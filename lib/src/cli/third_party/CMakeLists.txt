@@ -49,6 +49,14 @@ if(NOT MSVC)
     target_compile_options(apogee_sqlite3 PRIVATE -w)
 endif()
 
+# ---------------------------------------------------------------------------
+# tree-sitter and its grammars: the code graph's deterministic parser (27k).
+# Every build has it -- the no-llama developer build and the unit-test runners
+# included -- because the code graph is model-free by design and the suite
+# pins its extraction. The pins, the licences and the build cost are in that
+# directory's CMakeLists.txt and in third_party/README.md.
+add_subdirectory(tree-sitter)
+
 if(NOT APOGEE_ENABLE_LLAMA)
     # The developer's fast path only (-DAPOGEE_ENABLE_LLAMA=OFF, `make
     # no-llama`): the executable ships with llama.cpp in it, and every CI and
@@ -60,8 +68,8 @@ endif()
 
 include(FetchContent)
 
-# Pinned to release b11151 (2026-09-23). It started at 549b9d84, the revision
-# Ommi's local-inference path built against; moved for Gemma 4's "unified"
+# Pinned to release b11151 (2026-09-23). It started at 549b9d84 and was moved
+# for Gemma 4's "unified"
 # checkpoints, which that revision's converter refused and whose image and
 # audio projectors (gemma4uv/gemma4ua) its mtmd could not load. Updating this
 # pin is a DELIBERATE event: it gets its own commit, the message says what

@@ -16,14 +16,17 @@
 #include "contracts/assets.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
+#include "contracts/sha256.h"
 #include "embedstore/store.h"
 #include "httpserver/admin_auth.h"
 #include "knowledge/record.h"
 #include "knowledge/store.h"
+#include "modelstore/store.h"
 #include "platform/platform.h"
 #include "secrets/store.h"
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
+#include "support/mlx_model.h"
 #include "training/python_env.h"
 
 /// The doctor, against a matrix of deliberately broken installs.
@@ -222,8 +225,8 @@ TEST_CASE("a dangling model_path fails and names the command to fix it", "[comma
 }
 
 TEST_CASE("a present but unloadable GGUF fails", "[commands][check]") {
-    // Ommi's recorded lesson, and the reason this reads bytes rather than
-    // calling exists(): a Git LFS pointer or a truncated download is PRESENT,
+    // The reason this reads bytes rather than calling exists(): a Git LFS
+    // pointer or a truncated download is PRESENT,
     // the right name, and completely unusable. Checking presence alone reports
     // healthy and the failure surfaces much later, inside llama.cpp.
     Install install;
@@ -1180,6 +1183,33 @@ TEST_CASE(
     CHECK(row_with(built, "named graph: work")->remedy.empty());
 }
 
+TEST_CASE("the doctor's Graph section checks a code graph's trees and languages",
+          "[commands][check][graphs][code]") {
+    const Install install;
+    const std::filesystem::path tree = install.root / "repo" / "app";
+    std::filesystem::create_directories(tree);
+    const std::string tree_text = tree.generic_string();
+    const CheckReport healthy = run_checks(
+        inputs_with_config(install, "graphs:\n  code:\n    sources: [\"" + tree_text + "\"]\n"));
+    REQUIRE(row_with(healthy, "named graph: code") != nullptr);
+    CHECK(row_with(healthy, "named graph: code")->status == Status::Ok);
+    CHECK(row_with(healthy, "named graph: code")
+              ->detail.find("source trees [app] (parsed, no model)") != std::string::npos);
+    // No extractor is asked about: a code graph needs none.
+    CHECK(row_with(healthy, "named graph: code")->detail.find("extractor") == std::string::npos);
+
+    const CheckReport missing = run_checks(inputs_with_config(
+        install, "graphs:\n  code:\n    sources: [\"" + tree_text + "/gone\"]\n"));
+    CHECK(row_with(missing, "named graph: code")->status == Status::Fail);
+    CHECK(row_with(missing, "named graph: code")->detail.find("is not a directory") !=
+          std::string::npos);
+    const CheckReport unknown =
+        run_checks(inputs_with_config(install, "graphs:\n  code:\n    sources: [\"" + tree_text +
+                                                   "\"]\n    languages: [cobol]\n"));
+    CHECK(row_with(unknown, "named graph: code")->status == Status::Fail);
+    CHECK(row_with(unknown, "named graph: code")->remedy.find("cpp, python") != std::string::npos);
+}
+
 TEST_CASE(
     "the training rows: the environment a warning with its command, seeded kits and the "
     "script ok, an edited script kept, a broken kit a failure, a missing hf_dir a warning",
@@ -1772,4 +1802,679 @@ TEST_CASE("the doctor says each section, and counts the headers it reads",
     CHECK(heard_as("checking models: stored.gguf") == std::pair<std::size_t, std::size_t>{1, 2});
     CHECK(heard_as("checking models: other.gguf") == std::pair<std::size_t, std::size_t>{2, 2});
     CHECK(heard_as("checking config") == std::pair<std::size_t, std::size_t>{0, 0});
+}
+
+TEST_CASE("check names the channel, the root and the rung that chose it",
+          "[commands][check][channels]") {
+    // M10: the doctor's first lines say which Apogee this is and which data
+    // directory it is reading -- a run against another root than meant says
+    // so before anything else does.
+    using apogee::harness::Channel;
+    Install install;
+    install.seed();
+
+    const auto rows_for = [&install](const apogee::harness::RootInputs& root_inputs) {
+        CheckInputs inputs = inputs_for(install);
+        inputs.root = apogee::harness::resolve_root(root_inputs);
+        const CheckReport report = run_checks(inputs);
+        const apogee::commands::CheckRow* channel = row_with(report, "channel");
+        const apogee::commands::CheckRow* root = row_with(report, "root");
+        REQUIRE(channel != nullptr);
+        REQUIRE(root != nullptr);
+        CHECK(channel->section == "Version");
+        CHECK(root->section == "Version");
+        CHECK(channel->status == Status::Ok);
+        return std::pair{channel->detail, root->detail};
+    };
+
+    for (const Channel baked : apogee::harness::kChannels) {
+        const std::string name{apogee::harness::channel_name(baked)};
+        INFO(name);
+        const apogee::harness::RootInputs root_inputs{
+            .flag = std::nullopt, .environment = {}, .channel = baked, .home_directory = "/h"};
+        const auto [channel, root] = rows_for(root_inputs);
+        CHECK(channel == name);
+        CHECK(root == install.root.string() + " -- the " + name +
+                          " channel's own root, baked into this build");
+    }
+
+    const apogee::harness::RootInputs flagged{
+        .flag = apogee::harness::RootFlag{.channel = Channel::Test, .custom_config = {}},
+        .environment = {},
+        .channel = Channel::Release,
+        .home_directory = "/h"};
+    CHECK(rows_for(flagged).second == install.root.string() + " -- set by --test");
+    CHECK(rows_for(flagged).first == "release");
+
+    const apogee::harness::RootInputs ambient{.flag = std::nullopt,
+                                              .environment = install.root.string(),
+                                              .channel = Channel::Dev,
+                                              .home_directory = "/h"};
+    CHECK(rows_for(ambient).second == install.root.string() + " -- set by APOGEE_HOME");
+}
+
+namespace {
+
+/// A fake MLX runtime in the install (27a): mlx-lm's package files in the
+/// environment, and a model directory -- files only, as the doctor reads them.
+///
+/// The environment is laid out as Apple silicon lays it out, `bin/python`,
+/// where the MLX probe looks on the one target it runs on: these cases
+/// inject that target whatever the build is, as `mlx_local_test`'s runtime
+/// does. The build's own interpreter is written too, so the Training
+/// section reads the same environment on every platform -- on Windows that
+/// one is `Scripts/python.exe`, which no MLX host has.
+void write_fake_mlx_runtime(const Install& install) {
+    write_fake_interpreter(install);
+    install.write("training/venv/bin/python", "#!fake");
+    install.write("training/venv/lib/python3.14/site-packages/mlx_lm/__init__.py", "");
+    install.write("training/venv/lib/python3.14/site-packages/mlx_lm/_version.py",
+                  "__version__ = '0.32.0'\n");
+    // A whole model (27b reads its files): a 4-bit llama, trained for 131072.
+    apogee::testing::write_mlx_model(install.root / "mlx-model");
+}
+
+std::string mlx_entry(const Install& install, const std::string& path = {}) {
+    return "backends:\n  local:\n    type: mlx\n    model_path: " +
+           (path.empty() ? (install.root / "mlx-model").string() : path) + "\n";
+}
+
+}  // namespace
+
+TEST_CASE("off Apple silicon the MLX runtime is skipped, never passed, and an entry warns",
+          "[commands][check][mlx]") {
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", mlx_entry(install));
+    load_into(inputs);
+    inputs.host_target = "linux-x64";
+
+    const CheckReport report = run_checks(inputs);
+    INFO(render_report(report, false));
+    const apogee::commands::CheckRow* runtime = row_with(report, "runtime");
+    REQUIRE(runtime != nullptr);
+    CHECK(runtime->status == Status::Skipped);
+    CHECK(runtime->detail.find("Apple silicon macOS only") != std::string::npos);
+    const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+    REQUIRE(entry != nullptr);
+    CHECK(entry->status == Status::Warn);
+    CHECK(entry->detail.find("linux-x64") != std::string::npos);
+    CHECK(report.passed());
+}
+
+TEST_CASE(
+    "the MLX row says what it found: not set up is skipped until an entry needs it, then a "
+    "warning with the fix",
+    "[commands][check][mlx]") {
+    const Install install;
+    install.seed();
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", "backends:\n  m:\n    type: mock\n");
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* runtime = row_with(report, "runtime");
+        REQUIRE(runtime != nullptr);
+        CHECK(runtime->status == Status::Skipped);
+        CHECK(runtime->detail.find("only an mlx backend needs it") != std::string::npos);
+        CHECK(report.passed());
+    }
+    install.write("config/config.yaml", mlx_entry(install));
+    load_into(inputs);
+    {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* runtime = row_with(report, "runtime");
+        REQUIRE(runtime != nullptr);
+        CHECK(runtime->status == Status::Warn);
+        CHECK(runtime->remedy == "apogee train setup --with mlx");
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->status == Status::Warn);
+        CHECK(entry->remedy == "apogee train setup --with mlx");
+        CHECK(report.passed());
+    }
+}
+
+TEST_CASE("a ready MLX install passes on what its files show, and an edited driver is shown",
+          "[commands][check][mlx]") {
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", mlx_entry(install));
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* runtime = row_with(report, "runtime");
+        REQUIRE(runtime != nullptr);
+        CHECK(runtime->status == Status::Ok);
+        CHECK(runtime->detail.find("mlx-lm 0.32.0 is present") != std::string::npos);
+        // What was verified, said as such: files, not an import.
+        CHECK(runtime->detail.find("not imported") != std::string::npos);
+        const apogee::commands::CheckRow* driver = row_with(report, "driver");
+        REQUIRE(driver != nullptr);
+        CHECK(driver->status == Status::Ok);
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->status == Status::Ok);
+        CHECK(entry->detail.find("llama model directory") != std::string::npos);
+        // Its window and quantization, read from config.json (27b).
+        CHECK(entry->detail.find("4-bit (affine, group 64); 32768-token window (the default; "
+                                 "trained for 131072)") != std::string::npos);
+        const apogee::commands::CheckRow* converter = row_with(report, "conversion driver");
+        REQUIRE(converter != nullptr);
+        CHECK(converter->status == Status::Ok);
+        CHECK(converter->detail == "mlx_convert.py matches the shipped copy");
+    }
+    install.write("training/scripts/mlx_generate.py", "# mine\n");
+    {
+        const CheckReport report = run_checks(inputs);
+        const apogee::commands::CheckRow* driver = row_with(report, "driver");
+        REQUIRE(driver != nullptr);
+        CHECK(driver->status == Status::Warn);
+        CHECK(driver->detail.find("your edit is kept") != std::string::npos);
+    }
+    std::filesystem::remove(install.root / "training" / "scripts" / "mlx_generate.py");
+    {
+        const CheckReport report = run_checks(inputs);
+        const apogee::commands::CheckRow* driver = row_with(report, "driver");
+        REQUIRE(driver != nullptr);
+        CHECK(driver->status == Status::Warn);
+        CHECK(driver->remedy == "apogee check --fix");
+    }
+}
+
+namespace {
+
+/// The row `name` in `section`, matched whole: "vision" is also part of
+/// "default_vision".
+[[nodiscard]] const apogee::commands::CheckRow* row_in(const CheckReport& report,
+                                                       std::string_view section,
+                                                       std::string_view name) {
+    for (const apogee::commands::CheckRow& row : report.rows) {
+        if (row.section == section && row.name == name) {
+            return &row;
+        }
+    }
+    return nullptr;
+}
+
+/// The fixture model made a vision model (27c): a vision tower in its
+/// configuration, and the image processor's file beside it.
+void make_vision_model(const Install& install) {
+    install.write("mlx-model/config.json",
+                  R"({"architectures": ["Qwen3VLForConditionalGeneration"], )"
+                  R"("model_type": "qwen3_vl", "vision_config": {"depth": 27}, )"
+                  R"("text_config": {"model_type": "qwen3_vl_text", )"
+                  R"("max_position_embeddings": 262144}})");
+    install.write("mlx-model/preprocessor_config.json", "{}");
+}
+
+void install_mlx_vlm(const Install& install) {
+    install.write("training/venv/lib/python3.14/site-packages/mlx_vlm/__init__.py", "");
+    std::filesystem::create_directories(install.root /
+                                        "training/venv/lib/python3.14/site-packages/"
+                                        "mlx_vlm-0.3.9.dist-info");
+}
+
+}  // namespace
+
+TEST_CASE(
+    "the MLX vision row says what it found: mlx-vlm present passes on its files, absent is "
+    "skipped until a vision model needs it, then a warning with the fix",
+    "[commands][check][mlx][vision]") {
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", "models:\n  default: local\n" + mlx_entry(install));
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    {
+        // A text model: nothing here needs mlx-vlm, and nothing claims sight.
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* vision = row_in(report, "MLX", "vision");
+        REQUIRE(vision != nullptr);
+        CHECK(vision->status == Status::Skipped);
+        CHECK(vision->detail.find("only an MLX vision model needs it") != std::string::npos);
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->detail.find("vision") == std::string::npos);
+        const apogee::commands::CheckRow* images = row_in(report, "Attachments", "images");
+        REQUIRE(images != nullptr);
+        CHECK(images->detail.find("sees them") == std::string::npos);
+        CHECK(report.passed());
+    }
+    make_vision_model(install);
+    {
+        // A vision model without mlx-vlm: a warning naming it and the fix, and
+        // its images said to go elsewhere -- never claimed.
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* vision = row_in(report, "MLX", "vision");
+        REQUIRE(vision != nullptr);
+        CHECK(vision->status == Status::Warn);
+        CHECK(vision->detail.find("mlx-vlm is not installed") != std::string::npos);
+        CHECK(vision->detail.find("so local cannot read images") != std::string::npos);
+        CHECK(vision->remedy == "apogee train setup --with mlx-vlm");
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->status == Status::Ok);
+        CHECK(entry->detail.find("a vision model, but mlx-vlm is not installed") !=
+              std::string::npos);
+        const apogee::commands::CheckRow* images = row_in(report, "Attachments", "images");
+        REQUIRE(images != nullptr);
+        CHECK(images->detail.find("local sees them") == std::string::npos);
+        CHECK(report.passed());
+    }
+    install_mlx_vlm(install);
+    {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* vision = row_in(report, "MLX", "vision");
+        REQUIRE(vision != nullptr);
+        CHECK(vision->status == Status::Ok);
+        CHECK(vision->detail.find("mlx-vlm 0.3.9 is present") != std::string::npos);
+        CHECK(vision->detail.find("not imported") != std::string::npos);
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->detail.find("a vision model, reading images through mlx-vlm") !=
+              std::string::npos);
+        const apogee::commands::CheckRow* images = row_in(report, "Attachments", "images");
+        REQUIRE(images != nullptr);
+        CHECK(images->detail.find("local sees them as they are") != std::string::npos);
+        // Still not a clip reader: only still images go native on MLX.
+        const apogee::commands::CheckRow* video = row_in(report, "Attachments", "video");
+        REQUIRE(video != nullptr);
+        CHECK(video->detail.find("reads up to a minute") == std::string::npos);
+    }
+    {
+        // Off Apple silicon the section is skipped whole, sight included.
+        CheckInputs elsewhere = inputs;
+        elsewhere.host_target = "linux-x64";
+        const CheckReport report = run_checks(elsewhere);
+        CHECK(row_in(report, "MLX", "vision") == nullptr);
+    }
+}
+
+TEST_CASE(
+    "a vision role pointed at an mlx entry warns exactly as it does elsewhere: a text model, a "
+    "vision model without mlx-vlm",
+    "[commands][check][mlx][vision][roles]") {
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", "models:\n  default: chat\n  default_vision: local\n" +
+                                            mlx_entry(install) + "  chat:\n    type: mock\n");
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    const auto pointer = [&inputs] {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* row = row_in(report, "Config", "default_vision");
+        REQUIRE(row != nullptr);
+        return *row;
+    };
+    const apogee::commands::CheckRow text = pointer();
+    CHECK(text.status == Status::Warn);
+    CHECK(text.detail.find("local -- it is not a vision model") != std::string::npos);
+    CHECK(text.remedy.find("an mlx backend over a vision model") != std::string::npos);
+
+    make_vision_model(install);
+    const apogee::commands::CheckRow blind = pointer();
+    CHECK(blind.status == Status::Warn);
+    CHECK(blind.detail.find("mlx-vlm is not installed") != std::string::npos);
+    CHECK(blind.remedy == "apogee train setup --with mlx-vlm");
+
+    install_mlx_vlm(install);
+    CHECK(pointer().status == Status::Ok);
+    // Off Apple silicon nothing on the mlx backend sees, whatever is installed.
+    inputs.host_target = "linux-x64";
+    const apogee::commands::CheckRow elsewhere = pointer();
+    CHECK(elsewhere.status == Status::Warn);
+    CHECK(elsewhere.detail.find("Apple silicon macOS only") != std::string::npos);
+    inputs.host_target = "macos-arm64";
+
+    // A transcription role on an mlx entry: no audio here, said as such.
+    install.write("config/config.yaml",
+                  "models:\n  default: chat\n  default_transcription: local\n" +
+                      mlx_entry(install) + "  chat:\n    type: mock\n");
+    load_into(inputs);
+    const CheckReport report = run_checks(inputs);
+    const apogee::commands::CheckRow* deaf = row_in(report, "Config", "default_transcription");
+    REQUIRE(deaf != nullptr);
+    CHECK(deaf->status == Status::Warn);
+    CHECK(deaf->detail.find("an mlx backend hears no audio") != std::string::npos);
+}
+
+TEST_CASE(
+    "a driver an earlier Apogee seeded is said to be one, and named for check --fix; an edit "
+    "is the user's",
+    "[commands][check][mlx][scripts]") {
+    // 27c: skip-if-present seeding kept 27a's mlx_generate.py on an upgraded
+    // install. The row must not call it "matches", nor "your edit".
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", mlx_entry(install));
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    install.write("training/scripts/mlx_generate.py", "# 27a's driver\n");
+    install.write("training/scripts/train_mlx.py", "# v0.1.0's trainer\n");
+    std::vector<std::string> retired{
+        "mlx_generate.py " + apogee::models::sha256_hex("# 27a's driver\n"),
+        "train_mlx.py " + apogee::models::sha256_hex("# v0.1.0's trainer\n"),
+    };
+    std::ranges::sort(retired);
+    const std::vector<std::string_view> list{retired.begin(), retired.end()};
+    inputs.retired_scripts = list;
+    {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* driver = row_in(report, "MLX", "driver");
+        REQUIRE(driver != nullptr);
+        CHECK(driver->status == Status::Warn);
+        CHECK(driver->detail ==
+              "mlx_generate.py is an earlier Apogee's copy, unedited -- 'apogee check --fix' "
+              "brings it up to this build's");
+        CHECK(driver->remedy == "apogee check --fix");
+        const apogee::commands::CheckRow* trainer =
+            row_in(report, "Training", "script: train_mlx.py");
+        REQUIRE(trainer != nullptr);
+        CHECK(trainer->status == Status::Warn);
+        CHECK(trainer->detail.find("earlier Apogee's copy") != std::string::npos);
+        CHECK(trainer->remedy == "apogee check --fix");
+    }
+    // Under this build's own list the same bytes are an edit, kept and said.
+    inputs.retired_scripts = apogee::harness::bundled_scripts_retired();
+    const CheckReport report = run_checks(inputs);
+    const apogee::commands::CheckRow* driver = row_in(report, "MLX", "driver");
+    REQUIRE(driver != nullptr);
+    CHECK(driver->detail.find("your edit is kept") != std::string::npos);
+}
+
+TEST_CASE("an mlx entry naming no model directory fails, as a dangling GGUF does",
+          "[commands][check][mlx]") {
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", mlx_entry(install, (install.root / "gone").string()));
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    const CheckReport report = run_checks(inputs);
+    INFO(render_report(report, false));
+    const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+    REQUIRE(entry != nullptr);
+    CHECK(entry->status == Status::Fail);
+    CHECK(entry->detail.find("model_path does not exist") != std::string::npos);
+    CHECK(entry->remedy.find("--type mlx --model-path") != std::string::npos);
+    CHECK_FALSE(report.passed());
+}
+
+TEST_CASE("stored MLX models are validated by their files, and a broken one names its repair",
+          "[commands][check][mlx][store]") {
+    // 27b: the store's mlx/ row in the doctor -- whole files pass, a shard
+    // cut short fails with the handle to repair, an entry over it fails
+    // too, and an interrupted conversion's staging is a leftover --fix takes.
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    const std::filesystem::path whole =
+        install.root / "models" / "mlx-community--M-4bit" / "mlx" / "aaaaaaaaaaaa";
+    const std::filesystem::path broken =
+        install.root / "models" / "org--n" / "mlx" / "bbbbbbbbbbbb";
+    apogee::testing::write_mlx_model(whole);
+    apogee::testing::write_mlx_model(broken);
+    std::filesystem::resize_file(broken / "model.safetensors", 30);
+    const std::filesystem::path staging =
+        install.root / "models" / "org--n" / "mlx" / ".incoming-cccccccccccc";
+    apogee::testing::write_mlx_model(staging);
+    std::ofstream{apogee::models::staging_owner_path(staging)} << 999999999 << "\n";
+
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", mlx_entry(install, broken.string()));
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    const CheckReport report = run_checks(inputs);
+    INFO(render_report(report, false));
+
+    const apogee::commands::CheckRow* ok =
+        row_with(report, "mlx-community--M-4bit/mlx/aaaaaaaaaaaa");
+    REQUIRE(ok != nullptr);
+    CHECK(ok->status == Status::Ok);
+    CHECK(ok->detail == "llama, MLX, 4-bit (affine, group 64), files whole");
+    const apogee::commands::CheckRow* bad = row_with(report, "org--n/mlx/bbbbbbbbbbbb");
+    REQUIRE(bad != nullptr);
+    CHECK(bad->status == Status::Fail);
+    CHECK(bad->detail.find("model.safetensors is truncated") != std::string::npos);
+    CHECK(bad->remedy == "apogee models repair org--n/mlx/bbbbbbbbbbbb");
+    const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+    REQUIRE(entry != nullptr);
+    CHECK(entry->status == Status::Fail);
+    CHECK(entry->remedy == "apogee models repair org--n/mlx/bbbbbbbbbbbb");
+    const apogee::commands::CheckRow* leftovers = row_with(report, "leftovers");
+    REQUIRE(leftovers != nullptr);
+    CHECK(leftovers->status == Status::Warn);
+
+    // --fix removes the staging and nothing it does not own.
+    (void)apply_fixes(inputs);
+    CHECK_FALSE(std::filesystem::exists(staging));
+    CHECK(std::filesystem::exists(broken / "config.json"));
+    CHECK(std::filesystem::exists(whole / "model.safetensors"));
+}
+
+TEST_CASE("each suite has a row: its members named, a member at nothing failed",
+          "[commands][check][suites]") {
+    // 27d: a suite naming a backend that is not there is found here, in the
+    // doctor's words, not at the first turn that resolves through it.
+    Install install;
+    install.seed();
+    const auto check = [&](const std::string& suites, const std::string& models = {}) {
+        CheckInputs inputs = inputs_for(install);
+        install.write("config/config.yaml",
+                      "models:\n  default: root\n" + models +
+                          "backends:\n  root:\n    type: mock\n  helper:\n    type: mock\n"
+                          "suites:\n" +
+                          suites);
+        load_into(inputs);
+        return run_checks(inputs);
+    };
+
+    const CheckReport good = check(
+        "  research:\n    members:\n      chat: root\n      utility:\n        backend: helper\n"
+        "        context_size: 4096\n",
+        "  default_suite: research\n");
+    const auto* row = row_with(good, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Ok);
+    CHECK(row->detail == "chat root · utility helper (window 4096)  -- the default suite");
+
+    const CheckReport ghost = check(
+        "  broken:\n    members:\n      chat: root\n"
+        "      utility: ghost\n");
+    row = row_with(ghost, "suite: broken");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Fail);
+    CHECK(row->detail == "utility names a backend that is not configured: 'ghost'");
+    CHECK(row->remedy ==
+          "apogee config set-suite broken --utility <one of your configured backends>");
+
+    const CheckReport empty = check("  bare:\n");
+    row = row_with(empty, "suite: bare");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Warn);
+}
+
+TEST_CASE("a suite's row names whom its root may consult, and fails a member billed per call",
+          "[commands][check][suites][consult]") {
+    // 27f: the config verbs refuse a metered consultable member; one written
+    // by hand is found here, by asking its provider.
+    Install install;
+    install.seed();
+    const auto check = [&](const apogee::commands::MeteredProbe& metered) {
+        CheckInputs inputs = inputs_for(install);
+        install.write("config/config.yaml",
+                      "models:\n  default: root\nbackends:\n  root:\n    type: mock\n"
+                      "  helper:\n    type: mock\nsuites:\n  research:\n    members:\n"
+                      "      chat: root\n      utility: helper\n    consultable: [utility]\n");
+        load_into(inputs);
+        inputs.metered = metered;
+        return run_checks(inputs);
+    };
+    using apogee::commands::MeteredAnswer;
+    const CheckReport local = check([](const apogee::harness::Config&, std::string_view) {
+        return MeteredAnswer{.metered = false};
+    });
+    const auto* row = row_with(local, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Ok);
+    CHECK(row->detail == "chat root · utility helper  · consult: utility");
+
+    const CheckReport billed = check([](const apogee::harness::Config&, std::string_view) {
+        return MeteredAnswer{.metered = true};
+    });
+    row = row_with(billed, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Fail);
+    CHECK(row->detail ==
+          "consultable utility -- 'helper' is billed per call; a consult runs on the model's "
+          "initiative, which never spends");
+    CHECK(row->remedy ==
+          "apogee config set-suite research --consultable <its local members>, "
+          "or --utility <a local backend>");
+
+    const CheckReport unknown = check([](const apogee::harness::Config&, std::string_view) {
+        return MeteredAnswer{.metered = false, .unknown = "no API key"};
+    });
+    row = row_with(unknown, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Warn);
+
+    // Unset, the probe is the factory's: a mock backend bills nothing.
+    const CheckReport factory = check({});
+    row = row_with(factory, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Ok);
+}
+
+TEST_CASE(
+    "a suite's row says it orchestrates, and fails one whose symphonies reach a billed member",
+    "[commands][check][suites][orchestrate]") {
+    // 27t: the config verbs refuse `orchestrate: true` over a billed member a
+    // symphony reaches; one written by hand -- or a symphony added since --
+    // is found here, by the same rule.
+    Install install;
+    install.seed();
+    const auto check = [&](const apogee::commands::MeteredProbe& metered) {
+        CheckInputs inputs = inputs_for(install);
+        install.write("config/config.yaml",
+                      "models:\n  default: root\nbackends:\n  root:\n    type: mock\n"
+                      "  helper:\n    type: mock\nsuites:\n  research:\n    members:\n"
+                      "      chat: root\n      utility: helper\n    orchestrate: true\n");
+        load_into(inputs);
+        inputs.metered = metered;
+        return run_checks(inputs);
+    };
+    using apogee::commands::MeteredAnswer;
+    const CheckReport local = check([](const apogee::harness::Config&, std::string_view) {
+        return MeteredAnswer{.metered = false};
+    });
+    const auto* row = row_with(local, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Ok);
+    CHECK(row->detail == "chat root · utility helper  · orchestrates");
+
+    const CheckReport billed = check([](const apogee::harness::Config&, std::string_view backend) {
+        return MeteredAnswer{.metered = backend == "helper"};
+    });
+    row = row_with(billed, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Fail);
+    CHECK(row->detail ==
+          "orchestrate: 'summarize-verify' reaches utility ('helper') through its summarize stage "
+          "(utility), and 'helper' is billed per call -- a play the model starts runs on its "
+          "initiative, which never spends: only a suite whose symphonies reach local, unmetered "
+          "members can orchestrate");
+    CHECK(row->remedy == "apogee config set-suite research --orchestrate off");
+}
+
+TEST_CASE("a suite's row names what its verifier checks, and fails a verifier billed per call",
+          "[commands][check][suites][validate]") {
+    Install install;
+    install.seed();
+    const auto check = [&](const std::string& validate,
+                           const apogee::commands::MeteredProbe& metered) {
+        CheckInputs inputs = inputs_for(install);
+        install.write("config/config.yaml",
+                      "models:\n  default: root\nbackends:\n  root:\n    type: mock\n"
+                      "  helper:\n    type: mock\nsuites:\n  research:\n    members:\n"
+                      "      chat: root\n      utility: helper\n" +
+                          validate);
+        load_into(inputs);
+        inputs.metered = metered;
+        return run_checks(inputs);
+    };
+    using apogee::commands::MeteredAnswer;
+    const apogee::commands::MeteredProbe local = [](const apogee::harness::Config&,
+                                                    std::string_view) {
+        return MeteredAnswer{.metered = false};
+    };
+    const CheckReport checked =
+        check("    validate:\n      tool_args: on\n      answers: always\n", local);
+    const auto* row = row_with(checked, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Ok);
+    CHECK(row->detail ==
+          "chat root · utility helper  · validate: tool_args, answers always (verifier utility)");
+    // A block that switches nothing on still names its verifier, for /check.
+    const CheckReport nothing_on = check("    validate:\n      tool_args: off\n", local);
+    row = row_with(nothing_on, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->detail == "chat root · utility helper  · validate: on request (verifier utility)");
+    // No block: the row is as it was.
+    const CheckReport no_block = check("", local);
+    row = row_with(no_block, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->detail == "chat root · utility helper");
+
+    const CheckReport billed = check("    validate:\n      tool_args: on\n",
+                                     [](const apogee::harness::Config&, std::string_view) {
+                                         return MeteredAnswer{.metered = true};
+                                     });
+    row = row_with(billed, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Fail);
+    CHECK(row->detail ==
+          "verifier utility -- 'helper' is billed per call; a check runs on Apogee's initiative, "
+          "which never spends");
+    CHECK(row->remedy ==
+          "apogee config set-suite research --verifier <a local member>, or --utility <a local "
+          "backend>");
+    const CheckReport unknown =
+        check("    validate:\n      tool_args: on\n",
+              [](const apogee::harness::Config&, std::string_view) {
+                  return MeteredAnswer{.metered = false, .unknown = "no API key"};
+              });
+    row = row_with(unknown, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Warn);
 }

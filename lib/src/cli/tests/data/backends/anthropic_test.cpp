@@ -230,8 +230,8 @@ TEST_CASE("a request with no thinking sink still streams correctly",
 
 TEST_CASE("thinking blocks are replayed on the following request",
           "[backends][anthropic][thinking]") {
-    // An Anthropic requirement Ommi never had to meet: with extended thinking
-    // on, an assistant turn that called a tool must have its thinking block --
+    // An Anthropic requirement: with extended thinking on, an assistant turn
+    // that called a tool must have its thinking block --
     // signature included -- sent back in the next request, or the API rejects
     // the turn. Thinking must not enter the IR, so the provider caches the raw
     // blocks and splices them back itself.
@@ -392,7 +392,7 @@ TEST_CASE("tools are sent with input_schema, not parameters", "[backends][anthro
 
 TEST_CASE("the server-side web_search tool is added when configured",
           "[backends][anthropic][wire]") {
-    // What replaces Ommi's dependence on the claude CLI for web search.
+    // Web search on the API path, with no dependence on the claude CLI.
     AnthropicProvider::Options options;
     options.web_search = true;
     options.web_search_max_uses = 3;

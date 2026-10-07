@@ -18,12 +18,18 @@ apogee_add_module(contracts
     contracts/config_template.cpp
     contracts/config_edit.h
     contracts/config_edit.cpp
+    contracts/symphony_walk.h
+    contracts/symphony_walk.cpp
     contracts/host.h
     contracts/host.cpp
+    contracts/utf8.h
+    contracts/utf8.cpp
     contracts/assets.h
     contracts/assets.cpp
     contracts/assets_training.cpp
     contracts/assets_converter.cpp
+    contracts/assets_mlx.cpp
+    contracts/assets_symphonies.cpp
     contracts/errors.h
     contracts/errors.cpp
     contracts/cancellation.h
@@ -53,6 +59,10 @@ apogee_add_module(modelstore
     modelstore/gguf_inspect.cpp
     modelstore/kv_cache.h
     modelstore/kv_cache.cpp
+    modelstore/footprint.h
+    modelstore/footprint.cpp
+    modelstore/mlx_info.h
+    modelstore/mlx_info.cpp
     modelstore/sidecar.h
     modelstore/sidecar.cpp
     modelstore/snapshot.h
@@ -96,6 +106,8 @@ apogee_add_module(embedstore
     embedstore/graph_communities.cpp
     embedstore/graph_dedupe.h
     embedstore/graph_dedupe.cpp
+    embedstore/graph_code.h
+    embedstore/graph_code.cpp
     embedstore/fts.h
     embedstore/fts.cpp
     embedstore/chunk.h
@@ -167,8 +179,14 @@ apogee_add_module(backends
     backends/google_embed.cpp
     backends/llamacpp_embed.h
     backends/llamacpp_embed.cpp
+    backends/local_prompt.h
+    backends/local_prompt.cpp
     backends/llamacpp.h
     backends/llamacpp.cpp
+    backends/mlx_protocol.h
+    backends/mlx_protocol.cpp
+    backends/mlx_local.h
+    backends/mlx_local.cpp
     backends/factory.h
     backends/factory.cpp
 )

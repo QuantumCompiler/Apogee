@@ -27,10 +27,9 @@
 ///  3. **Thinking blocks must be replayed verbatim.** With extended thinking
 ///     on, an assistant turn that called a tool must have its `thinking` block
 ///     — signature and all — sent back in the following request, or the API
-///     refuses the turn. This is an Anthropic requirement Ommi never met
-///     because it never used the API's thinking. Since thinking must never
-///     enter the IR or persisted history, the provider caches the raw blocks
-///     and this layer splices them back in. See `ThinkingCache`.
+///     refuses the turn. Since thinking must never enter the IR or persisted
+///     history, the provider caches the raw blocks and this layer splices them
+///     back in. See `ThinkingCache`.
 namespace apogee::backends::anthropic {
 
 /// Raw assistant content blocks from one turn, kept so they can be replayed.

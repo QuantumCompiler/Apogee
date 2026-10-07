@@ -1,6 +1,7 @@
 #include "training/promote.h"
 
 #include <algorithm>
+#include <array>
 #include <system_error>
 
 namespace apogee::training {
@@ -43,6 +44,62 @@ GateVerdict eval_gate(const RunManifest& manifest, GateMode mode, bool force) {
     return verdict;
 }
 
+namespace {
+
+constexpr std::array<std::string_view, 2> kTargetNames{"gguf", "mlx"};
+
+/// Every file under `dir`, in bytes.
+[[nodiscard]] std::int64_t directory_bytes(const std::filesystem::path& dir) {
+    std::error_code code;
+    std::int64_t total = 0;
+    for (auto it = std::filesystem::recursive_directory_iterator(dir, code);
+         !code && it != std::filesystem::recursive_directory_iterator(); it.increment(code)) {
+        if (it->is_regular_file(code)) {
+            total += static_cast<std::int64_t>(it->file_size(code));
+        }
+    }
+    return total;
+}
+
+[[nodiscard]] std::string_view kind_of(PromoteTarget target) noexcept {
+    return target == PromoteTarget::Mlx ? "MLX models" : "GGUFs";
+}
+
+}  // namespace
+
+std::string_view to_string(PromoteTarget target) noexcept {
+    return target == PromoteTarget::Mlx ? kTargetNames[1] : kTargetNames[0];
+}
+
+std::optional<PromoteTarget> promote_target_from_string(std::string_view name) noexcept {
+    if (name == kTargetNames[0]) {
+        return PromoteTarget::Gguf;
+    }
+    if (name == kTargetNames[1]) {
+        return PromoteTarget::Mlx;
+    }
+    return std::nullopt;
+}
+
+std::span<const std::string_view> promote_target_names() noexcept {
+    return kTargetNames;
+}
+
+PromoteTarget target_of(const VersionEntry& entry) noexcept {
+    return entry.mlx() ? PromoteTarget::Mlx : PromoteTarget::Gguf;
+}
+
+std::string target_conflict(const VersionLedger& ledger, PromoteTarget target) {
+    const VersionEntry* active = ledger.active();
+    if (active == nullptr || target_of(*active) == target) {
+        return {};
+    }
+    return "'" + ledger.backend + "' holds " + std::string{kind_of(target_of(*active))} +
+           " (active v" + std::to_string(active->version) +
+           "), and a rollback never changes a backend's type -- promote --target " +
+           std::string{to_string(target)} + " under a new name";
+}
+
 int next_version(const VersionLedger& ledger) {
     int highest = 0;
     for (const VersionEntry& entry : ledger.versions) {
@@ -53,9 +110,16 @@ int next_version(const VersionLedger& ledger) {
 
 PromotePlan plan_promotion(const VersionLedger& ledger, const std::filesystem::path& run_dir,
                            const std::filesystem::path& output_dir, std::string_view backend,
-                           std::string_view quantize_type, bool keep_fused) {
+                           std::string_view quantize_type, bool keep_fused, PromoteTarget target) {
     PromotePlan plan;
     plan.version = next_version(ledger);
+    plan.target = target;
+    if (target == PromoteTarget::Mlx) {
+        // The fused weights are the version: written where they are stored.
+        plan.fused_dir = output_dir;
+        plan.keep_fused = true;
+        return plan;
+    }
     plan.fused_dir = run_dir / kFusedDirName;
     const std::string stem = std::string{backend} + "-v" + std::to_string(plan.version);
     plan.gguf_path = output_dir / (stem + ".gguf");
@@ -97,8 +161,8 @@ ArtifactsResult build_promotion_artifacts(const RunManifest& manifest, const Pro
         return true;
     };
 
-    if (std::filesystem::exists(plan.gguf_path, code)) {
-        result.error = plan.gguf_path.string() + " already exists";
+    if (std::filesystem::exists(plan.artifact(), code)) {
+        result.error = plan.artifact().string() + " already exists";
         return result;
     }
     if (cancelled()) {
@@ -122,6 +186,19 @@ ArtifactsResult build_promotion_artifacts(const RunManifest& manifest, const Pro
     }
     if (cancelled()) {
         discard(plan.fused_dir);
+        return result;
+    }
+
+    if (plan.target == PromoteTarget::Mlx) {
+        // The fused weights run as they are: read whole, and nothing more.
+        say("no GGUF conversion: the fused model is registered as it is, for the mlx backend");
+        if (const std::string error = verify(plan.fused_dir); !error.empty()) {
+            result.error = "the fused model is not a whole model directory: " + error;
+            discard(plan.fused_dir);
+            return result;
+        }
+        result.bytes = directory_bytes(plan.fused_dir);
+        result.ok = true;
         return result;
     }
 
@@ -174,7 +251,7 @@ ArtifactsResult build_promotion_artifacts(const RunManifest& manifest, const Pro
     } else {
         say("keeping the fused checkpoint at " + plan.fused_dir.string());
     }
-    result.gguf_bytes = static_cast<std::int64_t>(std::filesystem::file_size(plan.gguf_path, code));
+    result.bytes = static_cast<std::int64_t>(std::filesystem::file_size(plan.gguf_path, code));
     result.ok = true;
     return result;
 }
@@ -184,7 +261,11 @@ VersionEntry promotion_entry(const RunManifest& manifest, const PromotePlan& pla
     VersionEntry entry;
     entry.version = plan.version;
     entry.run_id = manifest.run_id;
-    entry.gguf_path = plan.gguf_path.string();
+    if (plan.target == PromoteTarget::Mlx) {
+        entry.mlx_path = plan.fused_dir.string();
+    } else {
+        entry.gguf_path = plan.gguf_path.string();
+    }
     entry.promoted_at = std::move(promoted_at);
     if (manifest.eval.has_value()) {
         entry.eval_score = manifest.eval->score;
@@ -233,7 +314,7 @@ PruneResult record_promotion(VersionLedger& ledger, VersionEntry entry, int reta
             const bool shared =
                 std::ranges::any_of(ledger.versions, [&](const VersionEntry& other) {
                     return other.version != old.version && !other.pruned() &&
-                           other.gguf_path == old.gguf_path &&
+                           other.weights() == old.weights() &&
                            std::ranges::find(candidates, other.version) == candidates.end();
                 });
             if (!shared) {
@@ -242,19 +323,23 @@ PruneResult record_promotion(VersionLedger& ledger, VersionEntry entry, int reta
                     error = remove(old);
                 } else {
                     std::error_code code;
-                    const bool existed = std::filesystem::exists(old.gguf_path, code);
-                    std::filesystem::remove(old.gguf_path, code);
+                    const bool existed = std::filesystem::exists(old.weights(), code);
+                    if (old.mlx()) {
+                        std::filesystem::remove_all(old.weights(), code);
+                    } else {
+                        std::filesystem::remove(old.weights(), code);
+                    }
                     if (code && existed) {
                         error = code.message();
                     }
                 }
                 if (!error.empty()) {
-                    result.failed.push_back(old.gguf_path + ": " + error);
+                    result.failed.push_back(old.weights() + ": " + error);
                     continue;
                 }
             }
             old.pruned_at = pruned_at;
-            result.removed.push_back(old.gguf_path);
+            result.removed.push_back(old.weights());
         }
     }
     return result;
@@ -282,16 +367,27 @@ RollbackTarget rollback_target(const VersionLedger& ledger) {
                       ledger.backend + "' -- nothing below it to roll back to";
         return target;
     }
+    const std::string what = previous->mlx() ? "MLX model" : "GGUF";
     if (previous->pruned()) {
         target.error = "v" + std::to_string(previous->version) + " of '" + ledger.backend +
-                       "' was pruned by retain_versions on " + previous->pruned_at +
-                       " -- its GGUF is gone, so rolling back to it is not possible";
+                       "' was pruned by retain_versions on " + previous->pruned_at + " -- its " +
+                       what + " is gone, so rolling back to it is not possible";
+        return target;
+    }
+    if (const VersionEntry* active = ledger.active();
+        active != nullptr && target_of(*active) != target_of(*previous)) {
+        target.error = "v" + std::to_string(previous->version) + " of '" + ledger.backend +
+                       "' is a " + what + " and the active v" + std::to_string(active->version) +
+                       " is not -- a rollback never changes a backend's type";
         return target;
     }
     std::error_code code;
-    if (!std::filesystem::is_regular_file(previous->gguf_path, code)) {
-        target.error = "the GGUF for v" + std::to_string(previous->version) + " of '" +
-                       ledger.backend + "' is not at " + previous->gguf_path +
+    const bool there = previous->mlx()
+                           ? std::filesystem::is_directory(previous->mlx_path, code)
+                           : std::filesystem::is_regular_file(previous->gguf_path, code);
+    if (!there) {
+        target.error = "the " + what + " for v" + std::to_string(previous->version) + " of '" +
+                       ledger.backend + "' is not at " + previous->weights() +
                        " -- rolling back to it is not possible";
         return target;
     }

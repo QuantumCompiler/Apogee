@@ -16,9 +16,9 @@
 /// of lexical / vector / hybrid and every surface reports which -- including
 /// when it degraded: nothing ever claims hybrid or vector when what ran was
 /// lexical. That reporting contract is why this is a pure function over facts
-/// rather than a branch inside each command: Ommi's subtlest retrieval bugs
-/// lived in resolution rules that had drifted between surfaces, and a rule
-/// that exists once cannot drift.
+/// rather than a branch inside each command: the subtlest retrieval bugs live
+/// in resolution rules that drift between surfaces, and a rule that exists
+/// once cannot drift.
 ///
 /// ## The rules
 ///

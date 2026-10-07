@@ -317,7 +317,7 @@ TEST_CASE("a refused resume falls back to a fresh child",
 }
 
 TEST_CASE("a side request never touches the session child", "[backends][claude_cli][session]") {
-    // Ommi's SideRequest lesson, and the same rule the local backend applies
+    // The side-request rule, the same one the local backend applies
     // to its KV cache: background summarisation shares no prefix with the
     // conversation and may run concurrently with a real turn.
     Fixture fixture{{turn_script("Real."), turn_script("A title")}};

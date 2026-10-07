@@ -8,9 +8,9 @@ distil a teacher across kits in one command, and the unattended,
 scheduler-invoked **cycle** with its anchor gate and circuit breaker.
 
 Apogee fine-tunes **full-weight SafeTensors snapshots** and promotes the
-result to a GGUF a `llamacpp` backend runs. It infers from GGUF only, so a
-snapshot is trainable and never runnable, and a promoted GGUF is runnable and
-never trainable.
+result to a GGUF a `llamacpp` backend runs -- or, on Apple silicon with
+`--target mlx`, registers the fused SafeTensors themselves as an `mlx`
+backend, with no conversion at all (see `train promote`).
 
 ## The Python boundary
 
@@ -21,7 +21,7 @@ environment under its data directory**:
 
 ```
 ~/.apogee/training/venv/          the environment (never the system Python)
-~/.apogee/training/scripts/       the shipped Python drivers, seeded by `apogee check --fix`
+~/.apogee/training/scripts/       the shipped Python drivers, seeded by `apogee check --fix` (the trainers', the mlx backend's mlx_generate.py, and mlx_convert.py for `models convert --mlx`)
 ~/.apogee/training/scripts/convert/  llama.cpp's converter, vendored at the pinned revision
 ~/.apogee/training/kits/          the bundled training kits, seeded the same way
 ~/.apogee/training/datasets/      trainer-ready datasets, one .jsonl per dataset
@@ -56,9 +56,10 @@ terminal, and on a pipe refuses naming this command.
 | Set | Packages | Needed by |
 |---|---|---|
 | `prepare` | `datasets` | Parquet in `datasets prepare` (JSON, JSONL and CSV need nothing) |
-| `mlx` | `mlx-lm` | `train run --trainer mlx`, the Apple Silicon trainer |
+| `mlx` | `mlx-lm` | `train run --trainer mlx`, the Apple Silicon trainer; an `mlx` backend, which runs a model directory through it for chat and `complete`; and `models convert --mlx`, which converts a SafeTensors model into an MLX directory with its converter |
 | `peft` | `torch`, `transformers`, `peft`, `bitsandbytes`, `accelerate` | `train run --trainer peft`, the CUDA trainer |
-| `convert` | `torch`, `transformers`, `gguf`, `numpy`, `sentencepiece`, `protobuf` | `train promote`'s GGUF conversion |
+| `convert` | `torch`, `transformers`, `gguf`, `numpy`, `sentencepiece`, `protobuf` | `train promote`'s GGUF conversion (not `--target mlx`, which converts nothing) |
+| `mlx-vlm` | `mlx-vlm` | an `mlx` backend over a vision model reading pictures as they are; without it such a model's pictures go to the `vision` role, and `apogee check` says so |
 
 `--trainer auto` picks `mlx` on macOS/arm64, `peft` where `nvidia-smi` is on
 PATH, and says so when neither fits. Versions are floors, not exact pins.
@@ -78,7 +79,8 @@ training:
 
 `apogee check` reports the environment and its sets, every seeded script
 against the shipped copy (an edit is kept and shown; a missing file is
-repaired by `--fix`), the vendored converter tree as one row, the trainer
+repaired by `--fix`, and so is an earlier Apogee's unedited copy, which
+`--fix` brings up to this build's -- the converter tree's rule), the vendored converter tree as one row, the trainer
 this host would use and whether its set is installed, the `convert` set,
 every installed kit, every version ledger's consistency (the active
 version's GGUF exists and the backend points at it), every named
@@ -245,7 +247,7 @@ A kit is one YAML file bundling a teacher **synthesis spec** and an inline
 | `summarization` | condense a passage into a faithful, concise summary |
 | `reasoning` | solve arithmetic and logic problems with a correct final answer |
 
-The reference implementation's `tool-use` and `web-search` kits are
+The `tool-use` and `web-search` kits are
 deferred: today a local model is shown no tool definitions and only one
 family's native tool tokens are parsed, so a kit teaching a prose tool-call
 line would tune a student into lines nobody dispatches. They arrive with the
@@ -272,9 +274,7 @@ eval:                  # gates the trained model (at least one item)
 ```
 
 Drop a `<name>.yaml` of the same shape beside the bundled ones; `apogee
-check` validates every installed kit. The format is the reference
-implementation's byte for byte, so a kit written for either project runs on
-both.
+check` validates every installed kit.
 
 ## The run
 
@@ -316,8 +316,8 @@ hyperparameters, the final loss, `status` (`running` while it runs, then
 `complete`, `failed` or `cancelled`) and the timestamps. **A crashed driver
 is a failed run, never a silent success**: an `{"error"}` line is its own
 event, a non-JSON line (a stack trace) is kept as a message, and the exit
-code is carried -- three silent gaps in the reference implementation, closed
-by the protocol.
+code is carried -- three gaps that would otherwise be silent, closed by the
+protocol.
 
 | Flag | Default | Description |
 |---|---|---|
@@ -330,7 +330,7 @@ by the protocol.
 | `--mask-prompt` | off | completion-only loss: the prompt tokens are excluded |
 | `--trainer` | `training.trainer`, else `auto` | `auto`, `mlx`, `peft`, `mock` |
 
-Two things the drivers do that the reference implementation's did not:
+Two details the drivers get right:
 `train_mlx.py` lays out the `{train,valid}.jsonl` directory `mlx_lm.lora`
 actually wants (every example trains; validation is a copy of the first
 tenth, so nothing is held back from a small dataset), and `train_peft.py`
@@ -365,6 +365,7 @@ and re-runs only with `--force`.
 
 ```bash
 apogee train promote <run-id> --as <backend> [--force] [--quantize TYPE] [--keep-fused]
+apogee train promote <run-id> --as <backend> --target mlx [--force]
 ```
 
 The only path from a run to inference, in order: the **eval gate** (hard by
@@ -388,17 +389,39 @@ entries as history. The fused checkpoint is removed after a successful
 conversion unless `--keep-fused`. **A failure at any step leaves the config
 and the ledger unchanged.**
 
+**`--target mlx`** (Apple silicon, the `mlx` backend): the same plan with the
+conversion taken out -- the gate, then the **fuse straight into the model
+store** (`models/<model>/mlx/<id>/`, claimed while it is written), the
+directory **read whole** (configuration, tokenizer, every shard within its
+header -- the store's MLX check), committed under the id its weights hash to
+with an `apogee-snapshot.json` record (`source: train`, `ref: <backend>
+v<N>`, `transform: promote run <id>`), and only then the config: a new
+`type: mlx` entry, or an existing `mlx` entry's `model_path` replaced in
+place. No GGUF is written and the `convert` set is never asked for. The
+ledger records the version's `mlx_path` where a GGUF version records its
+`gguf_path`; numbering, retention (a pruned MLX version's directory removed
+whole) and rollback are the same. Without `--target`, a promote into an
+existing entry makes what that entry runs (`mlx` for an `mlx` entry), and a
+new name makes a GGUF. Refused before anything is built: a `--target` an
+existing entry does not run, `--quantize` with `--target mlx` (it makes a
+GGUF), and a promote of one kind into a backend whose versions are the other
+-- a rollback repoints `model_path` and never changes a backend's type.
+`--keep-fused` is a note: the fused weights are the version. Registered on a
+machine that cannot run it (off Apple silicon, no `mlx-lm`), the entry is
+kept and the reason said. The regime and the cycle still promote GGUFs.
+
 ### `train rollback`, `versions`, `status`
 
 ```bash
 apogee train rollback <backend>      # repoint model_path at the previous version
-apogee train versions [<backend>]    # the ledger(s): version, time, run, eval, GGUF, active
+apogee train versions [<backend>]    # the ledger(s): version, time, run, eval, weights (a GGUF, or mlx/<id>), active
 apogee train status                  # the runs (newest first, running ones counted) and the active versions
 ```
 
 `rollback` repoints the backend at the highest version below the active
 one (not "active minus one": numbers have gaps after a prune) and **deletes
-nothing**; a pruned target, or one whose file is gone, is refused by name.
+nothing**; a pruned target, one whose file (or MLX directory) is gone, or an
+entry whose type is no longer the version's, is refused by name.
 The filesystem is the source of truth for all three: nothing is cached.
 `status` also rolls up the cycle (idle, running now, or halted with the
 reason; the anchor) and the pipelines (the running one, else the latest).
@@ -550,17 +573,17 @@ lets tiny regressions accumulate into drift. Under the default hard gate
 every stage of a complete pipeline scored 100%, so the dual gate is a
 formality there; it is under `training.gate_mode: soft`, where the
 per-stage gate is advisory and a stage may complete below 100%, that the
-dual gate is the one holding the line. (The reference implementation read
-the score from the last *passed* stage -- 100% by the gate's own
-definition -- so its anchor gate could never fail.) **Pass** promotes into
+dual gate is the one holding the line. (Reading the score from the last
+*passed* stage instead -- 100% by the gate's own definition -- would leave
+an anchor gate that could never fail.) **Pass** promotes into
 `training.cycle.backend` through the same path `train promote` takes (its
 own gate runs again), moves the consumed queue files to `consumed/`,
 advances the sessions watermark and resets the failure count; **fail**
 discards the candidate -- **nothing reaches inference** -- counts toward
 the breaker, and at `k` halts the loop with the reason in the record. The
 history is `cycle/history.json`, written atomically at every outcome, and
-`cycle halt` / `cycle resume` are the two edits to it (the reference
-implementation had you edit the file by hand). A failed or refused pass
+`cycle halt` / `cycle resume` are the two edits to it, so nobody edits the
+file by hand. A failed or refused pass
 exits non-zero, so a scheduler's log shows it.
 
 Schedule it with launchd:

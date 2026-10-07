@@ -270,11 +270,21 @@ TEST_CASE("placeholders expand against the request: the last tool result and the
     const nlohmann::json parsed = nlohmann::json::parse(answer, nullptr, false);
     REQUIRE_FALSE(parsed.is_discarded());
     CHECK(parsed.at("s") == "line \"quoted\"\nsecond");
+    // The brief itself, the same way (27r: a schema stage carrying what it
+    // was sent).
+    CHECK(apogee::backends::expand_mock_text(R"({"t": {{last_user:json}}})", request) ==
+          R"({"t": "q"})");
     CHECK(apogee::backends::expand_mock_text("plain", request) == "plain");
     // The request's schema, exactly as it rode (26f).
     request.transient.response_schema = R"({"b": 1, "a": 2})";
     CHECK(apogee::backends::expand_mock_text("{{response_schema:json}}", request) ==
           R"("{\"b\": 1, \"a\": 2}")");
+    // The tools the request offered, by name in its order (27o).
+    CHECK(apogee::backends::expand_mock_text("[{{tool_names}}]", request) == "[]");
+    request.tools = {apogee::harness::Tool{.name = "graph_explain"},
+                     apogee::harness::Tool{.name = "read_file"}};
+    CHECK(apogee::backends::expand_mock_text("{{tool_count}}: {{tool_names}}", request) ==
+          "2: graph_explain,read_file");
 
     // And through the provider, streamed and not.
     apogee::backends::MockProvider::Options options;

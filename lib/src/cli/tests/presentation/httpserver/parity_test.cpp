@@ -23,13 +23,14 @@
 /// The CLI↔HTTP parity table -- and its completeness.
 ///
 /// "Parity is the product" means every mutating CLI action reaches a remote
-/// client through the control plane. Ommi kept a hand-maintained list of such
-/// actions; the list was correct on the day each row was written. This test
+/// client through the control plane. A hand-maintained list of such
+/// actions is correct only on the day each row is written. This test
 /// walks the CLI's whole subcommand tree and requires EVERY subcommand to be
 /// classified below -- as a twin (with its admin route), a backfill (with the
-/// area that owns it), a carve-out (with the reason), or read-only. Adding a
-/// subcommand without placing it here fails the build, which is the only way a
-/// parity table stays true.
+/// area that owns it), a carve-out (with the reason), a read served (with the
+/// admin route that serves it), or read-only. Adding a subcommand without
+/// placing it here fails the build, which is the only way a parity table stays
+/// true.
 namespace {
 
 using apogee::httpserver::HttpRequest;
@@ -37,11 +38,12 @@ using apogee::httpserver::HttpResponse;
 using apogee::httpserver::Mux;
 using apogee::httpserver::RouteSpec;
 
-enum class Kind { Twin, Backfill, CarveOut, ReadOnly };
+enum class Kind { Twin, Backfill, CarveOut, Served, ReadOnly };
 
 struct Classification {
     Kind kind;
-    /// Twin: the admin route. Backfill: the owning area. Carve-out: the reason.
+    /// Twin and served: the admin route. Backfill: the owning area. Carve-out:
+    /// the reason.
     std::string method;
     std::string path;
     std::string note;
@@ -57,6 +59,12 @@ Classification backfill(std::string area) {
 
 Classification carve_out(std::string reason) {
     return Classification{Kind::CarveOut, {}, {}, std::move(reason)};
+}
+
+/// A read the admin plane serves (27j): the route a remote client reads the
+/// same facts from -- a GET, checked as a twin's route is.
+Classification served(std::string path) {
+    return Classification{Kind::Served, "GET", std::move(path), {}};
 }
 
 Classification read_only() {
@@ -89,16 +97,24 @@ const std::map<std::string, Classification>& table() {
         {"agents create", twin("POST", "/v1/admin/agents")},
         {"agents edit", twin("PUT", "/v1/admin/agents/{id}")},
         {"agents delete", twin("DELETE", "/v1/admin/agents/{id}")},
+        {"symphonies create", twin("POST", "/v1/admin/symphonies")},
+        {"symphonies edit", twin("PUT", "/v1/admin/symphonies/{id}")},
+        {"symphonies delete", twin("DELETE", "/v1/admin/symphonies/{id}")},
         {"knowledge capture", twin("POST", "/v1/admin/knowledge/capture")},
         {"knowledge link", twin("PATCH", "/v1/admin/knowledge/{id}")},
         {"knowledge status", twin("PATCH", "/v1/admin/knowledge/{id}")},
         {"knowledge delete", twin("DELETE", "/v1/admin/knowledge/{id}")},
         {"knowledge reindex", twin("POST", "/v1/admin/knowledge/reindex")},
         {"graph build", twin("POST", "/v1/admin/graph/{id}/build")},
+        {"graph update", twin("POST", "/v1/admin/graph/{id}/build")},
         {"graph delete", twin("DELETE", "/v1/admin/graph/{id}")},
         {"graph communities", twin("POST", "/v1/admin/graph/{id}/communities")},
         {"graph dedupe", twin("POST", "/v1/admin/graph/{id}/dedupe")},
         {"config add-graph", twin("POST", "/v1/admin/graphs")},
+        {"config add-suite", twin("POST", "/v1/admin/suites")},
+        {"config set-suite", twin("PUT", "/v1/admin/suites/{id}/members")},
+        {"config delete-suite", twin("DELETE", "/v1/admin/suites/{id}")},
+        {"config set-default-suite", twin("POST", "/v1/admin/suites/default")},
         {"config delete-graph", twin("DELETE", "/v1/admin/graphs/{id}")},
         {"datasets create", twin("POST", "/v1/admin/datasets")},
         {"datasets synth", twin("POST", "/v1/admin/datasets/synth")},
@@ -121,6 +137,9 @@ const std::map<std::string, Classification>& table() {
         {"config init", carve_out("the server cannot exist without a config to start from")},
         {"check", carve_out("--fix repairs the local install; host-local by nature")},
         {"uninstall", carve_out("removes the binary and the data directory; host-local")},
+        {"reset",
+         carve_out("resets the data directory to a fresh install; host-local, like uninstall -- "
+                   "served, it would delete the server's own state under it")},
         {"serve", carve_out("it is the server")},
         {"train setup",
          carve_out("creates the Python environment on the host; training control is CLI-only")},
@@ -143,19 +162,48 @@ const std::map<std::string, Classification>& table() {
          carve_out("the scheduler-invoked pass; a promotion changes what a served backend "
                    "runs; training control is CLI-only")},
         {"train cycle halt",
-         carve_out("edits the cycle's state on the host; training control is CLI-only -- the "
-                   "reference's POST .../cycle/halt is deliberately not ported")},
+         carve_out("edits the cycle's state on the host; training control is CLI-only -- "
+                   "there is deliberately no POST .../cycle/halt")},
         {"train cycle resume",
          carve_out("edits the cycle's state on the host; training control is CLI-only")},
         {"__mcp-tools",
          carve_out("an MCP server on this process's own stdio, spawned by another client")},
+        {"task run",
+         carve_out("an unattended run of the host's own session and tools, under its lock; task "
+                   "control is CLI-only -- the reads are served under /v1/admin/tasks*")},
+        {"task resume",
+         carve_out("continues a task on the host, in the folder it was started in; task control "
+                   "is CLI-only")},
+        {"task halt", carve_out("steers the task running on the host; task control is CLI-only")},
+        {"task cancel",
+         carve_out("ends the turn of the task running on the host; task control is CLI-only")},
+        {"symphonies play",
+         carve_out("runs the host's own models, stage by stage, on a user's act; playing is "
+                   "CLI-only, the training precedent -- the definitions are served under "
+                   "/v1/admin/symphonies*")},
+        // --- reads served: the same view, over the admin plane ------------------
+        {"task status", served("/v1/admin/tasks/{id}")},
+        {"task list", served("/v1/admin/tasks")},
+        {"symphonies list", served("/v1/admin/symphonies")},
+        {"symphonies show", served("/v1/admin/symphonies/{id}")},
+        {"graph path", served("/v1/admin/graph/{id}/path")},
+        {"graph explain", served("/v1/admin/graph/{id}/explain")},
+        {"graph neighbors", served("/v1/admin/graph/{id}/neighbors")},
+        {"graph query", served("/v1/admin/graph/{id}/query")},
         // --- read-only / interactive ------------------------------------------
         {"chat", read_only()},
+        // chat's session opened with a suite (27s); a session surface, as chat
+        // is -- the GUI drives it over machine mode, never HTTP.
+        {"execute", read_only()},
         {"complete", read_only()},
         {"analyze", read_only()},
         {"agents list", read_only()},
         {"graph stats", read_only()},
         {"graph show", read_only()},
+        {"graph report", read_only()},
+        {"graph export html", read_only()},
+        {"graph export graphml", read_only()},
+        {"graph export mermaid", read_only()},
         {"version", read_only()},
         {"__complete", read_only()},
         {"config get", read_only()},
@@ -245,10 +293,11 @@ TEST_CASE("every CLI subcommand is classified, and every twin's route is registe
     const std::vector<RouteSpec> routes = Mux::routes();
 
     for (const auto& [name, classification] : table()) {
-        if (classification.kind != Kind::Twin) {
+        if (classification.kind != Kind::Twin && classification.kind != Kind::Served) {
             continue;
         }
-        INFO("twin of " << name << ": " << classification.method << " " << classification.path);
+        INFO((classification.kind == Kind::Twin ? "twin of " : "read served for ")
+             << name << ": " << classification.method << " " << classification.path);
         bool registered = false;
         for (const RouteSpec& route : routes) {
             if (route.method == classification.method && route.pattern == classification.path) {
@@ -307,6 +356,54 @@ TEST_CASE(
             CHECK(route.method == "GET");
         }
     }
+}
+
+TEST_CASE(
+    "no task control action has a route: a mutating request to any task path is not 200, and "
+    "every task route is a GET",
+    "[httpserver][parity][tasks]") {
+    const apogee::harness::Config config;
+    apogee::harness::Harness harness{config};
+    apogee::httpserver::Handler handler{harness, {}, nullptr};
+    apogee::events::Bus bus;
+    apogee::httpserver::JobRegistry jobs{bus};
+    apogee::httpserver::AdminHandler admin{{}, jobs, bus};
+    const Mux mux{handler, admin, "secret"};
+    // Every task verb the table carves out, at every path a client might try.
+    std::vector<std::string> verbs;
+    for (const auto& [name, classification] : table()) {
+        if (name.starts_with("task ") && classification.kind == Kind::CarveOut) {
+            verbs.push_back(name.substr(5));
+        }
+    }
+    CHECK(verbs == std::vector<std::string>{"cancel", "halt", "resume", "run"});
+    for (const char* method : {"POST", "PUT", "PATCH", "DELETE"}) {
+        std::vector<std::string> paths{"/v1/admin/tasks", "/v1/admin/tasks/task-1"};
+        for (const std::string& verb : verbs) {
+            paths.push_back("/v1/admin/tasks/" + verb);
+            paths.push_back("/v1/admin/tasks/task-1/" + verb);
+        }
+        for (const std::string& path : paths) {
+            HttpRequest request;
+            request.method = method;
+            request.path = path;
+            request.headers["authorization"] = "Bearer secret";
+            INFO(method << " " << path);
+            const int status = mux.dispatch(request).status;
+            CHECK(status != 200);
+            CHECK(status != 202);
+        }
+    }
+    std::size_t task_routes = 0;
+    for (const RouteSpec& route : Mux::routes()) {
+        if (route.pattern.starts_with("/v1/admin/tasks")) {
+            INFO(route.method << " " << route.pattern);
+            CHECK(route.method == "GET");
+            CHECK(route.admin);
+            ++task_routes;
+        }
+    }
+    CHECK(task_routes == 2);
 }
 
 TEST_CASE("the admin prefix is gated before routing, and mounted only when given",

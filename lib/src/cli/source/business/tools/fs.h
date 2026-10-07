@@ -11,10 +11,9 @@
 /// The filesystem toolset: read, write, edit, delete, list, find and search
 /// contents -- inside a root.
 ///
-/// Ported from Ommi's `ommi-mcp-fs`, with one correction. Ommi's sandbox was
-/// `realpath(path).startswith(ROOT)`, a string comparison: a root of
-/// `/home/user` admitted `/home/userX`. Here the root has to be an ancestor by
-/// **path components**, after symlinks are followed on both sides.
+/// The root has to be an ancestor by **path components**, after symlinks are
+/// followed on both sides. A string-prefix comparison is not enough: a root of
+/// `/home/user` would admit `/home/userX`.
 namespace apogee::tools {
 
 inline constexpr std::size_t kDefaultReadLimit = 64 * 1024;

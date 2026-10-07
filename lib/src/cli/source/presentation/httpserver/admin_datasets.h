@@ -6,14 +6,14 @@
 #include "httpserver/http_types.h"
 #include "httpserver/jobs.h"
 
-/// The datasets slice of the control plane -- the twins of `apogee
-/// datasets`. `create` and `delete` are synchronous over the same store the
-/// CLI writes, so a dataset made here is byte-identical to one made there.
-/// `synth` is an **async job** (`datasets-synth`): teacher inference, not
-/// training -- the distinction the training track's carve-out rests on, and
-/// exactly how Ommi exposed it -- with the teacher named explicitly, served
-/// by this plane, and never a vendor CLI. `prepare` and `pull` are backfills
-/// of the datasets plane (a server-side conversion and download), not here.
+/// The datasets slice of the control plane -- the twins of `apogee datasets`.
+/// `create` and `delete` are synchronous over the same store the CLI writes, so
+/// a dataset made here is byte-identical to one made there. `synth` is an
+/// **async job** (`datasets-synth`): teacher inference, not training -- the
+/// distinction the training track's carve-out rests on -- with the teacher
+/// named explicitly, served by this plane, and never a vendor CLI. `prepare`
+/// and `pull` are backfills of the datasets plane (a server-side conversion and
+/// download), not here.
 namespace apogee::httpserver {
 
 class Handler;

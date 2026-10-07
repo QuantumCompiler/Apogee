@@ -1,6 +1,10 @@
 #pragma once
 
+#include <nlohmann/json_fwd.hpp>
+
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <string_view>
@@ -10,6 +14,8 @@
 #include "agentloop/question.h"
 #include "agentloop/reporter.h"
 #include "contracts/types.h"
+#include "tasks/ledger.h"
+#include "tasks/task.h"
 
 /// The `agentloop::Reporter` → JSONL adapter: Apogee's machine mode.
 ///
@@ -51,6 +57,14 @@
 ///   "options":[{"label":"…","description":"…"}]}]}
 /// {"type":"error","message":"…"}
 /// ```
+///
+/// A task run (`task run|resume --output-format stream-json`, 27j) adds its
+/// lifecycle around those turns -- `task_started`, `task_plan`, `task_round`,
+/// `task_grant`, `task_finished` -- one per transition its ledger writes,
+/// each carrying that transition as the ledger wrote it. The task's events
+/// are the one place this vocabulary is not a `Reporter` method: a task is
+/// not a turn, and the runner is not the loop. They render the ledger, which
+/// is the task's one source of truth.
 ///
 /// `question` is the one event that expects a reply. The driver answers with
 /// one `{"type":"answer","text":"…"}` line per question, in order, and the turn
@@ -129,11 +143,32 @@ public:
     /// machine-readable half, so a driver need not scrape prose.
     void emit_error(std::string_view message);
 
+    /// A task's lifecycle (27j): the event the transition at `index` of
+    /// `task`'s ledger is rendered as, carrying that transition exactly as
+    /// the ledger wrote it (`transition`) -- `task_started` for `started` and
+    /// `resumed`, with `resumed`, every transition before it (`history`) and
+    /// the task's whole view (`task`), so a front-end that joins at a resume
+    /// needs no other source; `task_plan` for `plan_started` and
+    /// `plan_recorded`, with the plan turn (`round`) and, once recorded, the
+    /// `plan`; `task_round` for `round_started` and `round_ended`, with the
+    /// round and, once it has ended, each check's state (`checks`);
+    /// `task_finished` for `finished`, with the `status`, the `reason` and
+    /// the task's final view. `created` comes before any run, and reaches a
+    /// driver in `task_started`'s history. `holder` is the task lock's holder
+    /// now, which says whether a process runs the task. A view, never the
+    /// ledger: a declared answer's text is in no event.
+    void emit_task_transition(const tasks::Task& task, std::size_t index,
+                              const std::optional<tasks::LockHolder>& holder);
+
+    /// `task_grant`: a call the task's grant let through (27i) in `round` --
+    /// the tool, its target and `by: grant`.
+    void emit_task_grant(const tasks::Task& task, int round, const tasks::Permit& permit);
+
     /// Whether any answer text was emitted this run.
     [[nodiscard]] bool wrote_answer() const noexcept;
 
 private:
-    void write(const std::string& line);
+    void write(const nlohmann::json& object);
 
     std::ostream* out_;
     bool wrote_answer_ = false;
@@ -175,6 +210,28 @@ enum class OutputFormat : std::uint8_t {
 /// above accept the same pair -- for completion.
 [[nodiscard]] std::vector<std::string_view> format_names();
 
+/// How a read command renders: `--output-format` on a read (27j, the
+/// convention 28h's reads join). A read prints one JSON document, never a
+/// stream -- JSONL stays the turn surfaces' -- so its words are `text` and
+/// `json`, and a turn's `stream-json` is refused on a read.
+enum class ReadFormat : std::uint8_t {
+    /// The human view.
+    Text,
+    /// One JSON document on stdout, the same facts as the human view, and
+    /// nothing else there: diagnostics go to stderr, exit codes as ever.
+    Json,
+};
+
+[[nodiscard]] std::string_view to_string(ReadFormat format) noexcept;
+[[nodiscard]] std::optional<ReadFormat> read_format_from_string(std::string_view name) noexcept;
+/// The words a read's `--output-format` takes, for its help and completion.
+[[nodiscard]] std::vector<std::string_view> read_format_names();
+
+/// Writes `document` to `out` as a read's machine face: one JSON document on
+/// one line -- the bytes an admin route serves for the same read, then a
+/// newline.
+void write_document(std::ostream& out, const nlohmann::json& document);
+
 /// One user turn read from a driver over stdin, in machine mode.
 struct DriverMessage {
     enum class Kind : std::uint8_t {
@@ -191,6 +248,10 @@ struct DriverMessage {
 
     Kind kind = Kind::Unknown;
     std::string text;
+    /// An `attach` line's `graph` (27p): `code` or `off` as written, the
+    /// attach's method over the config's; empty when the line has none. A
+    /// value that is not a string arrives as its JSON, to be refused by name.
+    std::string graph;
 };
 
 /// Parses one line of driver input.
@@ -203,6 +264,7 @@ struct DriverMessage {
 /// {"type":"user","text":"what is 2+2?"}
 /// {"type":"answer","text":"yes"}
 /// {"type":"attach","path":"report.pdf"}
+/// {"type":"attach","path":"src","graph":"off"}
 /// ```
 [[nodiscard]] DriverMessage parse_driver_line(std::string_view line);
 

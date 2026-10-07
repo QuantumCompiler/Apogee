@@ -1,0 +1,159 @@
+node class shapes::Circle
+  description pub struct Circle
+  metadata {"end_line":7,"file":"src/shapes.rs","kind":"code","lang":"rust","line":5,"member":"rust"}
+  mentions 1
+  at rust:src/shapes.rs:5-7 definition
+node class shapes::Shape
+  description pub trait Shape
+  metadata {"end_line":3,"file":"src/shapes.rs","kind":"code","lang":"rust","line":1,"member":"rust"}
+  mentions 1
+  at rust:src/shapes.rs:1-3 definition
+node file src/lib.rs
+  description Rust file
+  metadata {"end_line":13,"file":"src/lib.rs","kind":"code","lang":"rust","line":1,"member":"rust"}
+  mentions 1
+  at rust:src/lib.rs:1-13 definition
+node file src/shapes.rs
+  description Rust file
+  metadata {"end_line":19,"file":"src/shapes.rs","kind":"code","lang":"rust","line":1,"member":"rust"}
+  mentions 1
+  at rust:src/shapes.rs:1-19 definition
+node function shapes::Circle::area
+  description fn area(&self) -> f64
+  metadata {"end_line":18,"file":"src/shapes.rs","kind":"code","lang":"rust","line":16,"member":"rust"}
+  mentions 1
+  at rust:src/shapes.rs:16-18 definition
+node function shapes::Circle::new
+  description pub fn new(radius: f64) -> Self
+  metadata {"end_line":12,"file":"src/shapes.rs","kind":"code","lang":"rust","line":10,"member":"rust"}
+  mentions 1
+  at rust:src/shapes.rs:10-12 definition
+node function shapes::Shape::area
+  description fn area(&self) -> f64
+  metadata {"end_line":2,"file":"src/shapes.rs","kind":"code","lang":"rust","line":2,"member":"rust"}
+  mentions 1
+  at rust:src/shapes.rs:2-2 declaration
+node function total
+  description pub fn total(items: &[Box<dyn Shape>]) -> f64
+  metadata {"end_line":7,"file":"src/lib.rs","kind":"code","lang":"rust","line":5,"member":"rust"}
+  mentions 1
+  at rust:src/lib.rs:5-7 definition
+node function unit
+  description pub fn unit() -> Circle
+  metadata {"end_line":13,"file":"src/lib.rs","kind":"code","lang":"rust","line":9,"member":"rust"}
+  mentions 1
+  at rust:src/lib.rs:9-13 definition
+node module shapes
+  description module shapes
+  metadata {"end_line":1,"file":"src/shapes.rs","kind":"code","lang":"rust","line":1,"member":"rust"}
+  mentions 1
+  at rust:src/shapes.rs:1-1 definition
+node name .area
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at rust:src/lib.rs:6-6 reference
+node name .iter
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at rust:src/lib.rs:6-6 reference
+node name .map
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at rust:src/lib.rs:6-6 reference
+node name .sum
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at rust:src/lib.rs:6-6 reference
+node name println
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at rust:src/lib.rs:11-11 reference
+edge class shapes::Circle -[defined_in]-> file src/shapes.rs
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/shapes.rs:5
+edge class shapes::Circle -[inherits]-> class shapes::Shape
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/shapes.rs:15
+edge class shapes::Shape -[defined_in]-> file src/shapes.rs
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/shapes.rs:1
+edge file src/lib.rs -[imports]-> class shapes::Circle
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/lib.rs:3
+edge file src/lib.rs -[imports]-> class shapes::Shape
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/lib.rs:3
+edge file src/shapes.rs -[defined_in]-> module shapes
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/shapes.rs:1
+edge function shapes::Circle::area -[defined_in]-> class shapes::Circle
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/shapes.rs:16
+edge function shapes::Circle::area -[defined_in]-> file src/shapes.rs
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/shapes.rs:16
+edge function shapes::Circle::new -[defined_in]-> class shapes::Circle
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/shapes.rs:10
+edge function shapes::Circle::new -[defined_in]-> file src/shapes.rs
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/shapes.rs:10
+edge function shapes::Shape::area -[defined_in]-> class shapes::Shape
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/shapes.rs:2
+edge function total -[calls]-> name .area
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/lib.rs:6
+edge function total -[calls]-> name .iter
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/lib.rs:6
+edge function total -[calls]-> name .map
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/lib.rs:6
+edge function total -[calls]-> name .sum
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/lib.rs:6
+edge function total -[defined_in]-> file src/lib.rs
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/lib.rs:5
+edge function total -[references]-> class shapes::Shape
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/lib.rs:5
+edge function unit -[calls]-> function shapes::Circle::new
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/lib.rs:10
+edge function unit -[calls]-> name println
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/lib.rs:11
+edge function unit -[defined_in]-> file src/lib.rs
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/lib.rs:9
+edge function unit -[references]-> class shapes::Circle
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site rust:src/lib.rs:9

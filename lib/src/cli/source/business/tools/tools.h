@@ -5,11 +5,11 @@
 /// Filled by the `native-toolsets` item (Milestone V): the filesystem, shell,
 /// git, notes and RAG-query tools, each registered into the agent loop's own
 /// `ToolRegistry` and each destructive one declared into the permission gate.
-/// What Ommi ran as five Python MCP servers, in `apogee_core`.
 ///
-/// The package includes `agent/`, `agentloop/`, `embedstore/`, `platform/`
-/// and `harness/`, and never `backends/` or `commands/`; `harness.layering`
-/// holds it to that.
+/// The package includes `agent/`, `agentloop/`, `embedstore/`, `graph/` (the
+/// navigation core the `graph` toolset wraps, 27l), `platform/` and
+/// `harness/`, and never `backends/` or `commands/`; `harness.layering` holds
+/// it to that.
 ///
 /// This umbrella header is what `tests/crosscutting/packages_test.cpp` includes; it names
 /// the package's own headers so a broken include path fails the day it breaks.
@@ -18,6 +18,7 @@
 #include "tools/environment.h"
 #include "tools/fs.h"
 #include "tools/git.h"
+#include "tools/graph_nav.h"
 #include "tools/notes.h"
 #include "tools/process.h"
 #include "tools/rag_query.h"

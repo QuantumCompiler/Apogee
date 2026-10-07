@@ -2,12 +2,22 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "agentloop/loop.h"
+#include "contracts/config.h"
+#include "contracts/provider.h"
+#include "harness/harness.h"
 #include "machine/json_reporter.h"
+#include "tasks/ledger.h"
+#include "tasks/task.h"
+#include "tasks/view.h"
 #include "transport/jsonl_framer.h"
 
 /// Machine mode: the JSONL protocol a GUI drives Apogee over.
@@ -242,6 +252,159 @@ TEST_CASE("text with newlines and quotes survives the round trip", "[commands][m
     const std::vector<nlohmann::json> seen = events(out.str());
     REQUIRE(seen.size() == 1);
     CHECK(seen.front().at("text") == "line one\nline two \"quoted\"\\ and a backslash");
+}
+
+namespace {
+
+/// U+FFFD, the replacement character, as UTF-8.
+constexpr std::string_view kReplacement = "\xEF\xBF\xBD";
+
+/// A backend that says its reasoning and its answer in exactly the pieces it
+/// is given: cut wherever a token or a pipe read ends, which is anywhere --
+/// llama.cpp says a byte-fallback token one byte at a time.
+class PiecesProvider final : public apogee::harness::LLMProvider {
+public:
+    std::vector<std::string> thinking;
+    std::vector<std::string> answer;
+
+    [[nodiscard]] std::string_view backend_name() const noexcept override {
+        return "pieces";
+    }
+
+    [[nodiscard]] apogee::harness::ChatResponse chat(
+        const apogee::harness::ChatRequest& request,
+        const apogee::harness::CancellationToken& cancellation) override {
+        apogee::harness::StreamOptions options;
+        options.cancellation = cancellation;
+        return stream_chat(request, options);
+    }
+
+    [[nodiscard]] apogee::harness::ChatResponse stream_chat(
+        const apogee::harness::ChatRequest& /*request*/,
+        const apogee::harness::StreamOptions& options) override {
+        std::string whole;
+        for (const std::string& piece : thinking) {
+            if (options.on_thinking) {
+                options.on_thinking(piece);
+            }
+        }
+        for (const std::string& piece : answer) {
+            if (options.on_token) {
+                options.on_token(piece);
+            }
+            whole += piece;
+        }
+        apogee::harness::ChatResponse response;
+        response.message = apogee::harness::ChatMessage::assistant(whole);
+        response.model = "pieces-1";
+        return response;
+    }
+
+    [[nodiscard]] std::vector<apogee::harness::ModelInfo> list_models(
+        const apogee::harness::CancellationToken& /*cancellation*/) override {
+        return {};
+    }
+};
+
+/// One machine-mode turn, as `chat --output-format stream-json` runs it: the
+/// loop speaking through the reporter, then the turn's `result` from the
+/// history it kept. The JSONL it wrote.
+[[nodiscard]] std::string machine_turn(std::vector<std::string> thinking,
+                                       std::vector<std::string> answer) {
+    auto provider = std::make_shared<PiecesProvider>();
+    provider->thinking = std::move(thinking);
+    provider->answer = std::move(answer);
+    apogee::harness::Harness harness{apogee::harness::Config{}};
+    harness.register_provider("pieces", provider);
+    harness.use_default_router();
+
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.begin_session("pieces");
+    std::vector<apogee::harness::ChatMessage> history{apogee::harness::ChatMessage::user("hi")};
+    apogee::agentloop::Options options;
+    options.model = "pieces";
+    (void)apogee::agentloop::run(harness, history, options, reporter);
+    apogee::harness::ChatResponse response;
+    response.message = history.back();
+    response.model = "pieces";
+    reporter.emit_result(response);
+    return out.str();
+}
+
+/// The `text` of every event of `type`, in order.
+[[nodiscard]] std::vector<std::string> texts(const std::string& stream, std::string_view type) {
+    std::vector<std::string> out;
+    for (const nlohmann::json& event : events(stream)) {
+        if (event.value("type", std::string{}) == type) {
+            out.push_back(event.value("text", std::string{}));
+        }
+    }
+    return out;
+}
+
+[[nodiscard]] std::string joined(const std::vector<std::string>& pieces) {
+    std::string out;
+    for (const std::string& piece : pieces) {
+        out += piece;
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("a character split across streamed pieces reaches the driver whole",
+          "[commands][machine][utf8]") {
+    // A valid é cut between two pieces, in the reasoning and in the answer:
+    // each delta used to be written as it came, and half a character is not
+    // JSON -- the session died mid-turn. Every line parses, each delta is
+    // whole text, and the deltas add up to the answer the result carries.
+    std::string stream;
+    REQUIRE_NOTHROW(stream =
+                        machine_turn({"r\xC3", "\xA9sum\xC3", "\xA9"}, {"caf\xC3", "\xA9 ok"}));
+    CHECK(joined(texts(stream, "thinking_delta")) == "r\xC3\xA9sum\xC3\xA9");
+    CHECK(joined(texts(stream, "answer_delta")) == "caf\xC3\xA9 ok");
+    REQUIRE(texts(stream, "result").size() == 1);
+    CHECK(texts(stream, "result").front() == "caf\xC3\xA9 ok");
+}
+
+TEST_CASE("a stream that ends inside a character ends in U+FFFD, and the result says the same",
+          "[commands][machine][utf8]") {
+    // llama.cpp stopping at max_tokens halfway through a character: the last
+    // delta is the replacement character, and the result -- what history,
+    // the session file and a task's ledger keep -- is the same text.
+    std::string stream;
+    REQUIRE_NOTHROW(stream = machine_turn({"hm\xE2\x80"}, {"caf\xC3"}));
+    const std::string replaced = "caf" + std::string{kReplacement};
+    CHECK(joined(texts(stream, "thinking_delta")) == "hm" + std::string{kReplacement});
+    const std::vector<std::string> deltas = texts(stream, "answer_delta");
+    CHECK(joined(deltas) == replaced);
+    REQUIRE_FALSE(deltas.empty());
+    CHECK(deltas.back() == kReplacement);
+    REQUIRE(texts(stream, "result").size() == 1);
+    CHECK(texts(stream, "result").front() == replaced);
+}
+
+TEST_CASE("an event whose text is not UTF-8 is written, never thrown",
+          "[commands][machine][utf8]") {
+    // A notice or an error can carry bytes no model wrote -- a vendor CLI's
+    // stderr tail cut at a byte bound, a Latin-1 name -- and the writer used
+    // to throw on them, ending the session over a notice. Each is one line of
+    // JSON with U+FFFD where the bytes were not text; valid text is unchanged.
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    REQUIRE_NOTHROW(reporter.on_notice("stderr: caf\xE9"));
+    REQUIRE_NOTHROW(reporter.emit_error("ollama: \xE2\x80"));
+    REQUIRE_NOTHROW(reporter.on_notice("caf\xC3\xA9"));
+    std::istringstream lines{out.str()};
+    std::vector<nlohmann::json> events;
+    for (std::string line; std::getline(lines, line);) {
+        REQUIRE_NOTHROW(events.push_back(nlohmann::json::parse(line)));
+    }
+    REQUIRE(events.size() == 3);
+    CHECK(events[0].dump().find("caf" + std::string{kReplacement}) != std::string::npos);
+    CHECK(events[1].dump().find("ollama: " + std::string{kReplacement}) != std::string::npos);
+    CHECK(events[2].dump().find("caf\xC3\xA9") != std::string::npos);
 }
 
 TEST_CASE("a driver reading at any chunk size sees the same events",
@@ -483,4 +646,159 @@ TEST_CASE("a driver attaches a file with an attach line", "[machine][attachments
         apogee::commands::parse_driver_line(R"({"type":"attach","path":"docs/report.pdf"})");
     CHECK(attach.kind == DriverMessage::Kind::Attach);
     CHECK(attach.text == "docs/report.pdf");
+    CHECK(attach.graph.empty());
+
+    // 27p: its method, as `/attach`'s `--graph`, kept as written for the
+    // chat to resolve -- or refuse by name. A value that is no string arrives
+    // as its JSON, never as nothing; a null is no method at all.
+    const auto graph_of = [](std::string_view line) {
+        return apogee::commands::parse_driver_line(line).graph;
+    };
+    CHECK(graph_of(R"({"type":"attach","path":"src","graph":"off"})") == "off");
+    CHECK(graph_of(R"({"type":"attach","path":"src","graph":"tree"})") == "tree");
+    CHECK(graph_of(R"({"type":"attach","path":"src","graph":true})") == "true");
+    CHECK(graph_of(R"({"type":"attach","path":"src","graph":null})").empty());
+    CHECK(apogee::commands::parse_driver_line(R"({"type":"attach","path":"src","graph":"off"})")
+              .text == "src");
+    // Only an attach line carries one.
+    CHECK(graph_of(R"({"type":"user","text":"hi","graph":"off"})").empty());
+}
+
+namespace {
+
+namespace t = apogee::tasks;
+
+constexpr std::string_view kTaskAnswer = "TASK-ANSWER-PROBE-31e8";
+
+/// A task as its run writes it: every transition kind in the ledger, a
+/// round with a grant used and a question answered by the declared answer.
+[[nodiscard]] t::Task lived_task() {
+    t::Task task;
+    task.id = "task-20261004-120000";
+    task.goal = "Find the answer";
+    task.checks = {{t::CheckKind::Require, "42"}};
+    task.session_id = "20261004-120000-abcd";
+    task.tools = true;
+    task.policy.on_question = t::OnQuestion::Answer;
+    task.policy.answer = std::string{kTaskAnswer};
+    task.policy.grants = {"write_file"};
+    t::record_transition(task, t::kCreatedEvent, "t0", 0, task.goal);
+    t::record_transition(task, t::kStartedEvent, "t1");
+    task.rounds.push_back(t::Round{.index = 0, .kind = std::string{t::kPlanRound}});
+    t::record_transition(task, t::kPlanStartedEvent, "t2", 0, "plan");
+    task.rounds.back().outcome = std::string{t::kCompleted};
+    task.plan = "1. Answer.";
+    task.status = std::string{t::kRunning};
+    t::record_transition(task, t::kPlanRecordedEvent, "t3");
+    task.rounds.push_back(t::Round{.index = 1, .kind = std::string{t::kExecuteRound}});
+    t::record_transition(task, t::kRoundStartedEvent, "t4", 1, "execute");
+    task.rounds.back().allowed = {{.tool = "write_file", .target = "out.txt", .by = "grant"}};
+    task.rounds.back().answered = {
+        {.question = "Which colour?", .answer = std::string{kTaskAnswer}, .by = "declared"}};
+    t::conclude_round(task, "It is 42.\nTASK STATUS: DONE");
+    t::record_transition(task, t::kRoundEndedEvent, "t5", 1, "1 of 1 check passed");
+    task.reason = "every check passed";
+    t::record_transition(task, t::kFinishedEvent, "t6", 0, task.reason);
+    return task;
+}
+
+}  // namespace
+
+TEST_CASE("each ledger transition is one task event carrying it as the ledger wrote it",
+          "[commands][machine][task]") {
+    const t::Task task = lived_task();
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    for (std::size_t index = 0; index < task.transitions.size(); ++index) {
+        reporter.emit_task_transition(task, index, std::nullopt);
+    }
+    const std::vector<nlohmann::json> seen = events(out.str());
+    // `created` precedes any run: it reaches a driver as history.
+    CHECK(types(out.str()) == std::vector<std::string>{"task_started", "task_plan", "task_plan",
+                                                       "task_round", "task_round",
+                                                       "task_finished"});
+    REQUIRE(seen.size() == task.transitions.size() - 1);
+    for (std::size_t index = 0; index < seen.size(); ++index) {
+        CHECK(seen[index]["task_id"] == task.id);
+        CHECK(seen[index]["transition"] == t::transition_to_json(task.transitions[index + 1]));
+    }
+    // Started: not resumed, its history the transitions before it, and the
+    // task's whole view.
+    CHECK(seen[0]["resumed"] == false);
+    CHECK(seen[0]["history"] ==
+          nlohmann::json::array({t::transition_to_json(task.transitions[0])}));
+    CHECK(seen[0]["task"] == t::to_json(t::make_task_view(task, std::nullopt)));
+    // The plan turn, and once recorded the plan.
+    CHECK(seen[1]["round"]["kind"] == "plan");
+    CHECK_FALSE(seen[1].contains("plan"));
+    CHECK(seen[2]["plan"] == "1. Answer.");
+    // A round, and once ended each check's state and the rounds used.
+    CHECK(seen[3]["round"]["round"] == 1);
+    CHECK_FALSE(seen[3].contains("checks"));
+    CHECK(seen[4]["checks"][0]["passed"] == true);
+    CHECK(seen[4]["rounds_used"] == 1);
+    CHECK(seen[4]["round"]["allowed"][0]["by"] == "grant");
+    // Finished: the outcome and the final view.
+    CHECK(seen[5]["status"] == task.status);
+    CHECK(seen[5]["reason"] == "every check passed");
+    CHECK(seen[5]["task"]["status"] == task.status);
+}
+
+TEST_CASE("a resumed task's first event is task_started with resumed and its whole history",
+          "[commands][machine][task]") {
+    t::Task task = lived_task();
+    task.transitions.pop_back();  // as if halted before it finished
+    task.status = std::string{t::kRunning};
+    t::record_transition(task, t::kResumedEvent, "t7");
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    const t::LockHolder ours{.pid = 4153, .task_id = task.id, .running = true};
+    reporter.emit_task_transition(task, task.transitions.size() - 1, ours);
+    const nlohmann::json started = events(out.str()).front();
+    CHECK(started["type"] == "task_started");
+    CHECK(started["resumed"] == true);
+    CHECK(started["history"].size() == task.transitions.size() - 1);
+    CHECK(started["task"]["process"] == 4153);
+    CHECK(started["task"]["rounds_used"] == 1);
+}
+
+TEST_CASE("a grant used is a task_grant event", "[commands][machine][task]") {
+    const t::Task task = lived_task();
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.emit_task_grant(task, 1, task.rounds.back().allowed.front());
+    CHECK(events(out.str()).front() == nlohmann::json::parse(R"({"type": "task_grant",
+        "task_id": "task-20261004-120000", "round": 1, "tool": "write_file",
+        "target": "out.txt", "by": "grant"})"));
+}
+
+TEST_CASE("a declared answer reaches no task event", "[commands][machine][task][leak]") {
+    const t::Task task = lived_task();
+    REQUIRE(t::task_to_json(task).dump().find(kTaskAnswer) != std::string::npos);
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    for (std::size_t index = 0; index < task.transitions.size(); ++index) {
+        reporter.emit_task_transition(task, index, std::nullopt);
+    }
+    for (const t::Permit& permit : task.rounds.back().allowed) {
+        reporter.emit_task_grant(task, 1, permit);
+    }
+    REQUIRE_FALSE(out.str().empty());
+    CHECK(out.str().find(kTaskAnswer) == std::string::npos);
+    // The question was answered, and by the declared answer: said, never what.
+    CHECK(out.str().find("Which colour?") != std::string::npos);
+}
+
+TEST_CASE("a read's format is text or one JSON document, never a stream",
+          "[commands][machine][read]") {
+    using apogee::commands::read_format_from_string;
+    using apogee::commands::ReadFormat;
+    CHECK(read_format_from_string("text") == ReadFormat::Text);
+    CHECK(read_format_from_string("") == ReadFormat::Text);
+    CHECK(read_format_from_string("json") == ReadFormat::Json);
+    CHECK_FALSE(read_format_from_string("stream-json").has_value());
+    CHECK(apogee::commands::read_format_names() == std::vector<std::string_view>{"text", "json"});
+    std::ostringstream out;
+    apogee::commands::write_document(out, nlohmann::json{{"a", 1}, {"b", "two"}});
+    CHECK(out.str() == "{\"a\":1,\"b\":\"two\"}\n");
 }

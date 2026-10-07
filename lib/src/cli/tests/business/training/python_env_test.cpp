@@ -60,9 +60,12 @@ struct Fixture {
 }  // namespace
 
 TEST_CASE("requirement sets are named and carry packages", "[training][python]") {
-    CHECK(requirement_set_names().size() == 4);
+    CHECK(requirement_set_names().size() == 5);
     CHECK(requirement_set_from_string("prepare") == RequirementSet::Prepare);
     CHECK(requirement_set_from_string("convert") == RequirementSet::Convert);
+    // The mlx backend's vision path, installed on demand (27c).
+    CHECK(requirement_set_from_string("mlx-vlm") == RequirementSet::MlxVlm);
+    CHECK(packages_for(RequirementSet::MlxVlm)[0] == "mlx-vlm>=0.3");
     CHECK_FALSE(requirement_set_from_string("nope").has_value());
     for (const std::string_view name : requirement_set_names()) {
         const auto set = requirement_set_from_string(name);

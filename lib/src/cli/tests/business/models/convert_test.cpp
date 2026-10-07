@@ -13,6 +13,7 @@
 #include "modelstore/snapshot.h"
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
+#include "support/mlx_model.h"
 
 using apogee::harness::CancellationToken;
 using apogee::models::convert_snapshot;
@@ -290,4 +291,144 @@ TEST_CASE("a snapshot without a chat template is a base model", "[models][conver
     std::filesystem::remove(fixture.snapshot / "tokenizer_config.json");
     write_file(fixture.snapshot / "chat_template.jinja", "{{ messages }}");
     CHECK(snapshot_has_chat_template(fixture.snapshot));
+}
+
+// ---- into MLX (27b) -------------------------------------------------------------------
+
+namespace {
+
+/// A full-weight snapshot and a staging path, as `models convert --mlx`
+/// hands the ladder.
+struct MlxWork {
+    apogee::testing::TempDir root{"convert-mlx-" + std::to_string(std::random_device{}())};
+    std::filesystem::path snapshot = root.path() / "org--m" / "safetensors" / "aaaaaaaaaaaa";
+    std::filesystem::path out = root.path() / "org--m" / "mlx" / ".incoming-0123456789ab";
+
+    MlxWork() {
+        apogee::testing::write_mlx_model(snapshot,
+                                         apogee::testing::MlxModelSpec{.bits = 0, .format = "pt"});
+    }
+};
+
+/// What `mlx_lm.convert` writes, played in process.
+[[nodiscard]] apogee::models::MlxConvertFn writes(const apogee::testing::MlxModelSpec& spec) {
+    return [spec](const std::filesystem::path&, const std::filesystem::path& out,
+                  const CancellationToken&) {
+        apogee::testing::write_mlx_model(out, spec);
+        return std::string{};
+    };
+}
+
+}  // namespace
+
+TEST_CASE("a conversion into MLX lands a whole model, quantized as asked",
+          "[models][convert][mlx]") {
+    const MlxWork work;
+    const apogee::models::MlxConvertResult result = apogee::models::convert_snapshot_to_mlx(
+        work.snapshot, work.out, 4, writes({}), CancellationToken{});
+    REQUIRE(result.ok);
+    CHECK(result.error.empty());
+    CHECK(result.info.complete);
+    CHECK(result.info.quantization.bits == 4);
+    CHECK(result.info.context_length == 131072);
+    CHECK(std::filesystem::exists(work.out / "config.json"));
+}
+
+TEST_CASE("an MLX conversion that fails, stops or lands wrong leaves nothing",
+          "[models][convert][mlx]") {
+    const MlxWork work;
+    SECTION("the converter fails, mid-write") {
+        const apogee::models::MlxConvertResult result = apogee::models::convert_snapshot_to_mlx(
+            work.snapshot, work.out, 4,
+            [](const std::filesystem::path&, const std::filesystem::path& out,
+               const CancellationToken&) {
+                write_file(out / "model-00001-of-00002.safetensors", "half");
+                return std::string{"ValueError: Model type gemma9 not supported."};
+            },
+            CancellationToken{});
+        CHECK_FALSE(result.ok);
+        CHECK_FALSE(result.cancelled);
+        CHECK(result.error == "ValueError: Model type gemma9 not supported.");
+    }
+    SECTION("Ctrl-C mid-run") {
+        const CancellationToken token = CancellationToken::create();
+        const apogee::models::MlxConvertResult result = apogee::models::convert_snapshot_to_mlx(
+            work.snapshot, work.out, 4,
+            [&token](const std::filesystem::path&, const std::filesystem::path& out,
+                     const CancellationToken&) {
+                write_file(out / "model-00001-of-00002.safetensors", "half");
+                token.cancel();
+                return std::string{"cancelled"};
+            },
+            token);
+        CHECK(result.cancelled);
+        CHECK(result.error == "cancelled");
+    }
+    SECTION("a shard cut short") {
+        const apogee::models::MlxConvertResult result = apogee::models::convert_snapshot_to_mlx(
+            work.snapshot, work.out, 4,
+            [](const std::filesystem::path&, const std::filesystem::path& out,
+               const CancellationToken&) {
+                apogee::testing::write_mlx_model(out);
+                std::filesystem::resize_file(out / "model.safetensors", 40);
+                return std::string{};
+            },
+            CancellationToken{});
+        CHECK(result.error.starts_with(
+            "the converter finished but its output is not a loadable MLX model -- cannot load: "
+            "model.safetensors is truncated"));
+    }
+    SECTION("not quantized as asked") {
+        const apogee::models::MlxConvertResult result = apogee::models::convert_snapshot_to_mlx(
+            work.snapshot, work.out, 4, writes({.bits = 8}), CancellationToken{});
+        CHECK(result.error ==
+              "the converter finished but did not quantize to 4 bits (its "
+              "config.json says 8-bit (affine, group 64))");
+    }
+    CHECK_FALSE(std::filesystem::exists(work.out));
+    // The snapshot it read is untouched.
+    CHECK(apogee::models::read_mlx_info(work.snapshot).complete);
+}
+
+TEST_CASE("every MLX refusal comes before the converter runs", "[models][convert][mlx]") {
+    const MlxWork work;
+    bool ran = false;
+    const apogee::models::MlxConvertFn never = [&ran](const std::filesystem::path&,
+                                                      const std::filesystem::path&,
+                                                      const CancellationToken&) {
+        ran = true;
+        return std::string{};
+    };
+    const auto refusal = [&](const std::filesystem::path& snapshot) {
+        return apogee::models::convert_snapshot_to_mlx(snapshot, work.out, 4, never,
+                                                       CancellationToken{})
+            .error;
+    };
+    CHECK(refusal(work.root.path() / "nothing").find("is not a SafeTensors snapshot") !=
+          std::string::npos);
+
+    // Already quantized by mlx-lm: it runs as it is.
+    const std::filesystem::path quantized = work.root.path() / "quantized";
+    apogee::testing::write_mlx_model(quantized);
+    CHECK(refusal(quantized) == quantized.string() +
+                                    " is already an MLX model (4-bit (affine, group 64)) -- an "
+                                    "mlx backend runs it as it is; convert the full-weight release "
+                                    "instead");
+
+    // A publisher's own quantization is a full-weight release mlx-lm reads.
+    write_file(work.snapshot / "config.json",
+               R"({"model_type": "gpt_oss", "quantization_config": {"quant_method": "mxfp4"}})");
+    CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out).empty());
+
+    // Something already at the staging path.
+    write_file(work.out / "x", "x");
+    CHECK(refusal(work.snapshot).starts_with("something already exists at "));
+    CHECK(std::filesystem::exists(work.out / "x"));  // and it stays
+    CHECK_FALSE(ran);
+}
+
+TEST_CASE("the MLX size estimate follows the bits", "[models][convert][mlx]") {
+    CHECK(apogee::models::estimated_mlx_bytes(1'000'000'000, 4) == 500'000'000 + 62'500'000);
+    CHECK(apogee::models::estimated_mlx_bytes(1'000'000'000, 8) == 1'000'000'000 + 62'500'000);
+    CHECK(apogee::models::estimated_mlx_bytes(1'000'000'000, 0) == 2'000'000'000);
 }

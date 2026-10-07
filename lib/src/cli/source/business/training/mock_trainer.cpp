@@ -55,6 +55,22 @@ void append_text(std::string& out, std::string_view value) {
     out.append(value);
 }
 
+/// A SafeTensors file a reader takes whole: an 8-byte header length, a
+/// header naming one F16 tensor and `note` in its metadata -- so two runs'
+/// fused weights differ, as real fine-tunes do -- and the tensor's bytes.
+[[nodiscard]] std::string mock_safetensors(std::string_view note) {
+    const nlohmann::json header{
+        {"__metadata__", {{"format", "mlx"}, {"apogee_mock", std::string{note}}}},
+        {"model.embed_tokens.weight",
+         {{"dtype", "F16"}, {"shape", {1}}, {"data_offsets", {0, 2}}}}};
+    const std::string text = header.dump();
+    std::string bytes;
+    append_u64(bytes, text.size());
+    bytes += text;
+    bytes.append(2, '\0');
+    return bytes;
+}
+
 /// The scripted `answer` an adapter's `adapter_config.json` or a fused
 /// checkpoint's `mock.json` carries, or empty.
 std::string scripted_answer(const std::filesystem::path& file) {
@@ -221,8 +237,23 @@ std::string MockTrainer::fuse(const std::filesystem::path& base,
     if (code) {
         return "could not copy " + (base / "config.json").string() + ": " + code.message();
     }
-    std::ofstream{out / "model.safetensors", std::ios::binary} << "mock fused from "
-                                                               << adapter.string();
+    // A whole model directory, as a real fuse leaves one (27c: an MLX
+    // promotion registers it as it is): the base's tokenizer files beside
+    // the configuration, and weights a reader takes whole.
+    bool tokenizer = false;
+    for (const char* name : {"tokenizer.json", "tokenizer_config.json", "tokenizer.model",
+                             "special_tokens_map.json", "chat_template.jinja"}) {
+        if (std::filesystem::is_regular_file(base / name, code)) {
+            std::filesystem::copy_file(base / name, out / name,
+                                       std::filesystem::copy_options::overwrite_existing, code);
+            tokenizer = tokenizer || !code;
+        }
+    }
+    if (!tokenizer) {
+        std::ofstream{out / "tokenizer_config.json", std::ios::binary} << "{}\n";
+    }
+    std::ofstream{out / "model.safetensors", std::ios::binary}
+        << mock_safetensors("fused from " + adapter.string());
     const std::string answer = scripted_answer(adapter / "adapter_config.json");
     if (!answer.empty()) {
         std::ofstream{out / "mock.json", std::ios::binary}

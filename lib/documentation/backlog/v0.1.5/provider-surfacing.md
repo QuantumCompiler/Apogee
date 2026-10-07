@@ -16,14 +16,14 @@
 - Tests: `tests/presentation/commands/` — the check section against scripted cache states (including no cache); PATH-stripped sandbox check warns (the spike's probe, inverted into a test); `models list` golden rows per tier; the verified write exercised through the mock-shaped completion seam.
 - Consumes: [provider-detection.md](provider-detection.md) (tiers, cache, cheap-check rules); the use-time error text (shipped) as the remediation source; [28h](../v0.1.5/machine-readable-reads.md) output conventions (adopted early, consumed decision).
 
-**Reference (Ommi).** The doctor precedent is Ommi's `check` (its models doctor read GGUF headers so "a model that would die on its first turn is caught by the doctor rather than a user" — MODELS.md; the exact failure-shape this item ports to providers). No analog for provider tiers or a verified record.
+**Reference.** The doctor precedent is `check` (its per-backend validation catches an unloadable GGUF, so a model that would die on its first turn is caught by the doctor rather than a user — the exact failure-shape this item ports to providers).
 
 **Decisions made** (dated):
 - 2026-10-03 — Split from the provider-detection spike as the surfacing half; gated on 28a only, parallel to [provider-registration.md](provider-registration.md) — the doctor should tell the truth even for hand-registered backends on a machine that never runs a scan.
 - 2026-10-03 — Verification is passive (the spike's recommendation, the user not objecting): the record is written when the user's own turn succeeds, and no `--verify` probe-turn exists in this item; if one is ever wanted it is a new, explicitly opt-in flag.
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): one verified entry per provider — last success date and the earning backend; no history.
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): the Providers section appears only with a provider configured or detected; pure-local installs see nothing new.
-- 2026-10-03 — Confirmed (the default taken, the user's confirmation): llamacpp/mock rows keep their existing STATE/VERIFIED semantics — no second meaning added.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): llamacpp/mock rows keep their existing STATE/VERIFIED semantics — no second meaning added. *(2026-10-06, the pre-MR docs pass: MLX rows, since 27a–27b, carry their own local STATE/VERIFIED too — `ready`, the runtime's refusal or `cannot load`; the files on record — local rows like llamacpp's, outside this item's provider rows.)*
 
 **Guardrail(s).**
 - The inverted spike probe as a pinned test: a configured `claude-cli` backend with no binary on PATH makes `check` **warn** with the remediation text — never `ok`.

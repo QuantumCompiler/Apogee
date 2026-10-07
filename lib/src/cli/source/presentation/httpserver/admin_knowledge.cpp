@@ -11,6 +11,7 @@
 #include "agentloop/embed_func.h"
 #include "agentloop/rerank.h"
 #include "agentloop/retriever.h"
+#include "agentloop/validate.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
 #include "httpserver/handler.h"
@@ -76,6 +77,9 @@ constexpr int kHttpQueryTopK = 20;
     if (!result.notes.empty()) {
         out["notes"] = result.notes;
     }
+    if (result.validation.has_value()) {
+        out["validation"] = agentloop::validation_json(*result.validation);
+    }
     return out;
 }
 
@@ -89,6 +93,12 @@ constexpr int kHttpQueryTopK = 20;
     }
     if (!result.decision.note.empty()) {
         out["note"] = result.decision.note;
+    }
+    if (!result.notes.empty()) {
+        out["notes"] = result.notes;
+    }
+    if (result.validation.has_value()) {
+        out["validation"] = agentloop::validation_json(*result.validation);
     }
     return out;
 }

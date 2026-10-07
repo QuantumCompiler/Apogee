@@ -34,11 +34,13 @@ struct GraphMembers {
 [[nodiscard]] GraphMembers open_graph_members(const harness::NamedGraphConfig& named);
 
 /// The write-time rules a `graphs:` entry must satisfy, decided ONCE for
-/// `config add-graph` and its admin twin: a name, at least one member, no
-/// collision with a collection name (the resolution rule depends on it),
-/// a configured `extract_backend` when one is named, sane knobs. Unknown
-/// members are warnings, not errors -- ingest registers collections on
-/// first use. A non-empty `error` means the entry is refused.
+/// `config add-graph`, `graph build --source` and the admin twin: a name, at
+/// least one member collection or source tree, no collision with a
+/// collection name (the resolution rule depends on it), a configured
+/// `extract_backend` when one is named, sane knobs; since 27k, source trees
+/// absolute and distinctly named, and only vendored languages. Unknown
+/// members and missing trees are warnings, not errors -- ingest registers
+/// collections on first use. A non-empty `error` means the entry is refused.
 struct NamedGraphValidation {
     std::string error;
     std::vector<std::string> warnings;

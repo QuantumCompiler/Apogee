@@ -9,11 +9,11 @@
 /// **The on-disk contract.** One declaration of what `~/.apogee/` contains,
 /// read by every path that creates it and by the one that validates it.
 ///
-/// This exists because Ommi's dominant early bug class was *silent install
-/// drift*: `make install` seeded one thing, `install.sh` seeded another, the
-/// updater a third, and `check` validated a fourth list — each correct when
-/// written, and diverging one commit at a time. Nothing failed loudly; a fresh
-/// install simply lacked a directory some command needed months later.
+/// This exists to prevent *silent install drift*: `make install` seeding one
+/// thing, `install.sh` another, the updater a third, and `check` validating a
+/// fourth list — each correct when written, and diverging one commit at a
+/// time. Nothing fails loudly; a fresh install simply lacks a directory some
+/// command needs months later.
 ///
 /// The fix is structural rather than procedural. The layout is declared **once,
 /// here**, and every consumer enumerates it instead of restating it:
@@ -22,6 +22,8 @@
 ///     call the binary to do it, so neither shell script owns a copy of the
 ///     list),
 ///   - `apogee check` validates exactly these entries,
+///   - `apogee reset` plans its removals from exactly these entries, and its
+///     `--keep` accepts and completes exactly them,
 ///   - the CI parity gate diffs two installs against each other.
 ///
 /// Adding a directory means adding one row below. A contributor cannot forget
@@ -44,9 +46,9 @@ struct LayoutEntry {
     bool private_mode = false;
 
     /// Whether the directory holds the user's own data — models they supplied,
-    /// conversations they had. `apogee uninstall` prompts before removing a
-    /// tree containing any of these, and never deletes one under `--yes`
-    /// without having said so.
+    /// conversations they had. `apogee uninstall` and `apogee reset` prompt
+    /// before removing a tree containing any of these, and never delete one
+    /// under `--yes` without having said so.
     bool user_data = false;
 };
 
@@ -135,6 +137,16 @@ struct LayoutEntry {
 /// `consumed/`), and `work/` for the merged dataset. Created by the first
 /// `train cycle run`.
 [[nodiscard]] std::filesystem::path training_cycle_dir();
+/// `<APOGEE_HOME>/tasks` -- the task runner's state (27h): one directory
+/// per task holding its ledger, `task.json`, rewritten on every transition,
+/// and a halt or cancel request another process left for the running one;
+/// `task.lock`, the PID lock one running task holds. Private: a ledger
+/// names the goal and the plan.
+[[nodiscard]] std::filesystem::path tasks_dir();
+/// `<APOGEE_HOME>/symphonies` -- symphony spec files (27q): the shipped
+/// starters, seeded skip-if-present, and any the user drops beside them, each
+/// played by its file's name.
+[[nodiscard]] std::filesystem::path symphonies_dir();
 [[nodiscard]] std::filesystem::path cache_dir();
 /// `cache/prompt` -- a local model's attention cache kept between processes
 /// (26j): `models/<model>/` holds each model's prefix files (the state after

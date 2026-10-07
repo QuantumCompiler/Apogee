@@ -8,6 +8,7 @@
 #include <exception>
 #include <utility>
 
+#include "agentloop/member_call.h"
 #include "contracts/errors.h"
 
 namespace apogee::agentloop {
@@ -70,8 +71,14 @@ void sort_ranking(std::vector<RankedTool>& ranking) {
 
 const std::vector<std::string>& core_tools() {
     static const std::vector<std::string> core{"read_file", "list_directory", "run_command",
+                                               std::string{kConsultToolName},
                                                std::string{kFindToolsName}};
     return core;
+}
+
+bool is_core_tool(std::string_view name) {
+    return name.starts_with(kPlayToolPrefix) ||
+           std::ranges::find(core_tools(), name) != core_tools().end();
 }
 
 harness::Tool find_tools_tool(const std::vector<std::string>& hidden) {
@@ -372,6 +379,14 @@ ToolOffer ToolSelection::begin_turn(std::string_view query,
                 });
             if (registered) {
                 offered_.insert(name);
+            }
+        }
+        // Every symphony's tool too (27t): orchestration is the user's
+        // opt-in to the model choosing among them, and a choice ranked out of
+        // the offer is no choice at all -- consult's lesson (27f).
+        for (const harness::Tool& tool : ranker_->tools()) {
+            if (is_core_tool(tool.name)) {
+                offered_.insert(tool.name);
             }
         }
         for (const std::string& name : offer.ranked) {

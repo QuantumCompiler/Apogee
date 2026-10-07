@@ -12,7 +12,9 @@ AdminHandler::AdminHandler(AdminOptions options, JobRegistry& jobs, events::Bus&
     : options_{std::move(options)}, jobs_{&jobs}, bus_{&bus} {}
 
 AdminConfigContext AdminHandler::config_context() const {
-    return AdminConfigContext{.config_path = options_.config_path, .startup = &options_.startup};
+    return AdminConfigContext{.config_path = options_.config_path,
+                              .startup = &options_.startup,
+                              .metered = options_.metered};
 }
 
 HttpResponse AdminHandler::list_backends(const HttpRequest& /*request*/) {
@@ -49,6 +51,26 @@ HttpResponse AdminHandler::put_agent(const HttpRequest& request, std::string_vie
 
 HttpResponse AdminHandler::delete_agent(const HttpRequest& request, std::string_view name) {
     return admin_delete_agent(config_context(), name, request);
+}
+
+HttpResponse AdminHandler::list_symphonies(const HttpRequest&) {
+    return admin_list_symphonies(config_context());
+}
+
+HttpResponse AdminHandler::create_symphony(const HttpRequest& request) {
+    return admin_create_symphony(config_context(), request);
+}
+
+HttpResponse AdminHandler::get_symphony(const HttpRequest&, std::string_view name) {
+    return admin_get_symphony(config_context(), name);
+}
+
+HttpResponse AdminHandler::put_symphony(const HttpRequest& request, std::string_view name) {
+    return admin_put_symphony(config_context(), name, request);
+}
+
+HttpResponse AdminHandler::delete_symphony(const HttpRequest&, std::string_view name) {
+    return admin_delete_symphony(config_context(), name);
 }
 
 HttpResponse AdminHandler::list_mcp_servers(const HttpRequest&) {
@@ -186,6 +208,22 @@ HttpResponse AdminHandler::graph_entity(const HttpRequest& request, std::string_
     return admin_graph_entity(config_context(), collection, request);
 }
 
+HttpResponse AdminHandler::graph_path(const HttpRequest& request, std::string_view name) {
+    return admin_graph_path(config_context(), name, request);
+}
+
+HttpResponse AdminHandler::graph_explain(const HttpRequest& request, std::string_view name) {
+    return admin_graph_explain(config_context(), name, request);
+}
+
+HttpResponse AdminHandler::graph_neighbors(const HttpRequest& request, std::string_view name) {
+    return admin_graph_neighbors(config_context(), name, request);
+}
+
+HttpResponse AdminHandler::graph_query(const HttpRequest& request, std::string_view name) {
+    return admin_graph_query(config_context(), name, request);
+}
+
 HttpResponse AdminHandler::delete_graph(const HttpRequest& request, std::string_view collection) {
     return admin_delete_graph(config_context(), collection, request);
 }
@@ -244,6 +282,14 @@ HttpResponse AdminHandler::training_cycle(const HttpRequest& /*request*/) {
     return admin_training_cycle(config_context());
 }
 
+HttpResponse AdminHandler::list_tasks(const HttpRequest& request) {
+    return admin_list_tasks(request);
+}
+
+HttpResponse AdminHandler::get_task(const HttpRequest& /*request*/, std::string_view id) {
+    return admin_get_task(id);
+}
+
 HttpResponse AdminHandler::list_communities(const HttpRequest& request, std::string_view name) {
     return admin_list_communities(config_context(), name, request);
 }
@@ -271,6 +317,47 @@ HttpResponse AdminHandler::put_graph(const HttpRequest& request, std::string_vie
 HttpResponse AdminHandler::delete_graph_config(const HttpRequest& /*request*/,
                                                std::string_view name) {
     return admin_delete_graph_config(config_context(), name);
+}
+
+HttpResponse AdminHandler::list_suites(const HttpRequest& /*request*/) {
+    return admin_list_suites(config_context());
+}
+
+HttpResponse AdminHandler::create_suite(const HttpRequest& request) {
+    return admin_create_suite(config_context(), request);
+}
+
+HttpResponse AdminHandler::set_default_suite(const HttpRequest& request) {
+    return admin_set_default_suite(config_context(), request);
+}
+
+HttpResponse AdminHandler::get_suite(const HttpRequest& /*request*/, std::string_view name) {
+    return admin_get_suite(config_context(), name);
+}
+
+HttpResponse AdminHandler::put_suite(const HttpRequest& request, std::string_view name) {
+    return admin_put_suite(config_context(), name, request);
+}
+
+HttpResponse AdminHandler::delete_suite(const HttpRequest& /*request*/, std::string_view name) {
+    return admin_delete_suite(config_context(), name);
+}
+
+HttpResponse AdminHandler::set_suite_member(const HttpRequest& request, std::string_view name) {
+    return admin_set_suite_member(config_context(), name, request);
+}
+
+HttpResponse AdminHandler::set_suite_consult(const HttpRequest& request, std::string_view name) {
+    return admin_set_suite_consult(config_context(), name, request);
+}
+
+HttpResponse AdminHandler::set_suite_validate(const HttpRequest& request, std::string_view name) {
+    return admin_set_suite_validate(config_context(), name, request);
+}
+
+HttpResponse AdminHandler::set_suite_orchestrate(const HttpRequest& request,
+                                                 std::string_view name) {
+    return admin_set_suite_orchestrate(config_context(), name, request);
 }
 
 HttpResponse AdminHandler::list_jobs(const HttpRequest& /*request*/) {

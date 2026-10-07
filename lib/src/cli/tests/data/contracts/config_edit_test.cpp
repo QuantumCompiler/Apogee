@@ -1,11 +1,15 @@
 #include "contracts/config_edit.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "contracts/config.h"
 #include "support/env_guard.h"
@@ -904,6 +908,28 @@ TEST_CASE("a graphs: entry round-trips byte-exactly, with only what it says writ
     CHECK_THROWS_AS((void)delete_graph(kCommented, "work"), ConfigEditError);
 }
 
+TEST_CASE("a code graph's entry writes its trees and languages, and no empty collections",
+          "[config_edit][golden][graphs][code]") {
+    apogee::harness::NamedGraphConfig graph;
+    graph.sources = {"/srv/repo/src", "/srv/other"};
+    const std::string code = append_graph("graphs:\n", "code", graph, false);
+    CHECK(code == "graphs:\n  code:\n    sources: [/srv/repo/src, /srv/other]\n");
+    require_parses(code);
+    graph.languages = {"cpp", "python"};
+    graph.collections = {"docs"};
+    const std::string mixed = append_graph("graphs:\n", "mixed", graph, false);
+    CHECK(mixed ==
+          "graphs:\n  mixed:\n    collections: [docs]\n    sources: [/srv/repo/src, /srv/other]\n"
+          "    languages: [cpp, python]\n");
+    const auto loaded = apogee::harness::parse_config(mixed, "<test>");
+    CHECK(loaded.find_graph("mixed")->sources == graph.sources);
+    CHECK(loaded.find_graph("mixed")->languages == graph.languages);
+    // A graph with neither collections nor trees keeps writing `[]`, as it
+    // always did.
+    CHECK(append_graph("graphs:\n", "bare", apogee::harness::NamedGraphConfig{}, false) ==
+          "graphs:\n  bare:\n    collections: []\n");
+}
+
 TEST_CASE("graph helpers are section-scoped: a same-named agent and MCP server stay intact",
           "[config_edit][graphs][scope]") {
     apogee::harness::AgentConfig agent;
@@ -1186,4 +1212,443 @@ TEST_CASE("the helper role pointers are set through the one editor", "[config_ed
         CHECK(message.find("default_vision, default_transcription, default_utility") !=
               std::string::npos);
     }
+}
+
+namespace {
+
+apogee::harness::SuiteConfig research_suite() {
+    apogee::harness::SuiteConfig suite;
+    suite.members["chat"] = {.backend = "claude"};
+    suite.members["utility"] = {
+        .backend = "local", .context_size = 4096, .toolset = std::vector<std::string>{"fs"}};
+    suite.members["embedding"] = {.backend = "local"};
+    return suite;
+}
+
+/// A suite written by hand, comments and all, to edit one member of.
+constexpr std::string_view kHandSuite = R"YAML(models:
+  default: claude
+backends:
+  claude:
+    type: mock
+  local:
+    type: mock
+  helper:
+    type: mock
+suites:
+  # The everyday suite.
+  research:
+    description: Deep work   # what it is for
+    members:
+      chat: claude          # the big model
+      # The small one does the chores.
+      utility:
+        backend: local
+        context_size: 4096  # small on purpose
+      vision: claude
+  fast:
+    members:
+      chat: local
+)YAML";
+
+}  // namespace
+
+TEST_CASE("a suites: entry round-trips byte-exactly, members in role order",
+          "[config_edit][golden][suites]") {
+    using apogee::harness::append_suite;
+    using apogee::harness::delete_suite;
+    const std::string added = append_suite(kCommented, "research", research_suite(), false);
+    require_parses(added);
+    CHECK(added.starts_with(std::string{kCommented}));
+    // Role order, not the map's; the short form where nothing is pinned.
+    CHECK(
+        added.ends_with("\nsuites:\n  research:\n    members:\n      chat: claude\n"
+                        "      embedding: local\n      utility:\n        backend: local\n"
+                        "        context_size: 4096\n        toolset: [fs]\n"));
+    CHECK(delete_suite(added, "research") == std::string{kCommented} + "\nsuites:\n");
+    const auto loaded = apogee::harness::parse_config(added, "<test>");
+    REQUIRE(loaded.find_suite("research") != nullptr);
+    CHECK(*loaded.find_suite("research") == research_suite());
+
+    // A description when it says something, and an empty toolset written as one.
+    apogee::harness::SuiteConfig described;
+    described.description = "Deep: work";
+    described.members["chat"] = {.backend = "claude", .toolset = std::vector<std::string>{}};
+    const std::string full = append_suite("suites:\n", "s", described, false);
+    CHECK(full ==
+          "suites:\n  s:\n    description: \"Deep: work\"\n    members:\n      chat:\n"
+          "        backend: claude\n        toolset: []\n");
+    CHECK(*apogee::harness::parse_config(full, "<test>").find_suite("s") == described);
+
+    // Collisions as every section's, and `off` -- `/suite off` -- refused.
+    CHECK_THROWS_AS((void)append_suite(added, "Research", research_suite(), false),
+                    ConfigEditError);
+    CHECK_THROWS_AS((void)append_suite(added, "research", research_suite(), false),
+                    ConfigEditError);
+    CHECK_THROWS_AS((void)append_suite(kCommented, "off", research_suite(), false),
+                    ConfigEditError);
+    CHECK_THROWS_AS((void)append_suite(kCommented, "OFF", research_suite(), true), ConfigEditError);
+    const std::string replaced = append_suite(added, "research", described, true);
+    CHECK(apogee::harness::section_entry_names(replaced, "suites").size() == 1);
+    CHECK(*apogee::harness::parse_config(replaced, "<test>").find_suite("research") == described);
+    CHECK_THROWS_AS((void)delete_suite(kCommented, "research"), ConfigEditError);
+}
+
+TEST_CASE("setting one member leaves every other line of the suite as it was",
+          "[config_edit][golden][suites]") {
+    using apogee::harness::set_suite_member;
+    using apogee::harness::SuiteMember;
+    require_parses(kHandSuite);
+    const std::string hand{kHandSuite};
+
+    // Replaced in place: the member's own lines go, its neighbours' comments stay.
+    const std::string swapped =
+        set_suite_member(hand, "research", "utility", SuiteMember{.backend = "helper"});
+    require_parses(swapped);
+    std::string expected = hand;
+    const std::string utility_lines =
+        "      utility:\n        backend: local\n        context_size: 4096  # small on "
+        "purpose\n";
+    expected.replace(expected.find(utility_lines), utility_lines.size(), "      utility: helper\n");
+    CHECK(swapped == expected);
+
+    // Inserted in role order: embedding after chat, before its comment-led
+    // utility -- which keeps its comment.
+    const std::string inserted =
+        set_suite_member(hand, "RESEARCH", "embedding", SuiteMember{.backend = "local"});
+    expected = hand;
+    expected.insert(expected.find("      # The small one"), "      embedding: local\n");
+    CHECK(inserted == expected);
+    // After every role it knows: at the end of the block.
+    const std::string last = set_suite_member(
+        hand, "fast", "utility", SuiteMember{.backend = "helper", .context_size = 1024});
+    expected = hand;
+    expected += "      utility:\n        backend: helper\n        context_size: 1024\n";
+    CHECK(last == expected);
+
+    // Removed: the member and only it.
+    const std::string removed = set_suite_member(hand, "research", "vision", std::nullopt);
+    expected = hand;
+    expected.erase(expected.find("      vision: claude\n"),
+                   std::string{"      vision: claude\n"}.size());
+    CHECK(removed == expected);
+    // And put back, it goes in role order: before utility and the comment
+    // leading it.
+    expected = removed;
+    expected.insert(expected.find("      # The small one"), "      vision: claude\n");
+    CHECK(set_suite_member(removed, "research", "vision", SuiteMember{.backend = "claude"}) ==
+          expected);
+
+    // A suite with no members: block yet gains one.
+    const std::string bare = "suites:\n  s:\n    description: x\n";
+    CHECK(set_suite_member(bare, "s", "chat", SuiteMember{.backend = "claude"}) ==
+          "suites:\n  s:\n    description: x\n    members:\n      chat: claude\n");
+
+    // Refusals: a role that is none, a suite or a member that is not there, a
+    // members: block written on one line.
+    CHECK_THROWS_AS((void)set_suite_member(hand, "research", "root", SuiteMember{.backend = "x"}),
+                    ConfigEditError);
+    CHECK_THROWS_AS((void)set_suite_member(hand, "nope", "chat", SuiteMember{.backend = "x"}),
+                    ConfigEditError);
+    CHECK_THROWS_AS((void)set_suite_member(hand, "fast", "vision", std::nullopt), ConfigEditError);
+    CHECK_THROWS_AS((void)set_suite_member(kCommented, "s", "chat", SuiteMember{.backend = "x"}),
+                    ConfigEditError);
+    CHECK_THROWS_AS((void)set_suite_member("suites:\n  s:\n    members: {chat: claude}\n", "s",
+                                           "utility", SuiteMember{.backend = "x"}),
+                    ConfigEditError);
+}
+
+TEST_CASE("the default suite is set like a pointer, and the loader holds it to a suite",
+          "[config_edit][suites]") {
+    using apogee::harness::set_default_suite;
+    const std::string hand{kHandSuite};
+    const std::string set = set_default_suite(hand, "fast");
+    CHECK(set == "models:\n  default: claude\n  default_suite: fast\n" +
+                     hand.substr(std::string{"models:\n  default: claude\n"}.size()));
+    CHECK(apogee::harness::parse_config(set, "<test>").models.default_suite == "fast");
+    // Replaced in place, then cleared.
+    const std::string cleared = set_default_suite(set_default_suite(set, "research"), "");
+    CHECK(cleared.find("  default_suite: \"\"\n") != std::string::npos);
+    CHECK(apogee::harness::parse_config(cleared, "<test>").models.default_suite.empty());
+    // The re-parse is what refuses a dangling name, and the default suite's
+    // deletion: the edit never lands.
+    CHECK_THROWS_AS(apogee::harness::parse_config(set_default_suite(hand, "nope"), "<test>"),
+                    apogee::harness::ConfigError);
+    CHECK_THROWS_AS(
+        apogee::harness::parse_config(apogee::harness::delete_suite(set, "fast"), "<test>"),
+        apogee::harness::ConfigError);
+}
+
+TEST_CASE("a suite's consultable members and caps are written after its members, and round-trip",
+          "[config_edit][golden][suites]") {
+    using apogee::harness::append_suite;
+    apogee::harness::SuiteConfig suite = research_suite();
+    suite.consultable = {"utility"};
+    suite.consult_caps.per_turn = 2;
+    suite.consult_caps.answer_tokens = 256;
+    const std::string added = append_suite(kCommented, "research", suite, false);
+    require_parses(added);
+    CHECK(
+        added.ends_with("        toolset: [fs]\n    consultable: [utility]\n"
+                        "    consult_caps:\n      per_turn: 2\n      answer_tokens: 256\n"));
+    CHECK(*apogee::harness::parse_config(added, "<test>").find_suite("research") == suite);
+    // The inverse is the same entry's: everything it wrote goes.
+    CHECK(apogee::harness::delete_suite(added, "research") ==
+          std::string{kCommented} + "\nsuites:\n");
+}
+
+TEST_CASE("setting a suite's consultable members and caps leaves every other line as it was",
+          "[config_edit][golden][suites]") {
+    using apogee::harness::ConsultCaps;
+    using apogee::harness::set_suite_consult_caps;
+    using apogee::harness::set_suite_consultable;
+    const std::string hand{kHandSuite};
+
+    // Added at the entry's end -- after its members, before the next suite.
+    const std::string added = set_suite_consultable(hand, "research", {"utility"});
+    require_parses(added);
+    std::string expected = hand;
+    expected.insert(expected.find("  fast:\n"), "    consultable: [utility]\n");
+    CHECK(added == expected);
+    CHECK(apogee::harness::parse_config(added, "<test>").find_suite("research")->consultable ==
+          std::vector<std::string>{"utility"});
+
+    // Replaced where it stands, its neighbours untouched; a block list too.
+    const std::string widened = set_suite_consultable(added, "research", {"utility", "vision"});
+    expected = hand;
+    expected.insert(expected.find("  fast:\n"), "    consultable: [utility, vision]\n");
+    CHECK(widened == expected);
+    const std::string block = std::string{kHandSuite}.insert(
+        std::string{kHandSuite}.find("  fast:\n"),
+        "    consultable:   # who it asks\n      - utility\n    # caps follow\n    consult_caps:\n"
+        "      per_turn: 3\n");
+    require_parses(block);
+    const std::string reflowed = set_suite_consultable(block, "research", {"vision"});
+    CHECK(reflowed == std::string{kHandSuite}.insert(std::string{kHandSuite}.find("  fast:\n"),
+                                                     "    consultable: [vision]\n    # caps "
+                                                     "follow\n    consult_caps:\n      per_turn: "
+                                                     "3\n"));
+    // A block list whose items sit at the key's own indent -- legal YAML --
+    // goes with its key.
+    const std::string flush = std::string{kHandSuite}.insert(
+        std::string{kHandSuite}.find("  fast:\n"), "    consultable:\n    - utility\n");
+    require_parses(flush);
+    CHECK(set_suite_consultable(flush, "research", {"vision"}) ==
+          std::string{kHandSuite}.insert(std::string{kHandSuite}.find("  fast:\n"),
+                                         "    consultable: [vision]\n"));
+    // Removed: the key and its list go, nothing else.
+    CHECK(set_suite_consultable(widened, "research", {}) == hand);
+    CHECK(set_suite_consultable(hand, "research", {}) == hand);
+
+    // Caps: added at the end, replaced in place, removed when none is set.
+    ConsultCaps caps;
+    caps.brief_tokens = 512;
+    const std::string capped = set_suite_consult_caps(added, "research", caps);
+    expected = added;
+    expected.insert(expected.find("  fast:\n"), "    consult_caps:\n      brief_tokens: 512\n");
+    CHECK(capped == expected);
+    caps.per_turn = 1;
+    const std::string recapped = set_suite_consult_caps(capped, "research", caps);
+    expected = added;
+    expected.insert(expected.find("  fast:\n"),
+                    "    consult_caps:\n      per_turn: 1\n      brief_tokens: 512\n");
+    CHECK(recapped == expected);
+    CHECK(set_suite_consult_caps(recapped, "research", ConsultCaps{}) == added);
+    // A consultable list set on a suite with caps goes above them, and above
+    // the comment leading them.
+    const std::string caps_first = set_suite_consult_caps(hand, "fast", caps);
+    const std::string then_list = set_suite_consultable(
+        std::string{caps_first}.insert(caps_first.find("    consult_caps:"), "    # bounds\n"),
+        "fast", {"utility"});
+    CHECK(
+        then_list.ends_with("      chat: local\n    consultable: [utility]\n    # bounds\n"
+                            "    consult_caps:\n      per_turn: 1\n      brief_tokens: 512\n"));
+
+    // A suite that is not there is refused, as for a member.
+    CHECK_THROWS_AS((void)set_suite_consultable(hand, "nope", {"utility"}), ConfigEditError);
+    CHECK_THROWS_AS((void)set_suite_consult_caps(kCommented, "s", caps), ConfigEditError);
+}
+
+TEST_CASE("a suite's validate: block is written last, only what is set, and round-trips",
+          "[config_edit][golden][suites][validate]") {
+    using apogee::harness::append_suite;
+    apogee::harness::SuiteConfig suite = research_suite();
+    suite.consultable = {"utility"};
+    suite.validate.tool_args = true;
+    suite.validate.answers = "always";
+    const std::string added = append_suite(kCommented, "research", suite, false);
+    require_parses(added);
+    CHECK(
+        added.ends_with("        toolset: [fs]\n    consultable: [utility]\n"
+                        "    validate:\n      tool_args: on\n      answers: always\n"));
+    CHECK(*apogee::harness::parse_config(added, "<test>").find_suite("research") == suite);
+    CHECK(apogee::harness::delete_suite(added, "research") ==
+          std::string{kCommented} + "\nsuites:\n");
+    // Every key, in its writing order.
+    suite.validate.verifier = "vision";
+    suite.validate.extraction = false;
+    suite.members["vision"] = {.backend = "claude"};
+    const std::string full = append_suite(kCommented, "research", suite, false);
+    CHECK(
+        full.ends_with("    validate:\n      verifier: vision\n      tool_args: on\n"
+                       "      extraction: off\n      answers: always\n"));
+    CHECK(*apogee::harness::parse_config(full, "<test>").find_suite("research") == suite);
+}
+
+TEST_CASE("setting a suite's validate: block leaves every other line as it was",
+          "[config_edit][golden][suites][validate]") {
+    using apogee::harness::set_suite_validate;
+    using apogee::harness::ValidateConfig;
+    const std::string hand{kHandSuite};
+
+    // Added at the entry's end.
+    const std::string added =
+        set_suite_validate(hand, "research", ValidateConfig{.tool_args = true});
+    require_parses(added);
+    std::string expected = hand;
+    expected.insert(expected.find("  fast:\n"), "    validate:\n      tool_args: on\n");
+    CHECK(added == expected);
+
+    // Replaced in place, a comment inside it gone with it and one above kept.
+    const std::string commented = std::string{kHandSuite}.insert(
+        std::string{kHandSuite}.find("  fast:\n"),
+        "    # checks\n    validate:\n      tool_args: on   # tools first\n");
+    require_parses(commented);
+    const std::string widened = set_suite_validate(
+        commented, "research", ValidateConfig{.tool_args = true, .answers = "always"});
+    CHECK(widened ==
+          std::string{kHandSuite}.insert(
+              std::string{kHandSuite}.find("  fast:\n"),
+              "    # checks\n    validate:\n      tool_args: on\n      answers: always\n"));
+    // Removed: nothing set, no block.
+    CHECK(set_suite_validate(added, "research", ValidateConfig{}) == hand);
+    CHECK(set_suite_validate(hand, "research", ValidateConfig{}) == hand);
+    // The last suite: at the file's end.
+    CHECK(set_suite_validate(hand, "fast", ValidateConfig{.answers = "always"})
+              .ends_with("      chat: local\n    validate:\n      answers: always\n"));
+    // The re-parse is what refuses a verifier with no member.
+    CHECK_THROWS_AS(
+        apogee::harness::parse_config(
+            set_suite_validate(hand, "fast", ValidateConfig{.tool_args = true}), "<test>"),
+        apogee::harness::ConfigError);
+    CHECK_THROWS_AS((void)set_suite_validate(hand, "nope", ValidateConfig{.tool_args = true}),
+                    ConfigEditError);
+}
+
+TEST_CASE("a suite's orchestrate: is written last, only when on, and round-trips",
+          "[config_edit][golden][suites][orchestrate]") {
+    using apogee::harness::append_suite;
+    apogee::harness::SuiteConfig suite = research_suite();
+    suite.validate.tool_args = true;
+    suite.orchestrate = true;
+    const std::string added = append_suite(kCommented, "research", suite, false);
+    require_parses(added);
+    CHECK(added.ends_with("    validate:\n      tool_args: on\n    orchestrate: true\n"));
+    CHECK(*apogee::harness::parse_config(added, "<test>").find_suite("research") == suite);
+    CHECK(apogee::harness::delete_suite(added, "research") ==
+          std::string{kCommented} + "\nsuites:\n");
+    // Off is absent: nothing written.
+    suite.orchestrate = false;
+    CHECK(append_suite(kCommented, "research", suite, false).find("orchestrate") ==
+          std::string::npos);
+}
+
+TEST_CASE("setting a suite's orchestrate: leaves every other line as it was",
+          "[config_edit][golden][suites][orchestrate]") {
+    using apogee::harness::set_suite_orchestrate;
+    const std::string hand{kHandSuite};
+    // On: added at the entry's end.
+    const std::string on = set_suite_orchestrate(hand, "research", true);
+    require_parses(on);
+    std::string expected = hand;
+    expected.insert(expected.find("  fast:\n"), "    orchestrate: true\n");
+    CHECK(on == expected);
+    CHECK(apogee::harness::parse_config(on, "<test>").find_suite("research")->orchestrate);
+    // On again: unchanged. Off: the key removed, the file as it was.
+    CHECK(set_suite_orchestrate(on, "research", true) == on);
+    CHECK(set_suite_orchestrate(on, "research", false) == hand);
+    CHECK(set_suite_orchestrate(hand, "research", false) == hand);
+    // A hand-written value, with a comment above it: replaced in place, the
+    // comment kept.
+    const std::string commented = std::string{kHandSuite}.insert(
+        std::string{kHandSuite}.find("  fast:\n"), "    # plays on its own\n    orchestrate: on\n");
+    require_parses(commented);
+    CHECK(set_suite_orchestrate(commented, "research", true) ==
+          std::string{kHandSuite}.insert(std::string{kHandSuite}.find("  fast:\n"),
+                                         "    # plays on its own\n    orchestrate: true\n"));
+    // The last suite: at the file's end.
+    CHECK(set_suite_orchestrate(hand, "fast", true).ends_with("    orchestrate: true\n"));
+    CHECK_THROWS_AS((void)set_suite_orchestrate(hand, "nope", true), ConfigEditError);
+}
+
+TEST_CASE("attachments.graph is set through the one editor, every comment kept",
+          "[config_edit][attachments]") {
+    using apogee::harness::AttachmentGraphMethod;
+    using apogee::harness::set_attachments_graph;
+    // 27p: the shipped template keeps its commented example whole, and the
+    // block is appended after everything -- the only change.
+    const std::string shipped{apogee::harness::config_template()};
+    const std::string off = set_attachments_graph(shipped, "off");
+    CHECK(off == shipped + "\nattachments:\n  graph: off\n");
+    CHECK(apogee::harness::parse_config(off, "<test>").attachments.graph ==
+          AttachmentGraphMethod::Off);
+    // Set again: one token, in place.
+    const std::string code = set_attachments_graph(off, "code");
+    CHECK(code == shipped + "\nattachments:\n  graph: code\n");
+    CHECK(apogee::harness::parse_config(code, "<test>").attachments.graph ==
+          AttachmentGraphMethod::Code);
+
+    // A hand-written block: the value replaced, its trailing comment and the
+    // comment-dense rest untouched.
+    const std::string hand = std::string{kCommented} +
+                             "\n# How attaches are indexed.\nattachments:\n"
+                             "  graph: code    # build the code graph\n";
+    const std::string edited = set_attachments_graph(hand, "off");
+    CHECK(edited == std::string{kCommented} +
+                        "\n# How attaches are indexed.\nattachments:\n"
+                        "  graph: off    # build the code graph\n");
+    require_parses(edited);
+    // A block with no graph line gains one; a config with none gains the block.
+    CHECK(set_attachments_graph("attachments:\n", "off") == "attachments:\n  graph: off\n");
+    CHECK(set_attachments_graph(kCommented, "code") ==
+          std::string{kCommented} + "\nattachments:\n  graph: code\n");
+}
+
+TEST_CASE("attachments.graph off its set, or on a line the editor cannot see into, is refused",
+          "[config_edit][attachments]") {
+    using apogee::harness::set_attachments_graph;
+    CHECK_THROWS_WITH(set_attachments_graph(kCommented, "tree"),
+                      "attachments.graph: unknown value 'tree' (accepted: code, off)");
+    CHECK_THROWS_AS(set_attachments_graph(kCommented, ""), ConfigEditError);
+    CHECK_THROWS_AS(set_attachments_graph(kCommented, "Off"), ConfigEditError);
+    // A one-line mapping, or a header with a comment: appending a block
+    // beside it would be a second key the loader never reads.
+    CHECK_THROWS_AS(set_attachments_graph("attachments: { graph: off }\n", "code"),
+                    ConfigEditError);
+    CHECK_THROWS_AS(set_attachments_graph("attachments:   # how\n  graph: off\n", "code"),
+                    ConfigEditError);
+    // A comment naming the key is not the key.
+    CHECK(set_attachments_graph("# attachments: { graph: off }\n", "off") ==
+          "# attachments: { graph: off }\n\nattachments:\n  graph: off\n");
+
+    // Through the file layer: refused before the file is touched.
+    const TempDir dir{"edit-attachments"};
+    const std::filesystem::path path = std::filesystem::path{dir.path()} / "config.yaml";
+    apogee::harness::write_file_atomically(path, kCommented);
+    CHECK_THROWS_AS(apogee::harness::edit_config_file(
+                        path, [](std::string_view c) { return set_attachments_graph(c, "tree"); }),
+                    ConfigEditError);
+    {
+        // Closed before the next edit: on Windows a file held open cannot be
+        // replaced, and the rename that lands an edit fails "access denied".
+        std::ifstream in(path, std::ios::binary);
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+        CHECK(buffer.str() == std::string{kCommented});
+    }
+    // And a good edit lands, read back by the loader.
+    apogee::harness::edit_config_file(
+        path, [](std::string_view c) { return set_attachments_graph(c, "off"); });
+    CHECK(apogee::harness::load_config(path).attachments.graph ==
+          apogee::harness::AttachmentGraphMethod::Off);
 }

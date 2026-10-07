@@ -14,8 +14,8 @@
 // so the shipped sample and `apogee config init` can never drift apart. If you
 // edit one, regenerate the other -- CI fails otherwise.
 //
-// Ported from Ommi's template-drift test, which caught exactly this class of
-// bug: a documented option that `config init` had quietly stopped writing.
+// The drift test guards exactly this class of bug: a documented option that
+// `config init` has quietly stopped writing.
 
 namespace apogee::harness {
 namespace {
@@ -36,7 +36,8 @@ constexpr std::string_view kConfigTemplate = R"APOGEE(# Apogee configuration.
 models:
   # Role pointers. Each names an entry under `backends:` below, and every one
   # resolves through one shared chain:
-  #     -m on the command line  >  a per-feature pin  >  the role pointer here
+  #     -m on the command line  >  a per-feature pin  >  the active suite's
+  #       member (see suites: below)  >  the role pointer here
   #       >  (a helper role) the backend the chat is on  >  models.default
   # `apogee models status` prints which rung answered for each role.
 
@@ -69,6 +70,96 @@ models:
   # default_transcription: listener
   # default_utility: helper
 
+  # The suite every command resolves its roles under: a name under `suites:`
+  # below. Unset means none, and the chain above is exactly as written.
+  # `apogee chat --suite <name>` (or `/suite <name>` mid-chat) picks one for a
+  # single chat instead, and `--suite off` none.
+  # default_suite: research
+
+# Suites: named bundles of models, one backend per role a suite speaks for --
+# a research suite on a large model with a small helper for the chores, a fast
+# one all on the small model -- so switching between them is one word rather
+# than a rewrite of the pointers above. A role a suite leaves out falls through
+# to those pointers. A member is a backend's name, or a mapping that also pins,
+# while the suite is active, what makes a helper small: its window
+# (context_size) and the tools it is offered (toolset: any of fs, shell, git,
+# notes, rag, graph, web, mcp; [] for none). `apogee config add-suite` writes one and
+# `apogee models status --suite <name>` shows which roles it answers.
+# `consultable:` lets the chat model consult members through the consult tool
+# (with --tools): it asks one a self-contained question -- the member sees
+# that and nothing else -- and reads its answer. Local, unmetered members
+# only; `consult_caps:` bounds it (per_turn 4, brief_tokens 1024,
+# answer_tokens 512 unless set).
+# `validate:` has a member check the others' work, each seam opted into:
+# tool_args (a tool that writes or reaches out, its arguments checked before
+# it runs), extraction (a knowledge capture's record, against its source) and
+# answers (`/check` on request, or `always`). Structure is checked first and
+# the verifier -- the utility member unless `verifier:` names another -- only
+# when that passes; an objection goes back once for one revision, and one
+# still standing is shown to you with both sides. It spends from the same
+# per-turn budget as consult.
+# `orchestrate: true` lets an execute session's chat model play the suite's
+# symphonies on its own initiative: each one it can play is offered to it as
+# a tool (play_<name>), and it chooses -- `apogee execute --orchestrate` does
+# the same for one session. Only a suite whose symphonies reach local,
+# unmetered members can orchestrate, and a play spends from the same per-turn
+# budget as consult.
+#
+# suites:
+#   research:
+#     description: Deep work on the large model, chores on the small one
+#     members:
+#       chat: root
+#       utility:
+#         backend: helper
+#         context_size: 4096
+#       embedding: embedder
+#     consultable: [utility]
+#     validate:
+#       tool_args: on
+#     orchestrate: true
+
+# Symphonies: named, staged prompt processes over a suite's members. An input
+# goes in; each stage -- a ROLE, never a backend, so one symphony plays on any
+# suite -- is sent its prompt with {{input}} and the earlier stages' answers
+# ({{<stage>}}) filled in, and the last stage's answer comes out:
+# `apogee symphonies play <name> --input "..."`. A stage's `schema:` (a JSON
+# Schema, as JSON text) holds its answer to it; `image: true` sends it the
+# play's --image. Three ship (`apogee symphonies list`), and a spec file under
+# symphonies/ plays by its name too. `apogee symphonies create` and `edit`
+# write entries here. Each stage is one model call, one after another.
+# A stage may play another symphony instead of a role -- `play: <name>`,
+# given `input:` (a template, as a prompt is; the previous stage's answer
+# when left out) as that symphony's {{input}} -- so a chain is a symphony.
+# One that reaches itself is refused, and plays nest at most four deep.
+#
+# symphonies:
+#   brief:
+#     description: Summarize, then tighten
+#     stages:
+#       - name: summarize
+#         role: utility
+#         prompt: "Summarize in three sentences: {{input}}"
+#       - name: tighten
+#         role: chat
+#         prompt: "Shorten this to one sentence: {{summarize}}"
+#   digest:
+#     description: Summarize, then pull out the facts
+#     stages:
+#       - name: summary
+#         play: summarize-verify
+#       - name: facts
+#         play: extract-facts
+#
+# How deep plays nest, and one whole play's budget -- every symphony it
+# reaches counted together, a play that reaches a cap stopped there with no
+# answer. Unset, the depth is 4, the member calls each stage once, and the
+# answer tokens unbounded.
+# symphony_caps:
+#   depth: 4
+#   stage_calls: 12
+#   answer_tokens: 8000
+
 # Optional search roots that pre-fill path prompts. Each is optional; an empty
 # value simply means "no default". ${ENV_VAR} references are expanded.
 paths:
@@ -98,7 +189,8 @@ permissions:
 tools:
   # fs_root: ~            # the filesystem tools cannot leave this directory;
   #                       # unset, it is the folder Apogee was started in
-  # disabled: [shell]     # switch a whole toolset off: fs, shell, git, notes, rag
+  # disabled: [shell]     # switch a whole toolset off: fs, shell, git, notes, rag,
+  #                       # graph
   # The websites fetch_url reaches without asking, by exact host name:
   # docs.python.org admits neither python.org nor any other subdomain. Any
   # other website asks first, and where nobody can answer (a pipe, `serve`)
@@ -290,6 +382,27 @@ backends:
   #   model_path: "${HOME}/.cache/llms/SmolVLM-500M-Instruct-Q8_0.gguf"
   #   mmproj_path: "${HOME}/.cache/llms/mmproj-SmolVLM-500M-Instruct-Q8_0.gguf"
 
+  # ── Local inference via MLX (Apple silicon) ─────────────────────────────────
+  # Opt-in, beside llama.cpp -- which stays the default local runtime on every
+  # platform. Apple's MLX runs a Hugging Face model directory (config.json, the
+  # tokenizer files and SafeTensors weights: an mlx-community build, or a
+  # snapshot you already hold) in a Python child over pipes. One child per chat
+  # holds the model and its cache across turns; it never opens a port, and its
+  # warnings stay off your screen. Tools go through the model's own chat
+  # template. It needs mlx-lm in the environment Apogee owns, never the system
+  # Python:
+  #   apogee train setup --with mlx
+  # Off Apple silicon, or without that environment, the entry is refused with
+  # the fix named, and `apogee check` has an MLX row saying what it found.
+  # Sampling, thinking and max_tokens work as on a llamacpp entry -- the
+  # model's generation_config.json is its authors' recommendation -- and
+  # context_size is the window Apogee warns and compacts at.
+  # mlx:
+  #   type: mlx
+  #   model_path: "${HOME}/models/Llama-3.2-3B-Instruct-4bit"
+  #   # temperature: 0.6
+  #   # idle_unload_seconds: 900
+
   # ── User-supplied embedding backend (vector RAG) ────────────────────────────
   # No embedding model ships with Apogee. To enable vector retrieval, point
   # model_path at a local GGUF -- a dedicated embedding model is best, though a
@@ -373,12 +486,38 @@ backends:
 # Managed by `apogee config add-graph` / `delete-graph`. A graph's name must
 # not collide with a collection's -- `apogee check` fails the collision.
 #
+# A named graph can hold code too: `sources:` lists source trees parsed with
+# tree-sitter -- files, modules, classes and functions, and the calls,
+# imports, bases and type references between them, each `file:line` -- with
+# no model, no key and no network. `apogee graph build --source <dir> --graph
+# <name>` adds one (and the entry, when it is new); `apogee graph update
+# <name>` re-parses only the files that changed. `languages:` limits which
+# grammars are used (c, cpp, python, javascript, typescript, tsx, go, rust,
+# java, csharp, ruby, bash); empty means all.
+#
 # graphs:
 #   work:
 #     collections: [docs, meetings]   # the member collections
+#     # sources: [/path/to/repo/src]  # source trees parsed into the same graph
+#     # languages: [cpp, python]      # only these grammars (default: all)
 #     # extract_backend: local        # the backend `graph build work` extracts with
 #     # hops: 1                       # expansion depth at retrieval (1 or 2)
 #     # max_entities: 8               # neighbour entities an expansion injects, at most
+
+# ── Attachments (/attach, --attach, @ mentions) ──────────────────────────────
+# A file, folder or glob attached to a chat is indexed in the chat's own
+# store, and a folder of code is also parsed into the chat's code graph --
+# its functions, classes, calls and imports, with no model -- which the
+# chat's turns and graph tools then walk. `graph` is what an attach does
+# with a folder of code when nothing on the line says otherwise:
+#   code  build its code graph
+#   off   index its chunks alone
+# Unset, a chat builds the graph and `complete`'s one-shot does not; set, it
+# holds for both. One attach overrides it: `/attach src --graph=off`, or
+# `apogee complete "..." --attach src --graph=code`. An @ mention is a bare
+# path, so it always takes this default.
+# attachments:
+#   graph: code
 
 # ── Terminal display ─────────────────────────────────────────────────────────
 # Answers are Markdown. On a terminal, `chat` and `complete` render it as it
@@ -409,10 +548,10 @@ backends:
 # decided and stated -- by the utility model (or the chat's own model when it
 # is local), and its summary kept privately under memory/. A new chat's turns
 # then recall the few past chats, and recorded decisions, that bear on the
-# question, reported as `[memory] 2 past chats, 1 decision`. Only `chat`
-# recalls -- never `complete`, agents or `serve`. `--no-recall` turns it off
-# for a run, `/recall off` for a session, and `/private` keeps a chat from
-# ever being summarised.
+# question, reported as `[memory] 2 past chats, 1 decision`. Only `chat` and
+# `task` -- whose turns are chat turns -- recall, never `complete`, agents or
+# `serve`. `--no-recall` turns it off for a run, `/recall off` for a session,
+# and `/private` keeps a chat from ever being summarised.
 # memory:
 #   recall: true
 

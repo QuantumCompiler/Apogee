@@ -56,7 +56,8 @@ struct RagChoice {
 /// cannot tell why an answer went sideways, and that is doubly true when
 /// nothing on the command line asked for it.
 /// The status line for a turn's search of the chat's attachments (26d):
-/// excerpts, top score and the retriever, like a collection's.
+/// excerpts, top score and the retriever, like a collection's -- and, when
+/// the chat's code graph expanded the turn, `+N graph entities` (27o).
 [[nodiscard]] std::string describe_attachment_retrieval(const agentloop::RagResult& result);
 
 [[nodiscard]] std::string describe_retrieval(const RagChoice& choice,

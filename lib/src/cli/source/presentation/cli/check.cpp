@@ -22,6 +22,7 @@
 #include "agentloop/retriever.h"
 #include "agentloop/structured.h"
 #include "ansi/ansi.h"
+#include "backends/mlx_local.h"
 #include "backends/prompt_cache.h"
 #include "cli/embed.h"
 #include "cli/helpers.h"
@@ -31,19 +32,24 @@
 #include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "embedstore/ingest.h"
+#include "graph/code_languages.h"
 #include "harness/roles.h"
 #include "httpserver/admin_auth.h"
 #include "knowledge/store.h"
 #include "modelstore/gguf_inspect.h"
 #include "modelstore/kv_cache.h"
+#include "modelstore/mlx_info.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
+#include "operations/graph_sources.h"
+#include "operations/suites.h"
 #include "platform/child_process.h"
 #include "platform/ffmpeg.h"
 #include "platform/platform.h"
 #include "scaffold/agent.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
+#include "symphony/definition.h"
 #include "tools/toolsets.h"
 #include "training/cycle.h"
 #include "training/kit.h"
@@ -77,8 +83,22 @@ void say(const CheckInputs& inputs, const std::string& label, std::size_t done =
     }
 }
 
+/// The MLX ladder's view of this install (27a): the data directory checked,
+/// and the target -- this build's, unless a test names another.
+[[nodiscard]] backends::MlxHost mlx_host(const CheckInputs& inputs) {
+    backends::MlxHost host = backends::MlxHost::at(inputs.home);
+    if (!inputs.host_target.empty()) {
+        host.target = inputs.host_target;
+    }
+    return host;
+}
+
 void check_version(CheckReport& report, const CheckInputs& inputs) {
     add(report, Status::Ok, "Version", "apogee", std::string{version::semantic()});
+    add(report, Status::Ok, "Version", "channel",
+        std::string{harness::channel_name(inputs.root.channel)});
+    add(report, Status::Ok, "Version", "root",
+        inputs.home.string() + " -- " + harness::root_reason(inputs.root));
 
     if (inputs.executable.empty()) {
         return;
@@ -105,9 +125,10 @@ void check_version(CheckReport& report, const CheckInputs& inputs) {
 /// What a helper role reads.
 enum class Medium : std::uint8_t { Image, Audio };
 
-/// Why `backend` cannot read `medium`, or empty when it can -- judged from
-/// the config and the projector's own header, without loading a model.
-[[nodiscard]] std::string medium_gap(const harness::BackendConfig& backend, Medium medium) {
+/// Why a llamacpp or cloud `backend` cannot read `medium`, or empty when it
+/// can -- judged from the config and the projector's own header, without
+/// loading a model.
+[[nodiscard]] std::string medium_gap_text(const harness::BackendConfig& backend, Medium medium) {
     if (backend.type != harness::BackendType::LlamaCpp) {
         // A cloud API reads images; no cloud backend here is sent audio.
         return medium == Medium::Audio ? "only a local model's audio projector transcribes here"
@@ -131,12 +152,44 @@ enum class Medium : std::uint8_t { Image, Audio };
     return {};
 }
 
+/// Why a backend cannot read a medium, and the command that fixes it when
+/// one does; both empty when it can.
+struct MediumGap {
+    std::string reason;
+    std::string remedy;
+};
+
+/// Why `backend` cannot read `medium`, or empty when it can -- judged from
+/// the config, the projector's own header, and for an `mlx` entry its model
+/// directory and the environment (27c), without loading a model.
+[[nodiscard]] MediumGap medium_gap(const harness::BackendConfig& backend, Medium medium,
+                                   const backends::MlxHost& host) {
+    if (backend.type == harness::BackendType::Mlx) {
+        if (medium == Medium::Audio) {
+            return {.reason =
+                        "an mlx backend hears no audio -- only a llamacpp model's audio "
+                        "projector transcribes here",
+                    .remedy = {}};
+        }
+        if (host.target != backends::kMlxTarget) {
+            return {.reason = "the mlx backend runs on Apple silicon macOS only", .remedy = {}};
+        }
+        const backends::MlxVision vision = backends::probe_mlx_vision(
+            backends::inspect_mlx_model(
+                std::filesystem::path{harness::expand_env_and_home(backend.model_path)}),
+            host);
+        return {.reason = vision.reason, .remedy = vision.remedy};
+    }
+    return {.reason = medium_gap_text(backend, medium), .remedy = {}};
+}
+
 /// Role pointers must name a backend that exists. A dangling one fails at
 /// the point of use with a routing error that does not mention config. A
 /// helper that reads a `medium` (26b) is also warned about when its backend
 /// cannot read it, because the attachment that needs it fails much later,
 /// somewhere else.
-void check_role_pointer(CheckReport& report, const harness::Config& config, std::string_view what,
+void check_role_pointer(CheckReport& report, const harness::Config& config,
+                        const backends::MlxHost& host, std::string_view what,
                         const std::string& value, std::optional<Medium> medium = std::nullopt) {
     if (value.empty()) {
         return;
@@ -149,15 +202,177 @@ void check_role_pointer(CheckReport& report, const harness::Config& config, std:
         return;
     }
     if (medium.has_value()) {
-        if (const std::string gap = medium_gap(*backend, *medium); !gap.empty()) {
-            add(report, Status::Warn, "Config", std::string{what}, value + " -- " + gap,
-                *medium == Medium::Audio
-                    ? "point it at a llamacpp backend whose mmproj_path has an audio encoder"
-                    : "point it at a backend with an mmproj_path, or a cloud one");
+        if (const MediumGap gap = medium_gap(*backend, *medium, host); !gap.reason.empty()) {
+            std::string remedy = gap.remedy;
+            if (remedy.empty()) {
+                remedy = *medium == Medium::Audio
+                             ? "point it at a llamacpp backend whose mmproj_path has an audio "
+                               "encoder"
+                             : "point it at a backend with an mmproj_path, an mlx backend over a "
+                               "vision model, or a cloud one";
+            }
+            add(report, Status::Warn, "Config", std::string{what}, value + " -- " + gap.reason,
+                remedy);
             return;
         }
     }
     add(report, Status::Ok, "Config", std::string{what}, value);
+}
+
+/// One row per suite (27d): each member names a configured backend -- the
+/// row that says so before a session does -- and a vision or transcription
+/// member reads its medium, as a pointer at that role must. Since 27f a
+/// consultable member's provider is asked whether it bills per call -- a
+/// hand-edited one that does fails here, where the config verbs would have
+/// refused it -- and the row names whom the root may consult. Since 27g the
+/// verifier is held the same way, and the row names the seams it checks.
+/// Since 27t a suite that orchestrates is held to the config verbs' own rule
+/// -- every member a symphony it would offer reaches local and unmetered --
+/// over `symphonies`, and the row says it orchestrates.
+void check_suites(CheckReport& report, const harness::Config& config, const backends::MlxHost& host,
+                  const MeteredProbe& metered, const symphony::Catalog& symphonies) {
+    const harness::SuiteConfig* active = harness::active_suite(config);
+    for (const auto& [name, suite] : config.suites) {
+        const std::string label = "suite: " + name;
+        if (suite.members.empty()) {
+            add(report, Status::Warn, "Config", label,
+                "names no members -- every role falls through to the global pointers",
+                "apogee config set-suite " + name + " --<role> <backend>");
+            continue;
+        }
+        std::string members;
+        bool reported = false;
+        for (const std::string_view role : harness::suite_role_names()) {
+            const auto it = suite.members.find(role);
+            if (it == suite.members.end()) {
+                continue;
+            }
+            const harness::SuiteMember& member = it->second;
+            const harness::BackendConfig* backend = config.find_backend(member.backend);
+            if (backend == nullptr) {
+                add(report, Status::Fail, "Config", label,
+                    std::string{role} + " names a backend that is not configured: '" +
+                        member.backend + "'",
+                    "apogee config set-suite " + name + " --" + std::string{role} +
+                        " <one of your configured backends>");
+                reported = true;
+                break;
+            }
+            std::optional<Medium> medium;
+            if (role == "vision") {
+                medium = Medium::Image;
+            } else if (role == "transcription") {
+                medium = Medium::Audio;
+            }
+            if (medium.has_value()) {
+                if (const MediumGap gap = medium_gap(*backend, *medium, host);
+                    !gap.reason.empty()) {
+                    add(report, Status::Warn, "Config", label,
+                        std::string{role} + " " + member.backend + " -- " + gap.reason, gap.remedy);
+                    reported = true;
+                    break;
+                }
+            }
+            members += members.empty() ? "" : " · ";
+            members += std::string{role} + " " + member.backend;
+            if (member.context_size.has_value()) {
+                members += " (window " + std::to_string(*member.context_size) + ")";
+            }
+        }
+        for (const std::string& role : suite.consultable) {
+            if (reported) {
+                break;
+            }
+            const auto it = suite.members.find(role);
+            if (it == suite.members.end()) {
+                continue;  // the loader admits a consultable role with a member only
+            }
+            const MeteredAnswer answer = metered(config, it->second.backend);
+            const std::string fix = "apogee config set-suite " + name +
+                                    " --consultable <its local members>, or --" + role +
+                                    " <a local backend>";
+            if (!answer.unknown.empty()) {
+                add(report, Status::Warn, "Config", label,
+                    "consultable " + role + " -- whether '" + it->second.backend +
+                        "' is billed per call cannot be told (" + answer.unknown +
+                        "), so it is not offered to consult",
+                    fix);
+                reported = true;
+            } else if (answer.metered) {
+                add(report, Status::Fail, "Config", label,
+                    "consultable " + role + " -- '" + it->second.backend +
+                        "' is billed per call; a consult runs on the model's initiative, which "
+                        "never spends",
+                    fix);
+                reported = true;
+            }
+        }
+        // The verifier is a member call too (27g): held to the same rule.
+        const harness::ValidatePolicy policy = harness::validate_policy(suite.validate);
+        if (!reported && suite.validate.any()) {
+            if (const auto it = suite.members.find(policy.verifier); it != suite.members.end()) {
+                const MeteredAnswer answer = metered(config, it->second.backend);
+                const std::string fix = "apogee config set-suite " + name +
+                                        " --verifier <a local member>, or --" + policy.verifier +
+                                        " <a local backend>";
+                if (!answer.unknown.empty()) {
+                    add(report, Status::Warn, "Config", label,
+                        "verifier " + policy.verifier + " -- whether '" + it->second.backend +
+                            "' is billed per call cannot be told (" + answer.unknown +
+                            "), so nothing is checked by it",
+                        fix);
+                    reported = true;
+                } else if (answer.metered) {
+                    add(report, Status::Fail, "Config", label,
+                        "verifier " + policy.verifier + " -- '" + it->second.backend +
+                            "' is billed per call; a check runs on Apogee's initiative, which "
+                            "never spends",
+                        fix);
+                    reported = true;
+                }
+            }
+        }
+        // A play the model starts is a member call too (27t): the rule the
+        // config verbs hold `orchestrate: true` to, asked of a hand-edited
+        // file or a symphony added since.
+        if (!reported && suite.orchestrate) {
+            if (const std::string refused =
+                    validate_suite_orchestrate(config, name, suite, metered, &symphonies);
+                !refused.empty()) {
+                add(report, Status::Fail, "Config", label, refused,
+                    "apogee config set-suite " + name + " --orchestrate off");
+                reported = true;
+            }
+        }
+        if (!reported) {
+            std::string consult;
+            for (const std::string& role : suite.consultable) {
+                consult += (consult.empty() ? "  · consult: " : ", ") + role;
+            }
+            std::string validate;
+            if (suite.validate.any()) {
+                std::string seams;
+                const auto seam = [&seams](bool on, std::string_view name) {
+                    if (on) {
+                        seams += (seams.empty() ? "" : ", ") + std::string{name};
+                    }
+                };
+                seam(policy.tool_args, "tool_args");
+                seam(policy.extraction, "extraction");
+                seam(policy.answers_always, "answers always");
+                validate = "  · validate: " + (seams.empty() ? std::string{"on request"} : seams) +
+                           " (verifier " + policy.verifier + ")";
+            }
+            std::string detail = members + consult + validate;
+            if (suite.orchestrate) {
+                detail += "  · orchestrates";
+            }
+            if (active == &suite) {
+                detail += "  -- the default suite";
+            }
+            add(report, Status::Ok, "Config", label, detail);
+        }
+    }
 }
 
 void check_config(CheckReport& report, const CheckInputs& inputs) {
@@ -250,6 +465,59 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
             continue;
         }
 
+        if (backend.type == harness::BackendType::Mlx) {
+            // The same ladder construction runs (27a), so the doctor and a
+            // build cannot disagree about whether this entry can run.
+            const backends::MlxReadiness readiness =
+                backends::probe_mlx_backend(name, backend, mlx_host(inputs));
+            if (readiness.ready()) {
+                const backends::MlxModelInfo info =
+                    backends::inspect_mlx_model(readiness.model_dir);
+                // Its files read whole, as a GGUF's header is: a shard cut
+                // short fails here, not at the first turn (27b).
+                const models::MlxInfo files = models::read_mlx_info(readiness.model_dir);
+                if (!files.complete) {
+                    // A stored model is repaired by its handle; one placed
+                    // by hand has nothing to be fetched from.
+                    const std::optional<models::StoredMlx> stored = models::stored_mlx_at(
+                        models::list_store_mlx(models::StoreRoots::at(inputs.home / "models")),
+                        readiness.model_dir);
+                    add(report, Status::Fail, "Config", label,
+                        std::string{type} + " -- " + files.problem,
+                        stored.has_value() ? "apogee models repair " +
+                                                 models::weights_handle(
+                                                     stored->model, models::kMlxFormat, stored->id)
+                                           : std::string{});
+                    continue;
+                }
+                // Whether its pictures are read as they are (27c), never claimed
+                // for a model that cannot.
+                std::string sight;
+                if (info.vision) {
+                    sight = backends::probe_mlx_vision(info, mlx_host(inputs)).reads_images()
+                                ? "; a vision model, reading images through mlx-vlm"
+                                : "; a vision model, but mlx-vlm is not installed, so it "
+                                  "does not read images as they are";
+                }
+                add(report, Status::Ok, "Config", label,
+                    std::string{type} + " -- " +
+                        (info.model_type.empty() ? std::string{"a"} : info.model_type) +
+                        " model directory" +
+                        (info.chat_template ? "" : " with no chat template (a base model)") + ", " +
+                        files.quantization.describe() + "; " +
+                        models::describe(models::mlx_window(files, backend)) + sight +
+                        "; its runtime is present");
+                continue;
+            }
+            // A directory that is not there is a real failure, as a dangling
+            // GGUF is; a runtime not set up yet is a warning with its fix.
+            const bool broken = readiness.refusal == backends::MlxRefusal::ModelMissing ||
+                                readiness.refusal == backends::MlxRefusal::NotAModelDirectory;
+            add(report, broken ? Status::Fail : Status::Warn, "Config", label,
+                std::string{type} + " -- " + readiness.reason, readiness.remedy);
+            continue;
+        }
+
         if (secrets::takes_api_key(backend.type)) {
             // The ONE chain, so the doctor reports exactly what a build would
             // use -- and only WHERE it came from. NEVER the key itself.
@@ -287,14 +555,19 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
         add(report, Status::Ok, "Config", label, std::string{type});
     }
 
-    check_role_pointer(report, config, "default_backend", config.models.default_backend);
-    check_role_pointer(report, config, "default_embedding", config.models.default_embedding);
-    check_role_pointer(report, config, "default_extraction", config.models.default_extraction);
-    check_role_pointer(report, config, "default_vision", config.models.default_vision,
+    const backends::MlxHost host = mlx_host(inputs);
+    check_role_pointer(report, config, host, "default_backend", config.models.default_backend);
+    check_role_pointer(report, config, host, "default_embedding", config.models.default_embedding);
+    check_role_pointer(report, config, host, "default_extraction",
+                       config.models.default_extraction);
+    check_role_pointer(report, config, host, "default_vision", config.models.default_vision,
                        Medium::Image);
-    check_role_pointer(report, config, "default_transcription", config.models.default_transcription,
-                       Medium::Audio);
-    check_role_pointer(report, config, "default_utility", config.models.default_utility);
+    check_role_pointer(report, config, host, "default_transcription",
+                       config.models.default_transcription, Medium::Audio);
+    check_role_pointer(report, config, host, "default_utility", config.models.default_utility);
+    check_suites(report, config, host,
+                 inputs.metered ? inputs.metered : provider_metered_probe(inputs.config_path),
+                 symphony::catalog(config, symphony::directory_for(inputs.config_path)));
 
     // Collections: a typo in `retriever:` must never silently mean auto, and a
     // `rerank:` or `backend:` must name something that exists. The validator
@@ -398,7 +671,8 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
     int found = 0;
     const std::vector<models::StoredGguf> ggufs = models::list_store_ggufs(roots);
     const std::vector<models::StoredSnapshot> snapshots = models::list_store_snapshots(roots);
-    const std::size_t total = ggufs.size() + snapshots.size();
+    const std::vector<models::StoredMlx> mlx = models::list_store_mlx(roots);
+    const std::size_t total = ggufs.size() + snapshots.size() + mlx.size();
     std::size_t read = 0;
     for (const models::StoredGguf& stored : ggufs) {
         ++found;
@@ -428,6 +702,24 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
                 "apogee models repair " + name);
         } else {
             add(report, Status::Ok, "Models", name, "SafeTensors weights");
+        }
+    }
+    // An MLX model's files read whole -- the configuration the model's, a
+    // tokenizer, every shard the index names and each within its file --
+    // never "loads", which only a load can say (27b).
+    for (const models::StoredMlx& stored : mlx) {
+        ++found;
+        const std::string name =
+            models::weights_handle(stored.model, models::kMlxFormat, stored.id);
+        say(inputs, "checking models: " + name, ++read, total);
+        const models::MlxInfo info = models::read_mlx_info(stored.dir);
+        if (!info.complete) {
+            add(report, Status::Fail, "Models", name, "MLX model that " + info.problem,
+                "apogee models repair " + name);
+        } else {
+            add(report, Status::Ok, "Models", name,
+                (info.model_type.empty() ? std::string{} : info.model_type + ", ") + "MLX, " +
+                    info.quantization.describe() + ", files whole");
         }
     }
 
@@ -905,22 +1197,24 @@ void check_knowledge(CheckReport& report, const CheckInputs& inputs) {
 /// with, which are optional and found on PATH, and the chats' indexes. The
 /// indexes' folder is a layout row, so its mode is the filesystem check's.
 /// Whether the backend `key` reads `medium`, from the config alone.
-[[nodiscard]] bool reads(const harness::Config& config, const std::string& key, Medium medium) {
+[[nodiscard]] bool reads(const harness::Config& config, const backends::MlxHost& host,
+                         const std::string& key, Medium medium) {
     const harness::BackendConfig* backend = key.empty() ? nullptr : config.find_backend(key);
-    return backend != nullptr && medium_gap(*backend, medium).empty();
+    return backend != nullptr && medium_gap(*backend, medium, host).reason.empty();
 }
 
 /// The model a helper role reads `medium` with for a chat on `chat`: the
 /// role's own when it can, else the chat's when it can -- the rule the
 /// attachments follow (26e).
-[[nodiscard]] std::string helper_reading(const harness::Config& config, const std::string& chat,
+[[nodiscard]] std::string helper_reading(const harness::Config& config,
+                                         const backends::MlxHost& host, const std::string& chat,
                                          harness::ModelRole role, Medium medium) {
     const std::string key = harness::resolve_backend_key(
         config, harness::RoleRequest{.role = role, .conversation = chat});
-    if (reads(config, key, medium)) {
+    if (reads(config, host, key, medium)) {
         return key;
     }
-    return reads(config, chat, medium) ? chat : std::string{};
+    return reads(config, host, chat, medium) ? chat : std::string{};
 }
 
 /// Which models read images, audio and video for the default chat (26e):
@@ -930,13 +1224,14 @@ void check_media_readers(CheckReport& report, const CheckInputs& inputs, bool de
         return;
     }
     const harness::Config& config = inputs.config;
+    const backends::MlxHost host = mlx_host(inputs);
     const std::string chat = harness::resolve_chat_backend(config, "");
     const std::string describer =
-        helper_reading(config, chat, harness::ModelRole::Vision, Medium::Image);
+        helper_reading(config, host, chat, harness::ModelRole::Vision, Medium::Image);
     const std::string transcriber =
-        helper_reading(config, chat, harness::ModelRole::Transcription, Medium::Audio);
-    const bool sees = reads(config, chat, Medium::Image);
-    const bool hears = reads(config, chat, Medium::Audio);
+        helper_reading(config, host, chat, harness::ModelRole::Transcription, Medium::Audio);
+    const bool sees = reads(config, host, chat, Medium::Image);
+    const bool hears = reads(config, host, chat, Medium::Audio);
     // A clip goes as its frames only to a local model with a vision
     // projector; a cloud one is sent its timeline.
     const harness::BackendConfig* chat_backend = chat.empty() ? nullptr : config.find_backend(chat);
@@ -1122,9 +1417,30 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
                 "rename the graph: apogee config delete-graph " + name + ", then add-graph");
             continue;
         }
-        if (graph.collections.empty()) {
-            add(report, Status::Fail, "Graph", label, "no member collections",
+        if (graph.collections.empty() && graph.sources.empty()) {
+            add(report, Status::Fail, "Graph", label, "no member collections or source trees",
                 "apogee config add-graph " + name + " --collections <a,b> --force");
+            continue;
+        }
+        // Source trees (27k): each a directory, every language vendored.
+        bool sources_ok = true;
+        for (const std::string& source : graph.sources) {
+            if (!std::filesystem::is_directory(source, code)) {
+                add(report, Status::Fail, "Graph", label,
+                    "source tree '" + source + "' is not a directory",
+                    "fix the path under graphs." + name + ".sources, or remove it");
+                sources_ok = false;
+            }
+        }
+        for (const std::string& language : graph.languages) {
+            if (graph::code_language_by_name(language) == nullptr) {
+                add(report, Status::Fail, "Graph", label,
+                    "languages names '" + language + "', which no vendored grammar parses",
+                    "use one of: " + graph::code_language_names());
+                sources_ok = false;
+            }
+        }
+        if (!sources_ok) {
             continue;
         }
         if (!graph.extract_backend.empty() &&
@@ -1155,17 +1471,139 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
         for (const std::string& member : graph.collections) {
             members += (members.empty() ? "" : ", ") + member;
         }
-        const std::string detail =
-            "over [" + members + "]; hops " + std::to_string(graph.hops) + ", max_entities " +
-            std::to_string(graph.max_entities) + ", extractor " +
-            (graph.extract_backend.empty() ? std::string{"(the extraction role)"}
-                                           : graph.extract_backend);
+        std::string trees;
+        for (const std::string& source : graph.sources) {
+            trees += (trees.empty() ? "" : ", ") + source_member_label(source);
+        }
+        std::string detail = graph.collections.empty() ? std::string{} : "over [" + members + "]; ";
+        if (!trees.empty()) {
+            detail += "source trees [" + trees + "] (parsed, no model); ";
+        }
+        detail += "hops " + std::to_string(graph.hops) + ", max_entities " +
+                  std::to_string(graph.max_entities);
+        if (!graph.collections.empty()) {
+            detail += ", extractor " + (graph.extract_backend.empty()
+                                            ? std::string{"(the extraction role)"}
+                                            : graph.extract_backend);
+        }
         const std::filesystem::path db = inputs.home / "embeddings" / "graphs" / (name + ".db");
         if (std::filesystem::exists(db, code)) {
             add(report, Status::Ok, "Graph", label, detail + "; built");
         } else {
             add(report, Status::Ok, "Graph", label, detail + "; not yet built",
                 "apogee graph build " + name);
+        }
+    }
+}
+
+/// A seeded driver an earlier Apogee wrote and nobody edited (27c): it runs,
+/// but as that Apogee shipped it, and the fix replaces it in place.
+[[nodiscard]] std::string stale_script_detail(const std::string& script) {
+    return script +
+           " is an earlier Apogee's copy, unedited -- 'apogee check --fix' brings it up to this "
+           "build's";
+}
+
+/// The MLX runtime (27a): whether this host can run an `mlx` backend at all,
+/// and the seeded driver against its compiled-in copy. Off Apple silicon it
+/// is skipped, never passed; an environment without mlx-lm is a warning only
+/// where an `mlx` entry needs it. A pass says what was found -- the package's
+/// files, never an import -- and nothing more.
+void check_mlx(CheckReport& report, const CheckInputs& inputs) {
+    const backends::MlxHost host = mlx_host(inputs);
+    if (host.target != backends::kMlxTarget) {
+        add(report, Status::Skipped, "MLX", "runtime",
+            "MLX runs on Apple silicon macOS only (this build is " + host.target +
+                ") -- llama.cpp is the local runtime here");
+        return;
+    }
+    const bool wanted = !inputs.config_missing && inputs.config_error.empty() &&
+                        std::ranges::any_of(inputs.config.backends, [](const auto& entry) {
+                            return entry.second.type == harness::BackendType::Mlx;
+                        });
+    const backends::MlxReadiness runtime = backends::probe_mlx_runtime(host);
+    switch (runtime.refusal) {
+        case backends::MlxRefusal::NoEnvironment:
+        case backends::MlxRefusal::NoMlxLm:
+            add(report, wanted ? Status::Warn : Status::Skipped, "MLX", "runtime",
+                wanted ? runtime.reason
+                       : "not set up -- only an mlx backend needs it (" + runtime.reason + ")",
+                runtime.remedy);
+            break;
+        case backends::MlxRefusal::None:
+        case backends::MlxRefusal::NoDriver:
+            add(report, Status::Ok, "MLX", "runtime",
+                "mlx-lm " +
+                    (runtime.version.empty() ? std::string{"(version unstated)"}
+                                             : runtime.version) +
+                    " is present in " + host.venv.string() + " (its files, not imported by check)");
+            break;
+        case backends::MlxRefusal::Platform:
+        case backends::MlxRefusal::NoModelPath:
+        case backends::MlxRefusal::ModelMissing:
+        case backends::MlxRefusal::NotAModelDirectory:
+            break;  // the runtime's rungs never answer these
+    }
+
+    // The vision dependency (27c): mlx-vlm, which only a vision model needs.
+    // Reported from its files, as mlx-lm is -- and a vision entry without it
+    // is told where its images go instead, never claimed to see them.
+    const backends::MlxVlmPackage vlm = backends::find_mlx_vlm(host);
+    std::string sighted;
+    if (wanted) {
+        for (const auto& [name, backend] : inputs.config.backends) {
+            if (backend.type == harness::BackendType::Mlx &&
+                backends::inspect_mlx_model(
+                    std::filesystem::path{harness::expand_env_and_home(backend.model_path)})
+                    .vision) {
+                sighted += (sighted.empty() ? "" : ", ") + name;
+            }
+        }
+    }
+    if (vlm.installed()) {
+        add(report, Status::Ok, "MLX", "vision",
+            "mlx-vlm " + (vlm.version.empty() ? std::string{"(version unstated)"} : vlm.version) +
+                " is present in " + host.venv.string() +
+                " (its files, not imported by check) -- an MLX vision model reads images as "
+                "they are");
+    } else if (!sighted.empty()) {
+        add(report, Status::Warn, "MLX", "vision",
+            "mlx-vlm is not installed in " + host.venv.string() + ", so " + sighted +
+                " cannot read images as they are -- the vision role describes them instead, "
+                "when one is set",
+            std::string{backends::kMlxVisionRemedy});
+    } else {
+        add(report, Status::Skipped, "MLX", "vision",
+            "not set up -- only an MLX vision model needs it (mlx-vlm is not installed in " +
+                host.venv.string() + ")",
+            std::string{backends::kMlxVisionRemedy});
+    }
+
+    // The two seeded drivers: the backend's, and `convert --mlx`'s (27b).
+    for (const auto& [label, file] :
+         {std::pair<std::string, std::filesystem::path>{"driver", host.driver},
+          std::pair<std::string, std::filesystem::path>{
+              "conversion driver", inputs.home / harness::bundled_mlx_converter_relative_path()}}) {
+        const std::string script = file.filename().string();
+        switch (harness::inspect_seeded_script(inputs.home, script, inputs.retired_scripts)) {
+            case harness::SeededScript::Missing:
+                add(report, Status::Warn, "MLX", label,
+                    script + " is missing from " + file.parent_path().string(),
+                    "apogee check --fix");
+                break;
+            case harness::SeededScript::Current:
+                add(report, Status::Ok, "MLX", label, script + " matches the shipped copy");
+                break;
+            case harness::SeededScript::Stale:
+                add(report, Status::Warn, "MLX", label, stale_script_detail(script),
+                    "apogee check --fix");
+                break;
+            case harness::SeededScript::Edited:
+                add(report, Status::Warn, "MLX", label,
+                    script +
+                        " differs from the shipped copy -- your edit is kept and runs; delete the "
+                        "file and run 'apogee check --fix' to restore the shipped one");
+                break;
         }
     }
 }
@@ -1204,19 +1642,25 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
         const std::filesystem::path path =
             inputs.home / harness::bundled_script_relative_path(script.name);
         const std::string label = "script: " + std::string{script.name};
-        if (!std::filesystem::is_regular_file(path, code)) {
-            // A warning, not a failure: a fresh install passes, and the
-            // remedy is the doctor's own repair.
-            add(report, Status::Warn, "Training", label,
-                "missing from " + path.parent_path().string(), "apogee check --fix");
-            continue;
-        }
-        if (harness::is_unmodified_bundled_asset(inputs.home, path)) {
-            add(report, Status::Ok, "Training", label, "matches the shipped copy");
-        } else {
-            add(report, Status::Warn, "Training", label,
-                "differs from the shipped copy -- your edit is kept and runs; delete the file "
-                "and run 'apogee check --fix' to restore the shipped one");
+        switch (harness::inspect_seeded_script(inputs.home, script.name, inputs.retired_scripts)) {
+            case harness::SeededScript::Missing:
+                // A warning, not a failure: a fresh install passes, and the
+                // remedy is the doctor's own repair.
+                add(report, Status::Warn, "Training", label,
+                    "missing from " + path.parent_path().string(), "apogee check --fix");
+                break;
+            case harness::SeededScript::Current:
+                add(report, Status::Ok, "Training", label, "matches the shipped copy");
+                break;
+            case harness::SeededScript::Stale:
+                add(report, Status::Warn, "Training", label,
+                    stale_script_detail(std::string{script.name}), "apogee check --fix");
+                break;
+            case harness::SeededScript::Edited:
+                add(report, Status::Warn, "Training", label,
+                    "differs from the shipped copy -- your edit is kept and runs; delete the file "
+                    "and run 'apogee check --fix' to restore the shipped one");
+                break;
         }
     }
 
@@ -1309,9 +1753,10 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
         return;
     }
 
-    // Every version ledger: the active version's GGUF exists and the
-    // backend's model_path names it -- else the two have drifted, and a chat
-    // runs something other than what `train versions` says is active.
+    // Every version ledger: the active version's GGUF -- or MLX directory
+    // (27c) -- exists and the backend's model_path names it -- else the two
+    // have drifted, and a chat runs something other than what `train
+    // versions` says is active.
     for (const training::VersionLedger& ledger : training::TrainingStore{training}.all_versions()) {
         const std::string label = "versions: " + ledger.backend;
         const training::VersionEntry* active = ledger.active();
@@ -1322,10 +1767,14 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
                 "apogee train promote <run> --as " + ledger.backend);
             continue;
         }
-        if (!std::filesystem::is_regular_file(active->gguf_path, code)) {
+        const bool there = active->mlx()
+                               ? std::filesystem::is_directory(active->mlx_path, code)
+                               : std::filesystem::is_regular_file(active->gguf_path, code);
+        if (!there) {
             add(report, Status::Warn, "Training", label,
-                "active v" + std::to_string(active->version) +
-                    " names a GGUF that is not there: " + active->gguf_path,
+                "active v" + std::to_string(active->version) + " names " +
+                    (active->mlx() ? "an MLX model" : "a GGUF") +
+                    " that is not there: " + active->weights(),
                 "apogee train rollback " + ledger.backend + ", or promote again");
             continue;
         }
@@ -1334,13 +1783,13 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
             add(report, Status::Warn, "Training", label,
                 "active v" + std::to_string(active->version) +
                     " exists, but no backend of that name is configured",
-                "apogee config add-backend " + ledger.backend + " --type llamacpp --model-path " +
-                    active->gguf_path);
+                "apogee config add-backend " + ledger.backend + " --type " +
+                    (active->mlx() ? "mlx" : "llamacpp") + " --model-path " + active->weights());
             continue;
         }
-        if (harness::expand_env_and_home(backend->model_path) != active->gguf_path) {
+        if (harness::expand_env_and_home(backend->model_path) != active->weights()) {
             add(report, Status::Warn, "Training", label,
-                "the ledger says v" + std::to_string(active->version) + " (" + active->gguf_path +
+                "the ledger says v" + std::to_string(active->version) + " (" + active->weights() +
                     ") but the backend's model_path is " + backend->model_path,
                 "apogee train rollback " + ledger.backend + ", or promote again");
             continue;
@@ -1485,6 +1934,8 @@ CheckReport run_checks(const CheckInputs& inputs) {
     check_graphs(report, inputs);
     say(inputs, "checking training");
     check_training(report, inputs);
+    say(inputs, "checking MLX");
+    check_mlx(report, inputs);
     say(inputs, "checking the data directory");
     check_filesystem(report, inputs);
     say(inputs, "checking secrets");
@@ -1698,10 +2149,6 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->callback([&context, flags]() {
         CheckInputs inputs;
         inputs.config_path = harness::resolve_config_path(context.config_path);
-        inputs.env = [](std::string_view name) {
-            const char* value = std::getenv(std::string{name}.c_str());
-            return value == nullptr ? std::string{} : std::string{value};
-        };
 
         try {
             inputs.home = harness::apogee_home();
@@ -1709,49 +2156,72 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
             std::cerr << "apogee check: " << e.what() << "\n";
             throw CLI::RuntimeError(1);
         }
-
-        inputs.executable = platform::executable_path();
-
-        std::error_code exists_code;
-        if (!std::filesystem::exists(inputs.config_path, exists_code)) {
-            inputs.config_missing = true;
-        } else {
-            try {
-                inputs.config = harness::load_config(inputs.config_path);
-            } catch (const harness::ConfigError& e) {
-                inputs.config_error = e.what();
-            }
-        }
-
-        if (flags->fix) {
-            const std::vector<std::string> done = apply_fixes(inputs);
-            for (const std::string& line : done) {
-                std::cout << "fixed: " << line << "\n";
-            }
-            if (done.empty()) {
-                std::cout << "nothing to fix\n";
-            }
-        }
-
-        CheckReport report;
-        {
-            // Every model's header is read, so on a full store this takes
-            // seconds: said on one line, gone before the report (M1).
-            BusyLine busy{std::cerr, "checking", busy_options(flags->quiet)};
-            inputs.progress = busy.sink();
-            report = run_checks(inputs);
-            inputs.progress = nullptr;
-        }
-        const ansi::Style style =
-            ansi::Style::detect(flags->no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto);
-        std::cout << render_report(report, style.color_enabled());
+        inputs.root = harness::current_root();  // which rung chose it (M10)
 
         // Non-zero on failure so a script can gate on it -- the reason this is
         // a command rather than a page of documentation.
-        if (!report.passed()) {
+        if (!run_check_pass(std::move(inputs), CheckPassOptions{.fix = flags->fix,
+                                                                .quiet = flags->quiet,
+                                                                .no_color = flags->no_color})) {
             throw CLI::RuntimeError(1);
         }
     });
+}
+
+bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options) {
+    if (!inputs.env) {
+        inputs.env = [](std::string_view name) {
+            const char* value = std::getenv(std::string{name}.c_str());
+            return value == nullptr ? std::string{} : std::string{value};
+        };
+    }
+    if (inputs.executable.empty()) {
+        inputs.executable = platform::executable_path();
+    }
+
+    std::error_code exists_code;
+    if (!std::filesystem::exists(inputs.config_path, exists_code)) {
+        inputs.config_missing = true;
+    } else {
+        try {
+            inputs.config = harness::load_config(inputs.config_path);
+        } catch (const harness::ConfigError& e) {
+            inputs.config_error = e.what();
+        }
+    }
+
+    if (options.fix) {
+        const std::vector<std::string> done = apply_fixes(inputs);
+        std::size_t created = 0;
+        for (const std::string& line : done) {
+            if (options.fold_created && line.starts_with("created ")) {
+                ++created;
+                continue;
+            }
+            std::cout << "fixed: " << line << "\n";
+        }
+        if (created > 0) {
+            std::cout << "fixed: created " << created
+                      << " directories and files, the layout as a fresh install has it\n";
+        }
+        if (done.empty()) {
+            std::cout << "nothing to fix\n";
+        }
+    }
+
+    CheckReport report;
+    {
+        // Every model's header is read, so on a full store this takes
+        // seconds: said on one line, gone before the report (M1).
+        BusyLine busy{std::cerr, "checking", busy_options(options.quiet)};
+        inputs.progress = busy.sink();
+        report = run_checks(inputs);
+        inputs.progress = nullptr;
+    }
+    const ansi::Style style =
+        ansi::Style::detect(options.no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto);
+    std::cout << render_report(report, style.color_enabled());
+    return report.passed();
 }
 
 }  // namespace apogee::commands

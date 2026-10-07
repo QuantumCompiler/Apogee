@@ -6,9 +6,9 @@
 
 /// The RAG-query toolset: the model searching an ingested collection itself.
 ///
-/// The role Ommi's `ommi-mcp-embed` server played, in-process: the chunk
-/// store is opened directly and the embedder is the harness's own, resolved
-/// by capability -- no `OMMI_EMBED_EXEC` handle, no second transport.
+/// In-process: the chunk store is opened directly and the embedder is the
+/// harness's own, resolved by capability -- no separate server, no second
+/// transport.
 ///
 /// **One retriever per turn, reported honestly.** `search_documents` decides
 /// how to search through the same `resolve_turn_retriever` every surface

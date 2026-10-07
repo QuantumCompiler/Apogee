@@ -1,0 +1,180 @@
+node class store.Store
+  description type Store
+  metadata {"end_line":8,"file":"store/store.go","kind":"code","lang":"go","line":6,"member":"go"}
+  mentions 1
+  at go:store/store.go:6-8 definition
+node file main.go
+  description Go file
+  metadata {"end_line":16,"file":"main.go","kind":"code","lang":"go","line":1,"member":"go"}
+  mentions 1
+  at go:main.go:1-16 definition
+node file store/store.go
+  description Go file
+  metadata {"end_line":24,"file":"store/store.go","kind":"code","lang":"go","line":1,"member":"go"}
+  mentions 1
+  at go:store/store.go:1-24 definition
+node function main.fill
+  description func fill(s *store.Store)
+  metadata {"end_line":11,"file":"main.go","kind":"code","lang":"go","line":9,"member":"go"}
+  mentions 1
+  at go:main.go:9-11 definition
+node function main.main
+  description func main()
+  metadata {"end_line":16,"file":"main.go","kind":"code","lang":"go","line":13,"member":"go"}
+  mentions 1
+  at go:main.go:13-16 definition
+node function store.New
+  description func New() *Store
+  metadata {"end_line":13,"file":"store/store.go","kind":"code","lang":"go","line":11,"member":"go"}
+  mentions 1
+  at go:store/store.go:11-13 definition
+node function store.Store.Add
+  description func (s *Store) Add(item string)
+  metadata {"end_line":19,"file":"store/store.go","kind":"code","lang":"go","line":16,"member":"go"}
+  mentions 1
+  at go:store/store.go:16-19 definition
+node function store.Store.add
+  description func (s *Store) add(item string)
+  metadata {"end_line":24,"file":"store/store.go","kind":"code","lang":"go","line":22,"member":"go"}
+  mentions 1
+  at go:store/store.go:22-24 definition
+node module main
+  description package main
+  metadata {"end_line":1,"file":"main.go","kind":"code","lang":"go","line":1,"member":"go"}
+  mentions 1
+  at go:main.go:1-1 definition
+node module store
+  description package store
+  metadata {"end_line":1,"file":"store/store.go","kind":"code","lang":"go","line":1,"member":"go"}
+  mentions 1
+  at go:store/store.go:1-1 definition
+node name append
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at go:store/store.go:17-17 reference
+node name fmt
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at go:store/store.go:3-3 reference
+node name fmt.Println
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at go:store/store.go:18-18 reference
+node name len
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at go:store/store.go:18-18 reference
+node name strings
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at go:main.go:4-4 reference
+node name strings.ToUpper
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at go:main.go:10-10 reference
+edge class store.Store -[defined_in]-> file store/store.go
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:store/store.go:6
+edge file main.go -[defined_in]-> module main
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:main.go:1
+edge file main.go -[imports]-> module store
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:main.go:6
+edge file main.go -[imports]-> name strings
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:main.go:4
+edge file store/store.go -[defined_in]-> module store
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:store/store.go:1
+edge file store/store.go -[imports]-> name fmt
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:store/store.go:3
+edge function main.fill -[calls]-> function store.Store.Add
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:main.go:10
+edge function main.fill -[calls]-> name strings.ToUpper
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:main.go:10
+edge function main.fill -[defined_in]-> file main.go
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:main.go:9
+edge function main.fill -[references]-> class store.Store
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:main.go:9
+edge function main.main -[calls]-> function main.fill
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:main.go:15
+edge function main.main -[calls]-> function store.New
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:main.go:14
+edge function main.main -[defined_in]-> file main.go
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:main.go:13
+edge function store.New -[defined_in]-> file store/store.go
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:store/store.go:11
+edge function store.New -[references]-> class store.Store
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:store/store.go:11
+edge function store.Store.Add -[calls]-> name append
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:store/store.go:17
+edge function store.Store.Add -[calls]-> name fmt.Println
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:store/store.go:18
+edge function store.Store.Add -[calls]-> name len
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:store/store.go:18
+edge function store.Store.Add -[defined_in]-> class store.Store
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:store/store.go:16
+edge function store.Store.Add -[defined_in]-> file store/store.go
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:store/store.go:16
+edge function store.Store.Add -[references]-> class store.Store
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:store/store.go:16
+edge function store.Store.add -[calls]-> function store.Store.Add
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:store/store.go:23
+edge function store.Store.add -[defined_in]-> class store.Store
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:store/store.go:22
+edge function store.Store.add -[defined_in]-> file store/store.go
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:store/store.go:22
+edge function store.Store.add -[references]-> class store.Store
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site go:store/store.go:22

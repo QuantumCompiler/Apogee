@@ -19,6 +19,8 @@ apogee_add_module(markdown
 apogee_add_module(render
     render/json_report.h
     render/json_report.cpp
+    render/graph_report.h
+    render/graph_report.cpp
 )
 target_link_libraries(apogee_presentation_render PUBLIC nlohmann_json::nlohmann_json)
 
@@ -48,7 +50,7 @@ apogee_add_module(machine
     machine/json_reporter.h
     machine/json_reporter.cpp
 )
-target_link_libraries(apogee_presentation_machine PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(apogee_presentation_machine PUBLIC nlohmann_json::nlohmann_json)
 
 apogee_add_module(operations
     operations/backend_names.h
@@ -59,12 +61,16 @@ apogee_add_module(operations
     operations/dataset_core.cpp
     operations/graph_members.h
     operations/graph_members.cpp
+    operations/graph_sources.h
+    operations/graph_sources.cpp
     operations/knowledge_core.h
     operations/knowledge_core.cpp
     operations/retrieval.h
     operations/retrieval.cpp
     operations/run_settings.h
     operations/run_settings.cpp
+    operations/suites.h
+    operations/suites.cpp
 )
 target_link_libraries(apogee_presentation_operations PUBLIC nlohmann_json::nlohmann_json)
 
@@ -94,16 +100,24 @@ apogee_add_module(httpserver
     httpserver/admin_config.cpp
     httpserver/admin_agents.h
     httpserver/admin_agents.cpp
+    httpserver/admin_symphonies.h
+    httpserver/admin_symphonies.cpp
     httpserver/admin_knowledge.h
     httpserver/admin_knowledge.cpp
     httpserver/admin_graph.h
     httpserver/admin_graph.cpp
+    httpserver/admin_graph_navigate.h
+    httpserver/admin_graph_navigate.cpp
     httpserver/admin_graphs.h
     httpserver/admin_graphs.cpp
+    httpserver/admin_suites.h
+    httpserver/admin_suites.cpp
     httpserver/admin_datasets.h
     httpserver/admin_datasets.cpp
     httpserver/admin_training.h
     httpserver/admin_training.cpp
+    httpserver/admin_tasks.h
+    httpserver/admin_tasks.cpp
     httpserver/admin.h
     httpserver/admin.cpp
     httpserver/admin_auth_routes.h
@@ -138,12 +152,18 @@ apogee_add_module(cli
     cli/version_command.cpp
     cli/config_cmd.h
     cli/config_cmd.cpp
+    cli/config_suites.h
+    cli/config_suites.cpp
+    cli/suite_residency.h
+    cli/suite_residency.cpp
     cli/check.h
     cli/complete_protocol.h
     cli/complete_protocol.cpp
     cli/complete_sources.cpp
     cli/uninstall.h
     cli/uninstall.cpp
+    cli/reset.h
+    cli/reset.cpp
     cli/check.cpp
     cli/complete.h
     cli/complete.cpp
@@ -165,8 +185,14 @@ apogee_add_module(cli
     cli/analyze.cpp
     cli/agents_cmd.h
     cli/agents_cmd.cpp
+    cli/symphonies_cmd.h
+    cli/symphonies_cmd.cpp
     cli/graph.h
     cli/graph.cpp
+    cli/graph_navigate.h
+    cli/graph_navigate.cpp
+    cli/graph_artifacts.h
+    cli/graph_artifacts.cpp
     cli/datasets.h
     cli/datasets.cpp
     cli/train.h
@@ -175,14 +201,26 @@ apogee_add_module(cli
     cli/knowledge.cpp
     cli/chat.h
     cli/chat.cpp
+    cli/execute.h
+    cli/execute.cpp
     cli/chat_completer.h
     cli/chat_completer.cpp
+    cli/attachment_graph.h
+    cli/attachment_graph.cpp
     cli/chat_attachments.h
     cli/chat_attachments.cpp
     cli/chat_history.h
     cli/chat_history.cpp
+    cli/chat_play.h
+    cli/chat_play.cpp
     cli/chat_recall.h
     cli/chat_recall.cpp
+    cli/chat_session.h
+    cli/chat_session.cpp
+    cli/chat_turn.h
+    cli/chat_turn.cpp
+    cli/task_cmd.h
+    cli/task_cmd.cpp
     cli/complete_sources.h
 )
 target_link_libraries(apogee_presentation_cli PUBLIC CLI11::CLI11 nlohmann_json::nlohmann_json)

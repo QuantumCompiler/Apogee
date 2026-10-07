@@ -19,52 +19,24 @@ namespace {
     return count;
 }
 
-}  // namespace
-
-std::string entity_line(const embedstore::GraphNode& node) {
-    std::string label = node.type;
-    if (node.type == embedstore::kNodeTypeDecision) {
-        const embedstore::DecisionNodeMetadata meta =
-            embedstore::parse_decision_node_metadata(node.metadata);
-        if (!meta.status.empty()) {
-            label += ", " + meta.status;
-        }
+/// The model-free seed: the entities the question names by name.
+[[nodiscard]] std::vector<std::int64_t> lexical_seeds(const embedstore::Store& store,
+                                                      std::string_view lexical_query,
+                                                      int max_entities) {
+    std::vector<std::int64_t> out;
+    if (lexical_query.empty()) {
+        return out;
     }
-    std::string line = node.name + " (" + label + ")";
-    if (!node.description.empty()) {
-        line += ": " + node.description;
+    for (const embedstore::NodeResult& hit : store.search_nodes(lexical_query, max_entities)) {
+        out.push_back(hit.node.id);
     }
-    return line;
+    return out;
 }
 
-GraphSection build_graph_section(const embedstore::Store& store, std::string_view collection,
-                                 const std::vector<std::int64_t>& seed_chunks,
-                                 std::string_view lexical_query, int hops, int max_entities) {
-    std::vector<embedstore::ChunkRef> refs;
-    refs.reserve(seed_chunks.size());
-    for (const std::int64_t id : seed_chunks) {
-        refs.push_back(embedstore::ChunkRef{.collection = "", .chunk_id = id});
-    }
-    return build_graph_section_labelled(store, collection, refs, lexical_query, hops, max_entities);
-}
-
-GraphSection build_graph_section_labelled(const embedstore::Store& store, std::string_view header,
-                                          const std::vector<embedstore::ChunkRef>& seed_chunks,
-                                          std::string_view lexical_query, int hops,
-                                          int max_entities) {
+/// `expansion` as the section: the header, the entity lines, the triples.
+[[nodiscard]] GraphSection render_section(const embedstore::Expansion& expansion,
+                                          std::string_view header) {
     GraphSection section;
-    std::vector<std::int64_t> seed_nodes;
-    if (!lexical_query.empty()) {
-        // The model-free seed: an entity the question names by name.
-        for (const embedstore::NodeResult& hit : store.search_nodes(lexical_query, max_entities)) {
-            seed_nodes.push_back(hit.node.id);
-        }
-    }
-    if (seed_chunks.empty() && seed_nodes.empty()) {
-        return section;
-    }
-    const embedstore::Expansion expansion =
-        store.graph_expand_labelled(seed_chunks, seed_nodes, hops, max_entities);
     if (expansion.empty()) {
         return section;
     }
@@ -97,7 +69,12 @@ GraphSection build_graph_section_labelled(const embedstore::Store& store, std::s
     }
     if (!truncated) {
         for (const embedstore::ExpandEdge& edge : expansion.edges) {
-            std::string line = edge.source_name + " —[" + edge.relation + "]→ " + edge.target_name;
+            // A parsed edge says so (27k): what the source states, beside
+            // what a model asserted -- which keeps the bare form it always had.
+            const std::string relation = edge.origin == embedstore::kOriginExtracted
+                                             ? edge.relation + "·" + edge.origin
+                                             : edge.relation;
+            std::string line = edge.source_name + " —[" + relation + "]→ " + edge.target_name;
             if (!edge.description.empty()) {
                 line += ": " + edge.description;
             }
@@ -114,6 +91,67 @@ GraphSection build_graph_section_labelled(const embedstore::Store& store, std::s
     }
     section.text = std::move(out);
     return section;
+}
+
+}  // namespace
+
+std::string entity_line(const embedstore::GraphNode& node) {
+    std::string label = node.type;
+    if (node.type == embedstore::kNodeTypeDecision) {
+        const embedstore::DecisionNodeMetadata meta =
+            embedstore::parse_decision_node_metadata(node.metadata);
+        if (!meta.status.empty()) {
+            label += ", " + meta.status;
+        }
+    } else if (embedstore::is_code_node_type(node.type)) {
+        // A code entity carries where it is defined (27k): the model can
+        // cite, and a reader open, the line itself.
+        const embedstore::CodeNodeMetadata meta =
+            embedstore::parse_code_node_metadata(node.metadata);
+        if (meta.code && !meta.unresolved && !meta.file.empty()) {
+            label += ", " + meta.file + ":" + std::to_string(meta.line);
+        }
+    }
+    std::string line = node.name + " (" + label + ")";
+    if (!node.description.empty()) {
+        line += ": " + node.description;
+    }
+    return line;
+}
+
+GraphSection build_graph_section(const embedstore::Store& store, std::string_view collection,
+                                 const std::vector<std::int64_t>& seed_chunks,
+                                 std::string_view lexical_query, int hops, int max_entities) {
+    std::vector<embedstore::ChunkRef> refs;
+    refs.reserve(seed_chunks.size());
+    for (const std::int64_t id : seed_chunks) {
+        refs.push_back(embedstore::ChunkRef{.collection = "", .chunk_id = id});
+    }
+    return build_graph_section_labelled(store, collection, refs, lexical_query, hops, max_entities);
+}
+
+GraphSection build_graph_section_labelled(const embedstore::Store& store, std::string_view header,
+                                          const std::vector<embedstore::ChunkRef>& seed_chunks,
+                                          std::string_view lexical_query, int hops,
+                                          int max_entities) {
+    const std::vector<std::int64_t> seed_nodes = lexical_seeds(store, lexical_query, max_entities);
+    if (seed_chunks.empty() && seed_nodes.empty()) {
+        return GraphSection{};
+    }
+    return render_section(store.graph_expand_labelled(seed_chunks, seed_nodes, hops, max_entities),
+                          header);
+}
+
+GraphSection build_graph_section_excerpts(const embedstore::Store& store, std::string_view header,
+                                          const std::vector<embedstore::CodeExcerptRef>& excerpts,
+                                          std::string_view lexical_query, int hops,
+                                          int max_entities) {
+    const std::vector<std::int64_t> seed_nodes = lexical_seeds(store, lexical_query, max_entities);
+    if (excerpts.empty() && seed_nodes.empty()) {
+        return GraphSection{};
+    }
+    return render_section(store.graph_expand_excerpts(excerpts, seed_nodes, hops, max_entities),
+                          header);
 }
 
 std::filesystem::path graph_db_path(std::string_view name) {

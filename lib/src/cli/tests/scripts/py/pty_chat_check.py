@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Chat behaviours that only reproduce against a real terminal, or a real kill.
 
-Ten checks:
+Twelve checks:
 
   typeahead   Text typed BEFORE the first prompt is discarded once; text typed
               after it is honoured.  Only reproducible on a PTY -- `tcflush`
@@ -37,6 +37,33 @@ Ten checks:
   interrupt   Ctrl-C in the middle of a reply ends the process with the
               terminal's echo back on -- it was off during the turn, and a
               shell left with echo off takes input blind.
+
+  task-attended
+              An attended `task run` (27i): a tool granted with `--allow`
+              runs with no prompt, one not granted is asked about at the
+              terminal -- policy adds to the human path, never replaces it --
+              and a question with no declared answer is put to the person
+              there; each answer is recorded in the ledger as the person's.
+
+  task-machine
+              The same task in machine mode (27j), on the same terminal: a
+              machine-mode run reads no input, so nothing is asked -- the
+              ungranted tool is denied by nobody, the question ends the task
+              -- and the run ends by itself, its lifecycle on the stream.
+
+  execute     `apogee execute` (27s): the banner names the suite and how
+              many symphonies it can play; Tab completes a symphony's name
+              after `/play`; the play's stages are narrated in the thinking
+              block, which collapses, and its output is rendered as the
+              session's answer; the saved chat keeps the play as one exchange
+              and none of the narration.
+
+  orchestrate An orchestrating `execute` (27t): the banner says how many
+              symphonies the model is offered; the model's own play is a
+              labeled line -- its choice and its member calls -- with its
+              stage lines beneath it in the thinking block, each closed with
+              what it took, the block collapsing, and the answer that reads
+              its output is rendered.
 
 POSIX only -- `pty` and SIGKILL have no portable Windows equivalent.  Recorded
 as a per-item skip in CLAUDE.md -> Platforms.
@@ -225,10 +252,10 @@ def scripted(binary, env, home, turns):
 class Pty:
     """A chat on a pseudo-terminal, its output collected as it runs."""
 
-    def __init__(self, binary, env, extra=(), cwd=None):
+    def __init__(self, binary, env, extra=(), cwd=None, command=("chat",)):
         self.primary, self.secondary = pty.openpty()
         self.process = subprocess.Popen(
-            [os.path.abspath(binary), "chat", *extra],
+            [os.path.abspath(binary), *command, *extra],
             stdin=self.secondary, stdout=self.secondary, stderr=self.secondary,
             env=env, close_fds=True, cwd=cwd,
         )
@@ -251,6 +278,13 @@ class Pty:
 
     def send(self, data):
         os.write(self.primary, data)
+
+    def wait_for(self, needle, seconds):
+        """Drains until `needle` has been seen, or `seconds` pass."""
+        deadline = time.time() + seconds
+        while time.time() < deadline and needle not in self.text():
+            self.drain(0.1)
+        return needle in self.text()
 
     def echo_on(self):
         return bool(termios.tcgetattr(self.secondary)[3] & termios.ECHO)
@@ -363,6 +397,206 @@ def check_presets(binary, home, env):
     elif b"run_command" not in text.split(b"Allow? [y]es")[0].splitlines()[-2] + \
             text.split(b"Allow? [y]es")[0].splitlines()[-1]:
         failures.append(f"the prompt was not run_command's: {text!r}")
+    return failures
+
+
+def check_task_attended(binary, home, env):
+    """A task run at a terminal: granted runs, ungranted asks, a question
+    goes to the person, each answer recorded as theirs (27i)."""
+    work = os.path.join(home, "work")
+    os.makedirs(work)
+    scripted(binary, env, home, [
+        {"text": "1. Write, run, ask."},
+        {"tool_calls": [{"name": "write_file",
+                         "arguments": {"path": "out.txt", "content": "hello"}}]},
+        {"tool_calls": [{"name": "run_command", "arguments": {"command": "echo hi"}}]},
+        {"tool_calls": [{"name": "ask_user", "arguments": {"questions": [
+            {"header": "Colour", "question": "Which colour?",
+             "options": [{"label": "Red"}, {"label": "Green"}]}]}}]},
+        {"text": "Done: {{last_tool_result}}\nTASK STATUS: DONE"},
+    ])
+    term = Pty(binary, env, ("Do the work", "--tools", "--allow", "write_file", "--rounds", "1"),
+               cwd=work, command=("task", "run"))
+    failures = []
+    if not term.wait_for(b"Allow? [y]es", 15.0):
+        failures.append(f"run_command was never asked about: {term.text()!r}")
+    term.send(b"n\r")
+    if not term.wait_for(b"Choose a number, or type your own answer", 10.0):
+        failures.append(f"the question was never put: {term.text()!r}")
+    term.send(b"blue\r")
+    term.drain(3.0)
+    term.close()
+    text = term.text()
+    if term.process.returncode != 0:
+        failures.append(f"the task did not end done ({term.process.returncode}): {text!r}")
+    if not os.path.exists(os.path.join(work, "out.txt")):
+        failures.append("the granted write did not happen")
+    asks = text.count(b"Allow? [y]es")
+    if asks != 1:
+        failures.append(f"expected one prompt -- for run_command -- saw {asks}: {text!r}")
+    elif b"run_command" not in text.split(b"Allow? [y]es")[0].splitlines()[-2] + \
+            text.split(b"Allow? [y]es")[0].splitlines()[-1]:
+        failures.append(f"the prompt was not run_command's: {text!r}")
+    tasks = os.path.join(home, "tasks")
+    ledgers = [os.path.join(tasks, name, "task.json") for name in os.listdir(tasks)
+               if os.path.isfile(os.path.join(tasks, name, "task.json"))] \
+        if os.path.isdir(tasks) else []
+    if len(ledgers) != 1:
+        return failures + [f"expected one task ledger, found {ledgers}"]
+    with open(ledgers[0], encoding="utf-8") as handle:
+        task = json.load(handle)
+    round_ = task["rounds"][-1]
+    if round_.get("allowed") != [{"by": "grant", "target": "out.txt", "tool": "write_file"}]:
+        failures.append(f"the grant's use is not recorded: {round_.get('allowed')}")
+    if round_.get("denied") != [{"by": "person", "target": "echo hi", "tool": "run_command"}]:
+        failures.append(f"the person's no is not recorded: {round_.get('denied')}")
+    if round_.get("answered") != [{"answer": "blue", "by": "person",
+                                   "question": "Which colour?"}]:
+        failures.append(f"the person's answer is not recorded: {round_.get('answered')}")
+    if task.get("status") != "done":
+        failures.append(f"the task is {task.get('status')}: {task.get('reason')}")
+    return failures
+
+
+def check_task_machine(binary, home, env):
+    """A task in machine mode at a terminal: nobody is asked anything (27j)."""
+    work = os.path.join(home, "work")
+    os.makedirs(work)
+    scripted(binary, env, home, [
+        {"text": "1. Write, run, ask."},
+        {"tool_calls": [{"name": "write_file",
+                         "arguments": {"path": "out.txt", "content": "hello"}}]},
+        {"tool_calls": [{"name": "run_command", "arguments": {"command": "echo hi"}}]},
+        {"tool_calls": [{"name": "ask_user", "arguments": {"questions": [
+            {"header": "Colour", "question": "Which colour?",
+             "options": [{"label": "Red"}, {"label": "Green"}]}]}}]},
+        {"text": "Done.\nTASK STATUS: DONE"},
+    ])
+    term = Pty(binary, env, ("Do the work", "--tools", "--allow", "write_file", "--rounds", "1",
+                             "--output-format", "stream-json"),
+               cwd=work, command=("task", "run"))
+    # Nothing is typed: a prompt would wait here until the close kills it.
+    term.wait_for(b'"type":"task_finished"', 15.0)
+    term.drain(1.0)
+    term.close()
+    text = term.text()
+    failures = []
+    if term.process.returncode != 1:
+        failures.append(f"the task did not end failed on its own ({term.process.returncode}): "
+                        f"{text!r}")
+    if b"Allow? [y]es" in text or b"Choose a number" in text:
+        failures.append(f"machine mode asked at the terminal: {text!r}")
+    if b'"type":"task_started"' not in text:
+        failures.append(f"no task events on the stream: {text!r}")
+    tasks = os.path.join(home, "tasks")
+    ledgers = [os.path.join(tasks, name, "task.json") for name in os.listdir(tasks)
+               if os.path.isfile(os.path.join(tasks, name, "task.json"))] \
+        if os.path.isdir(tasks) else []
+    if len(ledgers) != 1:
+        return failures + [f"expected one task ledger, found {ledgers}"]
+    with open(ledgers[0], encoding="utf-8") as handle:
+        task = json.load(handle)
+    round_ = task["rounds"][-1]
+    if round_.get("denied") != [{"by": "nobody", "target": "echo hi", "tool": "run_command"}]:
+        failures.append(f"run_command was not denied by nobody: {round_.get('denied')}")
+    if task.get("status") != "failed" or "Which colour?" not in task.get("reason", ""):
+        failures.append(f"the question did not end the task: {task.get('status')} "
+                        f"{task.get('reason')}")
+    return failures
+
+
+def check_execute(binary, home, env):
+    """`execute` at a terminal (27s): its banner, a play narrated stage by
+    stage in the thinking block, the output rendered as the answer."""
+    helper = os.path.join(home, "helper.json")
+    with open(helper, "w", encoding="utf-8") as handle:
+        json.dump({"turns": [{"text": "A cat sat on a mat."}]}, handle)
+    scripted(binary, env, home, [{"text": "The **final** summary.\n"}])
+    for args in (["config", "add-backend", "helper", "--type", "mock", "--model-path", helper],
+                 ["config", "add-suite", "duo", "--chat", "scripted", "--utility", "helper"]):
+        if subprocess.run([binary, *args], env=env, stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL).returncode != 0:
+            raise RuntimeError(f"setup failed: {args}")
+    term = Pty(binary, env, ("--suite", "duo", "--no-recall"), command=("execute",))
+    term.drain(2.0)
+    # The symphony's name by Tab, from execute's table and its catalog.
+    term.send(b"/play su")
+    term.drain(0.5)
+    term.send(b"\t")
+    term.drain(0.5)
+    term.send(b" The cat sat on the mat.\r")
+    term.drain(3.0)
+    term.send(b"/exit\r")
+    term.drain(2.0)
+    term.close()
+    text = term.text()
+    failures = []
+    if b"scripted  \xc2\xb7  suite duo  \xc2\xb7  3 symphonies  \xc2\xb7  chat " not in text:
+        failures.append(f"the banner does not name the suite and its symphonies: {text!r}")
+    for stage in ("stage 1/2 summarize \u2014 asking utility (helper)",
+                  "stage 2/2 verify \u2014 asking chat (scripted)"):
+        if stage.encode() not in text:
+            failures.append(f"'{stage}' was not narrated: {text!r}")
+    if b"Worked for" not in text:
+        failures.append(f"the block of stages did not collapse to 'Worked for': {text!r}")
+    if b"The final summary." not in text or b"**final**" in text:
+        failures.append(f"the output was not rendered as the answer: {text!r}")
+    saved = sessions(home)
+    if len(saved) != 1:
+        failures.append(f"expected one saved chat, found {len(saved)}")
+    else:
+        kept = [(message["role"], json.dumps(message["content"])) for message in saved[0]["messages"]]
+        if [role for role, _ in kept] != ["user", "assistant"] or \
+                "/play summarize-verify The cat sat on the mat." not in kept[0][1]:
+            failures.append(f"the play, its name taken by Tab, was not kept as one exchange: {kept}")
+        if "asking utility" in json.dumps(saved[0]):
+            failures.append("the narration reached the saved chat")
+    return failures
+
+
+def check_orchestrate(binary, home, env):
+    """An orchestrating `execute` at a terminal (27t): the banner says how many
+    symphonies the model is offered; the model's own play is a labeled line
+    -- its choice and its cost -- with its stage lines beneath, in the
+    thinking block, and the answer that reads its output is rendered."""
+    helper = os.path.join(home, "helper.json")
+    with open(helper, "w", encoding="utf-8") as handle:
+        json.dump({"turns": [{"text": "A cat sat on a mat."}]}, handle)
+    scripted(binary, env, home, [
+        {"text": "", "tool_calls": [{"name": "play_summarize-verify",
+                                     "arguments": json.dumps({"input": "The cat sat on the mat."})}]},
+        {"text": "A cat sat on the mat."},
+        {"text": "The **played** summary.\n"}])
+    for args in (["config", "add-backend", "helper", "--type", "mock", "--model-path", helper],
+                 ["config", "add-suite", "duo", "--chat", "scripted", "--utility", "helper"]):
+        if subprocess.run([binary, *args], env=env, stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL).returncode != 0:
+            raise RuntimeError(f"setup failed: {args}")
+    term = Pty(binary, env, ("--suite", "duo", "--orchestrate", "--no-recall"),
+               command=("execute",))
+    term.drain(2.0)
+    term.send(b"Summarize: the cat sat on the mat.\r")
+    term.drain(3.0)
+    term.send(b"/exit\r")
+    term.drain(2.0)
+    term.close()
+    text = term.text()
+    failures = []
+    if b"3 symphonies  \xc2\xb7  orchestrating 2  \xc2\xb7  chat " not in text:
+        failures.append(f"the banner does not say what the model is offered: {text!r}")
+    for line in ("play \u2014 the model chose summarize-verify: 2 member calls, utility \u2192 chat",
+                 "stage 1/2 summarize \u2014 asking utility (helper)",
+                 "stage 2/2 verify \u2014 asking chat (scripted)"):
+        if line.encode() not in text:
+            failures.append(f"'{line}' was not narrated: {text!r}")
+    # What it costs: the labeled line says its member calls, and each stage
+    # closes with what it took.
+    if not re.search(rb"asking chat \(scripted\): [^\n]*\xc2\xb7 [0-9.]+ s", text):
+        failures.append(f"the play's stages did not close with their cost: {text!r}")
+    if b"Worked for" not in text:
+        failures.append(f"the block did not collapse to 'Worked for': {text!r}")
+    if b"The played summary." not in text or b"**played**" in text:
+        failures.append(f"the answer was not rendered: {text!r}")
     return failures
 
 
@@ -516,7 +750,11 @@ def main():
                         ("typeahead-hidden", check_typeahead_hidden),
                         ("side-calls", check_side_calls),
                         ("presets", check_presets),
+                        ("task-attended", check_task_attended),
+                        ("task-machine", check_task_machine),
                         ("base-model", check_base_model),
+                        ("execute", check_execute),
+                        ("orchestrate", check_orchestrate),
                         ("interrupt", check_interrupt)):
         home = tempfile.mkdtemp(prefix=f"apogee-chat-{name}-")
         try:
@@ -535,7 +773,9 @@ def main():
 
     print("typeahead discarded once; completed turns survive a kill -9; "
           "the banner and each question stand apart; answers render, raw with --raw; "
-          "typing mid-reply waits for the prompt; side calls are narrated in the block; a preset is the session answer given early; a base model is said and its tools are off; "
+          "typing mid-reply waits for the prompt; side calls are narrated in the block; a preset is the session answer given early; an attended task asks for what it was not granted, and one in machine mode asks nothing; a base model is said and its tools are off; "
+          "execute's banner names its suite and symphonies and a play is narrated in the block; "
+          "the model's own play is a labeled line with its stages and its cost; "
           "Ctrl-C restores echo - OK")
     return 0
 

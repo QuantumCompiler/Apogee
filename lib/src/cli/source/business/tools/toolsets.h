@@ -40,6 +40,8 @@ struct ToolsetOptions {
     std::shared_ptr<const ReviewDefaults> live_review;
     /// For the RAG tools' embedder. Null means lexical-only searches.
     const harness::Harness* harness = nullptr;
+    /// The RAG tools' collections and the graph tools' graphs (27l) -- must
+    /// outlive the registry. Null reads as an empty config.
     const harness::Config* config = nullptr;
     /// Toolsets switched off, by name.
     std::vector<std::string> disabled;
@@ -57,8 +59,14 @@ struct FsRoot {
 /// share.
 [[nodiscard]] FsRoot effective_fs_root(const std::filesystem::path& configured);
 
-/// The toolset names `tools.disabled` accepts: fs, shell, git, notes, rag.
+/// The toolset names `tools.disabled` accepts: fs, shell, git, notes, rag,
+/// graph.
 [[nodiscard]] std::span<const std::string_view> toolset_names() noexcept;
+
+/// The word of `harness::suite_toolset_names()` a registered tool falls
+/// under (27d) -- its native toolset, `web` or `mcp` -- or empty for one none
+/// of them names.
+[[nodiscard]] std::string toolset_of(std::string_view tool);
 
 /// The tools that declare `writes` -- the `permissions:` keys a config may
 /// carry, and what the shipped template lists.

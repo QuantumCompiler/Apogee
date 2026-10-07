@@ -149,7 +149,7 @@ TEST_CASE("membership converges: a member dropped from the list has its rows rec
     CHECK(f.graph.source_states("meetings").empty());
     CHECK(f.graph.graph_members() == std::vector<std::string>{"docs"});
     // Weight is not recomputed by reconcile -- the meetings corroboration
-    // stays until the edge is re-derived -- which is Ommi's shape too.
+    // stays until the edge is re-derived.
     CHECK(f.graph.node_neighbors(f.graph.find_nodes("Atlas").front().id).front().weight == 3);
 }
 

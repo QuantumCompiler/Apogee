@@ -37,9 +37,9 @@
 /// ## The snapshot
 ///
 /// The environment is read **once** and never again. Two writers on one
-/// process race (Ommi's OMMI-9 lesson: a token injected into the environment
-/// by one path changed what another path resolved, mid-run); a snapshot taken
-/// before anything resolves cannot move.
+/// process race (a token injected into the environment by one path can change
+/// what another path resolves, mid-run); a snapshot taken before anything
+/// resolves cannot move.
 namespace apogee::secrets {
 
 /// Which rung answered.

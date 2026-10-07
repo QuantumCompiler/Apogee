@@ -15,7 +15,7 @@
 - Release packaging (`cicd.sh` staging / the archive list): `machine-schema.json` beside the binary and stubs.
 - [machine-mode.md](../../reference/machine-mode.md): a "Validating and generating" section; `tests/scripts/py/naive_host_driver.py` swaps its hand-written vocabulary for a schema check — W2 closes in the probe itself.
 
-**Reference (Ommi).** No analog. Prior art: LSP's published metaModel and MCP's TypeScript-source schema — both prove integrators build clients from the artifact, not the prose; JSON Schema chosen here because validators exist in every language a host will be written in.
+**Reference.** Prior art: LSP's published metaModel and MCP's TypeScript-source schema — both prove integrators build clients from the artifact, not the prose; JSON Schema chosen here because validators exist in every language a host will be written in.
 
 **Decisions made** (dated):
 - 2026-09-25 — Split from the integration spike (item 27), wall W2.

@@ -1,9 +1,19 @@
 #pragma once
 
+#include <array>
 #include <memory>
+#include <string>
 
 #include "cli/command.h"
 #include "cli/registry.h"
+
+namespace CLI {
+class Option;
+}  // namespace CLI
+
+namespace apogee::harness {
+class RootFlagScope;
+}  // namespace apogee::harness
 
 namespace apogee::commands {
 
@@ -37,12 +47,29 @@ public:
     [[nodiscard]] int run(int argc, const char* const* argv);
 
 private:
+    /// Runs once parsing completes and before any command: puts the root flag
+    /// in force for this run -- or refuses one that disagrees with
+    /// `APOGEE_HOME` or `--config` -- then answers `--version`, which names
+    /// the root and so must come after it.
+    void apply_root_flags();
+
     // Declaration order is destruction order reversed: app_ holds callbacks
-    // that reference context_ and the commands owned by registry_, so it must
-    // be declared last and therefore destroyed first.
+    // that reference context_, custom_config_ and the commands owned by
+    // registry_, so it must be declared last and therefore destroyed first.
     RootContext context_;
+    /// `--custom`'s file as parsed (M10).
+    std::string custom_config_;
+    /// The root flag this run put in force, until the root is destroyed.
+    std::unique_ptr<harness::RootFlagScope> root_scope_;
     CommandRegistry registry_;
     std::unique_ptr<CLI::App> app_;
+    /// Owned by `app_`, and read for what THIS parse was given: a bound value
+    /// keeps an earlier parse's answer when a later one omits the flag.
+    CLI::Option* version_option_ = nullptr;
+    CLI::Option* config_option_ = nullptr;
+    /// `--release`, `--dev`, `--test`, in `harness::kChannels` order.
+    std::array<CLI::Option*, 3> channel_options_{};
+    CLI::Option* custom_option_ = nullptr;
 };
 
 }  // namespace apogee::commands

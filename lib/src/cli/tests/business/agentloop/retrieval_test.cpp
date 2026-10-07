@@ -12,7 +12,7 @@
 #include "harness/harness.h"
 #include "support/fake_transport.h"
 
-/// The resolution rules, as the exhaustive table Ommi's were encoded in. Every
+/// The resolution rules, encoded as an exhaustive table. Every
 /// row is one turn: what the user said (flag, pin), what exists (embedder,
 /// store), and exactly what must run, be reported, or be refused.
 namespace {

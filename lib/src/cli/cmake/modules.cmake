@@ -27,7 +27,7 @@ set(APOGEE_LAYERS infrastructure data business presentation)
 set(APOGEE_LAYER_infrastructure platform events ansi version)
 set(APOGEE_LAYER_data contracts transport modelstore logger secrets embedstore backends)
 set(APOGEE_LAYER_business harness agent agentloop knowledge graph tools mcp models training
-                          scaffold)
+                          tasks symphony scaffold)
 set(APOGEE_LAYER_presentation markdown render views machine operations httpserver cli)
 
 # ---- Infrastructure ---------------------------------------------------------
@@ -51,24 +51,27 @@ set(APOGEE_LINKS_agent contracts)
 set(APOGEE_LINKS_agentloop agent contracts embedstore harness logger platform)
 set(APOGEE_LINKS_knowledge agentloop contracts embedstore harness)
 set(APOGEE_LINKS_graph agentloop contracts embedstore harness knowledge)
-set(APOGEE_LINKS_tools agent agentloop contracts embedstore harness platform)
+set(APOGEE_LINKS_tools agent agentloop contracts embedstore graph harness platform)
 set(APOGEE_LINKS_mcp agent contracts events platform transport)
 set(APOGEE_LINKS_models contracts modelstore platform transport)
 set(APOGEE_LINKS_training contracts platform transport)
-set(APOGEE_LINKS_scaffold contracts)
+set(APOGEE_LINKS_tasks agent agentloop contracts logger platform)
+set(APOGEE_LINKS_symphony agent agentloop contracts harness)
+set(APOGEE_LINKS_scaffold contracts symphony)
 
 # ---- Presentation -----------------------------------------------------------
 set(APOGEE_LINKS_markdown ansi)
 set(APOGEE_LINKS_render "")
 set(APOGEE_LINKS_views agentloop ansi contracts markdown platform)
-set(APOGEE_LINKS_machine agent agentloop contracts)
+set(APOGEE_LINKS_machine agent agentloop contracts tasks)
 set(APOGEE_LINKS_operations agentloop contracts embedstore graph harness knowledge logger
-                            training)
+                            symphony training)
 set(APOGEE_LINKS_httpserver agent agentloop contracts embedstore events graph harness knowledge
-                            logger operations scaffold secrets tools training)
+                            logger operations scaffold secrets symphony tasks tools training)
 set(APOGEE_LINKS_cli agent agentloop ansi backends contracts embedstore events graph harness
                      httpserver knowledge logger machine mcp models modelstore operations
-                     platform render scaffold secrets tools training transport version views)
+                     platform render scaffold secrets symphony tasks tools training transport
+                     version views)
 
 # ---- The index both enforcers read ------------------------------------------
 # APOGEE_MODULES (every module, lowest layer first), APOGEE_MODULE_LAYER_<m>

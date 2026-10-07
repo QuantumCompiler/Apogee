@@ -36,8 +36,20 @@ struct GraphStats {
     /// Chunks the last build failed to extract.
     std::int64_t failed_chunks = 0;
     std::string extract_model;
-    /// Stored label-propagation communities with summaries.
+    /// Stored label-propagation communities (with a summary or without).
     std::int64_t communities = 0;
+    /// Communities stored without a summary (clustered, never summarised).
+    std::int64_t communities_unsummarised = 0;
+    /// The origin split (schema v6): edges a parse stated, edges a model
+    /// asserted.
+    std::int64_t edges_extracted = 0;
+    std::int64_t edges_inferred = 0;
+    /// The code layer: parsed files per language, code mentions, and the
+    /// unresolved references' name nodes.
+    std::map<std::string, std::int64_t> code_files_by_language;
+    std::int64_t code_files = 0;
+    std::int64_t code_mentions = 0;
+    std::int64_t unresolved_names = 0;
 
     [[nodiscard]] bool built() const noexcept {
         return nodes > 0;
@@ -73,14 +85,72 @@ struct NodeResult {
 /// One edge incident to a node, joined with the peer it connects to.
 /// Direction is from the queried node's perspective.
 struct Neighbor {
+    /// The edge's row id -- the handle its sites are read by.
+    std::int64_t edge_id = 0;
     std::string relation;
     std::string description;
     std::int64_t weight = 1;
+    /// `extracted` or `inferred`.
+    std::string origin;
+    /// Set for an extracted edge (1.0); a negative value means not recorded.
+    double confidence = -1.0;
     /// True: queried node -> peer; false: peer -> queried node.
     bool outgoing = true;
     std::int64_t peer_id = 0;
     std::string peer_name;
     std::string peer_type;
+};
+
+// ---- Navigation reads (27l) ----------------------------------------------------
+//
+// What `graph/navigate` walks with: edges by node, relation and direction,
+// counted or capped in SQL so a hub never loads its whole edge list to show
+// twelve; the entity index over names alone; a code node by the line its
+// span holds, or by its unqualified name. Reads only -- navigation never
+// writes.
+
+/// Which way an edge runs from the node asked about.
+enum class EdgeDirection : std::uint8_t {
+    /// Either way.
+    Both,
+    /// The node is the edge's source: what it calls, imports, is defined in.
+    Out,
+    /// The node is the edge's target: what calls it, imports it, is in it.
+    In,
+};
+
+/// What a neighbour read narrows to. Empty fields mean "any".
+struct NeighborFilter {
+    /// Only these relations.
+    std::vector<std::string> relations;
+    EdgeDirection direction = EdgeDirection::Both;
+    /// Only peers of this type (`decision`, `function`, ...).
+    std::string peer_type;
+};
+
+/// How many edges of one relation a node has one way.
+struct RelationCount {
+    std::string relation;
+    /// True: the node is the source.
+    bool outgoing = true;
+    std::int64_t count = 0;
+};
+
+/// A file the code layer mentions something in, under its source member.
+struct CodeFile {
+    std::string collection;
+    std::string file;
+};
+
+/// A code node's definition or declaration whose lines hold a given line.
+struct CodeSpan {
+    std::int64_t node_id = 0;
+    std::string collection;
+    std::string file;
+    std::int64_t line = 0;
+    /// The span's last line; equal to `line` for a one-line statement.
+    std::int64_t end_line = 0;
+    std::string role;
 };
 
 /// The expansion defaults a collection's `graph:` block falls back to.
@@ -107,6 +177,8 @@ struct ExpandEntity {
 /// One relation on the traversed neighbourhood, carrying display names so a
 /// caller renders triples without re-querying.
 struct ExpandEdge {
+    /// `extracted` or `inferred` -- what the rendering labels.
+    std::string origin;
     std::int64_t source_id = 0;
     std::int64_t target_id = 0;
     std::string source_name;

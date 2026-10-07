@@ -101,7 +101,7 @@ struct Fixture {
         request.promote = [this](std::string_view run_id) {
             promoted.emplace_back(run_id);
             return apogee::training::CyclePromotion{
-                .ok = true, .version = next_version++, .gguf_path = "/v.gguf"};
+                .ok = true, .version = next_version++, .weights_path = "/v.gguf"};
         };
         return request;
     }
@@ -206,6 +206,21 @@ TEST_CASE("the lock is exclusive, released on destruction and by hand, and re-ac
         CHECK(apogee::training::cycle_lock_held(fixture.cycle));
     }
     CHECK_FALSE(apogee::training::cycle_lock_held(fixture.cycle));
+}
+
+TEST_CASE("a lock a crashed cycle left is refused naming the file, never taken over",
+          "[training][cycle][lock]") {
+    // The lock is the platform seam's PidLock since 27h, which can take a dead
+    // holder's lock over -- for a task. The cycle's rule stays its own: the
+    // refusal names the file and the way out.
+    const Fixture fixture;
+    write(fixture.cycle / "cycle.lock", "999999999\n");
+    std::string error;
+    CHECK_FALSE(CycleLock::acquire(fixture.cycle, error).has_value());
+    CHECK(error ==
+          "another cycle is already running (lock: " + (fixture.cycle / "cycle.lock").string() +
+              "). If none is, remove the file and run again");
+    CHECK(read(fixture.cycle / "cycle.lock") == "999999999\n");
 }
 
 TEST_CASE(

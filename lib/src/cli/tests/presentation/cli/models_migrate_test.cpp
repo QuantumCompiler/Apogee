@@ -21,6 +21,7 @@
 #include "modelstore/store.h"
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
+#include "support/mlx_model.h"
 #include "training/manifest.h"
 #include "training/store.h"
 
@@ -216,4 +217,25 @@ TEST_CASE("migrate --yes moves every model and repoints everything that named on
     // And there is nothing left to do.
     REQUIRE(home.run({"models", "migrate"}, &out) == 0);
     CHECK(out.find("nothing to migrate") != std::string::npos);
+}
+
+TEST_CASE("migrate moves a flat MLX model into mlx/ and repoints the backend naming it",
+          "[commands][models][migrate][mlx]") {
+    const Home home;
+    const std::filesystem::path flat_mlx = home.models / "mlx-community--M-4bit";
+    apogee::testing::write_mlx_model(flat_mlx);
+    {
+        std::ofstream config{home.config_path, std::ios::app};
+        config << "  fast:\n    type: mlx\n    model_path: " << flat_mlx.string() << "/\n";
+    }
+    std::string out;
+    REQUIRE(home.run({"models", "migrate", "--yes"}, &out) == 0);
+
+    const apogee::models::StoreRoots roots = apogee::models::StoreRoots::at(home.models);
+    const std::vector<apogee::models::StoredMlx> stored =
+        apogee::models::list_store_mlx(roots, "mlx-community--M-4bit");
+    REQUIRE(stored.size() == 1);
+    CHECK(apogee::models::list_store_snapshots(roots, "mlx-community--M-4bit").empty());
+    const apogee::harness::Config config = apogee::harness::load_config(home.config_path);
+    CHECK(config.backends.at("fast").model_path == stored.front().dir.string());
 }

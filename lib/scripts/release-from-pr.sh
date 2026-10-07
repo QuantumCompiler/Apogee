@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# release-from-pr.sh -- tag and publish the release a merged pull request makes.
+# release-from-pr.sh -- tag and publish the release a merged pull request makes,
+# or the re-cut a dispatch of CI asks for.
 #
 #   release-from-pr.sh <pr-number>             rehearse: every check, no changes
 #   release-from-pr.sh <pr-number> --publish   tag the merge commit and publish
+#   release-from-pr.sh --recut <dir> [--run <id>] [--publish]
+#                                              the re-cut: a CI run's own fresh
+#                                              archives, downloaded into <dir>,
+#                                              released at the commit checked out
 #
 # CI's `tag and release` job runs this with --publish when a pull request into
 # `stable` is merged (user decision, 2026-09-25). Nothing is rebuilt: each
@@ -12,6 +17,18 @@
 # --publish it is a rehearsal: the same lookups and checks, then what it would
 # have published. CI runs one on request (Actions -> CI -> Run workflow, with
 # the PR number), and so can anyone with `gh` signed in, from a checkout.
+#
+# The RE-CUT (since 2026-10-04, M8, when the separate manual release workflow
+# was retired) is the one other way a release is published: CI dispatched with
+# `publish` on the release branch -- `make -C lib/src/cli release` does that --
+# builds every target from that commit, and once every build has passed, its
+# `tag and release` job runs this with --recut on the run's own archives. It is
+# for a merge whose own archives could not be released (the tree check refused
+# them, or they expired) and for a deleted release cut again. It shares every
+# step below but the first and the fourth: the commit is the one checked out,
+# which must be on the release branch -- a release is merged code, whichever
+# way it is cut -- and the archives are the run's own, each holding the record
+# of that commit's tree.
 #
 # In order, each a hard stop:
 #
@@ -34,8 +51,17 @@
 #   4b. Unchanged -- the latest release's CLI archives, downloaded and
 #      re-published as they are. The binary for this host is run, to prove
 #      the copy starts; it reports the CLI version it was built as.
-#   5. The tag at the merge commit and the release in ONE `gh release
-#      create`, so no tag is ever left behind without its release.
+#   4c. The re-cut -- the run's own build. The platforms are the run's
+#      successful `build <target>` jobs, as in 4a; every one's archive in
+#      <dir>, its .source naming the checked-out commit's tree; the binary for
+#      this host, run, and -- when the CLI changed since the latest release --
+#      reporting that version, as in 4a. In a re-cut a version already
+#      released at another commit is REFUSED rather than declined: a re-cut is
+#      asked for by name, so publishing nothing is a failure to report.
+#   5. The tag at the commit released and the release in ONE `gh release
+#      create`, so no tag is ever left behind without its release. In a
+#      re-cut, a release its tag already marks is finished only while it
+#      lacks an archive: one carrying them all is released, and refused.
 #
 # Needs gh (GH_TOKEN, and GH_REPO or a checkout of the repository), a checkout
 # with the history back to the latest release (CI's is complete), tar and
@@ -48,7 +74,7 @@ CI_WORKFLOW="${CI_WORKFLOW:-ci.yml}"
 scripts="$(cd "$(dirname "$0")" && pwd)"
 
 usage() {
-    sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 die() {
@@ -70,17 +96,40 @@ note() {
 
 pr=""
 publish=0
-for arg in "$@"; do
-    case "$arg" in
+recut_dir=""
+run_id_arg=""
+while [ $# -gt 0 ]; do
+    case "$1" in
         --publish) publish=1 ;;
+        --recut)
+            [ $# -ge 2 ] || { usage >&2; exit 2; }
+            recut_dir="$2"
+            shift
+            ;;
+        --run)
+            [ $# -ge 2 ] || { usage >&2; exit 2; }
+            run_id_arg="$2"
+            shift
+            ;;
         -h | --help) usage; exit 0 ;;
         *)
-            [ -z "$pr" ] || die "one pull request number, please (got '$pr' and '$arg')"
-            pr="$arg"
+            [ -z "$pr" ] || die "one pull request number, please (got '$pr' and '$1')"
+            pr="$1"
             ;;
     esac
+    shift
 done
-[[ "$pr" =~ ^[0-9]+$ ]] || { usage >&2; exit 2; }
+if [ -n "$recut_dir" ]; then
+    [ -z "$pr" ] || die "a re-cut releases a CI run's own build, not a pull request's (got #$pr with --recut)"
+    [ -d "$recut_dir" ] || die "--recut names a directory of the run's archives; '$recut_dir' is not one"
+    recut_dir="$(cd "$recut_dir" && pwd)"
+    run_id="${run_id_arg:-${GITHUB_RUN_ID:-}}"
+    [[ "$run_id" =~ ^[0-9]+$ ]] ||
+        die "a re-cut needs the CI run that built the archives: --run <id> (on a runner, GITHUB_RUN_ID)"
+else
+    [ -z "$run_id_arg" ] || die "--run belongs to --recut"
+    [[ "$pr" =~ ^[0-9]+$ ]] || { usage >&2; exit 2; }
+fi
 git rev-parse --git-dir >/dev/null 2>&1 || die "run this from a checkout of the repository"
 
 work="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/apogee-release.XXXXXX")"
@@ -108,6 +157,32 @@ have_commit() {
         die "could not fetch commit $1 from origin"
 }
 
+# The platforms a run built are its successful `build <target>` jobs, so the
+# set released follows the build matrix with no list kept here.
+built_targets() {
+    api "repos/{owner}/{repo}/actions/runs/$1/jobs?per_page=100" \
+        --jq '.jobs[] | select(.conclusion == "success") | .name | select(startswith("build ")) | ltrimstr("build ")'
+}
+
+if [ -n "$recut_dir" ]; then
+# --- 1. The re-cut: the commit checked out, on the release branch ------------
+
+release_sha="$(git rev-parse HEAD)"
+branch_sha="$(api "repos/{owner}/{repo}/commits/$RELEASE_BRANCH" --jq '.sha')" ||
+    die "could not read the tip of '$RELEASE_BRANCH'"
+have_commit "$branch_sha"
+git merge-base --is-ancestor "$release_sha" "$branch_sha" ||
+    die "${release_sha:0:7} is not on '$RELEASE_BRANCH': a release is merged code, so a re-cut is dispatched on '$RELEASE_BRANCH' (make -C lib/src/cli release)"
+
+if [ "$publish" = 1 ]; then
+    note "### Re-cut from CI run $run_id"
+else
+    note "### Re-cut rehearsal for CI run $run_id -- nothing is published"
+fi
+note ""
+note "- \`${release_sha:0:7}\`, on '$RELEASE_BRANCH'"
+
+else
 # --- 1. The pull request -----------------------------------------------------
 
 facts="$(api "repos/{owner}/{repo}/pulls/$pr" \
@@ -135,13 +210,15 @@ if [ "$merged" = true ]; then
 else
     note "- $state; rehearsing against GitHub's test merge \`$merge_sha\`"
 fi
+release_sha="$merge_sha"
+fi
 
 # --- 2. The release, and whether it is already out ---------------------------
 
-version="$(git show "$merge_sha:lib/release/VERSION" 2>/dev/null | tr -d ' \r\n')" ||
-    die "the merge $merge_sha has no lib/release/VERSION to name the release"
+version="$(git show "$release_sha:lib/release/VERSION" 2>/dev/null | tr -d ' \r\n')" ||
+    die "the commit $release_sha has no lib/release/VERSION to name the release"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
-    die "lib/release/VERSION at $merge_sha must hold the release as x.y.z (got '$version')"
+    die "lib/release/VERSION at $release_sha must hold the release as x.y.z (got '$version')"
 tag="v$version"
 
 # `git/ref/tags/<tag>` and never a bare name: the version branch shares it.
@@ -160,9 +237,12 @@ fi
 
 if [ -z "$tag_sha" ]; then
     action=create
-elif [ "$tag_sha" = "$merge_sha" ]; then
+elif [ "$tag_sha" = "$release_sha" ]; then
     action=finish
     note "- $tag already tags this commit: an earlier attempt made it, and this one finishes the release"
+elif [ -n "$recut_dir" ]; then
+    note "- **$tag is already released**, from \`${tag_sha:0:7}\`: the re-cut publishes nothing over it."
+    die "$tag is already released from ${tag_sha:0:7}; nothing was published. To cut it again, delete it first (gh release delete $tag --cleanup-tag), or bump lib/release/VERSION to cut the next release"
 else
     note "- **$tag is already released**, from \`${tag_sha:0:7}\`, so this merge publishes nothing."
     note "  Bump \`lib/release/VERSION\` to cut the next release."
@@ -175,7 +255,7 @@ found="$("$scripts/latest-release.sh" --exclude "$tag")" || die "could not look 
 latest="" latest_sha=""
 [ -z "$found" ] || read -r latest latest_sha <<<"$found"
 [ -z "$latest_sha" ] || have_commit "$latest_sha"
-cli_changed="$("$scripts/changed.sh" cli "$latest_sha" "$merge_sha" | tail -1)"
+cli_changed="$("$scripts/changed.sh" cli "$latest_sha" "$release_sha" | tail -1)"
 cli_changed="${cli_changed#cli=}"
 
 # The one file named $1 under $2, wherever the download put it.
@@ -217,7 +297,40 @@ run_host_binary() {
 }
 
 assets=()
-if [ "$cli_changed" = true ]; then
+if [ -n "$recut_dir" ]; then
+    # --- 4c. The re-cut: this run's own build --------------------------------
+    tree="$(git rev-parse "$release_sha^{tree}")"
+    targets="$(built_targets "$run_id")" || die "could not list the jobs of run $run_id"
+    [ -n "$targets" ] || die "CI run $run_id has no successful build job, so there is nothing to release"
+    note "- CI run $run_id built $(echo $targets)"
+    for target in $targets; do
+        case "$target" in
+            windows-*) ext=zip ;;
+            *) ext=tar.gz ;;
+        esac
+        archive="$(found_file "apogee-$target.$ext" "$recut_dir")"
+        source_file="$(found_file "apogee-$target.source" "$recut_dir")"
+        [ -n "$archive" ] || die "run $run_id built $target, but $recut_dir holds no apogee-$target.$ext"
+        [ -n "$source_file" ] ||
+            die "$recut_dir holds no apogee-$target.source, so what apogee-$target was built from is unknown"
+        built_tree="$(awk '$1 == "tree" { print $2 }' "$source_file")"
+        [ "$built_tree" = "$tree" ] ||
+            die "apogee-$target was not built from ${release_sha:0:7} (its record: $(tr '\n' ' ' <"$source_file")-- the commit is tree ${tree:0:12}); nothing was published"
+        check_archive "$target" "$archive"
+        assets+=("$archive")
+    done
+    note "- every archive was built from \`${release_sha:0:7}\`'s source tree \`${tree:0:12}\`"
+
+    run_host_binary "$recut_dir"
+    cli_version="$(printf '%s\n' "$reported" | awk 'NR == 1 && $1 == "apogee" { print $2 }')"
+    if [ "$cli_changed" = true ]; then
+        [ "$cli_version" = "$version" ] ||
+            die "the CLI changed since ${latest:-the start}, so it ships in $tag and must report $version -- but the binaries report '$reported' (set project(... VERSION $version) in lib/src/cli/CMakeLists.txt)"
+        note "- the executable reports \`$reported\`"
+    else
+        note "- the CLI is unchanged since $latest: rebuilt from source, it reports \`$reported\`"
+    fi
+elif [ "$cli_changed" = true ]; then
     # --- 4a. The pull request's own build ------------------------------------
     tree="$(git rev-parse "$merge_sha^{tree}")"
     runs="$(api "repos/{owner}/{repo}/actions/workflows/$CI_WORKFLOW/runs?event=pull_request&head_sha=$head_sha&status=success&per_page=20" \
@@ -227,12 +340,7 @@ if [ "$cli_changed" = true ]; then
     run_id=""
     targets=""
     for id in $runs; do
-        # The platforms this run built are its successful `build <target>`
-        # jobs, so the set released follows the build matrix with no list
-        # kept here.
-        built="$(api "repos/{owner}/{repo}/actions/runs/$id/jobs?per_page=100" \
-            --jq '.jobs[] | select(.conclusion == "success") | .name | select(startswith("build ")) | ltrimstr("build ")')" ||
-            die "could not list the jobs of run $id"
+        built="$(built_targets "$id")" || die "could not list the jobs of run $id"
         [ -n "$built" ] || continue
         have="$(api "repos/{owner}/{repo}/actions/runs/$id/artifacts?per_page=100" \
             --jq '.artifacts[] | select(.expired | not) | .name')" ||
@@ -248,7 +356,7 @@ if [ "$cli_changed" = true ]; then
         fi
     done
     [ -n "$run_id" ] ||
-        die "no successful CI run of #$pr's head ${head_sha:0:7} holds an archive for every platform it built (none ran, or the artifacts expired); nothing was published -- the manual path rebuilds: make -C lib/src/cli release VERSION=$version"
+        die "no successful CI run of #$pr's head ${head_sha:0:7} holds an archive for every platform it built (none ran, or the artifacts expired); nothing was published -- the re-cut rebuilds: make -C lib/src/cli release VERSION=$version"
     note "- the CLI changed since ${latest:-the start}: CI run $run_id built $(echo $targets)"
 
     gh run download "$run_id" --pattern 'apogee-*' --dir "$work/artifacts" >/dev/null
@@ -266,7 +374,7 @@ if [ "$cli_changed" = true ]; then
 
         built_tree="$(awk '$1 == "tree" { print $2 }' "$source_file")"
         [ "$built_tree" = "$tree" ] ||
-            die "apogee-$target was not built from the merge's source (its record: $(tr '\n' ' ' <"$source_file")-- the merge ${merge_sha:0:7} is tree ${tree:0:12}): '$RELEASE_BRANCH' moved after #$pr's last CI run, so these archives are not the merged source. Nothing was published -- the manual path rebuilds: make -C lib/src/cli release VERSION=$version"
+            die "apogee-$target was not built from the merge's source (its record: $(tr '\n' ' ' <"$source_file")-- the merge ${merge_sha:0:7} is tree ${tree:0:12}): '$RELEASE_BRANCH' moved after #$pr's last CI run, so these archives are not the merged source. Nothing was published -- the re-cut rebuilds: make -C lib/src/cli release VERSION=$version"
         check_archive "$target" "$archive"
         assets+=("$archive")
     done
@@ -297,9 +405,25 @@ fi
 
 # --- 5. Publish ---------------------------------------------------------------
 
+# A re-cut onto a tag that already marks this commit finishes an attempt that
+# stopped partway -- a release missing, or missing archives. A release that
+# carries every one is out, and a re-cut never replaces published binaries.
+if [ -n "$recut_dir" ] && [ "$action" = finish ] && gh release view "$tag" >/dev/null 2>&1; then
+    published="$(gh release view "$tag" --json assets --jq '.assets[].name')" ||
+        die "could not list the archives of $tag"
+    missing=0
+    for archive in "${assets[@]}"; do
+        printf '%s\n' "$published" | grep -Fqx "$(basename "$archive")" || missing=1
+    done
+    if [ "$missing" = 0 ]; then
+        note "- **$tag is already released** at this commit with every archive: the re-cut publishes nothing over it."
+        die "$tag is already released at ${release_sha:0:7}; nothing was published. To cut it again, delete it first (gh release delete $tag --cleanup-tag), or bump lib/release/VERSION to cut the next release"
+    fi
+fi
+
 if [ "$publish" != 1 ]; then
     if [ "$action" = create ]; then
-        note "- **would tag $tag at \`${merge_sha:0:7}\` and publish its release** with ${#assets[@]} archives"
+        note "- **would tag $tag at \`${release_sha:0:7}\` and publish its release** with ${#assets[@]} archives"
     else
         note "- **would finish $tag's release** with ${#assets[@]} archives"
     fi
@@ -307,8 +431,8 @@ if [ "$publish" != 1 ]; then
 fi
 
 if [ "$action" = create ]; then
-    # --target makes the tag at the merge commit in the same call as the release.
-    gh release create "$tag" --target "$merge_sha" --title "$tag" --generate-notes "${assets[@]}"
+    # --target makes the tag at the commit in the same call as the release.
+    gh release create "$tag" --target "$release_sha" --title "$tag" --generate-notes "${assets[@]}"
 else
     # gh release create can make the release and then fail partway through the
     # uploads; this attempt uploads into it rather than failing on it.
@@ -316,4 +440,4 @@ else
         gh release create "$tag" --verify-tag --title "$tag" --generate-notes
     gh release upload "$tag" "${assets[@]}" --clobber
 fi
-note "- **published $tag** at \`${merge_sha:0:7}\` with ${#assets[@]} archives"
+note "- **published $tag** at \`${release_sha:0:7}\` with ${#assets[@]} archives"

@@ -2,11 +2,18 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <sqlite3.h>
+
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <optional>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 #include "embedstore/fts.h"
@@ -195,4 +202,45 @@ TEST_CASE("an empty corpus answers nothing rather than failing", "[embedstore][s
     CHECK(store.search("anything", 5).empty());
     CHECK(store.chunk_count() == 0);
     CHECK(store.sources().empty());
+}
+
+TEST_CASE("an open waits out another connection's lock on the file rather than failing",
+          "[embedstore][store][concurrency]") {
+    // The last connection to close a WAL database checkpoints it under the
+    // file's exclusive lock, and an open landing in that window must wait --
+    // what the busy timeout is for. The open's first statement, the WAL
+    // pragma, already reads the file, so the timeout has to be set before it:
+    // set after, the plane's list of a graph a job had just finished with
+    // could answer 500 "database is locked" while the job's store closed.
+    // Here another connection holds the lock for a moment, then lets go.
+    Scratch scratch;
+    {
+        Store store{scratch.db()};
+        store.replace_source("doc", {"content"});
+    }
+    sqlite3* raw = nullptr;
+    REQUIRE(sqlite3_open(scratch.db().string().c_str(), &raw) == SQLITE_OK);
+    std::unique_ptr<sqlite3, int (*)(sqlite3*)> holder{raw, sqlite3_close};
+    // Exclusive locking mode: the file's lock, once a write takes it, is
+    // held until the connection closes.
+    REQUIRE(sqlite3_exec(raw,
+                         "PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; "
+                         "DELETE FROM store_meta WHERE key = 'no such key'",
+                         nullptr, nullptr, nullptr) == SQLITE_OK);
+    std::thread release{[&holder] {
+        std::this_thread::sleep_for(std::chrono::milliseconds{300});
+        (void)sqlite3_exec(holder.get(), "COMMIT", nullptr, nullptr, nullptr);
+        holder.reset();
+    }};
+    std::string error;
+    std::optional<Store> opened;
+    try {
+        opened.emplace(scratch.db());
+    } catch (const std::exception& e) {
+        error = e.what();
+    }
+    release.join();
+    INFO(error);
+    REQUIRE(opened.has_value());
+    CHECK(opened->chunk_count() == 1);
 }

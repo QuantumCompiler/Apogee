@@ -18,8 +18,8 @@
 /// store is a **cloud** model, whose manifest carries an empty `layers` array
 /// because the weights live on Ollama's servers. That case is covered below —
 /// it is exactly the "manifest exists, nothing local" path — but it means the
-/// happy path could not be characterized live here and is built to the layout
-/// Ommi verified on its own host and documented in `store.go`.
+/// happy path could not be characterized live here and is built to Ollama's
+/// on-disk store layout.
 namespace {
 
 using apogee::models::find_in_store;
@@ -175,7 +175,7 @@ TEST_CASE("a manifest naming a blob that is gone reports absent", "[models][olla
 TEST_CASE("a projector layer is read as its own file", "[models][ollama][vision]") {
     // Checked against the live registry before this was built: `llava` and
     // `moondream` both carry `application/vnd.ollama.image.projector` as a
-    // SEPARATE layer beside the model. The plan inherited from Ommi was to
+    // SEPARATE layer beside the model. The original plan was to
     // *extract* a projector out of a combined blob -- and the manifests say
     // there is nothing to extract, so this reads a second file instead.
     Store store;
@@ -291,7 +291,7 @@ TEST_CASE("the store reader has no way to delete anything", "[models][ollama][sa
     // identical license, template, and sometimes weight layers. Removing one
     // because "its" model is going away silently corrupts every sibling.
     //
-    // Apogee's rule, carried from Ommi, is that the only mutation of this store
+    // Apogee's rule is that the only mutation of this store
     // is `ollama rm` -- the vendor's own reference-counting GC. That rule is
     // kept structurally rather than by review: this module exposes no delete,
     // so there is nothing here to misuse. This test is the record of why the

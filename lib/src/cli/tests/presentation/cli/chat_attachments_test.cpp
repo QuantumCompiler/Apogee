@@ -1,24 +1,37 @@
 #include "cli/chat_attachments.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <csignal>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "agentloop/media.h"
+#include "backends/mlx_local.h"
 #include "backends/mock.h"
 #include "contracts/config.h"
+#include "contracts/layout.h"
+#include "embedstore/store.h"
 #include "harness/harness.h"
+#include "operations/graph_sources.h"
+#include "operations/retrieval.h"
 #include "platform/child_process.h"
 #include "support/env_guard.h"
+#include "support/fake_mlx_driver.h"
 #include "support/media_fakes.h"
+#include "tools/graph_nav.h"
+#include "tools/toolsets.h"
 
 using apogee::commands::ChatAttachments;
 using apogee::commands::existing_mention;
@@ -32,6 +45,10 @@ class CountingEmbeddings final : public apogee::harness::LLMProvider,
 public:
     std::atomic<int> texts{0};
     bool metered = false;
+    /// Calls so far, and from which one on a call is held until its
+    /// cancellation -- Ctrl-C at the turn that waits on the attach (0: never).
+    std::atomic<int> calls{0};
+    std::atomic<int> hold_from{0};
 
     [[nodiscard]] std::string_view backend_name() const noexcept override {
         return "embedder";
@@ -54,7 +71,14 @@ public:
 
     [[nodiscard]] std::vector<std::vector<float>> embed(
         const std::vector<std::string>& inputs,
-        const apogee::harness::CancellationToken&) override {
+        const apogee::harness::CancellationToken& cancellation) override {
+        if (const int call = ++calls; hold_from > 0 && call >= hold_from) {
+            const auto until = std::chrono::steady_clock::now() + std::chrono::seconds{20};
+            while (!cancellation.stop_requested() && std::chrono::steady_clock::now() < until) {
+                std::this_thread::sleep_for(std::chrono::milliseconds{5});
+            }
+            cancellation.throw_if_cancelled();
+        }
         texts += static_cast<int>(inputs.size());
         std::vector<std::vector<float>> out;
         for (const std::string& input : inputs) {
@@ -86,14 +110,18 @@ struct Fixture {
     std::unique_ptr<apogee::harness::Harness> harness;
     apogee::logger::Session session;
     std::vector<std::string> said;
+    /// The lines said as warnings, again.
+    std::vector<std::string> warned;
 
-    explicit Fixture(bool embedding_role = true) {
+    /// `extra` is YAML at the config's top level.
+    explicit Fixture(bool embedding_role = true, const std::string& extra = {}) {
         std::filesystem::create_directories(work);
         const std::string models = embedding_role ? "models:\n  default_embedding: embedder\n" : "";
         const apogee::harness::Config config = apogee::harness::parse_config(
             models +
                 "backends:\n  chat:\n    type: mock\n    context_size: 8000\n  embedder:\n"
-                "    type: mock\n",
+                "    type: mock\n" +
+                extra,
             "<test>");
         harness = std::make_unique<apogee::harness::Harness>(config);
         harness->register_provider("chat", std::make_shared<apogee::backends::MockProvider>(
@@ -106,10 +134,17 @@ struct Fixture {
 
     [[nodiscard]] ChatAttachments::Hooks hooks() {
         return ChatAttachments::Hooks{
-            .say = [this](const std::string& line, bool) { said.push_back(line); },
+            .say =
+                [this](const std::string& line, bool warning) {
+                    said.push_back(line);
+                    if (warning) {
+                        warned.push_back(line);
+                    }
+                },
             .progress = {},
             .confirm_large = {},
-            .save = false};
+            .save = false,
+            .built_in_graph = apogee::harness::AttachmentGraphMethod::Code};
     }
 
     void write(const std::string& name, const std::string& text) const {
@@ -479,7 +514,8 @@ struct MediaChat {
             .say = [this](const std::string& line, bool) { said.push_back(line); },
             .progress = {},
             .confirm_large = confirm,
-            .save = false};
+            .save = false,
+            .built_in_graph = apogee::harness::AttachmentGraphMethod::Code};
     }
 
     void write(const std::string& name, const std::string& bytes = "PNGBYTES") const {
@@ -580,6 +616,145 @@ TEST_CASE("a chat model that cannot see has its images described by the vision r
     REQUIRE(turn.inlined.size() == 1);
     CHECK(turn.inlined.front().parts.empty());
     CHECK(turn.inlined.front().text.find("1,284.50 EUR") != std::string::npos);
+}
+
+namespace {
+
+/// A chat on an `mlx` entry (27c): the real provider over a scripted
+/// driver, so what the attachments decide is what the backend is asked.
+struct MlxMediaChat {
+    apogee::testing::TempDir home{"chat-mlx-media-" + std::to_string(std::random_device{}())};
+    apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    std::filesystem::path work = home.path() / "work";
+    std::shared_ptr<apogee::testing::DriverState> driver =
+        std::make_shared<apogee::testing::DriverState>();
+    std::vector<apogee::platform::ChildCommand> commands;
+    std::shared_ptr<apogee::backends::MlxLocalProvider> chat;
+    std::shared_ptr<apogee::testing::MediaProvider> eyes =
+        std::make_shared<apogee::testing::MediaProvider>();
+    std::unique_ptr<apogee::harness::Harness> harness;
+    apogee::logger::Session session;
+    std::vector<std::string> said;
+
+    MlxMediaChat(bool vision, const std::string& roles) {
+        std::filesystem::create_directories(work);
+        driver->vision_startup = std::string{apogee::testing::kVisionReady};
+        driver->replies = {R"({"type":"text","id":{id},"text":"A red sign that says STOP."})"
+                           "\n"
+                           R"({"type":"done","id":{id},"finish":"stop","prompt_tokens":9,)"
+                           R"("cached_tokens":0,"completion_tokens":7})"
+                           "\n"};
+        apogee::backends::MlxLocalProvider::Options options;
+        options.backend_name = "chat";
+        options.model = "qwen3-vl";
+        options.model_dir = home.path() / "model";
+        options.info.model_type = "qwen3_vl";
+        options.info.chat_template = true;
+        options.info.vision = vision;
+        options.vision = vision;
+        options.vision_gap = vision ? "" : "it is not a vision model";
+        options.context_size = 8000;
+        chat = std::make_shared<apogee::backends::MlxLocalProvider>(
+            std::move(options),
+            [this](const apogee::platform::ChildCommand& command,
+                   std::string&) -> std::unique_ptr<apogee::testing::FakeDriver> {
+                commands.push_back(command);
+                driver->vision_spawn =
+                    std::ranges::find(command.arguments, "--vision") != command.arguments.end();
+                return std::make_unique<apogee::testing::FakeDriver>(driver);
+            });
+        const apogee::harness::Config config = apogee::harness::parse_config(
+            "models:\n  default: chat\n" + roles +
+                "backends:\n  chat:\n    type: mlx\n    model_path: " +
+                (home.path() / "model").string() + "\n  eyes:\n    type: mock\n",
+            "<test>");
+        harness = std::make_unique<apogee::harness::Harness>(config);
+        harness->register_provider("chat", chat);
+        harness->register_provider("eyes", eyes);
+        harness->use_default_router();
+        session.chat_id = "chat-mlx-media";
+        session.backend = "chat";
+        std::ofstream{work / "stop.png", std::ios::binary} << "PNGBYTES";
+    }
+
+    [[nodiscard]] ChatAttachments::Hooks hooks() {
+        return ChatAttachments::Hooks{
+            .say = [this](const std::string& line, bool) { said.push_back(line); },
+            .progress = {},
+            .confirm_large = {},
+            .save = false,
+            .built_in_graph = apogee::harness::AttachmentGraphMethod::Code};
+    }
+
+    [[nodiscard]] bool heard(std::string_view needle) const {
+        return std::ranges::any_of(
+            said, [&](const std::string& line) { return line.find(needle) != std::string::npos; });
+    }
+};
+
+}  // namespace
+
+TEST_CASE(
+    "an mlx vision model reads a picture as it is, through the one image pipeline; an mlx text "
+    "model has it described by the vision role instead",
+    "[commands][attachments][media][mlx]") {
+    SECTION("a vision model: read as it is, and described by itself for the turns after") {
+        MlxMediaChat fixture{true, ""};
+        CHECK(fixture.harness->can_read("chat", apogee::harness::Medium::Image));
+        ChatAttachments attached{*fixture.harness, fixture.session,
+                                 ChatAttachments::index_for("chat-mlx-media"), fixture.hooks()};
+        REQUIRE(attached.attach("stop.png", fixture.work));
+        attached.settle();
+        CHECK(fixture.heard("attached stop.png: 1 file, 1 chunk, described by chat, "));
+        CHECK(fixture.heard("read as it is with your next message"));
+        // The description went to the driver as a picture, loaded through mlx-vlm.
+        REQUIRE(fixture.commands.size() == 1);
+        CHECK(std::ranges::find(fixture.commands[0].arguments, "--vision") !=
+              fixture.commands[0].arguments.end());
+        const nlohmann::json sent = nlohmann::json::parse(fixture.driver->writes.at(0));
+        CHECK(sent["session"] == false);
+        CHECK(sent["messages"][0]["content"][0]["type"] == "image");
+        CHECK(sent["messages"][0]["content"][0]["image"] ==
+              "data:image/png;base64," + apogee::agentloop::base64_encode("PNGBYTES"));
+
+        const ChatAttachments::Turn first = attached.for_turn(
+            0, "what is it?",
+            apogee::agentloop::turn_budget(*fixture.harness, "chat", std::nullopt), 4, {});
+        REQUIRE(first.inlined.size() == 1);
+        CHECK(first.inlined.front().name == "stop.png (as it is)");
+        REQUIRE(first.inlined.front().parts.size() == 1);
+        CHECK(fixture.eyes->requests().empty());
+    }
+    SECTION("a text model: the vision role describes it, and the chat model is never sent it") {
+        MlxMediaChat fixture{false, "  default_vision: eyes\n"};
+        fixture.eyes->sees = true;
+        fixture.eyes->reply = [](const apogee::harness::ChatRequest&) {
+            return std::string{"A red sign that says STOP."};
+        };
+        CHECK_FALSE(fixture.harness->can_read("chat", apogee::harness::Medium::Image));
+        ChatAttachments attached{*fixture.harness, fixture.session,
+                                 ChatAttachments::index_for("chat-mlx-media"), fixture.hooks()};
+        REQUIRE(attached.attach("stop.png", fixture.work));
+        attached.settle();
+        CHECK(fixture.heard("attached stop.png: 1 file, 1 chunk, described by eyes, "));
+        CHECK_FALSE(fixture.heard("read as it is"));
+        const ChatAttachments::Turn turn = attached.for_turn(
+            0, "what is it?",
+            apogee::agentloop::turn_budget(*fixture.harness, "chat", std::nullopt), 4, {});
+        REQUIRE(turn.inlined.size() == 1);
+        CHECK(turn.inlined.front().parts.empty());
+        CHECK(turn.inlined.front().text.find("STOP") != std::string::npos);
+        CHECK(fixture.commands.empty());
+    }
+    SECTION("a text model and no vision role: refused, naming the role and the mlx way to see") {
+        MlxMediaChat fixture{false, ""};
+        ChatAttachments attached{*fixture.harness, fixture.session,
+                                 ChatAttachments::index_for("chat-mlx-media"), fixture.hooks()};
+        CHECK_FALSE(attached.attach("stop.png", fixture.work));
+        CHECK(fixture.heard("backend 'chat' cannot read images"));
+        CHECK(fixture.heard("an mlx backend over a vision model with mlx-vlm installed"));
+        CHECK(fixture.commands.empty());
+    }
 }
 
 TEST_CASE("media nothing here can read is refused, naming the role that would",
@@ -748,7 +923,9 @@ TEST_CASE("a folder rides its message with a map of itself; one file is its own 
 
     CHECK(fixture.session.attachments[0].map_at == std::optional<std::size_t>{2});
     CHECK_FALSE(fixture.session.attachments[1].map_at.has_value());
-    CHECK(attached.describe()[0].ends_with(", inlined, with a map of its folders"));
+    // A folder of code is graphed too (27n): its line ends with the graph's.
+    CHECK(attached.describe()[0].find(", inlined, with a map of its folders; graph: ") !=
+          std::string::npos);
 
     // Resumed, the same bytes on the same message: a cached prompt holds.
     ChatAttachments resumed{*fixture.harness, fixture.session, ChatAttachments::index_for("chat-1"),
@@ -838,4 +1015,953 @@ TEST_CASE("a map takes its place in the attachment share, and none is drawn on a
     blind.settle();
     CHECK(unknown.heard(", no map: the model's window is unknown -- "));
     CHECK(riding(blind.for_turn(0, "q", unknown.budget(), 4, {}), "proj (map)") == nullptr);
+}
+
+// ---- The attachment code graph (27n) ----------------------------------------
+
+namespace {
+
+/// The mini-repos 27k commits, one per vendored grammar.
+[[nodiscard]] std::filesystem::path code_fixtures() {
+    return std::filesystem::path{APOGEE_TEST_FIXTURES} / "code_graph";
+}
+
+/// A copy of `from` (under the fixtures' code_graph/, empty for all of it) at
+/// `fixture.work / as`.
+std::filesystem::path copy_code(const Fixture& fixture, const std::string& from,
+                                const std::string& as) {
+    const std::filesystem::path to = fixture.work / as;
+    std::filesystem::create_directories(to);
+    std::filesystem::copy(from.empty() ? code_fixtures() : code_fixtures() / from, to,
+                          std::filesystem::copy_options::recursive |
+                              std::filesystem::copy_options::overwrite_existing);
+    return to;
+}
+
+/// What `graph build --source` builds over `trees` -- 27k's entry, walking
+/// each tree itself -- in a store of its own beside the chat's.
+[[nodiscard]] std::string direct_dump(const Fixture& fixture,
+                                      const std::vector<std::filesystem::path>& trees) {
+    apogee::harness::NamedGraphConfig named;
+    for (const std::filesystem::path& tree : trees) {
+        named.sources.push_back(tree.generic_string());
+    }
+    const std::filesystem::path path =
+        fixture.home.path() / ("direct-" + std::to_string(std::random_device{}()) + ".db");
+    apogee::embedstore::Store store{path};
+    (void)apogee::commands::build_graph_sources(store, named, {});
+    return store.graph_dump();
+}
+
+[[nodiscard]] std::string chat_dump() {
+    return apogee::embedstore::Store{ChatAttachments::index_for("chat-1")}.graph_dump();
+}
+
+[[nodiscard]] std::vector<std::string> chat_members() {
+    return apogee::embedstore::Store{ChatAttachments::index_for("chat-1")}.code_members();
+}
+
+[[nodiscard]] bool said_graph(const Fixture& fixture) {
+    return std::ranges::any_of(fixture.said,
+                               [](const std::string& line) { return line.starts_with("graph:"); });
+}
+
+/// A harness with no backend at all: no chat model, no embedder, no key.
+struct Bare {
+    apogee::testing::TempDir home{"chat-attach-bare-" + std::to_string(std::random_device{}())};
+    apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    std::filesystem::path work = home.path() / "work";
+    std::unique_ptr<apogee::harness::Harness> harness;
+    apogee::logger::Session session;
+    std::vector<std::string> said;
+
+    Bare() {
+        std::filesystem::create_directories(work);
+        harness = std::make_unique<apogee::harness::Harness>(
+            apogee::harness::parse_config("# no backends\n", "<test>"));
+        harness->use_default_router();
+        session.chat_id = "chat-1";
+    }
+};
+
+}  // namespace
+
+TEST_CASE("a folder of code builds its graph in the chat's index, as graph build --source would",
+          "[commands][attachments][graph]") {
+    Fixture fixture;
+    // Every vendored grammar's mini-repo, and the goldens no grammar parses.
+    const std::filesystem::path tree = copy_code(fixture, "", "code");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), fixture.hooks()};
+    REQUIRE(attached.attach("code", fixture.work));
+    attached.settle();
+
+    // Byte for byte the graph 27k's own entry builds over the same files.
+    const std::string direct = direct_dump(fixture, {tree});
+    REQUIRE_FALSE(direct.empty());
+    CHECK(chat_dump() == direct);
+
+    // One line, after the attach line, its counts the graph's own.
+    const apogee::embedstore::GraphStats stats =
+        apogee::embedstore::Store{ChatAttachments::index_for("chat-1")}.graph_stats();
+    CHECK(stats.edges_inferred == 0);
+    const auto graph_line = std::ranges::find_if(
+        fixture.said, [](const std::string& line) { return line.starts_with("graph:"); });
+    REQUIRE(graph_line != fixture.said.end());
+    CHECK(std::prev(graph_line)->starts_with("attached code: "));
+    CHECK(graph_line->starts_with("graph: " + std::to_string(stats.nodes) + " nodes, " +
+                                  std::to_string(stats.edges) + " edges (supported: "));
+    CHECK(graph_line->find("python 4") != std::string::npos);
+    CHECK(graph_line->ends_with("; skipped: .golden 12)"));
+
+    CHECK(std::ranges::find(fixture.warned, *graph_line) == fixture.warned.end());
+
+    // Kept with the session, and repeated by /attachments.
+    REQUIRE(fixture.session.attachments.size() == 1);
+    REQUIRE(fixture.session.attachments[0].graph.has_value());
+    CHECK(fixture.session.attachments[0].graph->label == "code");
+    CHECK(fixture.session.attachments[0].graph->supported.size() == 12);
+    const std::vector<std::string> described = attached.describe();
+    REQUIRE(described.size() == 1);
+    CHECK(described[0].ends_with("; " + *graph_line));
+
+    // The chunks are indexed as ever: the graph is beside them.
+    CHECK(fixture.embeddings->texts > 0);
+}
+
+TEST_CASE("with no backend and no embedder, attaching a folder of code gets the full graph",
+          "[commands][attachments][graph]") {
+    Bare bare;
+    const std::filesystem::path tree = bare.work / "app";
+    std::filesystem::copy(code_fixtures() / "python", tree,
+                          std::filesystem::copy_options::recursive);
+    ChatAttachments attached{
+        *bare.harness, bare.session, ChatAttachments::index_for("chat-1"),
+        ChatAttachments::Hooks{
+            .say = [&bare](const std::string& line, bool) { bare.said.push_back(line); },
+            .progress = {},
+            .confirm_large = {},
+            .save = false,
+            .built_in_graph = apogee::harness::AttachmentGraphMethod::Code}};
+    // Named with a trailing separator: the same folder, the same label.
+    REQUIRE(attached.attach("app/", bare.work));
+    attached.settle();
+    CHECK(std::ranges::any_of(bare.said, [](const std::string& line) {
+        return line.find("searched by its words") != std::string::npos;
+    }));
+    CHECK(std::ranges::any_of(bare.said, [](const std::string& line) {
+        return line.starts_with("graph: ") &&
+               line.ends_with("(supported: python 4; skipped: none)");
+    }));
+    apogee::harness::NamedGraphConfig named;
+    named.sources = {tree.generic_string()};
+    apogee::embedstore::Store direct{bare.home.path() / "direct.db"};
+    (void)apogee::commands::build_graph_sources(direct, named, {});
+    CHECK(chat_dump() == direct.graph_dump());
+}
+
+TEST_CASE("a folder with no code, one file and a glob build no graph and say nothing of one",
+          "[commands][attachments][graph]") {
+    Fixture fixture;
+    fixture.write("docs/a.md", "alpha\n");
+    fixture.write("docs/b.txt", "beta\n");
+    fixture.write("docs/third_party/vendored.py", "def v():\n    pass\n");
+    copy_code(fixture, "python", "app");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), fixture.hooks()};
+    REQUIRE(attached.attach("docs", fixture.work));
+    REQUIRE(attached.attach("app/main.py", fixture.work));
+    REQUIRE(attached.attach("app/pkg/*.py", fixture.work));
+    attached.settle();
+    REQUIRE(fixture.session.attachments.size() == 3);
+    CHECK_FALSE(said_graph(fixture));
+    CHECK(chat_members().empty());
+    CHECK(chat_dump().empty());
+    for (const apogee::logger::Attachment& attachment : fixture.session.attachments) {
+        CHECK_FALSE(attachment.graph.has_value());
+    }
+    for (const std::string& line : attached.describe()) {
+        CHECK(line.find("graph") == std::string::npos);
+    }
+}
+
+TEST_CASE("re-attached, the graph converges on a fresh build; detached, its part alone goes",
+          "[commands][attachments][graph]") {
+    Fixture fixture;
+    const std::filesystem::path app = copy_code(fixture, "python", "app");
+    const std::filesystem::path shapes = copy_code(fixture, "cpp", "shapes");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), fixture.hooks()};
+    REQUIRE(attached.attach("app", fixture.work));
+    REQUIRE(attached.attach("shapes", fixture.work));
+    attached.settle();
+    CHECK(chat_members() == std::vector<std::string>{"app", "shapes"});
+    CHECK(chat_dump() == direct_dump(fixture, {app, shapes}));
+
+    // An edit, re-attached: the same member, updated to what a fresh build
+    // of the edited tree holds.
+    std::ofstream{app / "pkg" / "service.py", std::ios::app}
+        << "\n\ndef audit(user: User) -> str:\n    return user.greet()\n";
+    REQUIRE(attached.attach("app", fixture.work));
+    attached.settle();
+    CHECK(chat_members() == std::vector<std::string>{"app", "shapes"});
+    CHECK(chat_dump() == direct_dump(fixture, {app, shapes}));
+    REQUIRE(fixture.session.attachments.size() == 2);
+    CHECK(fixture.session.attachments[1].name == "app");
+    CHECK(fixture.session.attachments[1].graph->label == "app");
+
+    // Each folder's line counts its own part.
+    const std::vector<std::string> described = attached.describe();
+    REQUIRE(described.size() == 2);
+    CHECK(described[0].find("; graph: ") != std::string::npos);
+    CHECK(described[0].find("(supported: cpp 4; skipped: none)") != std::string::npos);
+    CHECK(described[1].find("(supported: python 4; skipped: none)") != std::string::npos);
+
+    // Detached: its part goes, the other's re-linked as a build of it alone.
+    REQUIRE(attached.detach("app"));
+    CHECK(chat_members() == std::vector<std::string>{"shapes"});
+    CHECK(chat_dump() == direct_dump(fixture, {shapes}));
+    REQUIRE(attached.detach("shapes"));
+    CHECK(chat_members().empty());
+    CHECK(chat_dump().empty());
+}
+
+TEST_CASE("two folders of one name are two members; a resumed chat updates its own",
+          "[commands][attachments][graph]") {
+    Fixture fixture;
+    copy_code(fixture, "python", "a/src");
+    copy_code(fixture, "go", "b/src");
+    {
+        ChatAttachments attached{*fixture.harness, fixture.session,
+                                 ChatAttachments::index_for("chat-1"), fixture.hooks()};
+        REQUIRE(attached.attach("a/src", fixture.work));
+        REQUIRE(attached.attach("b/src", fixture.work));
+        attached.settle();
+    }
+    CHECK(chat_members() == std::vector<std::string>{"src", "src-2"});
+    REQUIRE(fixture.session.attachments.size() == 2);
+    CHECK(fixture.session.attachments[0].graph->label == "src");
+    CHECK(fixture.session.attachments[1].graph->label == "src-2");
+
+    // Resumed: re-attached under its name, the same member is updated, and a
+    // third folder of that name takes the next number.
+    copy_code(fixture, "ruby", "c/src");
+    ChatAttachments resumed{*fixture.harness, fixture.session, ChatAttachments::index_for("chat-1"),
+                            fixture.hooks()};
+    REQUIRE(resumed.attach("b/src", fixture.work));
+    REQUIRE(resumed.attach("c/src", fixture.work));
+    resumed.settle();
+    CHECK(chat_members() == std::vector<std::string>{"src", "src-2", "src-3"});
+    CHECK(fixture.session.attachments[1].name == "b/src");
+    CHECK(fixture.session.attachments[1].graph->label == "src-2");
+
+    // With the first folder gone, a re-attach still updates its own member
+    // rather than taking the freed name -- and a new folder takes it.
+    REQUIRE(resumed.attach("a/src", fixture.work));
+    resumed.settle();
+    REQUIRE(resumed.detach("a/src"));
+    REQUIRE(resumed.attach("b/src", fixture.work));
+    resumed.settle();
+    CHECK(chat_members() == std::vector<std::string>{"src-2", "src-3"});
+    CHECK(fixture.session.attachments.back().name == "b/src");
+    CHECK(fixture.session.attachments.back().graph->label == "src-2");
+    copy_code(fixture, "java", "d/src");
+    REQUIRE(resumed.attach("d/src", fixture.work));
+    resumed.settle();
+    CHECK(fixture.session.attachments.back().graph->label == "src");
+    CHECK(chat_members() == std::vector<std::string>{"src", "src-2", "src-3"});
+}
+
+TEST_CASE("with the graph off nothing is built, and an earlier graph of the folder is forgotten",
+          "[commands][attachments][graph]") {
+    Fixture fixture;
+    copy_code(fixture, "python", "app");
+    ChatAttachments::Hooks off = fixture.hooks();
+    off.built_in_graph = apogee::harness::AttachmentGraphMethod::Off;
+    {
+        // `complete`'s one-shot store: a folder of code, chunks only.
+        ChatAttachments attached{*fixture.harness, fixture.session,
+                                 ChatAttachments::index_for("chat-1"), off};
+        REQUIRE(attached.attach("app", fixture.work));
+        attached.settle();
+        CHECK(fixture.heard("attached app: 4 files"));
+        CHECK_FALSE(said_graph(fixture));
+        CHECK(chat_members().empty());
+    }
+    {
+        ChatAttachments attached{*fixture.harness, fixture.session,
+                                 ChatAttachments::index_for("chat-1"), fixture.hooks()};
+        REQUIRE(attached.attach("app", fixture.work));
+        attached.settle();
+        CHECK(chat_members() == std::vector<std::string>{"app"});
+    }
+    fixture.said.clear();
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), off};
+    REQUIRE(attached.attach("app", fixture.work));
+    attached.settle();
+    CHECK_FALSE(said_graph(fixture));
+    CHECK(chat_members().empty());
+    CHECK(chat_dump().empty());
+    CHECK_FALSE(fixture.session.attachments[0].graph.has_value());
+}
+
+TEST_CASE("Ctrl-C keeps the chunks that are ready and leaves the graph absent, said",
+          "[commands][attachments][graph]") {
+    Fixture fixture;
+    const std::filesystem::path app = copy_code(fixture, "python", "app");
+    // The second file's embedding is held until the attach is cancelled, and
+    // Ctrl-C is pressed while the turn waits on it.
+    fixture.embeddings->hold_from = 2;
+    ChatAttachments::Hooks hooks = fixture.hooks();
+    bool pressed = false;
+    hooks.progress = [&pressed](const std::string& line) {
+        if (!pressed && !line.empty() && line.find("(1 of 4)") == std::string::npos) {
+            pressed = true;
+            (void)std::raise(SIGINT);
+        }
+    };
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), hooks};
+    REQUIRE(attached.attach("app", fixture.work));
+    attached.settle();
+    CHECK(pressed);
+    CHECK(fixture.heard(": cancelled"));
+    CHECK(fixture.heard("graph: not built -- cancelled; attach it again to build it"));
+    CHECK(std::ranges::find(fixture.warned,
+                            "graph: not built -- cancelled; attach it again to build it") !=
+          fixture.warned.end());
+
+    // The index usable: what was ready is attached, and searched.
+    REQUIRE(fixture.session.attachments.size() == 1);
+    CHECK(fixture.session.attachments[0].files.size() == 1);  // main.py; the rest cancelled
+    REQUIRE(fixture.session.attachments[0].graph.has_value());
+    CHECK(fixture.session.attachments[0].graph->absent == "cancelled");
+    CHECK(chat_members().empty());
+    CHECK(chat_dump().empty());
+    REQUIRE(attached.describe().size() == 1);
+    CHECK(attached.describe()[0].ends_with(
+        "; graph: not built -- cancelled; attach it again to build it"));
+
+    // The next attach completes it.
+    fixture.embeddings->hold_from = 0;
+    REQUIRE(attached.attach("app", fixture.work));
+    attached.settle();
+    CHECK(fixture.session.attachments[0].files.size() == 4);
+    CHECK(fixture.session.attachments[0].graph->label == "app");
+    CHECK(chat_dump() == direct_dump(fixture, {app}));
+}
+
+TEST_CASE("Ctrl-C on a re-attach forgets the folder's earlier graph rather than trust it",
+          "[commands][attachments][graph]") {
+    Fixture fixture;
+    const std::filesystem::path app = copy_code(fixture, "python", "app");
+    ChatAttachments::Hooks hooks = fixture.hooks();
+    bool armed = false;
+    bool pressed = false;
+    hooks.progress = [&](const std::string& line) {
+        if (armed && !pressed && !line.empty() && line.find("(1 of 4)") == std::string::npos) {
+            pressed = true;
+            (void)std::raise(SIGINT);
+        }
+    };
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), hooks};
+    REQUIRE(attached.attach("app", fixture.work));
+    attached.settle();
+    REQUIRE_FALSE(chat_dump().empty());
+
+    // Edited, attached again, and interrupted while the second edit embeds:
+    // the graph would be the old files', so it is forgotten, and said.
+    std::ofstream{app / "main.py", std::ios::app} << "\n# edited\n";
+    std::ofstream{app / "pkg" / "models.py", std::ios::app} << "\n# edited\n";
+    fixture.embeddings->hold_from = fixture.embeddings->calls + 2;
+    armed = true;
+    REQUIRE(attached.attach("app", fixture.work));
+    attached.settle();
+    fixture.embeddings->hold_from = 0;
+    CHECK(pressed);
+    CHECK(fixture.heard("graph: not built -- cancelled; attach it again to build it"));
+    REQUIRE(fixture.session.attachments.size() == 1);
+    CHECK(fixture.session.attachments[0].graph->absent == "cancelled");
+    CHECK(chat_members().empty());
+    CHECK(chat_dump().empty());
+
+    REQUIRE(attached.attach("app", fixture.work));
+    attached.settle();
+    CHECK(chat_dump() == direct_dump(fixture, {app}));
+}
+
+TEST_CASE("a re-attach that indexes nothing leaves the folder and its graph as they stood",
+          "[commands][attachments][graph]") {
+    Fixture fixture;
+    const std::filesystem::path app = copy_code(fixture, "python", "app");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), fixture.hooks()};
+    REQUIRE(attached.attach("app", fixture.work));
+    attached.settle();
+    const std::string before = chat_dump();
+    REQUIRE_FALSE(before.empty());
+    // Every file emptied: nothing of it is indexed, so nothing is replaced.
+    for (const char* file : {"main.py", "pkg/__init__.py", "pkg/models.py", "pkg/service.py"}) {
+        std::ofstream{app / file, std::ios::trunc};
+    }
+    REQUIRE(attached.attach("app", fixture.work));
+    attached.settle();
+    CHECK(fixture.heard("nothing attached from app"));
+    CHECK(chat_dump() == before);
+    REQUIRE(fixture.session.attachments.size() == 1);
+    REQUIRE(fixture.session.attachments[0].graph.has_value());
+    CHECK(fixture.session.attachments[0].graph->label == "app");
+}
+
+TEST_CASE("a quit mid-re-attach leaves the graph the saved session knows",
+          "[commands][attachments][graph]") {
+    Fixture fixture;
+    const std::filesystem::path app = copy_code(fixture, "python", "app");
+    {
+        ChatAttachments attached{*fixture.harness, fixture.session,
+                                 ChatAttachments::index_for("chat-1"), fixture.hooks()};
+        REQUIRE(attached.attach("app", fixture.work));
+        attached.settle();
+    }
+    const std::string before = chat_dump();
+    REQUIRE_FALSE(before.empty());
+    // Two files edited, so both are embedded again; the second is held until
+    // the process ends -- the destructor's cancel, with nothing recorded.
+    std::ofstream{app / "main.py", std::ios::app} << "\n# edited\n";
+    std::ofstream{app / "pkg" / "models.py", std::ios::app} << "\n# edited\n";
+    fixture.embeddings->hold_from = fixture.embeddings->calls + 2;
+    {
+        ChatAttachments quitting{*fixture.harness, fixture.session,
+                                 ChatAttachments::index_for("chat-1"), fixture.hooks()};
+        REQUIRE(quitting.attach("app", fixture.work));
+        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds{20};
+        while (fixture.embeddings->calls < fixture.embeddings->hold_from &&
+               std::chrono::steady_clock::now() < until) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        }
+        REQUIRE(fixture.embeddings->calls >= fixture.embeddings->hold_from);
+    }
+    fixture.embeddings->hold_from = 0;
+    // The session still records the earlier attach and its graph, and the
+    // index still holds that graph.
+    REQUIRE(fixture.session.attachments.size() == 1);
+    CHECK(fixture.session.attachments[0].graph->label == "app");
+    CHECK(chat_members() == std::vector<std::string>{"app"});
+    CHECK(chat_dump() == before);
+}
+
+TEST_CASE("after every settle the index's graph is exactly the recorded folders'",
+          "[commands][attachments][graph]") {
+    Fixture fixture;
+    const std::filesystem::path ghost = copy_code(fixture, "go", "ghost");
+    fixture.write("notes.md", "plain notes\n");
+    // A member no recorded attachment owns: a build a crash cut short.
+    apogee::commands::AttachmentGraphJob job;
+    job.name = "ghost";
+    job.label = "ghost";
+    job.root = ghost;
+    job.files = apogee::commands::source_files_under(
+        apogee::agentloop::find_attachment_files("ghost", fixture.work).files, ghost);
+    REQUIRE(apogee::commands::build_attachment_graph(ChatAttachments::index_for("chat-1"), job, {})
+                .state == apogee::commands::AttachmentGraphOutcome::State::Built);
+    REQUIRE(chat_members() == std::vector<std::string>{"ghost"});
+
+    // Attaching anything -- here no code at all -- settles into a graph that
+    // holds only what the session records: nothing.
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), fixture.hooks()};
+    REQUIRE(attached.attach("notes.md", fixture.work));
+    attached.settle();
+    CHECK(chat_members().empty());
+    CHECK(chat_dump().empty());
+}
+
+TEST_CASE("a quit mid-attach leaves the graph whole or absent, never half; the next completes it",
+          "[commands][attachments][graph]") {
+    Fixture fixture;
+    const std::filesystem::path tree = copy_code(fixture, "", "code");
+    const std::string direct = direct_dump(fixture, {tree});
+    {
+        // The process ending: the destructor cancels whatever is in flight.
+        ChatAttachments attached{*fixture.harness, fixture.session,
+                                 ChatAttachments::index_for("chat-1"), fixture.hooks()};
+        REQUIRE(attached.attach("code", fixture.work));
+    }
+    if (std::filesystem::exists(ChatAttachments::index_for("chat-1"))) {
+        const std::string after = chat_dump();
+        CHECK((after.empty() || after == direct));
+    }
+    CHECK(fixture.session.attachments.empty());  // nothing settled, nothing recorded
+    ChatAttachments again{*fixture.harness, fixture.session, ChatAttachments::index_for("chat-1"),
+                          fixture.hooks()};
+    REQUIRE(again.attach("code", fixture.work));
+    again.settle();
+    CHECK(chat_dump() == direct);
+}
+
+TEST_CASE("deleting the chat removes the graph with its index -- nothing survives it",
+          "[commands][attachments][graph]") {
+    Fixture fixture;
+    copy_code(fixture, "python", "app");
+    {
+        ChatAttachments attached{*fixture.harness, fixture.session,
+                                 ChatAttachments::index_for("chat-1"), fixture.hooks()};
+        REQUIRE(attached.attach("app", fixture.work));
+        attached.settle();
+        REQUIRE_FALSE(chat_members().empty());
+    }
+    ChatAttachments::remove_index("chat-1");
+    for (const auto& entry :
+         std::filesystem::directory_iterator{apogee::harness::attachments_dir()}) {
+        CHECK_FALSE(entry.path().filename().string().starts_with("chat-1"));
+    }
+}
+
+// ---- The graph at work on turns (27o) -----------------------------------------
+
+TEST_CASE("the chat's graph scope comes with its first graphed folder and goes with its last",
+          "[commands][attachments][graph][scope]") {
+    Fixture fixture;
+    fixture.write("docs/a.md", "alpha\n");
+    fixture.write("docs/b.txt", "beta\n");
+    copy_code(fixture, "python", "app");
+    copy_code(fixture, "cpp", "shapes");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), fixture.hooks()};
+    CHECK_FALSE(attached.graph_scope().has_value());
+
+    // Chunks only: no graph, no scope.
+    REQUIRE(attached.attach("docs", fixture.work));
+    attached.settle();
+    CHECK_FALSE(attached.graph_scope().has_value());
+
+    REQUIRE(attached.attach("app", fixture.work));
+    REQUIRE(attached.attach("shapes", fixture.work));
+    attached.settle();
+    std::optional<apogee::commands::AttachmentGraphScope> scope = attached.graph_scope();
+    REQUIRE(scope.has_value());
+    CHECK(scope->store == ChatAttachments::index_for("chat-1"));
+    CHECK(scope->folders ==
+          std::vector<apogee::commands::GraphedFolder>{{"app", "app"}, {"shapes", "shapes"}});
+    // What the tools read and what their descriptions say.
+    const apogee::graph::GraphTarget target = apogee::commands::attachment_graph_target(*scope);
+    CHECK(target.name == "attachments");
+    CHECK(target.store_path == ChatAttachments::index_for("chat-1"));
+    CHECK(apogee::commands::attachment_graph_note(*scope) ==
+          " Reads the code graph of the folders attached to this chat, app (member 'app') and "
+          "shapes (member 'shapes'): where its functions and classes are defined and "
+          "implemented, what calls what, and how one reaches another. A file is named relative "
+          "to its member's folder.");
+
+    // One graphed folder detached: the other's scope stands.
+    REQUIRE(attached.detach("app"));
+    scope = attached.graph_scope();
+    REQUIRE(scope.has_value());
+    CHECK(scope->folders == std::vector<apogee::commands::GraphedFolder>{{"shapes", "shapes"}});
+    CHECK(apogee::commands::attachment_graph_note(*scope).starts_with(
+        " Reads the code graph of the folder attached to this chat, shapes (member 'shapes'):"));
+    // A folder whose graph is absent -- cancelled, failed -- is no part of it.
+    fixture.session.attachments.push_back(apogee::logger::Attachment{
+        .name = "cut",
+        .files = {},
+        .inline_at = {},
+        .map_at = {},
+        .graph = apogee::logger::AttachmentGraph{
+            .label = {}, .supported = {}, .skipped = {}, .absent = "cancelled"}});
+    REQUIRE(attached.graph_scope().has_value());
+    CHECK(attached.graph_scope()->folders ==
+          std::vector<apogee::commands::GraphedFolder>{{"shapes", "shapes"}});
+    fixture.session.attachments.pop_back();
+    // A label the index no longer holds a graph for walks nothing.
+    apogee::commands::forget_attachment_graph(ChatAttachments::index_for("chat-1"), "shapes", {});
+    CHECK_FALSE(attached.graph_scope().has_value());
+    // Nor does an index that is gone -- and asking never makes one.
+    ChatAttachments::remove_index("chat-1");
+    CHECK_FALSE(attached.graph_scope().has_value());
+    CHECK_FALSE(std::filesystem::exists(ChatAttachments::index_for("chat-1")));
+}
+
+TEST_CASE("the chat's graph scope goes with its last graphed folder, though chunks stay",
+          "[commands][attachments][graph][scope]") {
+    Fixture fixture;
+    fixture.write("docs/a.md", "alpha\n");
+    fixture.write("docs/b.txt", "beta\n");
+    copy_code(fixture, "python", "app");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), fixture.hooks()};
+    REQUIRE(attached.attach("docs", fixture.work));
+    REQUIRE(attached.attach("app", fixture.work));
+    attached.settle();
+    REQUIRE(attached.graph_scope().has_value());
+    REQUIRE(attached.detach("app"));
+    CHECK_FALSE(attached.graph_scope().has_value());
+    CHECK(attached.names() == std::vector<std::string>{"docs"});
+}
+
+TEST_CASE("an attachment turn expands through the chat's graph and counts it; chunks alone do not",
+          "[commands][attachments][graph]") {
+    Bare bare;
+    std::filesystem::copy(code_fixtures() / "python", bare.work / "app",
+                          std::filesystem::copy_options::recursive);
+    std::filesystem::create_directories(bare.work / "notes");
+    std::ofstream{bare.work / "notes" / "make_user.txt"} << "make_user makes a user.\n";
+    ChatAttachments attached{
+        *bare.harness, bare.session, ChatAttachments::index_for("chat-1"),
+        ChatAttachments::Hooks{
+            .say = [&bare](const std::string& line, bool) { bare.said.push_back(line); },
+            .progress = {},
+            .confirm_large = {},
+            .save = false,
+            .built_in_graph = apogee::harness::AttachmentGraphMethod::Code}};
+    // Notes first: a chunk-only chat injects no graph.
+    REQUIRE(attached.attach("notes", bare.work));
+    attached.settle();
+    ChatAttachments::Turn turn =
+        attached.for_turn(0, "make_user", apogee::agentloop::TurnBudget{}, 4, {});
+    REQUIRE(turn.retrieved.has_value());
+    CHECK(turn.retrieved->graph_entities == 0);
+    REQUIRE_FALSE(turn.retrieved->prefix.empty());
+    CHECK(turn.retrieved->prefix.front().content.plain_text().find("[Knowledge graph") ==
+          std::string::npos);
+
+    // A folder of code: its excerpts' code is walked, after the excerpts, and
+    // the line says how much -- with no embedder anywhere.
+    REQUIRE(attached.attach("app", bare.work));
+    attached.settle();
+    turn = attached.for_turn(1, "make_user", apogee::agentloop::TurnBudget{}, 4, {});
+    REQUIRE(turn.retrieved.has_value());
+    CHECK(turn.retrieved->retriever == "lexical");
+    CHECK(turn.retrieved->graph_entities > 0);
+    REQUIRE(turn.retrieved->prefix.size() == 1);
+    const std::string sent = turn.retrieved->prefix.front().content.plain_text();
+    const std::size_t section = sent.find("[Knowledge graph: attachments]");
+    REQUIRE(section != std::string::npos);
+    CHECK(sent.find("--- app/pkg/service.py:") < section);
+    CHECK(sent.find("(class, pkg/models.py:") > section);
+    CHECK(apogee::commands::describe_attachment_retrieval(*turn.retrieved)
+              .find(" +" + std::to_string(turn.retrieved->graph_entities) + " graph entities") !=
+          std::string::npos);
+}
+
+TEST_CASE("a lexical-only chat walks its attachment graph through the scoped tools",
+          "[commands][attachments][graph][scope]") {
+    Bare bare;
+    std::filesystem::copy(code_fixtures() / "python", bare.work / "app",
+                          std::filesystem::copy_options::recursive);
+    ChatAttachments attached{
+        *bare.harness, bare.session, ChatAttachments::index_for("chat-1"),
+        ChatAttachments::Hooks{
+            .say = [&bare](const std::string& line, bool) { bare.said.push_back(line); },
+            .progress = {},
+            .confirm_large = {},
+            .save = false,
+            .built_in_graph = apogee::harness::AttachmentGraphMethod::Code}};
+    REQUIRE(attached.attach("app", bare.work));
+    attached.settle();
+    const std::optional<apogee::commands::AttachmentGraphScope> scope = attached.graph_scope();
+    REQUIRE(scope.has_value());
+    apogee::agent::ToolRegistry registry;
+    apogee::tools::register_native_toolsets(registry, apogee::tools::ToolsetOptions{});
+    const apogee::agent::ToolRegistry scoped =
+        apogee::commands::attachment_graph_tools(registry, *scope);
+    // Each says what it reads: the folder by its root, its member, and that a
+    // file is named relative to it.
+    for (const std::string_view name : apogee::tools::graph_tool_names()) {
+        CHECK(scoped.find(name)->description.ends_with(
+            apogee::commands::attachment_graph_note(*scope)));
+    }
+    CHECK(scoped.find("graph_explain")
+              ->description.find("folder attached to this chat, app (member 'app')") !=
+          std::string::npos);
+
+    const apogee::agent::ToolOutcome card =
+        scoped.find("graph_explain")->run(R"({"node":"make_user"})");
+    REQUIRE_FALSE(card.is_error);
+    const nlohmann::json json = nlohmann::json::parse(card.content);
+    CHECK(json["graph"] == "attachments");
+    CHECK(json["node"]["name"] == "pkg.service.make_user");
+    CHECK(json["node"]["member"] == "app");
+    CHECK(json["node"]["file"] == "pkg/service.py");
+
+    const apogee::agent::ToolOutcome path =
+        scoped.find("graph_path")
+            ->run(R"({"from":"main","to":"make_user","directed":true,"relations":["calls"]})");
+    REQUIRE_FALSE(path.is_error);
+    CHECK(nlohmann::json::parse(path.content)["found"] == true);
+}
+
+TEST_CASE("a turn walks only a graph the chat records -- never one left in the index",
+          "[commands][attachments][graph][scope]") {
+    // What a quit mid-attach can leave until the next settle forgets it: code
+    // in the index that no recorded folder owns. The turn reads the chat's
+    // state, not the index's tables, so it walks none of it.
+    Bare bare;
+    std::filesystem::copy(code_fixtures() / "python", bare.work / "app",
+                          std::filesystem::copy_options::recursive);
+    ChatAttachments attached{
+        *bare.harness, bare.session, ChatAttachments::index_for("chat-1"),
+        ChatAttachments::Hooks{
+            .say = [&bare](const std::string& line, bool) { bare.said.push_back(line); },
+            .progress = {},
+            .confirm_large = {},
+            .save = false,
+            .built_in_graph = apogee::harness::AttachmentGraphMethod::Code}};
+    REQUIRE(attached.attach("app", bare.work));
+    attached.settle();
+    REQUIRE_FALSE(chat_members().empty());
+    bare.session.attachments.front().graph.reset();
+    CHECK_FALSE(attached.graph_scope().has_value());
+    const ChatAttachments::Turn turn =
+        attached.for_turn(0, "make_user", apogee::agentloop::TurnBudget{}, 4, {});
+    REQUIRE(turn.retrieved.has_value());
+    REQUIRE_FALSE(turn.retrieved->prefix.empty());
+    CHECK(turn.retrieved->graph_entities == 0);
+    CHECK(turn.retrieved->prefix.front().content.plain_text().find("[Knowledge graph") ==
+          std::string::npos);
+}
+
+// ---- Attachment options (27p) -------------------------------------------------
+
+TEST_CASE("an attach's method is a flag over the config over the surface's built-in",
+          "[commands][attachments][options]") {
+    using apogee::commands::graph_method_note;
+    using apogee::commands::GraphMethod;
+    using apogee::commands::GraphMethodSource;
+    using apogee::commands::resolve_graph_method;
+    using apogee::harness::AttachmentGraphMethod;
+    constexpr AttachmentGraphMethod code = AttachmentGraphMethod::Code;
+    constexpr AttachmentGraphMethod off = AttachmentGraphMethod::Off;
+
+    struct Row {
+        std::optional<AttachmentGraphMethod> flag;
+        std::optional<AttachmentGraphMethod> config;
+        AttachmentGraphMethod built_in;
+        GraphMethod expected;
+        std::string note;
+    };
+
+    const std::string from_config_code =
+        "with its code graph (attachments.graph: code in the config)";
+    const std::string from_config_off =
+        "without its code graph (attachments.graph: off in the config)";
+    // Every combination: a chat's built-in (code) and complete's (off), each
+    // under no config, either config word, and no flag or either flag.
+    const std::vector<Row> table{
+        {{}, {}, code, {code, GraphMethodSource::BuiltIn}, ""},
+        {{}, {}, off, {off, GraphMethodSource::BuiltIn}, ""},
+        {{}, code, code, {code, GraphMethodSource::Config}, from_config_code},
+        {{}, code, off, {code, GraphMethodSource::Config}, from_config_code},
+        {{}, off, code, {off, GraphMethodSource::Config}, from_config_off},
+        {{}, off, off, {off, GraphMethodSource::Config}, from_config_off},
+        {code, {}, code, {code, GraphMethodSource::Flag}, "with its code graph (--graph=code)"},
+        {code, {}, off, {code, GraphMethodSource::Flag}, "with its code graph (--graph=code)"},
+        {code, off, code, {code, GraphMethodSource::Flag}, "with its code graph (--graph=code)"},
+        {code, off, off, {code, GraphMethodSource::Flag}, "with its code graph (--graph=code)"},
+        {code, code, off, {code, GraphMethodSource::Flag}, "with its code graph (--graph=code)"},
+        {code, code, code, {code, GraphMethodSource::Flag}, "with its code graph (--graph=code)"},
+        {off, {}, code, {off, GraphMethodSource::Flag}, "without its code graph (--graph=off)"},
+        {off, {}, off, {off, GraphMethodSource::Flag}, "without its code graph (--graph=off)"},
+        {off, code, code, {off, GraphMethodSource::Flag}, "without its code graph (--graph=off)"},
+        {off, code, off, {off, GraphMethodSource::Flag}, "without its code graph (--graph=off)"},
+        {off, off, code, {off, GraphMethodSource::Flag}, "without its code graph (--graph=off)"},
+        {off, off, off, {off, GraphMethodSource::Flag}, "without its code graph (--graph=off)"},
+    };
+    for (const Row& row : table) {
+        INFO("flag " << (row.flag ? apogee::harness::to_string(*row.flag) : "-") << ", config "
+                     << (row.config ? apogee::harness::to_string(*row.config) : "-")
+                     << ", built-in " << apogee::harness::to_string(row.built_in));
+        const GraphMethod method = resolve_graph_method(row.flag, row.config, row.built_in);
+        CHECK(method == row.expected);
+        CHECK(graph_method_note(method) == row.note);
+    }
+
+    // The class asks the one function, with its own built-in and the config.
+    Fixture fixture{true, "attachments:\n  graph: off\n"};
+    ChatAttachments::Hooks hooks = fixture.hooks();
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), hooks};
+    CHECK(attached.graph_method() == GraphMethod{off, GraphMethodSource::Config});
+    CHECK(attached.graph_method(code) == GraphMethod{code, GraphMethodSource::Flag});
+    Fixture plain;
+    hooks = plain.hooks();
+    hooks.built_in_graph = off;
+    ChatAttachments one_shot{*plain.harness, plain.session, ChatAttachments::index_for("chat-1"),
+                             hooks};
+    CHECK(one_shot.graph_method() == GraphMethod{off, GraphMethodSource::BuiltIn});
+}
+
+TEST_CASE("/attach reads its path first, then its flags, and refuses the rest by name",
+          "[commands][attachments][options]") {
+    using apogee::commands::AttachArgument;
+    using apogee::commands::parse_attach_argument;
+    using apogee::harness::AttachmentGraphMethod;
+
+    struct Row {
+        std::string_view argument;
+        std::string spec;
+        std::optional<AttachmentGraphMethod> graph;
+        std::string error;
+    };
+
+    const std::string shape{apogee::commands::kAttachShape};
+    const std::vector<Row> table{
+        // The path alone, as ever -- an unquoted one with a space included.
+        {"src", "src", {}, ""},
+        {"my notes/plan.md", "my notes/plan.md", {}, ""},
+        {"\"my notes/plan.md\"", "my notes/plan.md", {}, ""},
+        {"\"my notes/", "my notes/", {}, ""},  // completion's open folder quote
+        {"src/**/*.cpp", "src/**/*.cpp", {}, ""},
+        {"", "", {}, ""},
+        // Flags after it, both spellings, any spacing.
+        {"src --graph=off", "src", AttachmentGraphMethod::Off, ""},
+        {"src --graph off", "src", AttachmentGraphMethod::Off, ""},
+        {"src\t--graph=code", "src", AttachmentGraphMethod::Code, ""},
+        {"src   --graph   code", "src", AttachmentGraphMethod::Code, ""},
+        {"my notes --graph=off", "my notes", AttachmentGraphMethod::Off, ""},
+        {"\"my notes\" --graph=off", "my notes", AttachmentGraphMethod::Off, ""},
+        {"\"my notes/ --graph=off", "my notes/", AttachmentGraphMethod::Off, ""},
+        {"\"has --dashes\" --graph=code", "has --dashes", AttachmentGraphMethod::Code, ""},
+        // A `--` inside a word is the path's.
+        {"a--b", "a--b", {}, ""},
+        {"notes-2024 --graph=off", "notes-2024", AttachmentGraphMethod::Off, ""},
+        // Refused, each naming the shape or the set.
+        {"--graph=off src", "", {}, "the path comes first -- " + shape},
+        {"--graph=off", "", {}, "the path comes first -- " + shape},
+        {"src --depth=2", "", {}, "unknown flag '--depth' -- " + shape},
+        {"src --", "", {}, "unknown flag '--' -- " + shape},
+        {"src --graph=tree", "", {}, "--graph: unknown value 'tree' (accepted: code, off)"},
+        {"src --graph=", "", {}, "--graph: unknown value '' (accepted: code, off)"},
+        {"src --graph", "", {}, "--graph: unknown value '' (accepted: code, off)"},
+        {"src --graph=Off", "", {}, "--graph: unknown value 'Off' (accepted: code, off)"},
+        {"src --graph=off --graph=code", "", {}, "--graph is given twice -- " + shape},
+        {"src --graph=off extra", "", {}, "'extra' after the path is not a flag -- " + shape},
+        {"src --graph off extra", "", {}, "'extra' after the path is not a flag -- " + shape},
+        {"\"a b\" extra", "", {}, "'extra' after the path is not a flag -- " + shape},
+        {"\"a b\"c --graph=off",
+         "",
+         {},
+         "nothing may follow the path's closing quote but a space -- " + shape},
+    };
+    for (const Row& row : table) {
+        INFO("/attach " << row.argument);
+        const AttachArgument read = parse_attach_argument(row.argument);
+        CHECK(read.spec == row.spec);
+        CHECK(read.graph == row.graph);
+        CHECK(read.error == row.error);
+    }
+}
+
+TEST_CASE("a folder of code attached with --graph=off is chunks alone; with code, graphed then",
+          "[commands][attachments][options][graph]") {
+    using apogee::harness::AttachmentGraphMethod;
+    Fixture fixture;
+    copy_code(fixture, "python", "app");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), fixture.hooks()};
+    // Off: the chunks as ever, nothing of a graph built, kept or said beyond
+    // the method the attach line names.
+    REQUIRE(
+        attached.attach("app", fixture.work, attached.graph_method(AttachmentGraphMethod::Off)));
+    attached.settle();
+    CHECK(fixture.heard("attaching app (4 files, "));
+    CHECK(fixture.heard(") -- without its code graph (--graph=off)"));
+    CHECK(fixture.heard("attached app: 4 files"));
+    CHECK_FALSE(said_graph(fixture));
+    CHECK(chat_members().empty());
+    CHECK_FALSE(fixture.session.attachments[0].graph.has_value());
+    CHECK_FALSE(attached.graph_scope().has_value());
+    REQUIRE(attached.describe().size() == 1);
+    CHECK(attached.describe()[0].find("graph") == std::string::npos);
+
+    // The same folder with code: built then, as a direct build would.
+    fixture.said.clear();
+    REQUIRE(
+        attached.attach("app", fixture.work, attached.graph_method(AttachmentGraphMethod::Code)));
+    attached.settle();
+    CHECK(fixture.heard(") -- with its code graph (--graph=code)"));
+    CHECK(said_graph(fixture));
+    CHECK(chat_members() == std::vector<std::string>{"app"});
+    CHECK(chat_dump() == direct_dump(fixture, {fixture.work / "app"}));
+    REQUIRE(fixture.session.attachments[0].graph.has_value());
+    CHECK(attached.graph_scope().has_value());
+
+    // And off again forgets it -- honest, and silent about graphs.
+    fixture.said.clear();
+    REQUIRE(
+        attached.attach("app", fixture.work, attached.graph_method(AttachmentGraphMethod::Off)));
+    attached.settle();
+    CHECK_FALSE(said_graph(fixture));
+    CHECK(chat_members().empty());
+    CHECK(chat_dump().empty());
+}
+
+TEST_CASE("the config's graph: off makes a bare attach chunks only; --graph=code overrides once",
+          "[commands][attachments][options][graph]") {
+    using apogee::harness::AttachmentGraphMethod;
+    Fixture fixture{true, "attachments: { graph: off }\n"};
+    copy_code(fixture, "python", "app");
+    copy_code(fixture, "go", "svc");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), fixture.hooks()};
+    // Bare: the config's method, and the line says so.
+    REQUIRE(attached.attach("app", fixture.work));
+    attached.settle();
+    CHECK(fixture.heard(") -- without its code graph (attachments.graph: off in the config)"));
+    CHECK_FALSE(said_graph(fixture));
+    CHECK(chat_members().empty());
+
+    // One attach overrides it, and says so; the next bare one is the
+    // config's again.
+    fixture.said.clear();
+    REQUIRE(
+        attached.attach("svc", fixture.work, attached.graph_method(AttachmentGraphMethod::Code)));
+    attached.settle();
+    CHECK(fixture.heard(") -- with its code graph (--graph=code)"));
+    CHECK(said_graph(fixture));
+    CHECK(chat_members() == std::vector<std::string>{"svc"});
+    fixture.said.clear();
+    REQUIRE(attached.attach("app", fixture.work));
+    attached.settle();
+    CHECK(fixture.heard("(attachments.graph: off in the config)"));
+    CHECK(chat_members() == std::vector<std::string>{"svc"});
+}
+
+TEST_CASE("the method is named only where it matters: a folder of code",
+          "[commands][attachments][options]") {
+    using apogee::harness::AttachmentGraphMethod;
+    Fixture fixture;
+    fixture.write("docs/guide.md", "the guide\n");
+    fixture.write("docs/faq.md", "the answers\n");
+    fixture.write("notes.md", "a note\n");
+    copy_code(fixture, "python", "app");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), fixture.hooks()};
+    const auto with = [&attached](AttachmentGraphMethod method) {
+        return attached.graph_method(method);
+    };
+    // A folder with no code, one file and a glob: no method changes them,
+    // so none is named -- and no graph is built, whatever was asked.
+    REQUIRE(attached.attach("docs", fixture.work, with(AttachmentGraphMethod::Code)));
+    REQUIRE(attached.attach("notes.md", fixture.work, with(AttachmentGraphMethod::Off)));
+    REQUIRE(attached.attach("app/*.py", fixture.work, with(AttachmentGraphMethod::Code)));
+    attached.settle();
+    CHECK_FALSE(fixture.heard("code graph"));
+    CHECK_FALSE(said_graph(fixture));
+    CHECK(chat_members().empty());
+    // The built-in's own method is never named.
+    REQUIRE(attached.attach("app", fixture.work));
+    attached.settle();
+    CHECK_FALSE(fixture.heard("code graph"));
+    CHECK(said_graph(fixture));
+}
+
+TEST_CASE("an @ mention stays a bare path: flags typed after it are prose",
+          "[commands][attachments][options]") {
+    // 27p adds no mention syntax: the words after a mention are the
+    // message's, and the message is never changed.
+    const std::string message = "look at @app --graph=off and @\"my notes\" --graph code";
+    CHECK(mentioned_paths(message) == std::vector<std::string>{"app", "my notes"});
+    CHECK(message == "look at @app --graph=off and @\"my notes\" --graph code");
 }

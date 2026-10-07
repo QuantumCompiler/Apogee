@@ -17,7 +17,8 @@ namespace apogee::commands {
 [[nodiscard]] std::string helper_backend(const harness::Config& config, harness::ModelRole role,
                                          std::string_view conversation);
 
-/// The utility backend when the config names one, else empty: for the chore
+/// The utility backend when the config names one -- its pointer, or the
+/// active suite's member (27d) -- else empty: for the chore
 /// that happens only when a utility model is set -- summarising a large tool
 /// result -- and is never pushed onto the chat model.
 [[nodiscard]] std::string named_utility(const harness::Config& config);

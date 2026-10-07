@@ -96,8 +96,31 @@ TEST_CASE("the route table is the documented one", "[httpserver][mux]") {
         }
     }
     CHECK(public_rows == 8);
-    CHECK(admin_rows == 65);
+    CHECK(admin_rows == 86);
     CHECK(has("POST", "/v1/admin/backends/default-vision"));
+    // The symphonies slice (27q): three twins and two reads, no play.
+    CHECK(has("GET", "/v1/admin/symphonies"));
+    CHECK(has("POST", "/v1/admin/symphonies"));
+    CHECK(has("GET", "/v1/admin/symphonies/{id}"));
+    CHECK(has("PUT", "/v1/admin/symphonies/{id}"));
+    CHECK(has("DELETE", "/v1/admin/symphonies/{id}"));
+    // The tasks slice (27j): two reads, no control.
+    CHECK(has("GET", "/v1/admin/tasks"));
+    CHECK(has("GET", "/v1/admin/tasks/{id}"));
+    // The suites slice (27d).
+    CHECK(has("GET", "/v1/admin/suites"));
+    CHECK(has("POST", "/v1/admin/suites"));
+    CHECK(has("POST", "/v1/admin/suites/default"));
+    CHECK(has("GET", "/v1/admin/suites/{id}"));
+    CHECK(has("PUT", "/v1/admin/suites/{id}"));
+    CHECK(has("DELETE", "/v1/admin/suites/{id}"));
+    CHECK(has("PUT", "/v1/admin/suites/{id}/members"));
+    // Whom a suite's chat model may consult, and the caps (27f).
+    CHECK(has("PUT", "/v1/admin/suites/{id}/consult"));
+    // Which seams a member checks, and which member (27g).
+    CHECK(has("PUT", "/v1/admin/suites/{id}/validate"));
+    // Whether an execute session's root plays the symphonies (27t).
+    CHECK(has("PUT", "/v1/admin/suites/{id}/orchestrate"));
     CHECK(has("POST", "/v1/admin/backends/default-transcription"));
     CHECK(has("POST", "/v1/admin/backends/default-utility"));
     CHECK(has("GET", "/v1/admin/allowed-hosts"));

@@ -23,6 +23,7 @@ void FakeCommand::bind(CLI::App& root, const commands::RootContext& context) {
     cmd->callback([this]() {
         ++invocations_;
         observed_config_path_ = context_->config_path;
+        observed_root_ = harness::current_root();
     });
 }
 
@@ -32,6 +33,10 @@ int FakeCommand::invocations() const noexcept {
 
 const std::string& FakeCommand::observed_config_path() const noexcept {
     return observed_config_path_;
+}
+
+const harness::RootResolution& FakeCommand::observed_root() const noexcept {
+    return observed_root_;
 }
 
 }  // namespace apogee::testing

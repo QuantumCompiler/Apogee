@@ -5,6 +5,8 @@
 #include <istream>
 #include <stdexcept>
 
+#include "tasks/view.h"
+
 namespace apogee::commands {
 namespace {
 
@@ -19,12 +21,19 @@ namespace {
 
 JsonReporter::JsonReporter(std::ostream& out) : out_{&out} {}
 
-void JsonReporter::write(const std::string& line) {
+void JsonReporter::write(const nlohmann::json& object) {
     // One object per line, flushed immediately. Flushing per event is the point
     // of a streaming protocol: a driver rendering live must not wait for a
     // buffer to fill, and the whole reason this mode exists is that a GUI wants
     // tokens as they arrive.
-    (*out_) << line << "\n";
+    //
+    // Never a throw for the bytes in it. The answer and its reasoning arrive
+    // as whole characters already (the Harness's streams), but an event's
+    // other text comes from anywhere -- a vendor CLI's stderr tail cut at a
+    // byte bound, a name on disk -- and a writer that threw would end the
+    // session over a notice. What is not UTF-8 is said as U+FFFD; valid text is
+    // written byte for byte as a strict dump writes it.
+    (*out_) << object.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace) << "\n";
     out_->flush();
 }
 
@@ -32,11 +41,11 @@ void JsonReporter::begin_session(std::string_view model) {
     nlohmann::json object = event("session");
     object["protocol_version"] = kMachineProtocolVersion;
     object["model"] = std::string{model};
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::on_thinking() {
-    write(event("thinking").dump());
+    write(event("thinking"));
 }
 
 void JsonReporter::on_thinking_budget_reached() {
@@ -45,7 +54,7 @@ void JsonReporter::on_thinking_budget_reached() {
     // protocol grows.
     nlohmann::json object = event("thinking");
     object["budget_reached"] = true;
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::on_thinking_token(std::string_view chunk) {
@@ -54,7 +63,7 @@ void JsonReporter::on_thinking_token(std::string_view chunk) {
     }
     nlohmann::json object = event("thinking_delta");
     object["text"] = std::string{chunk};
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::on_side_call(const agentloop::SideCall& call) {
@@ -63,7 +72,7 @@ void JsonReporter::on_side_call(const agentloop::SideCall& call) {
     }
     nlohmann::json object = event("tool_status");
     object["text"] = call.role + " — " + call.detail;
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::on_recall(int chats, int decisions) {
@@ -73,7 +82,7 @@ void JsonReporter::on_recall(int chats, int decisions) {
     nlohmann::json object = event("memory");
     object["chats"] = chats;
     object["decisions"] = decisions;
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::on_notice(std::string_view text) {
@@ -82,7 +91,7 @@ void JsonReporter::on_notice(std::string_view text) {
     }
     nlohmann::json object = event("notice");
     object["text"] = std::string{text};
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::on_tool_status(std::string_view detail) {
@@ -91,7 +100,7 @@ void JsonReporter::on_tool_status(std::string_view detail) {
     }
     nlohmann::json object = event("tool_status");
     object["text"] = std::string{detail};
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::on_clear_status() {
@@ -102,7 +111,7 @@ void JsonReporter::on_clear_status() {
 }
 
 void JsonReporter::on_answer_start() {
-    write(event("answer_start").dump());
+    write(event("answer_start"));
 }
 
 void JsonReporter::on_answer_token(std::string_view chunk) {
@@ -112,11 +121,11 @@ void JsonReporter::on_answer_token(std::string_view chunk) {
     wrote_answer_ = true;
     nlohmann::json object = event("answer_delta");
     object["text"] = std::string{chunk};
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::on_answer_end() {
-    write(event("answer_end").dump());
+    write(event("answer_end"));
 }
 
 void JsonReporter::emit_result(const harness::ChatResponse& response) {
@@ -135,7 +144,7 @@ void JsonReporter::emit_result(const harness::ChatResponse& response) {
         usage["output_tokens"] = response.usage.completion_tokens;
         object["usage"] = std::move(usage);
     }
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::emit_question(const agentloop::QuestionRequest& request) {
@@ -158,7 +167,7 @@ void JsonReporter::emit_question(const agentloop::QuestionRequest& request) {
         questions.push_back(std::move(entry));
     }
     object["questions"] = std::move(questions);
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::emit_permission_question(const agent::GateRequest& request) {
@@ -190,13 +199,85 @@ void JsonReporter::emit_permission_question(const agent::GateRequest& request) {
           {"description", request.outbound ? "Allow this website for the rest of this session"
                                            : "Allow for the rest of this session"}}});
     object["questions"] = nlohmann::json::array({std::move(entry)});
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::emit_error(std::string_view message) {
     nlohmann::json object = event("error");
     object["message"] = std::string{message};
-    write(object.dump());
+    write(object);
+}
+
+void JsonReporter::emit_task_transition(const tasks::Task& task, std::size_t index,
+                                        const std::optional<tasks::LockHolder>& holder) {
+    if (index >= task.transitions.size()) {
+        return;
+    }
+    const tasks::Transition& transition = task.transitions[index];
+    const std::string& name = transition.event;
+    // The turn a plan or round transition is about: the plan, or the newest
+    // round of that number -- a round run again after a restart is the same
+    // round, as the ledger keeps it.
+    const auto turn = [&task, &transition](bool plan) -> nlohmann::json {
+        for (auto round = task.rounds.rbegin(); round != task.rounds.rend(); ++round) {
+            if ((round->kind == tasks::kPlanRound) == plan &&
+                (plan || round->index == transition.round)) {
+                return tasks::to_json(tasks::make_turn_view(*round));
+            }
+        }
+        return nullptr;
+    };
+    nlohmann::json object;
+    if (name == tasks::kStartedEvent || name == tasks::kResumedEvent) {
+        object = event("task_started");
+        object["resumed"] = name == tasks::kResumedEvent;
+        nlohmann::json history = nlohmann::json::array();
+        for (std::size_t earlier = 0; earlier < index; ++earlier) {
+            history.push_back(tasks::transition_to_json(task.transitions[earlier]));
+        }
+        object["history"] = std::move(history);
+        object["task"] = tasks::to_json(tasks::make_task_view(task, holder));
+    } else if (name == tasks::kPlanStartedEvent || name == tasks::kPlanRecordedEvent) {
+        object = event("task_plan");
+        object["round"] = turn(true);
+        if (name == tasks::kPlanRecordedEvent) {
+            object["plan"] = task.plan;
+        }
+    } else if (name == tasks::kRoundStartedEvent || name == tasks::kRoundEndedEvent) {
+        object = event("task_round");
+        object["round"] = turn(false);
+        if (name == tasks::kRoundEndedEvent) {
+            nlohmann::json checks = nlohmann::json::array();
+            for (const tasks::CheckView& check : tasks::make_check_views(task)) {
+                checks.push_back(tasks::to_json(check));
+            }
+            object["checks"] = std::move(checks);
+            object["rounds_used"] = tasks::rounds_used(task);
+        }
+    } else if (name == tasks::kFinishedEvent) {
+        object = event("task_finished");
+        object["status"] = transition.status;
+        object["reason"] = task.reason;
+        object["task"] = tasks::to_json(tasks::make_task_view(task, holder));
+    } else {
+        // `created` is written before any run, and reaches a driver as the
+        // history `task_started` carries.
+        return;
+    }
+    object["task_id"] = task.id;
+    object["transition"] = tasks::transition_to_json(transition);
+    write(object);
+}
+
+void JsonReporter::emit_task_grant(const tasks::Task& task, int round,
+                                   const tasks::Permit& permit) {
+    nlohmann::json object = event("task_grant");
+    object["task_id"] = task.id;
+    object["round"] = round;
+    object["tool"] = permit.tool;
+    object["target"] = permit.target;
+    object["by"] = permit.by;
+    write(object);
 }
 
 bool JsonReporter::wrote_answer() const noexcept {
@@ -223,6 +304,29 @@ std::optional<InputFormat> input_format_from_string(std::string_view name) noexc
 
 std::vector<std::string_view> format_names() {
     return {to_string(OutputFormat::Text), to_string(OutputFormat::StreamJson)};
+}
+
+std::string_view to_string(ReadFormat format) noexcept {
+    return format == ReadFormat::Json ? "json" : "text";
+}
+
+std::optional<ReadFormat> read_format_from_string(std::string_view name) noexcept {
+    if (name == "text" || name.empty()) {
+        return ReadFormat::Text;
+    }
+    if (name == "json") {
+        return ReadFormat::Json;
+    }
+    return std::nullopt;
+}
+
+std::vector<std::string_view> read_format_names() {
+    return {to_string(ReadFormat::Text), to_string(ReadFormat::Json)};
+}
+
+void write_document(std::ostream& out, const nlohmann::json& document) {
+    out << document.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace) << "\n";
+    out.flush();
 }
 
 std::optional<OutputFormat> output_format_from_string(std::string_view name) noexcept {
@@ -253,9 +357,13 @@ DriverMessage parse_driver_line(std::string_view line) {
     } else if (type == "answer") {
         message.kind = DriverMessage::Kind::Answer;
     } else if (type == "attach") {
-        // A file, folder or glob to attach, as `/attach` takes one (26d).
+        // A file, folder or glob to attach, as `/attach` takes one (26d),
+        // and its method, as `/attach`'s `--graph` (27p).
         message.kind = DriverMessage::Kind::Attach;
         message.text = root.value("path", std::string{});
+        if (const auto graph = root.find("graph"); graph != root.end() && !graph->is_null()) {
+            message.graph = graph->is_string() ? graph->get<std::string>() : graph->dump();
+        }
         return message;
     } else {
         return message;

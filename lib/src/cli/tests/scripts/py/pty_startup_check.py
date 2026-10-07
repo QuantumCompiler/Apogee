@@ -6,8 +6,7 @@ pipe-based test proves nothing about the interactive path -- it exercises the
 branch that deliberately emits nothing.  A PTY is the only way to see what the
 user actually sees.
 
-What this locks (the "startup speaks on one line" invariant, which Ommi
-retrofitted as OMMI-14 after the fact):
+What this locks (the "startup speaks on one line" invariant):
 
   * a verbose run's startup notice appears exactly ONCE, on one line;
   * no spinner frame survives into the final screen -- a transient indicator

@@ -43,6 +43,66 @@ inline constexpr std::string_view kNodeTypeDecision = "decision";
 /// can be told apart.
 inline constexpr std::string_view kDecisionNodeKind = "knowledge_record";
 
+// ---- Origin (schema v6, 27k) --------------------------------------------------
+//
+// Every edge says where it came from: `extracted` -- stated in source and
+// parsed (the code graph), confidence 1.0 -- or `inferred` -- asserted by a
+// model (the prose extractor, and the record pass built on its entities),
+// confidence not recorded. Schema, not convention: a reader can always tell
+// the two apart, and an `extracted` edge never merges down to `inferred`.
+inline constexpr std::string_view kOriginExtracted = "extracted";
+inline constexpr std::string_view kOriginInferred = "inferred";
+inline constexpr double kExtractedConfidence = 1.0;
+
+// ---- The code layer's kinds (27k) ---------------------------------------------
+//
+// The closed type set grows by the code kinds, still enforced in host code:
+// only the deterministic code build writes them (the prose extractor's set
+// is disjoint), so a model can never forge a code node and the code layer
+// never merges with a prose entity of the same name.
+inline constexpr std::string_view kCodeKindFile = "file";
+inline constexpr std::string_view kCodeKindModule = "module";
+inline constexpr std::string_view kCodeKindClass = "class";
+inline constexpr std::string_view kCodeKindFunction = "function";
+/// An unresolved reference's target: the text as written, standing for
+/// something outside the parsed tree. Navigable, never ranked as context nor
+/// clustered as structure (expansion and community detection leave it out).
+inline constexpr std::string_view kCodeKindName = "name";
+
+inline constexpr std::string_view kCodeRelationDefinedIn = "defined_in";
+inline constexpr std::string_view kCodeRelationImports = "imports";
+inline constexpr std::string_view kCodeRelationCalls = "calls";
+inline constexpr std::string_view kCodeRelationInherits = "inherits";
+inline constexpr std::string_view kCodeRelationReferences = "references";
+
+/// Whether `type` is one of the code kinds.
+[[nodiscard]] bool is_code_node_type(std::string_view type) noexcept;
+
+/// A code node's identity key -- what its `name_norm` holds: the qualified
+/// name **exactly as written**. Code is case-sensitive (Go's `Parse` and
+/// `parse` are two functions), so the prose layer's case-folding would merge
+/// two definitions into one node -- an invented link. Prose entities keep
+/// `normalize_entity_name`; the two layers' types are disjoint, so the two
+/// keys never meet.
+[[nodiscard]] std::string code_identity(std::string_view name);
+
+/// What a code node's metadata JSON carries: its primary location (the
+/// definition, else the first declaration) and language, or the unresolved
+/// marker on a `name` node.
+struct CodeNodeMetadata {
+    /// The metadata is a code node's at all.
+    bool code = false;
+    bool unresolved = false;
+    std::string language;
+    std::string member;
+    std::string file;
+    std::int64_t line = 0;
+    std::int64_t end_line = 0;
+};
+
+[[nodiscard]] std::string code_node_metadata_json(const CodeNodeMetadata& metadata);
+[[nodiscard]] CodeNodeMetadata parse_code_node_metadata(std::string_view json);
+
 /// Canonical form for dedup: lowercased, trimmed, interior whitespace runs
 /// collapsed to one space.
 [[nodiscard]] std::string normalize_entity_name(std::string_view name);
@@ -89,10 +149,9 @@ struct UpsertResult {
 /// chunks -- always raises the highest id even when the count is unchanged.
 /// Without that half of the fingerprint the reconcile pass would prune the
 /// source's dead mentions while the planner still read it as up to date, and
-/// its entities would not return until a forced rebuild (Ommi's recorded
-/// bug). `max_chunk_id` is 0 on a row stamped before it was recorded; the
-/// planner then compares the count only, so an upgrade never forces a
-/// rebuild.
+/// its entities would not return until a forced rebuild. `max_chunk_id` is 0
+/// on a row stamped before it was recorded; the planner then compares the
+/// count only, so an upgrade never forces a rebuild.
 struct SourceState {
     std::string source;
     std::int64_t chunk_count = 0;
@@ -117,7 +176,8 @@ struct ChunkRef {
     [[nodiscard]] bool operator==(const ChunkRef&) const noexcept = default;
 };
 
-/// One relation row as stored -- the community detector's input.
+/// One relation row as stored -- the community detector's input, and the
+/// edge list an export carries (27m).
 struct GraphEdge {
     std::int64_t id = 0;
     std::int64_t source_id = 0;
@@ -125,6 +185,10 @@ struct GraphEdge {
     std::string relation;
     std::string description;
     std::int64_t weight = 1;
+    /// `extracted` or `inferred` (schema v6).
+    std::string origin;
+    /// Set for an extracted edge (1.0); a negative value means not recorded.
+    double confidence = -1.0;
 };
 
 /// A graph's member collections by label, each a read-only view of that

@@ -7,6 +7,7 @@
 
 #include "contracts/config.h"
 #include "httpserver/http_types.h"
+#include "operations/suites.h"
 
 /// The config-editing slice of the control plane: backends and the three role
 /// pointers, each the twin of an `apogee config` subcommand.
@@ -32,6 +33,11 @@ struct AdminConfigContext {
     std::filesystem::path config_path;
     /// The config this server started from, for `restart_required`.
     const harness::Config* startup = nullptr;
+    /// Asks a backend's provider whether it bills per call, for a suite's
+    /// consultable members (27f) -- the CLI's own probe, handed down by the
+    /// composition root, which can build providers. Null tells nothing, and
+    /// unknown is metered.
+    commands::MeteredProbe metered;
 };
 
 /// A backend entry as the plane serializes it: every field but the key.
@@ -39,7 +45,8 @@ struct AdminConfigContext {
                                           const harness::BackendConfig& backend);
 
 /// Whether the file now differs from what the server started with, in what
-/// it serves: backend membership or the role pointers. Stateless on purpose,
+/// it serves: backend membership, the role pointers, or the suites and the
+/// default suite (27d). Stateless on purpose,
 /// so drift a CLI edit made while the server ran is reported too.
 [[nodiscard]] bool config_drifted(const harness::Config& startup, const harness::Config& now);
 

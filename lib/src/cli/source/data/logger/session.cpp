@@ -61,6 +61,8 @@ std::string_view to_string(WarningKind kind) noexcept {
             return "field_dropped";
         case WarningKind::RerankBackendMissing:
             return "rerank_backend_missing";
+        case WarningKind::SuiteMissing:
+            return "suite_missing";
     }
     return "unknown";
 }
@@ -128,6 +130,12 @@ std::string serialize(const Session& session) {
     if (!session.rerank.empty()) {
         out["rerank"] = session.rerank;
     }
+    if (session.suite.has_value()) {
+        out["suite"] = *session.suite;
+    }
+    if (!session.task.empty()) {
+        out["task"] = session.task;
+    }
     if (!session.title.empty()) {
         out["title"] = session.title;
     }
@@ -151,6 +159,20 @@ std::string serialize(const Session& session) {
             }
             if (const std::optional<std::size_t> at = attachment.map_at; at.has_value()) {
                 entry["map_at"] = *at;
+            }
+            if (const std::optional<AttachmentGraph> part = attachment.graph; part.has_value()) {
+                // Which part of the index's code graph is this attachment's,
+                // and what its notice said (27n) -- never the graph itself.
+                nlohmann::json graph = nlohmann::json::object();
+                if (!part->label.empty()) {
+                    graph["label"] = part->label;
+                    graph["supported"] = part->supported;
+                    graph["skipped"] = part->skipped;
+                }
+                if (!part->absent.empty()) {
+                    graph["absent"] = part->absent;
+                }
+                entry["graph"] = std::move(graph);
             }
             attachments.push_back(std::move(entry));
         }
@@ -208,6 +230,32 @@ LoadedSession deserialize(std::string_view text, const KnownDependencies& known)
                                        "' is no longer configured -- resuming without reranking"});
         session.rerank.clear();
     }
+    if (const auto it = parsed.find("suite"); it != parsed.end() && !it->is_null()) {
+        if (it->is_string()) {
+            session.suite = it->get<std::string>();
+        } else {
+            loaded.warnings.push_back(
+                ResumeWarning{WarningKind::FieldDropped, "suite",
+                              "field 'suite' had an unexpected shape and was ignored"});
+        }
+    }
+    // A suite since deleted: resume under the config's default, and say so.
+    // "" is a suite turned off, not a name, and is never checked.
+    if (known.check_suites && session.suite.has_value() && !session.suite->empty() &&
+        std::none_of(known.suites.begin(), known.suites.end(), [&](const std::string& name) {
+            return name.size() == session.suite->size() &&
+                   std::equal(name.begin(), name.end(), session.suite->begin(), [](char a, char b) {
+                       return std::tolower(static_cast<unsigned char>(a)) ==
+                              std::tolower(static_cast<unsigned char>(b));
+                   });
+        })) {
+        loaded.warnings.push_back({WarningKind::SuiteMissing, *session.suite,
+                                   "suite '" + *session.suite +
+                                       "' is no longer configured -- resuming under the "
+                                       "config's default suite, if it has one"});
+        session.suite.reset();
+    }
+    session.task = string_field(parsed, "task", loaded.warnings);
     session.provider_session_id = string_field(parsed, "provider_session_id", loaded.warnings);
     session.started_at = string_field(parsed, "started_at", loaded.warnings);
     session.updated_at = string_field(parsed, "updated_at", loaded.warnings);
@@ -270,6 +318,29 @@ LoadedSession deserialize(std::string_view text, const KnownDependencies& known)
                 if (const auto at = entry.find("map_at");
                     at != entry.end() && at->is_number_unsigned()) {
                     attachment.map_at = at->get<std::size_t>();
+                }
+                if (const auto graph = entry.find("graph");
+                    graph != entry.end() && graph->is_object()) {
+                    // A graph record that cannot be read costs the graph's
+                    // line, never the attachment: the next attach rebuilds it.
+                    try {
+                        AttachmentGraph read;
+                        read.label = graph->value("label", std::string{});
+                        read.absent = graph->value("absent", std::string{});
+                        if (const auto supported = graph->find("supported");
+                            supported != graph->end() && supported->is_object()) {
+                            read.supported = supported->get<std::map<std::string, std::int64_t>>();
+                        }
+                        if (const auto skipped = graph->find("skipped");
+                            skipped != graph->end() && skipped->is_object()) {
+                            read.skipped = skipped->get<std::map<std::string, std::int64_t>>();
+                        }
+                        if (!read.label.empty() || !read.absent.empty()) {
+                            attachment.graph = std::move(read);
+                        }
+                    } catch (const std::exception&) {
+                        attachment.graph.reset();
+                    }
                 }
                 session.attachments.push_back(std::move(attachment));
             } catch (const std::exception&) {

@@ -351,3 +351,49 @@ TEST_CASE("the harness names and saves a conversation only where a backend keeps
     std::error_code code;
     std::filesystem::remove_all(root, code);
 }
+
+TEST_CASE("a suite member pinned to 4096 runs its calls at that window",
+          "[backends][llamacpp][window][harness][suites]") {
+    // 27d's acceptance on the wire: the context llama.cpp is asked to make
+    // for the member's backend is the member's window -- not the backend's
+    // own default -- exactly while the suite is active. The factory builds
+    // every provider from `backend_as_run`; this builds one the same way
+    // over the scripted runtime.
+    apogee::harness::Config config = apogee::harness::parse_config(R"(
+models:
+  default: helper
+backends:
+  helper:
+    type: llamacpp
+    model_path: /models/test.gguf
+suites:
+  research:
+    members:
+      utility:
+        backend: helper
+        context_size: 4096
+)",
+                                                                   "<test>");
+    for (const bool active : {false, true}) {
+        CAPTURE(active);
+        config.models.default_suite = active ? "research" : "";
+        auto owned = std::make_unique<FakeLlamaRuntime>();
+        owned->trained_length = 262144;
+        FakeLlamaRuntime* runtime = owned.get();
+        LlamaCppProvider::Options options = LlamaCppProvider::options_from(
+            "helper", apogee::harness::backend_as_run(config, "helper"));
+        options.prompt_cache_dir.clear();  // hermetic: no state kept on disk
+        apogee::harness::Harness harness{config};
+        harness.register_provider(
+            "helper", std::make_shared<LlamaCppProvider>(std::move(options), std::move(owned)));
+        harness.use_default_router();
+
+        ChatRequest request = turn({ChatMessage::user("alpha")});
+        request.model = "helper";
+        (void)harness.chat(request);
+        REQUIRE(runtime->model != nullptr);
+        REQUIRE_FALSE(runtime->model->context_sizes.empty());
+        CHECK(runtime->model->context_sizes.front() == (active ? 4096 : 32768));
+        CHECK(harness.context_window_for_model("helper") == (active ? 4096 : 32768));
+    }
+}

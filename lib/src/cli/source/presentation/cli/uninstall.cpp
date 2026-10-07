@@ -7,6 +7,7 @@
 #include <sstream>
 #include <system_error>
 
+#include "cli/helpers.h"
 #include "contracts/assets.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
@@ -21,6 +22,12 @@ namespace {
 /// package manager owns would be worse than leaving one behind, so this is
 /// deliberately narrow.
 [[nodiscard]] std::vector<std::filesystem::path> completion_candidates() {
+    // The stubs are the release channel's (M10): they call `apogee` by name,
+    // and a dev or test install never writes any -- so its uninstall must not
+    // take the release install's.
+    if (harness::baked_channel() != harness::Channel::Release) {
+        return {};
+    }
     const std::optional<std::string> home = platform::home_directory();
     if (!home.has_value()) {
         return {};
@@ -34,7 +41,98 @@ namespace {
     };
 }
 
+/// Whether the directory at `path` holds anything that is not Apogee's own.
+[[nodiscard]] bool holds_user_data(const std::filesystem::path& home,
+                                   const std::filesystem::path& path) {
+    // A directory holding only Apogee's own unedited bundled files (a fresh
+    // install's prompts/ and schemas/) is not the user's data; one holding
+    // anything else -- an edit, a scaffolded agent -- is. An empty sessions/
+    // is not worth a warning; one with fifty conversations is.
+    std::error_code code;
+    bool found = false;
+    for (const auto& item : std::filesystem::directory_iterator(path, code)) {
+        if (!harness::is_unmodified_bundled_asset(home, item.path())) {
+            found = true;
+            break;
+        }
+    }
+    return !code && found;
+}
+
 }  // namespace
+
+std::vector<PlannedRow> plan_rows(const std::filesystem::path& home,
+                                  std::span<const harness::LayoutEntry> rows) {
+    std::vector<PlannedRow> planned;
+    planned.reserve(rows.size());
+    for (const harness::LayoutEntry& entry : rows) {
+        PlannedRow row;
+        row.name = std::string{entry.relative_path};
+        const std::filesystem::path path = home / entry.relative_path;
+        std::error_code code;
+        // symlink_status: a row that is a symlink is present as itself.
+        row.present = std::filesystem::exists(std::filesystem::symlink_status(path, code));
+        row.user_data = row.present && entry.user_data && holds_user_data(home, path);
+        planned.push_back(std::move(row));
+    }
+    return planned;
+}
+
+std::string describe_user_data(const std::vector<std::string>& lines) {
+    if (lines.empty()) {
+        return {};
+    }
+    // Named explicitly rather than folded into "data": these are the
+    // directories whose loss the user cannot undo, and a prompt that says
+    // "remove ~/.apogee?" does not convey that.
+    std::ostringstream out;
+    out << "\nIncluding YOUR OWN DATA in:\n";
+    for (const std::string& line : lines) {
+        out << "  " << line << "\n";
+    }
+    out << "\nThis cannot be undone.\n";
+    return out.str();
+}
+
+Confirmation confirm_removal(std::string_view command, bool yes, bool interactive, std::istream& in,
+                             std::ostream& out, std::ostream& err) {
+    if (yes) {
+        return Confirmation::Proceed;
+    }
+    if (!interactive) {
+        // Refusing beats guessing. A piped removal with no way to ask must not
+        // decide on the user's behalf that the answer is yes.
+        err << "\napogee " << command
+            << ": not a terminal -- rerun with --yes to confirm non-interactively\n";
+        return Confirmation::Refused;
+    }
+    out << "\nType 'yes' to proceed: " << std::flush;
+    std::string answer;
+    std::getline(in, answer);
+    if (answer != "yes") {
+        out << "cancelled\n";
+        return Confirmation::Cancelled;
+    }
+    return Confirmation::Proceed;
+}
+
+void remove_planned(const std::filesystem::path& path, bool recursive,
+                    std::vector<std::string>& removed, std::vector<std::string>& errors) {
+    if (path.empty()) {
+        return;
+    }
+    std::error_code code;
+    if (recursive) {
+        std::filesystem::remove_all(path, code);
+    } else {
+        std::filesystem::remove(path, code);
+    }
+    if (code) {
+        errors.push_back(path.string() + ": " + code.message());
+    } else {
+        removed.push_back(path.string());
+    }
+}
 
 UninstallPlan plan_uninstall(const std::filesystem::path& home,
                              const std::filesystem::path& binary) {
@@ -47,31 +145,12 @@ UninstallPlan plan_uninstall(const std::filesystem::path& home,
 
     if (std::filesystem::exists(home, code)) {
         plan.data_directory = home;
-
-        // Which user-owned trees actually have something in them. An empty
-        // sessions/ is not worth a warning; one with fifty conversations is.
-        for (const harness::LayoutEntry& entry : harness::data_directories()) {
-            if (!entry.user_data) {
-                continue;
+        // Which user-owned trees actually have something in them -- the walk
+        // reset shares, so the two prompts agree on what is the user's.
+        for (const PlannedRow& row : plan_rows(home)) {
+            if (row.user_data) {
+                plan.user_data.push_back(row.name);
             }
-            const std::filesystem::path path = home / entry.relative_path;
-            if (!std::filesystem::exists(path, code)) {
-                continue;
-            }
-            // A directory holding only Apogee's own unedited bundled files (a
-            // fresh install's prompts/ and schemas/) is not the user's data;
-            // one holding anything else -- an edit, a scaffolded agent -- is.
-            bool holds_user_data = false;
-            for (const auto& item : std::filesystem::directory_iterator(path, code)) {
-                if (!harness::is_unmodified_bundled_asset(home, item.path())) {
-                    holds_user_data = true;
-                    break;
-                }
-            }
-            if (code || !holds_user_data) {
-                continue;
-            }
-            plan.user_data.emplace_back(entry.relative_path);
         }
     }
 
@@ -101,50 +180,26 @@ std::string describe_plan(const UninstallPlan& plan) {
         out << "  (nothing -- this install looks already removed)\n";
     }
 
-    if (plan.touches_user_data()) {
-        // Named explicitly rather than folded into "data": these are the
-        // directories whose loss the user cannot undo, and a prompt that says
-        // "remove ~/.apogee?" does not convey that.
-        out << "\nIncluding YOUR OWN DATA in:\n";
-        for (const std::string& name : plan.user_data) {
-            out << "  " << name << "/\n";
-        }
-        out << "\nThis cannot be undone.\n";
+    std::vector<std::string> lines;
+    lines.reserve(plan.user_data.size());
+    for (const std::string& name : plan.user_data) {
+        lines.push_back(name + "/");
     }
+    out << describe_user_data(lines);
     return out.str();
 }
 
 std::vector<std::string> execute_uninstall(const UninstallPlan& plan,
                                            std::vector<std::string>& errors) {
     std::vector<std::string> removed;
-    std::error_code code;
-
-    const auto drop = [&](const std::filesystem::path& path, bool recursive) {
-        if (path.empty()) {
-            return;
-        }
-        if (recursive) {
-            std::filesystem::remove_all(path, code);
-        } else {
-            std::filesystem::remove(path, code);
-        }
-        if (code) {
-            errors.push_back(path.string() + ": " + code.message());
-            code.clear();
-        } else {
-            removed.push_back(path.string());
-        }
-    };
-
     for (const std::filesystem::path& path : plan.completions) {
-        drop(path, false);
+        remove_planned(path, false, removed, errors);
     }
-    drop(plan.data_directory, true);
+    remove_planned(plan.data_directory, true, removed, errors);
     // The binary last: if removing it fails, everything else is still gone and
     // the user can delete one file. Doing it first risks a half-removal with no
     // command left to finish the job.
-    drop(plan.binary, false);
-
+    remove_planned(plan.binary, false, removed, errors);
     return removed;
 }
 
@@ -174,7 +229,7 @@ void UninstallCommand::bind(CLI::App& root, const RootContext& context) {
 
         std::filesystem::path home;
         try {
-            home = harness::apogee_home();
+            home = harness::install_home();  // its own channel's, never a root flag's (M10)
         } catch (const std::exception& e) {
             std::cerr << "apogee uninstall: " << e.what() << "\n";
             throw CLI::RuntimeError(1);
@@ -188,21 +243,16 @@ void UninstallCommand::bind(CLI::App& root, const RootContext& context) {
 
         std::cout << describe_plan(plan);
 
-        if (!flags->yes) {
-            if (!platform::is_terminal(platform::StandardStream::In)) {
-                // Refusing beats guessing. A piped uninstall with no way to ask
-                // must not decide on the user's behalf that the answer is yes.
-                std::cerr << "\napogee uninstall: not a terminal -- rerun with --yes to confirm "
-                             "non-interactively\n";
+        // `stdin_is_piped` is the terminal question with one addition: a test
+        // that feeds std::cin from a buffer is a pipe too, whatever runs it.
+        switch (confirm_removal("uninstall", flags->yes, !stdin_is_piped(), std::cin, std::cout,
+                                std::cerr)) {
+            case Confirmation::Refused:
                 throw CLI::RuntimeError(1);
-            }
-            std::cout << "\nType 'yes' to proceed: " << std::flush;
-            std::string answer;
-            std::getline(std::cin, answer);
-            if (answer != "yes") {
-                std::cout << "cancelled\n";
+            case Confirmation::Cancelled:
                 return;
-            }
+            case Confirmation::Proceed:
+                break;
         }
 
         std::vector<std::string> errors;

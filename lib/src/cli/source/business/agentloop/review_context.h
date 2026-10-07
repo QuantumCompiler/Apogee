@@ -10,10 +10,8 @@
 /// the defaults `git_diff` and `git_log` fall back to when the model passes
 /// none -- and the model as a one-line system note. The model cannot change
 /// which diff is reviewed, and a small local model never has to parse a
-/// branch name out of a sentence. Ommi carried the same refs through
-/// `OMMI_GIT_REVIEW_*` environment variables its git server read at call
-/// time; Apogee's tools are in-process, so the side channel is gone and the
-/// refs are just arguments.
+/// branch name out of a sentence. Apogee's tools are in-process, so the refs
+/// are just arguments -- no environment-variable side channel.
 namespace apogee::agentloop {
 
 struct ReviewContext {

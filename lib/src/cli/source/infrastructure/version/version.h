@@ -16,8 +16,10 @@ namespace apogee::version {
 /// UTC date the build was configured, "YYYY-MM-DD".
 [[nodiscard]] std::string_view build_date();
 
-/// The single line `apogee --version` prints, e.g.
-/// "apogee 0.1.0 (a1b2c3d, 2026-08-24, macos-arm64)".
+/// The line `apogee --version` prints first, e.g.
+/// "apogee 0.1.0 (a1b2c3d, 2026-08-24, macos-arm64)" -- alone on its line,
+/// since the release scripts read line one; the channel and the data
+/// directory follow it (`cli/version_command.h`).
 [[nodiscard]] std::string full();
 
 }  // namespace apogee::version

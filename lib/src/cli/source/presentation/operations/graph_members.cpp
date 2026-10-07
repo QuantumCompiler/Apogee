@@ -2,9 +2,12 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <set>
 #include <system_error>
 
+#include "graph/code_languages.h"
 #include "operations/collections.h"
+#include "operations/graph_sources.h"
 
 namespace apogee::commands {
 
@@ -63,8 +66,10 @@ NamedGraphValidation validate_named_graph(const harness::Config& config, std::st
         out.error = "'" + std::string{name} + "' is not a plain graph name";
         return out;
     }
-    if (graph.collections.empty()) {
-        out.error = "at least one member collection is required (--collections a,b)";
+    if (graph.collections.empty() && graph.sources.empty()) {
+        out.error =
+            "at least one member collection or source tree is required (--collections a,b, or "
+            "--sources <dir>)";
         return out;
     }
     for (const std::string& collection : graph.collections) {
@@ -93,6 +98,33 @@ NamedGraphValidation validate_named_graph(const harness::Config& config, std::st
                     "' is not configured (add it with 'apogee config add-backend')";
         return out;
     }
+    // Source trees (27k): absolute, each label once and never a member
+    // collection's name -- a label is what a tree's rows are recorded under.
+    std::set<std::string> labels;
+    for (const std::string& source : graph.sources) {
+        if (source.empty() || !std::filesystem::path{source}.is_absolute()) {
+            out.error = "source tree '" + source + "' must be an absolute path";
+            return out;
+        }
+        const std::string label = source_member_label(source);
+        if (!labels.insert(label).second) {
+            out.error = "two source trees are both named '" + label +
+                        "' -- a graph's trees need distinct directory names";
+            return out;
+        }
+        if (std::ranges::find(graph.collections, label) != graph.collections.end()) {
+            out.error = "source tree '" + source + "' is named like the member collection '" +
+                        label + "' -- rename one";
+            return out;
+        }
+    }
+    for (const std::string& language : graph.languages) {
+        if (graph::code_language_by_name(language) == nullptr) {
+            out.error =
+                "unknown language '" + language + "' -- one of: " + graph::code_language_names();
+            return out;
+        }
+    }
     if (graph.hops < 1 || graph.hops > 2) {
         out.error = "hops must be 1 or 2";
         return out;
@@ -106,6 +138,12 @@ NamedGraphValidation validate_named_graph(const harness::Config& config, std::st
             !file_exists(collection_path(collection))) {
             out.warnings.push_back("member collection '" + collection +
                                    "' is not configured yet (ingest registers it on first use)");
+        }
+    }
+    for (const std::string& source : graph.sources) {
+        std::error_code code;
+        if (!std::filesystem::is_directory(source, code)) {
+            out.warnings.push_back("source tree '" + source + "' is not a directory");
         }
     }
     return out;

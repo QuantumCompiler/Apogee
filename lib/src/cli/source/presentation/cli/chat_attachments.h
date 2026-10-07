@@ -17,6 +17,7 @@
 #include "agentloop/budget.h"
 #include "agentloop/loop.h"
 #include "agentloop/rag.h"
+#include "cli/attachment_graph.h"
 #include "contracts/cancellation.h"
 #include "harness/harness.h"
 #include "logger/session.h"
@@ -39,7 +40,78 @@
 /// model, and a helper describing or transcribing, only ever run while the
 /// user is typing -- and anything else that reaches a model settles this
 /// first.
+///
+/// **A folder of code builds its graph** (27n): after its chunks are
+/// indexed, the worker parses the folder's files -- the ones the attach
+/// found, never a second walk -- into the same index with 27k's model-free
+/// build (`cli/attachment_graph`), says it in one line, and keeps it with the
+/// chat: re-attached, only what changed is parsed again; detached, its part
+/// is forgotten; the chat deleted, it goes with the index file. Ctrl-C keeps
+/// the chunks that are ready and leaves the graph absent, and says so.
+///
+/// **And turns reach it** (27o): while the index holds a graph, an
+/// attachment turn's excerpts seed the retrieval-time expansion through it,
+/// its section riding after them, and `graph_scope` hands the chat the
+/// store its scoped `graph` tools read -- so a model walks the attached code
+/// rather than inventing paths.
+///
+/// **How, per attach** (27p): whether a folder's code graph is built is a
+/// method -- `code` or `off` -- resolved once per attach by one function: a
+/// `--graph` on the attach beats the config's `attachments.graph`, which
+/// beats the surface's built-in (a chat's `code`, `complete`'s `off`). The
+/// attach line names the method when the built-in did not choose it. An `@`
+/// mention is a bare path, so it takes the default.
 namespace apogee::commands {
+
+/// What chose an attach's method (27p).
+enum class GraphMethodSource : std::uint8_t {
+    /// The surface's own default: a chat's `code`, `complete`'s `off` (27n).
+    BuiltIn,
+    /// The config's `attachments.graph`.
+    Config,
+    /// A `--graph` on the attach itself.
+    Flag,
+};
+
+/// The method an attach takes, and what chose it.
+struct GraphMethod {
+    harness::AttachmentGraphMethod method = harness::AttachmentGraphMethod::Code;
+    GraphMethodSource from = GraphMethodSource::BuiltIn;
+
+    bool operator==(const GraphMethod&) const = default;
+};
+
+/// The one resolution (27p): `flag` when given, else `config` when set, else
+/// `built_in`. Pure.
+[[nodiscard]] GraphMethod resolve_graph_method(std::optional<harness::AttachmentGraphMethod> flag,
+                                               std::optional<harness::AttachmentGraphMethod> config,
+                                               harness::AttachmentGraphMethod built_in);
+
+/// What an attach line adds for a method the built-in did not choose --
+/// `with its code graph (--graph=code)`, `without its code graph
+/// (attachments.graph: off in the config)` -- and nothing for the built-in's.
+[[nodiscard]] std::string graph_method_note(const GraphMethod& method);
+
+/// `/attach`'s argument, read (27p): the path first -- quoted when it holds a
+/// space, or everything before the first `--` word -- then its flags.
+struct AttachArgument {
+    std::string spec;
+    /// `--graph=<method>` or `--graph <method>`; nullopt when not given.
+    std::optional<harness::AttachmentGraphMethod> graph;
+    /// Why the line is refused, naming the shape or the valid set; empty
+    /// when it reads.
+    std::string error;
+};
+
+/// `/attach`'s shape, as a refusal names it.
+inline constexpr std::string_view kAttachShape = "/attach <path> [--graph=code|off]";
+
+/// Reads `/attach`'s argument (after `parse_slash`'s trim). A flag before the
+/// path, an unknown flag, a flag given twice, a missing or unknown value and
+/// a word after the path's closing quote are refused, each naming the shape
+/// or the valid set. An open quote -- completion leaves a folder's open --
+/// reads as no quote.
+[[nodiscard]] AttachArgument parse_attach_argument(std::string_view argument);
 
 class ChatAttachments {
 public:
@@ -56,6 +128,12 @@ public:
         /// Whether a settled attach is saved to the session file: a chat's
         /// is, `complete`'s temporary one is not.
         bool save = true;
+        /// This surface's built-in method for a folder of code (27n): a
+        /// chat's builds its code graph; `complete`'s one-shot store does not
+        /// -- a one-shot has no follow-up to walk it in. The lowest rung of
+        /// each attach's resolution (27p): the config's `attachments.graph`
+        /// beats it, and a `--graph` beats both.
+        harness::AttachmentGraphMethod built_in_graph = harness::AttachmentGraphMethod::Code;
     };
 
     /// `store_path` is the conversation's index: `index_for(chat_id)` for a
@@ -83,9 +161,21 @@ public:
     /// scratch a crash left.
     static void remove_index(std::string_view chat_id);
 
+    /// The method an attach takes here (27p): `flag` over the config's
+    /// `attachments.graph` over this surface's built-in, by
+    /// `resolve_graph_method`.
+    [[nodiscard]] GraphMethod graph_method(
+        std::optional<harness::AttachmentGraphMethod> flag = std::nullopt) const;
+
     /// Queues what `spec` names -- a file, a folder, a glob -- for indexing
-    /// and returns at once. False, having said why, when it names nothing or
-    /// the size guard refuses it.
+    /// and returns at once, a folder of code graphed or not as `method` says
+    /// -- and when something other than the built-in chose it, the attach
+    /// line says which method and what chose it. False, having said why,
+    /// when it names nothing or the size guard refuses it.
+    bool attach(std::string_view spec, const std::filesystem::path& working_directory,
+                const GraphMethod& method);
+    /// The same, with nothing on the line: `graph_method()`'s -- what an `@`
+    /// mention and a launch's `--image` take.
     bool attach(std::string_view spec, const std::filesystem::path& working_directory);
 
     /// Waits for indexing in flight, then records each attachment and decides
@@ -93,10 +183,12 @@ public:
     void settle();
 
     /// Detaches the attachment named `name`, and its files from the index
-    /// unless another attachment holds the same content.
+    /// unless another attachment holds the same content -- and its part of
+    /// the code graph (27n), the rest re-linked.
     [[nodiscard]] bool detach(std::string_view name);
 
-    /// One line per attachment, for `/attachments`.
+    /// One line per attachment, for `/attachments` -- a graphed folder's
+    /// ending with its graph's line, counted from the index as it is now.
     [[nodiscard]] std::vector<std::string> describe() const;
     /// The attachments' names, for `/detach`'s completion.
     [[nodiscard]] std::vector<std::string> names() const;
@@ -111,6 +203,13 @@ public:
     /// Whether this turn will search the index -- so the question is worth
     /// restating first.
     [[nodiscard]] bool retrieves() const;
+
+    /// The chat's code graph, while a recorded folder carries one and the
+    /// index holds it (27o): what an attachment turn expands through and what
+    /// the scoped `graph` toolset reads -- nullopt for a chat whose
+    /// attachments are chunks only, and again once the last graphed folder
+    /// is detached. Decided from the chat's own state, never from `graphs:`.
+    [[nodiscard]] std::optional<AttachmentGraphScope> graph_scope() const;
 
     /// The turn whose user message sits at `user_message` in history: an
     /// attachment settled since the last turn rides it when inlined -- an
@@ -140,6 +239,9 @@ private:
         std::vector<agentloop::FoundFile> files;
         /// The chat model when it was attached: who reads its media natively.
         std::string chat;
+        /// Its code graph's pass (27n): built for a folder of code, or an
+        /// earlier one forgotten; none for anything else.
+        std::optional<AttachmentGraphJob> graph;
     };
 
     struct Indexed {
@@ -148,9 +250,52 @@ private:
         /// Its media as the chat model reads them natively, for the next
         /// message (26e); empty when it cannot.
         std::vector<harness::ContentPart> native;
+        /// What its graph pass did; none when it ran none -- no job, or
+        /// nothing of the attach was indexed, so the earlier one stands.
+        std::optional<AttachmentGraphOutcome> graph;
     };
 
     void start_worker();
+    /// The graph pass of a queued folder (27n), on the worker after its
+    /// chunks: built -- or cancelled, failed, no longer asked for, its member
+    /// left for the settle that records it to forget.
+    [[nodiscard]] AttachmentGraphOutcome graph_pass(const AttachmentGraphJob& job,
+                                                    const harness::CancellationToken& token);
+
+    /// A folder attach's files, relative to it, and whether they include a
+    /// language a vendored grammar parses -- the only attach a method
+    /// changes anything for (27n).
+    struct SourceFolder {
+        std::filesystem::path root;
+        std::vector<std::string> files;
+        bool code = false;
+    };
+
+    /// The pass `spec` takes, if any: built when `method` is `code` and the
+    /// folder offers code, an earlier graph forgotten when not.
+    [[nodiscard]] std::optional<AttachmentGraphJob> graph_job(
+        std::string_view spec, std::optional<SourceFolder> folder,
+        harness::AttachmentGraphMethod method);
+    /// The member `name`'s code graph is kept under, as the session records
+    /// it, if it has one.
+    [[nodiscard]] std::optional<std::string> graph_label_of(const std::string& name) const;
+    /// The chat's graphed attachments' members but `name`'s.
+    [[nodiscard]] std::set<std::string> graph_members_but(const std::string& name) const;
+
+    /// What an indexed attachment's graph pass leaves the session and says
+    /// (27n): its record, its line, whether the line is a warning -- the
+    /// member labels kept in step.
+    struct GraphSaid {
+        std::optional<logger::AttachmentGraph> record;
+        std::string line;
+        bool warning = false;
+    };
+
+    [[nodiscard]] GraphSaid take_graph(const Indexed& indexed);
+    /// After a settle's records, and a detach: any member of the index's
+    /// code graph no recorded attachment owns is forgotten (27n), so the
+    /// graph is exactly the session's graphed folders'.
+    void reconcile_graph();
     /// Media `files` no model can read, said and left out; a run of billed
     /// descriptions asked about. False when nothing is left.
     [[nodiscard]] bool readable(std::string_view spec, std::vector<agentloop::FoundFile>& files,
@@ -189,6 +334,10 @@ private:
     std::string status_;
     std::future<void> worker_;
     harness::CancellationToken cancellation_ = harness::CancellationToken::create();
+    /// The members of folders queued since the last settle, by name (27n):
+    /// the session holds a recorded folder's, and these keep two folders of
+    /// one name, attached before either settles, apart.
+    std::map<std::string, std::string> graph_in_flight_;
 
     /// Settled and inlined, waiting for the next user message to ride.
     std::set<std::string> pending_inline_;

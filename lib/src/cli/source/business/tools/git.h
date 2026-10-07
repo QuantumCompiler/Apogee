@@ -10,10 +10,10 @@
 
 /// The git toolset: status, log, diff, show -- each a `git` child.
 ///
-/// Ported from Ommi's `ommi-mcp-git`. Every argument that reaches `git`
-/// travels in an argument list, never through a shell, so quoting is not a
-/// risk; **option injection** is, and the ref allow-list -- a token that
-/// starts with a letter or digit -- is what closes it.
+/// Every argument that reaches `git` travels in an argument list, never through
+/// a shell, so quoting is not a risk; **option injection** is, and the ref
+/// allow-list -- a token that starts with a letter or digit -- is what closes
+/// it.
 ///
 /// `git_diff` carries the deterministic review form the analyze item will
 /// pass parameters into: `base...head` (the merge-base diff, only what the

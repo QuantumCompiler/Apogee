@@ -7,6 +7,7 @@
 #include <iostream>
 #include <memory>
 #include <sstream>
+#include <string_view>
 
 #include "cli/complete_sources.h"
 #include "contracts/paths.h"
@@ -27,7 +28,7 @@ namespace {
     const std::size_t colon = type.find(':');
     const std::string base = type.substr(0, colon);
     value.type = base;
-    value.list = base == kCollectionListValue || option.get_delimiter() == ',';
+    value.list = base.ends_with(",...") || option.get_delimiter() == ',';
     if (base == kBackendValue) {
         value.kind = ValueKind::Backend;
     } else if (base == kPathValue) {
@@ -37,14 +38,38 @@ namespace {
         value.source = base;
     }
     if (colon != std::string::npos) {
-        std::stringstream validators{type.substr(colon + 1)};
-        for (std::string part; std::getline(validators, part, ':');) {
+        // Colon-separated -- a `{...}` set read whole, since a word in it may
+        // hold a colon itself (`--on-question`'s `answer:`, 27i).
+        const std::string validators = type.substr(colon + 1);
+        for (std::size_t at = 0; at < validators.size();) {
+            std::size_t end = validators.find(validators[at] == '{' ? '}' : ':', at);
+            if (end == std::string::npos) {
+                end = validators.size();
+            } else if (validators[at] == '{') {
+                ++end;  // the set's closing brace is its own
+            }
+            const std::string part = validators.substr(at, end - at);
+            at = end + 1;
             if (part.size() >= 2 && part.front() == '{' && part.back() == '}') {
-                // `CLI::IsMember` -- the set the parser will hold the word to.
-                value.kind = ValueKind::Choice;
+                std::vector<std::string> words;
                 std::stringstream members{part.substr(1, part.size() - 2)};
                 for (std::string member; std::getline(members, member, ',');) {
-                    value.choices.push_back(member);
+                    words.push_back(member);
+                }
+                const bool keyed = value.kind == ValueKind::Choice && !value.choices.empty() &&
+                                   std::ranges::all_of(value.choices, [](const std::string& key) {
+                                       return key.ends_with('=');
+                                   });
+                if (value.kind == ValueKind::Names) {
+                    // A name kind keeps its source: the set is every word the
+                    // parser takes, the source the ones the line can
+                    // (`models convert --mlx --type`).
+                } else if (keyed) {
+                    value.key_values = std::move(words);  // `keyed_words_value`
+                } else {
+                    // `CLI::IsMember` -- the set the parser will hold the word to.
+                    value.kind = ValueKind::Choice;
+                    value.choices.insert(value.choices.end(), words.begin(), words.end());
                 }
             } else if (part == "FILE" || part == "DIR" || part.starts_with("PATH(")) {
                 value.kind = ValueKind::Path;  // CLI::ExistingFile and its siblings
@@ -129,9 +154,22 @@ namespace {
             completion.candidates = filter_prefix(names, current);
             break;
         }
-        case ValueKind::Choice:
+        case ValueKind::Choice: {
+            // Past a key's `=`, that key's values: `chat=fs,g` -> `chat=fs,git`.
+            const std::size_t equals = current.find('=');
+            if (!value.key_values.empty() && equals != std::string_view::npos &&
+                contains(value.choices, current.substr(0, equals + 1))) {
+                const std::string key{current.substr(0, equals + 1)};
+                const ValueSpec values{.kind = ValueKind::Choice, .list = true};
+                for (const std::string& item :
+                     offer_items(value.key_values, values, current.substr(equals + 1))) {
+                    completion.candidates.push_back(key + item);
+                }
+                break;
+            }
             completion.candidates = offer_items(value.choices, value, current);
             break;
+        }
         case ValueKind::Path:
             completion.files = true;
             break;
@@ -217,6 +255,45 @@ CommandSpec specs_from_app(const CLI::App& app) {
     return root;
 }
 
+std::optional<harness::RootFlag> typed_root_flag(const std::vector<std::string>& words,
+                                                 const CommandSpec& root) {
+    const std::string custom_equals = std::string{harness::kCustomFlag} + "=";
+    std::optional<harness::RootFlag> flag;
+    int given = 0;
+    for (std::size_t i = 0; i < words.size(); ++i) {
+        const std::string& word = words[i];
+        if (!word.starts_with('-')) {
+            break;  // the verb: the root's flags come before it
+        }
+        for (const harness::Channel channel : harness::kChannels) {
+            if (word == harness::channel_flag(channel)) {
+                flag = harness::RootFlag{.channel = channel, .custom_config = {}};
+                ++given;
+            }
+        }
+        if (word.starts_with(custom_equals)) {
+            flag = harness::RootFlag{.channel = std::nullopt,
+                                     .custom_config = word.substr(custom_equals.size())};
+            ++given;
+        } else if (root.values.contains(word) && i + 1 < words.size()) {
+            ++i;  // the flag's value, never the verb
+            if (word == harness::kCustomFlag) {
+                flag = harness::RootFlag{.channel = std::nullopt, .custom_config = words[i]};
+                ++given;
+            }
+        }
+    }
+    if (given != 1) {
+        return std::nullopt;
+    }
+    harness::RootInputs inputs = harness::current_root_inputs();
+    inputs.flag = flag;
+    if (!harness::resolve_root(inputs).ok()) {
+        return std::nullopt;
+    }
+    return flag;
+}
+
 Completion complete_words(const CompletionRequest& request, const harness::Config& config,
                           const CommandSpec& root, const CompletionSources& sources) {
     // Walk the words the way the parser will: descend on a subcommand's name,
@@ -241,6 +318,8 @@ Completion complete_words(const CompletionRequest& request, const harness::Confi
             } else if (const auto value = node->values.find(word); value != node->values.end()) {
                 pending = &value->second;
                 pending_flag = word;
+            } else if (contains(node->flags, word)) {
+                context.flags.try_emplace(word);  // given, with no value to take
             }
             continue;
         }
@@ -349,6 +428,15 @@ void CompleteProtocolCommand::bind(CLI::App& root, const RootContext& context) {
             request.words.assign(words->begin(), words->end() - 1);
         }
 
+        // Read out of the live parser, so a flag or command added anywhere, at
+        // any depth, completes without this file being told about it. The
+        // protocol verb itself is hidden, so it is never offered.
+        const CommandSpec tree = specs_from_app(root);
+
+        // A root flag on the line steers which install the candidates come
+        // from, for this answer only (M10).
+        const harness::RootFlagScope typed_root{typed_root_flag(request.words, tree)};
+
         harness::Config config;
         try {
             config = harness::load_config(harness::resolve_config_path(context.config_path));
@@ -356,11 +444,6 @@ void CompleteProtocolCommand::bind(CLI::App& root, const RootContext& context) {
             // Silent. A broken or absent config makes completion unhelpful; it
             // must never print a diagnostic into the user's command line.
         }
-
-        // Read out of the live parser, so a flag or command added anywhere, at
-        // any depth, completes without this file being told about it. The
-        // protocol verb itself is hidden, so it is never offered.
-        const CommandSpec tree = specs_from_app(root);
 
         // Directives only for a stub that asks: an older stub would offer the
         // directive line itself as a candidate.

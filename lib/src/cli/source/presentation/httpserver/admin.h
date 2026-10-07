@@ -11,8 +11,12 @@
 #include "httpserver/admin_datasets.h"
 #include "httpserver/admin_events.h"
 #include "httpserver/admin_graph.h"
+#include "httpserver/admin_graph_navigate.h"
 #include "httpserver/admin_graphs.h"
 #include "httpserver/admin_knowledge.h"
+#include "httpserver/admin_suites.h"
+#include "httpserver/admin_symphonies.h"
+#include "httpserver/admin_tasks.h"
 #include "httpserver/admin_training.h"
 #include "httpserver/http_types.h"
 #include "httpserver/jobs.h"
@@ -38,6 +42,9 @@ struct AdminOptions {
     /// The environment the credential listing reports against; null means
     /// the process-wide snapshot.
     const secrets::EnvSnapshot* env = nullptr;
+    /// Whether a backend bills per call, for a suite's consultable members
+    /// (27f): `serve` hands down the CLI's probe.
+    commands::MeteredProbe metered;
 };
 
 class AdminHandler {
@@ -70,6 +77,14 @@ public:
     [[nodiscard]] HttpResponse put_agent(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse delete_agent(const HttpRequest& request, std::string_view name);
 
+    /// The `symphonies:` slice (27q) -- the twins of `symphonies create`,
+    /// `edit` and `delete`, and the reads of `list` and `show`.
+    [[nodiscard]] HttpResponse list_symphonies(const HttpRequest& request);
+    [[nodiscard]] HttpResponse create_symphony(const HttpRequest& request);
+    [[nodiscard]] HttpResponse get_symphony(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse put_symphony(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse delete_symphony(const HttpRequest& request, std::string_view name);
+
     /// The knowledge routes borrow the inference plane: its harness runs the
     /// clerk, its served set decides which backend may.
     [[nodiscard]] HttpResponse capture_knowledge(Handler& plane, const HttpRequest& request);
@@ -87,6 +102,12 @@ public:
                                            std::string_view name);
     [[nodiscard]] HttpResponse graph_stats(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse graph_entity(const HttpRequest& request, std::string_view name);
+    /// The navigation reads (27l): the CLI's `graph path|explain|neighbors|
+    /// query --output-format json` documents, served.
+    [[nodiscard]] HttpResponse graph_path(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse graph_explain(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse graph_neighbors(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse graph_query(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse delete_graph(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse set_graph_enabled(const HttpRequest& request,
                                                  std::string_view collection);
@@ -104,6 +125,21 @@ public:
     [[nodiscard]] HttpResponse delete_graph_config(const HttpRequest& request,
                                                    std::string_view name);
 
+    /// The `suites:` config slice (27d) -- the twins of `config add-suite`,
+    /// `set-suite`, `delete-suite` and `set-default-suite`.
+    [[nodiscard]] HttpResponse list_suites(const HttpRequest& request);
+    [[nodiscard]] HttpResponse create_suite(const HttpRequest& request);
+    [[nodiscard]] HttpResponse set_default_suite(const HttpRequest& request);
+    [[nodiscard]] HttpResponse get_suite(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse put_suite(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse delete_suite(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse set_suite_member(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse set_suite_consult(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse set_suite_validate(const HttpRequest& request,
+                                                  std::string_view name);
+    [[nodiscard]] HttpResponse set_suite_orchestrate(const HttpRequest& request,
+                                                     std::string_view name);
+
     /// The datasets slice -- the twins of `apogee datasets`; synth is the
     /// plane's third job kind (teacher inference, not training).
     [[nodiscard]] HttpResponse list_datasets(const HttpRequest& request);
@@ -120,6 +156,12 @@ public:
     [[nodiscard]] HttpResponse get_training_run(const HttpRequest& request, std::string_view id);
     [[nodiscard]] HttpResponse list_training_versions(const HttpRequest& request);
     [[nodiscard]] HttpResponse training_cycle(const HttpRequest& request);
+
+    /// The tasks slice (27j) -- reads only; `task run|resume|halt|cancel` are
+    /// parity carve-outs with no route. Off the ledgers alone: nothing of the
+    /// handler's is read.
+    [[nodiscard]] static HttpResponse list_tasks(const HttpRequest& request);
+    [[nodiscard]] static HttpResponse get_task(const HttpRequest& request, std::string_view id);
 
     [[nodiscard]] HttpResponse list_permissions(const HttpRequest& request);
     [[nodiscard]] HttpResponse put_permission(const HttpRequest& request, std::string_view tool);

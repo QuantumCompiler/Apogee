@@ -1,5 +1,5 @@
 # The Business layer (ADR 0001): what Apogee does -- the harness, the loop,
-# tools, knowledge, the graph, models, training.
+# tools, knowledge, the graph, models, training, tasks, symphonies.
 #
 # One static library per module -- apogee_business_<module> -- linked to
 # exactly the modules cmake/modules.cmake declares for it (apogee_add_module,
@@ -48,6 +48,10 @@ apogee_add_module(agentloop
     agentloop/recall.cpp
     agentloop/side_call.h
     agentloop/side_call.cpp
+    agentloop/member_call.h
+    agentloop/member_call.cpp
+    agentloop/validate.h
+    agentloop/validate.cpp
     agentloop/rag.h
     agentloop/rag.cpp
     agentloop/graph_context.h
@@ -94,6 +98,11 @@ target_link_libraries(apogee_business_knowledge PUBLIC nlohmann_json::nlohmann_j
 # (prompt and schema compiled in, validation in host code) and the
 # resumable build with the record pass. Model-free: generation and
 # embedding arrive as closures (tests/scripts/cmake/layering.cmake holds it to that).
+#
+# The code graph (27k) rides the same module: tree-sitter parses a source
+# tree with no model at all. `code_parser` is the one boundary over its C API
+# -- the grammars and the runtime are linked PRIVATE, so their headers reach
+# that file and nothing that includes the graph's own.
 apogee_add_module(graph
     graph/extract.h
     graph/extract.cpp
@@ -101,8 +110,31 @@ apogee_add_module(graph
     graph/build.cpp
     graph/communities.h
     graph/communities.cpp
+    graph/code_languages.h
+    graph/code_languages.cpp
+    graph/code_parser.h
+    graph/code_parser.cpp
+    graph/code_extract.h
+    graph/code_extract.cpp
+    graph/code_resolve.h
+    graph/code_resolve.cpp
+    graph/code_build.h
+    graph/code_build.cpp
+    graph/navigate.h
+    graph/navigate.cpp
+    graph/report.h
+    graph/report.cpp
+    graph/html_template.h
+    graph/html_template.cpp
+    graph/export_html.h
+    graph/export_html.cpp
+    graph/export_graphml.h
+    graph/export_graphml.cpp
+    graph/export_mermaid.h
+    graph/export_mermaid.cpp
 )
-target_link_libraries(apogee_business_graph PUBLIC nlohmann_json::nlohmann_json)
+target_link_libraries(apogee_business_graph PUBLIC nlohmann_json::nlohmann_json
+                      PRIVATE apogee_tree_sitter_all)
 
 apogee_add_module(tools
     tools/tools.h
@@ -120,10 +152,14 @@ apogee_add_module(tools
     tools/notes.cpp
     tools/rag_query.h
     tools/rag_query.cpp
+    tools/graph_nav.h
+    tools/graph_nav.cpp
     tools/environment.h
     tools/environment.cpp
     tools/toolsets.h
     tools/toolsets.cpp
+    tools/consult.h
+    tools/consult.cpp
 )
 target_link_libraries(apogee_business_tools PUBLIC nlohmann_json::nlohmann_json)
 
@@ -199,6 +235,8 @@ apogee_add_module(training
     training/promote.cpp
     training/convert.h
     training/convert.cpp
+    training/mlx_convert.h
+    training/mlx_convert.cpp
     training/pipeline.h
     training/pipeline.cpp
     training/regime.h
@@ -209,11 +247,48 @@ apogee_add_module(training
 target_link_libraries(apogee_business_training PUBLIC nlohmann_json::nlohmann_json
                       PRIVATE yaml-cpp::yaml-cpp)
 
+# The task runner (27h): the record and its transitions, the ledger and the
+# one-task lock, the autonomy policy and its ceiling (27i), what a turn does
+# with nobody present, and the outer loop -- a turn arrives as a closure, so
+# it never names a backend or a surface.
+apogee_add_module(tasks
+    tasks/task.h
+    tasks/task.cpp
+    tasks/ledger.h
+    tasks/ledger.cpp
+    tasks/policy.h
+    tasks/policy.cpp
+    tasks/unattended.h
+    tasks/unattended.cpp
+    tasks/runner.h
+    tasks/runner.cpp
+    tasks/view.h
+    tasks/view.cpp
+)
+target_link_libraries(apogee_business_tasks PUBLIC nlohmann_json::nlohmann_json)
+
+# Symphonies (27q): a definition's sources and its validation, the stage
+# walk over the one member call, and the view every surface renders -- a
+# stage's call arrives through agentloop's core, never a backend or a surface.
+apogee_add_module(symphony
+    symphony/definition.h
+    symphony/definition.cpp
+    symphony/runner.h
+    symphony/runner.cpp
+    symphony/tools.h
+    symphony/tools.cpp
+    symphony/view.h
+    symphony/view.cpp
+)
+target_link_libraries(apogee_business_symphony PUBLIC nlohmann_json::nlohmann_json)
+
 apogee_add_module(scaffold
     scaffold/mcp_server.h
     scaffold/mcp_server.cpp
     scaffold/agent.h
     scaffold/agent.cpp
+    scaffold/symphony.h
+    scaffold/symphony.cpp
 )
 
 apogee_add_layer()

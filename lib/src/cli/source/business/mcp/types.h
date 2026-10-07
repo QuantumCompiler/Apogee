@@ -9,10 +9,10 @@
 
 /// The wire: JSON-RPC 2.0 framing and the MCP payloads this client speaks.
 ///
-/// Hand-rolled, as Ommi's was -- the protocol subset is four methods, and a
-/// dependency for it would be a dependency for nothing. Ids are integers the
-/// client allocates; a server-initiated notification has no id, which is how
-/// the read loop tells the two apart before it decodes anything else.
+/// Hand-rolled -- the protocol subset is four methods, and a dependency for it
+/// would be a dependency for nothing. Ids are integers the client allocates; a
+/// server-initiated notification has no id, which is how the read loop tells
+/// the two apart before it decodes anything else.
 namespace apogee::mcp {
 
 inline constexpr std::string_view kJsonRpcVersion = "2.0";

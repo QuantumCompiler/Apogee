@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -54,6 +55,9 @@ enum class WarningKind : std::uint8_t {
     BackendMissing,
     /// The saved rerank judge is no longer in the config; resumed without it.
     RerankBackendMissing,
+    /// The saved suite is no longer in the config (27d); resumed under the
+    /// config's default suite, if it has one.
+    SuiteMissing,
     /// The file parsed but a field was the wrong shape; a default was used.
     FieldDropped,
 };
@@ -84,6 +88,26 @@ struct AttachedFile {
     std::uint64_t bytes = 0;
 };
 
+/// A folder attachment's part of the chat's code graph (27n): the graph lives
+/// in the chat's index beside the chunks, and this is what the session keeps
+/// of it -- which part is whose, and what the notice said. Additive: an older
+/// file has none, and reads as an attachment with no graph.
+struct AttachmentGraph {
+    /// The source member its files are recorded under in the index -- the
+    /// folder's name, made unique among the chat's attachments. Empty when
+    /// the graph is absent.
+    std::string label;
+    /// The files the build used, by language (`cpp`, `python`), and what it
+    /// left out, by extension, reason or vendored directory (`.md`,
+    /// `binary`, `third_party/`) -- the notice's parentheses.
+    std::map<std::string, std::int64_t> supported;
+    std::map<std::string, std::int64_t> skipped;
+    /// Why there is no graph although one was asked for -- `cancelled`, or
+    /// the error that stopped it -- so `/attachments` says the absence too.
+    /// Empty when it was built.
+    std::string absent;
+};
+
 /// A file, folder or glob attached to the chat (26d).
 struct Attachment {
     /// As the user named it: `report.pdf`, `src`, `docs/*.md`.
@@ -98,6 +122,10 @@ struct Attachment {
     /// one file's -- or nullopt when it has none. Rebuilt from `files`, like
     /// the inlined text, so the transcript keeps the message as typed.
     std::optional<std::size_t> map_at;
+    /// Its part of the chat's code graph (27n): a folder whose files include
+    /// a supported language; nullopt for a file, a glob, or a folder with no
+    /// code.
+    std::optional<AttachmentGraph> graph;
 };
 
 /// One saved conversation.
@@ -123,9 +151,9 @@ struct Session {
     /// cleanliness test locks that property from this end.
     std::vector<harness::ChatMessage> messages;
 
-    /// A provider-side session id, when the backend keeps one. Generalizes
-    /// Ommi's Claude-specific field: for every backend Apogee's transcript is
-    /// authoritative and this is only a resume optimization.
+    /// A provider-side session id, when the backend keeps one. For every
+    /// backend Apogee's transcript is authoritative and this is only a resume
+    /// optimization.
     std::string provider_session_id;
 
     std::string started_at;
@@ -152,6 +180,16 @@ struct Session {
     /// a resumed session continues as it was last set.
     std::string retriever;
     std::string rerank;
+    /// The suite the chat runs under (27d), as `--suite` or `/suite` left it:
+    /// a suite's name, "" for one turned off, and unset for a chat that never
+    /// had one -- which follows the config's default suite, and writes
+    /// nothing, so a chat with no suite saves exactly as it did before.
+    std::optional<std::string> suite;
+    /// The task that drives this chat (27h): its id, or empty for a chat a
+    /// person drives -- which writes nothing, so it saves exactly as before.
+    /// The ledger names the chat and the chat names its task; `chats delete`
+    /// refuses a chat whose task is live.
+    std::string task;
     /// What is attached to this chat, in the order attached (26d). Its index
     /// is `attachments/<chat_id>.db`, deleted with the chat.
     std::vector<Attachment> attachments;
@@ -167,6 +205,10 @@ struct Session {
 /// config include. An empty list disables backend checking.
 struct KnownDependencies {
     std::vector<std::string> backends;
+    /// The configured suites (27d). A saved suite missing from it is a
+    /// warning and dropped; with `check_suites` false nothing is checked.
+    std::vector<std::string> suites{};
+    bool check_suites = false;
 };
 
 struct LoadedSession {

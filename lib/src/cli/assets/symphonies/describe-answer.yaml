@@ -1,0 +1,31 @@
+# A shipped symphony (27q): an image described by the suite's vision member,
+# then a question about it answered from that description by its chat
+# member -- so a chat model that cannot see still answers about a picture.
+# What it shows: a stage that takes the input's image (image: true).
+#
+#   apogee symphonies play describe-answer --image photo.jpg --input "How many people are in it?"
+#   apogee symphonies create my-look --from describe-answer
+name: describe-answer
+description: Describe an image with the vision member, then answer a question about it from the description.
+input:
+  description: A question about the image, which is given with --image.
+  image: true
+stages:
+  - name: describe
+    role: vision
+    image: true
+    answer_tokens: 500
+    prompt: |
+      Describe this image in detail: the objects and the people in it, any text it shows word for word, the colours, the counts and the layout. Pay particular attention to anything that bears on this question: {{input}}
+  - name: answer
+    role: chat
+    answer_tokens: 300
+    prompt: |
+      Below is a description of an image, and a question about the image.
+
+      Description:
+      {{describe}}
+
+      Question: {{input}}
+
+      Answer the question from the description alone. If the description does not say, reply that the description of the image does not say.

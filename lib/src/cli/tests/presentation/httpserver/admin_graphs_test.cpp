@@ -204,3 +204,45 @@ TEST_CASE("PUT replaces the entry in place and DELETE removes it, leaving the da
     CHECK(std::filesystem::exists(apogee::agentloop::graph_db_path("work")));  // data stays
     CHECK(admin_delete_graph_config(fixture.context(), "work").status == 404);
 }
+
+TEST_CASE("a code graph's entry over HTTP is byte-identical to the CLI's, and refused alike",
+          "[httpserver][admin][graphs][parity][code]") {
+    const Fixture fixture;
+    const std::filesystem::path tree = fixture.home.path() / "repo" / "app";
+    std::filesystem::create_directories(tree);
+    const std::string source = tree.generic_string();
+    REQUIRE(fixture.cli({"config", "add-graph", "code", "--sources", source, "--languages",
+                         "cpp,python"}) == 0);
+    const HttpResponse created = admin_create_graph(
+        fixture.context(), with_body("POST", nlohmann::json{{"name", "code"},
+                                                            {"sources", {source}},
+                                                            {"languages", {"cpp", "python"}}}));
+    REQUIRE(created.status == 201);
+    CHECK(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
+    const nlohmann::json data = parsed(created)["data"];
+    CHECK(data["sources"] == nlohmann::json({source}));
+    CHECK(data["languages"] == nlohmann::json({"cpp", "python"}));
+    CHECK(data["collections"].empty());
+    CHECK_FALSE(parsed(created).contains("warnings"));
+
+    const auto post = [&](const nlohmann::json& body) {
+        return admin_create_graph(fixture.context(), with_body("POST", body));
+    };
+    // A relative tree means nothing on a server; a language no grammar parses;
+    // two trees under one name; a malformed list.
+    CHECK(post(nlohmann::json{{"name", "a"}, {"sources", {"repo/app"}}}).status == 400);
+    CHECK(post(nlohmann::json{{"name", "b"}, {"sources", {source}}, {"languages", {"cobol"}}})
+              .status == 400);
+    CHECK(post(nlohmann::json{{"name", "c"}, {"sources", {source, source + "/../app"}}}).status ==
+          400);
+    CHECK(post(nlohmann::json{{"name", "d"}, {"sources", source}}).status == 400);
+    // Recorded as the CLI records it: normalized, no trailing separator.
+    const HttpResponse slashed = post(nlohmann::json{{"name", "f"}, {"sources", {source + "/"}}});
+    REQUIRE(slashed.status == 201);
+    CHECK(parsed(slashed)["data"]["sources"] == nlohmann::json({source}));
+    // A tree that is not there yet is a warning, like an unregistered member.
+    const HttpResponse pending =
+        post(nlohmann::json{{"name", "e"}, {"sources", {source + "/later"}}});
+    CHECK(pending.status == 201);
+    CHECK(parsed(pending)["warnings"].size() == 1);
+}

@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "backends/mlx_local.h"
 #include "cli/helpers.h"
 #include "cli/interrupt.h"
 #include "cli/model_chain.h"
@@ -32,9 +33,12 @@
 #include "models/source_hf.h"
 #include "models/source_ollama.h"
 #include "modelstore/gguf_inspect.h"
+#include "modelstore/mlx_info.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
+#include "platform/platform.h"
 #include "training/convert.h"
+#include "training/mlx_convert.h"
 #include "training/python_env.h"
 #include "transport/http_client.h"
 #include "views/download_progress.h"
@@ -472,6 +476,13 @@ DeletePlan plan_delete(const models::StoreRoots& roots, std::string_view name) {
             plan.removes.push_back(stored.dir);
         }
     }
+    // An MLX model goes whole -- the directory, never a shard alone (27b).
+    for (const models::StoredMlx& stored : models::list_store_mlx(roots, target.model)) {
+        if ((target.format.empty() || target.format == models::kMlxFormat) &&
+            (target.id.empty() || target.id == stored.id)) {
+            plan.removes.push_back(stored.dir);
+        }
+    }
     if (plan.removes.empty()) {
         plan.error = "nothing stored under '" + std::string{name} + "'";
         return plan;
@@ -483,15 +494,29 @@ DeletePlan plan_delete(const models::StoreRoots& roots, std::string_view name) {
 DeletePlan plan_delete(const models::StoreRoots& roots, const harness::Config& config,
                        std::string_view name) {
     const auto backend = config.backends.find(std::string{name});
-    std::optional<models::StoredGguf> pointed_at;
-    if (backend != config.backends.end() && !backend->second.model_path.empty()) {
-        pointed_at =
-            models::stored_gguf_at(models::list_store_ggufs(roots),
-                                   harness::expand_env_and_home(backend->second.model_path));
-    }
-    const auto handle_of = [](const models::StoredGguf& stored) {
-        return models::weights_handle(stored.model, models::kGgufFormat, stored.id);
+
+    // The stored weights the backend's model_path names, by handle: a GGUF
+    // file, or an MLX model's directory (27b).
+    struct Pointed {
+        std::filesystem::path dir;
+        std::string handle;
     };
+
+    std::optional<Pointed> pointed_at;
+    if (backend != config.backends.end() && !backend->second.model_path.empty()) {
+        const std::filesystem::path path{harness::expand_env_and_home(backend->second.model_path)};
+        if (const std::optional<models::StoredGguf> gguf =
+                models::stored_gguf_at(models::list_store_ggufs(roots), path)) {
+            pointed_at = Pointed{
+                .dir = gguf->dir,
+                .handle = models::weights_handle(gguf->model, models::kGgufFormat, gguf->id)};
+        } else if (const std::optional<models::StoredMlx> mlx =
+                       models::stored_mlx_at(models::list_store_mlx(roots), path)) {
+            pointed_at =
+                Pointed{.dir = mlx->dir,
+                        .handle = models::weights_handle(mlx->model, models::kMlxFormat, mlx->id)};
+        }
+    }
 
     DeletePlan plan = plan_delete(roots, name);
     if (plan.ok) {
@@ -499,7 +524,7 @@ DeletePlan plan_delete(const models::StoreRoots& roots, const harness::Config& c
         if (pointed_at.has_value() &&
             std::ranges::find(plan.removes, pointed_at->dir) == plan.removes.end()) {
             plan.also_backend = std::string{name};
-            plan.also_backend_weights = handle_of(*pointed_at);
+            plan.also_backend_weights = pointed_at->handle;
         }
         return plan;
     }
@@ -507,7 +532,7 @@ DeletePlan plan_delete(const models::StoreRoots& roots, const harness::Config& c
         return plan;
     }
     if (pointed_at.has_value()) {
-        DeletePlan by_backend = plan_delete(roots, handle_of(*pointed_at));
+        DeletePlan by_backend = plan_delete(roots, pointed_at->handle);
         by_backend.backend = std::string{name};
         return by_backend;
     }
@@ -525,7 +550,8 @@ DeletePlan plan_delete(const models::StoreRoots& roots, const harness::Config& c
 
 std::string render_repair(const models::StoreRoots& roots, std::string_view name) {
     const models::StoreTarget target = models::resolve_store_target(roots, name);
-    if (!target.error.empty() || target.outside || target.format == models::kSafetensorsFormat) {
+    if (!target.error.empty() || target.outside ||
+        (!target.format.empty() && target.format != models::kGgufFormat)) {
         return {};
     }
     std::ostringstream out;
@@ -620,6 +646,11 @@ SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view
         choice.error = "'" + std::string{given} + "' is a GGUF; this reads SafeTensors weights";
         return choice;
     }
+    if (target.format == models::kMlxFormat) {
+        choice.error = "'" + std::string{given} +
+                       "' is an MLX model; this reads full-weight SafeTensors weights";
+        return choice;
+    }
     const std::string id = !target.id.empty() ? target.id : std::string{from_id};
     if (!id.empty()) {
         const std::filesystem::path dir =
@@ -679,6 +710,12 @@ GgufChoice choose_gguf(const models::StoreRoots& roots, std::string_view given,
                        "' is SafeTensors weights; make a GGUF of them first with 'apogee models "
                        "convert " +
                        target.model + "'";
+        return choice;
+    }
+    if (target.format == models::kMlxFormat) {
+        choice.error = "'" + std::string{given} +
+                       "' is an MLX model, already quantized for the mlx backend; quantize "
+                       "makes smaller GGUFs";
         return choice;
     }
     const std::string id = !target.id.empty() ? target.id : std::string{from_id};
@@ -771,6 +808,347 @@ bool repair_snapshot_in_place(const std::filesystem::path& dir) {
     }
     std::cout << "repaired.\n";
     return true;
+}
+
+// --- MLX models (27b) ------------------------------------------------------------------
+
+std::string mlx_summary(const models::MlxInfo& info, const harness::BackendConfig& backend) {
+    std::string line = info.quantization.describe() + ", " +
+                       models::describe(models::mlx_window(info, backend)) + ", " +
+                       format_progress_size(static_cast<std::int64_t>(info.bytes));
+    if (!info.model_type.empty()) {
+        line = info.model_type + ", " + line;
+    }
+    return line;
+}
+
+namespace {
+
+/// The one command that puts a stored MLX model to use, under the name
+/// `config add-backend` would fill it with.
+void print_mlx_backend_hint(const models::StoredMlx& stored) {
+    std::cout << "\nUse it by adding a backend:\n"
+              << "  apogee config add-backend " << models::stored_mlx_name(stored)
+              << " --type mlx --model-path " << stored.dir.string() << "\n";
+    if (platform::host_target() != "macos-arm64") {
+        std::cout << "(the mlx backend runs on Apple silicon macOS only; this build is "
+                  << platform::host_target() << ")\n";
+    }
+}
+
+[[nodiscard]] models::StoredMlx stored_at(const models::StoreRoots& roots, std::string_view model,
+                                          const std::filesystem::path& dir) {
+    for (const models::StoredMlx& stored : models::list_store_mlx(roots, model)) {
+        if (stored.dir == dir) {
+            return stored;
+        }
+    }
+    return models::StoredMlx{
+        .model = std::string{model}, .id = dir.filename().string(), .dir = dir, .arrived = {}};
+}
+
+/// The bytes under `dir`, for a progress line watching a directory grow.
+[[nodiscard]] std::int64_t bytes_under(const std::filesystem::path& dir) {
+    std::int64_t total = 0;
+    std::error_code code;
+    for (auto it = std::filesystem::recursive_directory_iterator(dir, code);
+         !code && it != std::filesystem::recursive_directory_iterator(); it.increment(code)) {
+        if (it->is_regular_file(code)) {
+            total += static_cast<std::int64_t>(it->file_size(code));
+        }
+    }
+    return total;
+}
+
+/// What a pulled tree's files are on record as: each as it landed.
+[[nodiscard]] models::Snapshot pulled_record(const models::HfRef& ref,
+                                             const std::vector<models::HfFile>& wanted,
+                                             const models::AcquireTreeResult& result) {
+    models::Snapshot record;
+    record.ref = ref.repo_id();
+    record.revision = ref.revision.empty() ? "main" : ref.revision;
+    record.source = "huggingface";
+    for (std::size_t i = 0; i < wanted.size() && i < result.sidecars.size(); ++i) {
+        const models::Sidecar& sidecar = result.sidecars[i];
+        record.files.push_back(
+            {.path = wanted[i].path, .size = sidecar.file_size, .sha256 = sidecar.file_digest});
+        if (record.pulled_at.empty()) {
+            record.pulled_at = sidecar.pulled_at;
+        }
+    }
+    return record;
+}
+
+/// Which checks a tree pull ran, never the bare word: a repository that
+/// publishes no digest for a file is said to have published none.
+[[nodiscard]] std::string pull_verification(const models::AcquireTreeResult& result,
+                                            std::size_t shards) {
+    std::size_t sized = 0;
+    std::size_t digests = 0;
+    for (const models::Sidecar& sidecar : result.sidecars) {
+        sized += sidecar.verification.size_checked ? 1 : 0;
+        digests += sidecar.verification.digest_checked ? 1 : 0;
+    }
+    const std::size_t unpublished = result.files - digests;
+    std::string none;
+    if (unpublished > 0) {
+        none = digests == 0 ? " (none published)"
+                            : " (" + std::to_string(unpublished) + " had none published)";
+    }
+    return "verified: " + std::to_string(result.files) + " file(s), " + human_size(result.bytes) +
+           " -- " + std::to_string(sized) + " size(s) checked, " + std::to_string(digests) +
+           " against a published sha256" + none + "; config.json, a tokenizer and " +
+           std::to_string(shards) + " shard header(s) read whole";
+}
+
+[[noreturn]] void cancelled_nothing_written(const std::filesystem::path& staging) {
+    (void)models::remove_weights(staging);
+    std::cerr << "apogee models: cancelled -- nothing was written\n";
+    throw CLI::RuntimeError(kCancelled);
+}
+
+}  // namespace
+
+PulledMlx pull_mlx(const std::string& ref, const models::StoreRoots& roots,
+                   backends::HttpClient& client, const harness::CancellationToken& cancellation) {
+    const std::optional<models::HfRef> parsed = models::parse_hf_ref(ref);
+    if (!parsed.has_value() || !parsed->file.empty()) {
+        fail("'" + ref + "' is not a Hugging Face repository (owner/repo[@revision])");
+    }
+    const std::string token = models::hf_token({});
+    const models::HfTree tree =
+        models::list_repo_tree(client, *parsed, models::HfRepoKind::Model, token, cancellation);
+    if (!tree.ok) {
+        fail(tree.error);
+    }
+    std::vector<models::HfFile> wanted;
+    std::vector<models::SnapshotFile> published;
+    bool any_shard = false;
+    bool config = false;
+    std::int64_t total = 0;
+    for (const models::HfFile& file : tree.files) {
+        if (!models::snapshot_wanted(file.path)) {
+            continue;
+        }
+        any_shard = any_shard || file.path.ends_with(".safetensors");
+        config = config || file.path == "config.json";
+        total += file.size;
+        wanted.push_back(file);
+        published.push_back({.path = file.path, .size = file.size, .sha256 = file.sha256});
+    }
+    // Refused before a byte moves: what cannot be a model is not downloaded.
+    if (!any_shard || !config) {
+        fail("'" + parsed->repo_id() + "' says it is an MLX model but holds no " +
+             (config ? std::string{".safetensors weights"} : std::string{"config.json"}) +
+             " -- nothing mlx-lm can load");
+    }
+
+    PulledMlx pulled;
+    pulled.model = models::repo_directory_name(*parsed);
+    // Hugging Face publishes every shard's sha256, so weights already here are
+    // found before a byte moves -- the SafeTensors rule's id.
+    if (const std::string known = models::snapshot_weight_id(published); !known.empty()) {
+        const std::filesystem::path existing =
+            models::weights_dir(roots, models::kMlxFormat, pulled.model, known);
+        std::error_code code;
+        if (std::filesystem::is_directory(existing, code)) {
+            std::cout << "already here -- these exact weights are at\n  " << existing.string()
+                      << "\n";
+            pulled.dir = existing;
+            pulled.existed = true;
+            pulled.info = models::read_mlx_info(existing);
+            print_mlx_backend_hint(stored_at(roots, pulled.model, existing));
+            return pulled;
+        }
+    }
+
+    // Claimed by this process from the moment it is named: an interrupted
+    // pull is a leftover `check` finds and `check --fix` removes.
+    const std::filesystem::path staging =
+        models::incoming_path(roots, models::kMlxFormat, pulled.model);
+    std::cout << "an MLX model: downloading " << wanted.size() << " file(s), " << human_size(total)
+              << ", into " << staging.parent_path().string() << "\n";
+    std::vector<models::TreeItem> items;
+    std::vector<models::SourcePromise> promises;
+    promises.reserve(wanted.size());
+    for (const models::HfFile& file : wanted) {
+        promises.emplace_back();
+        models::TreeItem item;
+        item.relative = file.path;
+        item.source = models::http_source(client, *parsed, models::HfRepoKind::Model, file, token,
+                                          cancellation, promises.back());
+        item.promise = promises.back();
+        items.push_back(std::move(item));
+    }
+    DownloadProgress progress{std::cout, stdout_download_options()};
+    const models::AcquireTreeResult result = models::acquire_tree(
+        staging, items,
+        [&progress](std::size_t index, std::size_t count, std::string_view relative,
+                    std::int64_t written,
+                    std::int64_t size) { progress.file(index, count, relative, written, size); });
+    progress.finish();
+    if (cancellation.stop_requested()) {
+        cancelled_nothing_written(staging);
+    }
+    if (!result.ok) {
+        (void)models::remove_weights(staging);
+        fail(result.error);
+    }
+
+    // The last rung: the files make a model mlx-lm can load -- its
+    // configuration, a tokenizer, every shard the index names and each
+    // shard's header within its file. A repository that is not one lands
+    // nothing.
+    pulled.info = models::read_mlx_info(staging);
+    if (!pulled.info.complete) {
+        (void)models::remove_weights(staging);
+        fail("what '" + parsed->repo_id() + "' holds is not a loadable MLX model -- " +
+             pulled.info.problem + "; nothing was kept");
+    }
+
+    const models::StoredDirectory stored =
+        models::commit_mlx(roots, pulled.model, staging, pulled_record(*parsed, wanted, result));
+    if (!stored.error.empty()) {
+        (void)models::remove_weights(staging);
+        fail(stored.error);
+    }
+    pulled.dir = stored.dir;
+    pulled.existed = stored.existed;
+    if (stored.existed) {
+        std::cout << "\nalready here -- these exact weights are at\n  " << stored.dir.string()
+                  << "\n";
+    } else {
+        std::cout << "\n"
+                  << stored.dir.string() << "\n"
+                  << pull_verification(result, pulled.info.shards.size()) << "\n";
+    }
+    std::cout << "mlx model: " << mlx_summary(pulled.info) << "\n";
+    if (!pulled.info.mlx_format) {
+        std::cout << "note: its files carry no mlx-lm marks (no quantization, shards not saved by "
+                     "mlx-lm) -- mlx-lm reads such weights all the same\n";
+    }
+    print_mlx_backend_hint(stored_at(roots, pulled.model, pulled.dir));
+    return pulled;
+}
+
+ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_view given,
+                                  std::string_view from, const training::MlxPrecision& precision,
+                                  const training::MlxConverter& converter) {
+    const SnapshotChoice source = choose_snapshot(roots, given, from);
+    if (!source.error.empty()) {
+        fail(source.error);
+    }
+    // Every refusal before anything is announced.
+    if (const std::string damaged = models::damaged_snapshot_error(source.path); !damaged.empty()) {
+        fail(damaged + " -- or repair it in place with 'apogee models repair " + source.model +
+             "'");
+    }
+    if (const std::string refused = models::mlx_conversion_refusal(source.path, {});
+        !refused.empty()) {
+        fail(refused);
+    }
+
+    ConvertedMlx out;
+    out.model = source.model;
+    models::Snapshot record;
+    record.ref =
+        source.id.empty() ? source.path.string() : source.model + "/safetensors/" + source.id;
+    record.source = "convert";
+    record.transform = "mlx_lm.convert " + std::string{precision.name};
+
+    // Recognised before it runs: the same set at the same precision is the
+    // same weights.
+    for (const models::StoredMlx& stored : models::list_store_mlx(roots, source.model)) {
+        const std::optional<models::Snapshot> made = models::load_snapshot(stored.dir);
+        if (made.has_value() && made->source == "convert" && made->ref == record.ref &&
+            made->transform == record.transform) {
+            std::cout << "already converted:\n  " << stored.dir.string() << "\n"
+                      << "(to convert it again, delete it first: apogee models delete "
+                      << models::weights_handle(stored.model, models::kMlxFormat, stored.id)
+                      << ")\n";
+            out.dir = stored.dir;
+            out.existed = true;
+            out.info = models::read_mlx_info(stored.dir);
+            print_mlx_backend_hint(stored);
+            return out;
+        }
+    }
+
+    const std::int64_t estimate = models::estimated_mlx_bytes(
+        models::snapshot_elements(source.path).value_or(0), precision.bits);
+    std::cout << "converting " << source.path.string() << " to MLX (" << precision.name
+              << (estimate > 0 ? ", about " + format_progress_size(estimate) : std::string{})
+              << ") -- mlx-lm's converter, in Apogee's Python environment\n";
+
+    // Named and claimed, never created: mlx_lm.convert makes the directory
+    // itself and refuses one that exists.
+    const std::filesystem::path staging =
+        models::incoming_path(roots, models::kMlxFormat, source.model);
+    models::MlxConvertResult result;
+    {
+        DownloadProgress progress{std::cout, stdout_download_options()};
+        {
+            const Ticker ticker{[&progress, &staging, estimate]() {
+                progress.bytes(bytes_under(staging), estimate);
+            }};
+            const InterruptScope interrupt;
+            result = models::convert_snapshot_to_mlx(
+                source.path, staging, precision.bits,
+                [&converter](const std::filesystem::path& snapshot,
+                             const std::filesystem::path& output,
+                             const harness::CancellationToken& cancellation) {
+                    return converter(snapshot, output, {}, cancellation);
+                },
+                InterruptScope::token());
+        }
+        progress.finish();
+    }
+    if (result.cancelled) {
+        cancelled_nothing_written(staging);
+    }
+    if (!result.ok) {
+        (void)models::remove_weights(staging);
+        fail(result.error);
+    }
+
+    // Its id is a digest over its shards' hashes: hashed now, said, and
+    // stoppable like the conversion.
+    std::cout << "hashing it ("
+              << format_progress_size(static_cast<std::int64_t>(result.info.bytes))
+              << ") -- its shards' SHA-256 names its folder in the store\n";
+    models::StoredDirectory stored;
+    {
+        DownloadProgress progress{std::cout, stdout_download_options()};
+        const InterruptScope interrupt;
+        const auto bytes = static_cast<std::int64_t>(result.info.bytes);
+        stored = models::commit_mlx(roots, source.model, staging, record,
+                                    [&progress, bytes](std::int64_t hashed) {
+                                        progress.bytes(hashed, bytes);
+                                        return !InterruptScope::token().stop_requested();
+                                    });
+        progress.finish();
+    }
+    if (stored.error == models::kStopped) {
+        cancelled_nothing_written(staging);
+    }
+    if (!stored.error.empty()) {
+        (void)models::remove_weights(staging);
+        fail(stored.error);
+    }
+    out.dir = stored.dir;
+    out.existed = stored.existed;
+    out.info = models::read_mlx_info(stored.dir);
+    std::cout << "\n"
+              << (stored.existed ? "already here -- these exact weights are at\n  " : "")
+              << stored.dir.string() << "\n"
+              << "verified: config.json, a tokenizer and " << out.info.shards.size()
+              << " shard header(s) read whole\n"
+              << "mlx model: " << mlx_summary(out.info) << "\n";
+    if (!models::snapshot_has_chat_template(source.path)) {
+        std::cout << base_model_note() << "\n";
+    }
+    print_mlx_backend_hint(stored_at(roots, out.model, out.dir));
+    return out;
 }
 
 namespace {
@@ -1434,6 +1812,44 @@ void run_register_chain(const RegisterChainRequest& request, const ChainTools& t
     (void)run_chain(stages, std::move(log), std::cout);
 }
 
+namespace {
+
+/// `models convert <model> --mlx [--type <precision>]` (27b): the
+/// precision, the runtime -- the backend's own ladder, file facts only --
+/// and the seeded driver asked before anything is announced, then the core.
+void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& given,
+                            const std::string& from, const std::string& type, bool registers) {
+    if (registers) {
+        fail(
+            "--register makes GGUF backends; an MLX model is registered with the "
+            "'config add-backend' line --mlx prints");
+    }
+    const training::MlxPrecision* precision = training::find_mlx_precision(type);
+    if (precision == nullptr) {
+        std::string names;
+        for (const std::string& name : training::mlx_precision_names()) {
+            names += (names.empty() ? "" : ", ") + name;
+        }
+        fail("--mlx writes " + names + "; '" + type + "' is a GGUF precision");
+    }
+    const backends::MlxHost host = backends::MlxHost::current();
+    const backends::MlxReadiness runtime = backends::probe_mlx_runtime(host);
+    if (!runtime.ready() && runtime.refusal != backends::MlxRefusal::NoDriver) {
+        fail("--mlx runs mlx-lm's converter: " + runtime.message());
+    }
+    const std::filesystem::path script = training::mlx_converter_script();
+    std::error_code code;
+    if (!std::filesystem::is_regular_file(script, code)) {
+        fail("the MLX converter is missing: " + script.string() +
+             " -- run 'apogee check --fix' to seed it");
+    }
+    (void)convert_model_to_mlx(
+        roots, given, from, *precision,
+        training::script_mlx_converter(runtime.interpreter, script, *precision));
+}
+
+}  // namespace
+
 void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_dir,
                           const RootContext& context) {
     // ---- pull ---------------------------------------------------------------
@@ -1520,9 +1936,20 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                 std::make_unique<backends::HttpClient>(std::make_unique<backends::CurlTransport>());
             const std::string token = models::hf_token({});
 
-            std::string error;
-            if (!models::resolve_file(*client, hf, token, cancellation, error)) {
-                fail(error);
+            if (hf.file.empty()) {
+                // An MLX model is a directory, pulled whole, when its model
+                // card says it is one and there is no GGUF to prefer (27b).
+                const models::HfListing listing =
+                    models::list_gguf_files(*client, hf, token, cancellation);
+                if (listing.ok && listing.gguf_files.empty() && listing.mlx()) {
+                    const InterruptScope interrupt;
+                    (void)pull_mlx(ref, roots, *client, InterruptScope::token());
+                    return;
+                }
+                std::string error;
+                if (!models::choose_file(listing, hf, error)) {
+                    fail(error);
+                }
             }
             source = models::http_source(*client, hf, token, cancellation, promise);
         } else if (models::store_has_manifest(store, ref)) {
@@ -1754,17 +2181,34 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
     auto convert_in = std::make_shared<std::string>();
     auto convert_type = std::make_shared<std::string>("f16");
     auto convert_from = std::make_shared<std::string>();
-    CLI::App* convert = models.add_subcommand("convert", "Make a GGUF from SafeTensors weights");
+    auto convert_mlx = std::make_shared<bool>(false);
+    CLI::App* convert = models.add_subcommand(
+        "convert", "Make a GGUF -- or with --mlx an MLX model -- from SafeTensors weights");
     convert
         ->add_option("model", *convert_in,
                      "A model (its newest SafeTensors download), <model>/safetensors/<id>, or a "
                      "snapshot directory")
         ->type_name(kSnapshotValue)
         ->required();
-    convert
-        ->add_option("-t,--type", *convert_type,
-                     "Precision to write (default f16; make it smaller with 'models quantize')")
-        ->check(CLI::IsMember(training::converter_out_types()));
+    // One --type, two engines' precisions: each is checked against its own
+    // list in the callback, where --mlx is known -- and completion offers the
+    // one `--mlx` earlier on the line chooses.
+    std::vector<std::string> convert_types = training::converter_out_types();
+    for (const std::string& name : training::mlx_precision_names()) {
+        if (std::ranges::find(convert_types, name) == convert_types.end()) {
+            convert_types.push_back(name);
+        }
+    }
+    const CLI::Option* convert_type_option =
+        convert
+            ->add_option("-t,--type", *convert_type,
+                         "Precision to write: a GGUF's (default f16; make it smaller with "
+                         "'models quantize'), or with --mlx an MLX model's (default 4bit)")
+            ->type_name(kConvertPrecisionValue)
+            ->check(CLI::IsMember(convert_types));
+    convert->add_flag("--mlx", *convert_mlx,
+                      "Make an MLX model with mlx-lm's converter (Apple silicon), quantized to "
+                      "--type, into the model's mlx/");
     convert->add_option("--from", *convert_from, "Which of the model's SafeTensors sets, by id")
         ->type_name(kSnapshotIdValue);
     auto convert_register = std::make_shared<bool>(false);
@@ -1784,11 +2228,23 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         "With --register: what each backend's name begins with, before -F16, -Q4KM ... "
         "(default: the model's name)");
 
-    convert->callback([convert_in, convert_type, convert_from, convert_register,
-                       convert_register_with, register_with_option, convert_base_name,
-                       convert_base_name_option, models_dir, &context]() {
+    convert->callback([convert_in, convert_type, convert_type_option, convert_mlx, convert_from,
+                       convert_register, convert_register_with, register_with_option,
+                       convert_base_name, convert_base_name_option, models_dir, &context]() {
         const models::StoreRoots roots = store_roots(models_dir, context.config_path);
         const bool registers = *convert_register || register_with_option->count() > 0;
+        if (*convert_mlx) {
+            convert_to_mlx_command(roots, *convert_in, *convert_from,
+                                   convert_type_option->count() > 0 ? *convert_type : "4bit",
+                                   registers);
+            return;
+        }
+        if (std::ranges::find(training::converter_out_types(), *convert_type) ==
+            training::converter_out_types().end()) {
+            fail("--type " + *convert_type +
+                 " is an MLX precision -- add --mlx to make an MLX model, or name a GGUF "
+                 "precision (f16, bf16, f32, q8_0, auto)");
+        }
         check_base_name(*convert_base_name, convert_base_name_option->count() > 0, registers);
         if (registers) {
             if (*convert_type != "f16") {
@@ -1846,6 +2302,26 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                 if (!repair_snapshot_in_place(stored.dir)) {
                     throw CLI::RuntimeError(1);
                 }
+            }
+        }
+        // An MLX model is judged against its own record, file by file, and
+        // re-fetched where it was pulled from -- then read whole (27b).
+        if (target.format.empty() || target.format == models::kMlxFormat) {
+            for (const models::StoredMlx& stored : models::list_store_mlx(roots, target.model)) {
+                if (!target.id.empty() && target.id != stored.id) {
+                    continue;
+                }
+                std::cout << (any ? "\n" : "") << "mlx:      "
+                          << models::weights_handle(stored.model, models::kMlxFormat, stored.id)
+                          << "\n";
+                any = true;
+                if (!repair_snapshot_in_place(stored.dir)) {
+                    throw CLI::RuntimeError(1);
+                }
+                const models::MlxInfo info = models::read_mlx_info(stored.dir);
+                std::cout << "files:    "
+                          << (info.complete ? "whole -- " + mlx_summary(info) : info.problem)
+                          << "\n";
             }
         }
         if (!any) {

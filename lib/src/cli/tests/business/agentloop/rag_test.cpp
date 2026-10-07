@@ -895,3 +895,268 @@ TEST_CASE("a vector or hybrid turn floors on its own scale: a cosine, and both h
     CHECK(top.best_score == apogee::agentloop::rrf_ceiling());
     CHECK(top.chunks == 1);
 }
+
+// --- an attachment turn through the chat's code graph (27o) ----------------------
+
+namespace {
+
+/// A chat's attachment index (26d) whose code graph (27n) holds what its
+/// files define: a.py's `run` calls b.py's `far`, c.py's `other` calls
+/// d.py's `near`, and `far` calls e.py's `deep`, two hops from a.py. a.py
+/// and c.py are attached -- their excerpts are what a
+/// turn retrieves -- and no entity is named or described by the question's
+/// words, so whatever a section lists was reached from an excerpt's code.
+/// No embedder anywhere: a lexical-only chat.
+struct CodeIndex {
+    Scratch scratch;
+
+    explicit CodeIndex(bool graphed = true, std::size_t padding = 0) {
+        const std::string a_hash =
+            add("a.py", "def run(path):\n    # zarquon zarquon widgets" +
+                            std::string(padding, '.') + "\n    return far(path)\n");
+        const std::string c_hash = add("c.py", "def other():\n    # zarquon\n    return near()\n");
+        if (!graphed) {
+            return;
+        }
+        Store store{scratch.db()};
+        (void)store.sync_code_graph(
+            {function("a.run", "a.py", 1, 3, "def run(path)"),
+             function("b.far", "b.py", 1, 2, "def far(path)"),
+             function("c.other", "c.py", 1, 3, "def other()"),
+             function("d.near", "d.py", 1, 2, "def near()"),
+             function("e.deep", "e.py", 1, 2, "def deep()")},
+            {call("a.run", "b.far", "a.py", 3), call("c.other", "d.near", "c.py", 3),
+             call("b.far", "e.deep", "b.py", 2)});
+        for (const auto& [file, hash] : {std::pair{"a.py", a_hash}, std::pair{"c.py", c_hash}}) {
+            store.set_code_file_state(
+                apogee::embedstore::CodeFileState{.collection = "src",
+                                                  .file = file,
+                                                  .content_hash = hash,
+                                                  .extractor = "test",
+                                                  .facts = "{}",
+                                                  .parsed_at = "2026-10-04T00:00:00Z"});
+        }
+    }
+
+    /// An attachment turn over the index, the chat's graph on.
+    [[nodiscard]] apogee::agentloop::RagTurn turn(std::string question) const {
+        apogee::agentloop::RagTurn out = turn_for(scratch, std::move(question));
+        out.attachments = true;
+        out.collection = "attachments";
+        out.graph_enabled = true;
+        out.graph_name = "attachments";
+        return out;
+    }
+
+private:
+    [[nodiscard]] std::string add(const std::string& name, const std::string& text) const {
+        const std::filesystem::path path = scratch.dir / name;
+        std::ofstream{path, std::ios::binary} << text;
+        apogee::agentloop::AttachmentIndex index{scratch.db(), {}, std::nullopt};
+        return index
+            .add(apogee::agentloop::FoundFile{.path = path, .name = name, .bytes = text.size()}, {})
+            .file->sha256;
+    }
+
+    [[nodiscard]] static apogee::embedstore::CodeNodeRow function(const std::string& name,
+                                                                  const std::string& file,
+                                                                  std::int64_t line,
+                                                                  std::int64_t end_line,
+                                                                  const std::string& signature) {
+        apogee::embedstore::CodeNodeRow row;
+        row.type = "function";
+        row.name = name;
+        row.description = signature;
+        row.metadata = apogee::embedstore::code_node_metadata_json({.code = true,
+                                                                    .language = "python",
+                                                                    .member = "src",
+                                                                    .file = file,
+                                                                    .line = line,
+                                                                    .end_line = end_line});
+        row.mentions.push_back({.collection = "src",
+                                .file = file,
+                                .line = line,
+                                .end_line = end_line,
+                                .role = "definition"});
+        return row;
+    }
+
+    [[nodiscard]] static apogee::embedstore::CodeEdgeRow call(const std::string& from,
+                                                              const std::string& to,
+                                                              const std::string& file,
+                                                              std::int64_t line) {
+        apogee::embedstore::CodeEdgeRow row;
+        row.source_type = "function";
+        row.source_name = from;
+        row.target_type = "function";
+        row.target_name = to;
+        row.relation = "calls";
+        row.sites.push_back({.collection = "src", .file = file, .line = line});
+        return row;
+    }
+};
+
+/// One token per byte, a 20% retrieval share of `window`.
+void count_bytes(apogee::agentloop::RagTurn& turn, std::int64_t window) {
+    turn.budget.budget.window = window;
+    turn.budget.budget.reserve = 0;
+    turn.budget.count = [](const apogee::harness::ChatRequest& request) {
+        std::int64_t tokens = 0;
+        for (const apogee::harness::ChatMessage& message : request.messages) {
+            tokens += static_cast<std::int64_t>(message.content.plain_text().size());
+        }
+        return apogee::agentloop::TokenCount{tokens, false};
+    };
+}
+
+}  // namespace
+
+TEST_CASE("an attachment turn over a graphed index injects its excerpts, then the graph section",
+          "[agentloop][rag][attachments][graph]") {
+    const CodeIndex index;
+    const RagResult result = apogee::agentloop::retrieve_for_turn(index.turn("zarquon widgets"));
+    REQUIRE(result.prefix.size() == 1);
+    const std::string sent = result.prefix.front().content.plain_text();
+    // Lexical-only: the excerpts as ever, labelled by their lines.
+    CHECK(result.retriever == "lexical");
+    CHECK(result.chunks == 2);
+    const std::size_t excerpt = sent.find("--- a.py:1–3 ---");
+    const std::size_t section = sent.find("[Knowledge graph: attachments]");
+    REQUIRE(excerpt != std::string::npos);
+    REQUIRE(section != std::string::npos);
+    // After the excerpts, in the same message.
+    CHECK(excerpt < section);
+    CHECK(sent.find("--- c.py:1–3 ---") < section);
+    // Each excerpt's code reached its callee -- cited to its line -- and the
+    // excerpts' own functions, already in front of the model, are not listed.
+    CHECK(sent.find("b.far (function, b.py:1): def far(path)") > section);
+    CHECK(sent.find("d.near (function, d.py:1): def near()") != std::string::npos);
+    CHECK(sent.find("a.run —[calls·extracted]→ b.far") != std::string::npos);
+    CHECK(sent.find("a.run (function") == std::string::npos);
+    CHECK(result.graph_entities == 2);
+    // The turn's knobs bound it: one hop by default, so e.deep -- two away --
+    // is not walked to; a second hop reaches it; the entity cap holds.
+    CHECK(sent.find("e.deep") == std::string::npos);
+    apogee::agentloop::RagTurn deeper = index.turn("zarquon widgets");
+    deeper.graph_hops = 2;
+    const RagResult two = apogee::agentloop::retrieve_for_turn(deeper);
+    REQUIRE(two.prefix.size() == 1);
+    CHECK(two.prefix.front().content.plain_text().find("e.deep (function, e.py:1)") !=
+          std::string::npos);
+    CHECK(two.graph_entities == 3);
+    deeper.graph_max_entities = 1;
+    CHECK(apogee::agentloop::retrieve_for_turn(deeper).graph_entities == 1);
+}
+
+TEST_CASE("an attachment turn's expansion is seeded by the top-k excerpts alone",
+          "[agentloop][rag][attachments][graph]") {
+    const CodeIndex index;
+    // a.py says zarquon twice: with room for one excerpt, only its code seeds
+    // -- though the search reaches past an inlined attachment, and so brings
+    // c.py back too before the cut.
+    apogee::agentloop::RagTurn turn = index.turn("zarquon widgets");
+    turn.limit = 1;
+    turn.exclude_sources = {apogee::agentloop::attachment_source("inlined")};
+    const RagResult result = apogee::agentloop::retrieve_for_turn(turn);
+    REQUIRE(result.prefix.size() == 1);
+    const std::string sent = result.prefix.front().content.plain_text();
+    CHECK(result.chunks == 1);
+    CHECK(sent.find("b.far (function") != std::string::npos);
+    CHECK(sent.find("d.near") == std::string::npos);
+    CHECK(result.graph_entities == 1);
+}
+
+TEST_CASE("an attachment turn's graph section fits the share as a collection's does",
+          "[agentloop][rag][attachments][graph][budget]") {
+    // a.py's excerpt runs past a thousand bytes; the section is a few lines.
+    const CodeIndex index{true, 1000};
+    apogee::agentloop::RagTurn turn = index.turn("zarquon widgets");
+    turn.limit = 1;
+
+    SECTION("no room for the excerpt beside it: the section alone, framed on its own") {
+        count_bytes(turn, 2000);
+        const RagResult result = apogee::agentloop::retrieve_for_turn(turn);
+        CHECK(result.chunks == 0);
+        CHECK(result.graph_entities == 1);
+        REQUIRE(result.prefix.size() == 1);
+        const std::string sent = result.prefix.front().content.plain_text();
+        CHECK(sent.starts_with("The following code-graph context is from files the user attached"));
+        CHECK(sent.find("[Knowledge graph: attachments]\nb.far (function, b.py:1)") !=
+              std::string::npos);
+        CHECK(sent.find("zarquon") == std::string::npos);
+        CHECK(sent.size() <= 400);
+        CHECK(result.notes == std::vector<std::string>{"0 of 1 excerpts fit the context budget"});
+    }
+
+    SECTION("no room for either: nothing injected, both said") {
+        count_bytes(turn, 500);
+        const RagResult result = apogee::agentloop::retrieve_for_turn(turn);
+        CHECK(result.chunks == 0);
+        CHECK(result.graph_entities == 0);
+        CHECK(result.prefix.empty());
+        CHECK(result.notes ==
+              std::vector<std::string>{"0 of 1 excerpts fit the context budget",
+                                       "the graph context did not fit the context budget either"});
+    }
+
+    SECTION("room for the excerpt alone, not beside the section: the section alone") {
+        // The excerpt is fitted with the section, never without it.
+        apogee::agentloop::RagTurn plain = turn;
+        plain.graph_enabled = false;
+        const RagResult without = apogee::agentloop::retrieve_for_turn(plain);
+        REQUIRE(without.prefix.size() == 1);
+        const std::size_t excerpt = without.prefix.front().content.plain_text().size();
+        count_bytes(turn, 20000);
+        const RagResult with = apogee::agentloop::retrieve_for_turn(turn);
+        REQUIRE(with.prefix.size() == 1);
+        const std::size_t both = with.prefix.front().content.plain_text().size();
+        REQUIRE(both > excerpt + 20);
+        // A share between the two: the window five times it.
+        count_bytes(turn, static_cast<std::int64_t>((excerpt + both) / 2 * 5));
+        const RagResult result = apogee::agentloop::retrieve_for_turn(turn);
+        CHECK(result.chunks == 0);
+        CHECK(result.graph_entities == 1);
+        CHECK(result.notes == std::vector<std::string>{"0 of 1 excerpts fit the context budget"});
+    }
+
+    SECTION("room for both: the excerpt, then the section") {
+        count_bytes(turn, 20000);
+        const RagResult result = apogee::agentloop::retrieve_for_turn(turn);
+        CHECK(result.chunks == 1);
+        CHECK(result.graph_entities == 1);
+        CHECK(result.notes.empty());
+    }
+}
+
+TEST_CASE("an attachment turn with no code graph, or with it off, injects exactly what it did",
+          "[agentloop][rag][attachments][graph]") {
+    const CodeIndex graphed;
+    const CodeIndex plain{false};
+    apogee::agentloop::RagTurn off = graphed.turn("zarquon widgets");
+    off.graph_enabled = false;
+    const RagResult without = apogee::agentloop::retrieve_for_turn(off);
+    const RagResult empty = apogee::agentloop::retrieve_for_turn(plain.turn("zarquon widgets"));
+    REQUIRE(without.prefix.size() == 1);
+    REQUIRE(empty.prefix.size() == 1);
+    const std::string sent = without.prefix.front().content.plain_text();
+    CHECK(sent == empty.prefix.front().content.plain_text());
+    CHECK(sent.find("[Knowledge graph") == std::string::npos);
+    CHECK(sent.starts_with("The following excerpts are from files the user attached"));
+    CHECK(without.graph_entities == 0);
+    CHECK(empty.graph_entities == 0);
+    CHECK(without.tokens == empty.tokens);
+}
+
+TEST_CASE("an attachment turn's question names entities to walk from too, with no embedder",
+          "[agentloop][rag][attachments][graph]") {
+    // e.deep is in no excerpt and two hops from the one that is: it is
+    // reached because the question names it, through the entity index.
+    const CodeIndex index;
+    apogee::agentloop::RagTurn turn = index.turn("zarquon deep");
+    turn.limit = 1;
+    const RagResult result = apogee::agentloop::retrieve_for_turn(turn);
+    REQUIRE(result.prefix.size() == 1);
+    CHECK(result.retriever == "lexical");
+    CHECK(result.prefix.front().content.plain_text().find(
+              "e.deep (function, e.py:1): def deep()") != std::string::npos);
+}

@@ -3,22 +3,23 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "cli/command.h"
 #include "contracts/config.h"
+#include "contracts/paths.h"
 
 /// The hidden `apogee __complete` verb — the shell-completion protocol.
 ///
 /// **Why a verb rather than static completion files.** The interesting things
 /// to complete are not fixed: backend names come from the user's config, and a
-/// completion file generated at build time cannot know them. Ommi's completions
-/// worked this way (cobra's protocol) for exactly that reason, and the small
-/// per-shell stubs Apogee installs do nothing but call back into the binary —
-/// so `apogee complete -m <TAB>` offers the backends this user actually has,
-/// and keeps working after they add one.
+/// completion file generated at build time cannot know them. So the small
+/// per-shell stubs Apogee installs (cobra's protocol) do nothing but call back
+/// into the binary — and `apogee complete -m <TAB>` offers the backends this
+/// user actually has, and keeps working after they add one.
 ///
 /// **Output contract.** One candidate per line on stdout, nothing else. Errors
 /// are silent and produce no candidates: a completion handler that prints a
@@ -66,10 +67,15 @@ struct ValueSpec {
     std::vector<std::string> choices;
     /// Which names, for `ValueKind::Names`: the declared type name.
     std::string source;
-    /// A comma-separated list -- declared `kCollectionListValue`, or split by
-    /// the parser (`->delimiter(',')`): only the word after the last comma is
-    /// completed, and what the list already holds is not offered again.
+    /// A comma-separated list -- a type ending `,...` (`kCollectionListValue`,
+    /// `word_list_value`), or split by the parser (`->delimiter(',')`): only
+    /// the word after the last comma is completed, and what the list already
+    /// holds is not offered again.
     bool list = false;
+    /// What follows a `KEY=` choice's `=`, a comma-separated list of these
+    /// (`--toolset chat=fs,git`): a second set after the keys, declared with
+    /// `keyed_words_value`. Empty for every other value.
+    std::vector<std::string> key_values;
     /// The declared type name as written -- `TEXT`, `INT`, `COLLECTION` --
     /// so a test can tell free text from a number.
     std::string type;
@@ -123,7 +129,8 @@ struct CompletionContext {
     /// The positionals given so far to the command in play, in order.
     std::vector<std::string> positionals;
     /// The value each flag was given, by the spelling used -- the last one
-    /// when a flag repeats.
+    /// when a flag repeats. A flag that takes no value is here with an empty
+    /// one, so a list can ask whether it was given (`--mlx`).
     std::map<std::string, std::string> flags;
 };
 
@@ -177,6 +184,15 @@ inline constexpr const char* kCompletionProtocolVar = "APOGEE_COMPLETION_PROTOCO
 
 /// Reads the whole command tree out of a parser; the root has an empty name.
 [[nodiscard]] CommandSpec specs_from_app(const CLI::App& app);
+
+/// The root flag a typed line carries before its verb (M10) -- `--dev`,
+/// `--test`, `--release` or `--custom <file>` -- when it carries exactly one
+/// the root chain accepts; otherwise none. `apogee --dev models delete <TAB>`
+/// must offer the dev root's models, since those are what the verb will take
+/// (ADR 0007: what completion offers, the command accepts). A doubtful line
+/// completes from the default root: completion never errors.
+[[nodiscard]] std::optional<harness::RootFlag> typed_root_flag(
+    const std::vector<std::string>& words, const CommandSpec& root);
 
 /// Filters `candidates` to those starting with `prefix`.
 [[nodiscard]] std::vector<std::string> filter_prefix(const std::vector<std::string>& candidates,

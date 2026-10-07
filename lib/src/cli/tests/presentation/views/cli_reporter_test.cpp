@@ -338,3 +338,70 @@ TEST_CASE("the spinner says what the session is while a step waits", "[ux][repor
     reporter.on_answer_end();
     CHECK(h.answer.str().find("base model") == std::string::npos);
 }
+
+TEST_CASE("a load while the spinner is up says so on it, then gives the line back",
+          "[ux][reporter][residency]") {
+    // 27e: a helper's first use, an embedding -- a load no request streams
+    // status for -- is heard from the harness and said on the spinner.
+    Harness h;
+    CliReporter reporter = h.make();
+    reporter.on_thinking();
+    REQUIRE(reporter.status().spinner_running());
+
+    apogee::harness::StatusEvent loading;
+    loading.type = apogee::harness::StatusEvent::Type::ModelLoading;
+    loading.phase = apogee::harness::StatusEvent::Phase::Start;
+    reporter.on_model_load("helper", loading);
+    CHECK(reporter.status().spinner_label() == "loading helper…");
+
+    apogee::harness::StatusEvent ready;
+    ready.type = apogee::harness::StatusEvent::Type::ModelReady;
+    ready.phase = apogee::harness::StatusEvent::Phase::Done;
+    reporter.on_model_load("helper", ready);
+    CHECK(reporter.status().spinner_label() == "Thinking…");
+
+    // A failed load gives the line back too.
+    reporter.on_model_load("broken", loading);
+    apogee::harness::StatusEvent failed = loading;
+    failed.phase = apogee::harness::StatusEvent::Phase::Error;
+    reporter.on_model_load("broken", failed);
+    CHECK(reporter.status().spinner_label() == "Thinking…");
+    reporter.on_clear_status();
+    CHECK(h.answer.str().empty());
+}
+
+TEST_CASE("a load with nothing on the line, or on a pipe, paints nothing",
+          "[ux][reporter][residency]") {
+    apogee::harness::StatusEvent loading;
+    loading.type = apogee::harness::StatusEvent::Type::ModelLoading;
+    loading.phase = apogee::harness::StatusEvent::Phase::Start;
+    apogee::harness::StatusEvent ready;
+    ready.type = apogee::harness::StatusEvent::Type::ModelReady;
+    ready.phase = apogee::harness::StatusEvent::Phase::Done;
+
+    // Between turns -- a title loading its model while the prompt waits.
+    Harness idle;
+    CliReporter at_prompt = idle.make();
+    at_prompt.on_model_load("helper", loading);
+    at_prompt.on_model_load("helper", ready);
+    CHECK(idle.progress.str().empty());
+
+    // And a load that began with nothing on the line takes nothing from the
+    // turn that starts before it ends.
+    Harness overlap;
+    CliReporter turn = overlap.make();
+    turn.on_model_load("helper", loading);
+    turn.on_thinking();
+    turn.on_model_load("helper", ready);
+    CHECK(turn.status().spinner_label() == "Thinking…");
+    turn.on_clear_status();
+
+    // A pipe: the spinner never runs, so nothing is said.
+    Harness piped;
+    CliReporter pipe = piped.make(false);
+    pipe.on_thinking();
+    pipe.on_model_load("helper", loading);
+    pipe.on_model_load("helper", ready);
+    pipe.on_clear_status();
+    CHECK(piped.progress.str().empty());
+}

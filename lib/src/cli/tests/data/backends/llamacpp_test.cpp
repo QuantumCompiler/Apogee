@@ -65,7 +65,7 @@ TEST_CASE("a second turn decodes only the new tokens", "[backends][llamacpp][kv]
     // THE acceptance criterion for this item: two successive calls against one
     // session process only new prompt tokens. Without a warm KV cache, turn two
     // re-decodes the entire conversation, and the whole in-process argument
-    // over Ommi's spawn-per-turn model collapses.
+    // over a spawn-per-turn model collapses.
     Fixture fixture;
 
     const auto first = fixture.provider->chat(turn({ChatMessage::user("alpha beta")}), {});
@@ -106,9 +106,9 @@ TEST_CASE("a second turn decodes only the new tokens", "[backends][llamacpp][kv]
 }
 
 TEST_CASE("a side request never touches the session KV", "[backends][llamacpp][kv]") {
-    // Ommi's SideRequest lesson, ported: its async titler ran with the session's
-    // prompt-cache flags and could clobber the KV state of the very conversation
-    // it was summarising -- and write the same file concurrently with the next
+    // The side-request hazard: an async titler that runs with the session's
+    // prompt-cache flags can clobber the KV state of the very conversation
+    // it is summarising -- and write the same file concurrently with the next
     // turn. Here a side request must run somewhere else entirely.
     Fixture fixture;
 
@@ -421,6 +421,40 @@ TEST_CASE("an idle model unloads and reloads on the next request", "[backends][l
     // Past it: the next request pays for a reload, and the 16GB is given back.
     now += std::chrono::seconds{120};
     (void)provider.chat(turn({ChatMessage::user("much later")}), {});
+    CHECK(runtime->loads == 2);
+}
+
+TEST_CASE("a held model outlasts its idle window, and the clock rules again once let go",
+          "[backends][llamacpp][idle][residency]") {
+    // 27e: a session using this model holds it -- two turns further apart
+    // than the window, and no reload. Let go, the window counts from the last
+    // use, at the next request as ever.
+    auto owned = std::make_unique<FakeLlamaRuntime>();
+    auto* runtime = owned.get();
+    auto now = std::chrono::steady_clock::now();
+    LlamaCppProvider::Options options;
+    options.backend_name = "local";
+    options.model_path = "/models/test.gguf";
+    options.idle_unload = std::chrono::seconds{60};
+    options.clock = [&now] { return now; };
+    LlamaCppProvider provider{std::move(options), std::move(owned)};
+
+    provider.hold_resident(true);
+    CHECK(provider.held_resident());
+    (void)provider.chat(turn({ChatMessage::user("hello")}), {});
+    now += std::chrono::seconds{120};
+    (void)provider.embed({"a question"}, {});
+    (void)provider.chat(turn({ChatMessage::user("much later")}), {});
+    CHECK(runtime->loads == 1);
+    CHECK(provider.model_loaded());
+
+    provider.hold_resident(false);
+    CHECK_FALSE(provider.held_resident());
+    now += std::chrono::seconds{30};
+    (void)provider.chat(turn({ChatMessage::user("inside the window")}), {});
+    CHECK(runtime->loads == 1);
+    now += std::chrono::seconds{61};
+    (void)provider.chat(turn({ChatMessage::user("past it")}), {});
     CHECK(runtime->loads == 2);
 }
 

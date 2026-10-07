@@ -36,10 +36,15 @@ int VersionLedger::kept() const noexcept {
 nlohmann::json ledger_to_json(const VersionLedger& ledger) {
     nlohmann::json versions = nlohmann::json::array();
     for (const VersionEntry& entry : ledger.versions) {
-        nlohmann::json row{{"version", entry.version},
-                           {"run_id", entry.run_id},
-                           {"gguf_path", entry.gguf_path},
-                           {"promoted_at", entry.promoted_at}};
+        nlohmann::json row{{"version", entry.version}, {"run_id", entry.run_id}};
+        // One of the two: a GGUF version's file, or an MLX version's
+        // directory (27c) -- so a GGUF ledger reads exactly as it always has.
+        if (entry.mlx()) {
+            row["mlx_path"] = entry.mlx_path;
+        } else {
+            row["gguf_path"] = entry.gguf_path;
+        }
+        row["promoted_at"] = entry.promoted_at;
         if (entry.eval_score.has_value()) {
             row["eval_score"] = *entry.eval_score;
         }
@@ -78,6 +83,7 @@ VersionLedger ledger_from_json(const nlohmann::json& json) {
             entry.version = row.value("version", 0);
             entry.run_id = row.value("run_id", std::string{});
             entry.gguf_path = row.value("gguf_path", std::string{});
+            entry.mlx_path = row.value("mlx_path", std::string{});
             entry.promoted_at = row.value("promoted_at", std::string{});
             if (const auto score = row.find("eval_score");
                 score != row.end() && score->is_number()) {

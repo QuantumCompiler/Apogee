@@ -20,7 +20,7 @@
 //
 // Compiled in rather than seeded under the data directory on purpose: the
 // clerk is a fixed system concern, not a user-editable agent, and so it adds
-// no install-parity surface (Ommi's rule, kept).
+// no install-parity surface.
 
 namespace apogee::knowledge {
 namespace {
@@ -132,6 +132,31 @@ constexpr std::string_view kCaptureSchema = R"SCHEMA({
     return std::string{text.substr(begin, end - begin)};
 }
 
+/// The record a clerk's outcome holds, or nullopt with `error` saying why:
+/// a non-conforming outcome is an error carrying the validator's message,
+/// never a partial record.
+std::optional<Record> read_outcome(const ClerkOutcome& outcome, std::string& error) {
+    if (!outcome.conforms || !outcome.json.has_value()) {
+        // A record is not a report: there is no "raw with conforms: false"
+        // here. Twice non-conforming is a failed capture that stores nothing.
+        error = "the clerk did not return a record";
+        for (const std::string& message : outcome.errors) {
+            error += "; " + message;
+        }
+        if (outcome.attempts > 0) {
+            error += " (after " + std::to_string(outcome.attempts) + " attempt" +
+                     (outcome.attempts == 1 ? "" : "s") + ")";
+        }
+        return std::nullopt;
+    }
+    try {
+        return outcome.json->get<Record>();
+    } catch (const nlohmann::json::exception& e) {
+        error = std::string{"the clerk's record could not be read: "} + e.what();
+        return std::nullopt;
+    }
+}
+
 }  // namespace
 
 std::string_view capture_prompt() noexcept {
@@ -188,31 +213,67 @@ Draft draft_record(Record record, const Overrides& overrides) {
     return draft;
 }
 
-Draft run_capture(const ClerkFn& clerk, std::string_view raw, const Overrides& overrides) {
+std::string revision_message(std::string_view raw, std::string_view record,
+                             std::string_view objection) {
+    return trim(raw) + "\n\n---\nYOUR PREVIOUS RECORD:\n" + trim(record) +
+           "\n\nA REVIEWER, CHECKING IT AGAINST THE CONVERSATION ABOVE, OBJECTED:\n" +
+           trim(objection) +
+           "\n\nReturn the record again as the schema describes: corrected where the objection "
+           "is right, unchanged where it is wrong.";
+}
+
+Draft run_capture(const ClerkFn& clerk, std::string_view raw, const Overrides& overrides,
+                  const agentloop::Verifier* verifier) {
     const ClerkOutcome outcome = clerk(capture_system_prompt(), raw);
-    if (!outcome.conforms || !outcome.json.has_value()) {
-        // A record is not a report: there is no "raw with conforms: false"
-        // here. Twice non-conforming is a failed capture that stores nothing.
+    std::string error;
+    const std::optional<Record> record = read_outcome(outcome, error);
+    if (!record.has_value() || !outcome.json.has_value()) {
         Draft draft;
-        draft.error = "the clerk did not return a record";
-        for (const std::string& error : outcome.errors) {
-            draft.error += "; " + error;
-        }
-        if (outcome.attempts > 0) {
-            draft.error += " (after " + std::to_string(outcome.attempts) + " attempt" +
-                           (outcome.attempts == 1 ? "" : "s") + ")";
-        }
+        draft.error = std::move(error);
         return draft;
     }
-    Record record;
-    try {
-        record = outcome.json->get<Record>();
-    } catch (const nlohmann::json::exception& e) {
-        Draft draft;
-        draft.error = std::string{"the clerk's record could not be read: "} + e.what();
+    Draft draft = draft_record(*record, overrides);
+    if (!draft.ok() || verifier == nullptr) {
+        // Structure first: a record that does not validate is a failed
+        // capture, and no verifier is woken for it.
         return draft;
     }
-    return draft_record(std::move(record), overrides);
+
+    // The record as the clerk wrote it, against its source (27g).
+    const std::vector<std::string> required = agentloop::required_fields(capture_schema());
+    std::optional<Record> revised;
+    const std::string written = outcome.json->dump(2);
+    agentloop::Validated validated = agentloop::validate_artifact(
+        written,
+        [&](const std::string& artifact) {
+            return agentloop::run_checks(
+                {}, verifier, [&] { return agentloop::extraction_brief(raw, artifact, required); });
+        },
+        [&](const std::string& artifact, const std::string& objection,
+            std::string& note) -> std::optional<std::string> {
+            // The producer's one revision: the clerk again, the source with
+            // its record and the objection beside it.
+            const ClerkOutcome again =
+                clerk(capture_system_prompt(), revision_message(raw, artifact, objection));
+            std::string why;
+            std::optional<Record> second = read_outcome(again, why);
+            if (!second.has_value()) {
+                note = "its revision failed: " + why;
+                return std::nullopt;
+            }
+            if (const Draft checked = draft_record(*second, overrides); !checked.ok()) {
+                note = "its revision does not validate: " + checked.error;
+                return std::nullopt;
+            }
+            revised = std::move(second);
+            return again.json->dump(2);
+        },
+        true);
+    if (revised.has_value() && validated.artifact != validated.original) {
+        draft = draft_record(std::move(*revised), overrides);
+    }
+    draft.validation = std::move(validated);
+    return draft;
 }
 
 Record finalize(Record draft, std::chrono::system_clock::time_point now) {

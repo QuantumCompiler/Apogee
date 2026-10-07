@@ -10,8 +10,7 @@
 /// **Not optional.** A spinner thread repainting every 120 ms and a token
 /// stream arriving from the provider's reader thread will interleave mid-escape
 /// -sequence, and the result is a torn line the user cannot read and nobody can
-/// reproduce on demand. Ommi hit exactly this collision. One mutex, and every
-/// writer goes through it.
+/// reproduce on demand. One mutex, and every writer goes through it.
 ///
 /// The stream is injected, which is what makes the whole layer testable: the
 /// escape sequences are where the bugs live, so tests write to a string buffer

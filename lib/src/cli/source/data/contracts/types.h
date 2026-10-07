@@ -63,9 +63,8 @@ struct ContentPart {
 /// Dual-mode from day one rather than "text now, parts when images land".
 /// Retrofitting multimodal content into an IR that assumed a string means
 /// touching every provider, every surface, and every persisted session file at
-/// once -- Ommi's recorded reason for building it this way, and it serializes
-/// as a bare JSON string in the common case so nothing pays for the option it
-/// does not use.
+/// once. It serializes as a bare JSON string in the common case, so nothing
+/// pays for the option it does not use.
 class MessageContent {
 public:
     MessageContent() = default;

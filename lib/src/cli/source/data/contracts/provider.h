@@ -12,10 +12,10 @@
 
 /// The interface every model backend implements.
 ///
-/// Ommi's recorded lesson: getting streaming, cancellation, multimodal content,
-/// and tool structures into the interface on day one is what let it keep four
-/// backends and several surfaces consistent. Adding any of them later means
-/// touching every implementation and every caller at once.
+/// Streaming, cancellation, multimodal content, and tool structures are in the
+/// interface from day one, because that is what keeps several backends and
+/// surfaces consistent. Adding any of them later means touching every
+/// implementation and every caller at once.
 ///
 /// Adding a backend is: implement LLMProvider, add a `type:` row to the config
 /// enum, register it. Nothing above the backends layer changes.
@@ -23,11 +23,10 @@ namespace apogee::harness {
 
 /// Receives streamed text as it arrives.
 ///
-/// Callbacks rather than coroutine generators (decided 2026-08-25): this is the
-/// Ommi-equivalent shape, it is simple to implement in every backend, and it
-/// does not force the whole call stack to become coroutines. A provider calls
-/// this from whatever thread it reads on, so a sink that touches shared state
-/// must do its own locking.
+/// Callbacks rather than coroutine generators (decided 2026-08-25): the shape
+/// is simple to implement in every backend, and it does not force the whole
+/// call stack to become coroutines. A provider calls this from whatever thread
+/// it reads on, so a sink that touches shared state must do its own locking.
 using TokenSink = std::function<void(std::string_view)>;
 
 /// Receives progress events. Optional -- an empty sink is valid and common.
@@ -69,10 +68,9 @@ struct StreamOptions {
 
 /// Implemented by a provider that can turn text into vectors.
 ///
-/// Ommi gated embedding behind a hardcoded allowlist of backend types, on the
-/// reasoning that its only cloud vendor could not embed. That rationale does
-/// not transfer: OpenAI and Google both embed over their APIs. So this is a
-/// per-provider capability, not a type test.
+/// A per-provider capability, not a hardcoded allowlist of backend types:
+/// cloud vendors embed too -- OpenAI and Google both do over their APIs -- so
+/// whether a backend embeds is a question for the provider, not a type test.
 class EmbeddingCapable {
 public:
     EmbeddingCapable() = default;
@@ -128,6 +126,44 @@ public:
     virtual void preload(const StatusSink& on_status) {
         (void)on_status;
     }
+
+    /// Hears every load this provider makes from now on -- its `ModelLoading`
+    /// start, its `ModelReady` or its error -- whichever request caused it: an
+    /// embedding, a helper's side call, a preload, a turn (27e). A load is
+    /// otherwise said only to a request that streams status, and most of a
+    /// helper's do not, so a first use paid its load in silence. Set before
+    /// the provider is first used; the default hears nothing, for a provider
+    /// with nothing to load.
+    virtual void set_load_listener(const StatusSink& listener) {
+        (void)listener;
+    }
+};
+
+/// Implemented by a provider that gives its model back after an idle spell
+/// -- `idle_unload_seconds`, a local model -- and that a session can hold
+/// against that clock (27e).
+///
+/// The idle clock is per backend and stays so: a hold only says "a session is
+/// using this", so a model the session has used is not unloaded between two
+/// of its turns, however far apart -- an embedder idling out mid-conversation
+/// pays its whole load back on the next question. Let go, the clock rules
+/// again from the model's last use. A hold is this process's memory and dies
+/// with it: nothing is persisted, and nothing runs in the background.
+class ResidencyHolding {
+public:
+    ResidencyHolding() = default;
+    virtual ~ResidencyHolding() = default;
+    ResidencyHolding(const ResidencyHolding&) = delete;
+    ResidencyHolding& operator=(const ResidencyHolding&) = delete;
+    ResidencyHolding(ResidencyHolding&&) = delete;
+    ResidencyHolding& operator=(ResidencyHolding&&) = delete;
+
+    /// Holds the model against its idle clock, or lets it go. Safe from any
+    /// thread; a request already deciding sees one value or the other.
+    virtual void hold_resident(bool held) noexcept = 0;
+
+    /// Whether it is held now.
+    [[nodiscard]] virtual bool held_resident() const noexcept = 0;
 };
 
 /// Implemented by a provider that embeds tool calls inside the text stream
@@ -312,9 +348,9 @@ public:
 // The provider interface
 // ---------------------------------------------------------------------------
 
-/// Four methods, down from Ommi's five: its `StreamTokens` one-shot streaming
-/// role is served by `stream_chat` with a single user message, which is a
-/// deliberate simplification -- two streaming paths meant two places for a
+/// Four methods. One-shot streaming has no method of its own: it is served by
+/// `stream_chat` with a single user message, which is a deliberate
+/// simplification -- two streaming paths would mean two places for a
 /// cancellation or framing bug to hide.
 class LLMProvider {
 public:

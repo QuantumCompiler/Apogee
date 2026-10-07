@@ -149,6 +149,29 @@ TEST_CASE("a ledger round-trips, is saved atomically, and every ledger lists by 
     CHECK_FALSE(json["versions"][1].contains("pruned_at"));
     CHECK_FALSE(json["versions"][1].contains("eval_score"));
     CHECK(json["versions"][2]["eval_passed"] == false);
+    // A GGUF version is written as it always was: no mlx_path.
+    CHECK(json["versions"][1]["gguf_path"] == "/v/tuned/v2.gguf");
+    CHECK_FALSE(json["versions"][1].contains("mlx_path"));
+
+    // An MLX version (27c): its directory, and no gguf_path beside it.
+    VersionLedger mlx;
+    mlx.backend = "tuned-mlx";
+    mlx.active_version = 1;
+    VersionEntry m1;
+    m1.version = 1;
+    m1.run_id = "r1";
+    m1.mlx_path = "/models/m/mlx/abcdef012345";
+    m1.promoted_at = "2026-10-04T12:00:00Z";
+    mlx.versions = {m1};
+    const nlohmann::json mlx_json = apogee::training::ledger_to_json(mlx);
+    CHECK(mlx_json["versions"][0]["mlx_path"] == "/models/m/mlx/abcdef012345");
+    CHECK_FALSE(mlx_json["versions"][0].contains("gguf_path"));
+    const VersionLedger mlx_back = apogee::training::ledger_from_json(mlx_json);
+    REQUIRE(mlx_back.versions.size() == 1);
+    CHECK(mlx_back.versions[0].mlx());
+    CHECK(mlx_back.versions[0].weights() == "/models/m/mlx/abcdef012345");
+    CHECK(mlx_back.versions[0].gguf_path.empty());
+    CHECK_FALSE(back->versions[0].mlx());
 
     VersionLedger other;
     other.backend = "alpha";

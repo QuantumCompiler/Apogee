@@ -19,11 +19,23 @@ apogee complete --output-format stream-json "what is 2+2?"
 apogee chat --output-format stream-json --input-format stream-json
 ```
 
+```bash
+apogee task run "Write the report" --require-file report.txt --output-format stream-json
+```
+
+```bash
+apogee execute --suite research --output-format stream-json
+```
+
 `--output-format` selects the event stream on stdout. `--input-format` selects
 JSONL user turns on stdin, which is what makes one `chat` child serve a whole
 conversation. It defaults to whatever `--output-format` is, so a driver may pass
 one flag; on `chat` the two directions **must agree**, and disagreeing is an
-error rather than a silently ignored flag.
+error rather than a silently ignored flag. `execute` (27s) is chat's session
+opened with a suite, and takes both flags as chat does (see
+[Playing a symphony](#playing-a-symphony-execute)). `task run` and `task resume` take
+`--output-format` alone: a task reads nothing from its driver (see
+[A task's run](#a-tasks-run)).
 
 ## Reading the stream
 
@@ -50,8 +62,8 @@ One JSON object per line on stdout. Every object has a `type`.
 | `thinking` | The model began reasoning. No text. Sent again with `"budget_reached": true` when the reasoning reached its thinking budget and was ended there (`--think-budget`, or the backend's `thinking_budget`). |
 | `thinking_delta` | A chunk of reasoning. **Droppable** — see below. |
 | `memory` | `chat` only: what a turn was handed from earlier conversations -- `chats`, past chats' summaries, and `decisions`, recorded knowledge records -- injected for this turn and never into the transcript (26l). Sent before the turn, only when it recalled something. |
-| `tool_status` | A tool is running, described in `text` for display -- or another model call the turn makes besides the chat model's own (the embedder, the utility model, the rerank judge, the knowledge clerk), as `<role> — <what it is doing>` (26n). |
-| `notice` | A line for the user in `text` that is neither progress nor an error — a local model answering without the tools it was given because its chat template cannot take them, or a reply kept as text because it did not match the template's format, or a request trimmed to fit the model's window (`context budget: 2 earlier exchanges not sent`). Show it and keep it; it never ends the turn. |
+| `tool_status` | A tool is running, described in `text` for display -- or another model call the turn makes besides the chat model's own (the embedder, the utility model, the rerank judge, the knowledge clerk, a suite member the model consults), as `<role> — <what it is doing>` (26n). A `consult` (27f) is an ordinary tool call: `[tool] consult`, then `consult — asking utility (<backend>): <the question's first words>` while the member answers, and the answer reaches the model as the tool's result. A suite's verifier checking a tool call or an answer (27g) is said the same way: `validate — asking utility (<backend>): Check …`. A symphony the root model plays on its own (27t, an orchestrating `execute` session) is an ordinary tool call too: `[tool] play_<symphony>`, then `play — the model chose <symphony>: <n> member calls, <roles>`, then a line per stage. |
+| `notice` | A line for the user in `text` that is neither progress nor an error — a local model answering without the tools it was given because its chat template cannot take them, or a reply kept as text because it did not match the template's format, or a request trimmed to fit the model's window (`context budget: 2 earlier exchanges not sent`), or what a suite's verifier said (27g): an objection to a tool call returned to the model, a dispute the call runs over, the two positions on an answer under `answers: always` (`validate: …`), a check that could not be made. Show it and keep it; it never ends the turn. |
 | `answer_start` / `answer_end` | Bracket one answer's deltas. |
 | `answer_delta` | A chunk of answer text. Concatenate in order. |
 | `result` | Ends a turn. Carries the whole answer, so a driver that dropped every delta still has it. `usage` is **absent** when the provider reported none — absent is not zero. |
@@ -78,6 +90,70 @@ Currently `1`. It is bumped **only when an existing event's meaning changes** �
 a field changing sense under a name a driver already reads. Additions are
 compatible by construction under rule 1.
 
+## A task's run
+
+`apogee task run "<goal>" … --output-format stream-json` (and `task resume …
+--output-format stream-json`) drives a task as it always does — a plan turn,
+then rounds, each an ordinary chat turn checked against the acceptance the task
+was given — and streams it: each turn's ordinary events, from `answer_start` to
+its `result`, with the task's own lifecycle around them. A front-end that wants a
+progress panel for a long-running goal spawns the task this way; its events
+arrive on the stdout of the `task run` it invoked, never from anywhere else.
+
+```jsonl
+{"type":"session","protocol_version":1,"model":"local"}
+{"type":"task_started","task_id":"task-20261004-120000","resumed":false,"transition":{"at":"2026-10-04T12:00:00Z","event":"started","status":"planning"},"history":[{"at":"2026-10-04T12:00:00Z","detail":"Write the report","event":"created","status":"planning"}],"task":{…}}
+{"type":"task_plan","task_id":"task-20261004-120000","transition":{"at":"…","detail":"plan","event":"plan_started","status":"planning"},"round":{"round":0,"kind":"plan","outcome":"in_flight",…}}
+{"type":"answer_start"}
+…
+{"type":"result","text":"1. Write it.\n2. Check it.","model":"local","finish_reason":"stop"}
+{"type":"task_plan","task_id":"…","transition":{"event":"plan_recorded","status":"running",…},"round":{…},"plan":"1. Write it.\n2. Check it."}
+{"type":"task_round","task_id":"…","transition":{"event":"round_started","round":1,"status":"running","detail":"execute",…},"round":{"round":1,"kind":"execute","outcome":"in_flight",…}}
+…
+{"type":"task_grant","task_id":"…","round":1,"tool":"write_file","target":"report.txt","by":"grant"}
+{"type":"task_round","task_id":"…","transition":{"event":"round_ended","round":1,"status":"done",…},"round":{…},"checks":[{"kind":"require_file","value":"/work/report.txt","description":"the file /work/report.txt exists and is not empty","ran":true,"passed":true,"detail":"10 bytes"}],"rounds_used":1}
+{"type":"task_finished","task_id":"…","transition":{"event":"finished","status":"done",…},"status":"done","reason":"every check passed and the model reported the task done, in 1 of 8 rounds","task":{…}}
+```
+
+| Event | Meaning |
+|---|---|
+| `task_started` | The run began: `started`, or `resumed` (`"resumed": true`) for `task resume`. Carries `history` — every transition the ledger held before this one — and `task`, the task's whole view as it stands, so a front-end joining at a resume needs no other source. |
+| `task_plan` | The plan turn began (`plan_started`) or its plan was recorded (`plan_recorded`, with `plan`); `round` is the plan turn. |
+| `task_round` | A round began (`round_started`) or ended (`round_ended`); `round` is that round — its outcome, the checks it passed, the model's self-report, what it let through, refused and answered, its tokens. Once it has ended, `checks` is each acceptance check's state and `rounds_used` the budget spent. |
+| `task_grant` | A tool call the task's own grant (`task run --allow`) let through: `round`, `tool`, `target`, `by: "grant"`. Sent after the round's turn, before its `round_ended`. |
+| `task_finished` | The run stopped: `status` (`done`, `exhausted`, `stalled`, `failed`, `halted`, `cancelled`), `reason` naming what did not pass, and `task`, the final view. |
+
+**One event per ledger transition, carrying it.** Every event but `task_grant`
+has `transition` — the transition exactly as the task's ledger wrote it (`at`,
+`event`, `status`, and `round` and `detail` when they say something) — and is
+sent only once the ledger holds it. So `task_started`'s `history`, followed by
+each later event's `transition`, *is* the ledger's transition sequence, one for
+one; `created`, written before the run began, arrives in that history. A
+`task_*` event carries `task_id`.
+
+**The view is the read's.** `task` (on `task_started` and `task_finished`) is
+the same document `apogee task status <id> --output-format json` prints and
+`GET /v1/admin/tasks/{id}` serves: `id`, `status`, `process` (the process running
+it, or `null`) and `interrupted`, `goal`, `conversation` (the chat's id),
+`folder`, `tools`, `policy` (`agent`, `grants`, `on_question`; `null` without
+tools), `rounds_used`, `rounds_budget`, `created_at`, `updated_at`, `reason`,
+`checks`, `self_report`, `plan` and `turns`. A driver that applies each event to
+the view `task_started` gave it — the transition's `status` and `at`, the turn
+each event carries, the `plan`, the `checks` — holds, at `task_finished`, exactly
+the final view. **A declared answer (`--on-question answer:…`) is in no event:**
+`policy.on_question` says `answer` and an answered question says `by:
+"declared"`, never what the answer said; `task status` at the terminal shows it.
+
+**Nothing is asked.** A task in machine mode reads no input — not even when a
+terminal is attached — so `ask` with no grant denies (the denial is the tool's
+result, recorded with `by: "nobody"`), and a question with no declared answer
+ends the task. A turn that does not finish ends in an `error` event instead of
+its `result` — the provider's message, `cancelled`, or the question nobody was
+present to answer — and `task_finished` follows. Every `[task]` line a person
+would read goes to stderr, with the outcome; the exit code is the task's (`0`
+done, `130` cancelled, `2` a provider's failure, `1` anything else short of
+done).
+
 ## Writing to the child
 
 One JSON object per line on stdin.
@@ -86,6 +162,7 @@ One JSON object per line on stdin.
 {"type":"user","text":"what is 2+2?"}
 {"type":"answer","text":"Yes"}
 {"type":"attach","path":"report.pdf"}
+{"type":"attach","path":"src","graph":"off"}
 ```
 
 An unrecognised line is ignored rather than fatal — the tolerance this protocol
@@ -102,6 +179,41 @@ folder over 500 files or 50 MB is refused, since there is no terminal to ask on;
 attach a narrower folder or a glob. A `user` message that mentions `@path` attaches
 that path the same way, and is answered as typed.
 
+A folder whose files include code a bundled grammar parses (C, C++, Python,
+JavaScript, TypeScript, Go, Rust, Java, C#, Ruby, Bash) is also parsed into the
+chat's code graph, after its chunks and with no model: one more `notice` follows
+the attach line, `graph: 412 nodes, 1820 edges (supported: cpp 30, python 2;
+skipped: .md 3)` -- the folder's part of the graph, the files used by language and
+what was left out. Attached again, only the files that changed are parsed again.
+Should the attach be interrupted, the notice says `graph: not built -- cancelled;
+attach it again to build it`. A single file, a glob, or a folder with no such code
+gets no graph and no such notice.
+
+Whether a folder of code is graphed is the attach's method, `code` or `off`. An
+`attach` line may carry its own, `"graph":"code"` or `"graph":"off"`, as `/attach
+<path> --graph=off` does at a terminal; without one, the config's
+`attachments.graph` decides, and without that, a chat builds the graph. A method the
+default did not choose is named at the end of the attach's first `notice` --
+`attaching src (4 files, 1.2 KB) -- without its code graph (--graph=off)`, or
+`(attachments.graph: off in the config)` -- and `off` indexes the folder's chunks
+alone, with no `graph:` notice (an earlier graph of the folder is forgotten). Any
+other value attaches nothing, and a `notice` says why: `src not attached: graph:
+unknown value 'tree' (accepted: code, off)`. A child started with `chat --attach
+<path> --graph off` applies it to those attaches; `complete --attach <path>
+--graph=code` builds the graph a one-shot otherwise skips. A `user` message's
+`@path` mention is a bare path -- anything after it is the message's -- so it takes
+the default.
+
+While a folder's graph is attached, each turn's retrieval walks it from the
+excerpts it found: the turn's attachments `notice` then ends with the count,
+`3 excerpts from the attachments, strong match (0.912 [lexical], 2 of 2 question
+words) +5 graph entities`. And a chat started with `--tools` offers the model the
+four graph tools -- `graph_query`, `graph_path`, `graph_explain`,
+`graph_neighbors` -- reading that chat's own graph: ordinary, never-gated tool
+calls whose results are the documents `apogee graph <verb> --output-format json`
+prints for the same tree, named `"graph": "attachments"`. Detached, the tools read
+the configured graphs again.
+
 An image, a recording or a video is attached the same way. A chat model that can
 read it is sent it as it is with the next `user` message; from the turn after, it
 reaches the model as text: an image's description, a recording's transcript, or
@@ -115,6 +227,47 @@ be read, such as a video's sound with no model to hear it.
 
 Closing stdin ends the session: the child drains its queued output, persists the
 conversation, and exits cleanly.
+
+### Playing a symphony (`execute`)
+
+`apogee execute` (27s) is chat's session opened with a suite: the same lines in,
+the same events out, a `user` line answered by the suite's root model as chat
+answers it. One `user` line means more there: one whose text is a `/play`
+command plays that symphony on the suite's members instead of asking the root.
+
+```jsonl
+{"type":"user","text":"/play summarize-verify The minutes of the meeting…"}
+```
+
+It arrives as an ordinary turn, in events the protocol already has: a
+`tool_status` as each stage starts, in a side call's shape (`stage 1/2 summarize
+— asking utility (l3b): …`; a chain's stages name their position, `digest →
+summarize-verify, stage 1/2 summarize`), then `answer_start`, the output in
+`answer_delta`, `answer_end`, and the turn's `result` carrying the whole output.
+The session keeps the play as one ordinary exchange — the line as typed, then
+the output — so the next `user` line builds on it, and a resumed or compacted
+session holds it like any other. A play that cannot run — no symphony of that
+name, no input for one that reads it, one that takes an image (a play from a
+line carries text alone), a stage refused or failed, the play's
+`symphony_caps` budget spent — ends in an `error` event instead of a `result`,
+the reason on stderr too, and nothing is kept. Every other line is what it is
+in `chat`: a slash word other than `/play` is a prompt like any text. The
+catalog is a read: `apogee symphonies list --output-format json`.
+
+**The model's own plays** (27t). Launched with `--orchestrate` -- or under a
+suite whose `orchestrate: true` says so -- an `execute` session offers its root
+model each symphony it can play as an ordinary tool, `play_<symphony>`, and the
+model may choose one on any turn. Nothing new crosses the wire: the choice is
+a tool call, said as one -- `[tool] play_summarize-verify` in a `tool_status`,
+then `play — the model chose summarize-verify: 2 member calls, utility → chat`,
+then a `tool_status` per stage as for `/play` -- and the play's output reaches
+the model as the tool's result, which it answers from in the turn's ordinary
+`answer_*` events and `result`. A play the model starts runs on local,
+unmetered members only, and spends from the turn's member-call budget with
+its consults and checks; one the budget cannot finish is refused before its
+first call -- a `notice` (`orchestrate: summarize-verify not played -- …`) --
+and one that fails once started is `orchestrate: summarize-verify stopped -- …`;
+either way a result the model reads, never silent. Without orchestration no `play_` tool exists.
 
 ### Answering a question
 
@@ -189,10 +342,90 @@ localhost control plane for local front-ends. Because the GUI performs its own
 mutations, it already knows when it changed something and can re-read; there is
 no push channel in v1.
 
+A read a host renders takes `--output-format json` and prints **one JSON
+document** of the same facts as the human view — never a stream, and stdout
+carries nothing else (diagnostics to stderr, exit codes as ever). Today that is
+the tasks:
+
+```bash
+apogee task status task-20261004-120000 --output-format json
+apogee task list --output-format json        # {"object":"list","data":[…],"total":N}; --all for every one
+```
+
+`task status`'s document is the view above, byte for byte the body of `GET
+/v1/admin/tasks/{id}`; `task list`'s is `GET /v1/admin/tasks`'s — `data` the
+newest 50 (`id`, `status`, `rounds_used`, `rounds_budget`, `goal`), `total` every
+task. A read given `stream-json`, or any word but `text` and `json`, is refused.
+
+Since 27l the graph navigation verbs are reads of the same kind:
+
+```bash
+apogee graph path <from> <to> [--directed] [--relation calls] --output-format json   # {"object":"graph.path",…}
+apogee graph explain <node> --output-format json                                       # {"object":"graph.node",…}
+apogee graph neighbors <node> [--relation R] [--direction in|out] --output-format json # {"object":"graph.neighbors",…}
+apogee graph query "<question>" --output-format json                                   # {"object":"graph.query",…}
+```
+
+Each takes `--graph <name>` or `--collection <name>` (neither: the one graph
+built). Each document is byte for byte what the `graph` tools return — to a
+model in a turn, and to any MCP client of `apogee __mcp-tools` — and what `GET
+/v1/admin/graph/{id}/path|explain|neighbors|query` serves; the shapes are in
+[http-api.md](http-api.md#get-v1admingraphidpath). A node that cannot be
+resolved, or a name several nodes answer to, exits `1` with the message — the
+candidates named — on stderr and nothing on stdout.
+
+Since 27m `graph report` is one more, with the same selection:
+
+```bash
+apogee graph report --output-format json                                              # {"object":"graph.report",…}
+```
+
+The document holds the facts the Markdown report renders, assembled from the
+store with no model call: `overview` (entity and relation counts, the kinds,
+the members, the parsed files per language, the unresolved names), `origin`
+(`extracted`/`inferred`), `hubs` (`metric: "degree"`, how many were `ranked`, and
+the `shown` ten, each a node, its `degree` and its relation groups as `graph
+neighbors` carries them), `communities` (`total`, `unsummarised`, the ten largest —
+`summary` absent on one clustered with no model), `links` (only for a named graph
+of two or more members: member `pairs`, relations `crossings` between them,
+entities `shared` by several), `decisions` and `orphans` (each a `total` and the
+`shown` ten), and `human_summary` — one paragraph of the same facts. `--out <file>`
+writes the document there instead.
+
+Since 27q the symphonies — named, staged prompt processes over a suite's
+members — read the same way, and a play prints one document too:
+
+```bash
+apogee symphonies list --output-format json                  # {"object":"list","data":[…],"problems":[…]}
+apogee symphonies show <name> --output-format json           # {"object":"symphony",…}
+apogee symphonies play <name> --input "…" --output-format json   # {"object":"symphony.play",…}
+```
+
+`list` and `show` are byte for byte what `GET /v1/admin/symphonies[/{id}]`
+serves; their shape is in
+[http-api.md](http-api.md#get-v1adminsymphonies). A play's document is
+`symphony` (its name), `suite` (the active suite's, `null` for none), `output`
+(the last stage's answer) and `stages` — each `name`, `role`, `backend` (the one
+that answered), `answer`, `cut` (it reached its cap), `tokens` when the provider
+said, and `seconds`. Since 27r a stage may play another symphony: its entry
+in `stages` is `name`, `play` (the symphony it played), `answer` (that
+symphony's output), `cut`, `tokens` when any of its stages said, `seconds`,
+and `stages` — the played symphony's own, in this same shape, as deep as the
+play went. A play is not a turn and emits no events: a host drives it as a
+command, the input as `--input` or on stdin. A play that stops — a stage
+refused or failed, an answer outside its stage's schema, the whole walk's
+budget (`symphony_caps`) spent — prints nothing on stdout and exits `1`
+(refused, or the budget) or `2` (a member's failure), the stage named on
+stderr with its position (`outer → inner, stage 2/3 verify (chat): …`).
+
 ## What machine mode does not do
 
 - **It opens no sockets.** Not one, ever — asserted in CI with `lsof`. Only
   `apogee serve` owns a port.
-- **It does not push.** Events arrive in response to turns, never unprompted.
+- **It does not push.** Events arrive in response to turns, never unprompted —
+  and a task's events only on the stdout of the `task run` or `task resume`
+  that runs it: a `chat` child never narrates a task it did not start.
 - **It does not represent slash commands.** `/model`, `/compact` and the rest are
-  terminal-REPL affordances; a driver uses the CLI commands and its own UI.
+  terminal-REPL affordances; a driver uses the CLI commands and its own UI. The
+  one exception is an `execute` session's `/play`, which is a turn rather than a
+  setting (see [Playing a symphony](#playing-a-symphony-execute)).

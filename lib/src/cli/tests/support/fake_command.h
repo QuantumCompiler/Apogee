@@ -4,6 +4,7 @@
 #include <string_view>
 
 #include "cli/command.h"
+#include "contracts/paths.h"
 
 namespace apogee::testing {
 
@@ -28,12 +29,17 @@ public:
     /// parsing, which is the only time a real command may read it.
     [[nodiscard]] const std::string& observed_config_path() const noexcept;
 
+    /// The data directory the run resolved, as seen from inside the callback
+    /// -- where a root flag, once in force, steers every layout lookup (M10).
+    [[nodiscard]] const harness::RootResolution& observed_root() const noexcept;
+
 private:
     std::string name_;
     std::string summary_;
     const commands::RootContext* context_{nullptr};
     int invocations_{0};
     std::string observed_config_path_;
+    harness::RootResolution observed_root_;
 };
 
 }  // namespace apogee::testing

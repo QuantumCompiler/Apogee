@@ -128,3 +128,40 @@ TEST_CASE("embedding is a per-entry capability the harness discovers, and Anthro
     CHECK(harness.generation_is_metered("gemini"));
     CHECK_FALSE(harness.generation_is_metered("mock"));
 }
+
+TEST_CASE("a suite switch rebuilds exactly the backends it re-pins",
+          "[backends][factory][suites]") {
+    // 27d: a window is a construction parameter, so a backend whose pin a
+    // switch moves is built again; every other provider is left alone.
+    Harness harness{config_from(R"(
+models:
+  default: root
+backends:
+  root:
+    type: mock
+  helper:
+    type: mock
+suites:
+  small:
+    members:
+      utility:
+        backend: helper
+        context_size: 2048
+)")};
+    (void)build_providers(harness, no_env());
+    apogee::harness::LLMProvider* root = &harness.provider("root");
+    apogee::harness::LLMProvider* helper = &harness.provider("helper");
+
+    harness.set_active_suite("small");
+    const auto rebuilt = apogee::backends::rebuild_providers(harness, {"helper"}, no_env());
+    REQUIRE(rebuilt.statuses.size() == 1);
+    CHECK(rebuilt.statuses.front().constructed);
+    CHECK(&harness.provider("root") == root);
+    CHECK(&harness.provider("helper") != helper);
+    CHECK(harness.route("helper").backend_name() == "helper");
+
+    // A name the config does not have is said, and nothing is registered.
+    const auto missing = apogee::backends::rebuild_providers(harness, {"ghost"}, no_env());
+    CHECK_FALSE(missing.statuses.front().constructed);
+    CHECK(missing.statuses.front().reason == "not configured");
+}

@@ -232,8 +232,9 @@ void forget_checkpoints_after(std::vector<Checkpoint>& held, std::int64_t positi
 /// One KV cache -- llama.cpp's `llama_context`.
 ///
 /// A context IS the conversation's warm state. Keeping one alive across turns
-/// is the whole architectural payoff over Ommi, which re-ingested through an
-/// on-disk prompt cache and paid ~1s of weight re-mapping per spawned turn.
+/// is the whole architectural payoff of running in-process, over a child per
+/// turn that re-ingests through an on-disk prompt cache and pays ~1s of weight
+/// re-mapping every time.
 class LlamaContext {
 public:
     LlamaContext() = default;
@@ -594,5 +595,14 @@ public:
 
 /// Whether this build has llama.cpp compiled in.
 [[nodiscard]] bool llama_available() noexcept;
+
+/// The memory of the devices a model offloads to, in all (27e): what 26a's
+/// check measures a load against, read whole rather than as what is free --
+/// on Apple silicon Metal's recommended working set, the share of the
+/// machine's memory a model may take, and free at a first load. A suite's
+/// admission is measured against it. Nullopt in a build without llama.cpp,
+/// or where no GPU device reports any: a model there runs on the CPU, and
+/// what fits is not known here.
+[[nodiscard]] std::optional<std::int64_t> offload_memory_total();
 
 }  // namespace apogee::backends

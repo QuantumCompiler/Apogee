@@ -107,7 +107,7 @@ TEST_CASE("the native toolsets set the note on the registry they fill, whatever 
     CHECK(note.find("- The file tools reach " + (temp.path() / "files").string()) !=
           std::string::npos);
 
-    options.disabled = {"fs", "shell", "git", "notes", "rag"};
+    options.disabled = {"fs", "shell", "git", "notes", "rag", "graph"};
     apogee::agent::ToolRegistry none;
     apogee::tools::register_native_toolsets(none, options);
     CHECK(none.empty());

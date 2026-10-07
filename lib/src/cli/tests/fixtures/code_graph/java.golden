@@ -1,0 +1,215 @@
+node class com.example.App
+  description public class App
+  metadata {"end_line":12,"file":"src/com/example/App.java","kind":"code","lang":"java","line":6,"member":"java"}
+  mentions 1
+  at java:src/com/example/App.java:6-12 definition
+node class com.example.model.Animal
+  description public abstract class Animal
+  metadata {"end_line":13,"file":"src/com/example/model/Animal.java","kind":"code","lang":"java","line":3,"member":"java"}
+  mentions 1
+  at java:src/com/example/model/Animal.java:3-13 definition
+node class com.example.model.Dog
+  description public class Dog extends Animal implements Comparable<Dog>
+  metadata {"end_line":13,"file":"src/com/example/model/Dog.java","kind":"code","lang":"java","line":3,"member":"java"}
+  mentions 1
+  at java:src/com/example/model/Dog.java:3-13 definition
+node file src/com/example/App.java
+  description Java file
+  metadata {"end_line":12,"file":"src/com/example/App.java","kind":"code","lang":"java","line":1,"member":"java"}
+  mentions 1
+  at java:src/com/example/App.java:1-12 definition
+node file src/com/example/model/Animal.java
+  description Java file
+  metadata {"end_line":13,"file":"src/com/example/model/Animal.java","kind":"code","lang":"java","line":1,"member":"java"}
+  mentions 1
+  at java:src/com/example/model/Animal.java:1-13 definition
+node file src/com/example/model/Dog.java
+  description Java file
+  metadata {"end_line":13,"file":"src/com/example/model/Dog.java","kind":"code","lang":"java","line":1,"member":"java"}
+  mentions 1
+  at java:src/com/example/model/Dog.java:1-13 definition
+node function com.example.App.main
+  description public static void main(String[] args)
+  metadata {"end_line":11,"file":"src/com/example/App.java","kind":"code","lang":"java","line":7,"member":"java"}
+  mentions 1
+  at java:src/com/example/App.java:7-11 definition
+node function com.example.model.Animal.name
+  description protected String name()
+  metadata {"end_line":12,"file":"src/com/example/model/Animal.java","kind":"code","lang":"java","line":10,"member":"java"}
+  mentions 1
+  at java:src/com/example/model/Animal.java:10-12 definition
+node function com.example.model.Animal.sound
+  description public abstract String sound()
+  metadata {"end_line":4,"file":"src/com/example/model/Animal.java","kind":"code","lang":"java","line":4,"member":"java"}
+  mentions 1
+  at java:src/com/example/model/Animal.java:4-4 declaration
+node function com.example.model.Animal.speak
+  description public String speak()
+  metadata {"end_line":8,"file":"src/com/example/model/Animal.java","kind":"code","lang":"java","line":6,"member":"java"}
+  mentions 1
+  at java:src/com/example/model/Animal.java:6-8 definition
+node function com.example.model.Dog.compareTo
+  description @Override public int compareTo(Dog other)
+  metadata {"end_line":12,"file":"src/com/example/model/Dog.java","kind":"code","lang":"java","line":9,"member":"java"}
+  mentions 1
+  at java:src/com/example/model/Dog.java:9-12 definition
+node function com.example.model.Dog.sound
+  description @Override public String sound()
+  metadata {"end_line":7,"file":"src/com/example/model/Dog.java","kind":"code","lang":"java","line":4,"member":"java"}
+  mentions 1
+  at java:src/com/example/model/Dog.java:4-7 definition
+node module com.example
+  description package com.example
+  metadata {"end_line":1,"file":"src/com/example/App.java","kind":"code","lang":"java","line":1,"member":"java"}
+  mentions 1
+  at java:src/com/example/App.java:1-1 definition
+node module com.example.model
+  description package com.example.model
+  metadata {"end_line":1,"file":"src/com/example/model/Animal.java","kind":"code","lang":"java","line":1,"member":"java"}
+  mentions 2
+  at java:src/com/example/model/Animal.java:1-1 definition
+  at java:src/com/example/model/Dog.java:1-1 definition
+node name .getSimpleName
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at java:src/com/example/model/Animal.java:11-11 reference
+node name .println
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at java:src/com/example/App.java:10-10 reference
+node name .size
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at java:src/com/example/App.java:10-10 reference
+node name Comparable
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at java:src/com/example/model/Dog.java:3-3 reference
+node name getClass
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at java:src/com/example/model/Animal.java:11-11 reference
+node name java.util.List
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at java:src/com/example/App.java:4-4 reference
+node name java.util.List.of
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at java:src/com/example/App.java:9-9 reference
+edge class com.example.App -[defined_in]-> file src/com/example/App.java
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/App.java:6
+edge class com.example.model.Animal -[defined_in]-> file src/com/example/model/Animal.java
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/model/Animal.java:3
+edge class com.example.model.Dog -[defined_in]-> file src/com/example/model/Dog.java
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/model/Dog.java:3
+edge class com.example.model.Dog -[inherits]-> class com.example.model.Animal
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/model/Dog.java:3
+edge class com.example.model.Dog -[inherits]-> name Comparable
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/model/Dog.java:3
+edge file src/com/example/App.java -[defined_in]-> module com.example
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/App.java:1
+edge file src/com/example/App.java -[imports]-> class com.example.model.Dog
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/App.java:3
+edge file src/com/example/App.java -[imports]-> name java.util.List
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/App.java:4
+edge file src/com/example/model/Animal.java -[defined_in]-> module com.example.model
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/model/Animal.java:1
+edge file src/com/example/model/Dog.java -[defined_in]-> module com.example.model
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/model/Dog.java:1
+edge function com.example.App.main -[calls]-> class com.example.model.Dog
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/App.java:8
+edge function com.example.App.main -[calls]-> function com.example.model.Animal.speak
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/App.java:10
+edge function com.example.App.main -[calls]-> name .println
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/App.java:10
+edge function com.example.App.main -[calls]-> name .size
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/App.java:10
+edge function com.example.App.main -[calls]-> name java.util.List.of
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/App.java:9
+edge function com.example.App.main -[defined_in]-> class com.example.App
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/App.java:7
+edge function com.example.model.Animal.name -[calls]-> name .getSimpleName
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/model/Animal.java:11
+edge function com.example.model.Animal.name -[calls]-> name getClass
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/model/Animal.java:11
+edge function com.example.model.Animal.name -[defined_in]-> class com.example.model.Animal
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/model/Animal.java:10
+edge function com.example.model.Animal.sound -[defined_in]-> class com.example.model.Animal
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/model/Animal.java:4
+edge function com.example.model.Animal.speak -[calls]-> function com.example.model.Animal.name
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/model/Animal.java:7
+edge function com.example.model.Animal.speak -[calls]-> function com.example.model.Animal.sound
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/model/Animal.java:7
+edge function com.example.model.Animal.speak -[defined_in]-> class com.example.model.Animal
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/model/Animal.java:6
+edge function com.example.model.Dog.compareTo -[defined_in]-> class com.example.model.Dog
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/model/Dog.java:9
+edge function com.example.model.Dog.compareTo -[references]-> class com.example.model.Dog
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/model/Dog.java:10
+edge function com.example.model.Dog.sound -[defined_in]-> class com.example.model.Dog
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site java:src/com/example/model/Dog.java:4
+edge module com.example.model -[defined_in]-> module com.example
+  description 
+  weight 2 origin extracted confidence 1.000000
+  site java:src/com/example/model/Animal.java:1
+  site java:src/com/example/model/Dog.java:1

@@ -1,0 +1,279 @@
+#include "operations/suites.h"
+
+#include <algorithm>
+#include <map>
+#include <span>
+#include <vector>
+
+#include "harness/roles.h"
+#include "symphony/tools.h"
+
+namespace apogee::commands {
+namespace {
+
+std::string joined(const std::vector<std::string>& names) {
+    std::string out;
+    for (const std::string& name : names) {
+        out += out.empty() ? "" : ", ";
+        out += name;
+    }
+    return out;
+}
+
+std::string joined(std::span<const std::string_view> names) {
+    std::string out;
+    for (const std::string_view name : names) {
+        out += out.empty() ? "" : ", ";
+        out += name;
+    }
+    return out;
+}
+
+}  // namespace
+
+std::string validate_suite_member(const harness::Config& config, std::string_view role,
+                                  const harness::SuiteMember& member) {
+    const std::span<const std::string_view> roles = harness::suite_role_names();
+    if (std::ranges::find(roles, role) == roles.end()) {
+        return "'" + std::string{role} + "' is not a role (accepted: " + joined(roles) + ")";
+    }
+    const std::string where = std::string{role} + ": ";
+    if (member.backend.find_first_not_of(" \t") == std::string::npos) {
+        return where + "names no backend";
+    }
+    if (config.find_backend(member.backend) == nullptr) {
+        const std::vector<std::string> known = config.backend_names();
+        return where + "no backend named '" + member.backend + "' in this config" +
+               (known.empty() ? " (it has no backends yet -- add one with 'apogee config "
+                                "add-backend')"
+                              : " (known backends: " + joined(known) + ")");
+    }
+    if (member.context_size.has_value() && *member.context_size < 1) {
+        return where + "context_size must be a positive number of tokens";
+    }
+    if (member.toolset.has_value()) {
+        const std::span<const std::string_view> words = harness::suite_toolset_names();
+        for (const std::string& word : *member.toolset) {
+            if (std::ranges::find(words, word) == words.end()) {
+                return where + "'" + word + "' is not a toolset (accepted: " + joined(words) + ")";
+            }
+        }
+    }
+    return {};
+}
+
+std::string validate_suite_consult(const harness::Config& config, const harness::SuiteConfig& suite,
+                                   const MeteredProbe& metered) {
+    const std::span<const std::string_view> consultable = harness::consultable_role_names();
+    std::vector<std::string> seen;
+    for (const std::string& role : suite.consultable) {
+        const std::string where = "consultable " + role + ": ";
+        if (std::ranges::find(consultable, role) == consultable.end()) {
+            if (role == "chat") {
+                return where +
+                       "the chat model is the root itself -- it consults its members, "
+                       "never itself";
+            }
+            return where + "not a role a suite can consult (accepted: " + joined(consultable) + ")";
+        }
+        if (std::ranges::find(seen, role) != seen.end()) {
+            return where + "listed twice";
+        }
+        seen.push_back(role);
+        const auto member = suite.members.find(role);
+        if (member == suite.members.end()) {
+            return where + "the suite has no " + role + " member -- name its backend with --" +
+                   role;
+        }
+        const MeteredAnswer answer =
+            metered
+                ? metered(config, member->second.backend)
+                : MeteredAnswer{.metered = true, .unknown = "nothing here can ask its provider"};
+        if (!answer.unknown.empty()) {
+            return where + "whether '" + member->second.backend +
+                   "' is billed per call cannot be told (" + answer.unknown +
+                   ") -- unknown is metered, and only a local, unmetered member can be consulted";
+        }
+        if (answer.metered) {
+            return where + "'" + member->second.backend +
+                   "' is billed per call -- a consult runs on the model's initiative, which "
+                   "never spends: only a local, unmetered member can be consulted";
+        }
+    }
+    const auto positive = [](const std::optional<std::int64_t>& value) {
+        return !value.has_value() || *value >= 1;
+    };
+    if (!positive(suite.consult_caps.per_turn) || !positive(suite.consult_caps.brief_tokens) ||
+        !positive(suite.consult_caps.answer_tokens)) {
+        return "consult caps must be positive whole numbers";
+    }
+    // Validation's verifier is a member call too (27g), held to the same
+    // rule as a consult.
+    return validate_suite_validation(config, suite, metered);
+}
+
+std::string validate_suite_validation(const harness::Config& config,
+                                      const harness::SuiteConfig& suite,
+                                      const MeteredProbe& metered) {
+    if (!suite.validate.any()) {
+        return {};
+    }
+    const harness::ValidatePolicy policy = harness::validate_policy(suite.validate);
+    const std::string where = "validate: ";
+    const std::span<const std::string_view> roles = harness::consultable_role_names();
+    if (std::ranges::find(roles, policy.verifier) == roles.end()) {
+        if (policy.verifier == "chat") {
+            return where +
+                   "the chat model is the root itself -- its work is what a member checks, so it "
+                   "cannot be the one checking";
+        }
+        return where + "'" + policy.verifier +
+               "' is not a role that can check (accepted: " + joined(roles) + ")";
+    }
+    if (suite.validate.answers.has_value()) {
+        const std::span<const std::string_view> whens = harness::answer_check_names();
+        if (std::ranges::find(whens, *suite.validate.answers) == whens.end()) {
+            return where + "answers is " + joined(whens) + ", not '" + *suite.validate.answers +
+                   "'";
+        }
+    }
+    const auto member = suite.members.find(policy.verifier);
+    if (member == suite.members.end()) {
+        return where + "the verifier is the " + policy.verifier +
+               " member, and the suite has none " + "-- name its backend with --" +
+               policy.verifier + ", or another verifier with " + "--verifier";
+    }
+    const MeteredAnswer answer =
+        metered ? metered(config, member->second.backend)
+                : MeteredAnswer{.metered = true, .unknown = "nothing here can ask its provider"};
+    if (!answer.unknown.empty()) {
+        return where + "whether '" + member->second.backend +
+               "' is billed per call cannot be told (" + answer.unknown +
+               ") -- unknown is metered, and only a local, unmetered member can check";
+    }
+    if (answer.metered) {
+        return where + "'" + member->second.backend +
+               "' is billed per call -- a check runs on Apogee's initiative, which never spends: "
+               "only a local, unmetered member can be the verifier";
+    }
+    return {};
+}
+
+std::string validate_suite_orchestrate(const harness::Config& config, std::string_view name,
+                                       const harness::SuiteConfig& suite,
+                                       const MeteredProbe& metered,
+                                       const symphony::Catalog* symphonies) {
+    if (!suite.orchestrate) {
+        return {};
+    }
+    const std::string where = "orchestrate: ";
+    if (symphonies == nullptr) {
+        return where +
+               "the symphonies cannot be read here, so whether one reaches a member billed per "
+               "call cannot be told -- unknown is metered";
+    }
+    // The members as a session under this suite would resolve them: the
+    // suite active, the conversation on its chat role.
+    harness::Config probe = config;
+    probe.suites[std::string{name}] = suite;
+    probe.models.default_suite = std::string{name};
+    const std::string conversation =
+        harness::resolve_backend(probe, harness::RoleRequest{.role = harness::ModelRole::Chat}).key;
+    std::map<std::string, MeteredAnswer, std::less<>> asked;
+    for (const symphony::Definition& definition : symphonies->definitions) {
+        const harness::SymphonySpec& spec = definition.spec;
+        if (!symphony::unprojectable(spec, *symphonies).empty()) {
+            continue;  // never offered, so never played on the model's initiative
+        }
+        for (const symphony::ReachedMember& member :
+             symphony::reached_members(probe, spec, *symphonies, conversation)) {
+            if (member.backend.empty()) {
+                continue;  // nothing answers: nothing to spend
+            }
+            auto answer = asked.find(member.backend);
+            if (answer == asked.end()) {
+                answer = asked
+                             .emplace(member.backend,
+                                      metered ? metered(probe, member.backend)
+                                              : MeteredAnswer{.metered = true,
+                                                              .unknown = "nothing here can ask "
+                                                                         "its provider"})
+                             .first;
+            }
+            const std::string reached = "'" + spec.name + "' reaches " + member.role + " ('" +
+                                        member.backend + "') through " +
+                                        symphony::reached_at(spec.name, member);
+            if (!answer->second.unknown.empty()) {
+                return where + reached + ", and whether '" + member.backend +
+                       "' is billed per call cannot be told (" + answer->second.unknown +
+                       ") -- unknown is metered, and only a suite whose symphonies reach local, "
+                       "unmetered members can orchestrate";
+            }
+            if (answer->second.metered) {
+                return where + reached + ", and '" + member.backend +
+                       "' is billed per call -- a play the model starts runs on its initiative, "
+                       "which never spends: only a suite whose symphonies reach local, unmetered "
+                       "members can orchestrate";
+            }
+        }
+    }
+    return {};
+}
+
+std::string validate_suite(const harness::Config& config, std::string_view name,
+                           const harness::SuiteConfig& suite, const MeteredProbe& metered,
+                           const symphony::Catalog* symphonies) {
+    if (name.empty()) {
+        return "a suite needs a name";
+    }
+    if (const harness::CaseInsensitiveLess less;
+        !less(name, harness::kSuiteOff) && !less(harness::kSuiteOff, name)) {
+        return "'" + std::string{name} + "' is reserved -- '/suite " +
+               std::string{harness::kSuiteOff} + "' means no suite; choose another name";
+    }
+    if (suite.members.empty()) {
+        return "a suite names at least one member -- a backend for one of its roles (" +
+               joined(harness::suite_role_names()) + ")";
+    }
+    for (const auto& [role, member] : suite.members) {
+        if (std::string refused = validate_suite_member(config, role, member); !refused.empty()) {
+            return refused;
+        }
+    }
+    if (std::string refused = validate_suite_consult(config, suite, metered); !refused.empty()) {
+        return refused;
+    }
+    return validate_suite_orchestrate(config, name, suite, metered, symphonies);
+}
+
+std::string validate_active_suite(const harness::Config& config) {
+    const harness::SuiteConfig* suite = harness::active_suite(config);
+    if (suite == nullptr) {
+        return {};
+    }
+    for (const std::string_view role : harness::suite_role_names()) {
+        const auto it = suite->members.find(role);
+        if (it == suite->members.end() || config.find_backend(it->second.backend) != nullptr) {
+            continue;
+        }
+        const std::vector<std::string> known = config.backend_names();
+        return "no backend named '" + it->second.backend + "'" +
+               (known.empty() ? std::string{} : " (configured: " + joined(known) + ")") +
+               " -- suite " + config.models.default_suite + "'s " + std::string{role} +
+               " member; fix it with: apogee config set-suite " + config.models.default_suite +
+               " --" + std::string{role} + " <backend>";
+    }
+    return {};
+}
+
+std::string validate_suite_delete(const harness::Config& config, std::string_view name) {
+    const harness::SuiteConfig* suite = config.find_suite(name);
+    if (suite == nullptr || harness::active_suite(config) != suite) {
+        return {};
+    }
+    return "'" + std::string{name} +
+           "' is the default suite (models.default_suite) -- set another first, or none: "
+           "apogee config set-default-suite off";
+}
+
+}  // namespace apogee::commands

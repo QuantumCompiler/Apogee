@@ -16,7 +16,7 @@
 /// output shape for both passes -- so a refined draft goes through exactly the
 /// finished-record path a captured one does. The loop is a review-UI
 /// affordance and lives on the control plane only; a CLI user re-runs
-/// `capture --dry-run` (a documented parity skip, Ommi's decision kept).
+/// `capture --dry-run` (a documented parity skip).
 namespace apogee::knowledge {
 
 /// An instruction is a short review note, not a second conversation: the

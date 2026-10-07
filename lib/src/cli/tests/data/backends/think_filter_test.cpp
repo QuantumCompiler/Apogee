@@ -84,10 +84,10 @@ TEST_CASE("reasoning reaches the thinking sink, not the answer", "[backends][thi
 
 TEST_CASE("an empty pair list is a pass-through and cannot underflow",
           "[backends][think][regression]") {
-    // Ommi's recorded bug: the hold-back was computed from the longest marker
-    // and panicked on a negative slice when there were no markers at all. Here
-    // the empty case does no arithmetic -- and an empty list on a KNOWN profile
-    // is a real configuration, meaning "this family emits no reasoning".
+    // The hazard: a hold-back computed from the longest marker goes negative
+    // when there are no markers at all. Here the empty case does no arithmetic
+    // -- and an empty list on a KNOWN profile is a real configuration, meaning
+    // "this family emits no reasoning".
     const std::string text = "<think>this should survive</think>";
     CHECK(filtered(text, 1, {}) == text);
     CHECK(filtered("", 1, {}).empty());

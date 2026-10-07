@@ -7,10 +7,12 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "contracts/cancellation.h"
 #include "contracts/config.h"
+#include "platform/pid_lock.h"
 #include "training/datasets.h"
 #include "training/pipeline.h"
 #include "training/trainer.h"
@@ -97,29 +99,28 @@ struct CycleHistory {
 [[nodiscard]] std::string save_history(const std::filesystem::path& cycle_dir,
                                        const CycleHistory& history);
 
-/// The PID lock: created exclusively, removed on release. A lock left by a
-/// crashed cycle is named in the refusal with the way out.
+/// The PID lock: created exclusively, removed on release -- the platform
+/// seam's `PidLock`, which the task runner shares (27h). A lock left by a
+/// crashed cycle is named in the refusal with the way out, never taken over.
 class CycleLock {
 public:
     /// nullopt with `error` set when the lock is held or cannot be made.
     [[nodiscard]] static std::optional<CycleLock> acquire(const std::filesystem::path& cycle_dir,
                                                           std::string& error);
-    ~CycleLock();
-    CycleLock(CycleLock&& other) noexcept;
-    CycleLock& operator=(CycleLock&& other) noexcept;
-    CycleLock(const CycleLock&) = delete;
-    CycleLock& operator=(const CycleLock&) = delete;
 
     [[nodiscard]] const std::filesystem::path& path() const noexcept {
-        return path_;
+        return lock_.path();
     }
 
     /// Removes the file now; safe to call twice.
-    void release() noexcept;
+    void release() noexcept {
+        lock_.release();
+    }
 
 private:
-    explicit CycleLock(std::filesystem::path path);
-    std::filesystem::path path_;
+    explicit CycleLock(platform::PidLock lock) : lock_{std::move(lock)} {}
+
+    platform::PidLock lock_;
 };
 
 /// Whether a cycle holds the lock now.
@@ -193,12 +194,13 @@ void record_cycle_run(CycleHistory& history, CycleRunRecord record);
 /// Halts when `k > 0` and the failures have reached it. Whether it did.
 bool trip_breaker(CycleHistory& history, int k);
 
-/// What promotion answered: the version and the file, or why not.
+/// What promotion answered: the version and its weights -- the GGUF, or an
+/// MLX version's directory -- or why not.
 struct CyclePromotion {
     bool ok = false;
     std::string error;
     int version = 0;
-    std::string gguf_path;
+    std::string weights_path;
 };
 
 /// The promote path, arriving as a closure: it edits the config, which

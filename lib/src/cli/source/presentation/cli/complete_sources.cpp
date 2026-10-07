@@ -11,6 +11,8 @@
 
 #include "cli/config_cmd.h"
 #include "cli/embed.h"
+#include "cli/graph.h"
+#include "cli/task_cmd.h"
 #include "contracts/assets.h"
 #include "contracts/cancellation.h"
 #include "contracts/layout.h"
@@ -21,9 +23,14 @@
 #include "modelstore/store.h"
 #include "operations/knowledge_core.h"
 #include "platform/child_process.h"
+#include "symphony/definition.h"
+#include "tasks/ledger.h"
+#include "tasks/task.h"
 #include "tools/toolsets.h"
+#include "training/convert.h"
 #include "training/datasets.h"
 #include "training/kit.h"
+#include "training/mlx_convert.h"
 #include "training/script_runner.h"
 #include "training/store.h"
 
@@ -61,10 +68,16 @@ namespace {
 }
 
 /// Models in the store, and each set of their weights by handle
-/// (`<model>/<format>/<id>`), for one format or both.
+/// (`<model>/<format>/<id>`), for the formats asked.
 [[nodiscard]] std::vector<std::string> stored_models(const models::StoreRoots& roots, bool ggufs,
-                                                     bool snapshots) {
+                                                     bool snapshots, bool mlx = false) {
     std::vector<std::string> out;
+    if (mlx) {
+        for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
+            out.push_back(stored.model);
+            out.push_back(models::weights_handle(stored.model, models::kMlxFormat, stored.id));
+        }
+    }
     if (ggufs) {
         for (const models::StoredGguf& stored : models::list_store_ggufs(roots)) {
             out.push_back(stored.model);
@@ -103,6 +116,20 @@ namespace {
             [&stored](const models::StoredGguf& other) { return other.dir == stored.dir; });
         if (!registered && std::ranges::find(taken, stem) == taken.end()) {
             out.push_back(stem);
+        }
+    }
+    // The stored MLX models the same way, by the name add-backend fills (27b).
+    const std::vector<models::StoredMlx> mlx = models::list_store_mlx(store_roots(config));
+    for (const models::StoredMlx& stored : mlx) {
+        const bool registered = std::ranges::any_of(config.backends, [&stored](const auto& entry) {
+            return !entry.second.model_path.empty() &&
+                   models::stored_mlx_at({stored},
+                                         harness::expand_env_and_home(entry.second.model_path))
+                       .has_value();
+        });
+        const std::string name = models::stored_mlx_name(stored);
+        if (!registered && std::ranges::find(taken, name) == taken.end()) {
+            out.push_back(name);
         }
     }
     return out;
@@ -187,9 +214,24 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
             list.names.push_back(std::move(name));
         }
         list.none = "no named graphs or collections yet";
+    } else if (kind == kModelSuiteValue) {
+        list.names = config.suite_names();
+        list.none = "no suites -- 'apogee config add-suite' makes one";
+    } else if (kind == kModelSuiteOrOffValue) {
+        list.names = config.suite_names();
+        list.names.emplace_back(harness::kSuiteOff);
     } else if (kind == kNamedGraphValue) {
         list.names = config.graph_names();
         list.none = "no named graphs -- 'apogee config add-graph' makes one";
+    } else if (kind == kSourcedGraphValue) {
+        for (const auto& [name, graph] : config.graphs) {
+            if (graph_updatable(graph)) {
+                list.names.push_back(name);
+            }
+        }
+        list.none =
+            "no named graph has source trees -- 'apogee graph build --source <dir> --graph "
+            "<name>' adds one";
     } else if (kind == kAgentValue) {
         for (const harness::NamedAgent& agent : harness::all_agents(config)) {
             list.names.push_back(agent.name);
@@ -236,6 +278,50 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
             list.names.push_back(run.id);
         }
         list.none = "no pipeline runs yet -- 'apogee train pipeline run'";
+    } else if (kind == kTaskValue) {
+        for (const tasks::Task& task : tasks::list_tasks(harness::tasks_dir())) {
+            list.names.push_back(task.id);
+        }
+        list.none = "no tasks yet -- 'apogee task run'";
+    } else if (kind == kHaltableTaskValue || kind == kCancellableTaskValue) {
+        // The ledgers `task list` reads -- the read the TASK kind makes --
+        // each held to the verb's own test.
+        const tasks::Request request =
+            kind == kHaltableTaskValue ? tasks::Request::Halt : tasks::Request::Cancel;
+        for (const tasks::Task& task : tasks::list_tasks(harness::tasks_dir())) {
+            if (task_stoppable(task, request)) {
+                list.names.push_back(task.id);
+            }
+        }
+        list.none = "no task 'task " + std::string{tasks::to_string(request)} +
+                    "' takes -- 'apogee task list' shows where each stands";
+    } else if (kind == kResumableTaskValue) {
+        // The same ledgers, held to resume's own test from the folder TAB
+        // runs in -- the one `task resume` compares against.
+        std::error_code code;
+        const std::filesystem::path here = std::filesystem::current_path(code);
+        if (!code) {
+            for (const tasks::Task& task : tasks::list_tasks(harness::tasks_dir())) {
+                if (task_resume_refusal(task, here).empty()) {
+                    list.names.push_back(task.id);
+                }
+            }
+        }
+        list.none =
+            "no task resumes here -- one that is not finished, in the folder it was started in";
+    } else if (kind == kSymphonyValue || kind == kSymphonyNameValue) {
+        for (const symphony::Definition& definition :
+             symphony::catalog(config, harness::symphonies_dir()).definitions) {
+            list.names.push_back(definition.spec.name);
+        }
+        // `edit` takes a name alone: a spec file is edited in place.
+        list.paths = kind == kSymphonyValue;
+    } else if (kind == kSymphonyEntryValue) {
+        for (const auto& [name, spec] : config.symphonies) {
+            list.names.push_back(name);
+        }
+        list.none =
+            "no symphonies in the config -- a starter or a spec file has no entry to delete";
     } else if (kind == kPipelineValue) {
         for (const auto& [name, spec] : config.training.pipelines) {
             list.names.push_back(name);
@@ -247,7 +333,7 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         }
         list.paths = true;
     } else if (kind == kModelValue) {
-        list.names = stored_models(store_roots(config), true, true);
+        list.names = stored_models(store_roots(config), true, true, true);
         list.none = "the model store is empty -- 'apogee models pull'";
     } else if (kind == kSnapshotValue) {
         list.names = stored_models(store_roots(config), false, true);
@@ -266,15 +352,23 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
             list.names.push_back(
                 models::weights_handle(stored.model, models::kSafetensorsFormat, stored.id));
         }
+        for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
+            list.names.push_back(
+                models::weights_handle(stored.model, models::kMlxFormat, stored.id));
+        }
         list.none = "no backends configured and the model store is empty";
     } else if (kind == kModelOrBackendValue) {
         const models::StoreRoots roots = store_roots(config);
-        list.names = stored_models(roots, true, true);
+        list.names = stored_models(roots, true, true, true);
         const std::vector<models::StoredGguf> ggufs = models::list_store_ggufs(roots);
+        const std::vector<models::StoredMlx> mlx = models::list_store_mlx(roots);
         for (const auto& [name, backend] : config.backends) {
-            if (!backend.model_path.empty() &&
-                models::stored_gguf_at(ggufs, harness::expand_env_and_home(backend.model_path))
-                    .has_value()) {
+            if (backend.model_path.empty()) {
+                continue;
+            }
+            const std::string path = harness::expand_env_and_home(backend.model_path);
+            if (models::stored_gguf_at(ggufs, path).has_value() ||
+                models::stored_mlx_at(mlx, path).has_value()) {
                 list.names.push_back(name);
             }
         }
@@ -285,6 +379,14 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         list = weight_ids(context, false);
     } else if (kind == kGgufIdValue) {
         list = weight_ids(context, true);
+    } else if (kind == kConvertPrecisionValue) {
+        // `--mlx` after `--type` cannot be seen: the line is read up to the
+        // cursor.
+        if (context.flags.contains("--mlx")) {
+            list.names = training::mlx_precision_names();
+        } else {
+            list.names = training::converter_out_types();
+        }
     } else if (kind == kPullRefValue) {
         for (const models::OllamaEntry& entry : models::list_store(models::ollama_store_root())) {
             list.names.push_back(entry.ref);

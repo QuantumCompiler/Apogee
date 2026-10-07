@@ -46,6 +46,8 @@ inline constexpr const char* kCollectionListValue = "COLLECTION,...";
 inline constexpr const char* kGraphValue = "GRAPH";
 /// A `graphs:` entry only.
 inline constexpr const char* kNamedGraphValue = "NAMED_GRAPH";
+/// A `graphs:` entry with source trees -- what `graph update` refreshes.
+inline constexpr const char* kSourcedGraphValue = "SOURCED_GRAPH";
 inline constexpr const char* kAgentValue = "AGENT";
 /// A saved conversation, by id.
 inline constexpr const char* kChatValue = "CHAT";
@@ -57,10 +59,33 @@ inline constexpr const char* kDatasetValue = "DATASET";
 inline constexpr const char* kKitValue = "KIT";
 /// An eval suite, a prepared `<name>.eval`, a kit, or a path.
 inline constexpr const char* kSuiteValue = "SUITE";
+/// A `suites:` entry -- a named bundle of models (27d). Not `SUITE`, which
+/// is the training track's eval suite.
+inline constexpr const char* kModelSuiteValue = "MODEL_SUITE";
+/// A `suites:` entry, or `off` for none -- what `select_suite` takes, where a
+/// command may run without a suite. `execute --suite` is `MODEL_SUITE`: it
+/// never runs without one (27s).
+inline constexpr const char* kModelSuiteOrOffValue = "MODEL_SUITE_OR_OFF";
 /// A training run id.
 inline constexpr const char* kRunValue = "RUN";
 /// A pipeline run id.
 inline constexpr const char* kPipelineRunValue = "PIPELINE_RUN";
+/// A task's id (27h).
+inline constexpr const char* kTaskValue = "TASK";
+/// A task `task halt` stops, and one `task cancel` does -- each by the verb's
+/// own test (`task_stoppable`).
+inline constexpr const char* kHaltableTaskValue = "HALTABLE_TASK";
+inline constexpr const char* kCancellableTaskValue = "CANCELLABLE_TASK";
+/// A task `task resume` continues from the working folder: unfinished, and
+/// started there (`task_resume_refusal`).
+inline constexpr const char* kResumableTaskValue = "RESUMABLE_TASK";
+/// A symphony (27q): a config entry, a shipped starter, a spec file under
+/// `symphonies/` -- or a spec file's path.
+inline constexpr const char* kSymphonyValue = "SYMPHONY";
+/// A symphony by name, never a path -- what `symphonies edit` takes.
+inline constexpr const char* kSymphonyNameValue = "SYMPHONY_NAME";
+/// A `symphonies:` config entry -- what `symphonies delete` removes.
+inline constexpr const char* kSymphonyEntryValue = "SYMPHONY_ENTRY";
 /// A `training.pipelines` entry, or a spec path.
 inline constexpr const char* kPipelineValue = "PIPELINE";
 /// A `training.regimes` entry, or a spec path.
@@ -85,6 +110,10 @@ inline constexpr const char* kNewBackendValue = "NEW_BACKEND";
 inline constexpr const char* kSnapshotIdValue = "SNAPSHOT_ID";
 /// A GGUF's id -- of the model named by the command's first positional.
 inline constexpr const char* kGgufIdValue = "GGUF_ID";
+/// A precision `models convert` writes: a GGUF's -- or, with `--mlx` on the
+/// line before it, an MLX model's. Validated against both by the parser; the
+/// line narrows the offer to the one the command will take.
+inline constexpr const char* kConvertPrecisionValue = "PRECISION";
 /// A model to pull: the models in the local Ollama store (a Hugging Face
 /// `owner/repo` is typed; there is no listing to offer).
 inline constexpr const char* kPullRefValue = "MODEL_REF";
@@ -102,18 +131,25 @@ inline constexpr const char* kAllowedHostValue = "ALLOWED_HOST";
 
 /// Every name kind above, for the protocol to recognise and a test to hold
 /// each to a source.
-inline constexpr std::array<std::string_view, 29> kNameValues{kCollectionValue,
+inline constexpr std::array<std::string_view, 40> kNameValues{kCollectionValue,
                                                               kCollectionListValue,
                                                               kGraphValue,
                                                               kNamedGraphValue,
+                                                              kSourcedGraphValue,
                                                               kAgentValue,
                                                               kChatValue,
                                                               kServerValue,
                                                               kDatasetValue,
                                                               kKitValue,
                                                               kSuiteValue,
+                                                              kModelSuiteValue,
+                                                              kModelSuiteOrOffValue,
                                                               kRunValue,
                                                               kPipelineRunValue,
+                                                              kTaskValue,
+                                                              kHaltableTaskValue,
+                                                              kCancellableTaskValue,
+                                                              kResumableTaskValue,
                                                               kPipelineValue,
                                                               kRegimeValue,
                                                               kModelValue,
@@ -124,13 +160,30 @@ inline constexpr std::array<std::string_view, 29> kNameValues{kCollectionValue,
                                                               kNewBackendValue,
                                                               kSnapshotIdValue,
                                                               kGgufIdValue,
+                                                              kConvertPrecisionValue,
                                                               kPullRefValue,
                                                               kRecordValue,
                                                               kGitRefValue,
                                                               kGitRemoteValue,
                                                               kConfigKeyValue,
                                                               kToolValue,
-                                                              kAllowedHostValue};
+                                                              kAllowedHostValue,
+                                                              kSymphonyValue,
+                                                              kSymphonyNameValue,
+                                                              kSymphonyEntryValue};
+
+/// `{a,b}`: a set of words, as a type name spells it.
+template <typename Words>
+[[nodiscard]] std::string word_set(const Words& words) {
+    std::string out = "{";
+    bool first = true;
+    for (const auto& word : words) {
+        out += first ? "" : ",";
+        out += std::string_view{word};
+        first = false;
+    }
+    return out + "}";
+}
 
 /// The type name for free text with a known set of usual words: the parser
 /// still takes any word -- the command validates it, with its own message,
@@ -139,14 +192,29 @@ inline constexpr std::array<std::string_view, 29> kNameValues{kCollectionValue,
 /// command validates against, never a copy of it.
 template <typename Words>
 [[nodiscard]] std::string words_value(const Words& words) {
-    std::string out = "TEXT:{";
-    bool first = true;
-    for (const auto& word : words) {
-        out += first ? "" : ",";
-        out += std::string_view{word};
-        first = false;
+    return "TEXT:" + word_set(words);
+}
+
+/// `words_value` for a comma-separated list of the words in one value
+/// (`--consultable utility,extraction`): the `,...` after the type marks a
+/// list, as `COLLECTION,...` does, so the word after the last comma
+/// completes.
+template <typename Words>
+[[nodiscard]] std::string word_list_value(const Words& words) {
+    return "TEXT,...:" + word_set(words);
+}
+
+/// The type name for `KEY=VALUE,...` (`--toolset chat=fs,git`): the keys,
+/// each offered with its `=`, then -- once one is typed -- the values, a
+/// comma-separated list after it. `--help` shows
+/// `TEXT:{chat=,utility=}:{fs,git}`.
+template <typename Keys, typename Values>
+[[nodiscard]] std::string keyed_words_value(const Keys& keys, const Values& values) {
+    std::vector<std::string> prefixed;
+    for (const auto& key : keys) {
+        prefixed.push_back(std::string{std::string_view{key}} + "=");
     }
-    return out + "}";
+    return words_value(prefixed) + ":" + word_set(values);
 }
 
 /// Root-level state every subcommand can read.
@@ -174,8 +242,8 @@ struct RootContext {
 /// knows what those are -- adding a command touches exactly two places: the
 /// command's own files, and the one line in `default_registry()` that
 /// constructs it. That is the self-registration property the skeleton exists
-/// to establish, and it is why the CLI can grow to Ommi's ~25 commands without
-/// main.cpp growing at all.
+/// to establish, and it is why the CLI can grow to any number of commands
+/// without main.cpp growing at all.
 ///
 /// Signal failure from a callback by throwing `CLI::RuntimeError(code)`; the
 /// root command turns it into that process exit code.

@@ -7,6 +7,7 @@
 #include <fstream>
 #include <system_error>
 
+#include "modelstore/mlx_info.h"
 #include "modelstore/snapshot.h"
 
 namespace apogee::models {
@@ -15,6 +16,11 @@ namespace {
 void remove_quietly(const std::filesystem::path& path) {
     std::error_code code;
     std::filesystem::remove(path, code);
+}
+
+void remove_tree_quietly(const std::filesystem::path& path) {
+    std::error_code code;
+    std::filesystem::remove_all(path, code);
 }
 
 }  // namespace
@@ -167,6 +173,78 @@ ConvertResult convert_snapshot(const std::filesystem::path& snapshot,
     }
     result.ok = true;
     result.path = output;
+    return result;
+}
+
+std::int64_t estimated_mlx_bytes(std::int64_t elements, int bits) {
+    if (bits <= 0) {
+        return elements * 2;
+    }
+    // bits/8 a weight, and a 16-bit scale and bias per group of 64.
+    return (elements * bits / 8) + (elements / 64 * 4);
+}
+
+std::string mlx_conversion_refusal(const std::filesystem::path& snapshot,
+                                   const std::filesystem::path& out) {
+    // --- rung 1: a snapshot, an intact one, of full weights ---------------------
+    if (!is_snapshot_dir(snapshot)) {
+        return snapshot.string() +
+               " is not a SafeTensors snapshot (a directory holding config.json and at least one "
+               "*.safetensors file). Pull one with 'apogee models pull <owner>/<repo> "
+               "--safetensors'";
+    }
+    if (std::string damaged = damaged_snapshot_error(snapshot); !damaged.empty()) {
+        return damaged;
+    }
+    if (const MlxInfo facts = read_mlx_config(snapshot);
+        facts.mlx_format && facts.quantization.quantized()) {
+        return snapshot.string() + " is already an MLX model (" + facts.quantization.describe() +
+               ") -- an mlx backend runs it as it is; convert the full-weight release instead";
+    }
+    // --- rung 2: never replace ---------------------------------------------------
+    std::error_code code;
+    if (std::filesystem::exists(out, code)) {
+        return "something already exists at " + out.string() + " -- delete it first";
+    }
+    return {};
+}
+
+MlxConvertResult convert_snapshot_to_mlx(const std::filesystem::path& snapshot,
+                                         const std::filesystem::path& out, int bits,
+                                         const MlxConvertFn& convert,
+                                         const harness::CancellationToken& cancellation) {
+    MlxConvertResult result;
+    result.error = mlx_conversion_refusal(snapshot, out);
+    if (!result.error.empty()) {
+        return result;
+    }
+    std::error_code code;
+    std::filesystem::create_directories(out.parent_path(), code);
+
+    // --- rung 3: convert into the staging path -------------------------------------
+    const std::string failure = convert(snapshot, out, cancellation);
+    if (!failure.empty() || cancellation.stop_requested()) {
+        remove_tree_quietly(out);
+        result.cancelled = cancellation.stop_requested() || failure == "cancelled";
+        result.error = result.cancelled ? "cancelled" : failure;
+        return result;
+    }
+
+    // --- rung 4: what landed is a whole MLX model, quantized as asked ---------------
+    result.info = read_mlx_info(out);
+    if (!result.info.complete) {
+        remove_tree_quietly(out);
+        result.error = "the converter finished but its output is not a loadable MLX model -- " +
+                       result.info.problem;
+        return result;
+    }
+    if (bits > 0 && result.info.quantization.bits != bits) {
+        remove_tree_quietly(out);
+        result.error = "the converter finished but did not quantize to " + std::to_string(bits) +
+                       " bits (its config.json says " + result.info.quantization.describe() + ")";
+        return result;
+    }
+    result.ok = true;
     return result;
 }
 

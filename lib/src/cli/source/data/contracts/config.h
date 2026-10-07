@@ -52,6 +52,9 @@ enum class BackendType : std::uint8_t {
     CodexCli,
     GeminiCli,
     OllamaCli,
+    /// Apple's MLX through a persistent Python child (27a): opt-in, Apple
+    /// silicon only, refused at construction where its runtime is absent.
+    Mlx,
     Mock
 };
 
@@ -134,11 +137,10 @@ struct BackendConfig {
 
     std::string system_prompt;
 
-    /// Context window in tokens. Unlike Ommi -- whose claude entries omitted
-    /// this because the claude CLI managed its own context -- Apogee owns
-    /// context tracking for every backend, so cloud entries carry a window
-    /// too. The model->window fallback table is harness-core's, not this
-    /// item's: unset here means "ask the fallback", not "unlimited".
+    /// Context window in tokens. Apogee owns context tracking for every
+    /// backend, so cloud entries carry a window too. The model->window fallback
+    /// table is harness-core's, not this item's: unset here means "ask the
+    /// fallback", not "unlimited".
     std::optional<std::int64_t> context_size;
 
     /// A local backend's attention cache (26a). Unset is `q8_0`, and a model
@@ -204,7 +206,7 @@ struct BackendConfig {
 ///
 /// Each names a key in `backends`, and they are resolved through ONE shared
 /// resolver -- `harness/roles.h` -- because CLI and HTTP must never grow
-/// independent resolution chains, which is a real Ommi bug class. Read them
+/// independent resolution chains, which is a real bug class. Read them
 /// directly only to display or validate the raw value; to decide which backend
 /// to RUN, call `resolve_backend_key()`. `cli.one_role_resolver` enforces it.
 struct ModelsConfig {
@@ -217,6 +219,298 @@ struct ModelsConfig {
     std::string default_vision;
     std::string default_transcription;
     std::string default_utility;
+
+    /// The suite every role resolves under (27d): a `suites:` name, or empty
+    /// for none -- and none is exactly the chain as it was before suites.
+    /// In the file it is the default; in the config a running session
+    /// resolves against it is that session's ACTIVE suite, which `--suite`
+    /// and `/suite` set in memory and never write back. A name with no
+    /// `suites:` entry fails the load, as a typo here would otherwise run
+    /// every command on the global pointers without a word.
+    std::string default_suite;
+};
+
+/// The roles a suite names members for (27d), as `suites.<name>.members`
+/// spells them: the six roles `harness/roles.h` resolves, called by the role
+/// rather than by the pointer (`chat`, not `default`), in the order every
+/// listing shows them.
+[[nodiscard]] std::span<const std::string_view> suite_role_names() noexcept;
+
+/// The words a suite member's `toolset:` takes (27d): the native toolsets
+/// `tools/toolsets.h` registers (`fs`, `shell`, `git`, `notes`, `rag`, and
+/// since 27l `graph`), `web`
+/// (fetch_url and web_search) and `mcp` (every MCP server's tools). Declared
+/// here, beside the parser that refuses any other word, as `lora_methods()`
+/// is; a test holds it to the toolsets that exist.
+[[nodiscard]] std::span<const std::string_view> suite_toolset_names() noexcept;
+
+/// The word `--suite` and `/suite` take for "no suite" -- reserved, so no
+/// suite may be named it.
+inline constexpr std::string_view kSuiteOff = "off";
+
+/// One member of a suite: the backend that answers for a role while the suite
+/// is active, and the two knobs that make a small helper small (27d).
+///
+/// The knobs **pin the backend while the suite is active**, whichever role it
+/// answers for at that moment: one backend is one loaded model with one
+/// window, so a pin cannot follow the role. Two members of one suite pinning
+/// the same backend two ways fail the load.
+struct SuiteMember {
+    /// A key under `backends:`, validated where it is used -- the existing
+    /// "no backend named" wording at use, a `Fail` row in `check` -- never at
+    /// load, exactly as a role pointer is.
+    std::string backend;
+    /// The window the backend runs at, in tokens: its `context_size` while
+    /// the suite is active. Unset keeps the entry's own.
+    std::optional<std::int64_t> context_size;
+    /// The toolsets the backend is offered when it runs a conversation's
+    /// tools, words of `suite_toolset_names()`. Unset offers every
+    /// registered tool; an empty list offers none.
+    std::optional<std::vector<std::string>> toolset;
+
+    /// Whether either knob is set -- the long form is written for it.
+    [[nodiscard]] bool pins() const noexcept {
+        return context_size.has_value() || toolset.has_value();
+    }
+
+    bool operator==(const SuiteMember&) const = default;
+};
+
+/// How many member calls a turn may make, and how long a brief and an answer
+/// may be (27f) -- the defaults a suite's `consult_caps:` adjusts. Named
+/// constants, so every reader agrees on them.
+inline constexpr std::int64_t kConsultsPerTurn = 4;
+inline constexpr std::int64_t kConsultBriefTokens = 1024;
+inline constexpr std::int64_t kConsultAnswerTokens = 512;
+
+/// A suite's `consult_caps:` (27f): each unset takes its default above. The
+/// member's own window stays the hard ceiling whatever these say.
+struct ConsultCaps {
+    std::optional<std::int64_t> per_turn;
+    std::optional<std::int64_t> brief_tokens;
+    std::optional<std::int64_t> answer_tokens;
+
+    /// Whether any is set -- the block is written for it.
+    [[nodiscard]] bool any() const noexcept {
+        return per_turn.has_value() || brief_tokens.has_value() || answer_tokens.has_value();
+    }
+
+    bool operator==(const ConsultCaps&) const = default;
+};
+
+/// The caps as they hold: each set one, else its default.
+struct ConsultLimits {
+    std::int64_t per_turn = kConsultsPerTurn;
+    std::int64_t brief_tokens = kConsultBriefTokens;
+    std::int64_t answer_tokens = kConsultAnswerTokens;
+
+    bool operator==(const ConsultLimits&) const = default;
+};
+
+[[nodiscard]] ConsultLimits consult_limits(const ConsultCaps& caps) noexcept;
+
+/// The names `consult_caps:` takes, in the order it is written:
+/// `per_turn`, `brief_tokens`, `answer_tokens`.
+[[nodiscard]] std::span<const std::string_view> consult_cap_names() noexcept;
+
+/// The roles a suite may name `consultable:` (27f): every role but `chat` --
+/// the root does not consult itself -- and `embedding`, a model that turns
+/// text into vectors and answers nothing.
+[[nodiscard]] std::span<const std::string_view> consultable_role_names() noexcept;
+
+/// The seams a suite's `validate:` block switches (27g), in the order it is
+/// written: `tool_args` (a gated tool's arguments, before it runs),
+/// `extraction` (a knowledge capture's record, against its source) and
+/// `answers` (an answer, on request or always).
+[[nodiscard]] std::span<const std::string_view> validate_seam_names() noexcept;
+
+/// What `validate.answers` takes (27g): `request` -- `/check` only, the
+/// default -- or `always`, a standing check after every answer.
+[[nodiscard]] std::span<const std::string_view> answer_check_names() noexcept;
+
+/// The role whose member checks when `validate.verifier` names none (27g):
+/// the small helper a suite already has for the chores.
+inline constexpr std::string_view kDefaultVerifier = "utility";
+
+/// A suite's `validate:` block (27g): which seams a member checks, and which
+/// member -- each unset field taking its default (the utility member, the
+/// seams off, answers on request), and none set writing no block. Off by
+/// default, opted into per seam.
+struct ValidateConfig {
+    /// The role whose member checks, one of `consultable_role_names()` with
+    /// a member in the suite.
+    std::optional<std::string> verifier;
+    std::optional<bool> tool_args;
+    std::optional<bool> extraction;
+    /// One of `answer_check_names()`.
+    std::optional<std::string> answers;
+
+    /// Whether any is set -- the block is written for it.
+    [[nodiscard]] bool any() const noexcept {
+        return verifier.has_value() || tool_args.has_value() || extraction.has_value() ||
+               answers.has_value();
+    }
+
+    bool operator==(const ValidateConfig&) const = default;
+};
+
+/// The block as it holds: each set field, else its default.
+struct ValidatePolicy {
+    std::string verifier{kDefaultVerifier};
+    bool tool_args = false;
+    bool extraction = false;
+    bool answers_always = false;
+
+    bool operator==(const ValidatePolicy&) const = default;
+};
+
+[[nodiscard]] ValidatePolicy validate_policy(const ValidateConfig& validate);
+
+/// One entry under `suites:` -- a named bundle of models (27d): a member per
+/// role it speaks for, every other role falling through the existing chain.
+///
+/// Later items hang their policy here, beside `members:` -- the consultable
+/// members (27f), the validation seams (27g), orchestration (27t) -- and none
+/// of them is declared until something consumes it.
+struct SuiteConfig {
+    /// Free text, for a listing. Never interpreted.
+    std::string description;
+    /// Keyed by role name (`suite_role_names()`); a role absent here is not
+    /// spoken for.
+    std::map<std::string, SuiteMember, std::less<>> members;
+    /// The roles whose members the root may consult through the `consult`
+    /// tool (27f), each one of `consultable_role_names()` with a member in
+    /// this suite, as written. Empty offers no tool. Whether a member is local
+    /// and unmetered is its provider's to say, so that is held where a
+    /// provider can be asked -- the config verbs, and the tool at use.
+    std::vector<std::string> consultable;
+    /// What bounds them (27f) -- and validation too (27g), which spends from
+    /// the same per-turn budget.
+    ConsultCaps consult_caps;
+    /// Which seams a member checks, and which member (27g). Its verifier must
+    /// be a member of this suite; whether that member is local and unmetered
+    /// is held where a provider can be asked, as for `consultable:`.
+    ValidateConfig validate;
+    /// Whether an execute session under this suite offers its root model the
+    /// symphonies as tools (27t) -- `orchestrate: true`, written only when on.
+    /// Off is absent: no symphony tool exists. Whether every member a
+    /// symphony reaches is local and unmetered is held where a provider can be
+    /// asked, as for `consultable:`: a play the model starts never spends.
+    bool orchestrate = false;
+
+    bool operator==(const SuiteConfig&) const = default;
+};
+
+/// The roles a symphony stage may play (27q): every suite role that answers a
+/// prompt -- `chat`, `extraction`, `vision`, `transcription`, `utility` --
+/// and never `embedding`, which answers none. In listing order.
+[[nodiscard]] std::span<const std::string_view> symphony_role_names() noexcept;
+
+/// What a symphony takes in (27q): the text a play is given, described for
+/// whoever plays it, and whether it carries an image too.
+struct SymphonyInput {
+    /// Free text: what the input is (`The passage to summarize.`). Shown by
+    /// `symphonies show`; never interpreted.
+    std::string description;
+    /// The play takes an image beside its text (`play --image`), which a
+    /// stage marked `image: true` is sent with its prompt.
+    bool image = false;
+
+    bool operator==(const SymphonyInput&) const = default;
+};
+
+/// One stage of a symphony (27q): a suite ROLE -- never a backend: the suite
+/// decides placement, the symphony decides process -- given a prompt rendered
+/// from the input and the earlier stages' answers, through the one member
+/// call (`agentloop/member_call`).
+///
+/// **Or another symphony, played** (27r): a stage that names a symphony under
+/// `play:` instead of a role is that symphony's whole walk, given `input` as
+/// its `{{input}}` -- its stages the same member calls an inline stage makes
+/// -- and its output is this stage's answer, threaded on exactly as a role
+/// stage's is. A chain is a symphony; there is no other kind.
+struct SymphonyStage {
+    /// Unique in its symphony, letters, digits, `_` and `-`; what later
+    /// stages name its answer by (`{{summarize}}`). Never `input`.
+    std::string name;
+    /// One of `symphony_role_names()`. Empty for a play stage.
+    std::string role;
+    /// The symphony this stage plays, by name (27r). Empty for a role stage:
+    /// a stage is one kind or the other, never both.
+    std::string play;
+    /// A play stage's template for what the played symphony is given as its
+    /// `{{input}}`, the prompt's grammar (27r). Empty means the previous
+    /// stage's answer -- the symphony's own input for the first stage -- so
+    /// stages that each play a symphony chain without a word. A role stage
+    /// has none: its brief is its `prompt`.
+    std::string input;
+    /// The template, as written: `{{input}}` and `{{<an earlier stage>}}`
+    /// are replaced at play time (`business/symphony/definition`), and
+    /// nothing else in it is touched. Never `${ENV}`-expanded.
+    std::string prompt;
+    /// A JSON Schema the stage's answer is held to (26f's grammar on a local
+    /// member), as its author wrote it -- the text rides the request as
+    /// written, so a grammar writes the properties in the order it lists
+    /// them. Empty for a plain-text answer.
+    std::string schema;
+    /// The input's image goes with this stage's prompt.
+    bool image = false;
+    /// This stage's caps; unset takes the symphony defaults
+    /// (`business/symphony/definition`). The member's window stays the
+    /// ceiling over both.
+    std::optional<std::int64_t> brief_tokens;
+    std::optional<std::int64_t> answer_tokens;
+
+    /// Whether this stage plays a symphony rather than a role (27r).
+    [[nodiscard]] bool plays() const noexcept {
+        return !play.empty();
+    }
+
+    bool operator==(const SymphonyStage&) const = default;
+};
+
+/// A symphony (27q): a named, staged prompt process -- an input in, its
+/// stages played in order, each one member call on a role of the active
+/// suite, and the last stage's answer out. From a `symphonies:` config entry
+/// or a spec file -- the same parser reads both (the `training.pipelines`
+/// precedent) -- or a shipped starter, which is a spec file compiled in.
+struct SymphonySpec {
+    std::string name;
+    /// Free text, for a listing.
+    std::string description;
+    SymphonyInput input;
+    /// In play order; at least one.
+    std::vector<SymphonyStage> stages;
+
+    bool operator==(const SymphonySpec&) const = default;
+};
+
+/// How deep symphonies may nest (27r) when `symphony_caps.depth` does not
+/// say: a symphony that plays none is 1 deep, one that plays it 2. Deep
+/// enough for real composition, shallow enough that the serial latency of a
+/// whole walk stays legible.
+inline constexpr std::int64_t kSymphonyDepth = 4;
+
+/// The `symphony_caps:` section (27r), hand-edited like `memory:`: how deep a
+/// play may nest, and the whole walk's budget. The budget aggregates across
+/// every symphony a play reaches -- a chain cannot multiply its way past a
+/// cap a single symphony honors -- and a walk that reaches it stops there,
+/// named, with no answer.
+struct SymphonyCaps {
+    /// The nesting cap, refused at definition time like a loop. Unset is
+    /// `kSymphonyDepth`.
+    std::optional<std::int64_t> depth;
+    /// The member calls one whole play may make. Unset is the walk's own
+    /// count -- each stage once -- so a play is never refused for its size.
+    std::optional<std::int64_t> stage_calls;
+    /// The answer tokens one whole play may produce. Unset is none.
+    std::optional<std::int64_t> answer_tokens;
+
+    [[nodiscard]] std::int64_t max_depth() const noexcept {
+        return depth.value_or(kSymphonyDepth);
+    }
+
+    bool operator==(const SymphonyCaps&) const = default;
 };
 
 /// Whether two role-pointer sets are identical. Defined in `config.cpp` -- the
@@ -251,10 +545,10 @@ struct GraphConfig {
 /// per-collection backend here; that field is deliberately not declared until
 /// something consumes it.
 ///
-/// Keyed by name in a map, like `backends:`, rather than Ommi's list of
-/// `- name:` items: the edit helpers, the loader's collision check, and
-/// `config get`'s dotted keys are all map-shaped, and a list would have needed
-/// a second copy of every one of them.
+/// Keyed by name in a map, like `backends:`, rather than a list of `- name:`
+/// items: the edit helpers, the loader's collision check, and `config get`'s
+/// dotted keys are all map-shaped, and a list would have needed a second copy
+/// of every one of them.
 struct EmbeddingConfig {
     /// Codepoints per chunk. Unset means the ingest default.
     std::optional<std::int64_t> chunk_size;
@@ -295,6 +589,14 @@ struct NamedGraphConfig {
     /// The member collections, each an `embeddings:` name. Removing one
     /// converges on the next build -- its rows reconcile away.
     std::vector<std::string> collections;
+    /// Source trees parsed into the graph by the code build (27k), each an
+    /// absolute directory (`~` and `${VAR}` expanded at load). Removing one
+    /// converges on the next build or update -- its rows are forgotten.
+    std::vector<std::string> sources;
+    /// The code build's grammars, by roster name (`cpp`, `python`, ...);
+    /// empty means every vendored one. Validated by `apogee check` and the
+    /// writers, not at load: the roster is the graph package's.
+    std::vector<std::string> languages;
     /// The backend `graph build <name>` extracts with when `-m` is not
     /// given. Empty means the extraction role, then the default.
     std::string extract_backend;
@@ -310,8 +612,8 @@ struct NamedGraphConfig {
 /// Keyed by name in a map like `backends:` and `embeddings:`, so the edit
 /// helpers, the loader's collision check and `config get` all work the same
 /// way. `command`, `args` and `env` have `${ENV_VAR}` and a leading `~`
-/// expanded at load -- Ommi expanded only the former while its documentation
-/// showed the latter, which is the trap this closes.
+/// expanded at load -- both, because expanding only the former while the
+/// documentation shows the latter is a trap.
 struct McpServerConfig {
     /// The executable, or a bare program name found on PATH.
     std::string command;
@@ -420,6 +722,35 @@ struct KnowledgeConfig {
     [[nodiscard]] std::string collection() const;
 };
 
+/// How an attached folder is represented beyond its chunks (27p): `code`
+/// parses a folder of code into the chat's code graph (27n) -- its functions,
+/// classes and the calls between them, with no model -- and `off` indexes
+/// its chunks alone. Deliberately two words: richer methods wait until one
+/// ships to name.
+enum class AttachmentGraphMethod : std::uint8_t { Code, Off };
+
+[[nodiscard]] std::string_view to_string(AttachmentGraphMethod method) noexcept;
+[[nodiscard]] std::optional<AttachmentGraphMethod> attachment_graph_method_from_string(
+    std::string_view name) noexcept;
+/// The words `attachments.graph` and every `--graph` take, in order: `code`,
+/// `off` -- for help, completion and the refusal of any other.
+[[nodiscard]] std::vector<std::string_view> attachment_graph_method_names();
+/// `<label>: unknown value '<got>' (accepted: code, off)` -- the one refusal
+/// of a method word, wherever it was typed. An empty label omits the prefix
+/// (CLI11 prints the option's name in front of a validator's message).
+[[nodiscard]] std::string attachment_graph_values_message(std::string_view label,
+                                                          std::string_view got);
+
+/// The `attachments:` section (27p): the default an attach takes when nothing
+/// on the line says otherwise. Read by the loader and written only by the
+/// comment-preserving editor (`set_attachments_graph`).
+struct AttachmentsConfig {
+    /// Unset means each surface's built-in -- a chat builds a folder's code
+    /// graph, `complete`'s one-shot store does not (27n) -- and set, it holds
+    /// for both. A `--graph` on one attach beats it.
+    std::optional<AttachmentGraphMethod> graph;
+};
+
 /// The `memory:` section (26l). Read-only here: hand-edited, like `auto_rag`.
 struct MemoryConfig {
     /// Whether `chat` summarises its finished chats and recalls them in new
@@ -440,11 +771,11 @@ struct PathsConfig {
 
 /// What the permission gate does before a destructive tool runs.
 ///
-/// Three words, from Ommi's `fs_permissions`: `ask` prompts the user every
-/// time and is the default when a tool is not listed; `allow` never prompts;
-/// `deny` never runs. Kept as an enum in the harness rather than a string so
-/// an unrecognised value fails at load -- a typo that read as "not allow" and
-/// silently meant ask would be the wrong kind of forgiving.
+/// Three words: `ask` prompts the user every time and is the default when a
+/// tool is not listed; `allow` never prompts; `deny` never runs. Kept as an
+/// enum in the harness rather than a string so an unrecognised value fails at
+/// load -- a typo that read as "not allow" and silently meant ask would be the
+/// wrong kind of forgiving.
 enum class PermissionLevel : std::uint8_t { Ask, Allow, Deny };
 
 [[nodiscard]] std::string_view to_string(PermissionLevel level) noexcept;
@@ -453,8 +784,8 @@ enum class PermissionLevel : std::uint8_t { Ask, Allow, Deny };
 
 /// The `permissions:` section: one level per **tool name**.
 ///
-/// Keyed by tool name rather than by a fixed pair of fields (Ommi gated
-/// exactly `write_file` and `delete_file`) so the shell tool, the notes tools,
+/// Keyed by tool name rather than by a fixed pair of fields (one for
+/// `write_file`, one for `delete_file`) so the shell tool, the notes tools,
 /// and a namespaced MCP tool all fit the same schema without a new key each.
 /// Every destructive tool consults it through one checker; a read-only tool
 /// never does, because prompting for reads trains the user to say yes.
@@ -663,9 +994,10 @@ enum class StatusMode : std::uint8_t { Line, Verbose, Quiet };
 /// Case-insensitive ordering for backend names.
 ///
 /// Transparent, so a `std::string_view` looks up without allocating. Making
-/// the MAP itself case-insensitive is what turns Ommi's silent-merge bug into
-/// a detectable one: a second key differing only by case fails to insert, and
-/// the loader reports the collision by name instead of dropping an entry.
+/// the MAP itself case-insensitive is what makes a case-only duplicate
+/// detectable rather than a silent merge: a second key differing only by case
+/// fails to insert, and the loader reports the collision by name instead of
+/// dropping an entry.
 struct CaseInsensitiveLess {
     using is_transparent = void;
     [[nodiscard]] bool operator()(std::string_view lhs, std::string_view rhs) const noexcept;
@@ -677,8 +1009,7 @@ struct Config {
     ///
     /// Ordered by the case-folded name so iteration is deterministic across
     /// platforms. Two names differing only by case are rejected at load rather
-    /// than merged -- Ommi's Viper-lowercasing lesson, made explicit: there,
-    /// "Qwen3" and "qwen3" silently became one entry.
+    /// than merged, so "Qwen3" and "qwen3" can never silently become one entry.
     std::map<std::string, BackendConfig, CaseInsensitiveLess> backends;
 
     ModelsConfig models;
@@ -706,6 +1037,7 @@ struct Config {
     ToolsConfig tools;
     KnowledgeConfig knowledge;
     MemoryConfig memory;
+    AttachmentsConfig attachments;
     UiConfig ui;
     TrainingConfig training;
 
@@ -722,6 +1054,19 @@ struct Config {
     /// case-insensitively, in the file's order (the retrieval precedence
     /// rule reads them first to last, so the order is the user's).
     std::vector<std::pair<std::string, NamedGraphConfig>> graphs;
+
+    /// Suites keyed by name AS WRITTEN, compared case-insensitively (27d).
+    /// Which backend a member gives a role is `harness/roles.h`'s answer, the
+    /// one chain; read the members directly only to display or validate them.
+    std::map<std::string, SuiteConfig, CaseInsensitiveLess> suites;
+
+    /// Symphonies keyed by name AS WRITTEN, compared case-insensitively
+    /// (27q). The shipped starters are not here unless the file overrides
+    /// one: they are compiled in (`contracts/assets.h`) and a same-named
+    /// entry wins.
+    std::map<std::string, SymphonySpec, CaseInsensitiveLess> symphonies;
+    /// How deep a play nests and the whole walk's budget (27r).
+    SymphonyCaps symphony_caps;
 
     StatusMode status_mode = StatusMode::Line;
     bool color = true;
@@ -757,7 +1102,59 @@ struct Config {
 
     /// Graph names as written, in the file's order.
     [[nodiscard]] std::vector<std::string> graph_names() const;
+
+    /// Case-insensitive lookup of a `suites:` entry. nullptr when absent.
+    [[nodiscard]] const SuiteConfig* find_suite(std::string_view name) const noexcept;
+
+    /// Suite names as written, in the map's (case-folded) order.
+    [[nodiscard]] std::vector<std::string> suite_names() const;
+
+    /// Case-insensitive lookup of a `symphonies:` entry. nullptr when absent.
+    [[nodiscard]] const SymphonySpec* find_symphony(std::string_view name) const noexcept;
 };
+
+/// The active suite: the entry `models.default_suite` names, surrounding
+/// whitespace ignored as the resolver ignores it on every pointer. nullptr
+/// when it names none.
+[[nodiscard]] const SuiteConfig* active_suite(const Config& config);
+
+/// What the active suite (`models.default_suite`) pins on one backend: the
+/// knobs of the member that names it (27d). Both unset when no suite is
+/// active, or none of its members names the backend.
+struct MemberPins {
+    std::optional<std::int64_t> context_size;
+    std::optional<std::vector<std::string>> toolset;
+
+    bool operator==(const MemberPins&) const = default;
+};
+
+/// The active suite's pins on `backend`, matched as backend names are
+/// (case-insensitively). The one reader of a member's knobs: the provider
+/// factory, the harness's window and every surface's tool offer all ask it,
+/// so a pin cannot hold on one of them and not another.
+[[nodiscard]] MemberPins suite_pins(const Config& config, std::string_view backend);
+
+/// One backend a suite puts to use, and the roles it answers for there (27e)
+/// -- one model, one window, one residency, however many roles it serves.
+struct SuiteBackend {
+    /// As the first member naming it spells it.
+    std::string backend;
+    /// Role names (`suite_role_names()`), in that order.
+    std::vector<std::string> roles;
+
+    bool operator==(const SuiteBackend&) const = default;
+};
+
+/// The backends `suite`'s members name, each once (matched as backend names
+/// are), in the order of their first role in `suite_role_names()`. What a
+/// suite holds resident, warms, and is measured by (27e).
+[[nodiscard]] std::vector<SuiteBackend> suite_backends(const SuiteConfig& suite);
+
+/// `backends.<name>` as it runs under the active suite: the entry as written,
+/// its `context_size` replaced by the suite's pin when there is one. What the
+/// provider factory constructs from. A default entry when there is no such
+/// backend.
+[[nodiscard]] BackendConfig backend_as_run(const Config& config, std::string_view name);
 
 /// `expand_env`, then a leading `~` or `~/` replaced by the home directory.
 /// What every path-like MCP field is read through.
@@ -765,10 +1162,10 @@ struct Config {
 
 /// Expands `${VAR}` references against the process environment.
 ///
-/// An undefined variable expands to the empty string, matching Ommi and the
-/// shell: a config referencing ${ANTHROPIC_API_KEY} on a machine that has none
-/// must still LOAD -- "local by default, cloud by choice" means a missing key
-/// is a runtime message from the backend, not a parse error here. `$$` is a
+/// An undefined variable expands to the empty string, matching the shell: a
+/// config referencing ${ANTHROPIC_API_KEY} on a machine that has none must
+/// still LOAD -- "local by default, cloud by choice" means a missing key is a
+/// runtime message from the backend, not a parse error here. `$$` is a
 /// literal `$`; a `${` with no closing brace is left untouched.
 [[nodiscard]] std::string expand_env(std::string_view input);
 
@@ -791,6 +1188,28 @@ struct Config {
 [[nodiscard]] RegimeSpec parse_regime_spec(std::string_view content, std::string_view origin,
                                            std::string_view fallback_name = {});
 
+/// A symphony from a spec file's YAML text (27q) -- the same parser and the
+/// same rules a `symphonies:` entry gets: at least one stage, each with a
+/// unique name, a prompt and a role of `symphony_role_names()` -- a stage
+/// naming a backend (a `backend:` or `model:` key, or a role that is one of
+/// `backends`, the configured names) refused with the principle: the suite
+/// decides placement -- a schema that is a JSON object, positive caps, and
+/// no key it does not know. A stage may instead play a symphony by name
+/// (27r): `play:` and optionally `input:`, never a role, a prompt, a schema
+/// or caps beside it, and never the symphony's own name -- the loop the
+/// parser can see (`contracts/symphony_walk.h`; a config's entries are walked
+/// against each other on load). The name defaults to `fallback_name` when
+/// the text carries none. What the templates and schemas mean is
+/// `business/symphony/definition`'s to check. Throws ConfigError naming
+/// what is wrong.
+[[nodiscard]] SymphonySpec parse_symphony_spec(std::string_view content, std::string_view origin,
+                                               std::string_view fallback_name = {},
+                                               const std::vector<std::string>& backends = {});
+
+/// Whether `name` can name a symphony or a stage: letters, digits, `_` and
+/// `-`, not empty.
+[[nodiscard]] bool is_symphony_name(std::string_view name) noexcept;
+
 /// Reads and parses the file at `path`.
 /// Throws ConfigError when it cannot be read or does not parse.
 [[nodiscard]] Config load_config(const std::filesystem::path& path);
@@ -798,8 +1217,7 @@ struct Config {
 /// The starter config shipped by `apogee config init`, as bytes.
 ///
 /// The checked-in sample at `lib/src/cli/assets/config.yaml` must byte-match
-/// this exactly; a test enforces it, so the two can never drift (Ommi's
-/// template-drift test, ported).
+/// this exactly; a test enforces it, so the two can never drift.
 [[nodiscard]] std::string_view config_template() noexcept;
 
 /// Writes config_template() to `path`, creating parent directories.

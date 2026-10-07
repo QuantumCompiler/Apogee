@@ -7,6 +7,7 @@
 
 #include "ansi/ansi.h"
 #include "cli/command.h"
+#include "cli/suite_residency.h"
 #include "contracts/config.h"
 #include "modelstore/gguf_inspect.h"
 #include "secrets/resolve.h"
@@ -71,6 +72,14 @@ struct ModelRow {
     /// An advisory note — a missing file, a combined multimodal blob, an
     /// unreadable header's reason. Never fatal on its own.
     std::string note;
+
+    /// What a local model is stored as -- `gguf`, `safetensors`, `mlx` --
+    /// empty for a cloud backend. For an MLX model (27b) also its
+    /// quantization and the window an entry over it gets, read from its
+    /// `config.json`; the table carries them in the note, the JSONL as fields.
+    std::string format;
+    std::string quant;
+    std::string window;
 
     /// A `backends:` entry, rather than something on disk no backend points at.
     bool configured = false;
@@ -148,8 +157,14 @@ struct ModelRow {
 /// Every line here comes from `harness::resolve_backend_key`, never from a
 /// local reimplementation of the chain. This command is the visible proof that
 /// the resolver answers the same way the run path does.
+///
+/// With a suite active, the suite's footprint follows (27e): each member's
+/// weights and cache at its window, or why unknown, and the set's total
+/// against `machine` -- unknown when none is given. Nothing is loaded to say
+/// it, so residency is a session's to tell (`/suite`).
 [[nodiscard]] std::string render_role_status(const harness::Config& config,
-                                             const BusyProgress& progress = {});
+                                             const BusyProgress& progress = {},
+                                             const MachineBudgetSource& machine = {});
 
 class ModelsCommand final : public Command {
 public:

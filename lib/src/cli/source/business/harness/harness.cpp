@@ -1,14 +1,92 @@
 #include "harness/harness.h"
 
 #include <algorithm>
+#include <exception>
+#include <optional>
 #include <utility>
 
 #include "contracts/errors.h"
+#include "contracts/utf8.h"
 #include "harness/context_windows.h"
 #include "harness/roles.h"
 
 namespace apogee::harness {
 namespace {
+
+/// Makes `text` UTF-8 in place. Whether it had to.
+bool repair(std::string& text) {
+    if (is_valid_utf8(text)) {
+        return false;
+    }
+    text = valid_utf8(text);
+    return true;
+}
+
+/// Whether everything `message` says is UTF-8 already.
+[[nodiscard]] bool is_text(const ChatMessage& message) {
+    const std::vector<ContentPart>& parts = message.content.parts();
+    const bool content =
+        parts.empty() ? is_valid_utf8(message.content.plain_text())
+                      : std::ranges::all_of(parts, [](const ContentPart& part) {
+                            return part.kind != ContentPart::Kind::Text || is_valid_utf8(part.text);
+                        });
+    return content && is_valid_utf8(message.tool_call_id) && is_valid_utf8(message.name) &&
+           std::ranges::all_of(message.tool_calls, [](const ToolCall& call) {
+               return is_valid_utf8(call.id) && is_valid_utf8(call.name) &&
+                      is_valid_utf8(call.arguments);
+           });
+}
+
+/// Makes everything `message` says UTF-8: its text, each text part of a
+/// multi-part one, its tool calls. Nothing is rebuilt that did not need
+/// mending, so a well-formed message is left exactly as it was.
+void mend(ChatMessage& message) {
+    if (message.content.parts().empty()) {
+        if (std::string text = message.content.plain_text(); repair(text)) {
+            message.content = std::move(text);
+        }
+    } else {
+        std::vector<ContentPart> parts = message.content.parts();
+        bool mended = false;
+        for (ContentPart& part : parts) {
+            if (part.kind == ContentPart::Kind::Text) {
+                mended = repair(part.text) || mended;
+            }
+        }
+        if (mended) {
+            message.content = MessageContent::from_parts(std::move(parts));
+        }
+    }
+    (void)repair(message.tool_call_id);
+    (void)repair(message.name);
+    for (ToolCall& call : message.tool_calls) {
+        (void)repair(call.id);
+        (void)repair(call.name);
+        (void)repair(call.arguments);
+    }
+}
+
+/// `request` mended, when any of its messages holds anything that is not
+/// UTF-8; nothing -- and nothing copied -- in the ordinary case, when every
+/// one already is. Every backend serializes a request with a strict dump, and
+/// its text comes from everywhere: the user, a file, an attachment,
+/// retrieved excerpts.
+[[nodiscard]] std::optional<ChatRequest> mended(const ChatRequest& request) {
+    if (std::ranges::all_of(request.messages, is_text)) {
+        return std::nullopt;
+    }
+    ChatRequest copy = request;
+    for (ChatMessage& message : copy.messages) {
+        mend(message);
+    }
+    return copy;
+}
+
+/// `response` with everything the model wrote in it UTF-8.
+[[nodiscard]] ChatResponse as_text(ChatResponse response) {
+    mend(response.message);
+    return response;
+}
 
 std::string join_names(const std::vector<std::string>& names) {
     std::string out;
@@ -146,7 +224,28 @@ Harness::Harness(Harness&&) noexcept = default;
 Harness& Harness::operator=(Harness&&) noexcept = default;
 
 void Harness::register_provider(std::string name, std::shared_ptr<LLMProvider> provider) {
+    if (provider != nullptr) {
+        // A rebuilt backend keeps the session's hold and its listener (27e).
+        attach_residency(name, *provider);
+    }
     providers_[std::move(name)] = std::move(provider);
+}
+
+void Harness::attach_residency(const std::string& name, LLMProvider& provider) const {
+    if (auto* holding = dynamic_cast<ResidencyHolding*>(&provider); holding != nullptr) {
+        holding->hold_resident(held_.contains(name));
+    }
+    if (auto* reporting = dynamic_cast<StatusReporting*>(&provider); reporting != nullptr) {
+        if (load_listener_) {
+            // The name shared, not copied: a listener is copied wherever a
+            // provider keeps it.
+            reporting->set_load_listener(
+                [listener = load_listener_, backend = std::make_shared<const std::string>(name)](
+                    const StatusEvent& event) { listener(*backend, event); });
+        } else {
+            reporting->set_load_listener({});
+        }
+    }
 }
 
 void Harness::use_default_router() {
@@ -187,18 +286,65 @@ const std::string& Harness::default_model() const noexcept {
     return config_.models.default_backend;
 }
 
+void Harness::set_active_suite(std::string suite) {
+    config_.models.default_suite = std::move(suite);
+    if (holding_suite_) {
+        hold_suite_members();
+    }
+}
+
 ChatResponse Harness::chat(const ChatRequest& request,
                            const CancellationToken& cancellation) const {
-    return route(request.model).chat(request, cancellation);
+    const std::optional<ChatRequest> sent = mended(request);
+    return as_text(route(request.model).chat(sent.has_value() ? *sent : request, cancellation));
 }
 
 ChatResponse Harness::stream_chat(const ChatRequest& request, const StreamOptions& options) const {
-    return route(request.model).stream_chat(request, options);
+    // One stream each for the answer and the reasoning, so each sink is
+    // handed whole characters. A sink the caller left unset stays unset: a
+    // provider may stream only when asked to.
+    Utf8Stream answer;
+    Utf8Stream thinking;
+    const auto say = [](const auto& sink, const std::string& text) {
+        if (!text.empty()) {
+            sink(text);
+        }
+    };
+    StreamOptions whole = options;
+    if (options.on_thinking) {
+        whole.on_thinking = [&](std::string_view piece) {
+            say(options.on_thinking, thinking.feed(piece));
+        };
+    }
+    if (options.on_token) {
+        whole.on_token = [&](std::string_view piece) {
+            // The answer begun, the reasoning is over: its unfinished
+            // character is said now, so a surface still shows reasoning
+            // before answer. An empty piece begins nothing.
+            if (!piece.empty() && options.on_thinking) {
+                say(options.on_thinking, thinking.flush());
+            }
+            say(options.on_token, answer.feed(piece));
+        };
+    }
+    const std::optional<ChatRequest> sent = mended(request);
+    ChatResponse response =
+        route(request.model).stream_chat(sent.has_value() ? *sent : request, whole);
+    // A stream that ended inside a character ends in U+FFFD, said as its
+    // last piece -- the same text the response and history keep.
+    if (options.on_thinking) {
+        say(options.on_thinking, thinking.flush());
+    }
+    if (options.on_token) {
+        say(options.on_token, answer.flush());
+    }
+    return as_text(std::move(response));
 }
 
 ChatResponse Harness::complete(const ChatRequest& request,
                                const CancellationToken& cancellation) const {
-    return route(request.model).complete(request, cancellation);
+    const std::optional<ChatRequest> sent = mended(request);
+    return as_text(route(request.model).complete(sent.has_value() ? *sent : request, cancellation));
 }
 
 std::vector<ModelInfo> Harness::list_all_models(const CancellationToken& cancellation) const {
@@ -398,6 +544,110 @@ bool Harness::preload_model(std::string_view backend_name, const StatusSink& on_
     return true;
 }
 
+void Harness::hold_in_use(const std::vector<std::string>& backends) {
+    held_.clear();
+    for (const std::string& name : backends) {
+        // A provider is registered under the config's key, which a member
+        // names as backend names are matched: case aside.
+        const auto entry = config_.backends.find(name);
+        held_.insert(entry != config_.backends.end() ? entry->first : name);
+    }
+    for (const auto& [name, provider] : providers_) {
+        if (auto* holding = dynamic_cast<ResidencyHolding*>(provider.get()); holding != nullptr) {
+            holding->hold_resident(held_.contains(name));
+        }
+    }
+}
+
+std::vector<std::string> Harness::held() const {
+    return {held_.begin(), held_.end()};
+}
+
+void Harness::hold_active_suite(bool on) {
+    if (!on) {
+        release_holds();
+        return;
+    }
+    holding_suite_ = true;
+    hold_suite_members();
+}
+
+void Harness::release_holds() noexcept {
+    holding_suite_ = false;
+    held_.clear();
+    for (const auto& [name, provider] : providers_) {
+        if (auto* holding = dynamic_cast<ResidencyHolding*>(provider.get()); holding != nullptr) {
+            holding->hold_resident(false);
+        }
+    }
+}
+
+void Harness::hold_suite_members() {
+    std::vector<std::string> backends;
+    if (const SuiteConfig* suite = active_suite(config_); suite != nullptr) {
+        for (const SuiteBackend& member : suite_backends(*suite)) {
+            backends.push_back(member.backend);
+        }
+    }
+    hold_in_use(backends);
+}
+
+void Harness::listen_for_loads(LoadListener listener) {
+    load_listener_ = std::move(listener);
+    for (const auto& [name, provider] : providers_) {
+        if (provider != nullptr) {
+            attach_residency(name, *provider);
+        }
+    }
+}
+
+std::optional<bool> Harness::resident(std::string_view backend) const {
+    const auto it = providers_.find(std::string{backend});
+    if (it == providers_.end() || it->second == nullptr) {
+        return std::nullopt;
+    }
+    // Only a model this process holds has a residency to report: a vendor
+    // CLI says "ready" with nothing of its own in memory.
+    if (dynamic_cast<const ResidencyHolding*>(it->second.get()) == nullptr) {
+        return std::nullopt;
+    }
+    const auto* reporter = dynamic_cast<const StatusReporting*>(it->second.get());
+    if (reporter == nullptr) {
+        return std::nullopt;
+    }
+    return reporter->model_status().type == StatusEvent::Type::ModelReady;
+}
+
+WarmResult Harness::warm(const std::vector<std::string>& backends,
+                         const WarmProgress& progress) const {
+    WarmResult result;
+    std::vector<std::string> to_load;
+    for (const std::string& name : backends) {
+        const std::optional<bool> loaded = resident(name);
+        if (!loaded.has_value()) {
+            continue;  // nothing of its own to load: never a request to warm it
+        }
+        if (*loaded) {
+            result.resident.push_back(name);
+        } else {
+            to_load.push_back(name);
+        }
+    }
+    for (std::size_t i = 0; i < to_load.size(); ++i) {
+        const std::string& name = to_load[i];
+        if (progress) {
+            progress(name, i + 1, to_load.size());
+        }
+        try {
+            (void)preload_model(name, {});
+            result.loaded.push_back(name);
+        } catch (const std::exception& e) {
+            result.failed.emplace_back(name, e.what());
+        }
+    }
+    return result;
+}
+
 std::int64_t Harness::context_window_for_model(std::string_view model) const {
     const std::string resolved = resolve_chat_backend(config_, model);
     const std::string_view name{resolved};
@@ -405,8 +655,10 @@ std::int64_t Harness::context_window_for_model(std::string_view model) const {
 
     // An explicit context_size on the backend entry always wins: the user
     // knows something we do not, such as a model served with a deliberately
-    // shortened window.
-    const std::int64_t configured = backend != nullptr ? backend->context_size.value_or(0) : 0;
+    // shortened window. The active suite's pin is that entry's, while the
+    // suite is active (27d) -- the window the factory built the backend at.
+    const std::int64_t configured =
+        backend != nullptr ? backend_as_run(config_, name).context_size.value_or(0) : 0;
     if (configured > 0) {
         return configured;
     }
@@ -432,6 +684,18 @@ std::int64_t Harness::context_window_for_model(std::string_view model) const {
     const std::string_view model_name =
         backend != nullptr && !backend->model.empty() ? std::string_view{backend->model} : name;
     return resolve_context_window(configured, model_name);
+}
+
+// ---------------------------------------------------------------------------
+// SessionHold
+// ---------------------------------------------------------------------------
+
+SessionHold::SessionHold(Harness& harness) : harness_{harness} {
+    harness_.hold_active_suite(true);
+}
+
+SessionHold::~SessionHold() {
+    harness_.release_holds();
 }
 
 }  // namespace apogee::harness

@@ -1,0 +1,245 @@
+node class geo::Circle
+  description class Circle : public Shape
+  metadata {"end_line":14,"file":"shapes/circle.hh","kind":"code","lang":"cpp","line":7,"member":"cpp"}
+  mentions 1
+  at cpp:shapes/circle.hh:7-14 definition
+node class geo::Shape
+  description class Shape
+  metadata {"end_line":12,"file":"shapes/shape.hh","kind":"code","lang":"cpp","line":7,"member":"cpp"}
+  mentions 1
+  at cpp:shapes/shape.hh:7-12 definition
+node file main.cc
+  description C++ file
+  metadata {"end_line":14,"file":"main.cc","kind":"code","lang":"cpp","line":1,"member":"cpp"}
+  mentions 1
+  at cpp:main.cc:1-14 definition
+node file shapes/circle.cc
+  description C++ file
+  metadata {"end_line":28,"file":"shapes/circle.cc","kind":"code","lang":"cpp","line":1,"member":"cpp"}
+  mentions 1
+  at cpp:shapes/circle.cc:1-28 definition
+node file shapes/circle.hh
+  description C++ file
+  metadata {"end_line":16,"file":"shapes/circle.hh","kind":"code","lang":"cpp","line":1,"member":"cpp"}
+  mentions 1
+  at cpp:shapes/circle.hh:1-16 definition
+node file shapes/shape.hh
+  description C++ file
+  metadata {"end_line":16,"file":"shapes/shape.hh","kind":"code","lang":"cpp","line":1,"member":"cpp"}
+  mentions 1
+  at cpp:shapes/shape.hh:1-16 definition
+node function geo::Circle::Circle
+  description Circle::Circle(double r) : radius_{r}
+  metadata {"end_line":14,"file":"shapes/circle.cc","kind":"code","lang":"cpp","line":14,"member":"cpp"}
+  mentions 2
+  at cpp:shapes/circle.cc:14-14 definition
+  at cpp:shapes/circle.hh:9-9 declaration
+node function geo::Circle::area
+  description double Circle::area() const
+  metadata {"end_line":18,"file":"shapes/circle.cc","kind":"code","lang":"cpp","line":16,"member":"cpp"}
+  mentions 2
+  at cpp:shapes/circle.cc:16-18 definition
+  at cpp:shapes/circle.hh:10-10 declaration
+node function geo::Shape::area
+  description virtual double area() const = 0
+  metadata {"end_line":10,"file":"shapes/shape.hh","kind":"code","lang":"cpp","line":10,"member":"cpp"}
+  mentions 1
+  at cpp:shapes/shape.hh:10-10 declaration
+node function geo::Shape::name
+  description std::string Shape::name() const
+  metadata {"end_line":26,"file":"shapes/circle.cc","kind":"code","lang":"cpp","line":24,"member":"cpp"}
+  mentions 2
+  at cpp:shapes/circle.cc:24-26 definition
+  at cpp:shapes/shape.hh:11-11 declaration
+node function geo::total_area
+  description double total_area(const Shape& a, const Shape& b)
+  metadata {"end_line":22,"file":"shapes/circle.cc","kind":"code","lang":"cpp","line":20,"member":"cpp"}
+  mentions 2
+  at cpp:shapes/circle.cc:20-22 definition
+  at cpp:shapes/shape.hh:14-14 declaration
+node function main
+  description int main()
+  metadata {"end_line":14,"file":"main.cc","kind":"code","lang":"cpp","line":8,"member":"cpp"}
+  mentions 1
+  at cpp:main.cc:8-14 definition
+node function shapes/circle.cc::geo::square
+  description double square(double x)
+  metadata {"end_line":10,"file":"shapes/circle.cc","kind":"code","lang":"cpp","line":8,"member":"cpp"}
+  mentions 1
+  at cpp:shapes/circle.cc:8-10 definition
+node module geo
+  description namespace geo
+  metadata {"end_line":28,"file":"shapes/circle.cc","kind":"code","lang":"cpp","line":5,"member":"cpp"}
+  mentions 3
+  at cpp:shapes/circle.cc:5-28 definition
+  at cpp:shapes/circle.hh:5-16 definition
+  at cpp:shapes/shape.hh:5-16 definition
+node name cmath
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at cpp:shapes/circle.cc:3-3 reference
+node name iostream
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at cpp:main.cc:1-1 reference
+node name memory
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at cpp:main.cc:2-2 reference
+node name std::make_unique
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at cpp:main.cc:9-9 reference
+node name std::move
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at cpp:main.cc:12-12 reference
+node name std::string
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 2
+  at cpp:shapes/circle.cc:24-24 reference
+  at cpp:shapes/shape.hh:11-11 reference
+node name string
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at cpp:shapes/shape.hh:3-3 reference
+edge class geo::Circle -[defined_in]-> file shapes/circle.hh
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:shapes/circle.hh:7
+edge class geo::Circle -[inherits]-> class geo::Shape
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:shapes/circle.hh:7
+edge class geo::Shape -[defined_in]-> file shapes/shape.hh
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:shapes/shape.hh:7
+edge file main.cc -[imports]-> file shapes/circle.hh
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:main.cc:4
+edge file main.cc -[imports]-> name iostream
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:main.cc:1
+edge file main.cc -[imports]-> name memory
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:main.cc:2
+edge file shapes/circle.cc -[defined_in]-> module geo
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:shapes/circle.cc:5
+edge file shapes/circle.cc -[imports]-> file shapes/circle.hh
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:shapes/circle.cc:1
+edge file shapes/circle.cc -[imports]-> name cmath
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:shapes/circle.cc:3
+edge file shapes/circle.hh -[defined_in]-> module geo
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:shapes/circle.hh:5
+edge file shapes/circle.hh -[imports]-> file shapes/shape.hh
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:shapes/circle.hh:3
+edge file shapes/shape.hh -[defined_in]-> module geo
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:shapes/shape.hh:5
+edge file shapes/shape.hh -[imports]-> name string
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:shapes/shape.hh:3
+edge function geo::Circle::Circle -[defined_in]-> class geo::Circle
+  description 
+  weight 2 origin extracted confidence 1.000000
+  site cpp:shapes/circle.cc:14
+  site cpp:shapes/circle.hh:9
+edge function geo::Circle::Circle -[defined_in]-> file shapes/circle.cc
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:shapes/circle.cc:14
+edge function geo::Circle::area -[calls]-> function shapes/circle.cc::geo::square
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:shapes/circle.cc:17
+edge function geo::Circle::area -[defined_in]-> class geo::Circle
+  description 
+  weight 2 origin extracted confidence 1.000000
+  site cpp:shapes/circle.cc:16
+  site cpp:shapes/circle.hh:10
+edge function geo::Circle::area -[defined_in]-> file shapes/circle.cc
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:shapes/circle.cc:16
+edge function geo::Shape::area -[defined_in]-> class geo::Shape
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:shapes/shape.hh:10
+edge function geo::Shape::name -[defined_in]-> class geo::Shape
+  description 
+  weight 2 origin extracted confidence 1.000000
+  site cpp:shapes/circle.cc:24
+  site cpp:shapes/shape.hh:11
+edge function geo::Shape::name -[defined_in]-> file shapes/circle.cc
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:shapes/circle.cc:24
+edge function geo::Shape::name -[references]-> name std::string
+  description 
+  weight 2 origin extracted confidence 1.000000
+  site cpp:shapes/circle.cc:24
+  site cpp:shapes/shape.hh:11
+edge function geo::total_area -[calls]-> function geo::Shape::area
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:shapes/circle.cc:21
+edge function geo::total_area -[defined_in]-> file shapes/circle.cc
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:shapes/circle.cc:20
+edge function geo::total_area -[defined_in]-> file shapes/shape.hh
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:shapes/shape.hh:14
+edge function geo::total_area -[references]-> class geo::Shape
+  description 
+  weight 2 origin extracted confidence 1.000000
+  site cpp:shapes/circle.cc:20
+  site cpp:shapes/shape.hh:14
+edge function main -[calls]-> function geo::Shape::area
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:main.cc:13
+edge function main -[calls]-> function geo::total_area
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:main.cc:11
+edge function main -[calls]-> name std::make_unique
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:main.cc:9
+edge function main -[calls]-> name std::move
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:main.cc:12
+edge function main -[defined_in]-> file main.cc
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:main.cc:8
+edge function shapes/circle.cc::geo::square -[defined_in]-> file shapes/circle.cc
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site cpp:shapes/circle.cc:8

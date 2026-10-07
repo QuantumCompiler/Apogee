@@ -394,7 +394,8 @@ TEST_CASE("attachments round-trip by reference, and an older file has none",
                                                                  .reader = "text",
                                                                  .bytes = 42}},
                                                       .inline_at = 3,
-                                                      .map_at = 3},
+                                                      .map_at = 3,
+                                                      .graph = {}},
                            apogee::logger::Attachment{.name = "report.pdf",
                                                       .files = {{.name = "report.pdf",
                                                                  .path = "/work/report.pdf",
@@ -402,7 +403,8 @@ TEST_CASE("attachments round-trip by reference, and an older file has none",
                                                                  .reader = "pdftotext",
                                                                  .bytes = 9000}},
                                                       .inline_at = {},
-                                                      .map_at = {}}};
+                                                      .map_at = {},
+                                                      .graph = {}}};
     const Session back = deserialize(apogee::logger::serialize(session), {}).session;
     REQUIRE(back.attachments.size() == 2);
     CHECK(back.attachments[0].name == "src");
@@ -436,4 +438,124 @@ TEST_CASE("attachments round-trip by reference, and an older file has none",
     CHECK(bad.session.attachments.empty());
     REQUIRE_FALSE(bad.warnings.empty());
     CHECK(bad.warnings.front().kind == WarningKind::FieldDropped);
+}
+
+TEST_CASE("an attachment's code graph is kept by its member and its notice, never the graph",
+          "[chat][session][attachments][graph]") {
+    // 27n: which part of the index's graph is the folder's, and what its line
+    // said -- or why there is none -- additive to the schema-2 record.
+    Session session;
+    session.chat_id = "c";
+    session.backend = "mock";
+    apogee::logger::Attachment built{
+        .name = "src",
+        .files = {{.name = "src/a.py",
+                   .path = "/work/src/a.py",
+                   .sha256 = "ab12",
+                   .reader = "text",
+                   .bytes = 42}},
+        .inline_at = {},
+        .map_at = {},
+        .graph = apogee::logger::AttachmentGraph{.label = "src",
+                                                 .supported = {{"python", 3}, {"cpp", 1}},
+                                                 .skipped = {{".md", 2}, {"third_party/", 9}},
+                                                 .absent = {}}};
+    apogee::logger::Attachment cancelled = built;
+    cancelled.name = "lib";
+    cancelled.graph = apogee::logger::AttachmentGraph{
+        .label = {}, .supported = {}, .skipped = {}, .absent = "cancelled"};
+    apogee::logger::Attachment none = built;
+    none.name = "notes.md";
+    none.graph.reset();
+    session.attachments = {built, cancelled, none};
+
+    const std::string text = apogee::logger::serialize(session);
+    const nlohmann::json written = nlohmann::json::parse(text);
+    CHECK(written["attachments"][0]["graph"] ==
+          nlohmann::json::parse(R"({"label": "src", "supported": {"cpp": 1, "python": 3},
+                                    "skipped": {".md": 2, "third_party/": 9}})"));
+    CHECK(written["attachments"][1]["graph"] ==
+          nlohmann::json::parse(R"({"absent": "cancelled"})"));
+    CHECK_FALSE(written["attachments"][2].contains("graph"));
+
+    const Session back = deserialize(text, {}).session;
+    REQUIRE(back.attachments.size() == 3);
+    REQUIRE(back.attachments[0].graph.has_value());
+    CHECK(back.attachments[0].graph->label == "src");
+    CHECK(back.attachments[0].graph->supported == built.graph->supported);
+    CHECK(back.attachments[0].graph->skipped == built.graph->skipped);
+    CHECK(back.attachments[0].graph->absent.empty());
+    REQUIRE(back.attachments[1].graph.has_value());
+    CHECK(back.attachments[1].graph->label.empty());
+    CHECK(back.attachments[1].graph->absent == "cancelled");
+    CHECK_FALSE(back.attachments[2].graph.has_value());
+
+    // An older file, and a malformed record: no graph, the attachment kept.
+    const Session older =
+        deserialize(
+            R"({"schema_version": 2, "chat_id": "c", "attachments": [{"name": "src", "files": []}]})",
+            {})
+            .session;
+    REQUIRE(older.attachments.size() == 1);
+    CHECK_FALSE(older.attachments[0].graph.has_value());
+    const Session odd =
+        deserialize(R"({"schema_version": 2, "chat_id": "c", "attachments": [{"name": "src",
+                       "files": [], "graph": {"label": "", "supported": 3}}]})",
+                    {})
+            .session;
+    REQUIRE(odd.attachments.size() == 1);
+    CHECK_FALSE(odd.attachments[0].graph.has_value());
+    const Session wrong =
+        deserialize(R"({"schema_version": 2, "chat_id": "c", "attachments": [{"name": "src",
+                       "files": [], "graph": {"label": "src", "supported": {"python": "x"}}}]})",
+                    {})
+            .session;
+    REQUIRE(wrong.attachments.size() == 1);
+    CHECK_FALSE(wrong.attachments[0].graph.has_value());
+}
+
+TEST_CASE("a chat's suite is saved as left, and a chat with none saves as before",
+          "[logger][session][suites]") {
+    // 27d: no suite, no new key -- the file is the one an older Apogee wrote.
+    const Session plain = sample();
+    const std::string plain_text = apogee::logger::serialize(plain);
+    CHECK(plain_text.find("suite") == std::string::npos);
+    CHECK_FALSE(deserialize(plain_text, {}).session.suite.has_value());
+
+    // A suite's name, and "" -- a suite turned off, which a resume keeps off.
+    for (const std::string& suite : {std::string{"research"}, std::string{}}) {
+        Session session = sample();
+        session.suite = suite;
+        const std::string text = apogee::logger::serialize(session);
+        CHECK(nlohmann::json::parse(text).at("suite") == suite);
+        KnownDependencies known;
+        known.suites = {"Research"};
+        known.check_suites = true;
+        const auto loaded = deserialize(text, known);
+        CHECK(loaded.warnings.empty());
+        CHECK(loaded.session.suite == suite);
+    }
+}
+
+TEST_CASE("a suite since deleted is dropped with a warning, never fatal",
+          "[logger][session][suites]") {
+    Session session = sample();
+    session.suite = "vanished";
+    KnownDependencies known;
+    known.suites = {"research"};
+    known.check_suites = true;
+    const auto loaded = deserialize(apogee::logger::serialize(session), known);
+    CHECK_FALSE(loaded.session.suite.has_value());
+    REQUIRE(loaded.warnings.size() == 1);
+    CHECK(loaded.warnings.front().kind == WarningKind::SuiteMissing);
+    CHECK(loaded.warnings.front().message.find("vanished") != std::string::npos);
+    CHECK(apogee::logger::to_string(WarningKind::SuiteMissing) == "suite_missing");
+
+    // Unchecked, it is kept as written.
+    CHECK(deserialize(apogee::logger::serialize(session), {}).session.suite == "vanished");
+    // A wrong shape is a dropped field, the chat still opens.
+    const auto odd = deserialize(R"({"chat_id":"x","backend":"b","suite":7})", {});
+    CHECK_FALSE(odd.session.suite.has_value());
+    REQUIRE(odd.warnings.size() == 2);  // the shape, and the missing schema
+    CHECK(odd.warnings.front().kind == WarningKind::FieldDropped);
 }

@@ -108,6 +108,14 @@ struct Tool {
     /// More for the prompt to show than the target it is decided on -- the
     /// URL beside the host. Optional.
     std::function<std::string(std::string_view arguments)> describe_detail;
+
+    /// A structural check of a call's arguments the tool can answer without
+    /// running or asking anyone -- a path that must exist, and does not:
+    /// why the call cannot do what it says, or empty. Optional. Only a
+    /// suite's tool-argument validation (27g) runs it, before any verifier
+    /// is woken; dispatch never does, so without validation a call runs
+    /// exactly as before.
+    std::function<std::string(std::string_view arguments)> precheck;
 };
 
 /// Whether `tool` goes through the permission gate: it writes, or it reaches
@@ -185,6 +193,11 @@ struct DispatchContext {
 /// tool that failed all come back as error outcomes the model can read and act
 /// on. That is what lets a model recover from its own hallucinated tool name
 /// instead of the turn dying.
+///
+/// The outcome's content is UTF-8 (`contracts/utf8.h`): a tool returns what
+/// its source held -- a Latin-1 file, a command's raw bytes -- and every
+/// surface's next step with it is a strict JSON dump, so it is made text
+/// here, the one place every tool call runs through.
 [[nodiscard]] ToolOutcome dispatch(const ToolRegistry& registry, const harness::ToolCall& call,
                                    const DispatchContext& context);
 

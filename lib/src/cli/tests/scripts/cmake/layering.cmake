@@ -7,8 +7,8 @@
 # when the loop landed (CLAUDE.md said it would). The dependency runs one way
 # — backends include harness — and `harness::ModelBehavior` exists as plain
 # data precisely so the loop can ask about a model family without reaching
-# back. Ommi has the same seam for the same reason: in Go the compiler enforces
-# it, because the reverse edge is an import cycle and the build simply fails.
+# back. In Go the compiler would enforce this seam, because the reverse edge
+# is an import cycle and the build simply fails.
 #
 # The loop matters as much as the harness here. A loop that includes a backend
 # starts special-casing one vendor's tool dialect, and "one shared loop for all
@@ -145,7 +145,8 @@ endif()
 
 # ---- The named rules ------------------------------------------------------------
 
-set(GUARDED_PACKAGES harness agentloop agent secrets tools mcp knowledge graph training)
+set(GUARDED_PACKAGES harness agentloop agent secrets tools mcp knowledge graph training tasks
+                     symphony)
 
 set(ALL_SOURCES "")
 foreach(package IN LISTS GUARDED_PACKAGES)
@@ -314,6 +315,63 @@ if(NOT VIOLATIONS STREQUAL "")
                         "harness/, contracts/, platform/ and itself.")
 endif()
 
+# The code graph (27k) is model-free by construction, not by care: its files
+# -- `graph/code_*` -- may include one another, the store (`embedstore/`),
+# and by name the SHA-256 the content fingerprint uses and the cancellation
+# token. Not `harness/`, not `agentloop/`, not `agent/`, not `knowledge/`, not
+# the prose extractor: there is no route to a model from the code path to
+# take, so "zero model calls" is a property of the include graph.
+file(GLOB graph_code_sources "${PACKAGE_DIR_graph}/code_*.h" "${PACKAGE_DIR_graph}/code_*.cpp")
+if(graph_code_sources STREQUAL "")
+    message(FATAL_ERROR "no code_* sources found under ${PACKAGE_DIR_graph} — "
+                        "this check would pass vacuously")
+endif()
+foreach(source IN LISTS graph_code_sources)
+    file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+    foreach(line IN LISTS project_includes)
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(graph/code_|embedstore/)"
+           AND NOT line MATCHES "#[ \t]*include[ \t]*\"contracts/(sha256|cancellation)\\.h\"")
+            get_filename_component(name "${source}" NAME)
+            list(APPEND VIOLATIONS "  graph/${name} reaches past the code path: ${line}")
+        endif()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "the code graph can reach a model:\n${pretty}\n"
+                        "graph/code_* may include only graph/code_*, embedstore/, "
+                        "contracts/sha256.h and contracts/cancellation.h.")
+endif()
+
+# tree-sitter's C API has ONE boundary (27k): `graph/code_parser.cpp` wraps
+# its handles in unique_ptrs with custom deleters, and no raw handle -- and no
+# tree-sitter type -- leaves it. So exactly that file includes its header;
+# the check requires seeing it there, so a moved boundary fails rather than
+# passes.
+file(GLOB_RECURSE every_source "${APOGEE_SOURCE_DIR}/*.h" "${APOGEE_SOURCE_DIR}/*.cpp")
+set(tree_sitter_seen FALSE)
+foreach(source IN LISTS every_source)
+    file(STRINGS "${source}" tree_sitter_includes REGEX "^[ \t]*#[ \t]*include[ \t]*[\"<]tree_sitter/")
+    if(tree_sitter_includes STREQUAL "")
+        continue()
+    endif()
+    file(RELATIVE_PATH relative "${APOGEE_SOURCE_DIR}" "${source}")
+    if(relative STREQUAL "business/graph/code_parser.cpp")
+        set(tree_sitter_seen TRUE)
+    else()
+        list(APPEND VIOLATIONS "  ${relative} includes tree-sitter: ${tree_sitter_includes}")
+    endif()
+endforeach()
+if(NOT tree_sitter_seen)
+    list(APPEND VIOLATIONS "  business/graph/code_parser.cpp no longer includes tree_sitter/api.h "
+                           "-- the boundary moved; move this check with it")
+endif()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "tree-sitter's C API escapes its boundary:\n${pretty}\n"
+                        "Only graph/code_parser.cpp may include tree_sitter/ headers.")
+endif()
+
 # `training/` is a domain core like `graph/`: the Python boundary, the kits,
 # the synth core and the dataset store every surface shares. It may include
 # the harness, the contracts, the platform seam, the loop's closures' types
@@ -341,6 +399,62 @@ if(NOT VIOLATIONS STREQUAL "")
     message(FATAL_ERROR "the training package includes a surface:\n${pretty}\n"
                         "training/ may include only harness/, contracts/, platform/, agentloop/, "
                         "agent/, transport/jsonl_framer.h and itself.")
+endif()
+
+# `tasks/` is a domain core like `training/` (27h): the record, the ledger and
+# its lock, the outer loop over the agent loop. It may include the loop (for
+# `ask_user`'s types), the tool registry and its gate (to watch them, never to
+# widen them), the harness, the session linkage in `logger/`, the contracts,
+# the platform seam and itself -- never a surface, and never a backend: a turn
+# arrives as a closure, so the runner the CLI drives names neither.
+file(GLOB_RECURSE tasks_sources "${PACKAGE_DIR_tasks}/*.h"
+                                "${PACKAGE_DIR_tasks}/*.cpp")
+if(tasks_sources STREQUAL "")
+    message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_tasks} — "
+                        "this check would pass vacuously")
+endif()
+foreach(source IN LISTS tasks_sources)
+    file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+    foreach(line IN LISTS project_includes)
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(tasks|agentloop|agent|harness|logger|contracts|platform)/")
+            get_filename_component(name "${source}" NAME)
+            list(APPEND VIOLATIONS "  tasks/${name} reaches a surface: ${line}")
+        endif()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "the tasks package includes a surface:\n${pretty}\n"
+                        "tasks/ may include only agentloop/, agent/, harness/, logger/, "
+                        "contracts/, platform/ and itself.")
+endif()
+
+# `symphony/` is a domain core like `tasks/` (27q): a definition's sources,
+# its validation, the stage walk and its view. Its model calls are the one
+# member call's (`agentloop/member_call`), so it may include the loop, the
+# harness, the contracts, the platform seam and itself -- never a backend,
+# which would make a second calling path, and never a surface. Since 27t it
+# projects each definition as a tool, so the tool registry (`agent/`) too.
+file(GLOB_RECURSE symphony_sources "${PACKAGE_DIR_symphony}/*.h"
+                                   "${PACKAGE_DIR_symphony}/*.cpp")
+if(symphony_sources STREQUAL "")
+    message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_symphony} — "
+                        "this check would pass vacuously")
+endif()
+foreach(source IN LISTS symphony_sources)
+    file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+    foreach(line IN LISTS project_includes)
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(symphony|agent|agentloop|harness|contracts|platform)/")
+            get_filename_component(name "${source}" NAME)
+            list(APPEND VIOLATIONS "  symphony/${name} reaches a surface: ${line}")
+        endif()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "the symphony package includes a surface:\n${pretty}\n"
+                        "symphony/ may include only agent/, agentloop/, harness/, contracts/, "
+                        "platform/ and itself.")
 endif()
 
 # The packages A1 carved, each held to the floor it was carved for.
@@ -385,10 +499,11 @@ endif()
 # `markdown/`, `platform/`, `contracts/` and `agentloop/` (the Reporter seam
 # and `ask_user` its adapters implement), never `cli/`, `machine/` or CLI11.
 # `machine/` is the machine-mode adapter and never paints: itself,
-# `agentloop/`, `agent/` and `contracts/` -- never `views/`, `ansi/` or
-# `markdown/`. `cli/`, the composition root, assembles both.
+# `agentloop/`, `agent/`, `contracts/` and, since 27j, `tasks/` -- the task
+# events render a task's ledger through its one view -- never `views/`,
+# `ansi/` or `markdown/`. `cli/`, the composition root, assembles both.
 foreach(rule "views:views|ansi|markdown|platform|contracts|agentloop"
-             "machine:machine|agentloop|agent|contracts")
+             "machine:machine|agentloop|agent|contracts|tasks")
     string(REPLACE ":" ";" parts "${rule}")
     list(GET parts 0 package)
     list(GET parts 1 allowed)
@@ -415,7 +530,7 @@ if(NOT VIOLATIONS STREQUAL "")
     message(FATAL_ERROR "a presentation module reaches past its rule:\n${pretty}\n"
                         "views/ paints and never parses argv: views/, ansi/, markdown/, "
                         "platform/, contracts/, agentloop/ only. machine/ never paints: "
-                        "machine/, agentloop/, agent/, contracts/ only.")
+                        "machine/, agentloop/, agent/, contracts/, tasks/ only.")
 endif()
 
 # `serve` never recalls (26l): one client's history must never reach another's

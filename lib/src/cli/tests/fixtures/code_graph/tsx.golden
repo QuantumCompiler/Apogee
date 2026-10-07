@@ -1,0 +1,80 @@
+node class src/Button.tsx::Props
+  description type Props = { label: string }
+  metadata {"end_line":4,"file":"src/Button.tsx","kind":"code","lang":"tsx","line":4,"member":"tsx"}
+  mentions 1
+  at tsx:src/Button.tsx:4-4 definition
+node file src/Button.tsx
+  description TSX file
+  metadata {"end_line":14,"file":"src/Button.tsx","kind":"code","lang":"tsx","line":1,"member":"tsx"}
+  mentions 1
+  at tsx:src/Button.tsx:1-14 definition
+node file src/report.ts
+  description TypeScript file
+  metadata {"end_line":3,"file":"src/report.ts","kind":"code","lang":"typescript","line":1,"member":"tsx"}
+  mentions 1
+  at tsx:src/report.ts:1-3 definition
+node function src/Button.tsx::Button
+  description function Button(props: Props)
+  metadata {"end_line":8,"file":"src/Button.tsx","kind":"code","lang":"tsx","line":6,"member":"tsx"}
+  mentions 1
+  at tsx:src/Button.tsx:6-8 definition
+node function src/Button.tsx::Toolbar
+  description Toolbar = ()
+  metadata {"end_line":14,"file":"src/Button.tsx","kind":"code","lang":"tsx","line":10,"member":"tsx"}
+  mentions 1
+  at tsx:src/Button.tsx:10-14 definition
+node function src/report.ts::report
+  description function report(label: string): void
+  metadata {"end_line":3,"file":"src/report.ts","kind":"code","lang":"typescript","line":1,"member":"tsx"}
+  mentions 1
+  at tsx:src/report.ts:1-3 definition
+node name .info
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at tsx:src/report.ts:2-2 reference
+node name react
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at tsx:src/Button.tsx:1-1 reference
+edge class src/Button.tsx::Props -[defined_in]-> file src/Button.tsx
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site tsx:src/Button.tsx:4
+edge file src/Button.tsx -[imports]-> file src/report.ts
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site tsx:src/Button.tsx:2
+edge file src/Button.tsx -[imports]-> name react
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site tsx:src/Button.tsx:1
+edge function src/Button.tsx::Button -[calls]-> function src/report.ts::report
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site tsx:src/Button.tsx:7
+edge function src/Button.tsx::Button -[defined_in]-> file src/Button.tsx
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site tsx:src/Button.tsx:6
+edge function src/Button.tsx::Button -[references]-> class src/Button.tsx::Props
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site tsx:src/Button.tsx:6
+edge function src/Button.tsx::Toolbar -[calls]-> function src/Button.tsx::Button
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site tsx:src/Button.tsx:12
+edge function src/Button.tsx::Toolbar -[defined_in]-> file src/Button.tsx
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site tsx:src/Button.tsx:10
+edge function src/report.ts::report -[calls]-> name .info
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site tsx:src/report.ts:2
+edge function src/report.ts::report -[defined_in]-> file src/report.ts
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site tsx:src/report.ts:1

@@ -18,9 +18,8 @@
 /// on parse and reorders keys on emit. Load-modify-save would silently delete
 /// the user's file contents. So Apogee never marshals a Config back to disk:
 /// it locates the affected lines and splices them, leaving every other byte
-/// exactly as it was. (Ommi reached the same conclusion and for the same
-/// reason; toml++ would not have helped -- comment preservation there is an
-/// open, unimplemented request.)
+/// exactly as it was. (toml++ would not have helped either -- comment
+/// preservation there is an open, unimplemented request.)
 ///
 /// # The Core constraint this exists to satisfy
 ///
@@ -31,11 +30,10 @@
 ///
 /// # Shape
 ///
-/// The transforms are PURE: text in, text out, no filesystem. That is a
-/// deliberate divergence from Ommi, where each helper read, edited, and wrote
-/// in one function. Separating them is what lets the golden-file suite run
-/// with no filesystem at all, and it is what makes the two guarantees below
-/// implementable:
+/// The transforms are PURE: text in, text out, no filesystem -- deliberately,
+/// rather than each helper reading, editing, and writing in one function.
+/// Separating them is what lets the golden-file suite run with no filesystem
+/// at all, and it is what makes the two guarantees below implementable:
 ///
 ///   * every edit is validated by RE-PARSING its own output before it lands;
 ///   * a failed edit leaves the file untouched (write-temp-then-rename).
@@ -66,9 +64,9 @@ public:
 /// An existing name that case-insensitively equals `candidate` without being
 /// byte-identical to it, or nullopt.
 ///
-/// This is Ommi's Viper-lowercasing lesson made explicit: there, adding
-/// "Qwen3" beside an existing "qwen3" silently merged the two into one backend
-/// at load. Apogee rejects the add and names the conflict instead.
+/// Names are compared case-insensitively, so adding "Qwen3" beside an existing
+/// "qwen3" would make two entries that name one backend. Apogee rejects the
+/// add and names the conflict instead.
 [[nodiscard]] std::optional<std::string> fold_collision(const std::vector<std::string>& existing,
                                                         std::string_view candidate);
 
@@ -179,15 +177,37 @@ public:
 /// Appends an `agents:` entry (creating the section), fields alphabetical
 /// after the name; a string or list is written only when set and a boolean
 /// only when true, so an existing entry stays byte-identical across a
-/// re-append of the same data -- Ommi's `formatAgentEntry` rule. `tools` is
-/// always written: it is the permission model, and an entry that left it
-/// implicit would read as "whatever the default is this release".
+/// re-append of the same data. `tools` is always written: it is the
+/// permission model, and an entry that left it implicit would read as
+/// "whatever the default is this release".
 /// Same collision and `force` rules as `append_backend`.
 [[nodiscard]] std::string append_agent(std::string_view content, std::string_view name,
                                        const AgentConfig& agent, bool force);
 
 /// Removes the entry and its fields; the exact inverse of the append.
 [[nodiscard]] std::string delete_agent(std::string_view content, std::string_view name);
+
+/// Appends a `symphonies:` entry -- a staged prompt process (27q) -- creating
+/// the section when absent: `description` and `input` when they say
+/// something, then `stages`, each `name` and `role`, its flags and caps when
+/// set, then its `prompt` and `schema` -- several lines as a literal block,
+/// anything a block cannot carry exactly double-quoted -- and a stage that
+/// plays a symphony (27r) its `play:` and its `input:` when set, so the entry
+/// reads back through the one parser as exactly `spec`. The name must be one
+/// (`is_symphony_name`). Same collision and `force` rules as
+/// `append_backend`; a replaced entry keeps its place and the comment above
+/// it.
+[[nodiscard]] std::string append_symphony(std::string_view content, std::string_view name,
+                                          const SymphonySpec& spec, bool force);
+
+/// Removes the entry and its lines -- a prompt's included, whatever they
+/// start with; the exact inverse of the append.
+[[nodiscard]] std::string delete_symphony(std::string_view content, std::string_view name);
+
+/// `spec` as a spec file: `name:` first, then the definition exactly as an
+/// entry writes it, at the top level -- what `symphonies edit` opens, and
+/// what `parse_symphony_spec` reads back as `spec`.
+[[nodiscard]] std::string render_symphony_spec(const SymphonySpec& spec);
 
 /// Appends a `graphs:` entry -- a named multi-collection graph -- creating
 /// the section when absent: `collections` as a flow list, then
@@ -202,6 +222,75 @@ public:
 /// Removes the entry and its fields; the exact inverse of the append. The
 /// graph's database (its derived data) is not this function's business.
 [[nodiscard]] std::string delete_graph(std::string_view content, std::string_view name);
+
+/// Appends a `suites:` entry -- a named bundle of models (27d) -- creating the
+/// section when absent: `description` when set, then `members:` in role
+/// order, each `role: backend` alone or, when it pins a knob, the long form
+/// with `backend`, `context_size` and `toolset`; then, when set, its
+/// `consultable:` flow list and `consult_caps:` block (27f), its
+/// `validate:` block (27g), and `orchestrate: true` (27t). Same collision
+/// and `force` rules as `append_backend`; the name `off` is refused, being
+/// `/suite off`.
+[[nodiscard]] std::string append_suite(std::string_view content, std::string_view name,
+                                       const SuiteConfig& suite, bool force);
+
+/// Removes the entry and its fields; the exact inverse of the append. The
+/// re-parse refuses it while `models.default_suite` names the suite.
+[[nodiscard]] std::string delete_suite(std::string_view content, std::string_view name);
+
+/// Sets one member of an existing suite -- `role` one of
+/// `suite_role_names()` -- replacing that member's lines in place, inserting
+/// it in role order, or with nullopt removing it; every other line of the
+/// entry, its comments included, is left as it was. A `members:` written as
+/// a one-line flow mapping is refused rather than misread. Throws
+/// ConfigEditError when the suite, or a member to remove, is missing.
+[[nodiscard]] std::string set_suite_member(std::string_view content, std::string_view suite,
+                                           std::string_view role,
+                                           const std::optional<SuiteMember>& member);
+
+/// Sets an existing suite's `consultable:` (27f) to `roles`, written as a
+/// flow list as given -- an empty list removes the key -- in place: a list
+/// already written (flow or block) is replaced where it stands, a new one goes
+/// above `consult_caps:` when the entry has it, else at the entry's end, and
+/// every other line, its comments included, is left as it was. Throws
+/// ConfigEditError when the suite is missing; the re-parse refuses a role
+/// that cannot be consulted or has no member.
+[[nodiscard]] std::string set_suite_consultable(std::string_view content, std::string_view suite,
+                                                const std::vector<std::string>& roles);
+
+/// Sets an existing suite's `consult_caps:` block (27f) to the caps set in
+/// `caps` -- none set removes it -- in place, as `set_suite_consultable` does.
+[[nodiscard]] std::string set_suite_consult_caps(std::string_view content, std::string_view suite,
+                                                 const ConsultCaps& caps);
+
+/// Sets an existing suite's `validate:` block (27g) to the fields set in
+/// `validate` -- none set removes it -- in place, as `set_suite_consultable`
+/// does: a block already written is replaced where it stands, a new one goes
+/// at the entry's end, and every other line is left as it was. The re-parse
+/// refuses a verifier that cannot check or has no member.
+[[nodiscard]] std::string set_suite_validate(std::string_view content, std::string_view suite,
+                                             const ValidateConfig& validate);
+
+/// Sets an existing suite's `orchestrate:` (27t): `orchestrate: true` when
+/// on, the key removed when off -- off is absent -- in place, as
+/// `set_suite_consultable` does. Throws ConfigEditError when the suite is
+/// missing.
+[[nodiscard]] std::string set_suite_orchestrate(std::string_view content, std::string_view suite,
+                                                bool orchestrate);
+
+/// Sets `models.default_suite` -- the suite every surface resolves under --
+/// as `set_models_role` sets a pointer; "" clears it. The re-parse refuses a
+/// name with no `suites:` entry.
+[[nodiscard]] std::string set_default_suite(std::string_view content, std::string_view name);
+
+/// Sets `attachments.graph` -- the method an attach takes when nothing on the
+/// line says otherwise (27p) -- to `method`, `code` or `off`: the line
+/// replaced in place (keeping any trailing comment), else inserted into the
+/// `attachments:` section, else the section appended. Any other word is
+/// refused naming the set, before the file is touched. The block's one
+/// writer: there is no `config set`, so no verb calls it yet, and a hand edit
+/// is the other way the block is set.
+[[nodiscard]] std::string set_attachments_graph(std::string_view content, std::string_view method);
 
 /// Sets `permissions.<tool>` to `level` (`ask`, `allow`, or `deny`),
 /// replacing the existing line (keeping any trailing comment) or inserting
@@ -234,10 +323,9 @@ public:
 /// runs of blank lines down to one, and ends the file with exactly one
 /// newline.
 ///
-/// Narrower than Ommi's FormatConfig, which also sorted the fields inside each
-/// entry. Sorting was dropped on purpose: moving a field line moves it out
-/// from under the comment that explains it, which is precisely the damage this
-/// whole module exists to prevent.
+/// It deliberately does not sort the fields inside each entry: moving a field
+/// line moves it out from under the comment that explains it, which is
+/// precisely the damage this whole module exists to prevent.
 [[nodiscard]] std::string format_config(std::string_view content);
 
 // ---------------------------------------------------------------------------

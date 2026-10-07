@@ -4,18 +4,24 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
+#include <optional>
 #include <random>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "cli/complete_protocol.h"
+#include "cli/complete_sources.h"
 #include "cli/registry.h"
 #include "cli/root.h"
 #include "cli/uninstall.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
+#include "contracts/paths.h"
+#include "support/channel_guard.h"
 #include "support/env_guard.h"
 
 /// The lifecycle surfaces: shell completion, and what uninstall plans to remove.
@@ -104,6 +110,11 @@ backends:
 }
 
 [[nodiscard]] bool contains(const std::vector<std::string>& haystack, std::string_view needle) {
+    return std::find(haystack.begin(), haystack.end(), needle) != haystack.end();
+}
+
+[[nodiscard]] bool contains_path(const std::vector<std::filesystem::path>& haystack,
+                                 const std::filesystem::path& needle) {
     return std::find(haystack.begin(), haystack.end(), needle) != haystack.end();
 }
 
@@ -666,13 +677,25 @@ TEST_CASE("a fixed set of values completes from the parser's own validator",
           std::vector<std::string>{"claude-cli"});
     CHECK(complete_line({"config", "set-permission", "write_file"}) ==
           std::vector<std::string>{"ask", "allow", "deny"});
-    // models convert's precisions come from the converter's own list.
+    // models convert's precisions come from the converter's own list -- and,
+    // with `--mlx` before `--type`, from mlx-lm's: the one the command takes.
+    const apogee::commands::CompletionSources live = apogee::commands::default_completion_sources();
     const std::vector<std::string> precisions =
-        complete_line({"models", "convert", "snap", "out.gguf", "--type"});
+        complete_full({"models", "convert", "snap", "--type"}, "", live).candidates;
     CHECK(contains(precisions, "f16"));
     CHECK(contains(precisions, "q8_0"));
+    CHECK_FALSE(contains(precisions, "4bit"));
+    const std::vector<std::string> mlx =
+        complete_full({"models", "convert", "snap", "--mlx", "-t"}, "", live).candidates;
+    CHECK(contains(mlx, "4bit"));
+    CHECK_FALSE(contains(mlx, "q8_0"));
     // A snapshot directory is one accepted form: files once no name matches.
     CHECK(complete_full({"models", "convert"}, "./", fake_sources()).files);
+    // A word of the set may hold a colon: `--on-question`'s forms (27i).
+    CHECK(complete_line({"task", "run", "goal", "--on-question"}) ==
+          std::vector<std::string>{"fail", "answer:"});
+    CHECK(complete_line({"task", "run", "goal", "--on-question"}, "a") ==
+          std::vector<std::string>{"answer:"});
 }
 
 TEST_CASE("a flag that takes no value leaves the next word to the line",
@@ -874,6 +897,33 @@ TEST_CASE("a comma list completes its last word and skips what it holds",
             .candidates == std::vector<std::string>{"docs,notes,meetings"});
 }
 
+TEST_CASE("a suite member flag completes past its key's = and after its commas",
+          "[commands][completion][values][suites]") {
+    // `--toolset ROLE=fs,git`: the roles with their `=`, then the toolsets
+    // after it -- after each comma too, one already listed not again.
+    const std::vector<std::string> toolset = {"config", "add-suite", "s", "--toolset"};
+    CHECK(contains(complete_line(toolset), "chat="));
+    CHECK(complete_line(toolset, "u") == std::vector<std::string>{"utility="});
+    const std::vector<std::string> after_key = complete_line(toolset, "chat=");
+    CHECK(after_key.size() == apogee::harness::suite_toolset_names().size());
+    CHECK(contains(after_key, "chat=fs"));
+    CHECK(complete_line(toolset, "chat=fs,g") ==
+          std::vector<std::string>{"chat=fs,git", "chat=fs,graph"});
+    CHECK_FALSE(contains(complete_line(toolset, "chat=fs,"), "chat=fs,fs"));
+    CHECK(complete_line(toolset, "nope=").empty());
+    // `--consultable ROLE,ROLE`: the roles after each comma.
+    CHECK(
+        complete_line({"config", "set-suite", "s", "--consultable"}, "utility,") ==
+        std::vector<std::string>{"utility,extraction", "utility,vision", "utility,transcription"});
+    // `--validate SEAM=VALUE`: each seam's own values, the seam alone its default.
+    const std::vector<std::string> validate = {"config", "set-suite", "s", "--validate"};
+    CHECK(complete_line(validate, "tool_args=") ==
+          std::vector<std::string>{"tool_args=", "tool_args=on", "tool_args=off"});
+    CHECK(complete_line(validate, "answers=") ==
+          std::vector<std::string>{"answers=", "answers=request", "answers=always"});
+    CHECK(contains(complete_line(validate), "off"));
+}
+
 TEST_CASE("a fixed set the parser splits at commas completes its last word",
           "[commands][completion][values]") {
     // `--register-with Q4_K_M,<TAB>`: the parser splits the word, so the
@@ -917,9 +967,9 @@ namespace {
 /// The arguments that are free text on purpose, reviewed 2026-09-24: prompts
 /// and messages, names for things being created, dates, patterns, and values
 /// with no listing to read (a vendor model id, a Hugging Face repository, an
-/// entity in a graph). Everything else must complete to something. A new
-/// TEXT argument fails the test below until it is tagged -- or added here,
-/// on purpose.
+/// entity in a graph -- and since 27l a relation in one, or a question). Everything else must
+/// complete to something. A new TEXT argument fails the test below until it is tagged -- or added
+/// here, on purpose.
 const std::vector<std::string> kFreeText{"agents create name",
                                          "agents create --description",
                                          "agents create --save-name",
@@ -936,12 +986,17 @@ const std::vector<std::string> kFreeText{"agents create name",
                                          "complete --system",
                                          "complete --context",
                                          "complete --allow-host",
+                                         "execute -s",
+                                         "execute --system",
+                                         "execute --allow-host",
                                          "config add-backend --api-key",
                                          "config add-backend --model",
                                          "config add-backend --embedding-model",
                                          "config add-backend --system-prompt",
                                          "config add-allowed-host host",
                                          "config add-graph name",
+                                         "config add-suite name",
+                                         "config add-suite --description",
                                          "datasets prepare --map",
                                          "datasets prepare --split",
                                          "datasets create name",
@@ -953,6 +1008,13 @@ const std::vector<std::string> kFreeText{"agents create name",
                                          "embed query text",
                                          "embed delete --source",
                                          "graph show ENTITY",
+                                         "graph path FROM",
+                                         "graph path TO",
+                                         "graph path --relation",
+                                         "graph explain NODE",
+                                         "graph neighbors NODE",
+                                         "graph neighbors --relation",
+                                         "graph query QUESTION",
                                          "knowledge capture TEXT",
                                          "knowledge capture --source",
                                          "knowledge query TEXT",
@@ -962,7 +1024,19 @@ const std::vector<std::string> kFreeText{"agents create name",
                                          "mcp test arguments",
                                          "models convert --base-name",
                                          "models pull --base-name",
-                                         "serve --bind"};
+                                         "serve --bind",
+                                         "task run goal",
+                                         "task run --require",
+                                         "symphonies create name",
+                                         "symphonies create --description",
+                                         "symphonies create --input-description",
+                                         "symphonies create --stage",
+                                         "symphonies create --play",
+                                         "symphonies play --input"};
+
+/// The type names CLI11 gives a number: an untagged value of any other type
+/// is free text.
+const std::set<std::string> kNumberTypes{"INT", "UINT", "FLOAT"};
 
 }  // namespace
 
@@ -981,7 +1055,10 @@ TEST_CASE("every argument completes to something, or is free text on purpose",
         if (value.kind == apogee::commands::ValueKind::Names) {
             used_kinds.insert(value.source);
         }
-        if (value.kind != apogee::commands::ValueKind::Text || value.type != "TEXT") {
+        // A number is not free text; any other untagged value is, whatever
+        // type name it shows -- `--play` once hid behind
+        // `NAME:SYMPHONY[:INPUT]`, read as a `NAME` nobody had reviewed.
+        if (value.kind != apogee::commands::ValueKind::Text || kNumberTypes.contains(value.type)) {
             return;  // named, chosen, a path, a backend -- or a number
         }
         INFO(where << " is free text: tag it, or add it to kFreeText on purpose");
@@ -1008,4 +1085,151 @@ TEST_CASE("every argument completes to something, or is free text on purpose",
         INFO(kind);
         CHECK(used_kinds.contains(std::string{kind}));
     }
+}
+
+// --- Install channels (M10) ---------------------------------------------------
+
+TEST_CASE("a channel build's uninstall plans its own root, never another, flags or not",
+          "[commands][uninstall][channels]") {
+    // The guardrail: a dev-channel uninstall takes `.apogee-dev` and never the
+    // release root, with a root flag on the line or not -- and leaves the
+    // release install's completions, which a dev install never wrote.
+    const UserHome user_home;
+    const apogee::testing::EnvUnsetGuard no_override{"APOGEE_HOME"};
+    const std::filesystem::path home = user_home.dir.path();
+    REQUIRE(apogee::harness::seed_data_directory(home / ".apogee").ok());
+    REQUIRE(apogee::harness::seed_data_directory(home / ".apogee-dev").ok());
+    const std::filesystem::path stub =
+        home / ".local" / "share" / "bash-completion" / "completions" / "apogee";
+    std::filesystem::create_directories(stub.parent_path());
+    std::ofstream{stub} << "# release stub\n";
+
+    std::vector<std::optional<apogee::harness::RootFlag>> flags{std::nullopt};
+    for (const apogee::harness::Channel channel : apogee::harness::kChannels) {
+        flags.emplace_back(apogee::harness::RootFlag{.channel = channel, .custom_config = {}});
+    }
+    flags.emplace_back(apogee::harness::RootFlag{
+        .channel = std::nullopt, .custom_config = home / "elsewhere" / "config" / "config.yaml"});
+
+    for (const std::optional<apogee::harness::RootFlag>& flag : flags) {
+        INFO((flag ? flag->spelling() : std::string{"no flag"}));
+        const apogee::harness::RootFlagScope scope{flag};
+        {
+            const apogee::testing::BakedChannelGuard dev{apogee::harness::Channel::Dev};
+            const apogee::commands::UninstallPlan plan =
+                apogee::commands::plan_uninstall(apogee::harness::install_home(), {});
+            CHECK(plan.data_directory == home / ".apogee-dev");
+            CHECK(plan.completions.empty());
+        }
+        const apogee::commands::UninstallPlan release =
+            apogee::commands::plan_uninstall(apogee::harness::install_home(), {});
+        CHECK(release.data_directory == home / ".apogee");
+        CHECK(contains_path(release.completions, stub));
+    }
+    // Planning removed nothing.
+    CHECK(std::filesystem::exists(home / ".apogee"));
+    CHECK(std::filesystem::exists(home / ".apogee-dev"));
+}
+
+TEST_CASE("the root flags complete, and the custom flag completes a path",
+          "[commands][completion][channels]") {
+    // ADR 0007: a new flag is offered the moment it exists -- read out of the
+    // live parser, so nothing here lists them for completion's sake.
+    const std::vector<std::string> flags = complete_line({}, "--");
+    for (const std::string_view flag : {"--release", "--dev", "--test", "--custom", "--config"}) {
+        INFO(flag);
+        CHECK(contains(flags, flag));
+    }
+
+    CompletionRequest request;
+    request.words = {"--custom"};
+    const apogee::commands::Completion value =
+        apogee::commands::complete_words(request, two_backends(), real_tree());
+    CHECK(value.files);
+    CHECK(value.candidates.empty());
+
+    // After a channel flag, the verbs, as after no flag at all.
+    CHECK(contains(complete_line({"--dev"}), "models"));
+}
+
+TEST_CASE("a root flag on the completion line is read before the verb, and only there",
+          "[commands][completion][channels]") {
+    const UserHome user_home;
+    const apogee::testing::EnvUnsetGuard no_override{"APOGEE_HOME"};
+    const std::string custom =
+        (user_home.dir.path() / "elsewhere" / "config" / "config.yaml").string();
+    using apogee::commands::typed_root_flag;
+
+    const auto dev = typed_root_flag({"--dev", "models", "delete"}, real_tree());
+    REQUIRE(dev.has_value());
+    CHECK(dev->channel == apogee::harness::Channel::Dev);
+
+    // A value-taking root flag's value is never mistaken for the verb.
+    const auto after_config =
+        typed_root_flag({"--config", "x.yaml", "--test", "chat"}, real_tree());
+    REQUIRE(after_config.has_value());
+    CHECK(after_config->channel == apogee::harness::Channel::Test);
+
+    for (const std::vector<std::string>& line :
+         {std::vector<std::string>{"--custom", custom, "chat"},
+          std::vector<std::string>{"--custom=" + custom, "chat"}}) {
+        const auto flag = typed_root_flag(line, real_tree());
+        REQUIRE(flag.has_value());
+        CHECK_FALSE(flag->channel.has_value());
+        CHECK(flag->custom_config == custom);
+    }
+
+    // Doubtful lines complete from the default root: two flags, a flag after
+    // the verb (CLI11 takes no root flag there), the value still being typed.
+    CHECK_FALSE(typed_root_flag({"--dev", "--test", "chat"}, real_tree()).has_value());
+    CHECK_FALSE(typed_root_flag({"models", "--dev"}, real_tree()).has_value());
+    CHECK_FALSE(typed_root_flag({"--custom"}, real_tree()).has_value());
+
+    // One the chain would refuse is no flag either -- completion never errors.
+    const apogee::testing::EnvGuard other{"APOGEE_HOME", user_home.dir.path().string()};
+    CHECK_FALSE(typed_root_flag({"--dev", "chat"}, real_tree()).has_value());
+}
+
+TEST_CASE("completion offers the names in the root the line's flag chose",
+          "[commands][completion][channels]") {
+    // ADR 0007: what completion offers, the command accepts. Under `--dev`
+    // the command reads the dev root's config, so TAB must too.
+    const UserHome user_home;
+    const apogee::testing::EnvUnsetGuard no_override{"APOGEE_HOME"};
+    const apogee::testing::EnvUnsetGuard no_config{"APOGEE_CONFIG"};
+    const std::filesystem::path home = user_home.dir.path();
+    for (const auto& [root, backend] :
+         {std::pair{".apogee", "only-in-release"}, std::pair{".apogee-dev", "only-in-dev"}}) {
+        std::filesystem::create_directories(home / root / "config");
+        std::ofstream{home / root / "config" / "config.yaml"} << "backends:\n  " << backend
+                                                              << ":\n    type: mock\n";
+    }
+
+    const auto offered = [](const std::vector<std::string>& words) {
+        const std::ostringstream captured;
+        std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
+        std::vector<const char*> argv{"apogee", "__complete"};
+        for (const std::string& word : words) {
+            argv.push_back(word.c_str());
+        }
+        int code = -1;
+        {
+            apogee::commands::RootCommand root{apogee::commands::default_registry()};
+            code = root.run(static_cast<int>(argv.size()), argv.data());
+        }
+        std::cout.rdbuf(old_out);
+        CHECK(code == 0);
+        return captured.str();
+    };
+
+    const std::string plain = offered({"complete", "-m", ""});
+    CHECK(plain.find("only-in-release") != std::string::npos);
+    CHECK(plain.find("only-in-dev") == std::string::npos);
+
+    const std::string dev = offered({"--dev", "complete", "-m", ""});
+    CHECK(dev.find("only-in-dev") != std::string::npos);
+    CHECK(dev.find("only-in-release") == std::string::npos);
+
+    // The answer's flag lasted as long as the answer.
+    CHECK_FALSE(apogee::harness::root_flag().has_value());
 }

@@ -420,6 +420,20 @@ std::unique_ptr<ChildProcess> start_child(const ChildCommand& command, std::stri
     posix_spawn_file_actions_adddup2(&actions, child_out.get(), STDOUT_FILENO);
     posix_spawn_file_actions_adddup2(&actions, child_err.get(), STDERR_FILENO);
 
+    // Its three pipes are ALL a child gets. Anything else this process holds
+    // without CLOEXEC would otherwise be held open for the child's whole life:
+    // a served connection's socket (cpp-httplib's accept sets none on macOS),
+    // another child's pipe ends mid-spawn on another thread. Found by the
+    // served mlx turn's sample (27c): the driver, spawned on the first served
+    // request, held that client's connection.
+    posix_spawnattr_t attributes;
+    posix_spawnattr_init(&attributes);
+#if defined(__APPLE__)
+    posix_spawnattr_setflags(&attributes, POSIX_SPAWN_CLOEXEC_DEFAULT);
+#elif defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 34))
+    posix_spawn_file_actions_addclosefrom_np(&actions, STDERR_FILENO + 1);
+#endif
+
     std::vector<std::string> storage;
     storage.push_back(resolved);
     for (const std::string& argument : command.arguments) {
@@ -456,9 +470,10 @@ std::unique_ptr<ChildProcess> start_child(const ChildCommand& command, std::stri
     }
 
     pid_t pid = -1;
-    const int status = ::posix_spawn(&pid, resolved.c_str(), &actions, nullptr, argv.data(),
+    const int status = ::posix_spawn(&pid, resolved.c_str(), &actions, &attributes, argv.data(),
                                      envp.empty() ? environ : envp.data());
     posix_spawn_file_actions_destroy(&actions);
+    posix_spawnattr_destroy(&attributes);
 
     if (status != 0) {
         error = "could not start '" + resolved + "': " + std::strerror(status);

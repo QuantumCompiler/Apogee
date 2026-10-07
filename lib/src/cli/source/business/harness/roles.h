@@ -8,11 +8,11 @@
 
 /// The one resolver for `models:` role pointers.
 ///
-/// **This file exists because Ommi shipped the same logic twice and the copies
-/// disagreed.** Its CLI and its HTTP admin plane each grew their own resolution
-/// chain, and a request that ran on one backend from the terminal ran on
-/// another over HTTP. The fix there was a single exported function both call;
-/// Apogee starts from that fix instead of earning it again.
+/// **This file exists so the same logic is never shipped twice.** A CLI and an
+/// HTTP admin plane that each grow their own resolution chain drift apart,
+/// until a request that runs on one backend from the terminal runs on another
+/// over HTTP. The fix is a single function both call, and Apogee starts from
+/// it.
 ///
 /// Apogee has no HTTP plane yet, and that is precisely why this lands **now**:
 /// a resolver written as a private helper inside `complete.cpp` is a resolver
@@ -24,10 +24,20 @@
 /// ```
 /// explicit override  (-m, or a request's `model`)
 ///   > per-feature backend  (a collection's `backend:`, a graph's entry)
-///     > the role pointer  (models.default_embedding, default_vision, ...)
-///       > the conversation's backend  (a helper role only)
-///         > models.default
+///     > the active suite's member  (suites.<models.default_suite>.members)
+///       > the role pointer  (models.default_embedding, default_vision, ...)
+///         > the conversation's backend  (a helper role only)
+///           > models.default
 /// ```
+///
+/// The suite rung (27d) speaks for the roles its suite names: a session's
+/// suite beats the global pointers, while an explicit `-m` and a feature's
+/// pinned backend still win over it. Which suite is active is the config's
+/// to say -- `models.default_suite`, which a session's view of the config
+/// sets to the suite `--suite` or `/suite` chose -- so every caller that
+/// resolves against that view resolves under the suite, with nothing to
+/// thread through. With no suite active the rung is skipped, and the chain
+/// is exactly the one below.
 ///
 /// A helper role -- vision, transcription, utility (26b) -- with no pointer
 /// falls back to the backend the conversation is on rather than to
@@ -45,7 +55,7 @@
 /// configured backend is the caller's question, answered in the caller's idiom
 /// — a fatal message on the CLI, a 400 over HTTP, a `Fail` row in `check`.
 /// Folding validation in here would force one error shape on all three, and
-/// that is the seam that made Ommi's two chains diverge in the first place.
+/// that is the seam along which per-surface copies of the chain diverge.
 namespace apogee::harness {
 
 /// Which role a backend is being resolved for.
@@ -67,6 +77,11 @@ enum class ModelRole : std::uint8_t {
 
 /// Whether `role` is a helper, falling back to the conversation's backend.
 [[nodiscard]] bool is_helper(ModelRole role) noexcept;
+
+/// The name a suite's `members:` calls `role` by (27d): `chat`, `embedding`,
+/// `extraction`, `vision`, `transcription`, `utility` -- one of
+/// `suite_role_names()`.
+[[nodiscard]] std::string_view suite_role(ModelRole role) noexcept;
 
 /// The `models:` key a role reads, e.g. "default_embedding". `Chat` has none of
 /// its own and answers "default".
@@ -106,6 +121,8 @@ enum class ResolvedFrom : std::uint8_t {
     Override,
     /// A backend pinned by the feature being run.
     EntryBackend,
+    /// The active suite's member for the role (27d).
+    Suite,
     /// The role's own `models:` pointer.
     RolePointer,
     /// The backend the conversation is on (a helper role with no pointer).
@@ -119,6 +136,13 @@ struct Resolution {
     std::string key;
     ResolvedFrom from = ResolvedFrom::Nothing;
 };
+
+/// Whether the config NAMES this role's backend -- its pointer, or the active
+/// suite's member -- rather than lending it one: the chat's own backend, or
+/// `models.default`. What "a utility model is set" means everywhere a chore
+/// runs only when one is (26b), and what keeps a suite's helper from reading
+/// as unset.
+[[nodiscard]] bool is_named(ResolvedFrom from) noexcept;
 
 /// Resolves `request`, reporting both the key and which rung answered.
 ///

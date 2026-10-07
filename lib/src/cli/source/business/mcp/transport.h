@@ -25,9 +25,9 @@
 ///
 /// `StdioTransport` is the one that ships: a child on pipes, newline-delimited
 /// JSON on stdout, and its stderr **captured, never inherited**. The sink is
-/// mandatory in the constructor. Ommi kept an inheriting constructor beside
-/// the safe one "for compatibility", and its own postmortem records what an
-/// inherited stderr did to the terminal; this API has no such door.
+/// mandatory in the constructor, and there is no inheriting constructor
+/// beside it "for compatibility": an inherited stderr writes straight onto
+/// the user's terminal, and this API has no such door.
 namespace apogee::mcp {
 
 class Transport {

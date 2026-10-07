@@ -13,6 +13,7 @@
 
 #include "backends/llamacpp_embed.h"
 #include "backends/llamacpp_tokens.h"
+#include "backends/local_prompt.h"
 #include "backends/markup_filter.h"
 #include "backends/native_tool_calls.h"
 #include "contracts/errors.h"
@@ -23,80 +24,6 @@
 
 namespace apogee::backends {
 namespace {
-
-/// The prompt-level form of structured output, now the fallback (26f): a
-/// grammar holds a local answer to its schema wherever the model's template
-/// can take one, and only where it cannot -- no template, a format with no
-/// place for a schema, a schema the converter cannot express, a turn with
-/// tools -- is the schema stated in the system block, the caller validating
-/// either way. Skipped when a system message already carries the schema
-/// text -- every structured caller states it once itself -- so the model
-/// never reads it twice.
-std::vector<harness::ChatMessage> messages_with_schema(const harness::ChatRequest& request) {
-    const std::string& schema = request.transient.response_schema;
-    if (schema.empty()) {
-        return request.messages;
-    }
-    const nlohmann::json parsed = nlohmann::json::parse(schema, nullptr, false);
-    const std::string text = parsed.is_discarded() ? schema : parsed.dump(2);
-    for (const harness::ChatMessage& message : request.messages) {
-        if (message.role == harness::Role::System &&
-            message.content.plain_text().find("OUTPUT FORMAT") != std::string::npos) {
-            return request.messages;
-        }
-    }
-    std::vector<harness::ChatMessage> out = request.messages;
-    const std::string instruction =
-        "OUTPUT FORMAT\nYour response MUST be valid JSON conforming to the following JSON "
-        "Schema. Output only the JSON object -- no surrounding text or markdown code "
-        "blocks.\n\n" +
-        text;
-    // Beside an existing system message when there is one, else first.
-    std::size_t at = 0;
-    for (std::size_t i = 0; i < out.size(); ++i) {
-        if (out[i].role == harness::Role::System) {
-            at = i + 1;
-        }
-    }
-    out.insert(out.begin() + static_cast<std::ptrdiff_t>(at),
-               harness::ChatMessage::system(instruction));
-    return out;
-}
-
-/// The messages a local prompt is rendered from: the schema instruction
-/// where one is asked for and `state_schema` -- false when a grammar holds
-/// the answer, so the schema is not stated twice -- and the system messages
-/// that open the conversation joined into one, a blank line apart.
-///
-/// A template may take one system message, and only first: Qwen3.5 and
-/// 3.8's raise "System message must be at the beginning" on a second, and
-/// the render failing drops the model to the fallback template -- and its
-/// tools with it. A second is the ordinary case: the environment note
-/// (25d), a retrieval block or a review note ahead of a chat's own system
-/// prompt. The Anthropic and Google wires join theirs the same way.
-std::vector<harness::ChatMessage> prompt_messages(const harness::ChatRequest& request,
-                                                  bool state_schema) {
-    std::vector<harness::ChatMessage> messages =
-        state_schema ? messages_with_schema(request) : request.messages;
-    std::size_t leading = 0;
-    while (leading < messages.size() && messages[leading].role == harness::Role::System) {
-        ++leading;
-    }
-    if (leading < 2) {
-        return messages;
-    }
-    std::string joined;
-    for (std::size_t i = 0; i < leading; ++i) {
-        const std::string text = messages[i].content.plain_text();
-        if (text.empty()) {
-            continue;
-        }
-        joined += (joined.empty() ? "" : "\n\n") + text;
-    }
-    messages.erase(messages.begin() + 1, messages.begin() + static_cast<std::ptrdiff_t>(leading));
-    messages.front() = harness::ChatMessage::system(joined);
-    return messages;
-}
 
 /// A context has to hold at least one token whose logits we can sample from.
 ///
@@ -935,8 +862,22 @@ void LlamaCppProvider::preload(const harness::StatusSink& on_status) {
     ensure_model(on_status);
 }
 
+void LlamaCppProvider::set_load_listener(const harness::StatusSink& listener) {
+    load_listener_ = listener;
+}
+
+void LlamaCppProvider::hold_resident(bool held) noexcept {
+    held_.store(held);
+}
+
+bool LlamaCppProvider::held_resident() const noexcept {
+    return held_.load();
+}
+
 void LlamaCppProvider::expire_if_idle() {
-    if (options_.idle_unload.count() <= 0 || model_ == nullptr || !used_) {
+    // A session using this model holds it (27e): the clock is not consulted
+    // until the hold is let go, and then from the last use as ever.
+    if (options_.idle_unload.count() <= 0 || model_ == nullptr || !used_ || held_.load()) {
         return;
     }
     if (options_.clock() - last_use_ >= options_.idle_unload) {
@@ -954,12 +895,22 @@ void LlamaCppProvider::ensure_model(const harness::StatusSink& on_status) {
     events::emit(events::kModelLoadStarted,
                  nlohmann::json{{"backend", options_.backend_name}, {"model", options_.model}});
 
-    if (on_status) {
+    // Said to the request that caused the load, when it streams status, and
+    // to the session's listener, whichever request it was (27e).
+    const auto say = [&on_status, this](const harness::StatusEvent& event) {
+        if (on_status) {
+            on_status(event);
+        }
+        if (load_listener_) {
+            load_listener_(event);
+        }
+    };
+    {
         harness::StatusEvent event;
         event.type = harness::StatusEvent::Type::ModelLoading;
         event.phase = harness::StatusEvent::Phase::Start;
         event.name = options_.model;
-        on_status(event);
+        say(event);
     }
 
     ModelLoad load;
@@ -974,25 +925,25 @@ void LlamaCppProvider::ensure_model(const harness::StatusSink& on_status) {
     std::string error;
     model_ = runtime_->load(load, error);
     if (model_ == nullptr) {
-        if (on_status) {
+        {
             harness::StatusEvent failed;
             failed.type = harness::StatusEvent::Type::ModelLoading;
             failed.phase = harness::StatusEvent::Phase::Error;
             failed.name = options_.model;
             failed.detail = error;
-            on_status(failed);
+            say(failed);
         }
         // A clear message naming the file, never a crash -- the acceptance
         // criterion for this path.
         throw harness::ProviderError(options_.backend_name, error);
     }
 
-    if (on_status) {
+    {
         harness::StatusEvent ready;
         ready.type = harness::StatusEvent::Type::ModelReady;
         ready.phase = harness::StatusEvent::Phase::Done;
         ready.name = options_.model;
-        on_status(ready);
+        say(ready);
     }
     events::emit(events::kModelLoadCompleted,
                  nlohmann::json{{"backend", options_.backend_name}, {"model", options_.model}});
@@ -1586,8 +1537,8 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
 
     // A side request -- a background title summary, a one-off clerk call -- is
     // not a turn of this conversation. It runs on its own throwaway context so
-    // the session's KV is untouched: Ommi's SideRequest lesson, where an async
-    // titler's cache write clobbered the session it was titling.
+    // the session's KV is untouched -- otherwise an async titler's cache write
+    // could clobber the session it is titling.
     const bool side_request = request.transient.side_request;
 
     LlamaContext* context = nullptr;

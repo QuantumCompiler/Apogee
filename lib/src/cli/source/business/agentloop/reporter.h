@@ -6,10 +6,10 @@
 
 /// Everything the loop wants to say, said through here.
 ///
-/// **This interface is the reason the loop can be shared.** Ommi's single most
-/// load-bearing sequencing lesson is that the loop must be extracted behind an
-/// observer BEFORE surfaces multiply, not after: it is what kept chat, complete,
-/// analyze, and serve consistent there, and what made deleting an entire
+/// **This interface is the reason the loop can be shared.** The single most
+/// load-bearing sequencing rule is that the loop must be extracted behind an
+/// observer BEFORE surfaces multiply, not after: it is what keeps chat,
+/// complete, analyze, and serve consistent, and what makes deleting an entire
 /// front-end a local change rather than a rewrite.
 ///
 /// So the loop knows nothing about terminals, HTTP, or GUIs. A surface is a thin

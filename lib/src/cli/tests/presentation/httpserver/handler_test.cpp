@@ -15,6 +15,7 @@
 
 #include "agent/fetch_url.h"
 #include "agent/tool.h"
+#include "backends/mlx_local.h"
 #include "backends/mock.h"
 #include "cli/embed.h"
 #include "cli/permissions.h"
@@ -25,6 +26,7 @@
 #include "httpserver/mux.h"
 #include "logger/session.h"
 #include "support/env_guard.h"
+#include "support/fake_mlx_driver.h"
 
 /// The conformance suite: every route, driven through the listener-free mux.
 ///
@@ -641,6 +643,110 @@ TEST_CASE("a vendor-CLI backend is refused by type, even when served and built",
     CHECK(response.status == 400);
     CHECK(parsed(response)["error"]["message"].get<std::string>().find("vendor CLI") !=
           std::string::npos);
+
+    // The refusal is about credentials, never runtimes (27c): every vendor
+    // CLI is refused by type, and no local type -- llamacpp, mlx -- is.
+    using apogee::harness::BackendType;
+    for (const BackendType type : {BackendType::ClaudeCli, BackendType::CodexCli,
+                                   BackendType::GeminiCli, BackendType::OllamaCli}) {
+        CHECK(apogee::httpserver::is_vendor_cli(type));
+    }
+    for (const BackendType type :
+         {BackendType::Mlx, BackendType::LlamaCpp, BackendType::Mock, BackendType::Anthropic,
+          BackendType::OpenAI, BackendType::Google}) {
+        CHECK_FALSE(apogee::httpserver::is_vendor_cli(type));
+    }
+}
+
+TEST_CASE(
+    "an mlx backend serves a stock client's streamed chat completion: local compute behind the "
+    "same loop, not refused by type",
+    "[httpserver][routing][mlx]") {
+    // 27c: the serve-policy decision made structural. The real provider over
+    // a scripted driver -- its own child, its own framing -- behind the
+    // listener-free mux, asked as an OpenAI client asks.
+    auto driver = std::make_shared<apogee::testing::DriverState>();
+    driver->replies = {
+        R"({"type":"text","id":{id},"text":"Local "})"
+        "\n"
+        R"({"type":"text","id":{id},"text":"weights, "})"
+        "\n"
+        R"({"type":"text","id":{id},"text":"no port."})"
+        "\n"
+        R"({"type":"done","id":{id},"finish":"stop","prompt_tokens":12,"cached_tokens":0,)"
+        R"("completion_tokens":5})"
+        "\n"};
+    int spawns = 0;
+    apogee::backends::MlxLocalProvider::Options mlx_options;
+    mlx_options.backend_name = "mlx-local";
+    mlx_options.model = "Llama-3.2-1B-Instruct";
+    mlx_options.model_dir = "/models/llama";
+    mlx_options.info.model_type = "llama";
+    mlx_options.info.chat_template = true;
+    auto provider = std::make_shared<apogee::backends::MlxLocalProvider>(
+        std::move(mlx_options),
+        [driver, &spawns](const apogee::platform::ChildCommand&,
+                          std::string&) -> std::unique_ptr<apogee::testing::FakeDriver> {
+            ++spawns;
+            return std::make_unique<apogee::testing::FakeDriver>(driver);
+        });
+
+    const apogee::testing::TempDir home{"serve-mlx-" + std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    Harness harness{apogee::harness::parse_config(
+        "models:\n  default: mlx-local\nbackends:\n  mlx-local:\n    type: mlx\n"
+        "    model_path: /models/llama\n  claude-sub:\n    type: claude-cli\n",
+        "<test>")};
+    harness.register_provider("mlx-local", provider);
+    MockProvider::Options subscription;
+    subscription.backend_name = "claude-sub";
+    harness.register_provider("claude-sub",
+                              std::make_shared<MockProvider>(std::move(subscription)));
+    harness.use_default_router();
+    HandlerOptions options;
+    options.served = {"mlx-local", "claude-sub"};
+    options.default_backend = "mlx-local";
+    Handler handler{harness, options, nullptr};
+    Mux mux{handler};
+
+    nlohmann::json body = chat_body("Where does this run?");
+    body["model"] = "mlx-local";
+    body["stream"] = true;
+    const HttpResponse response = mux.dispatch(post("/v1/chat/completions", body));
+    REQUIRE(response.status == 200);
+    CHECK(response.content_type == "text/event-stream");
+    const Frames streamed = frames(collect(response));
+    CHECK(streamed.done);
+    CHECK(streamed.done_last);
+    CHECK(content_of(streamed) == "Local weights, no port.");
+    // Streamed as the driver spoke: more than one content chunk.
+    int chunks = 0;
+    for (const nlohmann::json& frame : streamed.data) {
+        const nlohmann::json& delta = frame["choices"][0]["delta"];
+        chunks += delta.contains("content") && delta["content"].is_string() ? 1 : 0;
+    }
+    CHECK(chunks >= 2);
+    CHECK(streamed.data.back()["choices"][0]["finish_reason"] == "stop");
+    // The question reached the driver as one generate line.
+    REQUIRE_FALSE(driver->writes.empty());
+    const nlohmann::json sent = nlohmann::json::parse(driver->writes.front());
+    CHECK(sent["type"] == "generate");
+    CHECK(sent["messages"].back()["content"] == "Where does this run?");
+
+    // The same server refuses the vendor CLI beside it, by type.
+    body["model"] = "claude-sub";
+    body["stream"] = false;
+    const HttpResponse refused = mux.dispatch(post("/v1/chat/completions", body));
+    CHECK(refused.status == 400);
+    CHECK(parsed(refused)["error"]["message"].get<std::string>().find("vendor CLI") !=
+          std::string::npos);
+
+    // A second turn, unstreamed, on the same child: one driver per provider.
+    body["model"] = "mlx-local";
+    const HttpResponse again = mux.dispatch(post("/v1/chat/completions", body));
+    REQUIRE(again.status == 200);
+    CHECK(parsed(again)["choices"][0]["message"]["content"] == "Local weights, no port.");
+    CHECK(spawns == 1);
 }
 
 TEST_CASE("a configured but unbuilt backend is a 503 with its own reason",
@@ -695,6 +801,97 @@ TEST_CASE("a provider failure is a 502, or an error frame that still ends the st
     }
     CHECK(saw_error);
     CHECK(content_of(parsed_frames) == "one");
+}
+
+namespace {
+
+/// U+FFFD, the replacement character, as UTF-8.
+constexpr std::string_view kReplacement = "\xEF\xBF\xBD";
+
+/// Whether any frame of a stream is an error.
+bool any_error(const Frames& parsed_frames) {
+    return std::ranges::any_of(parsed_frames.data,
+                               [](const nlohmann::json& frame) { return frame.contains("error"); });
+}
+
+/// The last message session `id` keeps on disk, or nothing when it keeps none.
+std::string last_saved(const std::string& id) {
+    const std::vector<ChatMessage> messages = apogee::logger::load(id, {}).session.messages;
+    return messages.empty() ? std::string{} : messages.back().content.plain_text();
+}
+
+/// The text of a `/v1/completions` stream.
+std::string completion_text(const Frames& parsed_frames) {
+    std::string text;
+    for (const nlohmann::json& frame : parsed_frames.data) {
+        if (frame.contains("choices")) {
+            text += frame["choices"][0]["text"].get<std::string>();
+        }
+    }
+    return text;
+}
+
+}  // namespace
+
+TEST_CASE("a character split across streamed pieces reaches an SSE client whole",
+          "[httpserver][sse][utf8]") {
+    // A valid é cut between two pieces -- llama.cpp says a byte-fallback
+    // token a byte at a time. Each chunk used to be written as it came, and
+    // half a character is not JSON: the stream ended in a server_error.
+    auto scripted = std::make_shared<ScriptedStreamProvider>();
+    scripted->pieces = {"caf\xC3", "\xA9 ok"};
+    const Fixture fixture{{}, served_default(), false, scripted};
+
+    nlohmann::json body = chat_body("hi");
+    body["stream"] = true;
+    body["session_id"] = "new";
+    const HttpResponse response = fixture.send(post("/v1/chat/completions", body));
+    const std::string id = response.headers.at("X-Apogee-Session-Id");
+    const Frames chat = frames(collect(response));
+    CHECK_FALSE(any_error(chat));
+    CHECK(content_of(chat) == "caf\xC3\xA9 ok");
+    // What the client read is what the session keeps.
+    CHECK(last_saved(id) == "caf\xC3\xA9 ok");
+
+    const Frames completion = frames(collect(
+        fixture.send(post("/v1/completions", nlohmann::json{{"prompt", "hi"}, {"stream", true}}))));
+    CHECK_FALSE(any_error(completion));
+    CHECK(completion_text(completion) == "caf\xC3\xA9 ok");
+}
+
+TEST_CASE("an answer that ends inside a character ends in U+FFFD, streamed or not",
+          "[httpserver][utf8]") {
+    // llama.cpp stopping at max_tokens halfway through a character: every
+    // route answers with the replacement character where the bytes stopped,
+    // and a session keeps exactly what its client was sent.
+    auto scripted = std::make_shared<ScriptedStreamProvider>();
+    scripted->pieces = {"caf\xC3"};
+    const Fixture fixture{{}, served_default(), false, scripted};
+    const std::string replaced = "caf" + std::string{kReplacement};
+
+    nlohmann::json streamed = chat_body("hi");
+    streamed["stream"] = true;
+    const Frames chat = frames(collect(fixture.send(post("/v1/chat/completions", streamed))));
+    CHECK_FALSE(any_error(chat));
+    CHECK(content_of(chat) == replaced);
+
+    nlohmann::json blocking = chat_body("hi");
+    blocking["session_id"] = "new";
+    const HttpResponse answered = fixture.send(post("/v1/chat/completions", blocking));
+    REQUIRE(answered.status == 200);
+    CHECK(parsed(answered)["choices"][0]["message"]["content"] == replaced);
+    const std::string id = answered.headers.at("X-Apogee-Session-Id");
+    CHECK(last_saved(id) == replaced);
+
+    const Frames completion = frames(collect(
+        fixture.send(post("/v1/completions", nlohmann::json{{"prompt", "hi"}, {"stream", true}}))));
+    CHECK_FALSE(any_error(completion));
+    CHECK(completion_text(completion) == replaced);
+
+    const HttpResponse completed =
+        fixture.send(post("/v1/completions", nlohmann::json{{"prompt", "hi"}}));
+    REQUIRE(completed.status == 200);
+    CHECK(parsed(completed)["choices"][0]["text"] == replaced);
 }
 
 TEST_CASE("an empty streamed chunk is skipped, never the end of the stream",

@@ -1,11 +1,13 @@
 #include "cli/helpers.h"
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <chrono>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -17,6 +19,7 @@
 #include "agentloop/media.h"
 #include "cli/embed.h"
 #include "cli/tool_vectors.h"
+#include "contracts/utf8.h"
 #include "harness/harness.h"
 #include "harness/roles.h"
 #include "platform/platform.h"
@@ -42,6 +45,105 @@ agent::ToolRegistry apply_tool_policy(const agent::ToolRegistry& registry,
         }
     }
     return filtered;
+}
+
+std::vector<std::string> activate_suite(harness::Harness& harness, harness::Config& config,
+                                        const std::string& suite,
+                                        const backends::BuildOptions& options) {
+    const std::vector<std::string> names = config.backend_names();
+    std::vector<std::optional<std::int64_t>> windows;
+    windows.reserve(names.size());
+    for (const std::string& name : names) {
+        windows.push_back(harness::suite_pins(config, name).context_size);
+    }
+    config.models.default_suite = suite;
+    harness.set_active_suite(suite);
+    std::vector<std::string> repinned;
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        if (harness::suite_pins(config, names[i]).context_size != windows[i]) {
+            repinned.push_back(names[i]);
+        }
+    }
+    std::vector<std::string> said;
+    if (repinned.empty()) {
+        return said;
+    }
+    for (const backends::BackendStatus& status :
+         backends::rebuild_providers(harness, repinned, options).statuses) {
+        if (!status.constructed) {
+            said.push_back(status.name +
+                           " keeps its old window -- it could not be rebuilt: " + status.reason);
+        }
+    }
+    return said;
+}
+
+std::string known_suites(const harness::Config& config) {
+    std::string out;
+    for (const std::string& name : config.suite_names()) {
+        out += out.empty() ? "" : ", ";
+        out += name;
+    }
+    return out.empty() ? "none is configured -- 'apogee config add-suite'" : "configured: " + out;
+}
+
+std::string select_suite(harness::Config& config, std::string_view suite) {
+    if (suite == harness::kSuiteOff) {
+        config.models.default_suite.clear();
+        return {};
+    }
+    const auto it = config.suites.find(suite);
+    if (it == config.suites.end()) {
+        return "no suite named '" + std::string{suite} + "' (" + known_suites(config) + ")";
+    }
+    // The name as the file spells it, so every line that names the suite
+    // afterwards spells it one way.
+    config.models.default_suite = it->first;
+    return {};
+}
+
+agent::ToolRegistry apply_toolset(const agent::ToolRegistry& registry,
+                                  const std::vector<std::string>& toolset) {
+    agent::ToolRegistry narrowed;
+    narrowed.set_environment(registry.environment_source());
+    for (const std::string& name : registry.names()) {
+        const agent::Tool* tool = registry.find(name);
+        if (tool != nullptr &&
+            std::ranges::find(toolset, tools::toolset_of(name)) != toolset.end()) {
+            narrowed.add(*tool);
+        }
+    }
+    return narrowed;
+}
+
+agent::ToolRegistry pin_toolset(const agent::ToolRegistry& registry, const harness::Config& config,
+                                std::string_view backend) {
+    const std::optional<std::vector<std::string>> toolset =
+        harness::suite_pins(config, backend).toolset;
+    return toolset.has_value() ? apply_toolset(registry, *toolset) : registry;
+}
+
+MeteredProbe provider_metered_probe(std::filesystem::path config_path) {
+    return [config_path = std::move(config_path)](const harness::Config& config,
+                                                  std::string_view backend) {
+        MeteredAnswer answer;
+        const auto entry = config.backends.find(backend);
+        if (entry == config.backends.end()) {
+            answer.unknown = "no backend of that name is configured";
+            return answer;
+        }
+        backends::BuildOptions options;
+        options.config_path = config_path;
+        std::string reason;
+        const std::shared_ptr<harness::LLMProvider> provider = backends::make_provider(
+            entry->first, harness::backend_as_run(config, entry->first), reason, options);
+        if (provider == nullptr) {
+            answer.unknown = reason.empty() ? "it could not be built here" : reason;
+            return answer;
+        }
+        answer.metered = provider->generation_is_metered();
+        return answer;
+    };
 }
 
 agent::UrlFetcher make_http_fetcher(std::shared_ptr<backends::HttpClient> client) {
@@ -284,9 +386,8 @@ std::string attachment_refusal(const harness::Harness& harness, const std::strin
                                                            ? harness::ModelRole::Transcription
                                                            : harness::ModelRole::Vision,
                                                .conversation = model});
-    return media_refusal_message(
-        model, medium,
-        helper.from == harness::ResolvedFrom::RolePointer ? helper.key : std::string{});
+    return media_refusal_message(model, medium,
+                                 harness::is_named(helper.from) ? helper.key : std::string{});
 }
 
 std::string media_refusal_message(const std::string& model, harness::Medium medium,
@@ -296,7 +397,8 @@ std::string media_refusal_message(const std::string& model, harness::Medium medi
     // backend, a missing mmproj_path, and a build without llama.cpp.
     const std::string local =
         " -- a local model reads one with an mmproj_path on its backend, in a build with "
-        "-DAPOGEE_ENABLE_LLAMA=ON";
+        "-DAPOGEE_ENABLE_LLAMA=ON, or as an mlx backend over a vision model with mlx-vlm "
+        "installed";
     const auto role = [&](std::string_view noun, std::string_view command) {
         if (!helper.empty()) {
             return "and neither can the " + std::string{noun} + " model, '" + std::string{helper} +
@@ -325,17 +427,21 @@ std::vector<harness::ChatMessage> build_messages(
     const std::vector<harness::ContentPart>& attachments) {
     std::vector<harness::ChatMessage> messages;
 
+    // What was typed, piped or named arrives as the bytes it was read as --
+    // a terminal in another encoding, a Latin-1 file on stdin -- and enters
+    // the conversation here, whose history and requests are strict JSON
+    // dumps: made text first. Valid text is unchanged.
     if (!system_prompt.empty()) {
-        messages.push_back(harness::ChatMessage::system(system_prompt));
+        messages.push_back(harness::ChatMessage::system(harness::valid_utf8(system_prompt)));
     }
     if (!context.empty()) {
         // Before the prompt: a model weights the last message most, and the
         // prompt is what it should be answering, not the reference material.
-        messages.push_back(harness::ChatMessage::system(context));
+        messages.push_back(harness::ChatMessage::system(harness::valid_utf8(context)));
     }
 
     if (attachments.empty()) {
-        messages.push_back(harness::ChatMessage::user(prompt));
+        messages.push_back(harness::ChatMessage::user(harness::valid_utf8(prompt)));
         return messages;
     }
 
@@ -344,7 +450,7 @@ std::vector<harness::ChatMessage> build_messages(
     std::vector<harness::ContentPart> parts;
     parts.reserve(attachments.size() + 1);
     if (!prompt.empty()) {
-        parts.push_back(harness::ContentPart::from_text(prompt));
+        parts.push_back(harness::ContentPart::from_text(harness::valid_utf8(prompt)));
     }
     for (const harness::ContentPart& attachment : attachments) {
         parts.push_back(attachment);

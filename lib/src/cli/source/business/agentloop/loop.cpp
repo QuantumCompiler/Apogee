@@ -5,11 +5,13 @@
 #include <algorithm>
 #include <map>
 #include <optional>
+#include <ranges>
 #include <set>
 #include <stdexcept>
 #include <utility>
 
 #include "agentloop/budget.h"
+#include "agentloop/structured.h"
 #include "agentloop/thinking.h"
 #include "agentloop/tool_summary.h"
 #include "contracts/errors.h"
@@ -106,7 +108,123 @@ std::string call_key(const harness::ToolCall& call) {
     return call.name + '\x1f' + (parsed.is_discarded() ? call.arguments : parsed.dump());
 }
 
+/// The last user message in `history`, as written: the request a tool call
+/// serves, the question an answer answers (27g).
+std::string last_user_text(const std::vector<harness::ChatMessage>& history) {
+    for (const harness::ChatMessage& message : std::ranges::reverse_view(history)) {
+        if (message.role == harness::Role::User) {
+            return message.content.plain_text();
+        }
+    }
+    return {};
+}
+
+/// What a gated tool's call passes before any verifier is woken (27g): its
+/// arguments a JSON object, matching the tool's own parameter schema, and
+/// the tool's own precheck -- a path that must exist. In that order, the
+/// first failure deciding.
+std::vector<StructuralCheck> tool_structure(const agent::Tool& tool, std::string_view arguments) {
+    std::vector<StructuralCheck> out;
+    out.emplace_back([arguments]() -> std::string {
+        const nlohmann::json parsed = nlohmann::json::parse(arguments, nullptr, false);
+        if (parsed.is_discarded() || !parsed.is_object()) {
+            return "the arguments are not a JSON object";
+        }
+        return {};
+    });
+    out.emplace_back([&tool, arguments]() -> std::string {
+        const nlohmann::json schema = nlohmann::json::parse(tool.parameters_schema, nullptr, false);
+        if (schema.is_discarded() || !validate_schema(schema).ok) {
+            return {};  // a schema that cannot judge is not the call's fault
+        }
+        const ValidationResult checked = validate_against(schema, nlohmann::json::parse(arguments));
+        if (checked.ok) {
+            return {};
+        }
+        std::string errors;
+        for (const std::string& error : checked.errors) {
+            errors += (errors.empty() ? "" : "; ") + error;
+        }
+        return "they do not match its parameters: " + errors;
+    });
+    if (tool.precheck) {
+        out.emplace_back([&tool, arguments]() { return tool.precheck(arguments); });
+    }
+    return out;
+}
+
+/// The question put to the producer about an objection to its answer.
+std::string objection_question(std::string_view objection) {
+    return "A reviewer checked your last answer and objected:\n\n" + std::string{objection} +
+           "\n\nIf the objection is right, give the corrected answer. If it is wrong, say "
+           "briefly why your answer stands.";
+}
+
 }  // namespace
+
+std::string answer_objection(const harness::Harness& harness, const std::string& model,
+                             const std::vector<harness::ChatMessage>& history,
+                             std::string_view objection, std::optional<std::int64_t> max_tokens,
+                             const harness::CancellationToken& cancellation) {
+    std::vector<harness::ChatMessage> asked = history;
+    asked.push_back(harness::ChatMessage::user(objection_question(objection)));
+    harness::ChatRequest request;
+    request.model = model;
+    request.max_tokens = max_tokens;
+    // Not a turn of the conversation: its own context on a local backend,
+    // and the conversation's cache untouched.
+    request.transient.side_request = true;
+    const TurnBudget budget = turn_budget(harness, model, max_tokens);
+    Assembly assembly =
+        assemble_request(budget, request, asked, {}, {}, 0, current_turn_start(asked));
+    request.messages = std::move(assembly.messages);
+    return trim(harness.chat(request, cancellation).message.content.plain_text());
+}
+
+Validated check_answer(const harness::Harness& harness, const std::string& model,
+                       const std::vector<harness::ChatMessage>& history, const Verifier& verifier,
+                       const SideCallSink& narrate, std::optional<std::int64_t> max_tokens,
+                       const harness::CancellationToken& cancellation) {
+    std::string answer;
+    if (!history.empty() && history.back().role == harness::Role::Assistant) {
+        answer = trim(history.back().content.plain_text());
+    }
+    if (answer.empty()) {
+        Validated nothing;
+        nothing.result = Validated::Result::Unchecked;
+        nothing.notes.emplace_back("there is no answer to check yet");
+        return nothing;
+    }
+    const std::string question = last_user_text(history);
+    return validate_artifact(
+        answer,
+        [&](const std::string& artifact) {
+            return run_checks({}, &verifier, [&] { return answer_brief(question, artifact); });
+        },
+        [&](const std::string& /*artifact*/, const std::string& objection,
+            std::string& note) -> std::optional<std::string> {
+            std::string revised;
+            try {
+                const SideCallScope said{narrate, "validate",
+                                         "asking " + model + " to answer the objection"};
+                revised =
+                    answer_objection(harness, model, history, objection, max_tokens, cancellation);
+            } catch (const harness::CancelledError&) {
+                throw;
+            } catch (const std::exception& e) {
+                note = std::string{"the model could not answer it: "} + e.what();
+                return std::nullopt;
+            }
+            if (revised.empty()) {
+                note = "the model gave no answer to it";
+                return std::nullopt;
+            }
+            return revised;
+        },
+        // An answer is already the user's to read: the one verifier call is
+        // the measure, and the model's reply stands beside it, unverified.
+        false);
+}
 
 std::vector<harness::Tool> advertised_tools(const Options& options) {
     std::vector<harness::Tool> tools;
@@ -138,6 +256,38 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
 
     RunResult result;
     result.tokens.estimated = false;
+
+    // The turn's member calls (27f): counted from zero, said where this
+    // run's other model calls are said, and cancelled with the turn -- and a
+    // play the model started that could not run kept as a notice (27t).
+    std::optional<MemberCalls::Turn> member_turn;
+    if (options.member_calls != nullptr) {
+        member_turn.emplace(options.member_calls->begin_turn(
+            [&reporter](const SideCall& call) { reporter.on_side_call(call); },
+            options.cancellation,
+            [&reporter](std::string_view line) { reporter.on_notice(line); }));
+    }
+
+    // The suite's validation (27g), where a turn has a member-call budget:
+    // a gated tool's arguments before it runs, and a standing answer check.
+    // With no suite, no `validate:` block or a seam off, nothing changes. A
+    // side run -- a clerk -- is never validated, and a structured answer is
+    // held by its schema, which a model is never asked about.
+    const SideCallSink side = [&reporter](const SideCall& call) { reporter.on_side_call(call); };
+    const bool validating = options.member_calls != nullptr && !options.side_request;
+    const bool check_tools = validating && seam_on(harness.config(), Seam::ToolArgs);
+    const bool check_answers =
+        validating && options.response_schema.empty() && seam_on(harness.config(), Seam::Answer);
+    std::optional<Verifier> verifier;
+    std::string no_verifier;
+    if (check_tools || check_answers) {
+        if (const VerifierRole role = verifier_role(harness.config()); role.missing.empty()) {
+            verifier = bind_verifier(harness, *options.member_calls, role.role);
+        } else {
+            no_verifier = role.missing;
+        }
+    }
+    ToolArgChecks tool_checks;
 
     const std::vector<harness::Tool> tools = advertised_tools(options);
 
@@ -181,6 +331,9 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
     if (options.thinking.mode == harness::ThinkingMode::Auto) {
         reporter.on_progress(std::string{"thinking: auto -- "} + (thinking.off() ? "off" : "on") +
                              ", by " + decided.by);
+    }
+    if (check_tools && !verifier.has_value()) {
+        reporter.on_notice("validate: tool arguments checked by structure only -- " + no_verifier);
     }
     const std::size_t turn_start = current_turn_start(history);
     bool stubs_said = false;
@@ -347,6 +500,26 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
             result.answer = answer;
             result.finish_reason = response.finish_reason;
             result.hit_iteration_limit = final_pass && !calls.empty();
+
+            // The standing answer check (27g): once the answer is given, the
+            // verifier once; a pass is its line in the thinking block, and
+            // anything else is said after the answer -- never into history.
+            if (check_answers && !answer.empty()) {
+                if (verifier.has_value()) {
+                    Validated checked =
+                        check_answer(harness, options.model, history, *verifier, side,
+                                     options.max_tokens, options.cancellation);
+                    if (checked.result != Validated::Result::Passed) {
+                        for (const std::string& line : answer_lines(checked, "validate")) {
+                            reporter.on_notice(line);
+                        }
+                    }
+                    result.answer_check = std::move(checked);
+                } else {
+                    reporter.on_notice("validate: the answer was not checked -- " + no_verifier);
+                }
+                reporter.on_clear_status();
+            }
             return result;
         }
 
@@ -436,6 +609,31 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
                                       " is unavailable for the rest of this turn (see its "
                                       "error above). Answer without it.");
                     continue;
+                }
+
+                // Tool-argument validation (27g), between selection and
+                // execution: a gated tool's call is checked before the gate
+                // ever sees it. Round one's objection is the call's result,
+                // and it does not run; the revision is checked again, and
+                // runs -- through the gate, as any call does -- after a pass
+                // or, at the round limit, with the dispute said first.
+                if (check_tools) {
+                    if (const agent::Tool* tool = options.tools->find(call.name);
+                        tool != nullptr && agent::gated(*tool)) {
+                        const ToolArgChecks::Decision decided = tool_checks.check(
+                            call.name, call.arguments, tool_structure(*tool, call.arguments),
+                            verifier.has_value() ? &*verifier : nullptr, [&]() {
+                                return tool_args_brief(last_user_text(history), call.name,
+                                                       tool->description, call.arguments);
+                            });
+                        for (const std::string& line : decided.said) {
+                            reporter.on_notice(line);
+                        }
+                        if (decided.result.has_value()) {
+                            append_result(history, call, *decided.result);
+                            continue;
+                        }
+                    }
                 }
 
                 const agent::ToolOutcome outcome =

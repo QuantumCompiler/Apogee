@@ -32,7 +32,7 @@ endif()
 # is stamped into version.h via configure_file. Bump it here when cutting a
 # release (see CLAUDE.md -> Versioning).
 project(Apogee
-    VERSION 0.1.3
+    VERSION 0.1.4
     DESCRIPTION "A self-contained C++ AI harness for local and cloud LLMs"
     # C is enabled for one reason: SQLite ships as a C amalgamation, and the
     # chunk store compiles it. No Apogee source is C -- "primarily C++" is
@@ -65,8 +65,21 @@ option(APOGEE_BUILD_TESTS  "Build the test suite" ON)
 # honest. Until 2026-09-19 the default was OFF and one CI job built it.
 option(APOGEE_ENABLE_LLAMA "Configure and build the pinned llama.cpp target" ON)
 
+# The install channel (M10, DEVELOPER.md -> Install channels): which data
+# directory the executable owns with no flag and no APOGEE_HOME -- release
+# ~/.apogee, dev ~/.apogee-dev, test ~/.apogee-test -- and the name it builds
+# and installs under, `apogee` or `apogee-<channel>` beside it. `make install
+# MODE=<channel>` passes it; release is the default, and what CI, cicd.sh and
+# every release archive build. A channel changes the root and the name, never
+# the contents: the asset set is identical across channels.
+set(APOGEE_CHANNEL "release" CACHE STRING "Install channel: release, dev or test")
+set_property(CACHE APOGEE_CHANNEL PROPERTY STRINGS release dev test)
+if(NOT APOGEE_CHANNEL MATCHES "^(release|dev|test)$")
+    message(FATAL_ERROR "APOGEE_CHANNEL must be release, dev or test (got '${APOGEE_CHANNEL}')")
+endif()
+
 # Everything links statically into the one executable: it ships alone, on
-# every target (the release workflow copies the binary and nothing else; the
+# every target (a release archive carries the binary and nothing else; the
 # Windows presets add -static for the runtime too). Set HERE, before any
 # dependency is declared, and forced: a subproject's own
 # `option(BUILD_SHARED_LIBS ... ON)` -- llama.cpp's, for one -- would otherwise

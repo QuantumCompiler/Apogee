@@ -1,9 +1,14 @@
 #include "contracts/config_edit.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <fstream>
+#include <functional>
+#include <initializer_list>
+#include <optional>
 #include <random>
+#include <span>
 #include <sstream>
 #include <system_error>
 #include <utility>
@@ -550,8 +555,8 @@ Lines format_mcp_server_entry(std::string_view name, const McpServerConfig& serv
     };
     out.push_back(std::string(kEntryIndent, ' ') + std::string{name} + ":" +
                   std::string{terminator});
-    // Alphabetical after the name, as Ommi's formatter was, so two entries
-    // written by two surfaces read alike.
+    // Alphabetical after the name, so two entries written by two surfaces
+    // read alike.
     if (!server.args.empty()) {
         list("args", server.args);
     }
@@ -714,13 +719,31 @@ Lines format_graph_entry(std::string_view name, const NamedGraphConfig& graph,
     };
     out.push_back(std::string(kEntryIndent, ' ') + std::string{name} + ":" +
                   std::string{terminator});
-    std::string members = "[";
-    for (const std::string& collection : graph.collections) {
-        members += members.size() > 1 ? ", " : "";
-        members += yaml_scalar(collection);
+    // `collections:` is always written for a graph of collections; a code
+    // graph (27k) with only `sources:` omits the empty list.
+    if (!graph.collections.empty() || graph.sources.empty()) {
+        std::string members = "[";
+        for (const std::string& collection : graph.collections) {
+            members += members.size() > 1 ? ", " : "";
+            members += yaml_scalar(collection);
+        }
+        members += "]";
+        field("collections", members);
     }
-    members += "]";
-    field("collections", members);
+    const auto list = [&](std::string_view key, const std::vector<std::string>& values) {
+        std::string rendered = "[";
+        for (const std::string& value : values) {
+            rendered += rendered.size() > 1 ? ", " : "";
+            rendered += yaml_scalar(value);
+        }
+        field(key, rendered + "]");
+    };
+    if (!graph.sources.empty()) {
+        list("sources", graph.sources);
+    }
+    if (!graph.languages.empty()) {
+        list("languages", graph.languages);
+    }
     if (!graph.extract_backend.empty()) {
         field("extract_backend", yaml_scalar(graph.extract_backend));
     }
@@ -756,6 +779,723 @@ std::string append_embedding(std::string_view content, std::string_view name,
 
 std::string delete_embedding(std::string_view content, std::string_view name) {
     return delete_entry(content, "embeddings", "collection", name);
+}
+
+namespace {
+
+/// A suite member's role sits at this indent under `members:`, and a long-form
+/// member's fields at the next.
+constexpr std::size_t kMemberIndent = 6;
+constexpr std::size_t kMemberFieldIndent = 8;
+
+/// A flow list of YAML scalars: `[a, b]`.
+std::string flow_list(const std::vector<std::string>& values) {
+    std::string rendered = "[";
+    for (const std::string& value : values) {
+        rendered += rendered.size() > 1 ? ", " : "";
+        rendered += yaml_scalar(value);
+    }
+    return rendered + "]";
+}
+
+/// One member's lines: `role: backend` alone, or the long form when it pins.
+Lines format_suite_member(std::string_view role, const SuiteMember& member,
+                          std::string_view terminator) {
+    const std::string indent(kMemberIndent, ' ');
+    const std::string field(kMemberFieldIndent, ' ');
+    const std::string end{terminator};
+    if (!member.pins()) {
+        return {indent + std::string{role} + ": " + yaml_scalar(member.backend) + end};
+    }
+    Lines out{indent + std::string{role} + ":" + end,
+              field + "backend: " + yaml_scalar(member.backend) + end};
+    if (member.context_size.has_value()) {
+        out.push_back(field + "context_size: " + std::to_string(*member.context_size) + end);
+    }
+    if (member.toolset.has_value()) {
+        out.push_back(field + "toolset: " + flow_list(*member.toolset) + end);
+    }
+    return out;
+}
+
+/// `consultable: [utility, vision]` (27f) -- nothing for an empty list.
+Lines format_consultable(const std::vector<std::string>& roles, std::string_view terminator) {
+    if (roles.empty()) {
+        return {};
+    }
+    return {std::string(kFieldIndent, ' ') + "consultable: " + flow_list(roles) +
+            std::string{terminator}};
+}
+
+/// The `consult_caps:` block (27f), its caps in `consult_cap_names()` order --
+/// nothing when none is set.
+Lines format_consult_caps(const ConsultCaps& caps, std::string_view terminator) {
+    if (!caps.any()) {
+        return {};
+    }
+    const std::string end{terminator};
+    const std::string field(kMemberIndent, ' ');
+    Lines out{std::string(kFieldIndent, ' ') + "consult_caps:" + end};
+    const auto add = [&](std::string_view name, const std::optional<std::int64_t>& value) {
+        if (value.has_value()) {
+            out.push_back(field + std::string{name} + ": " + std::to_string(*value) + end);
+        }
+    };
+    add("per_turn", caps.per_turn);
+    add("brief_tokens", caps.brief_tokens);
+    add("answer_tokens", caps.answer_tokens);
+    return out;
+}
+
+/// The `validate:` block (27g), its keys in writing order -- `verifier`,
+/// then `validate_seam_names()` -- each only when set; nothing when none is.
+Lines format_validate(const ValidateConfig& validate, std::string_view terminator) {
+    if (!validate.any()) {
+        return {};
+    }
+    const std::string end{terminator};
+    const std::string field(kMemberIndent, ' ');
+    Lines out{std::string(kFieldIndent, ' ') + "validate:" + end};
+    if (validate.verifier.has_value()) {
+        out.push_back(field + "verifier: " + yaml_scalar(*validate.verifier) + end);
+    }
+    const auto add = [&](std::string_view name, const std::optional<bool>& value) {
+        if (value.has_value()) {
+            out.push_back(field + std::string{name} + ": " + (*value ? "on" : "off") + end);
+        }
+    };
+    add("tool_args", validate.tool_args);
+    add("extraction", validate.extraction);
+    if (validate.answers.has_value()) {
+        out.push_back(field + "answers: " + yaml_scalar(*validate.answers) + end);
+    }
+    return out;
+}
+
+/// `orchestrate: true` (27t) when the suite orchestrates; nothing when it
+/// does not -- off is absent.
+Lines format_orchestrate(bool orchestrate, std::string_view terminator) {
+    if (!orchestrate) {
+        return {};
+    }
+    return Lines{std::string(kFieldIndent, ' ') + "orchestrate: true" + std::string{terminator}};
+}
+
+Lines format_suite_entry(std::string_view name, const SuiteConfig& suite,
+                         std::string_view terminator) {
+    const std::string end{terminator};
+    Lines out{std::string(kEntryIndent, ' ') + std::string{name} + ":" + end};
+    if (!suite.description.empty()) {
+        out.push_back(std::string(kFieldIndent, ' ') +
+                      "description: " + yaml_scalar(suite.description) + end);
+    }
+    if (!suite.members.empty()) {
+        out.push_back(std::string(kFieldIndent, ' ') + "members:" + end);
+        // In the order every listing shows the roles, not the map's.
+        for (const std::string_view role : suite_role_names()) {
+            if (const auto it = suite.members.find(role); it != suite.members.end()) {
+                const Lines member = format_suite_member(role, it->second, terminator);
+                out.insert(out.end(), member.begin(), member.end());
+            }
+        }
+    }
+    const Lines consultable = format_consultable(suite.consultable, terminator);
+    out.insert(out.end(), consultable.begin(), consultable.end());
+    const Lines caps = format_consult_caps(suite.consult_caps, terminator);
+    out.insert(out.end(), caps.begin(), caps.end());
+    const Lines validate = format_validate(suite.validate, terminator);
+    out.insert(out.end(), validate.begin(), validate.end());
+    const Lines orchestrate = format_orchestrate(suite.orchestrate, terminator);
+    out.insert(out.end(), orchestrate.begin(), orchestrate.end());
+    return out;
+}
+
+/// The lines a key at `key_index` owns: those after it indented at least
+/// `child_indent`, up to `limit` -- blank and comment lines kept only when a
+/// child follows them, as `entry_extent` keeps them.
+std::pair<std::size_t, std::size_t> block_extent(const Lines& lines, std::size_t key_index,
+                                                 std::size_t limit, std::size_t child_indent) {
+    std::size_t last_content = key_index;
+    for (std::size_t i = key_index + 1; i < limit; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line)) {
+            continue;
+        }
+        if (indent_of(line) >= child_indent) {
+            last_content = i;
+            continue;
+        }
+        break;
+    }
+    return {key_index, last_content + 1};
+}
+
+/// The key a content line at exactly `indent` names (`key:` or `key: value`),
+/// or nullopt.
+std::optional<std::string_view> key_at(std::string_view line_body, std::size_t indent) {
+    if (is_blank(line_body) || is_comment(line_body) || indent_of(line_body) != indent) {
+        return std::nullopt;
+    }
+    const std::string_view rest = line_body.substr(indent);
+    const std::size_t colon = rest.find(':');
+    if (colon == std::string_view::npos || colon == 0) {
+        return std::nullopt;
+    }
+    return rest.substr(0, colon);
+}
+
+/// Inserts `added` at `at`, giving an unterminated last line its terminator
+/// first when the insertion follows it.
+void insert_lines(Lines& lines, std::size_t at, const Lines& added, const std::string& terminator) {
+    if (at > 0 && at == lines.size()) {
+        std::string& previous = lines.back();
+        if (!previous.empty() && previous.back() != '\n') {
+            previous += terminator;
+        }
+    }
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(at), added.begin(), added.end());
+}
+
+}  // namespace
+
+std::string append_suite(std::string_view content, std::string_view name, const SuiteConfig& suite,
+                         bool force) {
+    if (equals_folded(name, kSuiteOff)) {
+        throw ConfigEditError("suite name '" + std::string{name} + "' is reserved -- '/suite " +
+                              std::string{kSuiteOff} + "' means no suite; choose another");
+    }
+    const Lines lines = split_lines(content);
+    return append_entry(content, "suites", "suite", name,
+                        format_suite_entry(name, suite, dominant_terminator(lines)), force);
+}
+
+std::string delete_suite(std::string_view content, std::string_view name) {
+    return delete_entry(content, "suites", "suite", name);
+}
+
+// ---- Symphonies (27q) ---------------------------------------------------------
+
+namespace {
+
+/// The words YAML reads as something other than the strings they spell.
+constexpr std::array<std::string_view, 13> kYamlKeywords{
+    "true", "false", "null", "yes", "no", "on", "off", "y", "n", "~", ".nan", ".inf", "-.inf"};
+
+/// The digits a `\xNN` escape is written with.
+constexpr std::string_view kHexDigits = "0123456789abcdef";
+
+/// A word YAML would read as something other than the string it spells.
+bool yaml_keyword(std::string_view value) {
+    return std::ranges::any_of(kYamlKeywords,
+                               [&](std::string_view word) { return equals_folded(value, word); });
+}
+
+/// `parts` joined -- one allocation-friendly line of an entry.
+std::string line_of(std::initializer_list<std::string_view> parts) {
+    std::string out;
+    for (const std::string_view part : parts) {
+        out += part;
+    }
+    return out;
+}
+
+/// Whether `value` reads back as itself written plain: a letter or digit
+/// first, a few punctuation marks inside, nothing at either end YAML would
+/// strip, and no word YAML treats as a keyword.
+bool plain_safe(std::string_view value) {
+    if (value.empty() || yaml_keyword(value) || value.back() == ' ') {
+        return false;
+    }
+    if (std::isalnum(static_cast<unsigned char>(value.front())) == 0) {
+        return false;
+    }
+    return std::ranges::all_of(value, [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) != 0 ||
+               std::string_view{" _-.,;()/+='?!"}.find(c) != std::string_view::npos;
+    });
+}
+
+/// `value` double-quoted, every character YAML would not keep escaped.
+std::string quoted_text(std::string_view value) {
+    std::string out = "\"";
+    for (const char c : value) {
+        switch (c) {
+            case '"':
+                out += "\\\"";
+                break;
+            case '\\':
+                out += "\\\\";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            case '\r':
+                out += "\\r";
+                break;
+            case '\t':
+                out += "\\t";
+                break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+                    out += "\\x";
+                    out += kHexDigits[(static_cast<unsigned char>(c) >> 4U) & 0x0FU];
+                    out += kHexDigits[static_cast<unsigned char>(c) & 0x0FU];
+                } else {
+                    out += c;
+                }
+        }
+    }
+    return out + "\"";
+}
+
+/// Whether a literal block can carry `value` exactly: printable lines (a tab
+/// is), no carriage return, and at most one newline at the end -- a block
+/// keeping trailing blank lines would swallow whatever an editor puts after
+/// it.
+bool block_safe(std::string_view value) {
+    if (value.find('\n') == std::string_view::npos ||
+        value.find_first_not_of(" \t\n") == std::string_view::npos) {
+        return false;  // one line, or nothing to show: a scalar says it
+    }
+    if (value.size() >= 2 && value.substr(value.size() - 2) == "\n\n") {
+        return false;
+    }
+    // A line of nothing but blanks reads as an empty one to a line scan.
+    std::string_view rest = value;
+    while (!rest.empty()) {
+        const std::size_t newline = rest.find('\n');
+        const std::string_view line = rest.substr(0, newline);
+        if (!line.empty() && line.find_first_not_of(" \t") == std::string_view::npos) {
+            return false;
+        }
+        if (newline == std::string_view::npos) {
+            break;
+        }
+        rest.remove_prefix(newline + 1);
+    }
+    return std::ranges::none_of(value, [](char c) {
+        return c == '\r' || c == 0x7F ||
+               (static_cast<unsigned char>(c) < 0x20 && c != '\n' && c != '\t');
+    });
+}
+
+/// `key: value` at `indent`, the value as its text reads back exactly through
+/// `parse_symphony_spec`: plain when that is safe, a literal block for
+/// several lines, double-quoted with escapes otherwise.
+void text_field(Lines& out, std::size_t indent, std::string_view key, std::string_view value,
+                std::string_view terminator) {
+    const std::string pad(indent, ' ');
+    const std::string end{terminator};
+    if (!block_safe(value)) {
+        out.push_back(pad + std::string{key} + ": " +
+                      (plain_safe(value) ? std::string{value} : quoted_text(value)) + end);
+        return;
+    }
+    // Clip keeps one final newline, strip none; an explicit indentation
+    // indicator when the first line opens with a space, which detection
+    // would take for the block's own indentation.
+    const bool final_newline = value.back() == '\n';
+    std::string_view lines = final_newline ? value.substr(0, value.size() - 1) : value;
+    const std::size_t first = lines.find_first_not_of('\n');
+    const bool leading_space = first != std::string_view::npos && lines[first] == ' ';
+    out.push_back(
+        line_of({pad, key, ": |", leading_space ? "2" : "", final_newline ? "" : "-", end}));
+    const std::string content(indent + 2, ' ');
+    while (true) {
+        const std::size_t newline = lines.find('\n');
+        const std::string_view line = lines.substr(0, newline);
+        out.push_back(line.empty() ? end : line_of({content, line, end}));
+        if (newline == std::string_view::npos) {
+            break;
+        }
+        lines.remove_prefix(newline + 1);
+    }
+}
+
+/// A definition's lines at `indent`, everything but the name: `description`
+/// and `input` when they say something, then `stages`, each stage's short
+/// fields before its prompt and schema -- a play stage's (27r) `play:`, and
+/// its `input:` when it has one.
+void symphony_body(Lines& out, const SymphonySpec& spec, std::size_t indent,
+                   std::string_view terminator) {
+    const std::string pad(indent, ' ');
+    const std::string end{terminator};
+    if (!spec.description.empty()) {
+        text_field(out, indent, "description", spec.description, terminator);
+    }
+    if (!spec.input.description.empty() || spec.input.image) {
+        out.push_back(line_of({pad, "input:", end}));
+        if (!spec.input.description.empty()) {
+            text_field(out, indent + 2, "description", spec.input.description, terminator);
+        }
+        if (spec.input.image) {
+            out.push_back(line_of({pad, "  image: true", end}));
+        }
+    }
+    out.push_back(line_of({pad, "stages:", end}));
+    const std::string field(indent + 4, ' ');
+    for (const SymphonyStage& stage : spec.stages) {
+        out.push_back(line_of({pad, "  - name: ", stage.name, end}));
+        // Every field the stage holds is written, so the parser -- not the
+        // renderer -- judges a stage that mixes the two kinds (27r): a role
+        // and a play both set read back refused, never as one of them.
+        if (!stage.role.empty() || !stage.plays()) {
+            out.push_back(line_of({field, "role: ", stage.role, end}));
+        }
+        if (stage.plays()) {
+            out.push_back(line_of({field, "play: ", stage.play, end}));
+        }
+        if (stage.image) {
+            out.push_back(line_of({field, "image: true", end}));
+        }
+        if (stage.brief_tokens.has_value()) {
+            out.push_back(
+                line_of({field, "brief_tokens: ", std::to_string(*stage.brief_tokens), end}));
+        }
+        if (stage.answer_tokens.has_value()) {
+            out.push_back(
+                line_of({field, "answer_tokens: ", std::to_string(*stage.answer_tokens), end}));
+        }
+        if (!stage.plays() || !stage.prompt.empty()) {
+            text_field(out, indent + 4, "prompt", stage.prompt, terminator);
+        }
+        if (!stage.input.empty()) {
+            text_field(out, indent + 4, "input", stage.input, terminator);
+        }
+        if (!stage.schema.empty()) {
+            text_field(out, indent + 4, "schema", stage.schema, terminator);
+        }
+    }
+}
+
+/// The lines one `symphonies:` entry occupies. Unlike `entry_extent`, a
+/// line indented under the entry is the entry's whatever it starts with: a
+/// prompt's `# Heading` is block content, not a comment that might belong to
+/// the next entry. Blank lines, and comments at an entry's own indent or
+/// less, stay tentative.
+std::pair<std::size_t, std::size_t> symphony_extent(const Lines& lines, std::size_t key_index,
+                                                    std::size_t section_end) {
+    std::size_t last_content = key_index;
+    for (std::size_t i = key_index + 1; i < section_end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line)) {
+            continue;
+        }
+        if (indent_of(line) >= kFieldIndent) {
+            last_content = i;
+            continue;
+        }
+        if (is_comment(line)) {
+            continue;
+        }
+        break;
+    }
+    return {key_index, last_content + 1};
+}
+
+}  // namespace
+
+std::string render_symphony_spec(const SymphonySpec& spec) {
+    Lines out;
+    out.push_back("name: " + spec.name + "\n");
+    symphony_body(out, spec, 0, "\n");
+    return join_lines(out);
+}
+
+std::string append_symphony(std::string_view content, std::string_view name,
+                            const SymphonySpec& spec, bool force) {
+    if (!is_symphony_name(name)) {
+        throw ConfigEditError("symphony name '" + std::string{name} +
+                              "' is not one (letters, digits, '_' and '-')");
+    }
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+    Lines entry;
+    entry.push_back(std::string(kEntryIndent, ' ') + std::string{name} + ":" + terminator);
+    symphony_body(entry, spec, kFieldIndent, terminator);
+
+    const SectionRange range = find_section(lines, "symphonies");
+    if (!range.found) {
+        // No section yet: the generic path creates it at the file's end.
+        return append_entry(content, "symphonies", "symphony", name, std::move(entry), force);
+    }
+    if (const std::optional<std::string> clash =
+            fold_collision(section_entry_names(content, "symphonies"), name);
+        clash.has_value() && !force) {
+        throw ConfigEditError("symphony '" + std::string{name} + "' collides with existing '" +
+                              *clash +
+                              "' -- symphony names are compared case-insensitively, so the two "
+                              "would be the same symphony; choose a distinct name");
+    }
+    if (const std::optional<std::size_t> existing = find_entry_line(lines, range, name);
+        existing.has_value()) {
+        if (!force) {
+            throw ConfigEditError("symphony '" + std::string{name} +
+                                  "' already exists; pass --force to replace it");
+        }
+        // Replaced in place, its own extent: the entry keeps its position and
+        // the comment above it.
+        const auto [begin, end] = symphony_extent(lines, *existing, range.end);
+        lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(begin),
+                    lines.begin() + static_cast<std::ptrdiff_t>(end));
+        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(begin), entry.begin(),
+                     entry.end());
+        return join_lines(lines);
+    }
+    // After the last entry's own extent -- a prompt whose last line opens
+    // with '#' is that entry's, not a trailing comment to insert above -- and
+    // above any comment block that closes the section.
+    std::size_t insert_at = range.begin;
+    for (std::size_t i = range.begin; i < range.end; ++i) {
+        if (entry_name(body(lines[i])).has_value()) {
+            insert_at = symphony_extent(lines, i, range.end).second;
+        }
+    }
+    if (insert_at > 0 && insert_at == lines.size()) {
+        std::string& previous = lines.back();
+        if (!previous.empty() && previous.back() != '\n') {
+            previous += terminator;
+        }
+    }
+    if (insert_at > range.begin) {
+        entry.insert(entry.begin(), terminator);
+    }
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(insert_at), entry.begin(),
+                 entry.end());
+    return join_lines(lines);
+}
+
+std::string delete_symphony(std::string_view content, std::string_view name) {
+    Lines lines = split_lines(content);
+    const SectionRange range = find_section(lines, "symphonies");
+    if (!range.found) {
+        throw ConfigEditError("no 'symphonies:' section in this config");
+    }
+    const std::optional<std::size_t> key_line = find_entry_line(lines, range, name);
+    if (!key_line.has_value()) {
+        throw ConfigEditError("symphony '" + std::string{name} + "' not found in config");
+    }
+    auto [begin, end] = symphony_extent(lines, *key_line, range.end);
+    // The blank separator above it goes too: the exact inverse of the append.
+    if (begin > range.begin && is_blank(body(lines[begin - 1]))) {
+        --begin;
+    }
+    lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(begin),
+                lines.begin() + static_cast<std::ptrdiff_t>(end));
+    return join_lines(lines);
+}
+
+std::string set_suite_member(std::string_view content, std::string_view suite,
+                             std::string_view role, const std::optional<SuiteMember>& member) {
+    const std::span<const std::string_view> roles = suite_role_names();
+    const auto rank = std::ranges::find(roles, role);
+    if (rank == roles.end()) {
+        std::string accepted;
+        for (const std::string_view name : roles) {
+            accepted += (accepted.empty() ? "" : ", ") + std::string{name};
+        }
+        throw ConfigEditError("'" + std::string{role} + "' is not a role (accepted: " + accepted +
+                              ")");
+    }
+
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+    const SectionRange section = find_section(lines, "suites");
+    if (!section.found) {
+        throw ConfigEditError("no 'suites:' section in this config");
+    }
+    const std::optional<std::size_t> key = find_entry_line(lines, section, suite);
+    if (!key.has_value()) {
+        throw ConfigEditError("suite '" + std::string{suite} + "' not found in config");
+    }
+    const auto [entry_begin, entry_end] = entry_extent(lines, *key, section.end);
+    const std::string missing =
+        "suite '" + std::string{suite} + "' has no " + std::string{role} + " member";
+
+    // The `members:` block, written as a block: a flow mapping on one line is
+    // legal YAML, and rare enough that refusing it beats a splice that
+    // misreads it.
+    std::optional<std::size_t> members_line;
+    for (std::size_t i = entry_begin + 1; i < entry_end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (key_at(line, kFieldIndent) != std::optional<std::string_view>{"members"}) {
+            continue;
+        }
+        std::string_view value = line.substr(line.find(':') + 1);
+        value.remove_prefix(std::min(value.find_first_not_of(" \t"), value.size()));
+        if (!value.empty() && value.front() != '#') {
+            throw ConfigEditError("suites." + std::string{suite} +
+                                  ".members is written inline -- write it as a block, or "
+                                  "replace the suite with add-suite --force");
+        }
+        members_line = i;
+        break;
+    }
+
+    if (!members_line.has_value()) {
+        if (!member.has_value()) {
+            throw ConfigEditError(missing);
+        }
+        Lines added{std::string(kFieldIndent, ' ') + "members:" + terminator};
+        const Lines rendered = format_suite_member(role, *member, terminator);
+        added.insert(added.end(), rendered.begin(), rendered.end());
+        insert_lines(lines, entry_end, added, terminator);
+        return join_lines(lines);
+    }
+
+    const auto [block_begin, block_end] =
+        block_extent(lines, *members_line, entry_end, kMemberIndent);
+    std::optional<std::size_t> role_line;
+    std::optional<std::size_t> later_role;
+    for (std::size_t i = block_begin + 1; i < block_end; ++i) {
+        const std::optional<std::string_view> name = key_at(body(lines[i]), kMemberIndent);
+        if (!name.has_value()) {
+            continue;
+        }
+        if (*name == role) {
+            role_line = i;
+            break;
+        }
+        // The first member that sorts after this role: a new one goes before
+        // it, so the members read in the order every listing shows them.
+        if (!later_role.has_value()) {
+            if (const auto at = std::ranges::find(roles, *name); at != roles.end() && at > rank) {
+                later_role = i;
+            }
+        }
+    }
+
+    if (role_line.has_value()) {
+        const auto [begin, end] = block_extent(lines, *role_line, block_end, kMemberFieldIndent);
+        lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(begin),
+                    lines.begin() + static_cast<std::ptrdiff_t>(end));
+        if (member.has_value()) {
+            insert_lines(lines, begin, format_suite_member(role, *member, terminator), terminator);
+        }
+        return join_lines(lines);
+    }
+    if (!member.has_value()) {
+        throw ConfigEditError(missing);
+    }
+    std::size_t at = block_end;
+    if (later_role.has_value()) {
+        // Above the comment that leads the member it goes before: that
+        // comment is the later member's, and stays on it.
+        at = *later_role;
+        while (at > block_begin + 1 && is_comment(body(lines[at - 1]))) {
+            --at;
+        }
+    }
+    insert_lines(lines, at, format_suite_member(role, *member, terminator), terminator);
+    return join_lines(lines);
+}
+
+namespace {
+
+/// The lines a suite field at `key_index` owns: the key line, and after it
+/// every line indented deeper -- or, for a block list, a `- item` at the
+/// key's own indent -- with blank and comment lines kept only when such a
+/// line follows them.
+std::pair<std::size_t, std::size_t> suite_field_extent(const Lines& lines, std::size_t key_index,
+                                                       std::size_t limit) {
+    std::size_t last_content = key_index;
+    for (std::size_t i = key_index + 1; i < limit; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line)) {
+            continue;
+        }
+        const std::size_t indent = indent_of(line);
+        if (indent > kFieldIndent ||
+            (indent == kFieldIndent && line.substr(indent).starts_with("-"))) {
+            last_content = i;
+            continue;
+        }
+        break;
+    }
+    return {key_index, last_content + 1};
+}
+
+/// Replaces the suite field `key` of `suite` with `rendered` -- removing it
+/// when `rendered` is empty -- in place, every other line of the entry as it
+/// was. A field not yet written goes above `before` when the entry has that
+/// field (above the comment leading it), else at the entry's end.
+std::string set_suite_field(std::string_view content, std::string_view suite, std::string_view key,
+                            std::string_view before,
+                            const std::function<Lines(std::string_view)>& render) {
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+    const SectionRange section = find_section(lines, "suites");
+    if (!section.found) {
+        throw ConfigEditError("no 'suites:' section in this config");
+    }
+    const std::optional<std::size_t> entry = find_entry_line(lines, section, suite);
+    if (!entry.has_value()) {
+        throw ConfigEditError("suite '" + std::string{suite} + "' not found in config");
+    }
+    const auto [entry_begin, entry_end] = entry_extent(lines, *entry, section.end);
+    std::optional<std::size_t> field_line;
+    std::optional<std::size_t> before_line;
+    for (std::size_t i = entry_begin + 1; i < entry_end; ++i) {
+        const std::optional<std::string_view> name = key_at(body(lines[i]), kFieldIndent);
+        if (name == std::optional<std::string_view>{key}) {
+            field_line = i;
+        } else if (!before.empty() && name == std::optional<std::string_view>{before}) {
+            before_line = i;
+        }
+    }
+    const Lines rendered = render(terminator);
+    if (field_line.has_value()) {
+        const auto [begin, end] = suite_field_extent(lines, *field_line, entry_end);
+        lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(begin),
+                    lines.begin() + static_cast<std::ptrdiff_t>(end));
+        if (!rendered.empty()) {
+            insert_lines(lines, begin, rendered, terminator);
+        }
+        return join_lines(lines);
+    }
+    if (rendered.empty()) {
+        return std::string{content};  // nothing written, nothing to remove
+    }
+    std::size_t at = entry_end;
+    if (before_line.has_value()) {
+        at = *before_line;
+        while (at > entry_begin + 1 && is_comment(body(lines[at - 1]))) {
+            --at;
+        }
+    }
+    insert_lines(lines, at, rendered, terminator);
+    return join_lines(lines);
+}
+
+}  // namespace
+
+std::string set_suite_consultable(std::string_view content, std::string_view suite,
+                                  const std::vector<std::string>& roles) {
+    return set_suite_field(
+        content, suite, "consultable", "consult_caps",
+        [&roles](std::string_view terminator) { return format_consultable(roles, terminator); });
+}
+
+std::string set_suite_consult_caps(std::string_view content, std::string_view suite,
+                                   const ConsultCaps& caps) {
+    return set_suite_field(
+        content, suite, "consult_caps", "",
+        [&caps](std::string_view terminator) { return format_consult_caps(caps, terminator); });
+}
+
+std::string set_suite_validate(std::string_view content, std::string_view suite,
+                               const ValidateConfig& validate) {
+    return set_suite_field(
+        content, suite, "validate", "",
+        [&validate](std::string_view terminator) { return format_validate(validate, terminator); });
+}
+
+std::string set_suite_orchestrate(std::string_view content, std::string_view suite,
+                                  bool orchestrate) {
+    return set_suite_field(content, suite, "orchestrate", "",
+                           [orchestrate](std::string_view terminator) {
+                               return format_orchestrate(orchestrate, terminator);
+                           });
 }
 
 std::vector<std::string_view> models_role_fields() {
@@ -1038,6 +1778,29 @@ std::string set_models_role(std::string_view content, std::string_view field,
                               "' (accepted: " + accepted + ")");
     }
     return set_section_scalar(content, "models", field, value);
+}
+
+std::string set_default_suite(std::string_view content, std::string_view name) {
+    return set_section_scalar(content, "models", "default_suite", name);
+}
+
+std::string set_attachments_graph(std::string_view content, std::string_view method) {
+    if (!attachment_graph_method_from_string(method).has_value()) {
+        throw ConfigEditError(attachment_graph_values_message("attachments.graph", method));
+    }
+    // `attachments: { graph: off }` -- or a header carrying a comment -- is a
+    // section the line editor does not see: a block appended beside it would
+    // be a second key, and the loader reads the first. Refused, never misread.
+    for (const std::string& line : split_lines(content)) {
+        const std::string_view text = body(line);
+        if (is_top_level(text) && text.starts_with("attachments:") &&
+            !is_section_header(text, "attachments")) {
+            throw ConfigEditError(
+                "the attachments: line holds more than its key -- the editor sets the block "
+                "form, 'attachments:' alone with '  graph: <code|off>' under it");
+        }
+    }
+    return set_section_scalar(content, "attachments", "graph", method);
 }
 
 std::string set_permission(std::string_view content, std::string_view tool,

@@ -7,8 +7,10 @@
 # serve DOES hold a port (the sibling check proves `complete` does not), that
 # the bind policy fails closed on the real command line, that the streamed
 # body reaches a real client whole and ends with [DONE], that a session minted
-# over HTTP is resumable from the terminal, and that SIGTERM stops the server
-# cleanly. POSIX only, like the other shell checks (CLAUDE.md -> Platforms).
+# over HTTP is resumable from the terminal, that a task the CLI ran is read
+# over the admin plane as the CLI prints it while no task control answers
+# (27j), and that SIGTERM stops the server cleanly. POSIX only, like the
+# other shell checks (CLAUDE.md -> Platforms).
 
 set -uo pipefail
 
@@ -222,6 +224,34 @@ if "$APOGEE_BIN" auth add openai sk-on-the-command-line </dev/null >/dev/null 2>
     fail "auth add accepted a key as a command-line argument"
 fi
 grep -q "LEAKPROBE" "$WORK_DIR/config/credentials.json" && fail "auth clear left the key in the store"
+
+# --- the task reads (27j): served as the CLI prints them; control has no route ---
+mkdir -p "$WORK_DIR/project"
+( cd "$WORK_DIR/project" && "$APOGEE_BIN" task run "Say hello" -m mock --rounds 1 \
+    </dev/null >"$WORK_DIR/task-run.txt" 2>&1 )
+"$APOGEE_BIN" task list --output-format json </dev/null >"$WORK_DIR/task-list-cli.json" 2>/dev/null \
+    || fail "task list --output-format json"
+CODE="$(curl -s -o "$WORK_DIR/task-list.json" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/v1/admin/tasks")"
+[ "$CODE" = "200" ] || fail "GET /v1/admin/tasks failed (got $CODE): $(cat "$WORK_DIR/task-list.json")"
+[ "$(cat "$WORK_DIR/task-list.json")" = "$(cat "$WORK_DIR/task-list-cli.json")" ] \
+    || fail "the served task list is not the CLI's document: $(cat "$WORK_DIR/task-list.json")"
+TASK_ID="$(grep -o '"id":"task-[0-9-]*"' "$WORK_DIR/task-list.json" | head -n 1 | cut -d'"' -f4)"
+[ -n "$TASK_ID" ] || fail "no task listed after task run: $(cat "$WORK_DIR/task-run.txt")"
+"$APOGEE_BIN" task status "$TASK_ID" --output-format json </dev/null >"$WORK_DIR/task-cli.json" 2>/dev/null \
+    || fail "task status --output-format json"
+CODE="$(curl -s -o "$WORK_DIR/task.json" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/v1/admin/tasks/$TASK_ID")"
+[ "$CODE" = "200" ] || fail "GET /v1/admin/tasks/$TASK_ID failed (got $CODE)"
+[ "$(cat "$WORK_DIR/task.json")" = "$(cat "$WORK_DIR/task-cli.json")" ] \
+    || fail "the served task is not the CLI's document: $(cat "$WORK_DIR/task.json")"
+CODE="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/admin/tasks/$TASK_ID")"
+[ "$CODE" = "401" ] || fail "an unauthenticated task read was not 401 (got $CODE)"
+for path in "/v1/admin/tasks" "/v1/admin/tasks/$TASK_ID" "/v1/admin/tasks/$TASK_ID/resume" \
+    "/v1/admin/tasks/$TASK_ID/halt" "/v1/admin/tasks/$TASK_ID/cancel" "/v1/admin/tasks/run"; do
+    for method in POST PUT DELETE; do
+        CODE="$(curl -s -o /dev/null -w '%{http_code}' -X "$method" -H "Authorization: Bearer $TOKEN" "$BASE$path")"
+        case "$CODE" in 2*) fail "task control answered over HTTP: $method $path ($CODE)" ;; esac
+    done
+done
 
 # --- SIGTERM stops it cleanly ------------------------------------------------
 kill -TERM "$SERVER"

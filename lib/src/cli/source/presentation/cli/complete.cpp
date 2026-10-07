@@ -13,6 +13,7 @@
 #include "agent/tool.h"
 #include "agentloop/loop.h"
 #include "agentloop/media.h"
+#include "agentloop/member_call.h"
 #include "agentloop/rag.h"
 #include "agentloop/reporter.h"
 #include "agentloop/retriever.h"
@@ -29,7 +30,9 @@
 #include "harness/roles.h"
 #include "machine/json_reporter.h"
 #include "mcp/registry.h"
+#include "operations/suites.h"
 #include "platform/platform.h"
+#include "tools/consult.h"
 #include "views/ask_prompt.h"
 #include "views/cli_reporter.h"
 #include "views/terminal.h"
@@ -46,6 +49,10 @@ struct CompleteFlags {
     std::vector<std::string> images;
     /// Files, folders and globs to attach (26d).
     std::vector<std::string> attach;
+    /// The method those attaches take (27p): `code` or `off`; empty leaves
+    /// it to the config's `attachments.graph`, else the one-shot's built-in,
+    /// no graph (27n).
+    std::string graph;
     double temperature = 0.0;
     std::int64_t max_tokens = 0;
     /// Whether the model thinks first, and for how long (26i).
@@ -198,8 +205,12 @@ ChatAttachments::Turn attach_for_prompt(OneShotAttachments& attachments, const C
             fail_user(image + " was not attached, so there is nothing to ask about");
         }
     }
+    // `--graph` for this invocation's attaches, over the config's default
+    // and the one-shot's built-in (27p).
+    const GraphMethod method = attachments.attached().graph_method(
+        harness::attachment_graph_method_from_string(flags.graph));
     for (const std::string& spec : flags.attach) {
-        (void)attachments.attached().attach(spec, working_directory);
+        (void)attachments.attached().attach(spec, working_directory, method);
     }
     attachments.attached().settle();
     return attachments.attached().for_turn(user_message, prompt, budget, flags.rag_limit, {});
@@ -262,7 +273,10 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
                                        bool /*warning*/) { reporter.on_notice(line); },
                     .progress = {},
                     .confirm_large = {},
-                    .save = false});
+                    .save = false,
+                    // No graph for a one-shot by default (27n): no follow-up
+                    // walks it -- unless the config or --graph asks (27p).
+                    .built_in_graph = harness::AttachmentGraphMethod::Off});
             ChatAttachments::Turn turn =
                 attach_for_prompt(*machine_attachments, flags, prompt, request.messages.size() - 1,
                                   agentloop::turn_budget(harness, model, max_tokens));
@@ -275,13 +289,26 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         agent::ToolRegistry machine_registry;
         std::unique_ptr<agentloop::ToolSelection> machine_selection;
         const auto machine_mcp = std::make_shared<mcp::Registry>();
+        const auto machine_consults = std::make_shared<agentloop::MemberCalls>(harness);
+        // The run's member calls (27f), with tools or without: the suite's
+        // validation (27g) spends from the same count.
+        machine_options.member_calls = machine_consults.get();
         if (flags.tools) {
             // stdout is the protocol: connection notes go to stderr.
-            machine_registry = make_built_in_tools(BuiltInToolOptions{
-                .config = &config,
-                .harness = &harness,
-                .mcp = machine_mcp,
-                .mcp_status = [](std::string_view line) { std::cerr << line << "\n"; }});
+            // The toolset the active suite pins on this backend, if any (27d).
+            machine_registry = pin_toolset(
+                make_built_in_tools(BuiltInToolOptions{
+                    .config = &config,
+                    .harness = &harness,
+                    .mcp = machine_mcp,
+                    .mcp_status = [](std::string_view line) { std::cerr << line << "\n"; }}),
+                config, model);
+            // The consult tool when the suite designates members (27f), after
+            // the pin: `consultable:` is the suite's own switch.
+            for (const std::string& note :
+                 tools::register_consult_tool(machine_registry, harness, machine_consults).notes) {
+                std::cerr << "apogee: " << note << "\n";
+            }
             machine_options.tools = &machine_registry;
             // Past a dozen and a half tools, the ones the question needs (26g).
             std::string ranked_by;
@@ -388,7 +415,10 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
                         }
                     },
                 .confirm_large = {},
-                .save = false});
+                .save = false,
+                // No graph for a one-shot by default (27n): no follow-up
+                // walks it -- unless the config or --graph asks (27p).
+                .built_in_graph = harness::AttachmentGraphMethod::Off});
         ChatAttachments::Turn turn =
             attach_for_prompt(*attached, flags, prompt, request.messages.size() - 1, budget);
         loop_options.inline_attachments = std::move(turn.inlined);
@@ -429,16 +459,30 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     agent::ToolRegistry registry;
     std::unique_ptr<agentloop::ToolSelection> selection;
     const auto mcp_registry = std::make_shared<mcp::Registry>();
+    const auto consults = std::make_shared<agentloop::MemberCalls>(harness);
+    // The run's member calls (27f), with tools or without: the suite's
+    // validation (27g) spends from the same count.
+    loop_options.member_calls = consults.get();
     if (flags.tools) {
-        registry = make_built_in_tools(BuiltInToolOptions{
-            .config = &config,
-            .harness = &harness,
-            .mcp = mcp_registry,
-            .mcp_status = mcp_status_line(reporter.status()),
-            .mcp_server_log = flags.verbose ? mcp::StderrTail::Sink{[](std::string_view bytes) {
-                std::cerr << bytes << std::flush;
-            }}
-                                            : mcp::StderrTail::Sink{}});
+        // The toolset the active suite pins on this backend, if any (27d).
+        registry = pin_toolset(
+            make_built_in_tools(BuiltInToolOptions{
+                .config = &config,
+                .harness = &harness,
+                .mcp = mcp_registry,
+                .mcp_status = mcp_status_line(reporter.status()),
+                .mcp_server_log = flags.verbose ? mcp::StderrTail::Sink{[](std::string_view bytes) {
+                    std::cerr << bytes << std::flush;
+                }}
+                                                : mcp::StderrTail::Sink{}}),
+            config, model);
+        // The consult tool when the suite designates members (27f), after
+        // the pin: `consultable:` is the suite's own switch.
+        for (const std::string& note :
+             tools::register_consult_tool(registry, harness, consults).notes) {
+            reporter.status().print_line(reporter_options.style.tag(ansi::Role::Warning) + " " +
+                                         note);
+        }
         loop_options.tools = &registry;
         // Past a dozen and a half tools, the ones the question needs (26g).
         std::string ranked_by;
@@ -540,6 +584,15 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
                     "retrieved when not (repeatable)")
         ->type_name(kPathValue)
         ->allow_extra_args(false);
+    cmd->add_option("--graph", flags->graph,
+                    "For this run's --attach: code builds a folder's code graph, off indexes its "
+                    "chunks alone (default: the config's attachments.graph, else off)")
+        ->type_name(words_value(harness::attachment_graph_method_names()))
+        ->check([](const std::string& value) {
+            return harness::attachment_graph_method_from_string(value).has_value()
+                       ? std::string{}
+                       : harness::attachment_graph_values_message("", value);
+        });
     flags->temperature_option =
         cmd->add_option("-t,--temperature", flags->temperature, "Sampling temperature");
     flags->max_tokens_option =
@@ -561,16 +614,19 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
                     "Allow a tool for this run without asking (repeatable, with --tools)")
         ->type_name(kToolValue)
         ->expected(1)
-        ->allow_extra_args(false);
+        ->allow_extra_args(false)
+        ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
     cmd->add_option("--deny", flags->deny,
                     "Refuse a tool or website for this run without asking (repeatable)")
         ->type_name(kToolValue)
         ->expected(1)
-        ->allow_extra_args(false);
+        ->allow_extra_args(false)
+        ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
     cmd->add_option("--allow-host", flags->allow_hosts,
                     "Allow fetching from a website for this run without asking (repeatable)")
         ->expected(1)
-        ->allow_extra_args(false);
+        ->allow_extra_args(false)
+        ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
     cmd->add_flag("--no-color", flags->no_color, "Disable ANSI colour output");
     cmd->add_flag("--raw", flags->raw,
                   "Show the answer's Markdown as written instead of rendering it on the terminal");
@@ -619,6 +675,17 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
             fail_user(message);
         }
 
+        // A suite member naming nothing is refused, never routed around (27d).
+        if (const std::string refused = validate_active_suite(config); !refused.empty()) {
+            fail_user(refused);
+        }
+        // `--graph` is how this run's attaches are indexed (27p): with none,
+        // it would say nothing.
+        if (!flags->graph.empty() && flags->attach.empty()) {
+            fail_user(
+                "--graph applies to --attach: it says whether an attached folder's code "
+                "graph is built");
+        }
         const std::string prompt = resolve_prompt(*flags);
         check_images(*flags);
 

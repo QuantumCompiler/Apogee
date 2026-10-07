@@ -7,6 +7,8 @@
 #include <vector>
 
 #include "agentloop/retriever.h"
+#include "agentloop/side_call.h"
+#include "agentloop/validate.h"
 #include "contracts/config.h"
 #include "harness/harness.h"
 #include "knowledge/clerk.h"
@@ -39,6 +41,9 @@ struct CaptureInputs {
     /// `--retriever`; empty means auto. Resolved against the collection's
     /// own pin, never a chat session's document retriever.
     std::string retriever_flag;
+    /// Where the verifier's call is said, when the active suite validates
+    /// extraction (27g) -- chat's thinking block; null says nothing.
+    agentloop::SideCallSink narrate;
 };
 
 /// How the record would be, or was, indexed.
@@ -70,6 +75,9 @@ struct CaptureResult {
     std::string error;
     /// The failure is the model's (a backend error) rather than the user's.
     bool backend_error = false;
+    /// What the suite's verifier made of the record (27g), when the active
+    /// suite validates extraction.
+    std::optional<agentloop::Validated> validation;
 
     [[nodiscard]] bool ok() const noexcept {
         return error.empty();
@@ -89,7 +97,10 @@ struct CaptureResult {
 
 /// Runs the clerk over `inputs.raw` and drafts the record -- what a dry run
 /// prints: id-less, timestamp-less, nothing written. `decision` is filled
-/// either way, so the dry run can say what a real one would do.
+/// either way, so the dry run can say what a real one would do. When the
+/// harness's active suite validates extraction (27g), the capture is a turn
+/// of its own: its verifier checks the record through a member-call budget
+/// opened here, and `validation` says what came of it.
 [[nodiscard]] CaptureResult draft_capture(const harness::Harness& harness,
                                           const harness::Config& config,
                                           const CaptureInputs& inputs,

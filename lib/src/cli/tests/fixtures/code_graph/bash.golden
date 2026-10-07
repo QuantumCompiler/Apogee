@@ -1,0 +1,93 @@
+node file lib.sh
+  description Bash file
+  metadata {"end_line":10,"file":"lib.sh","kind":"code","lang":"bash","line":1,"member":"bash"}
+  mentions 1
+  at bash:lib.sh:1-10 definition
+node file main.sh
+  description Bash file
+  metadata {"end_line":10,"file":"main.sh","kind":"code","lang":"bash","line":1,"member":"bash"}
+  mentions 1
+  at bash:main.sh:1-10 definition
+node function lib.sh::die
+  description die()
+  metadata {"end_line":10,"file":"lib.sh","kind":"code","lang":"bash","line":7,"member":"bash"}
+  mentions 1
+  at bash:lib.sh:7-10 definition
+node function lib.sh::log
+  description log()
+  metadata {"end_line":5,"file":"lib.sh","kind":"code","lang":"bash","line":3,"member":"bash"}
+  mentions 1
+  at bash:lib.sh:3-5 definition
+node function main.sh::main
+  description main()
+  metadata {"end_line":8,"file":"main.sh","kind":"code","lang":"bash","line":4,"member":"bash"}
+  mentions 1
+  at bash:main.sh:4-8 definition
+node name date
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at bash:lib.sh:4-4 reference
+node name echo
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at bash:lib.sh:4-4 reference
+node name exit
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at bash:lib.sh:9-9 reference
+node name grep
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at bash:main.sh:7-7 reference
+edge file main.sh -[calls]-> function main.sh::main
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site bash:main.sh:10
+edge file main.sh -[imports]-> file lib.sh
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site bash:main.sh:2
+edge function lib.sh::die -[calls]-> function lib.sh::log
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site bash:lib.sh:8
+edge function lib.sh::die -[calls]-> name exit
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site bash:lib.sh:9
+edge function lib.sh::die -[defined_in]-> file lib.sh
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site bash:lib.sh:7
+edge function lib.sh::log -[calls]-> name date
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site bash:lib.sh:4
+edge function lib.sh::log -[calls]-> name echo
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site bash:lib.sh:4
+edge function lib.sh::log -[defined_in]-> file lib.sh
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site bash:lib.sh:3
+edge function main.sh::main -[calls]-> function lib.sh::die
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site bash:main.sh:6
+edge function main.sh::main -[calls]-> function lib.sh::log
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site bash:main.sh:5
+edge function main.sh::main -[calls]-> name grep
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site bash:main.sh:7
+edge function main.sh::main -[defined_in]-> file main.sh
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site bash:main.sh:4

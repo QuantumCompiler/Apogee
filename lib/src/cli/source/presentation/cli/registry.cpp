@@ -16,11 +16,15 @@
 #include "cli/config_cmd.h"
 #include "cli/datasets.h"
 #include "cli/embed.h"
+#include "cli/execute.h"
 #include "cli/graph.h"
 #include "cli/knowledge.h"
 #include "cli/mcp_cmd.h"
 #include "cli/models.h"
+#include "cli/reset.h"
 #include "cli/serve_cmd.h"
+#include "cli/symphonies_cmd.h"
+#include "cli/task_cmd.h"
 #include "cli/train.h"
 #include "cli/uninstall.h"
 #include "cli/version_command.h"
@@ -79,11 +83,15 @@ CommandRegistry default_registry() {
     registry.add(std::make_unique<ConfigCommand>());
     registry.add(std::make_unique<DatasetsCommand>());
     registry.add(std::make_unique<EmbedCommand>());
+    registry.add(std::make_unique<ExecuteCommand>());
     registry.add(std::make_unique<GraphCommand>());
     registry.add(std::make_unique<KnowledgeCommand>());
     registry.add(std::make_unique<McpCommand>());
     registry.add(std::make_unique<ModelsCommand>());
+    registry.add(std::make_unique<ResetCommand>());
     registry.add(std::make_unique<ServeCommand>());
+    registry.add(std::make_unique<SymphoniesCommand>());
+    registry.add(std::make_unique<TaskCommand>());
     registry.add(std::make_unique<UninstallCommand>());
     registry.add(std::make_unique<VersionCommand>());
     // Hidden: the shell-completion protocol, not a user-facing command.

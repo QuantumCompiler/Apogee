@@ -104,6 +104,11 @@ struct Plan {
     // Where each old file now lives -- every GGUF and projector.
     std::map<std::filesystem::path, std::filesystem::path> relocated;
     for (const models::MigrationItem& item : plan.files.items) {
+        if (item.kind == models::MigrationItem::Kind::Mlx) {
+            // An mlx backend names the directory itself (27b).
+            relocated[normal(item.moves.front().first)] = item.destination;
+            continue;
+        }
         if (item.kind == models::MigrationItem::Kind::Snapshot) {
             plan.snapshots[normal(item.moves.front().first)] = item.destination;
             const models::SnapshotDamage damage =
@@ -182,8 +187,12 @@ struct Plan {
                 if (value.empty()) {
                     continue;
                 }
-                const auto found = relocated.find(
-                    normal(std::filesystem::path{harness::expand_env_and_home(value)}));
+                std::filesystem::path named =
+                    normal(std::filesystem::path{harness::expand_env_and_home(value)});
+                if (!named.has_filename()) {
+                    named = named.parent_path();  // a directory written with its slash
+                }
+                const auto found = relocated.find(named);
                 if (found == relocated.end()) {
                     continue;
                 }

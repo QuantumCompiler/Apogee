@@ -151,8 +151,8 @@ std::string judge_prompt(std::string_view prompt, std::string_view candidate,
 
 std::string parse_judge_verdict(std::string_view reply) {
     // The first WORD, letters only: "A" and "B" are verdicts, "Both are
-    // fine" is not a vote for B (the reference read its first byte and
-    // counted it as one).
+    // fine" is not a vote for B (reading only its first byte would count it
+    // as one).
     const std::string answer = trimmed_upper(reply);
     std::string word;
     for (const char c : answer) {

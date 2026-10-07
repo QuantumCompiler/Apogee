@@ -23,11 +23,14 @@ bool write_snapshot(const std::filesystem::path& dir, const Snapshot& snapshot) 
     for (const SnapshotFile& file : snapshot.files) {
         files.push_back({{"path", file.path}, {"size", file.size}, {"sha256", file.sha256}});
     }
-    const nlohmann::json record{{"ref", snapshot.ref},
-                                {"revision", snapshot.revision},
-                                {"source", snapshot.source},
-                                {"pulled_at", snapshot.pulled_at},
-                                {"files", files}};
+    nlohmann::json record{{"ref", snapshot.ref},
+                          {"revision", snapshot.revision},
+                          {"source", snapshot.source},
+                          {"pulled_at", snapshot.pulled_at},
+                          {"files", files}};
+    if (!snapshot.transform.empty()) {
+        record["transform"] = snapshot.transform;
+    }
     std::filesystem::path temp = snapshot_record_path(dir);
     temp += ".tmp-" + std::to_string(std::random_device{}());
     {
@@ -60,6 +63,7 @@ std::optional<Snapshot> load_snapshot(const std::filesystem::path& dir) {
     snapshot.revision = record.value("revision", std::string{});
     snapshot.source = record.value("source", std::string{});
     snapshot.pulled_at = record.value("pulled_at", std::string{});
+    snapshot.transform = record.value("transform", std::string{});
     if (const auto files = record.find("files"); files != record.end() && files->is_array()) {
         for (const nlohmann::json& file : *files) {
             if (!file.is_object()) {

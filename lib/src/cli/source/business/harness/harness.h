@@ -1,11 +1,15 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "contracts/behavior.h"
@@ -44,7 +48,7 @@ public:
 /// one should not get "no such backend" because the file spells it another.
 [[nodiscard]] std::string normalize_route_key(std::string_view value);
 
-/// The three-rung router, carrying Ommi's precedence exactly.
+/// The three-rung router.
 ///
 ///   1. exact backend key         — `backends:` map key
 ///   2. a backend entry's `model:` field
@@ -55,11 +59,11 @@ public:
 /// another entry's model field, or two entries pointing at the same model make
 /// `-m <key>` ambiguous.
 ///
-/// Ommi has a fourth rung — "if exactly one backend is registered, use it" —
-/// deliberately not ported (2026-08-25). It papers over an unset
-/// `models.default` in a way that stops working the moment a second backend is
-/// added, which is precisely when a user has the least idea why routing
-/// changed. A clear "set models.default" is the better failure.
+/// A fourth rung — "if exactly one backend is registered, use it" — is
+/// deliberately absent (2026-08-25). It papers over an unset `models.default`
+/// in a way that stops working the moment a second backend is added, which is
+/// precisely when a user has the least idea why routing changed. A clear "set
+/// models.default" is the better failure.
 class SimpleRouter final : public ModelRouter {
 public:
     /// `providers` maps a backend key to its provider. Entries in `config`
@@ -92,6 +96,27 @@ enum class Medium : std::uint8_t { Image, Audio, Video };
 
 /// "an image", "audio", "a video".
 [[nodiscard]] std::string_view to_string(Medium medium) noexcept;
+
+/// Hears a load any registered provider makes (27e): the backend it is
+/// registered under, and the event -- `ModelLoading` at the start, then
+/// `ModelReady`, or `ModelLoading` with phase `Error`.
+using LoadListener = std::function<void(std::string_view backend, const StatusEvent& event)>;
+
+/// How far a warmup walk is (27e): the backend loading now, the item it is
+/// of how many -- the shape a busy line's sink takes.
+using WarmProgress =
+    std::function<void(std::string_view backend, std::size_t done, std::size_t total)>;
+
+/// What a warmup walk did (27e).
+struct WarmResult {
+    /// Loaded by the walk, in its order.
+    std::vector<std::string> loaded;
+    /// Already in memory: nothing to do.
+    std::vector<std::string> resident;
+    /// Could not be loaded -- the backend, and why. Its first use will fail
+    /// the same way, so the walk goes on rather than stopping a session.
+    std::vector<std::pair<std::string, std::string>> failed;
+};
 
 /// Owns the providers and routes requests to them.
 class Harness : public ProviderRegistry {
@@ -131,11 +156,30 @@ public:
     /// `models.default` from config.
     [[nodiscard]] const std::string& default_model() const noexcept;
 
+    /// Makes `suite` the one every role resolves under, "" for none (27d):
+    /// this harness's view of the config, as `--suite` and `/suite` set it --
+    /// never the file. A backend the switch re-pins needs rebuilding to run
+    /// at its new window; the caller, who can build providers, does that
+    /// (`backends::rebuild_providers`). While a session holds its suite
+    /// (`SessionHold`), the hold moves with it (27e).
+    void set_active_suite(std::string suite);
+
     // --- Request paths -----------------------------------------------------
     //
     // Thin: route, then delegate. They exist so a surface holds one object
     // rather than a provider plus a router, and so routing failures are
     // reported in one place.
+    //
+    // And text crosses them both ways as UTF-8, in the one place every model
+    // call does (`contracts/utf8.h`). Out: a request whose messages hold
+    // anything ill-formed -- a user's bytes, a file's, an excerpt's -- reaches
+    // its provider mended, since every backend serializes it with a strict
+    // JSON dump. Back: a streamed piece is handed on in whole characters --
+    // one split across pieces arrives whole, and a stream that ends inside one
+    // ends in U+FFFD, said as its last piece -- and the returned answer and
+    // its tool calls are UTF-8, because a backend's bytes are cut wherever a
+    // token or a pipe read ends and every surface's next step is a strict
+    // dump too. Well-formed text crosses byte for byte, and is not copied.
 
     [[nodiscard]] ChatResponse chat(const ChatRequest& request,
                                     const CancellationToken& cancellation = {}) const;
@@ -159,7 +203,7 @@ public:
     // The Harness performs the discovery so callers ask a plain typed question.
     // No `dynamic_cast` at a call site: an acceptance criterion of this item,
     // and what stops "can this embed?" from becoming a switch over backend
-    // types the way it did in Ommi.
+    // types.
 
     /// Whether the backend serving `model` can produce embeddings.
     /// False for an unroutable model — an unknown backend cannot embed either.
@@ -237,6 +281,56 @@ public:
     /// the load itself fails.
     bool preload_model(std::string_view backend_name, const StatusSink& on_status) const;
 
+    // --- Residency (27e) ------------------------------------------------------
+    //
+    // Policy over what each backend already does: a provider owns its model's
+    // residency and its idle clock; the harness only says which of them a
+    // session is using, warms a set on request, and lets a surface hear the
+    // loads. No second eviction engine, nothing in the background.
+
+    /// Holds the models of `backends` against their idle-unload clocks, and
+    /// lets go of every other: the held set is REPLACED, not added to. A
+    /// provider registered later under a held name -- a rebuild at a new
+    /// window -- is held as it is registered. A backend whose model this
+    /// process does not hold (a cloud one) is remembered and has nothing to
+    /// hold.
+    void hold_in_use(const std::vector<std::string>& backends);
+
+    /// The backends held now, sorted.
+    [[nodiscard]] std::vector<std::string> held() const;
+
+    /// While on, the backends of the active suite are the ones held, and the
+    /// hold follows `set_active_suite` -- members that leave are let go, the
+    /// new ones held. Off lets go of every hold. What `SessionHold` turns on
+    /// for its life.
+    void hold_active_suite(bool on);
+
+    /// Lets go of every hold, and of following the suite: what
+    /// `hold_active_suite(false)` does. Allocates nothing, so a session's end
+    /// can call it from a destructor.
+    void release_holds() noexcept;
+
+    /// Every load a provider makes from now on -- whichever request caused
+    /// it -- is said to `listener`, with the backend's name. Set it before
+    /// the first request: a provider reads it on whatever thread loads.
+    void listen_for_loads(LoadListener listener);
+
+    /// Whether `backend`'s model is in this process's memory now: true once
+    /// loaded, false while its first use (or a warmup) would load it.
+    /// Nullopt for a backend whose model this process does not hold -- a
+    /// cloud API, a vendor CLI -- or one not registered.
+    [[nodiscard]] std::optional<bool> resident(std::string_view backend) const;
+
+    /// Loads, now, the models of `backends` that this process holds and has
+    /// not loaded -- the warmup walk behind `chat --warm` -- telling
+    /// `progress` each one as it starts, numbered against how many need it.
+    /// A backend that holds nothing here is skipped: a warmup never sends a
+    /// paid provider a request. A load that fails is recorded and the walk
+    /// goes on. A warmup is not a use: a member's idle clock starts at its
+    /// first request, as `serve --preload`'s does.
+    [[nodiscard]] WarmResult warm(const std::vector<std::string>& backends,
+                                  const WarmProgress& progress) const;
+
     /// The effective context window for `model`: the backend entry's
     /// `context_size` when set, else the window the backend reports sizing
     /// itself (`ContextWindowReporting`), else the compiled fallback table.
@@ -244,9 +338,41 @@ public:
     [[nodiscard]] std::int64_t context_window_for_model(std::string_view model) const;
 
 private:
+    /// Applies the hold and the load listener to one provider.
+    void attach_residency(const std::string& name, LLMProvider& provider) const;
+
+    /// Holds the active suite's backends while a session asks for it.
+    void hold_suite_members();
+
     Config config_;
     std::map<std::string, std::shared_ptr<LLMProvider>> providers_;
     std::unique_ptr<ModelRouter> router_;
+    /// The backends a session holds (27e), as named to `hold_in_use`.
+    std::set<std::string, std::less<>> held_;
+    /// Whether a session holds the active suite (`hold_active_suite`).
+    bool holding_suite_ = false;
+    LoadListener load_listener_;
+};
+
+/// A session's in-use hold on its suite's members (27e): while it lives, the
+/// models of the active suite's backends are held against their idle clocks,
+/// the hold following the suite as `--suite`/`/suite` move it
+/// (`Harness::hold_active_suite`); on its end every hold goes, so the hold
+/// dies with the session -- and with the process, which keeps nothing of it.
+/// Only a model the session has used is affected: one never asked for has no
+/// idle clock running, so untouched members stay as evictable as before.
+class SessionHold {
+public:
+    explicit SessionHold(Harness& harness);
+    ~SessionHold();
+
+    SessionHold(const SessionHold&) = delete;
+    SessionHold& operator=(const SessionHold&) = delete;
+    SessionHold(SessionHold&&) = delete;
+    SessionHold& operator=(SessionHold&&) = delete;
+
+private:
+    Harness& harness_;
 };
 
 }  // namespace apogee::harness

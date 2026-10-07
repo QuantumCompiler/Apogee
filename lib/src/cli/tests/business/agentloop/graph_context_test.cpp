@@ -135,3 +135,72 @@ TEST_CASE("the budget cuts whole lines and never leaves a triple without its ent
     CHECK(small.entities == 2);
     CHECK(small.text.find("Seed —[links]→ N0") != std::string::npos);
 }
+
+TEST_CASE("a code entity carries its file:line, and a parsed relation says it was parsed",
+          "[agentloop][graph][render][code]") {
+    GraphNode function;
+    function.name = "apogee::graph::build_source";
+    function.type = "function";
+    function.description = "SourceBuildResult build_source(...)";
+    function.metadata = apogee::embedstore::code_node_metadata_json(
+        apogee::embedstore::CodeNodeMetadata{.code = true,
+                                             .unresolved = false,
+                                             .language = "cpp",
+                                             .member = "cli",
+                                             .file = "source/business/graph/code_build.cpp",
+                                             .line = 198,
+                                             .end_line = 335});
+    CHECK(apogee::agentloop::entity_line(function) ==
+          "apogee::graph::build_source (function, source/business/graph/code_build.cpp:198): "
+          "SourceBuildResult build_source(...)");
+
+    // A code graph's section under the existing budget: entities with their
+    // lines, relations marked parsed; a model's relation keeps its bare form.
+    Scratch scratch;
+    apogee::embedstore::CodeNodeRow caller;
+    caller.type = "function";
+    caller.name = "run";
+    caller.description = "void run()";
+    caller.metadata = apogee::embedstore::code_node_metadata_json({.code = true,
+                                                                   .language = "cpp",
+                                                                   .member = "src",
+                                                                   .file = "a.cc",
+                                                                   .line = 3,
+                                                                   .end_line = 5});
+    caller.mentions.push_back(
+        {.collection = "src", .file = "a.cc", .line = 3, .end_line = 5, .role = "definition"});
+    apogee::embedstore::CodeNodeRow callee = caller;
+    callee.name = "helper";
+    callee.description = "int helper()";
+    callee.metadata = apogee::embedstore::code_node_metadata_json({.code = true,
+                                                                   .language = "cpp",
+                                                                   .member = "src",
+                                                                   .file = "b.cc",
+                                                                   .line = 9,
+                                                                   .end_line = 9});
+    callee.mentions.front().file = "b.cc";
+    callee.mentions.front().line = 9;
+    apogee::embedstore::CodeEdgeRow call;
+    call.source_type = "function";
+    call.source_name = "run";
+    call.target_type = "function";
+    call.target_name = "helper";
+    call.relation = "calls";
+    call.sites.push_back({.collection = "src", .file = "a.cc", .line = 4});
+    (void)scratch.store.sync_code_graph({caller, callee}, {call});
+    const GraphSection section =
+        apogee::agentloop::build_graph_section_labelled(scratch.store, "code", {}, "helper", 1, 8);
+    REQUIRE(section.entities >= 1);
+    CHECK(section.text.find("[Knowledge graph: code]") == 0);
+    CHECK(section.text.find("run (function, a.cc:3): void run()") != std::string::npos);
+    CHECK(section.text.find("run —[calls·extracted]→ helper") != std::string::npos);
+}
+
+TEST_CASE("a prose relation keeps its bare form beside a parsed one",
+          "[agentloop][graph][render]") {
+    Fixture f;
+    const GraphSection section =
+        apogee::agentloop::build_graph_section(f.store, "notes", {f.chunk_a}, "", 1, 8);
+    CHECK(section.text.find("Atlas —[stores readings in]→ Vault") != std::string::npos);
+    CHECK(section.text.find("extracted") == std::string::npos);
+}

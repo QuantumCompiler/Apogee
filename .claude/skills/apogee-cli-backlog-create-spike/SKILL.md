@@ -30,7 +30,7 @@ Every document follows the backlog README's format and `/apogee-cli-backlog-crea
 - **Walls map to items, visibly.** Each document says which walls it removes; a wall one root-cause fix collapses is claimed by exactly one document, and siblings reference it rather than re-owning it.
 - **The user's answers become dated decisions**; recommendations they let stand become `[default: …]` with the recommendation recorded; genuinely user-owned questions still open become `[user]` calls that block that item's build. Nothing the spike settled is reopened — mark it `(consumed decision)` where a sibling owns it.
 - **Gates wire the siblings**: the split's build order becomes 🔒 gates among the new items (name real items, no cycles); an item useful on its own carries no gate just to mirror the narrative.
-- **One Reference (Ommi) pass for the set** — the spike usually checked the analog already; cite what it found per document, and an honest "no analog" where there is none.
+- **One Reference pass for the set** — the spike usually found the precedents already (in-house items and seams, external prior art); cite what it found per document, and leave the section out where there is none.
 
 ## 4. Place the set and update the docs
 

@@ -3,8 +3,12 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <optional>
+#include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include "agentloop/rerank.h"
 #include "agentloop/retriever.h"
@@ -14,11 +18,49 @@
 namespace apogee::commands {
 namespace {
 
+/// What follows `/attach`'s path (27p): the method, for this attach alone.
+constexpr std::array kAttachFlags{
+    ChatFlagSpec{"graph", "Whether a folder's code graph is built: code or off",
+                 ArgumentValues::GraphMethods},
+};
+
+/// What follows `/suite`'s name (27e): the switches `parse_suite_argument`
+/// reads.
+constexpr std::array kSuiteFlags{
+    ChatFlagSpec{"force", "Switch even when what the suite takes is over this machine's memory"},
+    ChatFlagSpec{"warm", "Load the suite's members now, rather than at first use"},
+};
+
 constexpr std::array kCommands{
     ChatCommandSpec{"help", ChatVerb::Help, "", "List these commands"},
     ChatCommandSpec{"model", ChatVerb::Model, "[backend]",
                     "Show the backend answering, or switch to another", ArgumentValues::Backends},
     ChatCommandSpec{"models", ChatVerb::Models, "", "List the configured backends"},
+    ChatCommandSpec{"suite", ChatVerb::Suite, "[name|off]",
+                    "Show the suite and what its members hold, or switch to another (then "
+                    "--force, --warm) or off",
+                    ArgumentValues::Suites, kSuiteFlags, SessionRows::ChatOnly},
+    // An execute session always runs under a suite (27s): its `/suite`
+    // switches and never turns it off.
+    ChatCommandSpec{"suite", ChatVerb::Suite, "[name]",
+                    "Show the suite and what its members hold, or switch to another (then "
+                    "--force, --warm)",
+                    ArgumentValues::NamedSuites, kSuiteFlags, SessionRows::ExecuteOnly},
+    ChatCommandSpec{"symphonies",
+                    ChatVerb::Symphonies,
+                    "",
+                    "List the symphonies /play can play",
+                    ArgumentValues::None,
+                    {},
+                    SessionRows::ExecuteOnly},
+    ChatCommandSpec{"play",
+                    ChatVerb::Play,
+                    "<symphony> [input]",
+                    "Play a symphony on the input: its stages on the suite's members, its "
+                    "output this session's answer",
+                    ArgumentValues::Symphonies,
+                    {},
+                    SessionRows::ExecuteOnly},
     ChatCommandSpec{"system", ChatVerb::System, "<text>", "Replace the system prompt"},
     ChatCommandSpec{"temperature", ChatVerb::Temperature, "<number>",
                     "Set the sampling temperature"},
@@ -41,9 +83,12 @@ constexpr std::array kCommands{
     ChatCommandSpec{"capture", ChatVerb::Capture, "[status|link]",
                     "Save this conversation as a knowledge record",
                     ArgumentValues::CaptureStatuses},
+    ChatCommandSpec{"check", ChatVerb::Check, "",
+                    "Have the suite's verifier check the last answer, once"},
     ChatCommandSpec{"attach", ChatVerb::Attach, "<path>",
-                    "Attach a file, folder or glob: inlined when it fits, retrieved when not",
-                    ArgumentValues::Paths},
+                    "Attach a file, folder or glob: inlined when it fits, retrieved when not "
+                    "(then --graph=code|off)",
+                    ArgumentValues::Paths, kAttachFlags},
     ChatCommandSpec{"attachments", ChatVerb::Attachments, "", "List what is attached"},
     ChatCommandSpec{"detach", ChatVerb::Detach, "<name>", "Detach an attachment",
                     ArgumentValues::AttachmentNames},
@@ -277,26 +322,192 @@ std::vector<NamedChoice> argument_choices(ArgumentValues values,
                 }
             }
             break;
+        case ArgumentValues::Suites:
+            choices = sources.suites;
+            choices.push_back({std::string{harness::kSuiteOff}, "No suite: the global pointers"});
+            break;
+        case ArgumentValues::NamedSuites:
+            choices = sources.suites;
+            break;
+        case ArgumentValues::Symphonies:
+            if (sources.symphonies) {
+                choices = sources.symphonies();
+            }
+            break;
+        case ArgumentValues::GraphMethods:
+            for (const std::string_view name : harness::attachment_graph_method_names()) {
+                choices.push_back(
+                    {std::string{name},
+                     harness::attachment_graph_method_from_string(name) ==
+                             harness::AttachmentGraphMethod::Code
+                         ? "Parse a folder of code into the chat's code graph, with no model"
+                         : "Index its chunks alone, with no code graph"});
+            }
+            break;
     }
     return choices;
 }
 
-}  // namespace
-
-std::span<const ChatCommandSpec> chat_commands() noexcept {
-    return kCommands;
+/// Where the flags begin in a path argument (27p), when the cursor is past
+/// the path: after its closing quote and a space; in an open quote, at the
+/// first word starting `-`; unquoted, at the first word after a space that
+/// starts `-`, or -- with none -- at the cursor when a space is just behind
+/// it. Nullopt while the cursor is still in the path, so an unquoted path
+/// with a space completes as it always has.
+std::optional<std::size_t> flags_begin(std::string_view typed) {
+    const auto first_dash_word = [&typed]() -> std::optional<std::size_t> {
+        for (std::size_t at = 1; at < typed.size(); ++at) {
+            if (typed[at] == '-' && is_space(typed[at - 1])) {
+                return at;
+            }
+        }
+        return std::nullopt;
+    };
+    if (typed.starts_with('"')) {
+        const std::size_t close = typed.find('"', 1);
+        if (close == std::string_view::npos) {
+            return first_dash_word();
+        }
+        if (close + 1 < typed.size() && is_space(typed[close + 1])) {
+            return close + 1;
+        }
+        return std::nullopt;
+    }
+    if (typed.find_first_of(" \t") == std::string_view::npos) {
+        return std::nullopt;
+    }
+    if (const std::optional<std::size_t> dash = first_dash_word(); dash.has_value()) {
+        return dash;
+    }
+    if (is_space(typed.back())) {
+        return typed.size();
+    }
+    return std::nullopt;
 }
 
-const ChatCommandSpec* find_chat_command(std::string_view verb) noexcept {
+/// The words of `text`, split at spaces and tabs.
+std::vector<std::string_view> words_in(std::string_view text) {
+    std::vector<std::string_view> out;
+    for (std::size_t at = 0; at < text.size();) {
+        while (at < text.size() && is_space(text[at])) {
+            ++at;
+        }
+        const std::size_t end = std::min(text.find_first_of(" \t", at), text.size());
+        if (end > at) {
+            out.push_back(text.substr(at, end - at));
+        }
+        at = end;
+    }
+    return out;
+}
+
+/// The flag of `spec` named `name` (without its `--`), or null.
+const ChatFlagSpec* find_flag(const ChatCommandSpec& spec, std::string_view name) {
+    for (const ChatFlagSpec& flag : spec.flags) {
+        if (flag.name == name) {
+            return &flag;
+        }
+    }
+    return nullptr;
+}
+
+/// `flag`'s values that start with `typed`, each written after `lead` --
+/// `--graph=` when the value follows the flag's own `=`, nothing when it is
+/// a word of its own.
+std::vector<Suggestion> value_candidates(const ChatFlagSpec* flag, std::string_view typed,
+                                         const std::string& lead,
+                                         const ChatCompletionSources& sources) {
+    std::vector<Suggestion> out;
+    if (flag == nullptr) {
+        return out;
+    }
+    for (NamedChoice& choice : argument_choices(flag->values, sources)) {
+        if (choice.name.starts_with(typed)) {
+            out.push_back({lead + choice.name, {}, std::move(choice.description)});
+        }
+    }
+    return out;
+}
+
+/// The flags of `spec` for the text from `begin` to the cursor (27p): a
+/// flag's values after `--name ` or `--name=`, else the flags not yet given
+/// that start with the word at the cursor.
+Suggestions complete_flags(std::string_view before, std::size_t begin, const ChatCommandSpec& spec,
+                           const ChatCompletionSources& sources) {
+    Suggestions out;
+    const std::string_view part = before.substr(begin);
+    const std::size_t space = part.find_last_of(" \t");
+    const std::size_t word = space == std::string_view::npos ? 0 : space + 1;
+    const std::string_view current = part.substr(word);
+    const std::vector<std::string_view> earlier = words_in(part.substr(0, word));
+    out.from = begin + word;
+    // `--graph off`: the value, as its own word -- unless the flag is a
+    // switch, which takes none (`--warm`).
+    if (!earlier.empty() && earlier.back().starts_with("--") &&
+        earlier.back().find('=') == std::string_view::npos) {
+        const ChatFlagSpec* flag = find_flag(spec, earlier.back().substr(2));
+        if (flag == nullptr || flag->values != ArgumentValues::None) {
+            out.candidates = value_candidates(flag, current, {}, sources);
+            return out;
+        }
+    }
+    // `--graph=of`: the value, after the flag's own `=`.
+    if (const std::size_t equals = current.find('=');
+        current.starts_with("--") && equals != std::string_view::npos) {
+        out.candidates = value_candidates(find_flag(spec, current.substr(2, equals - 2)),
+                                          current.substr(equals + 1),
+                                          std::string{current.substr(0, equals + 1)}, sources);
+        return out;
+    }
+    // The flags not yet given -- on an empty word, or the start of one: a
+    // word that is not a flag's start matches none.
+    for (const ChatFlagSpec& flag : spec.flags) {
+        const std::string name = "--" + std::string{flag.name};
+        const std::string text = flag.values == ArgumentValues::None ? name : name + "=";
+        const bool given = std::ranges::any_of(earlier, [&](std::string_view earlier_word) {
+            return earlier_word == name || earlier_word.starts_with(name + "=");
+        });
+        if (!given && std::string_view{text}.starts_with(current)) {
+            out.candidates.push_back({text, {}, std::string{flag.description}});
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+bool offered_in(SessionRows rows, SessionMode mode) noexcept {
+    switch (rows) {
+        case SessionRows::Every:
+            return true;
+        case SessionRows::ChatOnly:
+            return mode == SessionMode::Chat;
+        case SessionRows::ExecuteOnly:
+            return mode == SessionMode::Execute;
+    }
+    return false;
+}
+
+std::vector<std::reference_wrapper<const ChatCommandSpec>> chat_commands(SessionMode mode) {
+    std::vector<std::reference_wrapper<const ChatCommandSpec>> rows;
     for (const ChatCommandSpec& spec : kCommands) {
-        if (spec.verb == verb) {
+        if (offered_in(spec.sessions, mode)) {
+            rows.emplace_back(spec);
+        }
+    }
+    return rows;
+}
+
+const ChatCommandSpec* find_chat_command(std::string_view verb, SessionMode mode) noexcept {
+    for (const ChatCommandSpec& spec : kCommands) {
+        if (spec.verb == verb && offered_in(spec.sessions, mode)) {
             return &spec;
         }
     }
     return nullptr;
 }
 
-std::vector<std::string> chat_help_lines(std::size_t width) {
+std::vector<std::string> chat_help_lines(std::size_t width, SessionMode mode) {
     const auto usage = [](const ChatCommandSpec& spec) {
         std::string out = "/" + std::string{spec.verb};
         if (!spec.argument.empty()) {
@@ -304,8 +515,9 @@ std::vector<std::string> chat_help_lines(std::size_t width) {
         }
         return out;
     };
+    const std::vector<std::reference_wrapper<const ChatCommandSpec>> offered = chat_commands(mode);
     std::size_t widest = 0;
-    for (const ChatCommandSpec& spec : kCommands) {
+    for (const ChatCommandSpec& spec : offered) {
         widest = std::max(widest, ansi::display_width(usage(spec)));
     }
     // Two in, the usages, two more, then the descriptions -- wrapped under
@@ -321,7 +533,7 @@ std::vector<std::string> chat_help_lines(std::size_t width) {
     const std::size_t text_width = unbounded ? std::string::npos : width - 1 - indent;
 
     std::vector<std::string> lines;
-    for (const ChatCommandSpec& spec : kCommands) {
+    for (const ChatCommandSpec& spec : offered) {
         const std::string head = std::string(kIndent, ' ') + usage(spec);
         const std::vector<std::string> rows = wrap_words(spec.description, text_width);
         if (beside) {
@@ -375,6 +587,10 @@ ChatCompletionSources chat_completion_sources(const harness::Config& config,
         }
         sources.backends.push_back({name, std::move(description)});
     }
+    for (const std::string& name : config.suite_names()) {
+        const harness::SuiteConfig* suite = config.find_suite(name);
+        sources.suites.push_back({name, suite != nullptr ? suite->description : std::string{}});
+    }
     sources.working_directory = std::move(working_directory);
     sources.list = list_directory;
     return sources;
@@ -393,7 +609,7 @@ Suggestions suggest_chat_input(std::string_view before_cursor,
         if (typed.find('/') != std::string_view::npos) {
             return out;
         }
-        for (const ChatCommandSpec& spec : kCommands) {
+        for (const ChatCommandSpec& spec : chat_commands(sources.mode)) {
             if (spec.verb.starts_with(typed)) {
                 const std::string name = "/" + std::string{spec.verb};
                 // A trailing space when it takes an argument, so the next
@@ -415,7 +631,8 @@ Suggestions suggest_chat_input(std::string_view before_cursor,
     if (!slash) {
         return out;
     }
-    const ChatCommandSpec* spec = find_chat_command(before_cursor.substr(1, first_space - 1));
+    const ChatCommandSpec* spec =
+        find_chat_command(before_cursor.substr(1, first_space - 1), sources.mode);
     if (spec == nullptr || spec->values == ArgumentValues::None) {
         return out;
     }
@@ -424,6 +641,23 @@ Suggestions suggest_chat_input(std::string_view before_cursor,
         ++from;
     }
     const std::string_view typed = before_cursor.substr(from);
+    // Past a path argument, its flags (27p).
+    if (spec->values == ArgumentValues::Paths && !spec->flags.empty()) {
+        if (const std::optional<std::size_t> begin = flags_begin(typed); begin.has_value()) {
+            return complete_flags(before_cursor, from + *begin, *spec, sources);
+        }
+    }
+    // Past any other argument and a space, its flags (`/suite fast --warm`).
+    if (!spec->flags.empty() && spec->values != ArgumentValues::Paths) {
+        if (const std::size_t space = typed.find_first_of(" \t");
+            space != std::string_view::npos && !typed.starts_with('-')) {
+            // `off` loads and admits nothing: no flag follows it.
+            if (spec->id == ChatVerb::Suite && typed.substr(0, space) == harness::kSuiteOff) {
+                return out;
+            }
+            return complete_flags(before_cursor, from + space, *spec, sources);
+        }
+    }
     if (spec->values == ArgumentValues::Paths) {
         // The `@` completer's own logic, on the argument as if `@` led it.
         const std::string as_mention = "@" + std::string{typed};

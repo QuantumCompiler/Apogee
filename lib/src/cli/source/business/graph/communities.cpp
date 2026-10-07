@@ -228,9 +228,6 @@ std::string community_text(const std::vector<embedstore::GraphNode>& nodes,
 
 CommunitiesResult build_communities(embedstore::Store& store, const SummarizeFn& summarize,
                                     const EmbedFn& embed, const CommunitiesOptions& options) {
-    if (!summarize) {
-        throw std::invalid_argument("communities need a summarise function");
-    }
     CommunitiesResult out;
     const std::vector<embedstore::GraphEdge> edges = store.all_edges();
     const std::vector<std::vector<std::int64_t>> communities =
@@ -261,6 +258,16 @@ CommunitiesResult build_communities(embedstore::Store& store, const SummarizeFn&
             ++out.unchanged;
             continue;
         }
+        if (!summarize) {
+            // Clustering alone: the membership stored, the summary absent.
+            if (existing.contains(key)) {
+                ++out.unchanged;
+            } else {
+                (void)store.replace_community(key, members, "", "");
+                ++out.clustered;
+            }
+            continue;
+        }
         const std::vector<embedstore::GraphNode> nodes = store.nodes_by_ids(members);
         std::string summary;
         try {
@@ -281,6 +288,11 @@ CommunitiesResult build_communities(embedstore::Store& store, const SummarizeFn&
         ++out.summarized;
     }
     out.pruned = static_cast<int>(store.prune_communities(keep));
+    for (const embedstore::GraphCommunity& community : store.graph_communities()) {
+        if (community.summary.empty()) {
+            ++out.summaries_absent;
+        }
+    }
 
     // Vectorise last, batched, and every summary still without a vector --
     // not only this run's -- so an earlier embed failure heals here instead

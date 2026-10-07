@@ -5,9 +5,8 @@
 
 /// Cooperative cancellation for in-flight requests.
 ///
-/// Go's `context.Context` threads cancellation through every call in Ommi;
-/// this is the C++ equivalent, minus the deadline and value machinery nothing
-/// here needs.
+/// The counterpart of Go's `context.Context` cancellation, minus the deadline
+/// and value machinery nothing here needs.
 ///
 /// Copies share one flag, so a token handed to a provider and kept by the
 /// caller refer to the same cancellation. Cancelling is safe from any thread --

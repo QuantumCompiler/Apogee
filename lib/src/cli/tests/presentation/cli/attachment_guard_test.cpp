@@ -150,7 +150,9 @@ TEST_CASE("every surface that takes --image goes through the attachment path",
     // surface, so adding a third without wiring the guard fails here — which is
     // the failure mode that actually happened, and the one a per-surface test
     // cannot catch because nobody writes the test for the surface they forgot.
-    const std::vector<std::string> surfaces{"complete.cpp", "chat.cpp"};
+    // Chat's `--image` -- and execute's, the same session (27s) -- lives in the
+    // session core both commands are thin over.
+    const std::vector<std::string> surfaces{"complete.cpp", "chat_session.cpp"};
 
     for (const std::string& surface : surfaces) {
         INFO("surface: " << surface);
@@ -172,7 +174,8 @@ TEST_CASE("every surface that takes --image goes through the attachment path",
 TEST_CASE("the guard has exactly one definition", "[commands][attachments][parity]") {
     // The structural half: a second implementation is how the two surfaces
     // drifted the first time. `helpers.cpp` owns it; no command may define it.
-    for (const std::string& surface : {"complete.cpp", "chat.cpp", "chat_attachments.cpp"}) {
+    for (const std::string& surface : {"complete.cpp", "chat.cpp", "chat_session.cpp",
+                                       "execute.cpp", "chat_play.cpp", "chat_attachments.cpp"}) {
         INFO("surface: " << surface);
         const std::string source = read_source(surface);
         CHECK(source.find("std::string attachment_refusal(") == std::string::npos);
@@ -185,7 +188,8 @@ TEST_CASE("no surface reaches vision through a type test", "[commands][attachmen
     // provider; a command that reached for the concrete type would be correct
     // today and wrong the moment a second backend gained vision.
     for (const std::string& surface :
-         {"complete.cpp", "chat.cpp", "helpers.cpp", "chat_attachments.cpp"}) {
+         {"complete.cpp", "chat.cpp", "chat_session.cpp", "execute.cpp", "chat_play.cpp",
+          "helpers.cpp", "chat_attachments.cpp"}) {
         INFO("surface: " << surface);
         const std::string source = read_source(surface);
         CHECK(source.find("dynamic_cast") == std::string::npos);

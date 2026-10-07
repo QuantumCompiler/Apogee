@@ -19,7 +19,7 @@ A spike answers a design question with **evidence, not opinion**. Its deliverabl
 1. [`lib/documentation/backlog/README.md`](../../../lib/documentation/backlog/README.md) — the index: what's already queued, the gate convention, where a resulting split would land (release table vs. the standing Architecture/Maintenance tables).
 2. [`lib/documentation/assistant/CLAUDE.md`](../../../lib/documentation/assistant/CLAUDE.md) and [`SPEC.md`](../../../lib/documentation/assistant/SPEC.md) — the invariants and non-goals the findings must respect. If the spike's premise collides with a SPEC non-goal, surface that **as a finding** — a SPEC revision is the user's call, made before any items exist.
 3. [`ROADMAP.md`](../../../lib/documentation/assistant/ROADMAP.md) — release context; which open `[user]` decisions might interact with this question.
-4. **Ommi** (`~/Data/Development/Projects/Ommi`) — if the reference implementation has an analog, read it before probing; it tells you which walls are real and which are already-solved problems.
+4. **Precedents** — if a shipped Apogee item or an external project has already solved an analog, read it before probing; it tells you which walls are real and which are already-solved problems.
 
 ## 3. Probe the real thing
 

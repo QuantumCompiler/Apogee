@@ -29,6 +29,13 @@ std::string CliHome::config_text() const {
 }
 
 int CliHome::run(const std::vector<std::string>& args, std::string* out) const {
+    std::string err;
+    const int code = run(args, out, &err);
+    *out += err;
+    return code;
+}
+
+int CliHome::run(const std::vector<std::string>& args, std::string* out, std::string* err) const {
     // This install for this run, whatever another home in the test set.
     const EnvGuard home_guard{"APOGEE_HOME", home().string()};
     const std::ostringstream captured;
@@ -53,7 +60,8 @@ int CliHome::run(const std::vector<std::string>& args, std::string* out) const {
     }
     std::cout.rdbuf(old_out);
     std::cerr.rdbuf(old_err);
-    *out = captured.str() + errors.str();
+    *out = captured.str();
+    *err = errors.str();
     return code;
 }
 

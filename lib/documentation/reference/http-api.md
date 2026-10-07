@@ -263,7 +263,8 @@ apogee serve --print-admin-token
 
 Every write reads the config fresh from disk and reports `restart_required`:
 `true` when the file now differs from what the running server started with, in
-backend membership or the role pointers. The server does not hot-reload; a
+backend membership, the role pointers, or the suites (`suites:` and
+`models.default_suite`). The server does not hot-reload; a
 backend added here is served after a restart (and only if the server is started
 with `-m` or `--all-backends` to serve it).
 
@@ -271,7 +272,8 @@ with `-m` or `--all-backends` to serve it).
 
 Every backend entry as a **view that has no `api_key` field** — `api_key_set`
 says whether one is configured — plus `roles`, each named by the backend that
-*resolves* for it and which rung answered (`default`, `role_pointer`, …), and
+*resolves* for it and which rung answered (`default`, `role_pointer`, `suite`
+when `models.default_suite` names a suite whose member answers, …), and
 `restart_required`. The roles are `default`, `default_embedding`,
 `default_extraction`, and the helpers `default_vision`,
 `default_transcription` and `default_utility`; with no conversation to fall
@@ -424,6 +426,63 @@ its prompt and schema files are removed too. `200 {deleted, files_removed}`;
 `404` when there is no entry -- including for a bundled agent that was never
 overridden, which has no entry to delete.
 
+### `GET /v1/admin/symphonies`
+
+Every symphony (27q) -- a named, staged prompt process whose stages name
+suite roles, never backends -- as `{"object": "list", "data": [...],
+"problems": [...]}`: the shipped starters first (a config entry of the same
+name in its place), then the config's `symphonies:` entries, then the spec
+files under the data directory's `symphonies/`, each name once. Each item is
+`{object: "symphony", name, description, source, path?, overrides, input:
+{description, image}, stages: [{name, role, prompt, schema?, image,
+brief_tokens?, answer_tokens?}], problems}` -- `source` one of `shipped`,
+`config`, `file`; `path` only for one read from a file; a stage's `schema` its
+JSON Schema as the text it was written in; `problems` empty for a definition
+that can be played. A stage that plays another symphony (27r) is `{name, play,
+input?, image}` -- `play` the symphony's name, `input` its template only when
+written (absent, the played symphony is given the previous stage's answer) --
+and a chain's `problems` include what it reaches: a loop, a nesting past
+`symphony_caps.depth`, a played name nothing defines, a played symphony that
+cannot be played, each named with its path. The list's `problems` names spec files that could not be
+read. Byte for byte what `apogee symphonies list --output-format json` prints.
+
+### `POST /v1/admin/symphonies`
+
+The twin of `apogee symphonies create`. Body: the definition in the view's own
+shape -- `name` (required), `description`, `input: {description, image}`,
+`stages` (required: each `name`, `role`, `prompt`, and optionally `schema`,
+`image`, `brief_tokens`, `answer_tokens` -- or, for a stage that plays another
+symphony, `name`, `play` and optionally `input` and `image`) -- and `force`. Read back through the
+same parser and validation as the CLI's and written through its scaffold, so
+the config entry is byte-identical to the CLI's. A stage naming a backend (a
+`backend` or `model` key, or a `role` that is a configured backend) is `400`
+with the reason, as is any other refusal -- an unknown role, a template naming
+no earlier stage, a schema that is not one, a stage that both plays a role and
+a symphony, a definition that would loop or nest past the cap; `409` (`type: conflict`) when the
+name exists without `force`. `201` with the definition's view (`200` when it
+replaced one). No restart is needed: a play reads the config each run.
+
+### `GET /v1/admin/symphonies/{id}`
+
+One definition's view, byte for byte what `apogee symphonies show <name>
+--output-format json` prints. `{id}` is a name; the plane never reads a path a
+client gives. `404` when unknown.
+
+### `PUT /v1/admin/symphonies/{id}`
+
+The twin of `apogee symphonies edit`: the same body as `POST`, with the name
+from the path and `force` implied -- what `edit` writes back. A starter or a
+spec file edited this way gains a config entry of its name that stands in for
+it. `200` with the view; `400` on a refusal or a malformed body.
+
+### `DELETE /v1/admin/symphonies/{id}`
+
+The twin of `apogee symphonies delete`: the entry is removed, the exact
+inverse of its writing. `200 {deleted}`; `404` when there is no entry --
+including for a shipped starter, which has none. There is deliberately no
+play route: playing runs the host's models on a user's act, and stays on the
+command line as training control does.
+
 ### `POST /v1/admin/knowledge/capture`
 
 The twin of `apogee knowledge capture`: the normalization clerk over a raw
@@ -452,8 +511,15 @@ same spend rule), and `draft` (below).
 `registered` says the collection was added under `embeddings:` by this call
 (the first capture into a new name); `note` carries the resolver's fallback
 reason when there is one, `notes` anything non-fatal (a `supersedes` target
-that does not exist). The raw conversation is archived on the server under
-`knowledge/raw/` and never returned. `400` on a missing `raw`, a bad status,
+that does not exist). When the server's suite validates extraction (27g --
+`validate: {extraction: on}`), `validation` says what its verifier made of
+the record, checked against `raw` before any override: `{result, verifier,
+objection?, revisions, verifier_calls, insisted?, notes?}`, `result` one of
+`passed`, `revised` (objected to, revised once by the clerk, and the revision
+agreed with), `disputed` (an objection still standing beside the record the
+clerk kept -- never silently overridden) or `unchecked` (the verifier could
+not decide; `notes` say why). The raw conversation is archived on the server
+under `knowledge/raw/` and never returned. `400` on a missing `raw`, a bad status,
 a bad retriever, or a resolver refusal (an explicit `vector` with no embedding
 backend); `501` when the server serves no generation backend; `502` when the
 clerk failed to produce a conforming record after its one retry.
@@ -461,7 +527,8 @@ clerk failed to produce a conforming record after its one retry.
 **`"draft": true`** runs the clerk, applies the overrides, normalises and
 validates -- and stores nothing: the HTTP twin of `capture --dry-run`, and
 the first step of the capture → review → store flow below. `200` with
-`{draft: true, record, db, retriever[, warning][, note]}`: the record has an
+`{draft: true, record, db, retriever[, warning][, note][, notes][,
+validation]}`: the record has an
 empty `id` and `timestamp` and no `raw_ref` (only a store mints those), `db`
 and `retriever` are the store decision a real capture would make, and
 `warning` says what a real capture would fail on (an explicit `vector` with
@@ -629,11 +696,37 @@ from the entry has its rows reconciled away on the next build. `--dry-run`
 is CLI-only. Every knowledge record in a collection -- or in any member -- is
 materialised as a `decision` node on every build, deterministically.
 
+**Source trees (27k).** A named graph whose entry lists `sources:` has them
+parsed first, with tree-sitter and **no model**: files, modules, classes and
+functions, and the calls, imports, bases, type references and containment
+between them, each stated at a `file:line` and stored with origin
+`extracted`. Incremental by content hash -- a file is parsed again only when
+its bytes or the extractor change -- and re-linked whole, so the result is
+what a fresh build stores. The job's record carries a `code` object:
+`{files_used, files_parsed, files_unchanged, files_removed,
+files_by_language, skipped: [{member, file, reason}], partial,
+missing_sources, empty_sources, references_resolved, references_unresolved,
+nodes, edges}` -- every file it could not use named with why, never
+silently; a tree that is not a directory in `missing_sources` (what it
+contributed forgotten), one that offers no file -- inside a git repository
+only what git tracks or does not ignore is read -- in `empty_sources`. A graph of
+source trees alone needs **no generation backend**: it builds even on a
+server that serves none, and `model` is not consulted. **`"update": true`**
+is the twin of `apogee graph update {id}`: the trees re-parsed where they
+changed, the collections left as they are, never a model call -- `400` when
+`{id}` is not a named graph or has no source trees. A graph holding
+collections too still needs its extractor for them (the rules above).
+
 ### `GET /v1/admin/graph/{id}/stats`
 
 `200` with `{nodes, edges, mentions, nodes_by_type, nodes_with_vectors,
-total_chunks, chunks_with_mentions, stale_files, failed_chunks, communities[,
-extract_model]}`. For a named graph also `graph`, `collections`, the graph's
+total_chunks, chunks_with_mentions, stale_files, failed_chunks, communities,
+communities_unsummarised, edges_extracted, edges_inferred[, extract_model]}`
+-- every edge parsed from source (`extracted`) or asserted by a model
+(`inferred`), the split always said; with a code layer (27k) also
+`code_files`, `code_files_by_language`, `code_mentions` and
+`unresolved_names` (references nothing in the trees defines, each a `name`
+node, never guessed at). For a named graph also `graph`, `collections`, the graph's
 own `embed_model` when entities were embedded, and `members`: one
 `{collection, mentions, total_chunks, chunks_with_mentions, stale_files[,
 missing: true]}` per member, coverage read from the member's own store, a
@@ -653,6 +746,68 @@ bool}`; a `decision` node carries its record's `status` and `discipline`; in
 a named graph each supporting chunk names the member `collection` it lives
 in, resolved through that member's store. `400` without a name; `404` when
 the graph is unbuilt, the collection has no data, or nothing matches.
+
+### `GET /v1/admin/graph/{id}/path`
+
+The read twin of `apogee graph path` (27l), and the four navigation reads
+below with it: `{id}` resolves graphs-first exactly as `--graph` does, and
+the `200` body is the one document `apogee graph <verb> --graph {id}
+--output-format json` prints and the `graph` tools return -- the same bytes,
+from one traversal core. Reads only: nothing here writes. Navigation is
+model-free: no backend need be served.
+
+`?from=&to=` (both required; each a name, `kind:name`, `path:line` for code,
+or a code node's unqualified name when exactly one qualified name ends in
+it), `max_hops` (default 8, 1..32), `directed` (`true`/`false`, default
+undirected with each hop's direction shown), `relations` (comma-separated:
+walk only these). `200 {"object": "graph.path", graph, from, to, matched:
+{from, to}, directed, max_hops, relations?, found, hops, nodes: [node…],
+steps: [{from, relation, origin, direction: "forward" | "backward", to,
+weight, at?, description?}], note?}` -- `origin` is `extracted` or
+`inferred`, `at` a parsed edge's first site (`file:line`), and with no path
+`found: false` and `note: "no path within N hops"`. A node is `{name, type,
+member?, file?, line?, end_line?, unresolved?, status?, discipline?}`. An
+unresolved `name` node may end a path and never carries one.
+
+Failures carry the CLI's message in the error envelope: `400` for a missing
+or non-integer parameter, a cap out of range, an `{id}` that is not a plain
+name, or a name **several nodes answer to** -- never picked:
+`error.candidates` lists them, each a node; `404` (`not_found_error`)
+when `{id}` names no graph or collection, the graph is not built, or a node
+matches nothing (`error.candidates` then holds the near matches).
+
+### `GET /v1/admin/graph/{id}/explain`
+
+The read twin of `apogee graph explain`: `?node=` (required), `max_neighbors`
+(per relation, default 12, 1..100). `200 {"object": "graph.node", graph,
+node, matched, description?, mentions, degree: {total, out, in},
+max_per_relation, relations: [{relation, direction: "out" | "in", total,
+neighbors: [node + {weight, origin, at?, description?}]}], provenance: {code:
+[{role, member, file, line, end_line?}], chunks: [{collection, source, chunk}
+| {collection, chunk_id, missing: true}]}, communities: [{id, size,
+summary?}], decisions: [node + {decision?}]}` -- each relation group counted
+in full and listed to the cap, the first 12 lines or chunks of provenance,
+and the knowledge records one edge away. Failures as `path`'s.
+
+### `GET /v1/admin/graph/{id}/neighbors`
+
+The read twin of `apogee graph neighbors`: `?node=` (required), `relation`
+(only this one), `direction` (`both`, `out`, `in`), `max_neighbors` (per
+relation, default 12, 1..100). `200 {"object": "graph.neighbors", graph,
+node, matched, degree, relation?, direction, max_per_relation, relations}`,
+the groups shaped as `explain`'s. Failures as `path`'s.
+
+### `GET /v1/admin/graph/{id}/query`
+
+The read twin of `apogee graph query`: `?q=` (required) matched as an entity's
+exact name, else its words against entity names (never descriptions), then
+walked as a turn's retrieval-time expansion walks -- `hops` (1 or 2) and
+`max_entities` (1..50) defaulting to the graph's own -- and cut whole lines at
+the 1,500-codepoint section a turn injects. `200 {"object": "graph.query",
+graph, question, match: "exact" | "names" | "none", hops, max_entities,
+budget, seeds: [node…], entities: [node + {hop, description?}], relations:
+[{from, relation, origin, to, description?}], truncated}`. Nothing matching is
+`200` with `match: "none"`. Failures as `path`'s.
 
 ### `POST /v1/admin/graph/{id}/communities`
 
@@ -674,11 +829,16 @@ summary kept). Summary vectors follow the same spend rule as the build's
 entity vectors, and a summary still without one is vectorised on the next
 run with an embedder.
 
-Body, every field optional: `model`, `force`, `min_size`. The summariser
-resolves exactly as the build's extractor does, with the same refusals:
-`400` for a metered default reached by fall-through, a vendor CLI, or an
-unserved backend; `404` for an unbuilt graph or a collection with no data;
-`501` when the server serves no generation backend. A named graph's
+Body, every field optional: `model`, `force`, `min_size`, and **`summaries`**
+(27k, default `true`): `false` is `--no-summaries` -- the clusters detected
+and stored with **no model call and no backend needed**, each without a
+summary (so without a pseudo-chunk), and the job's counts adding `clustered`
+and `summaries_absent`; a later run with summaries writes exactly the ones
+still without. With summaries, the summariser resolves exactly as the
+build's extractor does, with the same refusals: `400` for a metered default
+reached by fall-through, a vendor CLI, or an unserved backend; `404` for an
+unbuilt graph or a collection with no data; `501` when the server serves no
+generation backend (the message names `"summaries": false`). A named graph's
 summaries live in its own database and are listable here; they do not
 surface through its members' retrieval.
 
@@ -697,12 +857,18 @@ earliest-extracted node survives: edges are repointed to it (weights summed
 when they collide, would-be self-loops dropped), mentions unioned and
 recounted, descriptions merged first-non-empty (the survivor's vector
 cleared on a text change), and the merged nodes' community memberships
-removed (the next communities run recomputes). Entities without a vector are
-never considered, and **`decision` nodes are never merged**. Synchronous --
-storage and cosine, no generation -- and **never automatic**: `200
-{"groups": [{kept, kept_type, merged: [names]}], "merged_nodes", "threshold",
-"dry_run"}`; with `"dry_run": true` the groups are computed and nothing is
-written. `400` for a threshold outside `(0, 1]`; `404` for an unbuilt graph
+removed (the next communities run recomputes); a parsed edge never merges
+down to a model's, and its sites move with it. Entities without a vector are
+never considered, **`decision` nodes are never merged**, and neither is a
+**code entity** (27k) -- its identity is its exact qualified name, one node
+per name as it is built. Synchronous -- storage and cosine, no generation --
+and **never automatic**: `200 {"groups": [{kept, kept_type, merged:
+[names]}], "merged_nodes", "threshold", "dry_run", "code_entities",
+"code_identity_merges"[, "prose_skipped"]}` -- `code_identity_merges` the
+code entities stated at more than one place (a declaration and its
+definition), `prose_skipped` the reason the vector pass did not run when no
+prose entity has a vector to compare; with `"dry_run": true` the groups are
+computed and nothing is written. `400` for a threshold outside `(0, 1]`; `404` for an unbuilt graph
 or a collection with no data.
 
 ### `DELETE /v1/admin/graph/{id}`
@@ -732,7 +898,8 @@ without the boolean.
 
 The `graphs:` entries -- named graphs spanning several collections, the
 twins of `apogee config add-graph` / `delete-graph`. `200 {"object": "list",
-"data": [{name, collections, extract_backend?, hops, max_entities, built}]}`,
+"data": [{name, collections, sources?, languages?, extract_backend?, hops,
+max_entities, built}]}`,
 `built` reporting whether the graph's database exists. Config only: the data
 routes are `/v1/admin/graph/{id}/*` above. A collection covered by a built
 entry expands through it at retrieval, cross-collection; the first entry
@@ -742,10 +909,15 @@ nothing.
 ### `POST /v1/admin/graphs`
 
 Adds an entry through the same comment-preserving transform the CLI uses,
-byte-identical. Body: `name` and `collections` (a non-empty list of
-collection names) required; `extract_backend`, `hops` (1 or 2),
-`max_entities` optional. The CLI's rules, answered as `400`: a plain name, at
-least one member, **no collision with a collection name** (resolution is
+byte-identical. Body: `name`, and `collections` (collection names) or
+`sources` (27k: source trees, each an **absolute** directory, recorded
+normalized as the CLI records it) or both; `languages` (the trees' grammars:
+`c`, `cpp`, `python`, `javascript`, `typescript`, `tsx`, `go`, `rust`,
+`java`, `csharp`, `ruby`, `bash`; empty for all), `extract_backend`, `hops`
+(1 or 2), `max_entities` optional. A tree that is not a directory yet is a
+`warnings` entry; a relative tree, two trees with one directory name, a tree
+named like a member collection, or an unknown language is a `400`. The CLI's rules, answered as `400`: a plain name, at
+least one member collection or source tree, **no collision with a collection name** (resolution is
 graphs-first, so a collision would make the collection's own graph
 unreachable), a configured `extract_backend` when one is named, knobs in
 range. A member that is not configured yet is a `warnings` entry, never a
@@ -770,6 +942,126 @@ Removes the entry and answers `{"deleted": name}`. The graph's database is
 left on disk exactly as `apogee config delete-graph` leaves it --
 `DELETE /v1/admin/graph/{id}` while the entry still exists removes the data.
 `404` when not configured.
+
+### `GET /v1/admin/suites`
+
+The `suites:` entries -- named bundles of models, one backend per role a
+suite speaks for -- the twins of `apogee config add-suite`, `set-suite`,
+`delete-suite` and `set-default-suite`. `200 {"object": "list", "data":
+[{name, description?, members: {role: {backend, context_size?, toolset?}},
+consultable?, consult_caps?, validate?, orchestrate?, default}]}`, `default`
+saying whether
+`models.default_suite` names it. The roles are `chat`, `embedding`,
+`extraction`, `vision`, `transcription` and `utility`; `toolset` words are
+`fs`, `shell`, `git`, `notes`, `rag`, `graph`, `web` and `mcp`. `consultable` lists
+the roles whose members the suite's chat model may consult through the
+`consult` tool (27f) -- `extraction`, `vision`, `transcription` or `utility`
+-- and `consult_caps` the caps a turn's consults run under (`per_turn`,
+`brief_tokens`, `answer_tokens`; each absent one at its default, 4, 1024
+and 512). `validate` (27g) is the suite's rubber-duck validation as written
+-- `{verifier?, tool_args?, extraction?, answers?}`, only the keys set: the
+role whose member checks the others' work (`utility` when absent), whether a
+gated tool's arguments are checked before it runs and a knowledge capture's
+record against its source (booleans, `on`/`off` in the file), and whether
+answers are checked on request (`request`, the default: chat's `/check`) or
+`always`. `orchestrate` (27t), present and `true` only when on, is whether an
+`apogee execute` session under the suite offers its chat model the
+symphonies as tools. A suite is resolution, not transport: the server resolves every
+request under the suite it started with -- the config's default, never a
+request's -- and each write below answers `restart_required` when the file
+has moved on from it.
+
+### `POST /v1/admin/suites`
+
+Adds an entry through the same comment-preserving transform the CLI uses,
+byte-identical. Body: `name` and `members` (role -> a backend's name, or
+`{backend, context_size?, toolset?}`) required; `description`,
+`consultable` (a list of roles), `consult_caps` (`{per_turn?,
+brief_tokens?, answer_tokens?}`), `validate` (`{verifier?, tool_args?,
+extraction?, answers?}`) and `orchestrate` (a boolean) optional. The CLI's rules, answered as
+`400`: a name that is not `off` (`/suite off` means no suite), at least one
+member, every member a configured backend, a positive window, known toolset
+words, one backend pinned one way -- and each consultable role one that
+answers, with a member in the suite whose backend's provider says it is not
+billed per call (asked as the CLI asks it: a consult runs on the model's
+initiative, which never spends), every cap positive -- and a verifier that
+can check (not `chat`, not `embedding`) with a member in the suite whose
+provider says it is not billed per call, held the same way -- and, with
+`orchestrate` on, every member a symphony the suite would offer reaches,
+resolved through the one role chain, not billed per call by its provider's
+word (a play the model starts runs on its initiative, which never spends).
+`201
+{"data": {…}, "restart_required"}`; `409` when the name exists -- `PUT`
+replaces.
+
+### `POST /v1/admin/suites/default`
+
+The twin of `apogee config set-default-suite`: body `{"name"}`, a suite or
+`off` for none. `200 {"field": "default_suite", "name", "restart_required"}`,
+`name` being `""` for `off`; `400` for a suite that is not configured.
+
+### `GET /v1/admin/suites/{id}`
+
+One entry, `200 {"data": {…}}` in the shape above; `404` when not
+configured.
+
+### `PUT /v1/admin/suites/{id}`
+
+Replaces the entry in place, under the same rules as `POST`; a body `name`,
+when present, must match the path (`400` otherwise). `200 {"data": {…},
+"restart_required"}`; `404` when not configured.
+
+### `DELETE /v1/admin/suites/{id}`
+
+Removes the entry and answers `{"deleted": name}`; `404` when not
+configured, `409` while `models.default_suite` names it.
+
+### `PUT /v1/admin/suites/{id}/members`
+
+The twin of `apogee config set-suite`, one member at a time: body `{"role",
+"member"}`, the member a backend's name or `{backend, context_size?,
+toolset?}`, or `null` to remove it -- the role then falls through to the
+global pointers. That member's lines are replaced in place, and every other
+line of the entry, its comments included, is left as it was. `200 {"data":
+{…}, "restart_required"}`; `404` when the suite is not configured, `400` under
+the CLI's rules.
+
+### `PUT /v1/admin/suites/{id}/consult`
+
+The twin of `apogee config set-suite --consultable`/`--consult-cap` (27f):
+whom the suite's chat model may consult, and the caps. Body
+`{"consultable"?: [role, …] | null, "consult_caps"?: {per_turn?,
+brief_tokens?, answer_tokens?} | null}` -- a key left out keeps what the
+entry has, `null` clears it, and a cap set to `null` goes back to its
+default. The two keys are replaced in place and every other line of the
+entry is left as it was. `200 {"data": {…}, "restart_required"}`; `404` when
+the suite is not configured, `400` under the CLI's rules -- a member billed
+per call among them.
+
+### `PUT /v1/admin/suites/{id}/validate`
+
+The twin of `apogee config set-suite --verifier`/`--validate` (27g): which
+seams the suite's verifier checks, and which member checks. Body
+`{"verifier"?: role | null, "tool_args"?: bool | null, "extraction"?: bool |
+null, "answers"?: "request" | "always" | null}` -- a key left out keeps what
+the entry has, `null` puts it back to its default, and with nothing left set
+the block is removed (the twin of `--validate off`). The block is replaced in
+place and every other line of the entry is left as it was. `200 {"data":
+{…}, "restart_required"}`; `404` when the suite is not configured, `400`
+under the CLI's rules -- a verifier with no member, or one billed per call,
+among them.
+
+### `PUT /v1/admin/suites/{id}/orchestrate`
+
+The twin of `apogee config set-suite --orchestrate on|off` (27t): whether an
+`apogee execute` session under the suite offers its chat model the
+symphonies as tools. Body `{"orchestrate": true | false}`; `true` writes
+`orchestrate: true` and `false` removes the key, in place, every other line
+of the entry left as it was. `200 {"data": {…}, "restart_required"}`; `404`
+when the suite is not configured, `400` under the CLI's rules -- a member a
+symphony reaches that is billed per call (named, with the symphony and its
+stage), or a provider that cannot be asked, among them. The member route
+above holds a suite that orchestrates to the same rule.
 
 ### `POST /v1/admin/knowledge`
 
@@ -809,7 +1101,7 @@ The twin of `apogee datasets synth`, as an **async job** (`datasets-synth`):
 `{"name", "teacher", "kit", "count"?, "topic"?, "temperature"?,
 "max_tokens"?, "parallel"?, "force"?}`. Synth is teacher inference, not
 training -- the distinction the training track's carve-out rests on -- so it
-is exposed exactly as the reference implementation exposed it. The teacher is
+is exposed here. The teacher is
 named explicitly (never resolved from a role), must be served by this plane,
 and is never a vendor CLI; an API backend runs `parallel` batches in flight
 (default 4), a local one runs one. `202 {"job_id"}`; progress `synthesising
@@ -856,8 +1148,8 @@ rollback|setup`, `train pipeline run|resume`, `train regime run` and
 `train cycle run|halt|resume` have no route: an expensive GPU job with
 live progress is not a control surface a remote client should be able to
 start, and a promotion changes what this server chats with. Each is a
-documented parity carve-out (the reference implementation's
-`POST .../cycle/halt` is deliberately not ported); what a remote client may
+documented parity carve-out (there is deliberately no
+`POST .../cycle/halt`); what a remote client may
 do is read.
 
 ### `GET /v1/admin/training/runs`
@@ -890,9 +1182,11 @@ neither, `400` for an id that is not a plain name.
 The version ledgers under `training/versions/`: `200 {"object": "list",
 "data": [ledger]}`, or with `?backend=<name>` that backend's ledger alone
 (`404` when it has none). A ledger is `{backend_name, active_version,
-versions: [{version, run_id, gguf_path, promoted_at[, eval_score,
-eval_passed, pruned_at]}]}` -- a pruned entry stays as history with the
-time retention removed its file.
+versions: [{version, run_id, gguf_path | mlx_path, promoted_at[,
+eval_score, eval_passed, pruned_at, fused_path]}]}` -- a GGUF version names
+its `gguf_path`, an MLX one (`train promote --target mlx`) its `mlx_path`
+directory; a pruned entry stays as history with the time retention removed
+its file.
 
 ### `GET /v1/admin/training/cycle`
 
@@ -904,6 +1198,45 @@ sessions_until, runs: [{run_at, source, dataset_rows, pipeline_id, gate:
 anchor_score, promoted_version[, note]}], active: bool}`; `404` until the
 first `train cycle run` has written it. `cycle run`, `halt` and `resume`
 have no route.
+
+### `GET /v1/admin/tasks`
+
+The tasks under `tasks/`, newest first, as `apogee task list` shows them: `200
+{"object": "list", "data": [{id, status, rounds_used, rounds_budget, goal}],
+"total": N}` -- the newest 50, or with `?all=true` every one (any other value of
+`all` but `false` is `400`); `total` counts every task, and `data` is `[]` and
+never null. A ledger that cannot be read is left out. The body is byte for byte
+what `apogee task list --output-format json` prints.
+
+**Task control is CLI-only** -- the training track's split. `apogee task run`,
+`resume`, `halt` and `cancel` have no route: a task is an unattended run of the
+host's own session and tools under its lock, not a control surface a remote
+client should hold. Each is a documented parity carve-out; what a remote client
+may do is read.
+
+### `GET /v1/admin/tasks/{id}`
+
+One task's view, as `apogee task status <id> --output-format json` prints it,
+byte for byte: `200 {id, status, process, interrupted, goal, conversation, folder,
+tools, policy: {agent, grants, on_question} | null, rounds_used, rounds_budget,
+created_at, updated_at, reason, checks: [{kind, value, description, ran, passed,
+detail}], self_report, plan, turns: [{round, kind, outcome, adopted,
+checks_passed, self_report, tools, allowed: [{tool, target, by}], denied: [{tool,
+target, by}], answered: [{question, by}], tokens, tokens_estimated, started_at,
+ended_at}]}`. `status` is the ledger's -- `planning`, `running`, `halted`,
+`cancelled`, `done`, `exhausted`, `stalled` or `failed` -- with `process` the
+process running it now (`null` otherwise) and `interrupted` true for a task whose
+ledger says it is planning or running with no process left to run it (`task
+resume` continues it on the host). `checks` are each acceptance check as the
+newest completed round left it, and `self_report` that round's (`done`,
+`not_done`, `unreported`); a turn's `outcome` is `completed`, `interrupted` or
+`in_flight`. **A declared answer is never served:** `policy.on_question` is
+`answer` when the task was handed one and an answered question says `by:
+"declared"`, never what it said -- `task status` at the host's terminal shows
+it. Nor is a path into the private layout: `folder` and a `require_file` check's
+`value` are the user's own. `404` when there is no such task, `400` for an id
+that is not one, `500` when its ledger cannot be read (the message never names
+its path).
 
 ### `GET /v1/admin/permissions`
 
@@ -1036,6 +1369,8 @@ after a successful ingest, the twin of `apogee embed ingest --graph`.
   puts its own access control in front. Only the admin plane takes a bearer.
 - **It does not terminate TLS.** Plain HTTP, behind a reverse proxy that does.
 - **It does not serve subscription backends.** A vendor-CLI entry is refused by
-  type, with a 400 that says why.
+  type, with a 400 that says why. The refusal is about credentials, not
+  runtimes: a local `mlx` entry is served like a `llamacpp` one, its driver a
+  child of the server over pipes that holds no socket.
 - **It does not run tools the client defines.** The loop is the server's; a
   request with `tools` is refused rather than silently ignored.

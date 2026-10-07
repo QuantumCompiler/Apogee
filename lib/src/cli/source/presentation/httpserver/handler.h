@@ -96,6 +96,18 @@ struct HandlerOptions {
     /// ones its question needs, through a selection of its own. Null offers
     /// every tool.
     std::shared_ptr<const agentloop::ToolRanker> tool_ranker;
+
+    /// A served backend the active suite pins a toolset on (27d): what a
+    /// request on it is offered instead of every tool -- the registry
+    /// narrowed to the pin, with a ranker of its own when it is still large.
+    struct PinnedTools {
+        std::shared_ptr<const agent::ToolRegistry> registry;
+        std::shared_ptr<const agentloop::ToolRanker> ranker;
+    };
+
+    /// By backend key. Empty -- no suite, or none pinning a served backend --
+    /// offers every request the whole registry, as before.
+    std::map<std::string, PinnedTools, std::less<>> pinned_tools;
 };
 
 class Handler {

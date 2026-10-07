@@ -130,7 +130,7 @@ void require_ref(const std::string& ref, std::string_view label) {
 }
 
 /// Resolves a review ref to something a diff spec can name, fetching per
-/// `fetch_mode` -- Ommi's `_resolve_review_ref`, case for case.
+/// `fetch_mode`.
 std::string resolve_review_ref(const Git& git, const std::string& ref, const std::string& remote,
                                const std::string& fetch_mode) {
     const std::set<std::string> remotes = git.remotes();

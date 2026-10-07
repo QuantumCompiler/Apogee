@@ -575,7 +575,10 @@ TEST_CASE(
     CHECK(summary.transient.response_schema.empty());
     CHECK(summary.messages.front().content.plain_text().find("corpus analyst") !=
           std::string::npos);
+    // Straight after the job: its store may still be closing (2026-10-07,
+    // windows-arm64 answered 500 here -- embedstore/store.cpp's busy timeout).
     response = fixture.list_communities("notes");
+    INFO(response.body);
     REQUIRE(response.status == 200);
     const nlohmann::json listed = parsed(response)["data"];
     REQUIRE(listed.size() == 1);
@@ -693,4 +696,99 @@ TEST_CASE("the new graph routes sit behind the gate and dispatch through the mux
     one.body.clear();
     CHECK(mux.dispatch(one).status == 200);
     CHECK(mux.dispatch(one).status == 404);
+}
+
+namespace {
+
+/// A source tree for a code graph, outside the fixture's home: two Python
+/// modules, one calling the other.
+struct SourceTree {
+    apogee::testing::TempDir dir{"admin-graph-src-" + std::to_string(std::random_device{}())};
+
+    SourceTree() {
+        std::filesystem::create_directories(dir.path() / "pkg");
+        std::ofstream{dir.path() / "pkg" / "lib.py", std::ios::binary}
+            << "def helper():\n    return 1\n";
+        std::ofstream{dir.path() / "pkg" / "app.py", std::ios::binary}
+            << "from .lib import helper\n\n\ndef run():\n    return helper() + len([])\n";
+    }
+
+    [[nodiscard]] std::string entry() const {
+        return "graphs:\n  code:\n    sources: [\"" + dir.path().generic_string() +
+               "\"]\n  prose:\n    collections: [notes]\n";
+    }
+};
+
+}  // namespace
+
+TEST_CASE("a code graph builds and updates over the plane with no generation backend served",
+          "[httpserver][admin][graph][code]") {
+    const SourceTree tree;
+    Fixture fixture{{}, /*serve=*/false, false, tree.entry()};
+
+    HttpResponse response = fixture.build("code");
+    REQUIRE(response.status == 202);
+    const apogee::httpserver::JobRecord built = fixture.wait(parsed(response).at("job_id"));
+    REQUIRE(built.status == JobStatus::Succeeded);
+    const nlohmann::json code = built.result.at("code");
+    CHECK(code.at("files_parsed") == 2);
+    CHECK(code.at("files_by_language").at("python") == 2);
+    CHECK(code.at("references_resolved").get<int>() >= 2);
+    CHECK(code.at("references_unresolved") == 1);  // len, a name -- never a guess
+    CHECK(code.at("skipped").empty());
+    CHECK(fixture.provider->requests().empty());
+
+    const nlohmann::json stats = parsed(fixture.stats("code"));
+    CHECK(stats.at("code_files") == 2);
+    CHECK(stats.at("edges_extracted").get<int>() > 0);
+    CHECK(stats.at("edges_inferred") == 0);
+
+    // `"update": true` is `graph update`: nothing changed, nothing parsed.
+    response = fixture.build("code", nlohmann::json{{"update", true}});
+    REQUIRE(response.status == 202);
+    const apogee::httpserver::JobRecord updated = fixture.wait(parsed(response).at("job_id"));
+    REQUIRE(updated.status == JobStatus::Succeeded);
+    CHECK(updated.result.at("code").at("files_parsed") == 0);
+    CHECK(updated.result.at("code").at("files_unchanged") == 2);
+
+    // Update's refusals, as the CLI's: not a named graph, or one with no trees.
+    CHECK(fixture.build("notes", nlohmann::json{{"update", true}}).status == 400);
+    CHECK(fixture.build("prose", nlohmann::json{{"update", true}}).status == 400);
+    CHECK(fixture.build("code", nlohmann::json{{"update", "yes"}}).status == 400);
+    // A graph with prose still needs its extractor: no backend served, 501.
+    CHECK(fixture.build("prose").status == 501);
+}
+
+TEST_CASE(
+    "communities cluster with no model over the plane when asked, and dedupe says what "
+    "each layer had",
+    "[httpserver][admin][graph][code][model-free]") {
+    const SourceTree tree;
+    Fixture fixture{{}, /*serve=*/false, false, tree.entry()};
+    HttpResponse response = fixture.build("code");
+    REQUIRE(response.status == 202);
+    REQUIRE(fixture.wait(parsed(response).at("job_id")).status == JobStatus::Succeeded);
+
+    // Summaries wanted with nothing to write them: the 501 says the way out.
+    response = fixture.communities("code");
+    CHECK(response.status == 501);
+    CHECK(response.body.find("\\\"summaries\\\": false") != std::string::npos);
+    CHECK(fixture.communities("code", nlohmann::json{{"summaries", 1}}).status == 400);
+
+    response = fixture.communities("code", nlohmann::json{{"summaries", false}, {"min_size", 2}});
+    REQUIRE(response.status == 202);
+    const apogee::httpserver::JobRecord clustered = fixture.wait(parsed(response).at("job_id"));
+    REQUIRE(clustered.status == JobStatus::Succeeded);
+    CHECK(clustered.result.at("summarized") == 0);
+    CHECK(clustered.result.at("clustered").get<int>() >= 1);
+    CHECK(clustered.result.at("summaries_absent").get<int>() >= 1);
+    CHECK(fixture.provider->requests().empty());
+    const nlohmann::json listed = parsed(fixture.list_communities("code"));
+    REQUIRE_FALSE(listed.at("data").empty());
+    CHECK(listed.at("data").front().at("summary") == "");
+
+    const nlohmann::json dedupe = parsed(fixture.dedupe("code"));
+    CHECK(dedupe.at("merged_nodes") == 0);
+    CHECK(dedupe.at("code_entities").get<int>() > 0);
+    CHECK(dedupe.at("prose_skipped") == "no prose entities -- nothing to compare by vector");
 }

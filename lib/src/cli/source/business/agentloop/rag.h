@@ -64,7 +64,8 @@ struct RagResult {
     std::vector<std::string> notes;
 
     /// Entities the knowledge-graph expansion injected beside the chunks;
-    /// 0 when the collection has no enabled graph or nothing was related.
+    /// 0 when the collection has no enabled graph -- an attachment turn's
+    /// chat no code graph (27o) -- or nothing was related.
     int graph_entities = 0;
 
     /// What `prefix` costs, by the turn's count: the share a later retrieval
@@ -140,6 +141,16 @@ struct RagTurn {
     /// collection's own when `graph_store_path` is empty, else a named
     /// graph's database -- whose seeds carry the collection's name as their
     /// label and whose section carries the graph's name.
+    ///
+    /// **An attachment turn expands too** (27o): with `attachments` set, the
+    /// graph is the chat's own code graph, in the index beside its chunks
+    /// (27n) -- `graph_store_path` and `graph_seed_collection` unused -- set
+    /// by the chat from its own state (`ChatAttachments::graph_scope`), never
+    /// by `resolve_turn_graph`, which stays about collections and named
+    /// graphs. The same top-k seed it through the code their lines state
+    /// (`code_excerpt_refs`), the same hop and entity knobs and section
+    /// budget bound it, and its section rides after the excerpts in the
+    /// same transient message, fitted to the share as a collection's is.
     bool graph_enabled = false;
     int graph_hops = 1;
     int graph_max_entities = 8;

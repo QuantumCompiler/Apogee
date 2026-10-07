@@ -34,10 +34,10 @@
 ///
 /// Sibling models reference identical blobs — license and template layers
 /// routinely, weights occasionally. Deleting a blob because "its" model is
-/// going away silently corrupts every other model that referenced it. Ommi
-/// recorded this rule and Apogee keeps it: **the only mutation of the Ollama
-/// store is `ollama rm`**, the vendor's own reference-counting GC. This module
-/// is read-only by construction — it has no delete path to misuse.
+/// going away silently corrupts every other model that referenced it. So **the
+/// only mutation of the Ollama store is `ollama rm`**, the vendor's own
+/// reference-counting GC. This module is read-only by construction — it has no
+/// delete path to misuse.
 namespace apogee::models {
 
 /// One model found in the store.
@@ -60,10 +60,10 @@ struct OllamaEntry {
     ///
     /// **Ollama ships the projector as its OWN layer** —
     /// `application/vnd.ollama.image.projector` — rather than fused into the
-    /// model blob. That was worth checking rather than assuming: the plan
-    /// inherited from Ommi was to *extract* a projector out of a combined file,
-    /// and the manifests say there is nothing to extract. `llava` and
-    /// `moondream` both carry the two layers side by side.
+    /// model blob. That was worth checking rather than assuming: the original
+    /// plan was to *extract* a projector out of a combined file, and the
+    /// manifests say there is nothing to extract. `llava` and `moondream` both
+    /// carry the two layers side by side.
     ///
     /// Empty for a text-only model.
     std::filesystem::path projector_blob;

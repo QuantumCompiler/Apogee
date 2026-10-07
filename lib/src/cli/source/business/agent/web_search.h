@@ -15,14 +15,13 @@
 /// (25e).
 ///
 /// **This revises the 2026-08-26 decision** that search comes only from the
-/// providers' own server-side tools. That decision refused Ommi's search
-/// because it scraped DuckDuckGo's results page with regular expressions,
-/// which breaks silently whenever the markup changes and returns nothing
-/// rather than failing. SearXNG answers over a stable JSON API instead, keeps
-/// its own engines working against upstream changes, and fails out loud: an
-/// HTTP error, or the engines it names in `unresponsive_engines`. So the rule
-/// here is **never silently empty** -- every outcome is results, or an error
-/// that says what to do.
+/// providers' own server-side tools. That decision refused search that scrapes
+/// DuckDuckGo's results page with regular expressions, which breaks silently
+/// whenever the markup changes and returns nothing rather than failing. SearXNG
+/// answers over a stable JSON API instead, keeps its own engines working
+/// against upstream changes, and fails out loud: an HTTP error, or the engines
+/// it names in `unresponsive_engines`. So the rule here is **never silently
+/// empty** -- every outcome is results, or an error that says what to do.
 ///
 /// The HTTP call arrives as a `UrlFetcher` from the composition root, as
 /// `fetch_url`'s does: `agent/` includes no transport, and everything here is

@@ -25,7 +25,7 @@ constexpr std::string_view kAdminPrefix = "/v1/admin";
 /// `documentation/reference/http-api.md`, and each documented route to be
 /// here -- so the reference a client author trusts cannot drift from the
 /// routes that exist. Admin rows are only reachable through the gate.
-constexpr std::array<Route, 73> kRoutes{{
+constexpr std::array<Route, 94> kRoutes{{
     {"POST", "/v1/chat/completions", false,
      +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string&) {
          return h.chat_completions(r);
@@ -143,6 +143,28 @@ constexpr std::array<Route, 73> kRoutes{{
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
          return a->delete_agent(r, id);
      }},
+    // The symphonies slice (27q): the twins of create, edit and delete, and
+    // the reads list and show serve; play stays on the command line.
+    {"GET", "/v1/admin/symphonies", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->list_symphonies(r);
+     }},
+    {"POST", "/v1/admin/symphonies", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->create_symphony(r);
+     }},
+    {"GET", "/v1/admin/symphonies/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->get_symphony(r, id);
+     }},
+    {"PUT", "/v1/admin/symphonies/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->put_symphony(r, id);
+     }},
+    {"DELETE", "/v1/admin/symphonies/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->delete_symphony(r, id);
+     }},
     {"POST", "/v1/admin/knowledge", true,
      +[](Handler& h, AdminHandler* a, const HttpRequest& r, const std::string&) {
          return a->create_knowledge(h, r);
@@ -193,6 +215,23 @@ constexpr std::array<Route, 73> kRoutes{{
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
          return a->graph_entity(r, id);
      }},
+    // Navigation (27l): reads only, the `graph` verbs' JSON documents.
+    {"GET", "/v1/admin/graph/{id}/path", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->graph_path(r, id);
+     }},
+    {"GET", "/v1/admin/graph/{id}/explain", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->graph_explain(r, id);
+     }},
+    {"GET", "/v1/admin/graph/{id}/neighbors", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->graph_neighbors(r, id);
+     }},
+    {"GET", "/v1/admin/graph/{id}/query", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->graph_query(r, id);
+     }},
     {"POST", "/v1/admin/graph/{id}/communities", true,
      +[](Handler& h, AdminHandler* a, const HttpRequest& r, const std::string& id) {
          return a->build_communities(h, r, id);
@@ -234,6 +273,48 @@ constexpr std::array<Route, 73> kRoutes{{
     {"DELETE", "/v1/admin/graphs/{id}", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
          return a->delete_graph_config(r, id);
+     }},
+    // The suites: config slice (27d) -- the literal `default` first, so it
+    // is never read as a suite's name on a POST.
+    {"GET", "/v1/admin/suites", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->list_suites(r);
+     }},
+    {"POST", "/v1/admin/suites", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->create_suite(r);
+     }},
+    {"POST", "/v1/admin/suites/default", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->set_default_suite(r);
+     }},
+    {"GET", "/v1/admin/suites/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->get_suite(r, id);
+     }},
+    {"PUT", "/v1/admin/suites/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->put_suite(r, id);
+     }},
+    {"DELETE", "/v1/admin/suites/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->delete_suite(r, id);
+     }},
+    {"PUT", "/v1/admin/suites/{id}/members", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->set_suite_member(r, id);
+     }},
+    {"PUT", "/v1/admin/suites/{id}/consult", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->set_suite_consult(r, id);
+     }},
+    {"PUT", "/v1/admin/suites/{id}/validate", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->set_suite_validate(r, id);
+     }},
+    {"PUT", "/v1/admin/suites/{id}/orchestrate", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->set_suite_orchestrate(r, id);
      }},
     // The datasets slice: the literal paths first, so `synth` and `kits`
     // are never read as dataset names.
@@ -283,6 +364,17 @@ constexpr std::array<Route, 73> kRoutes{{
     {"GET", "/v1/admin/training/cycle", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
          return a->training_cycle(r);
+     }},
+    // The tasks slice (27j): reads only, the training split. `task run`,
+    // `resume`, `halt` and `cancel` have no route -- task control is
+    // CLI-only.
+    {"GET", "/v1/admin/tasks", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->list_tasks(r);
+     }},
+    {"GET", "/v1/admin/tasks/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->get_task(r, id);
      }},
     {"GET", "/v1/admin/permissions", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {

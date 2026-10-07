@@ -323,8 +323,7 @@ TEST_CASE("a provider reporting no usage falls back to an estimate", "[conforman
 }
 
 TEST_CASE("ask_user is advertised uniformly across every provider", "[conformance]") {
-    // Apogee owns the loop everywhere, so this needs no vendor special case --
-    // the divergence from Ommi, asserted.
+    // Apogee owns the loop everywhere, so this needs no vendor special case.
     for (const ProviderCase& provider : providers()) {
         INFO("provider: " << provider.name);
 

@@ -14,7 +14,10 @@ this locks:
     a real folder in the working directory and the message is sent as typed --
     and no row reaches the terminal's last column, and none is left behind on
     or under a line sent in one burst;
-  * a pipe gets none of it: no prompt, no row, no escape sequence.
+  * a pipe gets none of it: no prompt, no row, no escape sequence;
+  * attachment options (27p): Tab after `/attach <path> ` takes `--graph=`
+    from the one command table, its values follow, and the line sent attaches
+    the folder with the method it names.
 
 POSIX only -- `pty` has no Windows equivalent.
 """
@@ -286,6 +289,56 @@ def check_suggestions(binary, env, home, failures):
         shutil.rmtree(work, ignore_errors=True)
 
 
+def check_attach_flags(binary, env, home, failures):
+    """27p: `/attach <path> ` completes its flag, then the flag's values."""
+    width = 44
+    work = tempfile.mkdtemp(prefix="apogee-lineedit-attach-")
+    try:
+        os.mkdir(os.path.join(work, "library"))
+        with open(os.path.join(work, "library", "main.py"), "w", encoding="utf-8") as handle:
+            handle.write("def main():\n    return 1\n")
+        screens = []
+        before = len(sessions(home))
+        run_chat(binary, env, [
+            b"/attach library ",  # the flag, from the table
+            b"\t",               # Tab: "--graph=", and its values under it
+            b"\t",               # Tab: the first value
+            b"\r",               # sent: the folder attached, its method said
+            b"/attachments\r",   # settled: the graph built
+            b"/exit\r",
+        ], cwd=work, width=width, snapshots=screens)
+
+        flag, values, picked = [below_prompt(s) for s in screens[:3]]
+        # One candidate is drawn inline after the cursor, not as a row.
+        if not (flag and flag[0].startswith("You: /attach library") and "--graph=" in "".join(flag)):
+            failures.append(f"/attach <path> did not offer --graph=: {flag!r}")
+        if not (values and values[0].startswith("You: /attach library --graph=")
+                and any("--graph=code" in row for row in values[1:])
+                and any("--graph=off" in row for row in values[1:])):
+            failures.append(f"Tab did not take --graph= and offer its values: {values!r}")
+        if not (picked and picked[0].startswith("You: /attach library --graph=code")):
+            failures.append(f"Tab did not take the first value: {picked!r}")
+        said = "".join(screens[3].lines())
+        if "with its code graph (--graph=code)" not in said:
+            failures.append(f"the line sent did not name the method: {said[-600:]!r}")
+        attached = [a for session in sessions(home)[before:]
+                    for a in session.get("attachments", [])]
+        if not (len(attached) == 1 and attached[0].get("name") == "library"
+                and attached[0].get("graph", {}).get("label") == "library"):
+            failures.append(f"the line sent did not attach the folder with its graph: {attached!r}")
+        for number in (0, 1, 2):
+            lines = screens[number].lines()
+            prompt = max(i for i, line in enumerate(lines) if line.startswith("You:"))
+            if any(col >= width - 1 for col in screens[number].touched[prompt:]):
+                failures.append(f"attach step {number}: a row under the prompt reached the last "
+                                f"column: {lines[prompt:]!r}")
+        for screen in screens:
+            if screen.unhandled:
+                failures.append(f"unmodelled sequences {screen.unhandled!r}: extend the model")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def check_pipe(binary, env, failures):
     """A pipe is a first-class way to drive chat: it must get bytes and nothing else."""
     work = tempfile.mkdtemp(prefix="apogee-lineedit-pipe-")
@@ -350,6 +403,7 @@ def main():
                     failures.append("the history file does not contain the typed line")
 
         check_suggestions(binary, env, home, failures)
+        check_attach_flags(binary, env, home, failures)
         check_pipe(binary, env, failures)
 
         if failures:

@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "contracts/sha256.h"
+#include "contracts/utf8.h"
 
 namespace apogee::agent {
 
@@ -186,6 +187,9 @@ ToolOutcome dispatch(const ToolRegistry& registry, const harness::ToolCall& call
         // with it.
         outcome = ToolOutcome{std::string{"Error: "} + e.what(), true};
     }
+    // What the tool found, made text: history, the session file, the next
+    // request and an MCP client's frame are each a strict JSON dump.
+    outcome.content = harness::valid_utf8(outcome.content);
 
     if (context.on_status) {
         context.on_status("");

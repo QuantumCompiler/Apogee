@@ -21,6 +21,7 @@ include(Catch)
 
 add_library(apogee_tests_infrastructure OBJECT
     infrastructure/platform/platform_test.cpp
+    infrastructure/platform/pid_lock_test.cpp
     infrastructure/platform/child_process_test.cpp
     infrastructure/platform/ffmpeg_test.cpp
     infrastructure/ansi/ansi_test.cpp
@@ -30,8 +31,10 @@ add_library(apogee_tests_infrastructure OBJECT
     support/file_time.h
     support/file_time.cpp
     support/fake_child.h
+    support/fake_mlx_driver.h
     support/fake_ffmpeg.h
     support/gguf_builder.h
+    support/mlx_model.h
     support/terminal_model.h
     support/terminal_model.cpp
     support/embedding_fixtures.h
@@ -41,9 +44,14 @@ target_link_libraries(apogee_tests_infrastructure PRIVATE apogee_infrastructure 
 add_library(apogee_tests_data OBJECT
     data/contracts/config_test.cpp
     data/contracts/config_edit_test.cpp
+    data/contracts/symphony_spec_test.cpp
+    data/contracts/symphony_walk_test.cpp
     data/contracts/host_test.cpp
+    data/contracts/utf8_test.cpp
     data/contracts/paths_test.cpp
     data/contracts/types_test.cpp
+    support/channel_guard.h
+    support/channel_guard.cpp
     data/backends/mock_test.cpp
     data/transport/sse_parser_test.cpp
     data/transport/http_client_test.cpp
@@ -64,8 +72,13 @@ add_library(apogee_tests_data OBJECT
     data/backends/ollama_cli_test.cpp
     data/backends/codex_cli_test.cpp
     data/backends/gemini_cli_test.cpp
+    data/backends/mlx_protocol_test.cpp
+    data/backends/mlx_local_test.cpp
+    data/backends/mlx_driver_test.cpp
     data/modelstore/gguf_inspect_test.cpp
     data/modelstore/kv_cache_test.cpp
+    data/modelstore/footprint_test.cpp
+    data/modelstore/mlx_info_test.cpp
     data/contracts/sha256_test.cpp
     data/modelstore/store_test.cpp
     data/modelstore/sidecar_test.cpp
@@ -90,6 +103,10 @@ add_library(apogee_tests_data OBJECT
     data/embedstore/graph_communities_test.cpp
     data/embedstore/graph_dedupe_test.cpp
     data/embedstore/graph_multi_test.cpp
+    data/embedstore/graph_code_test.cpp
+    data/embedstore/graph_navigate_test.cpp
+    support/graph_fixture.h
+    support/graph_fixture.cpp
     support/fake_transport.h
     support/fake_llama.h
     support/fake_transport.cpp
@@ -103,6 +120,7 @@ add_library(apogee_tests_business OBJECT
     business/harness/provider_capability_test.cpp
     business/harness/llamacpp_harness_test.cpp
     business/harness/roles_test.cpp
+    business/harness/residency_test.cpp
     business/models/lineage_test.cpp
     business/models/acquire_test.cpp
     business/models/convert_test.cpp
@@ -131,6 +149,8 @@ add_library(apogee_tests_business OBJECT
     business/agentloop/thinking_test.cpp
     business/agentloop/recall_test.cpp
     business/agentloop/side_call_test.cpp
+    business/agentloop/member_call_test.cpp
+    business/agentloop/validate_test.cpp
     business/tools/fs_test.cpp
     business/tools/shell_test.cpp
     business/tools/notes_test.cpp
@@ -138,6 +158,10 @@ add_library(apogee_tests_business OBJECT
     business/tools/rag_query_test.cpp
     business/tools/gate_test.cpp
     business/tools/environment_test.cpp
+    business/tools/toolsets_test.cpp
+    business/tools/consult_test.cpp
+    business/tools/graph_nav_test.cpp
+    business/tools/tool_args_validation_test.cpp
     business/mcp/types_test.cpp
     business/mcp/transport_test.cpp
     business/mcp/client_test.cpp
@@ -145,6 +169,7 @@ add_library(apogee_tests_business OBJECT
     business/mcp/serve_stdio_test.cpp
     business/scaffold/mcp_server_test.cpp
     business/scaffold/agent_test.cpp
+    business/scaffold/symphony_test.cpp
     business/agentloop/structured_test.cpp
     business/agentloop/review_context_test.cpp
     business/knowledge/record_test.cpp
@@ -159,6 +184,13 @@ add_library(apogee_tests_business OBJECT
     business/agentloop/graph_context_test.cpp
     business/graph/communities_test.cpp
     business/graph/graph_multi_test.cpp
+    business/graph/code_extract_test.cpp
+    business/graph/code_parser_test.cpp
+    business/graph/code_resolve_test.cpp
+    business/graph/code_build_test.cpp
+    business/graph/navigate_test.cpp
+    business/graph/report_test.cpp
+    business/graph/export_test.cpp
     business/agentloop/graph_named_test.cpp
     business/training/script_runner_test.cpp
     business/training/python_env_test.cpp
@@ -173,9 +205,20 @@ add_library(apogee_tests_business OBJECT
     business/training/eval_test.cpp
     business/training/promote_test.cpp
     business/training/convert_test.cpp
+    business/training/mlx_convert_test.cpp
     business/training/pipeline_test.cpp
     business/training/regime_test.cpp
     business/training/cycle_test.cpp
+    business/tasks/task_test.cpp
+    business/tasks/ledger_test.cpp
+    business/tasks/policy_test.cpp
+    business/tasks/unattended_test.cpp
+    business/tasks/runner_test.cpp
+    business/tasks/view_test.cpp
+    business/symphony/definition_test.cpp
+    business/symphony/runner_test.cpp
+    business/symphony/tools_test.cpp
+    business/symphony/view_test.cpp
     support/fake_mcp_server.cpp
     support/fake_mcp_server.h
 )
@@ -188,12 +231,15 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/models_pull_test.cpp
     presentation/cli/models_migrate_test.cpp
     presentation/cli/models_convert_test.cpp
+    presentation/cli/models_mlx_test.cpp
     presentation/cli/model_chain_test.cpp
     presentation/cli/complete_sources_test.cpp
     presentation/cli/models_test.cpp
+    presentation/cli/suite_residency_test.cpp
     presentation/cli/config_cmd_test.cpp
     presentation/cli/attachment_guard_test.cpp
     presentation/operations/retrieval_test.cpp
+    presentation/operations/suites_test.cpp
     presentation/cli/helpers_test.cpp
     presentation/cli/tool_vectors_test.cpp
     presentation/views/thinking_view_test.cpp
@@ -207,10 +253,15 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/chat_test.cpp
     presentation/cli/check_test.cpp
     presentation/cli/lifecycle_test.cpp
+    presentation/cli/reset_test.cpp
     presentation/machine/machine_mode_test.cpp
     presentation/views/line_reader_test.cpp
     presentation/cli/chat_attachments_test.cpp
+    presentation/cli/attachment_graph_test.cpp
+    presentation/operations/graph_sources_test.cpp
     presentation/cli/chat_completer_test.cpp
+    presentation/cli/chat_session_test.cpp
+    presentation/cli/execute_test.cpp
     presentation/httpserver/handler_test.cpp
     presentation/httpserver/sse_test.cpp
     presentation/httpserver/session_test.cpp
@@ -224,18 +275,28 @@ add_library(apogee_tests_presentation OBJECT
     presentation/httpserver/admin_auth_routes_test.cpp
     presentation/cli/permissions_test.cpp
     presentation/render/json_report_test.cpp
+    presentation/render/graph_report_test.cpp
     presentation/cli/analyze_test.cpp
     presentation/cli/agents_test.cpp
     presentation/httpserver/admin_agents_test.cpp
+    presentation/httpserver/admin_symphonies_test.cpp
     presentation/cli/knowledge_test.cpp
     presentation/httpserver/admin_knowledge_test.cpp
     presentation/cli/graph_test.cpp
+    presentation/cli/graph_code_test.cpp
+    presentation/cli/graph_navigate_test.cpp
+    presentation/cli/graph_artifacts_test.cpp
     presentation/httpserver/admin_graph_test.cpp
     presentation/httpserver/admin_graphs_test.cpp
+    presentation/httpserver/admin_graph_navigate_test.cpp
+    presentation/httpserver/admin_suites_test.cpp
     presentation/cli/datasets_test.cpp
     presentation/cli/train_test.cpp
+    presentation/cli/task_test.cpp
+    presentation/cli/symphonies_test.cpp
     presentation/httpserver/admin_datasets_test.cpp
     presentation/httpserver/admin_training_test.cpp
+    presentation/httpserver/admin_tasks_test.cpp
     support/fake_command.h
     support/fake_command.cpp
     support/cli_home.h
@@ -441,7 +502,7 @@ add_test(NAME cli.install_is_ours_only
         -DBUILD_DIR=${CMAKE_BINARY_DIR}
         -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/install-only
         -DMAKEFILE=${CMAKE_CURRENT_SOURCE_DIR}/../Makefile
-        -DEXE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}
+        -DEXE_NAME=$<TARGET_FILE_NAME:apogee>
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/install_is_ours_only.cmake"
 )
 
@@ -451,7 +512,7 @@ add_test(NAME cli.no_vendor_credentials
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/no_vendor_credentials.cmake"
 )
 
-# One role-resolution chain, and only one. See the file for the Ommi bug class.
+# One role-resolution chain, and only one. See the file for the bug class.
 add_test(NAME cli.one_role_resolver
     COMMAND "${CMAKE_COMMAND}"
         -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
@@ -472,14 +533,34 @@ add_test(NAME cli.test_names
 )
 
 if(UNIX)
+    # A dev-channel build of the executable, for the parity case below (M10):
+    # main.cpp over the same apogee_core, stamped through the one function
+    # `apogee` is (apogee_channel_executable) -- so it is what `make install
+    # MODE=dev` builds, under the name it installs as. Built on demand by the
+    # fixture, never by a plain build: what CI builds stays the release
+    # executable alone, and a channel costs the suite one compile and a link.
+    add_executable(apogee_channel_probe EXCLUDE_FROM_ALL "${PROJECT_SOURCE_DIR}/source/main.cpp")
+    target_link_libraries(apogee_channel_probe PRIVATE apogee_core)
+    apogee_set_target_options(apogee_channel_probe)
+    apogee_channel_executable(apogee_channel_probe dev)
+    set_target_properties(apogee_channel_probe PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/channel-probe")
+    add_test(NAME cli.channel_probe_build
+        COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target apogee_channel_probe)
+    set_tests_properties(cli.channel_probe_build PROPERTIES
+        FIXTURES_SETUP channel_probe TIMEOUT 900)
+
     # The install-parity gate. See tests/scripts/sh/install_parity.sh for why an exception
-    # here is where the next drift hides.
+    # here is where the next drift hides -- and, since M10, a channel install held to the
+    # same tree under its own root.
     add_test(NAME cli.install_parity
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/install_parity.sh"
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/install-parity
+            $<TARGET_FILE:apogee_channel_probe>
     )
-    set_tests_properties(cli.install_parity PROPERTIES TIMEOUT 60)
+    set_tests_properties(cli.install_parity PROPERTIES
+        TIMEOUT 60 FIXTURES_REQUIRED channel_probe)
 
     # The completion stubs in the real shells (bash always; zsh and fish when
     # present) against the real binary -- what a stub SENDS `__complete`, which
@@ -509,16 +590,117 @@ if(UNIX)
     )
     set_tests_properties(cli.auto_rag PROPERTIES TIMEOUT 60)
 
+    # Suites (27d) on the real binary: add-suite through the one editor, a
+    # chat whose utility resolves through the suite rung (the helper titles
+    # it), /suite switching the bundle and off restoring the pointers, both
+    # surviving resume.
+    add_test(NAME cli.suites_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/suites_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/suites
+    )
+    set_tests_properties(cli.suites_lifecycle PROPERTIES TIMEOUT 120)
+
+    # The task runner (27h) on the real binary, scripted mocks and no input:
+    # goal -> plan -> an incomplete round -> the corrective round -> done,
+    # with the ledger's transition sequence; status and list; an ask-level
+    # tool denied and recorded with stdin held open (a prompt would hang);
+    # the budget and the breaker each naming the unpassed checks; the lock
+    # refusing a second run by name; a task killed mid-round resumed to done
+    # with no turn said twice; cancel and halt across processes; and chats
+    # delete refusing a live task's conversation. Since 27i the autonomy
+    # policy too: a granted write run unprompted and recorded with its
+    # target, a declared answer consumed and recorded (and without one, the
+    # task failing naming the question), and a grant wider than the config
+    # or the agent refused naming the rule, no task made. Since 27j the
+    # surfaces: a run under --output-format stream-json whose task events --
+    # task_started's history, then one per transition -- are the ledger's
+    # transition sequence one for one, a driver's reconstruction from the
+    # stream equal to `task status --output-format json`, and a halted task
+    # resumed in machine mode opening with its whole history.
+    add_test(NAME cli.task_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/task_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/task-e2e
+    )
+    set_tests_properties(cli.task_lifecycle PROPERTIES TIMEOUT 180)
+
+    # Symphonies (27q) on the real binary, scripted members echoing their
+    # briefs: the starters seeded byte for byte; play's stages in order with
+    # each request exactly its rendered template, each stage said, the JSON
+    # document, --suite and stdin, a schema stage held and a miss stopping the
+    # walk named; create refusing a backend at parse with the file untouched,
+    # edit through $EDITOR, delete the inverse; a hand-written backend refused
+    # at load; completion for the verbs and the names.
+    add_test(NAME cli.symphonies_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/symphonies_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/symphonies-e2e
+            ${CMAKE_CURRENT_SOURCE_DIR}/../assets/symphonies
+    )
+    set_tests_properties(cli.symphonies_lifecycle PROPERTIES TIMEOUT 120)
+
+    # Execute mode (27s) on the real binary, scripted members echoing their
+    # briefs and no input after the command: the suite-first refusals naming
+    # the way to a suite; bare input answered and saved byte for byte as
+    # `chat --suite`; `/play` threading stage one into stage two, its output
+    # the answer and one exchange of the saved conversation, a play that
+    # cannot run kept out of it; `/symphonies`, `/suite off` refused; resumed
+    # by `execute -c` and `chat --resume` with its plays intact, and
+    # compacted; machine mode carrying a play in the events it already has,
+    # an `error` for one that cannot run; completion.
+    add_test(NAME cli.execute_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/execute_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/execute-e2e
+    )
+    set_tests_properties(cli.execute_lifecycle PROPERTIES TIMEOUT 120)
+
     add_test(NAME cli.complete_opens_no_listening_socket
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/no_listen_check.sh"
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/no-listen-home
+            # The mlx backend's phase (27a): its real driver under stubs, the
+            # whole process tree sampled -- and since 27c a served mlx turn,
+            # serve's own pid the only listener, its driver never one.
+            ${CMAKE_CURRENT_SOURCE_DIR}/data/backends/scripts
+            ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/mlx/model
     )
     set_tests_properties(cli.complete_opens_no_listening_socket PROPERTIES TIMEOUT 60)
 
+    # The mlx backend (27a) on the real binary with its real driver under stub
+    # mlx packages: check, a byte-clean complete, a tool-using chat on one
+    # driver, /exit, and a refusal naming its fix -- and since 27c a vision
+    # model's picture read as it is through a stub mlx-vlm (and, without it,
+    # the doctor's warning and the refusal), a text model's picture described
+    # by the vision role, and a run promoted with --target mlx then asked.
+    # Apple silicon only.
+    add_test(NAME cli.mlx_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/mlx_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/mlx-e2e-home
+            ${CMAKE_CURRENT_SOURCE_DIR}/data/backends/scripts
+            ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/mlx/model
+    )
+    set_tests_properties(cli.mlx_lifecycle PROPERTIES TIMEOUT 120)
+
+    # MLX model operations (27b) on the real binary: `models convert --mlx`
+    # through the seeded driver under the stub mlx packages -- the set landed
+    # by its hash, listed and checked, a REAL Ctrl-C mid-conversion leaving the
+    # store as it was, and the set deleted whole. Apple silicon only.
+    add_test(NAME cli.mlx_models_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/mlx_models_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/mlx-models-e2e-home
+            ${CMAKE_CURRENT_SOURCE_DIR}/data/backends/scripts
+    )
+    set_tests_properties(cli.mlx_models_lifecycle PROPERTIES TIMEOUT 120)
+
     # The other half of that boundary: serve DOES hold a port, fails closed on a
     # non-loopback bind, streams to a real client, mints sessions the terminal
-    # can resume, and stops on SIGTERM. Properties of the process, not a class.
+    # can resume, serves the task reads as the CLI prints them while no task
+    # control answers (27j), and stops on SIGTERM. Properties of the process,
+    # not a class.
     add_test(NAME cli.serve_lifecycle
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/serve_e2e.sh"
             $<TARGET_FILE:apogee>
@@ -572,6 +754,56 @@ if(UNIX)
     )
     set_tests_properties(cli.graph_lifecycle PROPERTIES TIMEOUT 120)
 
+    # The code graph on the real binary (27k): the model-free pass on a
+    # sandbox with zero backends, no key and the network pointed at a closed
+    # port -- build over a source tree (a skipped file named, a vendored one
+    # left out), stats' origin split, show across files to the line, an edit
+    # re-parsed alone and converging on a fresh build, communities clustered
+    # with the summaries absent, dedupe's per-layer report -- then expansion
+    # over code beside a collection on a scripted mock; and since 27n a chat
+    # attaching the tree, its index holding the direct build's graph row for
+    # row, gone with `chats delete`.
+    add_test(NAME cli.code_graph_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/code_graph_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/code-graph-e2e
+            "${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    )
+    set_tests_properties(cli.code_graph_lifecycle PROPERTIES TIMEOUT 120)
+
+    # Graph navigation on the real binary (27l), with zero backends: path,
+    # explain, neighbors and query over a code graph built with no model; an
+    # external MCP client over stdio listing the four graph tools from
+    # `__mcp-tools`, read-only, each answering with the CLI's own JSON byte
+    # for byte; a tool-using turn on a pipe calling graph_path ungated; and
+    # the graph's rows unchanged by all of it. Needs python3 (skips without).
+    add_test(NAME cli.graph_navigation_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/graph_navigation_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/graph-navigation-e2e
+            "${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/mcp_graph_client.py"
+    )
+    set_tests_properties(cli.graph_navigation_lifecycle PROPERTIES TIMEOUT 120)
+
+    # Graph artifacts on the real binary (27m), with zero backends: the
+    # report printed and the same bytes at --out, its one JSON document; the
+    # HTML page under its default name in the working directory with its data
+    # block, its cap note and no external reference -- its own script driven
+    # through layout, click-to-explain, search and the legend where node is
+    # installed; GraphML read back by Python's stdlib parser and by networkx
+    # where installed; a Mermaid call flow every line of which the grammar
+    # reads; and a canary in the source's comments and the private layout rows
+    # in no artifact, the data directory unchanged. python3 and node optional.
+    add_test(NAME cli.graph_artifacts_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/graph_artifacts_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/graph-artifacts-e2e
+            "${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/js/graph_html_check.js"
+    )
+    set_tests_properties(cli.graph_artifacts_lifecycle PROPERTIES TIMEOUT 120)
+
     # The datasets floor on the real binary: the seeded kits, create, synth
     # through the scripted mock, the Python boundary (the refusal on a pipe,
     # `train setup` against the host's python3, `prepare` through the seeded
@@ -622,7 +854,7 @@ if(UNIX)
         # in a unit test.
         # A noisy, dying MCP server under a PTY: its stderr never paints the
         # terminal, the failure carries its tail, and startup does not wait
-        # out the connect timeout. Ommi's Milestone P postmortem, locked.
+        # out the connect timeout.
         add_test(NAME cli.mcp_server_stderr_stays_off_the_terminal
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_mcp_check.py"
@@ -654,14 +886,15 @@ if(UNIX)
                 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_chat_check.py"
                 $<TARGET_FILE:apogee>
         )
-        set_tests_properties(cli.chat_typeahead_and_crash_safety PROPERTIES TIMEOUT 120)
+        set_tests_properties(cli.chat_typeahead_and_crash_safety PROPERTIES TIMEOUT 180)
 
         # Line editing. replxx engages only when stdin AND stdout are both
         # terminals, so none of this reproduces on a pipe -- which is the point:
         # before it was wired, an arrow key arrived in the message as a literal
         # escape sequence. Since item 24 it also holds the suggestion rows to
         # the screen: drawn, taken by Tab, never at the last column, never left
-        # behind -- and a pipe given none of it.
+        # behind -- and a pipe given none of it. Since 27p, Tab after
+        # `/attach <path> ` takes `--graph=` and then its value.
         add_test(NAME cli.chat_line_editing
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_lineedit_check.py"

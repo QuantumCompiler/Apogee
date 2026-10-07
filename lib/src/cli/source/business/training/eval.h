@@ -19,24 +19,23 @@
 /// An item WITH `expected` is a deterministic substring check. One WITHOUT
 /// is a **pairwise judge** comparison of the candidate against its own
 /// untuned base through the same runner -- the question promotion asks (did
-/// the adapter help?), not the reference implementation's comparison
-/// against whatever `models.default` was. The judge answers `A`, `B` or
-/// `TIE`; anything else is a tie, and a judge or baseline failure is a tie
-/// too, under the **never-fail contract** the rerank judge keeps: a broken
-/// judge costs nothing but the signal. With no judge such items `skip` and
-/// auto-pass -- loudly, with the count, so nobody mistakes an ungated suite
-/// for a passed one.
+/// the adapter help?), not a comparison against whatever `models.default`
+/// happens to be. The judge answers `A`, `B` or `TIE`; anything else is a tie,
+/// and a judge or baseline failure is a tie too, under the **never-fail
+/// contract** the rerank judge keeps: a broken judge costs nothing but the
+/// signal. With no judge such items `skip` and auto-pass -- loudly, with the
+/// count, so nobody mistakes an ungated suite for a passed one.
 ///
 /// **The gate is 100%.** `score` is reported; `passed` is true only when
 /// every item passed.
 namespace apogee::training {
 
-/// The judge's generation budget. The reference used 10 -- enough for one
-/// word -- but a REASONING judge spends its budget thinking before the word
-/// appears, and under the never-fail contract a verdict that never arrives
-/// is a tie, which passes: a small budget would silently ungate every judged
-/// item on such a model. The rerank judge found the same live (gpt-oss at
-/// 256 never reached its final channel).
+/// The judge's generation budget. Ten tokens is enough for one word, but a
+/// REASONING judge spends its budget thinking before the word appears, and
+/// under the never-fail contract a verdict that never arrives is a tie, which
+/// passes: a small budget would silently ungate every judged item on such a
+/// model. The rerank judge found the same live (gpt-oss at 256 never reached
+/// its final channel).
 inline constexpr int kJudgeMaxTokens = 1024;
 
 /// How a failed gate is treated: `Hard` refuses, `Soft` warns and goes on.

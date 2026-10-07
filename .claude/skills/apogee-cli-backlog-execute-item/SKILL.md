@@ -12,7 +12,7 @@ Apogee is built docs-first: every work item has its own document in `lib/documen
 Before touching the queue, read the contributor docs in `lib/documentation/assistant/` — they are the source of truth and override anything remembered from prior sessions:
 
 1. [`CLAUDE.md`](../../../lib/documentation/assistant/CLAUDE.md) — **read fully**: the working process, adopted invariants, Code Style (hard rules: `.h`/`.cpp` pairs; smart pointers only, never owning raw pointers), and the Documentation and Status flow that defines "done".
-2. [`SPEC.md`](../../../lib/documentation/assistant/SPEC.md) — product shape, divergences from Ommi, non-goals, principles.
+2. [`SPEC.md`](../../../lib/documentation/assistant/SPEC.md) — product shape, non-goals, principles.
 3. [`ROADMAP.md`](../../../lib/documentation/assistant/ROADMAP.md) — release context and the outstanding `[user]` decisions.
 4. [`DEVELOPER.md`](../../../lib/documentation/assistant/DEVELOPER.md) — architecture reference, as needed while building.
 
@@ -25,10 +25,10 @@ Read [`lib/documentation/backlog/README.md`](../../../lib/documentation/backlog/
 
 ## 3. Read the item's document — it IS the working spec
 
-Read the whole document: What/why, Core constraints, Seam + files, **Reference (Ommi)**, Decisions made, Open calls, Guardrails, Acceptance criteria, Scope note.
+Read the whole document: What/why, Core constraints, Seam + files, **Reference**, Decisions made, Open calls, Guardrails, Acceptance criteria, Scope note.
 
 - **Split-first rule:** if the item is marked **split first** (in its Scope note or index row), do NOT build from it. The work is to groom it into its listed sub-documents (confirm the split with the user), add them to the index, and stop.
-- **Reference (Ommi):** the sibling project at `~/Data/Development/Projects/Ommi` is the reference implementation. Read the Ommi sources/docs the section names before designing — the item docs cite them because they carry proven behavior and recorded lessons.
+- **Reference:** read the in-house precedents and external prior art the section names before designing — the item docs cite them because they carry proven behavior and recorded lessons.
 
 ## 4. Resolve the Open calls before writing code
 

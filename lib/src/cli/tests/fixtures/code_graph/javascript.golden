@@ -1,0 +1,177 @@
+node class src/app.js::App
+  description class App extends Logger
+  metadata {"end_line":10,"file":"src/app.js","kind":"code","lang":"javascript","line":5,"member":"javascript"}
+  mentions 1
+  at javascript:src/app.js:5-10 definition
+node class src/util.js::Logger
+  description class Logger
+  metadata {"end_line":9,"file":"src/util.js","kind":"code","lang":"javascript","line":5,"member":"javascript"}
+  mentions 1
+  at javascript:src/util.js:5-9 definition
+node file src/app.js
+  description JavaScript file
+  metadata {"end_line":12,"file":"src/app.js","kind":"code","lang":"javascript","line":1,"member":"javascript"}
+  mentions 1
+  at javascript:src/app.js:1-12 definition
+node file src/util.js
+  description JavaScript file
+  metadata {"end_line":9,"file":"src/util.js","kind":"code","lang":"javascript","line":1,"member":"javascript"}
+  mentions 1
+  at javascript:src/util.js:1-9 definition
+node file src/view.jsx
+  description JavaScript file
+  metadata {"end_line":7,"file":"src/view.jsx","kind":"code","lang":"javascript","line":1,"member":"javascript"}
+  mentions 1
+  at javascript:src/view.jsx:1-7 definition
+node function src/app.js::App.run
+  description run(file)
+  metadata {"end_line":9,"file":"src/app.js","kind":"code","lang":"javascript","line":6,"member":"javascript"}
+  mentions 1
+  at javascript:src/app.js:6-9 definition
+node function src/app.js::start
+  description start = ()
+  metadata {"end_line":12,"file":"src/app.js","kind":"code","lang":"javascript","line":12,"member":"javascript"}
+  mentions 1
+  at javascript:src/app.js:12-12 definition
+node function src/util.js::Logger.log
+  description log(message)
+  metadata {"end_line":8,"file":"src/util.js","kind":"code","lang":"javascript","line":6,"member":"javascript"}
+  mentions 1
+  at javascript:src/util.js:6-8 definition
+node function src/util.js::format
+  description function format(value)
+  metadata {"end_line":3,"file":"src/util.js","kind":"code","lang":"javascript","line":1,"member":"javascript"}
+  mentions 1
+  at javascript:src/util.js:1-3 definition
+node function src/view.jsx::Label
+  description function Label({ text })
+  metadata {"end_line":5,"file":"src/view.jsx","kind":"code","lang":"javascript","line":3,"member":"javascript"}
+  mentions 1
+  at javascript:src/view.jsx:3-5 definition
+node function src/view.jsx::Panel
+  description Panel = ()
+  metadata {"end_line":7,"file":"src/view.jsx","kind":"code","lang":"javascript","line":7,"member":"javascript"}
+  mentions 1
+  at javascript:src/view.jsx:7-7 definition
+node name .log
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at javascript:src/util.js:7-7 reference
+node name .run
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at javascript:src/app.js:12-12 reference
+node name fs
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at javascript:src/app.js:3-3 reference
+node name fs.existsSync
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at javascript:src/app.js:8-8 reference
+node name path
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at javascript:src/app.js:2-2 reference
+node name path.basename
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at javascript:src/app.js:7-7 reference
+edge class src/app.js::App -[defined_in]-> file src/app.js
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/app.js:5
+edge class src/app.js::App -[inherits]-> class src/util.js::Logger
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/app.js:5
+edge class src/util.js::Logger -[defined_in]-> file src/util.js
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/util.js:5
+edge file src/app.js -[imports]-> file src/util.js
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/app.js:1
+edge file src/app.js -[imports]-> name fs
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/app.js:3
+edge file src/app.js -[imports]-> name path
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/app.js:2
+edge file src/view.jsx -[imports]-> file src/util.js
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/view.jsx:1
+edge function src/app.js::App.run -[calls]-> function src/util.js::Logger.log
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/app.js:7
+edge function src/app.js::App.run -[calls]-> function src/util.js::format
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/app.js:7
+edge function src/app.js::App.run -[calls]-> name fs.existsSync
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/app.js:8
+edge function src/app.js::App.run -[calls]-> name path.basename
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/app.js:7
+edge function src/app.js::App.run -[defined_in]-> class src/app.js::App
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/app.js:6
+edge function src/app.js::start -[calls]-> class src/app.js::App
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/app.js:12
+edge function src/app.js::start -[calls]-> name .run
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/app.js:12
+edge function src/app.js::start -[defined_in]-> file src/app.js
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/app.js:12
+edge function src/util.js::Logger.log -[calls]-> function src/util.js::format
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/util.js:7
+edge function src/util.js::Logger.log -[calls]-> name .log
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/util.js:7
+edge function src/util.js::Logger.log -[defined_in]-> class src/util.js::Logger
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/util.js:6
+edge function src/util.js::format -[defined_in]-> file src/util.js
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/util.js:1
+edge function src/view.jsx::Label -[calls]-> function src/util.js::format
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/view.jsx:4
+edge function src/view.jsx::Label -[defined_in]-> file src/view.jsx
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/view.jsx:3
+edge function src/view.jsx::Panel -[calls]-> function src/view.jsx::Label
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/view.jsx:7
+edge function src/view.jsx::Panel -[defined_in]-> file src/view.jsx
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site javascript:src/view.jsx:7

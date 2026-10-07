@@ -16,8 +16,8 @@ struct llama_vocab;
 /// parser for that template's tool-call format, and returns a lazy grammar
 /// that constrains a call once the model starts one -- or, given a JSON
 /// Schema, a grammar holding the whole answer to it (26f). Every family's trained
-/// format, maintained upstream with the pin -- where Ommi injected a prose
-/// protocol that a model trained on tool tokens ignores (25b).
+/// format, maintained upstream with the pin -- not an injected prose protocol,
+/// which a model trained on tool tokens ignores (25b).
 ///
 /// **Why a library of its own** (`apogee_llama_chat`, compiled only with
 /// `APOGEE_ENABLE_LLAMA`): `common` carries its own copy of nlohmann/json, at

@@ -2,12 +2,17 @@
 
 #include <array>
 #include <chrono>
+#include <functional>
+#include <map>
 #include <system_error>
 
+#include "agent/fetch_url.h"
+#include "agent/web_search.h"
 #include "contracts/layout.h"
 #include "platform/platform.h"
 #include "tools/environment.h"
 #include "tools/fs.h"
+#include "tools/graph_nav.h"
 #include "tools/notes.h"
 #include "tools/rag_query.h"
 #include "tools/shell.h"
@@ -15,7 +20,9 @@
 namespace apogee::tools {
 namespace {
 
-constexpr std::array<std::string_view, 5> kToolsetNames{"fs", "shell", "git", "notes", "rag"};
+constexpr std::array<std::string_view, 6> kToolsetNames{"fs",    "shell", "git",
+                                                        "notes", "rag",   "graph"};
+
 constexpr std::array<std::string_view, 6> kDestructiveTools{
     "write_file", "edit_file", "delete_file", "run_command", "write_note", "delete_note"};
 
@@ -82,6 +89,10 @@ void register_native_toolsets(agent::ToolRegistry& registry, const ToolsetOption
     if (!disabled(options, "rag")) {
         register_rag_tools(registry, options.harness, options.config);
     }
+    if (!disabled(options, "graph")) {
+        // Read-only (27l): ungated, and served by `__mcp-tools` with the rest.
+        register_graph_tools(registry, GraphToolsOptions{.config = options.config, .scope = {}});
+    }
 
     // Set whatever is switched off: fetch_url and MCP tools ride the same
     // registry, and a model with any tool needs the date as much as one
@@ -105,6 +116,35 @@ void register_native_toolsets(agent::ToolRegistry& registry, const ToolsetOption
         }
         return note;
     });
+}
+
+std::string toolset_of(std::string_view tool) {
+    if (tool == agent::kFetchUrlToolName || tool == agent::kWebSearchToolName) {
+        return "web";
+    }
+    if (tool.starts_with("mcp__")) {
+        return "mcp";
+    }
+    // Each native toolset's names, read off the registration itself -- one
+    // toolset switched on at a time -- so a tool added to a set is filed
+    // under it without a list here to forget.
+    static const std::map<std::string, std::string, std::less<>> by_tool = [] {
+        std::map<std::string, std::string, std::less<>> out;
+        for (const std::string_view toolset : kToolsetNames) {
+            ToolsetOptions options;
+            for (const std::string_view other : kToolsetNames) {
+                if (other != toolset) {
+                    options.disabled.emplace_back(other);
+                }
+            }
+            for (std::string& name : native_tool_names(options)) {
+                out.emplace(std::move(name), std::string{toolset});
+            }
+        }
+        return out;
+    }();
+    const auto it = by_tool.find(tool);
+    return it == by_tool.end() ? std::string{} : it->second;
 }
 
 std::vector<std::string> native_tool_names(const ToolsetOptions& options) {

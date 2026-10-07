@@ -1,0 +1,973 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<meta name="generator" content="apogee graph export html">
+<title>{{title}} · graph</title>
+<style>
+/* One file, read from anywhere: everything it needs is in it, and the policy
+   above refuses the browser any fetch at all. */
+:root {
+  --bg: #f6f6f3; --panel: #ffffff; --ink: #1c1c1a; --muted: #66665f; --line: #dcdcd5;
+  --edge: rgba(70, 70, 64, 0.2); --edge-hi: rgba(28, 28, 26, 0.75); --accent: #2563d9;
+  --halo: rgba(246, 246, 243, 0.9); --none: #9b9b93; --sat: 62%; --lit: 47%;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141413; --panel: #1e1e1c; --ink: #ebebe7; --muted: #a0a099; --line: #36362f;
+    --edge: rgba(220, 220, 212, 0.15); --edge-hi: rgba(240, 240, 234, 0.8); --accent: #6d9eff;
+    --halo: rgba(20, 20, 19, 0.9); --none: #75756d; --sat: 64%; --lit: 63%;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  display: flex; flex-direction: column; overflow: hidden; background: var(--bg); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+}
+header {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 10px 16px;
+  background: var(--panel); border-bottom: 1px solid var(--line);
+}
+h1 { margin: 0; font-size: 16px; font-weight: 650; overflow-wrap: anywhere; }
+#cap-note { margin: 0; flex: 1 1 280px; color: var(--muted); font-size: 13px; }
+#search-box { position: relative; flex: 0 1 340px; min-width: 200px; }
+#search {
+  width: 100%; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); color: var(--ink); font: inherit;
+}
+#search:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+#results {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 5; max-height: 55vh;
+  overflow: auto; margin: 0; padding: 4px 0; list-style: none; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+}
+#results li { padding: 4px 10px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#results li.count { cursor: default; color: var(--muted); font-size: 12px; }
+#results li.active, #results li:not(.count):hover { background: var(--bg); }
+.meta { color: var(--muted); font-size: 12px; }
+#results .meta { margin-left: 8px; }
+main { position: relative; flex: 1; min-height: 0; }
+canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+canvas.dragging { cursor: grabbing; }
+canvas.over { cursor: pointer; }
+.panel {
+  position: absolute; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
+}
+#legend {
+  left: 12px; bottom: 12px; width: min(330px, calc(100% - 24px)); max-height: 42%; overflow: auto;
+  padding: 8px 10px; font-size: 12px;
+}
+#legend h2, #card h3 { margin: 10px 0 4px; font-size: 12px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+#legend h2:first-child { margin-top: 0; }
+#legend p { margin: 2px 0; }
+.community {
+  display: flex; gap: 8px; width: 100%; padding: 3px 4px; border: 0; border-radius: 4px;
+  background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.community:hover, .community.on { background: var(--bg); }
+.swatch { flex: none; width: 10px; height: 10px; margin-top: 3px; border-radius: 50%; }
+.stroke { display: inline-block; width: 22px; margin: 0 6px 3px 0; vertical-align: middle; border-top: 2px solid var(--edge-hi); }
+.stroke.dashed { border-top-style: dashed; }
+#card { top: 12px; right: 12px; bottom: 12px; width: min(400px, calc(100% - 24px)); overflow: auto; padding: 12px 14px 16px; }
+#card[hidden], #results[hidden] { display: none; }
+#card h2 { margin: 0 28px 2px 0; font-size: 15px; overflow-wrap: anywhere; }
+#card p { margin: 4px 0; overflow-wrap: anywhere; }
+#card ul { margin: 2px 0 6px; padding-left: 16px; }
+#card li { margin: 2px 0; overflow-wrap: anywhere; }
+#card h4 { margin: 8px 0 2px; font-size: 13px; font-weight: 600; }
+#card .close {
+  position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; border: 0; border-radius: 4px;
+  background: none; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer;
+}
+#card .close:hover { background: var(--bg); color: var(--ink); }
+.peer {
+  padding: 0; border: 0; background: none; color: var(--accent); font: inherit; text-align: left;
+  cursor: pointer; overflow-wrap: anywhere;
+}
+.peer:hover { text-decoration: underline; }
+.peer.off { color: inherit; cursor: default; }
+.peer.off:hover { text-decoration: none; }
+.note { color: var(--muted); font-size: 12px; }
+.noscript { margin: 16px; }
+@media (max-width: 640px) {
+  #card { top: auto; left: 12px; height: 58%; width: auto; }
+  #legend { max-height: 30%; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>{{title}}</h1>
+  <p id="cap-note">{{cap_note}}</p>
+  <div id="search-box">
+    <input id="search" type="search" placeholder="Search names, files, descriptions  ( / )" aria-label="Search the graph" autocomplete="off" spellcheck="false">
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+</header>
+<main>
+  <canvas id="canvas" aria-label="The graph: drag to pan, scroll to zoom, click an entity to explain it"></canvas>
+  <section id="legend" class="panel" aria-label="Legend"></section>
+  <aside id="card" class="panel" aria-live="polite" hidden></aside>
+  <noscript><p class="noscript">This view draws the graph with JavaScript. The graph itself is embedded in this file as one JSON block: the script element whose id is graph-data.</p></noscript>
+</main>
+<script type="application/json" id="graph-data">{{data}}</script>
+<script>
+(function () {
+  'use strict';
+
+  /* ---- The data: one JSON block, each entity the card apogee graph explain prints ---- */
+  const data = JSON.parse(document.getElementById('graph-data').textContent);
+  const cards = data.nodes;
+  const N = cards.length;
+  const edges = data.edges;
+  const M = edges.length;
+
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const search = document.getElementById('search');
+  const results = document.getElementById('results');
+  const legend = document.getElementById('legend');
+  const panel = document.getElementById('card');
+
+  const keyOf = (node) => node.type + ':' + node.name;
+  const indexOf = new Map();
+  cards.forEach((card, i) => indexOf.set(keyOf(card.node), i));
+
+  const radius = new Float64Array(N);
+  const community = new Array(N);
+  for (let i = 0; i < N; i++) {
+    radius[i] = Math.min(26, 3 + Math.sqrt(cards[i].degree.total) * 1.15);
+    community[i] = cards[i].communities.length ? cards[i].communities[0].id : null;
+  }
+
+  const src = new Int32Array(M);
+  const dst = new Int32Array(M);
+  const asserted = new Uint8Array(M);
+  const incident = Array.from({ length: N }, () => []);
+  const linkCount = new Float64Array(N);
+  for (let e = 0; e < M; e++) {
+    src[e] = edges[e][0];
+    dst[e] = edges[e][1];
+    asserted[e] = edges[e][3] === 1 ? 0 : 1;
+    incident[src[e]].push(e);
+    incident[dst[e]].push(e);
+    linkCount[src[e]] += 1;
+    linkCount[dst[e]] += 1;
+  }
+
+  /* ---- Colours: one per community, largest first; unclustered entities grey ---- */
+  const rankOf = new Map();
+  data.communities.forEach((c, i) => rankOf.set(c.id, i));
+  let theme = {};
+  let colour = new Array(N);
+  const hueOf = (rank) => (rank * 137.508 + 210) % 360;
+  function communityColour(id) {
+    if (id === null || !rankOf.has(id)) {
+      return theme.none;
+    }
+    return 'hsl(' + hueOf(rankOf.get(id)).toFixed(1) + ', ' + theme.sat + ', ' + theme.lit + ')';
+  }
+  function readTheme() {
+    const style = getComputedStyle(document.documentElement);
+    const read = (name) => style.getPropertyValue(name).trim();
+    theme = {
+      edge: read('--edge'), edgeHi: read('--edge-hi'), accent: read('--accent'), ink: read('--ink'),
+      halo: read('--halo'), none: read('--none'), sat: read('--sat'), lit: read('--lit')
+    };
+    colour = community.map(communityColour);
+  }
+
+  /* ---- The layout: a force simulation, Barnes-Hut for the repulsion ---- */
+  const x = new Float64Array(N);
+  const y = new Float64Array(N);
+  const vx = new Float64Array(N);
+  const vy = new Float64Array(N);
+  const charge = new Float64Array(N);
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  (function seed() {
+    const groups = new Map();
+    for (let i = 0; i < N; i++) {
+      const rank = community[i] !== null && rankOf.has(community[i]) ? rankOf.get(community[i]) : -1;
+      if (!groups.has(rank)) {
+        groups.set(rank, []);
+      }
+      groups.get(rank).push(i);
+    }
+    const order = Array.from(groups.keys()).sort((a, b) => (a < 0) - (b < 0) || a - b);
+    order.forEach((rank, g) => {
+      const members = groups.get(rank);
+      const spread = groups.size > 1 ? 70 + 9 * Math.sqrt(members.length) : 0;
+      const cx = spread * Math.sqrt(g) * Math.cos(g * golden) * 2.2;
+      const cy = spread * Math.sqrt(g) * Math.sin(g * golden) * 2.2;
+      members.forEach((i, j) => {
+        const r = 9 * Math.sqrt(j + 0.5);
+        x[i] = cx + r * Math.cos(j * golden);
+        y[i] = cy + r * Math.sin(j * golden);
+      });
+    });
+    for (let i = 0; i < N; i++) {
+      charge[i] = -36 - 3 * radius[i];
+    }
+  })();
+
+  const linkDistance = new Float64Array(M);
+  const linkStrength = new Float64Array(M);
+  const linkBias = new Float64Array(M);
+  for (let e = 0; e < M; e++) {
+    const s = src[e];
+    const t = dst[e];
+    linkDistance[e] = 26 + radius[s] + radius[t];
+    linkStrength[e] = 1 / Math.min(linkCount[s], linkCount[t]);
+    linkBias[e] = linkCount[s] / (linkCount[s] + linkCount[t]);
+  }
+
+  let alpha = 1;
+  let alphaTarget = 0;
+  const alphaMin = 0.002;
+  const alphaDecay = 1 - Math.pow(alphaMin, 1 / 320);
+  const theta2 = 0.81;
+  let dragged = -1;
+  let dragX = 0;
+  let dragY = 0;
+
+  function cell(cx, cy, size) {
+    return { x: cx, y: cy, size: size, w: 0, sx: 0, sy: 0, bodies: [], kids: null };
+  }
+  function insert(node, i, depth) {
+    node.w += charge[i];
+    node.sx += x[i] * charge[i];
+    node.sy += y[i] * charge[i];
+    if (node.kids !== null) {
+      pushDown(node, i, depth);
+      return;
+    }
+    if (node.bodies.length === 0 || depth >= 28) {
+      node.bodies.push(i);
+      return;
+    }
+    const moved = node.bodies;
+    node.bodies = [];
+    node.kids = [null, null, null, null];
+    for (const b of moved) {
+      pushDown(node, b, depth);
+    }
+    pushDown(node, i, depth);
+  }
+  function pushDown(node, i, depth) {
+    const half = node.size / 2;
+    const right = x[i] >= node.x + half ? 1 : 0;
+    const below = y[i] >= node.y + half ? 1 : 0;
+    const k = right + 2 * below;
+    if (node.kids[k] === null) {
+      node.kids[k] = cell(node.x + right * half, node.y + below * half, half);
+    }
+    insert(node.kids[k], i, depth + 1);
+  }
+  function buildTree() {
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    for (let i = 0; i < N; i++) {
+      x0 = Math.min(x0, x[i]);
+      y0 = Math.min(y0, y[i]);
+      x1 = Math.max(x1, x[i]);
+      y1 = Math.max(y1, y[i]);
+    }
+    const root = cell(x0 - 1, y0 - 1, Math.max(x1 - x0, y1 - y0) + 2);
+    for (let i = 0; i < N; i++) {
+      insert(root, i, 0);
+    }
+    return root;
+  }
+  function repel(root, i) {
+    const stack = [root];
+    while (stack.length) {
+      const node = stack.pop();
+      if (node.w === 0) {
+        continue;
+      }
+      if (node.kids !== null) {
+        const dx = node.sx / node.w - x[i];
+        const dy = node.sy / node.w - y[i];
+        const d2 = dx * dx + dy * dy;
+        if (node.size * node.size / theta2 < d2) {
+          push(i, node.w, dx, dy, d2);
+        } else {
+          for (const kid of node.kids) {
+            if (kid !== null) {
+              stack.push(kid);
+            }
+          }
+        }
+        continue;
+      }
+      for (const b of node.bodies) {
+        if (b === i) {
+          continue;
+        }
+        let dx = x[b] - x[i];
+        let dy = y[b] - y[i];
+        if (dx === 0 && dy === 0) {
+          dx = (((i * 7919 + b * 104729) % 97) - 48) * 1e-3;
+          dy = (((i * 104729 + b * 7919) % 89) - 44) * 1e-3;
+        }
+        push(i, charge[b], dx, dy, dx * dx + dy * dy);
+      }
+    }
+  }
+  function push(i, w, dx, dy, d2) {
+    const l = d2 < 1 ? Math.sqrt(d2) : d2;
+    const f = w * alpha / Math.max(l, 1e-6);
+    vx[i] += dx * f;
+    vy[i] += dy * f;
+  }
+  function tick() {
+    alpha += (alphaTarget - alpha) * alphaDecay;
+    for (let e = 0; e < M; e++) {
+      const s = src[e];
+      const t = dst[e];
+      let dx = x[t] + vx[t] - x[s] - vx[s];
+      let dy = y[t] + vy[t] - y[s] - vy[s];
+      let l = Math.sqrt(dx * dx + dy * dy) || 1e-6;
+      l = (l - linkDistance[e]) / l * alpha * linkStrength[e];
+      dx *= l;
+      dy *= l;
+      vx[t] -= dx * linkBias[e];
+      vy[t] -= dy * linkBias[e];
+      vx[s] += dx * (1 - linkBias[e]);
+      vy[s] += dy * (1 - linkBias[e]);
+    }
+    if (N > 1) {
+      const root = buildTree();
+      for (let i = 0; i < N; i++) {
+        repel(root, i);
+      }
+    }
+    for (let i = 0; i < N; i++) {
+      vx[i] -= x[i] * 0.025 * alpha;
+      vy[i] -= y[i] * 0.025 * alpha;
+      if (i === dragged) {
+        x[i] = dragX;
+        y[i] = dragY;
+        vx[i] = 0;
+        vy[i] = 0;
+        continue;
+      }
+      vx[i] *= 0.6;
+      vy[i] *= 0.6;
+      x[i] += vx[i];
+      y[i] += vy[i];
+    }
+  }
+
+  /* ---- The view ---- */
+  let dpr = 1;
+  let width = 0;
+  let height = 0;
+  let k = 1;
+  let tx = 0;
+  let ty = 0;
+  let autoFit = true;
+  let selected = -1;
+  let hovered = -1;
+  let matches = null;
+  let focusCommunity = null;
+  let running = N > 0;
+  let frameAsked = false;
+
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    width = canvas.clientWidth;
+    height = canvas.clientHeight;
+    canvas.width = Math.max(1, Math.round(width * dpr));
+    canvas.height = Math.max(1, Math.round(height * dpr));
+    redraw();
+  }
+  function fit() {
+    if (N === 0 || width === 0) {
+      return;
+    }
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    for (let i = 0; i < N; i++) {
+      x0 = Math.min(x0, x[i] - radius[i]);
+      y0 = Math.min(y0, y[i] - radius[i]);
+      x1 = Math.max(x1, x[i] + radius[i]);
+      y1 = Math.max(y1, y[i] + radius[i]);
+    }
+    const pad = 36;
+    k = Math.min(4, Math.max(0.02, Math.min((width - 2 * pad) / Math.max(1, x1 - x0), (height - 2 * pad) / Math.max(1, y1 - y0))));
+    tx = width / 2 - k * (x0 + x1) / 2;
+    ty = height / 2 - k * (y0 + y1) / 2;
+  }
+  function redraw() {
+    if (!frameAsked) {
+      frameAsked = true;
+      requestAnimationFrame(frame);
+    }
+  }
+  function frame() {
+    frameAsked = false;
+    if (running) {
+      const until = performance.now() + 14;
+      do {
+        tick();
+      } while (alpha > alphaMin && performance.now() < until);
+      if (alpha <= alphaMin && alphaTarget === 0) {
+        running = false;
+      }
+    }
+    if (autoFit) {
+      fit();
+    }
+    draw();
+    if (running) {
+      redraw();
+    }
+  }
+  function reheat(target) {
+    alphaTarget = target;
+    alpha = Math.max(alpha, target);
+    running = true;
+    redraw();
+  }
+
+  /* What stays lit: a community picked in the legend, else the search's
+     matches, else the selected entity and its neighbours. */
+  function lit() {
+    if (focusCommunity !== null) {
+      const on = new Uint8Array(N);
+      for (let i = 0; i < N; i++) {
+        on[i] = community[i] === focusCommunity ? 1 : 0;
+      }
+      return on;
+    }
+    if (matches !== null) {
+      return matches;
+    }
+    if (selected >= 0) {
+      const on = new Uint8Array(N);
+      on[selected] = 1;
+      for (const e of incident[selected]) {
+        on[src[e]] = 1;
+        on[dst[e]] = 1;
+      }
+      return on;
+    }
+    return null;
+  }
+  function shortName(card) {
+    const node = card.node;
+    if (node.type === 'file') {
+      return node.name.slice(node.name.lastIndexOf('/') + 1) || node.name;
+    }
+    if (node.type === 'module' || node.type === 'class' || node.type === 'function') {
+      const cut = Math.max(node.name.lastIndexOf('::') + 1, node.name.lastIndexOf('.'));
+      const tail = node.name.slice(cut + 1);
+      return tail || node.name;
+    }
+    return node.name;
+  }
+  function strokeEdges(on, wanted) {
+    ctx.beginPath();
+    for (let e = 0; e < M; e++) {
+      if (asserted[e] !== wanted) {
+        continue;
+      }
+      if (on !== null && !(on[src[e]] && on[dst[e]])) {
+        continue;
+      }
+      ctx.moveTo(x[src[e]], y[src[e]]);
+      ctx.lineTo(x[dst[e]], y[dst[e]]);
+    }
+    ctx.stroke();
+  }
+  function draw() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    if (N === 0) {
+      return;
+    }
+    const on = lit();
+    ctx.save();
+    ctx.translate(tx, ty);
+    ctx.scale(k, k);
+    ctx.lineWidth = 1 / k;
+    for (const pass of [0, 1]) {
+      ctx.setLineDash(pass === 1 ? [4 / k, 3 / k] : []);
+      ctx.strokeStyle = theme.edge;
+      ctx.globalAlpha = on === null ? 1 : 0.35;
+      strokeEdges(null, pass);
+      if (on !== null) {
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = theme.edgeHi;
+        strokeEdges(on, pass);
+      }
+    }
+    ctx.setLineDash([]);
+    for (let i = N - 1; i >= 0; i--) {
+      ctx.globalAlpha = on === null || on[i] ? 1 : 0.14;
+      ctx.fillStyle = colour[i];
+      ctx.beginPath();
+      ctx.arc(x[i], y[i], radius[i], 0, 2 * Math.PI);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    for (const i of [selected, hovered]) {
+      if (i >= 0) {
+        ctx.lineWidth = 2.5 / k;
+        ctx.strokeStyle = theme.accent;
+        ctx.beginPath();
+        ctx.arc(x[i], y[i], radius[i] + 3 / k, 0, 2 * Math.PI);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+    drawLabels(on);
+  }
+  function drawLabels(on) {
+    ctx.font = '12px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 3;
+    const shown = new Set();
+    const label = (i) => {
+      if (shown.has(i)) {
+        return;
+      }
+      const sx = x[i] * k + tx;
+      const sy = y[i] * k + ty;
+      if (sx < -200 || sx > width + 200 || sy < -20 || sy > height + 20) {
+        return;
+      }
+      shown.add(i);
+      const text = shortName(cards[i]);
+      const at = sx + radius[i] * k + 4;
+      ctx.strokeStyle = theme.halo;
+      ctx.strokeText(text, at, sy);
+      ctx.fillStyle = theme.ink;
+      ctx.fillText(text, at, sy);
+    };
+    /* The busiest dozen are named at any zoom, so the picture is never
+       anonymous; the rest as they grow large enough to read. */
+    let budget = 160;
+    for (let i = 0; i < N && budget > 0; i++) {
+      if ((i < 12 || radius[i] * k >= 7) && (on === null || on[i])) {
+        label(i);
+        budget -= 1;
+      }
+    }
+    if (on !== null) {
+      let extra = 60;
+      for (let i = 0; i < N && extra > 0; i++) {
+        if (on[i]) {
+          label(i);
+          extra -= 1;
+        }
+      }
+    }
+    for (const i of [selected, hovered]) {
+      if (i >= 0) {
+        label(i);
+      }
+    }
+  }
+
+  /* ---- Pointing: pan, zoom, drag an entity, click to explain ---- */
+  function local(event) {
+    const box = canvas.getBoundingClientRect();
+    return [event.clientX - box.left, event.clientY - box.top];
+  }
+  function entityAt(sx, sy) {
+    const wx = (sx - tx) / k;
+    const wy = (sy - ty) / k;
+    let best = -1;
+    let bestD = Infinity;
+    for (let i = 0; i < N; i++) {
+      const dx = x[i] - wx;
+      const dy = y[i] - wy;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d <= radius[i] + 4 / k && d < bestD) {
+        best = i;
+        bestD = d;
+      }
+    }
+    return best;
+  }
+  let pointer = null;
+  canvas.addEventListener('pointerdown', (event) => {
+    const [sx, sy] = local(event);
+    canvas.setPointerCapture(event.pointerId);
+    pointer = { sx: sx, sy: sy, lastX: sx, lastY: sy, entity: entityAt(sx, sy), moved: false };
+    canvas.classList.add('dragging');
+  });
+  canvas.addEventListener('pointermove', (event) => {
+    const [sx, sy] = local(event);
+    if (pointer === null) {
+      const over = entityAt(sx, sy);
+      if (over !== hovered) {
+        hovered = over;
+        canvas.classList.toggle('over', over >= 0);
+        redraw();
+      }
+      return;
+    }
+    if (Math.abs(sx - pointer.sx) + Math.abs(sy - pointer.sy) > 4) {
+      pointer.moved = true;
+    }
+    if (pointer.moved && pointer.entity >= 0) {
+      dragged = pointer.entity;
+      dragX = (sx - tx) / k;
+      dragY = (sy - ty) / k;
+      autoFit = false;
+      reheat(0.25);
+    } else if (pointer.moved) {
+      tx += sx - pointer.lastX;
+      ty += sy - pointer.lastY;
+      autoFit = false;
+      redraw();
+    }
+    pointer.lastX = sx;
+    pointer.lastY = sy;
+  });
+  function release() {
+    if (pointer !== null && !pointer.moved) {
+      select(pointer.entity, false);
+    }
+    pointer = null;
+    dragged = -1;
+    alphaTarget = 0;
+    canvas.classList.remove('dragging');
+  }
+  canvas.addEventListener('pointerup', release);
+  canvas.addEventListener('pointercancel', release);
+  canvas.addEventListener('pointerleave', () => {
+    if (hovered >= 0 && pointer === null) {
+      hovered = -1;
+      redraw();
+    }
+  });
+  canvas.addEventListener('wheel', (event) => {
+    event.preventDefault();
+    const [sx, sy] = local(event);
+    const factor = Math.exp(-event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.0015));
+    const next = Math.min(12, Math.max(0.01, k * factor));
+    tx = sx - (sx - tx) * next / k;
+    ty = sy - (sy - ty) * next / k;
+    k = next;
+    autoFit = false;
+    redraw();
+  }, { passive: false });
+  canvas.addEventListener('dblclick', () => {
+    autoFit = true;
+    redraw();
+  });
+
+  /* ---- The card: the payload of apogee graph explain, as it was printed ---- */
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) {
+      node.className = className;
+    }
+    if (text !== undefined) {
+      node.textContent = text;
+    }
+    return node;
+  }
+  function where(node) {
+    if (node.file) {
+      return node.file + ':' + node.line + (node.end_line ? '-' + node.end_line : '');
+    }
+    if (node.unresolved) {
+      return 'unresolved';
+    }
+    if (node.status) {
+      return node.status + (node.discipline ? ', ' + node.discipline : '');
+    }
+    return '';
+  }
+  function describe(node) {
+    const place = where(node);
+    return node.type + (place ? ' · ' + place : '');
+  }
+  function peer(node) {
+    const i = indexOf.get(keyOf(node));
+    if (i === undefined) {
+      const span = el('span', 'peer off', node.name);
+      span.title = 'not among the entities drawn';
+      return span;
+    }
+    const button = el('button', 'peer', node.name);
+    button.type = 'button';
+    button.addEventListener('click', () => select(i, true));
+    return button;
+  }
+  const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+  function renderCard(card) {
+    panel.replaceChildren();
+    const close = el('button', 'close', '×');
+    close.type = 'button';
+    close.setAttribute('aria-label', 'Close');
+    close.addEventListener('click', () => select(-1, false));
+    panel.append(close, el('h2', '', card.node.name), el('p', 'meta', describe(card.node) + (card.node.member ? ' · ' + card.node.member : '')));
+    if (card.description) {
+      panel.append(el('p', '', card.description));
+    }
+    const d = card.degree;
+    panel.append(el('p', '', plural(d.total, 'relation', 'relations') + ': ' + d.out + ' out, ' + d.in + ' in · ' + plural(card.mentions, 'mention', 'mentions')));
+    if (card.relations.length) {
+      panel.append(el('h3', '', 'Relations'));
+      for (const group of card.relations) {
+        panel.append(el('h4', '', group.relation + (group.direction === 'out' ? ' → ' : ' ← ') + group.total));
+        const list = el('ul');
+        for (const n of group.neighbors) {
+          const item = el('li');
+          item.append(peer(n));
+          let meta = ' ' + describe(n);
+          if (n.weight > 1) {
+            meta += ' · ×' + n.weight;
+          }
+          if (n.at) {
+            meta += ' · at ' + n.at;
+          }
+          if (n.description) {
+            meta += ' · ' + n.description;
+          }
+          item.append(el('span', 'meta', meta));
+          list.append(item);
+        }
+        if (group.total > group.neighbors.length) {
+          list.append(el('li', 'note', '… and ' + (group.total - group.neighbors.length) + ' more (apogee graph explain lists up to 100)'));
+        }
+        panel.append(list);
+      }
+    }
+    const code = card.provenance.code;
+    const chunks = card.provenance.chunks;
+    if (code.length) {
+      panel.append(el('h3', '', card.node.unresolved ? 'Referenced at' : 'Stated at'));
+      const list = el('ul');
+      for (const at of code) {
+        list.append(el('li', '', at.role + ' · ' + at.member + ': ' + at.file + ':' + at.line + (at.end_line ? '-' + at.end_line : '')));
+      }
+      panel.append(list);
+    }
+    if (chunks.length) {
+      panel.append(el('h3', '', 'Mentioned in'));
+      const list = el('ul');
+      for (const m of chunks) {
+        const from = m.collection ? m.collection + ': ' : '';
+        list.append(el('li', '', m.missing ? from + 'chunk id ' + m.chunk_id + ' (no longer present)' : from + m.source + ' [chunk ' + m.chunk + ']'));
+      }
+      panel.append(list);
+    }
+    const listed = code.length + chunks.length;
+    if (listed > 0 && card.mentions > listed) {
+      panel.append(el('p', 'note', '… and ' + (card.mentions - listed) + ' more'));
+    }
+    if (card.communities.length) {
+      panel.append(el('h3', '', 'Community'));
+      for (const c of card.communities) {
+        const p = el('p', '', '#' + c.id + ' · ' + plural(c.size, 'member', 'members') + ': ');
+        p.append(c.summary ? document.createTextNode(c.summary) : el('em', '', 'no summary (clustered with no model)'));
+        panel.append(p);
+      }
+    }
+    if (card.decisions.length) {
+      panel.append(el('h3', '', 'Decisions'));
+      const list = el('ul');
+      for (const decision of card.decisions) {
+        const item = el('li');
+        item.append(peer(decision), el('span', 'meta', ' ' + where(decision)));
+        if (decision.decision) {
+          item.append(document.createTextNode(': ' + decision.decision));
+        }
+        list.append(item);
+      }
+      panel.append(list);
+    }
+    panel.append(el('p', 'note', 'The card apogee graph explain prints, ' + data.cap.card_neighbors + ' neighbours per relation at most.'));
+    panel.scrollTop = 0;
+  }
+  function select(i, centre) {
+    selected = i;
+    if (i < 0) {
+      panel.hidden = true;
+      redraw();
+      return;
+    }
+    renderCard(cards[i]);
+    panel.hidden = false;
+    if (centre) {
+      autoFit = false;
+      k = Math.max(k, 0.8);
+      tx = width / 2 - x[i] * k;
+      ty = height / 2 - y[i] * k;
+    }
+    redraw();
+  }
+
+  /* ---- Search: names first, then files, kinds and descriptions ---- */
+  const haystack = cards.map((card) => ({
+    name: card.node.name.toLowerCase(),
+    rest: [card.node.type, card.node.file || '', card.description || ''].join(' ').toLowerCase()
+  }));
+  let hits = [];
+  let active = -1;
+  function runSearch() {
+    const q = search.value.trim().toLowerCase();
+    results.replaceChildren();
+    active = -1;
+    if (!q) {
+      matches = null;
+      hits = [];
+      results.hidden = true;
+      redraw();
+      return;
+    }
+    const scored = [];
+    for (let i = 0; i < N; i++) {
+      const at = haystack[i].name.indexOf(q);
+      let score = 0;
+      if (at >= 0) {
+        score = at === 0 || haystack[i].name.endsWith(q) ? 3 : 2;
+      } else if (haystack[i].rest.indexOf(q) >= 0) {
+        score = 1;
+      }
+      if (score > 0) {
+        scored.push([score, i]);
+      }
+    }
+    scored.sort((a, b) => b[0] - a[0] || a[1] - b[1]);
+    hits = scored.map((s) => s[1]);
+    matches = new Uint8Array(N);
+    for (const i of hits) {
+      matches[i] = 1;
+    }
+    results.append(el('li', 'count', hits.length === 0 ? 'No entity matches' : plural(hits.length, 'match', 'matches') + (hits.length > 50 ? ', the first 50:' : '')));
+    hits.slice(0, 50).forEach((i, row) => {
+      const item = el('li', '', cards[i].node.name);
+      item.setAttribute('role', 'option');
+      item.dataset.row = String(row);
+      item.append(el('span', 'meta', describe(cards[i].node)));
+      item.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        choose(i);
+      });
+      results.append(item);
+    });
+    results.hidden = false;
+    redraw();
+  }
+  function choose(i) {
+    results.hidden = true;
+    select(i, true);
+  }
+  function mark(row) {
+    const items = results.querySelectorAll('li[role="option"]');
+    items.forEach((item) => item.classList.toggle('active', Number(item.dataset.row) === row));
+    if (items[row]) {
+      items[row].scrollIntoView({ block: 'nearest' });
+    }
+    active = row;
+  }
+  search.addEventListener('input', runSearch);
+  search.addEventListener('focus', () => {
+    if (hits.length) {
+      results.hidden = false;
+    }
+  });
+  search.addEventListener('blur', () => {
+    results.hidden = true;
+  });
+  search.addEventListener('keydown', (event) => {
+    const shown = Math.min(hits.length, 50);
+    if (event.key === 'ArrowDown' && shown) {
+      event.preventDefault();
+      mark((active + 1) % shown);
+    } else if (event.key === 'ArrowUp' && shown) {
+      event.preventDefault();
+      mark((active - 1 + shown) % shown);
+    } else if (event.key === 'Enter' && shown) {
+      event.preventDefault();
+      choose(hits[Math.max(active, 0)]);
+    } else if (event.key === 'Escape') {
+      search.value = '';
+      runSearch();
+      search.blur();
+    }
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === '/' && document.activeElement !== search) {
+      event.preventDefault();
+      search.focus();
+    } else if (event.key === 'Escape' && document.activeElement !== search) {
+      focusCommunity = null;
+      renderLegend();
+      select(-1, false);
+    }
+  });
+
+  /* ---- The legend: communities by size, and what an edge's stroke says ---- */
+  function renderLegend() {
+    legend.replaceChildren();
+    legend.append(el('h2', '', 'Communities'));
+    const shown = data.communities.slice(0, 12);
+    if (shown.length === 0) {
+      legend.append(el('p', 'note', 'None stored: apogee graph communities clusters them (no model needed).'));
+    }
+    for (const c of shown) {
+      const button = el('button', 'community' + (focusCommunity === c.id ? ' on' : ''));
+      button.type = 'button';
+      const swatch = el('span', 'swatch');
+      swatch.style.background = communityColour(c.id);
+      const text = el('span');
+      text.append(el('strong', '', '#' + c.id), document.createTextNode(' · ' + plural(c.size, 'member', 'members') + ' · '));
+      const summary = c.summary || '';
+      text.append(summary ? document.createTextNode(summary.length > 90 ? summary.slice(0, 90) + '…' : summary) : el('em', '', 'no summary'));
+      button.append(swatch, text);
+      button.addEventListener('click', () => {
+        focusCommunity = focusCommunity === c.id ? null : c.id;
+        renderLegend();
+        redraw();
+      });
+      legend.append(button);
+    }
+    if (data.communities.length > shown.length) {
+      legend.append(el('p', 'note', 'and ' + (data.communities.length - shown.length) + ' more'));
+    }
+    legend.append(el('h2', '', 'Relations'));
+    const kinds = [[0, 'parsed from source (extracted)', data.origin.extracted], [1, 'asserted by a model (inferred)', data.origin.inferred]];
+    for (const [dashed, words, count] of kinds) {
+      if (count > 0) {
+        const p = el('p');
+        p.append(el('span', dashed ? 'stroke dashed' : 'stroke'), document.createTextNode(words));
+        legend.append(p);
+      }
+    }
+    legend.append(el('p', 'note', plural(N, 'entity', 'entities') + ' and ' + plural(M, 'relation', 'relations') + ' drawn. Drag to pan, scroll to zoom, double-click to fit; click an entity to explain it.'));
+  }
+
+  readTheme();
+  renderLegend();
+  if (window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+      readTheme();
+      renderLegend();
+      redraw();
+    });
+  }
+  window.addEventListener('resize', resize);
+  resize();
+})();
+</script>
+</body>
+</html>

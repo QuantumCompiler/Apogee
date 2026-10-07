@@ -39,7 +39,40 @@ namespace {
     return {};
 }
 
+/// The active suite's member for `role`, or "" when no suite is active or it
+/// names none. The one place a member is read to decide what runs.
+[[nodiscard]] std::string_view member_for(const Config& config, ModelRole role) {
+    const SuiteConfig* suite = active_suite(config);
+    if (suite == nullptr) {
+        return {};
+    }
+    const auto it = suite->members.find(suite_role(role));
+    return it == suite->members.end() ? std::string_view{} : std::string_view{it->second.backend};
+}
+
 }  // namespace
+
+std::string_view suite_role(ModelRole role) noexcept {
+    switch (role) {
+        case ModelRole::Embedding:
+            return "embedding";
+        case ModelRole::Extraction:
+            return "extraction";
+        case ModelRole::Vision:
+            return "vision";
+        case ModelRole::Transcription:
+            return "transcription";
+        case ModelRole::Utility:
+            return "utility";
+        case ModelRole::Chat:
+            break;
+    }
+    return "chat";
+}
+
+bool is_named(ResolvedFrom from) noexcept {
+    return from == ResolvedFrom::RolePointer || from == ResolvedFrom::Suite;
+}
 
 std::string_view to_string(ModelRole role) noexcept {
     switch (role) {
@@ -66,13 +99,18 @@ bool is_helper(ModelRole role) noexcept {
 
 Resolution resolve_backend(const Config& config, const RoleRequest& request) {
     // The order below IS the contract, and it is table-tested rung by rung in
-    // tests/business/harness/roles_test.cpp. Reordering these five returns is the whole
+    // tests/business/harness/roles_test.cpp. Reordering these six returns is the whole
     // bug this file exists to prevent, so it is asserted rather than reviewed.
     if (const std::string_view value = trim(request.override); !value.empty()) {
         return {.key = std::string{value}, .from = ResolvedFrom::Override};
     }
     if (const std::string_view value = trim(request.entry_backend); !value.empty()) {
         return {.key = std::string{value}, .from = ResolvedFrom::EntryBackend};
+    }
+    // The suite's member (27d). With no suite active this answers nothing,
+    // and the chain below is exactly the one from before suites.
+    if (const std::string_view value = trim(member_for(config, request.role)); !value.empty()) {
+        return {.key = std::string{value}, .from = ResolvedFrom::Suite};
     }
     if (const std::string_view value = trim(pointer_for(config, request.role)); !value.empty()) {
         return {.key = std::string{value}, .from = ResolvedFrom::RolePointer};

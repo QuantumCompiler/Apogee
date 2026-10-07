@@ -3,6 +3,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "agent/fetch_url.h"
 #include "agent/readable.h"
@@ -127,6 +129,29 @@ TEST_CASE("dispatch reports progress and clears it", "[agent][tool]") {
     REQUIRE(statuses.size() == 2);
     CHECK(statuses[0] == "[tool] thing");
     CHECK(statuses[1].empty());  // back to rest
+}
+
+TEST_CASE("a tool's output that is not UTF-8 leaves dispatch as UTF-8", "[agent][tool][utf8]") {
+    // A Latin-1 file, a command's raw bytes, a stream cut mid-character: the
+    // result reaches history, the session file, the next request and an MCP
+    // client's frame, each a strict JSON dump -- so dispatch, which every
+    // surface runs a tool through, hands back text. Each maximal ill-formed
+    // part is one U+FFFD; valid output is untouched, byte for byte.
+    const std::string valid = "na\xC3\xAFve \xE2\x82\xAC \xF0\x9F\x98\x80\n";
+    for (const auto& [said, expected] : std::vector<std::pair<std::string, std::string>>{
+             {"caf\xE9 cr\xE8me", "caf\xEF\xBF\xBD cr\xEF\xBF\xBDme"},
+             {"cut \xE2\x82", "cut \xEF\xBF\xBD"},
+             {valid, valid}}) {
+        ToolRegistry registry;
+        Tool tool;
+        tool.name = "raw";
+        tool.description = "d";
+        tool.run = [raw = said](std::string_view) { return ToolOutcome{raw, false}; };
+        registry.add(std::move(tool));
+        const ToolOutcome outcome = dispatch(registry, ToolCall{"c", "raw", "{}"}, {});
+        CHECK(outcome.content == expected);
+        CHECK_FALSE(outcome.is_error);
+    }
 }
 
 // ---------------------------------------------------------------------------

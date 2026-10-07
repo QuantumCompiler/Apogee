@@ -24,11 +24,10 @@
 /// **The protocol is a contract on both sides.** `parse_progress_line` is
 /// pinned against a golden fixture, and the shipped drivers are run under
 /// stub modules to prove they emit the fixture's shapes. Three outcomes are
-/// distinct by construction, each a silent failure in the reference
-/// implementation: an `{"error"}` line is its own event (there it decoded
-/// as a blank progress tick), a non-JSON line is a message (there it was
-/// dropped), and the child's exit code is carried (there it was discarded,
-/// so a crashed trainer was a complete run).
+/// distinct by construction, each a silent failure if they blur: an
+/// `{"error"}` line is its own event (never a blank progress tick), a
+/// non-JSON line is a message (never dropped), and the child's exit code is
+/// carried (so a crashed trainer is never a complete run).
 namespace apogee::training {
 
 /// The adapter directory inside a run's directory.

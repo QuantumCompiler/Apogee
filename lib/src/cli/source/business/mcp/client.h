@@ -27,9 +27,8 @@
 /// The moment the transport reports the far end gone, every pending call is
 /// released with "connection closed" -- so a server that dies mid-handshake
 /// fails at once instead of holding the caller (and the status line) for the
-/// whole connect timeout. Ommi's registry tests dropped from 50 s to 2 s the
-/// day that was fixed. `mark_done` is idempotent: a server dying while the
-/// caller is closing it must not race.
+/// whole connect timeout. `mark_done` is idempotent: a server dying while
+/// the caller is closing it must not race.
 namespace apogee::mcp {
 
 struct ClientOptions {

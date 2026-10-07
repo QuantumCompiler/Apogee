@@ -60,8 +60,20 @@ inline constexpr std::string_view kFindToolsName = "find_tools";
 
 /// The tools offered whenever selection is on and the registry has them --
 /// the ones almost every task begins with -- and `find_tools` (26g, default
-/// taken).
+/// taken). And `consult` (27f): registered only where the session's suite
+/// designates members, the user's own opt-in, and a call a local model's
+/// grammar -- built over the offered tools -- cannot even parse while it is
+/// ranked out of the offer (Llama 3.1 8B named it from its history, and the
+/// call came back as text).
 [[nodiscard]] const std::vector<std::string>& core_tools();
+
+/// Whether `name` is offered whenever it is registered: one of `core_tools()`,
+/// or a symphony's tool (`play_<symphony>`, 27t) -- every one of them, since
+/// orchestration is the user's opt-in to the model choosing among the
+/// symphonies, and a choice ranked out of the offer is one a local model
+/// cannot even make (consult's lesson). Their count is the catalog's, which
+/// the user writes.
+[[nodiscard]] bool is_core_tool(std::string_view name);
 
 /// The most names `find_tools`'s description lists; past it, how many more.
 inline constexpr std::size_t kHiddenNamesListed = 100;

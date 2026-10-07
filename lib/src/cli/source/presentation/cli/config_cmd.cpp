@@ -2,6 +2,7 @@
 
 #include <CLI/CLI.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <initializer_list>
@@ -11,13 +12,16 @@
 #include <string>
 #include <vector>
 
+#include "cli/config_suites.h"
 #include "cli/graph.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/host.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "graph/code_languages.h"
 #include "modelstore/store.h"
+#include "operations/graph_sources.h"
 #include "tools/toolsets.h"
 
 namespace apogee::commands {
@@ -102,6 +106,9 @@ std::string render_secret(const std::string& value, bool reveal) {
 /// Resolves a dotted key against a loaded config.
 /// Returns nullopt when the key does not name anything.
 std::optional<std::string> lookup(const Config& config, std::string_view key, bool reveal) {
+    if (std::optional<std::string> suite = suite_lookup(config, key); suite.has_value()) {
+        return suite;
+    }
     if (key == "status_mode") {
         return std::string{harness::to_string(config.status_mode)};
     }
@@ -231,6 +238,12 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
     }
     if (key == "ui.markdown") {
         return config.ui.markdown ? "true" : "false";
+    }
+    if (key == "attachments.graph") {
+        // Unset is each surface's built-in (27p), which no one word names.
+        return config.attachments.graph.has_value()
+                   ? std::string{harness::to_string(*config.attachments.graph)}
+                   : std::string{};
     }
     if (key == "tools.disabled") {
         std::string out;
@@ -448,27 +461,57 @@ struct AddBackendFlags {
 };
 
 /// A name the model store knows fills what the flags leave open (M7): a
-/// stored GGUF named `<name>.gguf` gives the type its format runs as, its
-/// file and its projector -- the arguments a hand-typed `add-backend` would
-/// carry, said as such. A flag given always wins; a model path given means
-/// nothing is filled. Two stored GGUFs of that name are refused, listed.
+/// stored GGUF named `<name>.gguf`, or a stored MLX model of that name
+/// (`stored_mlx_name`, 27b), gives the type its format runs as, its file or
+/// directory and its projector -- the arguments a hand-typed `add-backend`
+/// would carry, said as such. A flag given always wins; a model path given
+/// means nothing is filled. Two stored models of that name are refused,
+/// listed.
 void fill_from_store(AddBackendFlags& flags) {
     const std::string_view type{models::backend_type_for_format(models::kGgufFormat)};
-    if (!flags.model_path.empty() || (flags.type_option->count() > 0 && flags.type != type)) {
+    const std::string_view mlx_type{models::backend_type_for_format(models::kMlxFormat)};
+    const bool typed = flags.type_option->count() > 0;
+    if (!flags.model_path.empty() || (typed && flags.type != type && flags.type != mlx_type)) {
         return;
     }
-    const std::vector<models::StoredGguf> named = models::stored_ggufs_named(
-        models::list_store_ggufs(models::StoreRoots::at(harness::models_dir())), flags.name);
-    if (named.empty()) {
-        return;
+    const models::StoreRoots roots = models::StoreRoots::at(harness::models_dir());
+    std::vector<models::StoredGguf> named;
+    if (!typed || flags.type == type) {
+        named = models::stored_ggufs_named(models::list_store_ggufs(roots), flags.name);
     }
-    if (named.size() > 1) {
+    std::vector<models::StoredMlx> named_mlx;
+    if (!typed || flags.type == mlx_type) {
+        named_mlx = models::stored_mlx_named(models::list_store_mlx(roots), flags.name);
+    }
+    if (named.size() + named_mlx.size() > 1) {
         std::string files;
         for (const models::StoredGguf& stored : named) {
             files += "\n  " + stored.file.string();
         }
-        fail("'" + flags.name + "' is the name of " + std::to_string(named.size()) +
-             " stored GGUFs -- pass --model-path with one of:" + files);
+        for (const models::StoredMlx& stored : named_mlx) {
+            files += "\n  " + stored.dir.string();
+        }
+        std::string kind = " stored models";
+        if (named_mlx.empty()) {
+            kind = " stored GGUFs";
+        } else if (named.empty()) {
+            kind = " stored MLX models";
+        }
+        fail("'" + flags.name + "' is the name of " +
+             std::to_string(named.size() + named_mlx.size()) + kind +
+             " -- pass --model-path with one of:" + files);
+    }
+    if (!named_mlx.empty()) {
+        const models::StoredMlx& stored = named_mlx.front();
+        flags.type = mlx_type;
+        flags.model_path = stored.dir.string();
+        std::cout << "filled from the store: "
+                  << models::weights_handle(stored.model, models::kMlxFormat, stored.id)
+                  << "\n  --type " << flags.type << " --model-path " << flags.model_path << "\n";
+        return;
+    }
+    if (named.empty()) {
+        return;
     }
     const models::StoredGguf& stored = named.front();
     flags.type = type;
@@ -680,6 +723,8 @@ void bind_delete_mcp_server(CLI::App& parent, const RootContext& context) {
 struct AddGraphFlags {
     std::string name;
     std::string collections;
+    std::vector<std::string> sources;
+    std::vector<std::string> languages;
     std::string extract_backend;
     int hops = 1;
     int max_entities = 8;
@@ -692,13 +737,27 @@ struct AddGraphFlags {
 void bind_add_graph(CLI::App& parent, const RootContext& context) {
     auto flags = std::make_shared<AddGraphFlags>();
     CLI::App* cmd = parent.add_subcommand(
-        "add-graph", "Add a named knowledge graph spanning several collections");
+        "add-graph", "Add a named knowledge graph spanning collections and, parsed, source trees");
     cmd->add_option("name", flags->name, "Name for the graph (must not be a collection's name)")
         ->required();
     cmd->add_option("--collections", flags->collections,
                     "The member collections, comma-separated (e.g. docs,meetings)")
-        ->type_name(kCollectionListValue)
-        ->required();
+        ->type_name(kCollectionListValue);
+    cmd->add_option("--sources", flags->sources,
+                    "Source trees parsed into the graph with no model (repeatable; a directory)")
+        ->type_name(kPathValue);
+    {
+        // Each a roster name, comma-separated or repeated: the parser holds
+        // every word to the vendored grammars, and completion offers them.
+        std::vector<std::string> names;
+        for (const graph::CodeLanguage& language : graph::code_languages()) {
+            names.emplace_back(language.name);
+        }
+        cmd->add_option("--languages", flags->languages,
+                        "Only these grammars for the source trees, comma-separated (default: all)")
+            ->delimiter(',')
+            ->check(CLI::IsMember(names));
+    }
     cmd->add_option("--extract-backend", flags->extract_backend,
                     "The backend `graph build` extracts with (default: the extraction role)")
         ->type_name(kBackendValue);
@@ -709,22 +768,37 @@ void bind_add_graph(CLI::App& parent, const RootContext& context) {
     cmd->callback([&context, flags]() {
         const std::filesystem::path path = config_path_for(context);
         harness::NamedGraphConfig graph;
-        std::size_t start = 0;
-        while (start <= flags->collections.size()) {
-            const std::size_t comma = flags->collections.find(',', start);
-            std::string item = flags->collections.substr(
-                start, comma == std::string::npos ? std::string::npos : comma - start);
-            const std::size_t first = item.find_first_not_of(" \t");
-            const std::size_t last = item.find_last_not_of(" \t");
-            item =
-                first == std::string::npos ? std::string{} : item.substr(first, last - first + 1);
-            if (!item.empty()) {
-                graph.collections.push_back(item);
+        const auto comma_list = [](const std::string& text) {
+            std::vector<std::string> items;
+            std::size_t start = 0;
+            while (start <= text.size()) {
+                const std::size_t comma = text.find(',', start);
+                std::string item = text.substr(
+                    start, comma == std::string::npos ? std::string::npos : comma - start);
+                const std::size_t first = item.find_first_not_of(" \t");
+                const std::size_t last = item.find_last_not_of(" \t");
+                item = first == std::string::npos ? std::string{}
+                                                  : item.substr(first, last - first + 1);
+                if (!item.empty()) {
+                    items.push_back(item);
+                }
+                if (comma == std::string::npos) {
+                    break;
+                }
+                start = comma + 1;
             }
-            if (comma == std::string::npos) {
-                break;
+            return items;
+        };
+        graph.collections = comma_list(flags->collections);
+        for (const std::string& language : flags->languages) {
+            if (std::ranges::find(graph.languages, language) == graph.languages.end()) {
+                graph.languages.push_back(language);
             }
-            start = comma + 1;
+        }
+        // A source tree is recorded absolute: a config is read from wherever
+        // apogee runs, and a relative path would mean something else there.
+        for (const std::string& source : flags->sources) {
+            graph.sources.push_back(absolute_source_path(source));
         }
         graph.extract_backend = flags->extract_backend;
         graph.hops = flags->hops;
@@ -871,6 +945,7 @@ std::vector<std::string> config_keys(const harness::Config& config) {
                                   "tools.fs_root",
                                   "tools.disabled",
                                   "ui.markdown",
+                                  "attachments.graph",
                                   "training.python",
                                   "training.trainer",
                                   "training.judge_backend",
@@ -912,6 +987,7 @@ std::vector<std::string> config_keys(const harness::Config& config) {
         entry("embeddings", name,
               {"chunk_size", "chunk_overlap", "description", "backend", "retriever", "rerank"});
     }
+    append_suite_keys(config, keys);
     return keys;
 }
 
@@ -943,6 +1019,7 @@ void ConfigCommand::bind(CLI::App& root, const RootContext& context) {
     bind_set_role(*cmd, context, "set-default-utility", "default_utility",
                   "Set the backend for chores: titles, compaction, search queries, large tool "
                   "results");
+    bind_suite_verbs(*cmd, context);
     bind_set_permission(*cmd, context);
     bind_add_allowed_host(*cmd, context);
     bind_delete_allowed_host(*cmd, context);

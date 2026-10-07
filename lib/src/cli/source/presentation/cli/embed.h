@@ -11,9 +11,8 @@
 ///
 /// **The whole surface works with no model, no API key, and no network.** That
 /// is the point of building the lexical floor first: retrieval is available to
-/// someone who has installed Apogee and nothing else. Ommi's recorded history
-/// is the argument — its RAG survived an embedding-model freeze only because
-/// the lexical path never needed one.
+/// someone who has installed Apogee and nothing else, and it keeps working
+/// when no embedding model can be had — the lexical path never needs one.
 namespace apogee::commands {
 
 class EmbedCommand final : public Command {

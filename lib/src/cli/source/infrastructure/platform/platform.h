@@ -89,6 +89,11 @@ struct LocalDate {
 /// (`TZ`, `/etc/localtime`, the Windows zone).
 [[nodiscard]] LocalDate local_date(std::chrono::system_clock::time_point when);
 
+/// `when` on the UTC calendar, laid out by `format` (`strftime`'s fields): a
+/// record's timestamp, `%Y-%m-%dT%H:%M:%SZ`, or an id's, `%Y%m%d-%H%M%S`.
+/// Empty when the layout does not fit 64 bytes.
+[[nodiscard]] std::string utc_time(std::chrono::system_clock::time_point when, const char* format);
+
 /// This process's id, for a PID lock file (`train cycle`'s) and nothing
 /// else -- a number a person can `kill`, never an identity.
 [[nodiscard]] long current_process_id() noexcept;

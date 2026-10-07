@@ -7,7 +7,7 @@ using apogee::backends::batch_ranges;
 TEST_CASE("inputs are split at the provider's maximum and nowhere else",
           "[backends][embed][batch]") {
     // The batch-splitting boundary, in one table. Batch-first is the Core
-    // constraint; per-input calls were Ommi's recorded cost trap.
+    // constraint; per-input calls are the cost trap it avoids.
     CHECK(batch_ranges(0, 100).empty());
     CHECK(batch_ranges(1, 100) == std::vector<std::pair<std::size_t, std::size_t>>{{0, 1}});
     CHECK(batch_ranges(100, 100) == std::vector<std::pair<std::size_t, std::size_t>>{{0, 100}});

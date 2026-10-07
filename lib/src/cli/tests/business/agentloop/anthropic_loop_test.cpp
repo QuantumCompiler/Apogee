@@ -157,6 +157,58 @@ TEST_CASE("Anthropic tool_use round-trips through the loop end to end",
     CHECK(found_tool_result);
 }
 
+TEST_CASE("a tool's bytes that are not UTF-8 reach Anthropic's next request as UTF-8",
+          "[agentloop][anthropic][utf8]") {
+    // The request body is a strict dump of the history: a Latin-1 file read
+    // into it used to throw there, before anything was sent, and took the
+    // turn down with an encoding error instead of an answer.
+    auto transport = std::make_unique<FakeTransport>(
+        std::vector<FakeTransport::Reply>{sse(kToolTurn), sse(kAnswerTurn)});
+    auto* raw = transport.get();
+
+    AnthropicProvider::Options provider_options;
+    provider_options.backend_name = "claude";
+    provider_options.api_key = "sk-ant-test";
+    provider_options.base_url = "https://api.test";
+
+    Harness harness{Config{}};
+    harness.register_provider("claude", std::make_shared<AnthropicProvider>(
+                                            std::move(provider_options),
+                                            std::make_unique<HttpClient>(std::move(transport))));
+    harness.use_default_router();
+
+    ToolRegistry registry;
+    Tool lookup;
+    lookup.name = "lookup";
+    lookup.description = "Looks something up";
+    lookup.run = [](std::string_view) { return ToolOutcome{"caf\xE9", false}; };
+    registry.add(std::move(lookup));
+
+    std::vector<ChatMessage> history{ChatMessage::user("what is the answer?")};
+    Options options;
+    options.model = "claude";
+    options.tools = &registry;
+
+    RunResult result;
+    REQUIRE_NOTHROW(result = apogee::agentloop::run(harness, history, options));
+    CHECK(result.answer == "The answer is 42");
+    REQUIRE(raw->requests().size() == 2);
+    const json second = json::parse(raw->requests()[1].body);
+    bool found_tool_result = false;
+    for (const auto& message : second.at("messages")) {
+        if (message.at("role") != "user" || !message.at("content").is_array()) {
+            continue;
+        }
+        for (const auto& block : message.at("content")) {
+            if (block.value("type", std::string{}) == "tool_result") {
+                found_tool_result = true;
+                CHECK(block.at("content") == "caf\xEF\xBF\xBD");
+            }
+        }
+    }
+    CHECK(found_tool_result);
+}
+
 TEST_CASE("ask_user reaches Anthropic as a normal tool definition", "[agentloop][anthropic][ask]") {
     // Apogee owns the loop on every provider, so ask_user works uniformly --
     // it is just a tool in the request, with no vendor special case anywhere.

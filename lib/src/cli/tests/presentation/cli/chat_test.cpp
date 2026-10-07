@@ -794,6 +794,18 @@ TEST_CASE("a folder attached sends its map on the prompt, and never into the sav
         CHECK(chat.out.find("--- map of attachment: ") != std::string::npos);
         CHECK(chat.out.find("docs/  1 file\nsrc/  1 file\n") != std::string::npos);
         CHECK(chat.out.find("where is main?") != std::string::npos);
+        // A one-shot has no follow-up to walk a graph in: none is built (27n).
+        CHECK(chat.err.find("graph:") == std::string::npos);
+    }
+    {
+        // complete in machine mode: the same one-shot, the same answer.
+        HelperChat chat{texts({"{{last_user}}"}), {}, "    context_size: 8000\n"};
+        folder(chat.home.path() / "proj");
+        INFO(chat.err);
+        REQUIRE(chat.run({"complete", "--output-format", "stream-json", "--attach",
+                          (chat.home.path() / "proj").string(), "where is main?"}) == 0);
+        CHECK(chat.out.find("with a map of its folders") != std::string::npos);
+        CHECK(chat.out.find("graph:") == std::string::npos);
     }
     {
         // chat: the map rides the request; the saved message is as typed.
@@ -809,6 +821,11 @@ TEST_CASE("a folder attached sends its map on the prompt, and never into the sav
         const apogee::harness::ChatMessage& asked =
             session.messages.at(*session.attachments[0].map_at);
         CHECK(asked.content.plain_text() == "where is main?");
+        // A chat's folder of code is graphed in its index, and said (27n).
+        CHECK(chat.err.find("graph: ") != std::string::npos);
+        CHECK(chat.err.find("(supported: cpp 1; skipped: .md 1)") != std::string::npos);
+        REQUIRE(session.attachments[0].graph.has_value());
+        CHECK(session.attachments[0].graph->label == "proj");
     }
 }
 
@@ -1277,6 +1294,31 @@ TEST_CASE("complete --allow is the user answering at invocation; without it, den
     CHECK(chat.run({"complete", "--allow", "write_file", "write it"}) != 0);
 }
 
+TEST_CASE("a repeated --allow, --deny or --allow-host is taken whole, on chat and complete",
+          "[chat][cli][permissions][presets]") {
+    // Each flag is repeatable for real: a second use was refused by the
+    // parser ("At Most 1 required but received 2") until 27i.
+    HelperChat chat{texts({"fine"}), {"Title"}};
+    REQUIRE(chat.run({"chat", "--tools", "--allow", "write_file", "--allow", "edit_file", "--deny",
+                      "run_command", "--deny", "example.org", "--allow-host", "docs.python.org",
+                      "--allow-host", "en.wikipedia.org"},
+                     "/permissions\n") == 0);
+    const std::string said = chat.out + chat.err;
+    CHECK(said.find("write_file   allow  (this session)") != std::string::npos);
+    CHECK(said.find("edit_file    allow  (this session)") != std::string::npos);
+    CHECK(said.find("run_command  deny   (this session)") != std::string::npos);
+    CHECK(said.find("website example.org: deny (this session)") != std::string::npos);
+    CHECK(said.find("website docs.python.org: allow (this session)") != std::string::npos);
+    CHECK(said.find("website en.wikipedia.org: allow (this session)") != std::string::npos);
+
+    HelperChat once{writes_a_file(), {"unused"}};
+    sandboxed(once);
+    REQUIRE(once.run({"complete", "--tools", "--allow", "edit_file", "--allow", "write_file",
+                      "--deny", "run_command", "--deny", "delete_file", "--allow-host",
+                      "docs.python.org", "--allow-host", "en.wikipedia.org", "write it"}) == 0);
+    CHECK(std::filesystem::exists(once.home.path() / "work" / "out.txt"));
+}
+
 TEST_CASE("chat --allow writes without asking, and a fresh chat asks again",
           "[chat][cli][permissions][presets]") {
     HelperChat chat{writes_a_file(), {"Title"}};
@@ -1401,5 +1443,456 @@ TEST_CASE("an attachment with nothing relevant injects nothing, says so the same
         // Its diagnostics ride stderr, stdout being the protocol's alone.
         CHECK(chat.err.find("apogee: " + terminal_line + "\n") != std::string::npos);
         CHECK(chat.out.find("7731") == std::string::npos);
+    }
+}
+
+TEST_CASE("chat and complete offer consult under a suite that designates a member",
+          "[chat][cli][consult]") {
+    // 27f: the root calls consult; the member answers with the brief it was
+    // sent -- so the relayed answer is the wire's own record -- on every
+    // surface that registers the tool, each opening the turn's budget.
+    const nlohmann::json chatty = nlohmann::json::array(
+        {{{"tool_calls",
+           {{{"name", "consult"},
+             {"arguments", {{"member", "utility"}, {"question", "What is the codeword?"}}}}}}},
+         {{"text", "relayed {{last_tool_result}}"}}});
+    HelperChat chat{chatty,
+                    {"MEMBER-ANSWER heard [{{last_user}}] system [{{system}}]"},
+                    {},
+                    "suites:\n  research:\n    members:\n      chat: chatty\n"
+                    "      utility: helper\n    consultable: [utility]\n"};
+    const std::string relayed =
+        "relayed utility (helper) answered:\nMEMBER-ANSWER heard [What is the codeword?] "
+        "system []";
+
+    // Under the suite as the config's default: complete, on a terminal's
+    // path and on machine mode's.
+    std::string text;
+    {
+        std::ifstream in{chat.config_path, std::ios::binary};
+        std::ostringstream read;
+        read << in.rdbuf();
+        text = read.str();
+    }
+    const std::string models = "models:\n  default: chatty\n";
+    text.replace(text.find(models), models.size(), models + "  default_suite: research\n");
+    std::ofstream{chat.config_path, std::ios::binary} << text;
+    REQUIRE(chat.run({"complete", "--tools", "what is the codeword?"}) == 0);
+    INFO(chat.err);
+    CHECK(chat.out.find(relayed) != std::string::npos);
+    REQUIRE(chat.run({"complete", "--tools", "--output-format", "stream-json",
+                      "what is the codeword?"}) == 0);
+    CHECK(chat.out.find("\"consult — asking utility (helper): What is the codeword?\"") !=
+          std::string::npos);
+    CHECK(chat.out.find("MEMBER-ANSWER heard [What is the codeword?] system []") !=
+          std::string::npos);
+    // Without --tools nothing is offered, as for every tool.
+    REQUIRE(chat.run({"complete", "what is the codeword?"}) == 0);
+    CHECK(chat.out.find("MEMBER-ANSWER") == std::string::npos);
+
+    // And chat.
+    REQUIRE(chat.run({"chat", "--tools"}, "what is the codeword?\n") == 0);
+    CHECK(chat.out.find(relayed) != std::string::npos);
+    // With the suite off, no consult: the call names a tool that is not there.
+    REQUIRE(chat.run({"chat", "--tools", "--suite", "off"}, "what is the codeword?\n") == 0);
+    CHECK(chat.out.find("MEMBER-ANSWER") == std::string::npos);
+    CHECK(chat.out.find("relayed Error: no tool named 'consult'") != std::string::npos);
+}
+
+TEST_CASE("/check has the suite's verifier check the last answer once, and says both sides",
+          "[chat][cli][validate]") {
+    // 27g: the verifier, once, briefed with the question and the answer; the
+    // chat's model answers the objection once; both said; the conversation
+    // untouched. The helper titles the chat first, as the utility member.
+    HelperChat chat{texts({"381", "You're right: 391."}),
+                    {"Helper Title", "OBJECT: 17 x 23 is 391, not 381."},
+                    {},
+                    "suites:\n  checked:\n    members:\n      chat: chatty\n"
+                    "      utility: helper\n"};
+    REQUIRE(chat.run({"chat", "--suite", "checked"}, "what is 17 x 23?\n/check\n") == 0);
+    INFO(chat.err);
+    const std::string said = chat.out + chat.err;
+    CHECK(said.find("check: utility (helper) objects to the answer -- \"17 x 23 is 391, not "
+                    "381.\"") != std::string::npos);
+    CHECK(said.find("check: shown the objection, the model answered -- \"You're right: 391.\"") !=
+          std::string::npos);
+    // Never a transcript mutation: the question and the answer as given.
+    const apogee::logger::Session session = HelperChat::only_session();
+    REQUIRE(session.messages.size() == 2);
+    CHECK(session.messages.back().content.plain_text() == "381");
+}
+
+TEST_CASE("/check says why it cannot run, and asks nobody", "[chat][cli][validate]") {
+    HelperChat chat{texts({"381"}),
+                    {"Helper Title"},
+                    {},
+                    "suites:\n  lonely:\n    members:\n      chat: chatty\n"};
+    REQUIRE(chat.run({"chat"}, "/check\n") == 0);
+    CHECK((chat.out + chat.err).find("check: no suite is active") != std::string::npos);
+    REQUIRE(chat.run({"chat", "--suite", "lonely"}, "what?\n/check\n") == 0);
+    CHECK((chat.out + chat.err).find("check: suite lonely has no utility member to check with") !=
+          std::string::npos);
+    HelperChat fresh{texts({"381"}),
+                     {"Helper Title"},
+                     {},
+                     "suites:\n  checked:\n    members:\n      chat: chatty\n"
+                     "      utility: helper\n"};
+    REQUIRE(fresh.run({"chat", "--suite", "checked"}, "/check\n") == 0);
+    CHECK((fresh.out + fresh.err).find("check: there is no answer to check yet") !=
+          std::string::npos);
+}
+
+TEST_CASE("answers always: every answer checked, in chat and machine mode alike",
+          "[chat][cli][validate]") {
+    HelperChat chat{texts({"381", "You're right: 391."}),
+                    {"OBJECT: 17 x 23 is 391, not 381.", "Helper Title"},
+                    {},
+                    "suites:\n  checked:\n    members:\n      chat: chatty\n"
+                    "      utility: helper\n    validate:\n      answers: always\n"};
+    REQUIRE(chat.run({"chat", "--suite", "checked", "--output-format", "stream-json"},
+                     R"({"type":"user","text":"what is 17 x 23?"})"
+                     "\n") == 0);
+    INFO(chat.out);
+    // Said as notices: events of a type the protocol already has.
+    CHECK(chat.out.find("{\"text\":\"validate: utility (helper) objects to the answer -- \\\"17 x "
+                        "23 is 391, not 381.\\\"\",\"type\":\"notice\"}") != std::string::npos);
+    CHECK(chat.out.find("\"validate — asking utility (helper): Check an answer against the "
+                        "question it answers.") != std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    REQUIRE(session.messages.size() == 2);
+    CHECK(session.messages.back().content.plain_text() == "381");
+}
+
+TEST_CASE("answers always reaches complete, with tools or without", "[chat][cli][validate]") {
+    HelperChat chat{texts({"381", "You're right: 391."}),
+                    {"OBJECT: 17 x 23 is 391, not 381."},
+                    {},
+                    "suites:\n  checked:\n    members:\n      chat: chatty\n"
+                    "      utility: helper\n    validate:\n      answers: always\n"};
+    std::string text;
+    {
+        const std::ifstream in{chat.config_path, std::ios::binary};
+        std::ostringstream read;
+        read << in.rdbuf();
+        text = read.str();
+    }
+    const std::string models = "models:\n  default: chatty\n";
+    text.replace(text.find(models), models.size(), models + "  default_suite: checked\n");
+    std::ofstream{chat.config_path, std::ios::binary} << text;
+    REQUIRE(chat.run({"complete", "what is 17 x 23?"}) == 0);
+    INFO(chat.err);
+    CHECK(chat.out.find("381") != std::string::npos);
+    CHECK((chat.out + chat.err)
+              .find("validate: utility (helper) objects to the answer -- \"17 x 23 is 391, not "
+                    "381.\"") != std::string::npos);
+}
+
+namespace {
+
+/// The tool results `session` holds, in order.
+[[nodiscard]] std::vector<std::string> tool_results(const apogee::logger::Session& session) {
+    std::vector<std::string> out;
+    for (const ChatMessage& message : session.messages) {
+        if (message.role == apogee::harness::Role::Tool) {
+            out.push_back(message.content.plain_text());
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("a chat with a graphed folder offers the graph tools scoped to it; detached, they go",
+          "[chat][cli][attachments][graph]") {
+    // 27o: the scripted model calls graph_explain each question. With the
+    // folder of code attached, the call reads the chat's own graph; after it
+    // is detached -- a folder of notes still attached, chunks only -- the
+    // same call reads what the unscoped toolset reads: here, nothing built.
+    // Few enough toolsets that every tool is offered (26g selects past 16).
+    const nlohmann::json explain = {
+        {"tool_calls", {{{"name", "graph_explain"}, {"arguments", {{"node", "make_user"}}}}}}};
+    HelperChat chat{nlohmann::json::array({explain,
+                                           {{"text", "offered {{tool_names}}"}},
+                                           explain,
+                                           {{"text", "offered {{tool_names}}"}}}),
+                    {"Graph chat", "make_user"},
+                    {},
+                    "tools:\n  disabled: [git, notes, shell, rag]\n"};
+    const std::filesystem::path app = chat.home.path() / "app";
+    std::filesystem::copy(std::filesystem::path{APOGEE_TEST_FIXTURES} / "code_graph" / "python",
+                          app, std::filesystem::copy_options::recursive);
+    const std::filesystem::path notes = chat.home.path() / "notes";
+    std::filesystem::create_directories(notes);
+    std::ofstream{notes / "a.md", std::ios::binary} << "alpha\n";
+    std::ofstream{notes / "b.md", std::ios::binary} << "beta\n";
+
+    const std::string input = "/attach " + notes.generic_string() + "\n/attach " +
+                              app.generic_string() + "\nwho makes users?\n/detach " +
+                              app.generic_string() + "\nand now?\n";
+    REQUIRE(chat.run({"chat", "--tools"}, input) == 0);
+    INFO(chat.err);
+    CHECK(chat.err.find("graph: ") != std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    const std::vector<std::string> results = tool_results(session);
+    REQUIRE(results.size() == 2);
+    // Scoped: the chat's graph, its member and file.
+    const nlohmann::json card = nlohmann::json::parse(results[0], nullptr, false);
+    REQUIRE_FALSE(card.is_discarded());
+    CHECK(card["graph"] == "attachments");
+    CHECK(card["node"]["member"] == "app");
+    CHECK(card["node"]["file"] == "pkg/service.py");
+    // All four offered beside the rest.
+    std::vector<std::string> answers;
+    for (const ChatMessage& message : session.messages) {
+        if (message.role == apogee::harness::Role::Assistant && message.tool_calls.empty()) {
+            answers.push_back(message.content.plain_text());
+        }
+    }
+    REQUIRE(answers.size() == 2);
+    for (const std::string_view tool :
+         {"graph_explain", "graph_path", "graph_query", "graph_neighbors"}) {
+        CHECK(answers[0].find(tool) != std::string::npos);
+    }
+    // Detached -- notes, chunks only, still attached: the scoped set is gone
+    // with it, and the name reads what the unscoped set reads.
+    CHECK(results[1].find("attachments") == std::string::npos);
+    CHECK(results[1].find("no graph is built yet") != std::string::npos);
+    CHECK(session.attachments.size() == 1);
+}
+
+TEST_CASE("a driven chat walks its attached folder's graph through the scoped tools",
+          "[chat][cli][attachments][graph][machine]") {
+    HelperChat chat{
+        nlohmann::json::array(
+            {{{"tool_calls",
+               {{{"name", "graph_path"},
+                 {"arguments", {{"from", "main"}, {"to", "make_user"}, {"directed", true}}}}}}},
+             {{"text", "walked"}}}),
+        {"Driven"}};
+    const std::filesystem::path app = chat.home.path() / "app";
+    std::filesystem::copy(std::filesystem::path{APOGEE_TEST_FIXTURES} / "code_graph" / "python",
+                          app, std::filesystem::copy_options::recursive);
+    const std::string input = R"({"type":"attach","path":")" + app.generic_string() + "\"}\n" +
+                              R"({"type":"user","text":"how does main reach make_user?"})" + "\n";
+    REQUIRE(chat.run({"chat", "--tools", "--input-format", "stream-json", "--output-format",
+                      "stream-json"},
+                     input) == 0);
+    INFO(chat.err);
+    CHECK(chat.out.find("graph: ") != std::string::npos);
+    const std::vector<std::string> results = tool_results(HelperChat::only_session());
+    REQUIRE(results.size() == 1);
+    const nlohmann::json path = nlohmann::json::parse(results[0], nullptr, false);
+    REQUIRE_FALSE(path.is_discarded());
+    CHECK(path["graph"] == "attachments");
+    CHECK(path["found"] == true);
+    CHECK(path["hops"] == 2);
+}
+
+TEST_CASE("a suite's toolset pin keeps the graph tools scoped to the chat's folder",
+          "[chat][cli][attachments][graph][suites]") {
+    // The pin narrows what the scoped registry offers -- never back to the
+    // unscoped set (27d's pin over 27o's scope).
+    const nlohmann::json explain = {
+        {"tool_calls", {{{"name", "graph_explain"}, {"arguments", {{"node", "make_user"}}}}}}};
+    HelperChat chat{nlohmann::json::array({explain, {{"text", "offered {{tool_names}}"}}}),
+                    {"Pinned"},
+                    {},
+                    "suites:\n  research:\n    members:\n      chat:\n        backend: chatty\n"
+                    "        toolset: [graph]\n"};
+    const std::filesystem::path app = chat.home.path() / "app";
+    std::filesystem::copy(std::filesystem::path{APOGEE_TEST_FIXTURES} / "code_graph" / "python",
+                          app, std::filesystem::copy_options::recursive);
+    REQUIRE(chat.run({"chat", "--tools", "--suite", "research"},
+                     "/attach " + app.generic_string() + "\nwho makes users?\n") == 0);
+    INFO(chat.err);
+    const apogee::logger::Session session = HelperChat::only_session();
+    const std::vector<std::string> results = tool_results(session);
+    REQUIRE(results.size() == 1);
+    CHECK(nlohmann::json::parse(results[0], nullptr, false)["graph"] == "attachments");
+    REQUIRE_FALSE(session.messages.empty());
+    CHECK(session.messages.back().content.plain_text() ==
+          "offered graph_explain,graph_neighbors,graph_path,graph_query");
+}
+
+// ---------------------------------------------------------------------------
+// Attachment options (27p)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// The Python mini-repo 27k commits, copied to `<home>/app`.
+std::filesystem::path python_app(const HelperChat& chat) {
+    const std::filesystem::path app = chat.home.path() / "app";
+    std::filesystem::copy(std::filesystem::path{APOGEE_TEST_FIXTURES} / "code_graph" / "python",
+                          app, std::filesystem::copy_options::recursive);
+    return app;
+}
+
+}  // namespace
+
+TEST_CASE("/attach --graph=off indexes chunks only; the folder re-attached with code is graphed",
+          "[chat][cli][attachments][options]") {
+    HelperChat chat{texts({"one", "two"}), {"Options"}, "    context_size: 8000\n"};
+    const std::string app = python_app(chat).generic_string();
+    REQUIRE(chat.run({"chat"}, "/attach " + app + " --graph=off\nfirst?\n/attachments\n/attach " +
+                                   app + " --graph code\nsecond?\n/attachments\n") == 0);
+    INFO(chat.err);
+    // Off: the attach line names the method, and nothing of a graph follows.
+    const std::size_t off = chat.err.find(") -- without its code graph (--graph=off)");
+    const std::size_t on = chat.err.find(") -- with its code graph (--graph=code)");
+    REQUIRE(off != std::string::npos);
+    REQUIRE(on != std::string::npos);
+    CHECK(off < on);
+    CHECK(chat.err.substr(off, on - off).find("graph: ") == std::string::npos);
+    // Code: built then, and said.
+    CHECK(chat.err.find("graph: ", on) != std::string::npos);
+    CHECK(chat.err.find("(supported: python 4; skipped: none)", on) != std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    REQUIRE(session.attachments.size() == 1);
+    REQUIRE(session.attachments[0].graph.has_value());
+    CHECK(session.attachments[0].graph->label == "app");
+    // The path as typed, without its flags.
+    CHECK(session.attachments[0].name == app);
+}
+
+TEST_CASE("the config's graph: off makes /attach skip the graph; --graph=code overrides once",
+          "[chat][cli][attachments][options]") {
+    HelperChat chat{
+        texts({"one"}), {"Options"}, "    context_size: 8000\n", "attachments: { graph: off }\n"};
+    const std::filesystem::path app = python_app(chat);
+    std::filesystem::copy(app, chat.home.path() / "again",
+                          std::filesystem::copy_options::recursive);
+    REQUIRE(chat.run({"chat"}, "/attach " + app.generic_string() + "\n/attach " +
+                                   (chat.home.path() / "again").generic_string() +
+                                   " --graph=code\nfirst?\n") == 0);
+    INFO(chat.err);
+    CHECK(chat.err.find(") -- without its code graph (attachments.graph: off in the config)") !=
+          std::string::npos);
+    CHECK(chat.err.find(") -- with its code graph (--graph=code)") != std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    REQUIRE(session.attachments.size() == 2);
+    CHECK_FALSE(session.attachments[0].graph.has_value());
+    REQUIRE(session.attachments[1].graph.has_value());
+    CHECK(session.attachments[1].graph->label == "again");
+}
+
+TEST_CASE("/attach refuses a flag before the path, an unknown flag and a bad value, by name",
+          "[chat][cli][attachments][options]") {
+    HelperChat chat{texts({"one"}), {"Options"}, "    context_size: 8000\n"};
+    const std::string app = python_app(chat).generic_string();
+    REQUIRE(chat.run({"chat"}, "/attach --graph=off " + app + "\n/attach " + app +
+                                   " --depth=2\n/attach " + app + " --graph=tree\n/attach\n" +
+                                   "/attachments\n") == 0);
+    INFO(chat.err);
+    CHECK(chat.err.find("the path comes first -- /attach <path> [--graph=code|off]") !=
+          std::string::npos);
+    CHECK(chat.err.find("unknown flag '--depth' -- /attach <path> [--graph=code|off]") !=
+          std::string::npos);
+    CHECK(chat.err.find("--graph: unknown value 'tree' (accepted: code, off)") !=
+          std::string::npos);
+    CHECK(chat.err.find("/attach takes a file, a folder or a glob -- /attach <path>") !=
+          std::string::npos);
+    CHECK(chat.err.find("nothing attached -- /attach <path>") != std::string::npos);
+}
+
+TEST_CASE("an @ mention is a bare path: the message is sent as typed, the default method taken",
+          "[chat][cli][attachments][options]") {
+    HelperChat chat{texts({"{{last_user}}"}), {"Mention"}, "    context_size: 8000\n"};
+    const std::filesystem::path app = python_app(chat);
+    const std::string message = "what does @" + app.generic_string() + " --graph=off do?";
+    REQUIRE(chat.run({"chat"}, message + "\n") == 0);
+    INFO(chat.err);
+    // No mention syntax: `--graph=off` is prose, so the default ran.
+    CHECK(chat.err.find("code graph (") == std::string::npos);
+    CHECK(chat.err.find("graph: ") != std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    REQUIRE(session.attachments.size() == 1);
+    CHECK(session.attachments[0].name == app.generic_string());
+    CHECK(session.attachments[0].graph.has_value());
+    // The message's bytes, unchanged, in the transcript and to the model.
+    REQUIRE_FALSE(session.messages.empty());
+    CHECK(session.messages.front().content.plain_text() == message);
+    CHECK(chat.out.find(message) != std::string::npos);
+}
+
+TEST_CASE("chat --graph takes the launch's --attach, and alone is refused",
+          "[chat][cli][attachments][options]") {
+    {
+        HelperChat chat{texts({"one"}), {"Launch"}, "    context_size: 8000\n"};
+        const std::filesystem::path app = python_app(chat);
+        REQUIRE(chat.run({"chat", "--attach", app.string(), "--graph=off"}, "first?\n") == 0);
+        INFO(chat.err);
+        CHECK(chat.err.find(") -- without its code graph (--graph=off)") != std::string::npos);
+        CHECK_FALSE(HelperChat::only_session().attachments.at(0).graph.has_value());
+    }
+    {
+        HelperChat chat{texts({"one"}), {"Launch"}, "    context_size: 8000\n"};
+        CHECK(chat.run({"chat", "--graph=off"}, "first?\n") != 0);
+        CHECK(chat.err.find("--graph applies to the --attach given with it") != std::string::npos);
+        CHECK(chat.run({"chat", "--attach", "x", "--graph=tree"}, "first?\n") != 0);
+        CHECK(chat.err.find("unknown value 'tree' (accepted: code, off)") != std::string::npos);
+    }
+}
+
+TEST_CASE("a driver's attach line takes a graph method, and a bad one attaches nothing",
+          "[chat][cli][attachments][options][machine]") {
+    HelperChat chat{texts({"driven"}), {"Driven"}, "    context_size: 8000\n"};
+    const std::filesystem::path app = python_app(chat);
+    const std::string input = R"({"type":"attach","path":")" + app.generic_string() +
+                              R"(","graph":"tree"})" + "\n" + R"({"type":"attach","path":")" +
+                              app.generic_string() + R"(","graph":"off"})" + "\n" +
+                              R"({"type":"user","text":"what is it?"})" + "\n";
+    REQUIRE(chat.run({"chat", "--input-format", "stream-json", "--output-format", "stream-json"},
+                     input) == 0);
+    INFO(chat.out);
+    CHECK(chat.out.find(" not attached: graph: unknown value 'tree' (accepted: code, off)") !=
+          std::string::npos);
+    CHECK(chat.out.find(") -- without its code graph (--graph=off)") != std::string::npos);
+    CHECK(chat.out.find("\"text\":\"graph: ") == std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    REQUIRE(session.attachments.size() == 1);
+    CHECK_FALSE(session.attachments[0].graph.has_value());
+}
+
+TEST_CASE("complete --attach --graph=code builds the graph in the one-shot store",
+          "[chat][cli][attachments][options]") {
+    {
+        // 27n's one-shot default stands without the flag; with it, a graph.
+        HelperChat chat{texts({"a", "b"}), {}, "    context_size: 8000\n"};
+        const std::string app = python_app(chat).string();
+        REQUIRE(chat.run({"complete", "--attach", app, "where is main?"}) == 0);
+        CHECK(chat.err.find("graph: ") == std::string::npos);
+        REQUIRE(chat.run({"complete", "--attach", app, "--graph=code", "where is main?"}) == 0);
+        INFO(chat.err);
+        CHECK(chat.err.find(") -- with its code graph (--graph=code)") != std::string::npos);
+        CHECK(chat.err.find("graph: ") != std::string::npos);
+        CHECK(chat.err.find("(supported: python 4; skipped: none)") != std::string::npos);
+        // Nothing kept: the one-shot store goes with the run.
+        std::error_code code;
+        const std::filesystem::path chats = apogee::harness::attachments_dir();
+        CHECK((!std::filesystem::exists(chats, code) || std::filesystem::is_empty(chats, code)));
+    }
+    {
+        // The config's default reaches complete too; machine mode the same.
+        HelperChat chat{
+            texts({"a", "b"}), {}, "    context_size: 8000\n", "attachments:\n  graph: code\n"};
+        const std::string app = python_app(chat).string();
+        REQUIRE(chat.run({"complete", "--output-format", "stream-json", "--attach", app,
+                          "where is main?"}) == 0);
+        INFO(chat.out);
+        CHECK(chat.out.find("with its code graph (attachments.graph: code in the config)") !=
+              std::string::npos);
+        CHECK(chat.out.find("\"text\":\"graph: ") != std::string::npos);
+        REQUIRE(chat.run({"complete", "--output-format", "stream-json", "--attach", app, "--graph",
+                          "off", "where is main?"}) == 0);
+        CHECK(chat.out.find("without its code graph (--graph=off)") != std::string::npos);
+        CHECK(chat.out.find("\"text\":\"graph: ") == std::string::npos);
+    }
+    {
+        HelperChat chat{texts({"a"}), {}, "    context_size: 8000\n"};
+        CHECK(chat.run({"complete", "--graph=code", "q"}) != 0);
+        CHECK(chat.err.find("--graph applies to --attach") != std::string::npos);
+        CHECK(chat.run({"complete", "--attach", "x", "--graph=tree", "q"}) != 0);
+        CHECK(chat.err.find("unknown value 'tree' (accepted: code, off)") != std::string::npos);
     }
 }
