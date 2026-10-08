@@ -82,7 +82,6 @@ Release-agnostic upkeep — polish, performance and ergonomics — claimable at 
 
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
-| 28h | Machine-readable reads — `--output-format json` on `models`/`chats`/`agents`/`mcp`/`check`, the same facts as the human view | v0.1.5 | [`machine-readable-reads.md`](v0.1.5/machine-readable-reads.md) | 🟢 |
 | 28i | The config file moves to JSON — `config.yaml` → `config.json` on the one editor, format-preserving contract intact; **JSONC, comments preserved** (the user's call, 2026-10-03) through edits, migration and the teaching template; existing YAML reads compatibly with a notice, `config migrate` converts losslessly with a backup; `config upgrade` appends missing newer options with their template comments (explicit, additive, never installer-run) and `check` says when the file is behind (extended 2026-10-03, the user's call) | v0.1.5 | [`config-json.md`](v0.1.5/config-json.md) | 🟢 |
 
 ### v0.1.6

@@ -1,7 +1,10 @@
 #pragma once
 
+#include <nlohmann/json_fwd.hpp>
+
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -127,6 +130,13 @@ struct CheckInputs {
 /// Renders a report for a terminal. `color` gates ANSI.
 [[nodiscard]] std::string render_report(const CheckReport& report, bool use_color);
 
+/// The report as one JSON document (28h): `{"rows": [{"section", "name",
+/// "status", "detail", "remedy"?}], "ok", "failures", "warnings"}` -- the
+/// same rows, `skipped` a status of its own, never folded into a pass --
+/// and `fixed`, what `--fix` repaired, when `fixed` is given.
+[[nodiscard]] nlohmann::json render_report_document(
+    const CheckReport& report, const std::optional<std::vector<std::string>>& fixed);
+
 /// How `run_check_pass` runs.
 struct CheckPassOptions {
     /// Repair first (`--fix`), saying what was repaired.
@@ -138,6 +148,10 @@ struct CheckPassOptions {
     /// Scan the providers first (`--refresh-providers`, 28c): the explicit
     /// scan `providers scan` runs, its cache then read by the report.
     bool refresh_providers = false;
+    /// Print one JSON document instead of the report (`--output-format
+    /// json`, 28h): the rows, the counts, `ok`, and what `--fix` repaired --
+    /// nothing else on stdout, the exit code as ever.
+    bool json = false;
     /// Say the repairs that created something as one count rather than a line
     /// each. Recreating a whole layout -- what a reset does -- creates well
     /// over a hundred directories and bundled files, and a line apiece would

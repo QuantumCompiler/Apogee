@@ -1,6 +1,7 @@
 #include "cli/chat_history.h"
 
 #include <CLI/CLI.hpp>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <iostream>
@@ -9,8 +10,10 @@
 
 #include "cli/chat_attachments.h"
 #include "cli/chat_recall.h"
+#include "cli/helpers.h"
 #include "cli/task_cmd.h"
 #include "contracts/errors.h"
+#include "machine/json_reporter.h"
 
 namespace apogee::commands {
 namespace {
@@ -46,6 +49,13 @@ namespace {
 }
 
 }  // namespace
+
+nlohmann::json session_row_view(const logger::Session& session) {
+    return nlohmann::json{{"id", session.chat_id},
+                          {"updated", session.updated_at},
+                          {"turns", session.turns},
+                          {"name", session.display_name()}};
+}
 
 std::string format_session_row(const logger::Session& session) {
     std::ostringstream out;
@@ -173,8 +183,20 @@ void ChatsCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->require_subcommand(1);
 
     CLI::App* list = cmd->add_subcommand("list", "List saved conversations, newest first");
-    list->callback([]() {
+    auto format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    add_read_format(list, format);
+    list->callback([format]() {
         const std::vector<logger::Session> sessions = logger::list_sessions();
+        if (*format == ReadFormat::Json) {
+            // The row's facts, one object each, newest first (28h).
+            nlohmann::json data = nlohmann::json::array();
+            for (const logger::Session& session : sessions) {
+                data.push_back(session_row_view(session));
+            }
+            write_document(std::cout,
+                           nlohmann::json{{"object", "list"}, {"data", std::move(data)}});
+            return;
+        }
         if (sessions.empty()) {
             std::cout << "no saved conversations yet\n";
             return;

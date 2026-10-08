@@ -2773,6 +2773,29 @@ The integration spike's wall **W2** — a host's event vocabulary was hand-trans
 
 **Left for the owner.** The schema's `$id` (a URL under the repository, not served anywhere) and the definition names (`event_<type>`, `line_<type>`) — public names once released.
 
+### 2026-10-07 — `machine-readable-reads` (backlog item 28h): the reads a host renders, as JSON
+
+The integration spike's wall **W7** — "everything else is a CLI command", but the reads a host UI needs printed prose, so a host screen-scraped `apogee models` or re-read config files — closed on 27j's read convention.
+
+**What was built**
+
+- [x] **`--output-format json` on the five reads**, each one document on stdout and nothing else (27j's `write_document`), the default human output byte-unchanged: **`models list`** (`text`, `json`, and its existing `stream-json` kept) — `{"object":"list","data":[rows],"folded":N}`, each row the object a `stream-json` line carries (`model_row_json`, now shared by both), consumed snapshots folded as the table folds them; **`models info`** and **`models status`** — their `label: value` record as `{"fields":[{"field","value"}]}` (`render_record_document`, plus `name` for info); **`chats list`** — `id`, `updated`, `turns`, `name` per conversation, newest first (`session_row_view`); **`agents list`** — byte for byte the body of `GET /v1/admin/agents`; **`mcp list`** — each `GET /v1/admin/mcp-servers` entry plus `state`, `protocol_version`, `tools` and `error` from connecting; **`check`** — `{"rows":[…],"ok","failures","warnings"}` with `skipped` its own status, `--fix`'s repairs as `fixed`, the busy line silent, the exit code the human run's (`render_report_document`).
+- [x] **One serializer per shape** (`operations/read_views.h/.cpp`): `agent_view`, `mcp_server_view` and their list documents moved out of the admin plane, which now calls them — so the CLI and the server share them without including each other. The read flag's helper (`add_read_format`) moved to `cli/helpers` and is shared with the symphonies' reads.
+- [x] **The refusal**: a command with no JSON face given `--output-format json` fails with CLI11's own error and a line naming every command whose `--output-format` takes `text` and `json` (`json_readers`, read from the live parser — the five, the graph, symphony and task reads); a read given `stream-json` is refused by name.
+- [x] **No key in any document**: the leak sweep (`leak_test.cpp`) now renders the check document, the model listing's, the agents' and the MCP servers' — with an MCP server whose environment holds the probe key, said only as `env_set`.
+- [x] **The reference** ([machine-mode.md](../reference/machine-mode.md)): the five reads beside the task, graph and symphony reads in "Everything else is a CLI command", each shape and field named.
+- [x] **Tests**: `read_documents_test.cpp` (6 cases on the real command tree in a throwaway install: `models list` one document whose rows are the table's, `stream-json` still a row per line; `models info` and `status` field for field against their text; `chats list` empty and with two chats, row for row; `agents list` equal to the admin route's body and `mcp list` each entry the admin entry plus its state; `check` healthy and broken with the human run's exit code and `--fix` inside the document; the refusal naming the readers, and `stream-json` refused on a read), the leak sweep, and the completion pin of `models info`'s flags updated for its new `--output-format`; **`naive_host_driver.py`** phase 3 reads the five as JSON and builds its model picker from `models list`: **W7 closes** — of the spike's walls only W6 (per-run integration wiring, 28e, whose document is still unwritten) remains.
+
+**Decisions** — folded from the item document: the shared serializers in `operations/`; agents and MCP servers the admin plane's own bodies, models/chats/check CLI-only with the HTTP twin named as skipped; `models list` keeping `stream-json` beside `json`; `models info`/`status` as their record's fields; `chats list` the row's four facts; `check`'s document; the refusal read from the parser.
+
+**Guardrails, mutation-tested.** Seven mutants — an MCP server's environment leaked, `agents list` not the admin body, `check`'s JSON exit always 0, a chat's turns dropped, the refusal naming no reader, `--fix` printing beside the document, an empty info record — **7 caught** (a first refusal mutant changed only the message's prefix and was not a fault; the one that dropped the names was caught).
+
+**Real weights.** None applies.
+
+**Not verified.** Windows (the suite is in-process and portable; not run there); HTTP twins for the model, chat and doctor reads (none exist; out of scope).
+
+**Left for the owner.** `models info`/`status` as `label: value` fields rather than typed documents; models, chats and check having no admin twin.
+
 ## Milestone N — Model operations
 
 **Goal.** Model management, end to end: one shared resolver for the `models:` role pointers, the `apogee models` suite, a real GGUF header reader that `check` uses to tell a working model from a broken one, and — from 2026-09-07 — acquiring, quantizing, and repairing models from Hugging Face and the user's Ollama store without ever leaving a half-downloaded one on disk. From 2026-09-28 (26b), helper models beside the chat model: `vision`, `transcription` and `utility` in the same resolver.

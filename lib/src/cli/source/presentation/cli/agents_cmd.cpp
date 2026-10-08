@@ -17,6 +17,8 @@
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/paths.h"
+#include "machine/json_reporter.h"
+#include "operations/read_views.h"
 #include "platform/child_process.h"
 #include "platform/platform.h"
 #include "scaffold/agent.h"
@@ -188,8 +190,15 @@ void bind_create(CLI::App& parent, const RootContext& context) {
 
 void bind_list(CLI::App& parent, const RootContext& context) {
     CLI::App* cmd = parent.add_subcommand("list", "List the agents: name, model, tools, files");
-    cmd->callback([&context]() {
+    auto format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    add_read_format(cmd, format);
+    cmd->callback([&context, format]() {
         const harness::Config config = load(config_path_for(context));
+        if (*format == ReadFormat::Json) {
+            // The very body `GET /v1/admin/agents` serves (28h).
+            write_document(std::cout, operations::agents_document(config));
+            return;
+        }
         std::cout << std::left << std::setw(22) << "NAME" << std::setw(18) << "MODEL"
                   << std::setw(12) << "TOOLS" << std::setw(26) << "PROMPT" << std::setw(30)
                   << "SCHEMA"

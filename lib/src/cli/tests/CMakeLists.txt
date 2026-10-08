@@ -230,6 +230,7 @@ target_link_libraries(apogee_tests_business PRIVATE apogee_business apogee_data
 add_library(apogee_tests_presentation OBJECT
     presentation/cli/registry_test.cpp
     presentation/cli/provider_offer_test.cpp
+    presentation/cli/read_documents_test.cpp
     presentation/cli/root_test.cpp
     presentation/cli/models_pull_test.cpp
     presentation/cli/models_migrate_test.cpp

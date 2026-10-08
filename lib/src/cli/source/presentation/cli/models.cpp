@@ -770,34 +770,93 @@ std::string render_model_table(const std::vector<ModelRow>& all_rows, const ansi
     return out.str();
 }
 
+nlohmann::json model_row_json(const ModelRow& row) {
+    nlohmann::json object;
+    object["type"] = "model";
+    object["backend"] = row.backend;
+    object["backend_type"] = row.type;
+    object["model"] = row.model;
+    object["roles"] = row.roles;
+    object["source"] = row.provenance;
+    object["architecture"] = row.architecture;
+    object["profile"] = row.profile;
+    object["state"] = row.state;
+    object["verified"] = row.verified;
+    if (!row.note.empty()) {
+        object["note"] = row.note;
+    }
+    for (const auto& [key, value] :
+         {std::pair<const char*, const std::string&>{"format", row.format},
+          std::pair<const char*, const std::string&>{"quant", row.quant},
+          std::pair<const char*, const std::string&>{"window", row.window}}) {
+        if (!value.empty()) {
+            object[key] = value;
+        }
+    }
+    return object;
+}
+
 std::string render_model_jsonl(const std::vector<ModelRow>& rows) {
     std::ostringstream out;
     for (const ModelRow& row : rows) {
-        nlohmann::json object;
-        object["type"] = "model";
-        object["backend"] = row.backend;
-        object["backend_type"] = row.type;
-        object["model"] = row.model;
-        object["roles"] = row.roles;
-        object["source"] = row.provenance;
-        object["architecture"] = row.architecture;
-        object["profile"] = row.profile;
-        object["state"] = row.state;
-        object["verified"] = row.verified;
-        if (!row.note.empty()) {
-            object["note"] = row.note;
-        }
-        for (const auto& [key, value] :
-             {std::pair<const char*, const std::string&>{"format", row.format},
-              std::pair<const char*, const std::string&>{"quant", row.quant},
-              std::pair<const char*, const std::string&>{"window", row.window}}) {
-            if (!value.empty()) {
-                object[key] = value;
-            }
-        }
-        out << object.dump() << "\n";
+        out << model_row_json(row).dump() << "\n";
     }
     return out.str();
+}
+
+nlohmann::json render_model_document(const std::vector<ModelRow>& rows, bool all) {
+    // The table's rows, folded as the table folds them (M4) and the fold
+    // counted -- the same facts (28h).
+    nlohmann::json data = nlohmann::json::array();
+    std::size_t folded = 0;
+    for (const ModelRow& row : rows) {
+        if (row.consumed && !all) {
+            ++folded;
+            continue;
+        }
+        data.push_back(model_row_json(row));
+    }
+    return nlohmann::json{{"object", "list"}, {"data", std::move(data)}, {"folded", folded}};
+}
+
+nlohmann::json render_record_document(std::string_view text) {
+    // `info` and `status` print a record of `label: value` lines, a value
+    // running on over the indented lines under it: the same record, as data,
+    // its labels as printed (28h).
+    nlohmann::json fields = nlohmann::json::array();
+    std::size_t start = 0;
+    while (start < text.size()) {
+        std::size_t end = text.find('\n', start);
+        if (end == std::string_view::npos) {
+            end = text.size();
+        }
+        const std::string_view line = text.substr(start, end - start);
+        start = end + 1;
+        if (line.empty()) {
+            continue;
+        }
+        const std::size_t colon = line.find(':');
+        if (line.front() == ' ' || colon == std::string_view::npos) {
+            if (!fields.empty()) {
+                std::string value = fields.back()["value"].get<std::string>();
+                std::string_view continued = line;
+                while (!continued.empty() && continued.front() == ' ') {
+                    continued.remove_prefix(1);
+                }
+                value += value.empty() ? "" : "\n";
+                value += continued;
+                fields.back()["value"] = value;
+            }
+            continue;
+        }
+        std::string_view value = line.substr(colon + 1);
+        while (!value.empty() && value.front() == ' ') {
+            value.remove_prefix(1);
+        }
+        fields.push_back(nlohmann::json{{"field", std::string{line.substr(0, colon)}},
+                                        {"value", std::string{value}}});
+    }
+    return nlohmann::json{{"fields", std::move(fields)}};
 }
 
 namespace {
@@ -1415,8 +1474,11 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
     auto list_quiet = std::make_shared<bool>(false);
     auto list_all = std::make_shared<bool>(false);
     CLI::App* list = cmd->add_subcommand("list", "List configured backends and their models");
-    list->add_option("--output-format", *format, "text (default) or stream-json")
-        ->check(CLI::IsMember({"text", "stream-json"}));
+    list->add_option("--output-format", *format,
+                     "text (default), json -- one document of the table's facts -- or "
+                     "stream-json, one row per line")
+        ->check(CLI::IsMember({"text", "json", "stream-json"}))
+        ->type_name("text|json|stream-json");
     list->add_flag("--no-color", *no_color, "Disable coloured output");
     list->add_flag("-q,--quiet", *list_quiet, "No progress line while the models are read");
     list->add_flag("--all", *list_all,
@@ -1427,8 +1489,9 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
         {
             // Every stored model's header is read, and on a full store that
             // takes seconds: said on one line, gone before the table (M1).
-            BusyLine busy{std::cerr, "reading the model store",
-                          busy_options(*list_quiet || *format == "stream-json")};
+            BusyLine busy{
+                std::cerr, "reading the model store",
+                busy_options(*list_quiet || *format == "stream-json" || *format == "json")};
             const std::unique_ptr<backends::ExistenceView> view = backends::host_existence_view();
             const backends::ProviderCache cache = backends::load_provider_cache();
             rows = build_model_rows(config, harness::models_dir(),
@@ -1437,6 +1500,10 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
         }
         if (*format == "stream-json") {
             std::cout << render_model_jsonl(rows);
+            return;
+        }
+        if (*format == "json") {
+            write_document(std::cout, render_model_document(rows, *list_all));
             return;
         }
         std::cout << render_model_table(
@@ -1454,11 +1521,14 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
         ->type_name(kBackendOrWeightsValue)
         ->required();
     info->add_flag("-q,--quiet", *info_quiet, "No progress line while the model is read");
-    info->callback([load, info_name, info_quiet, &context]() {
+    auto info_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    add_read_format(info, info_format);
+    info->callback([load, info_name, info_quiet, info_format, &context]() {
         const harness::Config config = load();
         std::string body;
         {
-            BusyLine busy{std::cerr, "reading the model", busy_options(*info_quiet)};
+            BusyLine busy{std::cerr, "reading the model",
+                          busy_options(*info_quiet || *info_format == ReadFormat::Json)};
             const std::unique_ptr<backends::ExistenceView> view = backends::host_existence_view();
             const backends::ProviderCache cache = backends::load_provider_cache();
             const secrets::CredentialStore store{
@@ -1497,6 +1567,12 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
             }
             fail("no backend or stored weights named '" + *info_name + "'");
         }
+        if (*info_format == ReadFormat::Json) {
+            nlohmann::json document = render_record_document(body);
+            document["name"] = *info_name;
+            write_document(std::cout, document);
+            return;
+        }
         std::cout << body;
     });
 
@@ -1508,7 +1584,9 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
         ->add_option("--suite", *status_suite,
                      "Resolve under this suite instead of models.default_suite, or off for none")
         ->type_name(kModelSuiteOrOffValue);
-    status->callback([load, status_quiet, status_suite]() {
+    auto status_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    add_read_format(status, status_format);
+    status->callback([load, status_quiet, status_suite, status_format]() {
         harness::Config config = load();
         if (!status_suite->empty()) {
             if (const std::string refused = select_suite(config, *status_suite); !refused.empty()) {
@@ -1517,8 +1595,13 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
         }
         std::string body;
         {
-            BusyLine busy{std::cerr, "resolving the roles", busy_options(*status_quiet)};
+            BusyLine busy{std::cerr, "resolving the roles",
+                          busy_options(*status_quiet || *status_format == ReadFormat::Json)};
             body = render_role_status(config, busy.sink(), machine_budget);
+        }
+        if (*status_format == ReadFormat::Json) {
+            write_document(std::cout, render_record_document(body));
+            return;
         }
         std::cout << body;
     });

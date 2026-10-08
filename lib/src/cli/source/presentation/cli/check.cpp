@@ -41,6 +41,7 @@
 #include "harness/roles.h"
 #include "httpserver/admin_auth.h"
 #include "knowledge/store.h"
+#include "machine/json_reporter.h"
 #include "modelstore/gguf_inspect.h"
 #include "modelstore/kv_cache.h"
 #include "modelstore/mlx_info.h"
@@ -2207,6 +2208,31 @@ std::string render_report(const CheckReport& report, bool use_color) {
     return out.str();
 }
 
+nlohmann::json render_report_document(const CheckReport& report,
+                                      const std::optional<std::vector<std::string>>& fixed) {
+    nlohmann::json rows = nlohmann::json::array();
+    for (const CheckRow& row : report.rows) {
+        nlohmann::json entry{
+            {"section", row.section},
+            {"name", row.name},
+            {"status", row.status == Status::Skipped ? std::string{"skipped"}
+                                                     : std::string{to_string(row.status)}},
+            {"detail", row.detail}};
+        if (!row.remedy.empty()) {
+            entry["remedy"] = row.remedy;
+        }
+        rows.push_back(std::move(entry));
+    }
+    nlohmann::json document{{"rows", std::move(rows)},
+                            {"ok", report.passed()},
+                            {"failures", report.count(Status::Fail)},
+                            {"warnings", report.count(Status::Warn)}};
+    if (fixed.has_value()) {
+        document["fixed"] = *fixed;
+    }
+    return document;
+}
+
 std::string_view CheckCommand::name() const noexcept {
     return "check";
 }
@@ -2224,6 +2250,7 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
     };
 
     auto flags = std::make_shared<Flags>();
+    auto format = std::make_shared<ReadFormat>(ReadFormat::Text);
 
     CLI::App* cmd = root.add_subcommand(std::string{name()}, std::string{summary()});
     cmd->add_flag("--fix", flags->fix,
@@ -2234,8 +2261,9 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->add_flag("--refresh-providers", flags->refresh_providers,
                   "Scan the providers first -- each vendor CLI on PATH, its login evidence, each "
                   "key -- as 'apogee providers scan' does");
+    add_read_format(cmd, format);
 
-    cmd->callback([&context, flags]() {
+    cmd->callback([&context, flags, format]() {
         CheckInputs inputs;
         inputs.config_path = harness::resolve_config_path(context.config_path);
 
@@ -2253,7 +2281,8 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
                             CheckPassOptions{.fix = flags->fix,
                                              .quiet = flags->quiet,
                                              .no_color = flags->no_color,
-                                             .refresh_providers = flags->refresh_providers})) {
+                                             .refresh_providers = flags->refresh_providers,
+                                             .json = *format == ReadFormat::Json})) {
             throw CLI::RuntimeError(1);
         }
     });
@@ -2281,7 +2310,11 @@ bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options) {
         }
     }
 
-    if (options.fix) {
+    std::optional<std::vector<std::string>> fixed;
+    if (options.fix && options.json) {
+        // In the document, never on stdout beside it (28h).
+        fixed = apply_fixes(inputs);
+    } else if (options.fix) {
         const std::vector<std::string> done = apply_fixes(inputs);
         std::size_t created = 0;
         for (const std::string& line : done) {
@@ -2303,7 +2336,7 @@ bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options) {
     if (options.refresh_providers) {
         // The explicit scan (28a), before the report reads its cache: the
         // one place `check` may start a vendor's binary, and only when asked.
-        BusyLine busy{std::cerr, "scanning providers", busy_options(options.quiet)};
+        BusyLine busy{std::cerr, "scanning providers", busy_options(options.quiet || options.json)};
         const secrets::CredentialStore store{secrets::credentials_path(inputs.config_path)};
         (void)backends::scan_host_providers(backends::ScanOptions{}, &store);
     }
@@ -2312,10 +2345,14 @@ bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options) {
     {
         // Every model's header is read, so on a full store this takes
         // seconds: said on one line, gone before the report (M1).
-        BusyLine busy{std::cerr, "checking", busy_options(options.quiet)};
+        BusyLine busy{std::cerr, "checking", busy_options(options.quiet || options.json)};
         inputs.progress = busy.sink();
         report = run_checks(inputs);
         inputs.progress = nullptr;
+    }
+    if (options.json) {
+        write_document(std::cout, render_report_document(report, fixed));
+        return report.passed();
     }
     const ansi::Style style =
         ansi::Style::detect(options.no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto);

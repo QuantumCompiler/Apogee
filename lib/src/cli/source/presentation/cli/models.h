@@ -1,5 +1,7 @@
 #pragma once
 
+#include <nlohmann/json_fwd.hpp>
+
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -149,6 +151,19 @@ struct ProviderLens {
 /// stream-json`. A GUI listing models is the first consumer of machine mode
 /// beyond chat, and the flag already exists.
 [[nodiscard]] std::string render_model_jsonl(const std::vector<ModelRow>& rows);
+
+/// One row as the JSONL line and the JSON document both carry it.
+[[nodiscard]] nlohmann::json model_row_json(const ModelRow& row);
+
+/// `models list --output-format json` (28h): `{"object": "list", "data":
+/// [rows], "folded": N}` -- the table's rows, a consumed snapshot folded
+/// unless `all`, as the table folds it.
+[[nodiscard]] nlohmann::json render_model_document(const std::vector<ModelRow>& rows, bool all);
+
+/// `models info` and `models status` as JSON (28h): their record of
+/// `label: value` lines as `{"fields": [{"field", "value"}...]}`, in order,
+/// labels as printed and a value's indented continuation joined to it.
+[[nodiscard]] nlohmann::json render_record_document(std::string_view text);
 
 /// The body of `apogee models info <name>`: a backend, or -- with
 /// `models_dir` -- one set of weights in the store by its handle or id.

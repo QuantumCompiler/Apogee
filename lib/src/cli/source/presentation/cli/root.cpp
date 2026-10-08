@@ -2,10 +2,13 @@
 
 #include <CLI/CLI.hpp>
 
+#include <cctype>
 #include <cstdlib>
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -157,6 +160,57 @@ void RootCommand::apply_root_flags() {
     }
 }
 
+namespace {
+
+/// Whether `option` is a read's output format: its words are `text` and
+/// `json` -- a read's `text|json`, not a turn's `text|stream-json`, and not
+/// an agent's own `json|markdown` answer format.
+[[nodiscard]] bool takes_json(const CLI::Option& option) {
+    std::string words = option.get_type_name();
+    for (char& c : words) {
+        if (c != '_' && (std::isalnum(static_cast<unsigned char>(c)) == 0) && c != '-') {
+            c = ' ';
+        }
+    }
+    std::istringstream split{words};
+    std::string word;
+    bool text = false;
+    bool json = false;
+    while (split >> word) {
+        text = text || word == "text";
+        json = json || word == "json";
+    }
+    return text && json;
+}
+
+void collect_json_readers(const CLI::App& app, const std::string& prefix,
+                          std::vector<std::string>& out) {
+    for (const CLI::App* sub : app.get_subcommands({})) {
+        if (sub->get_group().empty()) {
+            continue;  // hidden: a protocol, not a command a person types
+        }
+        const std::string name = prefix.empty() ? sub->get_name() : prefix + " " + sub->get_name();
+        if (const CLI::Option* option = sub->get_option_no_throw("--output-format");
+            option != nullptr && takes_json(*option)) {
+            out.push_back(name);
+        }
+        collect_json_readers(*sub, name, out);
+    }
+}
+
+}  // namespace
+
+std::string json_readers(const CLI::App& app) {
+    std::vector<std::string> names;
+    collect_json_readers(app, "", names);
+    std::string out;
+    for (const std::string& name : names) {
+        out += out.empty() ? "" : ", ";
+        out += name;
+    }
+    return out;
+}
+
 int RootCommand::run(int argc, const char* const* argv) {
     if (argc <= 1) {
         std::cout << app_->help();
@@ -168,7 +222,20 @@ int RootCommand::run(int argc, const char* const* argv) {
     } catch (const CLI::ParseError& e) {
         // Covers --help and --version (exit 0) as well as usage errors and any
         // CLI::RuntimeError a command threw to set its own exit code.
-        return app_->exit(e);
+        const int code = app_->exit(e);
+        // A JSON face asked of a command that has none (28h): the refusal
+        // names the commands that take one -- read from the parser itself,
+        // so a new read joins the list the day it gains the flag.
+        if (dynamic_cast<const CLI::ExtrasError*>(&e) != nullptr) {
+            for (int i = 1; i < argc; ++i) {
+                if (std::string_view{argv[i]}.starts_with("--output-format")) {
+                    std::cerr << "apogee: --output-format json is taken by: " << json_readers(*app_)
+                              << "\n";
+                    break;
+                }
+            }
+        }
+        return code;
     }
 
     return 0;

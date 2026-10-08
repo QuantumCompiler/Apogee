@@ -543,6 +543,43 @@ budget (`symphony_caps`) spent — prints nothing on stdout and exits `1`
 (refused, or the budget) or `2` (a member's failure), the stage named on
 stderr with its position (`outer → inner, stage 2/3 verify (chat): …`).
 
+Since 28h the listings a host UI renders are reads of the same kind:
+
+```bash
+apogee models list --output-format json     # {"object":"list","data":[…],"folded":N}; --all for the folded ones too
+apogee models info <backend> --output-format json    # {"name":…,"fields":[{"field":"backend","value":…},…]}
+apogee models status --output-format json            # {"fields":[{"field":"chat","value":…},…]}
+apogee chats list --output-format json      # {"object":"list","data":[{"id","updated","turns","name"},…]}
+apogee agents list --output-format json     # byte for byte GET /v1/admin/agents
+apogee mcp list --output-format json        # GET /v1/admin/mcp-servers's entries, with what connecting found
+apogee check --output-format json           # {"rows":[{"section","name","status","detail","remedy"?}],"ok":…,"failures":N,"warnings":N}
+```
+
+- **`models list`**: one object per row the table shows — `backend`,
+  `backend_type`, `model`, `roles`, `source`, `architecture`, `profile`,
+  `state`, `verified`, and `note`, `format`, `quant`, `window` where the row has
+  them — the very object each line of `--output-format stream-json` carries
+  (which stays, a row per line). A snapshot a conversion consumed is folded as
+  the table folds it, and `folded` counts them.
+- **`models info`** and **`models status`**: their `label: value` record as
+  `fields`, in order, each label as printed and a value's indented continuation
+  joined to it with a newline. The values are the same words the human view
+  prints.
+- **`chats list`**: newest first, each conversation's `id`, `updated`, `turns`
+  and `name`.
+- **`agents list`** is exactly the body `GET /v1/admin/agents` serves; **`mcp
+  list`** each server as `GET /v1/admin/mcp-servers` serves it — `name`,
+  `command`, `args`, `enabled`, `env_set` (never the environment itself) — plus
+  what connecting to it found: `state` (`connected`, `not connected`,
+  `disabled`), `protocol_version`, `tools`, and `error` when it did not connect.
+- **`check`**: every row the report shows, `status` one of `ok`, `warn`, `fail`
+  and `skipped` — never folded into a pass — `ok` the verdict and the exit code
+  the human run's (non-zero on a failure). With `--fix`, what it repaired is the
+  document's `fixed`, never a line beside it.
+
+No document carries a key or a token. A command that has no JSON face refuses
+`--output-format json` and names the commands that have one.
+
 ## What machine mode does not do
 
 - **It opens no sockets.** Not one, ever — asserted in CI with `lsof`. Only

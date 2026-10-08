@@ -17,6 +17,11 @@ class RootFlagScope;
 
 namespace apogee::commands {
 
+/// Every command under `app` whose `--output-format` takes `json` -- the
+/// reads (27j, 28h) -- by its full name, comma-separated: what the refusal of
+/// a JSON face asked of a command without one names.
+[[nodiscard]] std::string json_readers(const CLI::App& app);
+
 /// The `apogee` root command: persistent flags, the registered subcommands,
 /// and argv -> exit code.
 ///

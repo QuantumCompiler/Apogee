@@ -21,6 +21,7 @@
 #include "contracts/types.h"
 #include "harness/harness.h"
 #include "harness/roles.h"
+#include "machine/json_reporter.h"
 #include "mcp/registry.h"
 #include "operations/backend_names.h"
 #include "operations/retrieval.h"
@@ -36,6 +37,10 @@
 /// which is the split that makes exec-style testing and (later) HTTP parity
 /// possible. Anything a second command would also need lands here rather than
 /// in the first command that happened to want it.
+namespace CLI {
+class App;
+}  // namespace CLI
+
 namespace apogee::commands {
 
 /// Process exit codes.
@@ -208,6 +213,11 @@ inline constexpr std::size_t kFetchMaxBodyBytes = std::size_t{5} * 1024 * 1024;
 /// until they work out that Ctrl-D is what it wants. True whenever std::cin's
 /// buffer has been replaced, since that is where the input is read from.
 [[nodiscard]] bool stdin_is_piped();
+
+/// `--output-format text|json` on a read (the 27j convention, shared since
+/// 28h): one JSON document of the same facts as the human view, a turn's
+/// `stream-json` refused by name.
+void add_read_format(CLI::App* command, const std::shared_ptr<ReadFormat>& format);
 
 /// Reads `path` and returns it as an image content part carrying a `data:` URI.
 ///

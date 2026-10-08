@@ -404,20 +404,28 @@ def main():
         round_trip = False
 
     # ================= Phase 3: the read surface =============================
+    # Since 28h the doc's CLI-command section names `--output-format json` on
+    # the reads a host UI needs: the host populates a model picker and lists
+    # the rest without screen-scraping, and records W7 only if they are prose.
     print("phase 3: the read surface a host UI gets", flush=True)
-    models_out = run_cli(binary, ["models"], env, project, may_fail=True)
-    first = (models_out.stdout or models_out.stderr).strip().splitlines()
-    is_json = False
-    try:
-        json.loads(first[0]) if first else None
-        is_json = True
-    except (json.JSONDecodeError, IndexError):
-        pass
-    wall("W7", "Reads are prose: 'everything else is a CLI command', but the "
-               "read commands emit human text, so a host UI listing models or "
-               "servers screen-scrapes or re-reads config files itself",
-         f"`apogee models` first line: {first[0][:100] if first else '(empty)'!r} "
-         f"(json={is_json}); no --output-format on read commands")
+    reads = {}
+    for command in (["models", "list"], ["chats", "list"], ["agents", "list"],
+                    ["mcp", "list"], ["check"]):
+        proc = run_cli(binary, [*command, "--output-format", "json"], env, project,
+                       may_fail=True)
+        try:
+            reads[" ".join(command)] = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            reads[" ".join(command)] = None
+    picker = [row.get("backend") for row in (reads.get("models list") or {}).get("data", [])]
+    if all(isinstance(document, dict) for document in reads.values()) and picker:
+        print(f"  W7 closed: {len(reads)} reads as JSON documents; the model picker: {picker}",
+              flush=True)
+    else:
+        wall("W7", "Reads are prose: 'everything else is a CLI command', but the "
+                   "read commands emit human text, so a host UI listing models or "
+                   "servers screen-scrapes or re-reads config files itself",
+             f"documents: { {k: isinstance(v, dict) for k, v in reads.items()} }")
 
     # ---- write the evidence -------------------------------------------------
     (findings / "transcript.txt").write_text("\n".join(TRANSCRIPT) + "\n")

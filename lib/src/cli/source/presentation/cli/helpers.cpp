@@ -1,5 +1,7 @@
 #include "cli/helpers.h"
 
+#include <CLI/CLI.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -17,6 +19,7 @@
 #include "agentloop/embed_func.h"
 #include "agentloop/graph_context.h"
 #include "agentloop/media.h"
+#include "cli/command.h"
 #include "cli/embed.h"
 #include "cli/tool_vectors.h"
 #include "contracts/utf8.h"
@@ -334,6 +337,21 @@ namespace {
 
 std::streambuf* const kOriginalStdinBuffer = initial_stdin_buffer();
 }  // namespace
+
+void add_read_format(CLI::App* command, const std::shared_ptr<ReadFormat>& format) {
+    command
+        ->add_option_function<std::string>(
+            "--output-format",
+            [format](const std::string& value) {
+                const std::optional<ReadFormat> parsed = read_format_from_string(value);
+                if (!parsed.has_value()) {
+                    throw CLI::ValidationError("--output-format", "expected 'text' or 'json'");
+                }
+                *format = *parsed;
+            },
+            "Output format: text (default) or json -- one JSON document of the same facts")
+        ->type_name(words_value(read_format_names()));
+}
 
 bool stdin_is_piped() {
     return std::cin.rdbuf() != kOriginalStdinBuffer ||

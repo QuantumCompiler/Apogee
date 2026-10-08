@@ -69,6 +69,8 @@ apogee_add_module(operations
     operations/graph_sources.cpp
     operations/knowledge_core.h
     operations/knowledge_core.cpp
+    operations/read_views.h
+    operations/read_views.cpp
     operations/retrieval.h
     operations/retrieval.cpp
     operations/run_settings.h
