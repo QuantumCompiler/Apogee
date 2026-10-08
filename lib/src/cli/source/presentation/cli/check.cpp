@@ -24,9 +24,14 @@
 #include "ansi/ansi.h"
 #include "backends/mlx_local.h"
 #include "backends/prompt_cache.h"
+#include "backends/provider_cache.h"
+#include "backends/provider_probe.h"
+#include "backends/provider_status.h"
+#include "backends/provider_table.h"
 #include "cli/embed.h"
 #include "cli/helpers.h"
 #include "cli/models_pull.h"
+#include "cli/provider_offer.h"
 #include "contracts/assets.h"
 #include "contracts/host.h"
 #include "contracts/layout.h"
@@ -552,6 +557,12 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
             continue;
         }
 
+        // A vendor CLI's row is the Providers section's (28c): whether its
+        // binary is there is the one fact that matters, and "ok" for an
+        // entry that merely parses read like a pass.
+        if (harness::is_vendor_cli(backend.type)) {
+            continue;
+        }
         add(report, Status::Ok, "Config", label, std::string{type});
     }
 
@@ -596,6 +607,78 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
         }
         add(report, Status::Ok, "Config", label,
             collection.retriever.empty() ? "auto" : collection.retriever);
+    }
+}
+
+/// The Providers section (28c): each configured provider backend's tier in
+/// plain words -- a vendor CLI whose binary is missing WARNS, with the
+/// use-time error's own remedy, where the config's shape once said ok --
+/// then the providers the last scan found that no backend reaches. Read
+/// from the provider cache and the cheap checks alone: no binary is started
+/// here, and a machine never scanned is said, not probed. Absent entirely
+/// on a pure-local install with nothing detected.
+void check_providers(CheckReport& report, const CheckInputs& inputs) {
+    const backends::ProviderCache cache =
+        backends::load_provider_cache(inputs.home / "cache" / "providers.json");
+    const bool configured_any = std::ranges::any_of(inputs.config.backends, [](const auto& entry) {
+        return backends::provider_for_type(entry.second.type) != nullptr;
+    });
+    std::vector<backends::ProviderStatus> unregistered;
+    for (const backends::ProviderStatus& status : cached_statuses(cache)) {
+        const bool reached = std::ranges::any_of(inputs.config.backends, [&](const auto& entry) {
+            return entry.second.type == status.type;
+        });
+        if (!reached && offerable(status)) {
+            unregistered.push_back(status);
+        }
+    }
+    if (!configured_any && unregistered.empty()) {
+        return;
+    }
+
+    const std::unique_ptr<backends::ExistenceView> host =
+        inputs.provider_view == nullptr ? backends::host_existence_view() : nullptr;
+    const backends::ExistenceView& view =
+        inputs.provider_view != nullptr ? *inputs.provider_view : *host;
+    const secrets::CredentialStore store{secrets::credentials_path(inputs.config_path)};
+    const secrets::EnvSnapshot env = secrets::EnvSnapshot::capture(inputs.env);
+    for (const auto& [name, backend] : inputs.config.backends) {
+        const std::optional<backends::ProviderStatus> status =
+            backends::backend_provider_status(backend, view, &store, env, cache);
+        if (!status.has_value()) {
+            continue;
+        }
+        const std::string label = "backend: " + name;
+        const std::string type{harness::to_string(backend.type)};
+        if (status->tier() == backends::ProviderTier::NotFound) {
+            // An API key that resolves nowhere is the Config row's warning,
+            // said once; a vendor CLI's missing binary is said here.
+            if (harness::is_vendor_cli(backend.type)) {
+                add(report, Status::Warn, "Providers", label,
+                    type + " -- " + status->installed_evidence,
+                    std::string{backends::provider_for_type(backend.type)->remedy});
+            }
+            continue;
+        }
+        add(report, Status::Ok, "Providers", label,
+            type + " -- " + backends::describe_status(*status));
+    }
+    for (const backends::ProviderStatus& status : unregistered) {
+        const backends::ProviderFacts* facts = backends::provider_for_type(status.type);
+        const std::string type{harness::to_string(status.type)};
+        add(report, Status::Ok, "Providers", "provider: " + status.id,
+            std::string{backends::to_string(status.tier())} + ", not registered",
+            facts->needs_model
+                ? "apogee config add-backend " + status.id + " --type " + type + " --model <model>"
+                : std::string{"apogee providers scan --register"});
+    }
+    if (cache.scanned()) {
+        add(report, Status::Ok, "Providers", "scan", "last scanned " + cache.scanned_at);
+    } else {
+        add(report, Status::Ok, "Providers", "scan",
+            "not scanned yet -- versions, status-command logins and providers no backend "
+            "reaches are unknown",
+            "apogee check --refresh-providers   (or apogee providers scan)");
     }
 }
 
@@ -1919,6 +2002,8 @@ CheckReport run_checks(const CheckInputs& inputs) {
     check_version(report, inputs);
     say(inputs, "checking config");
     check_config(report, inputs);
+    say(inputs, "checking providers");
+    check_providers(report, inputs);
     say(inputs, "checking tools");
     check_tools(report, inputs);
     say(inputs, "checking MCP servers");
@@ -2135,6 +2220,7 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
         bool fix = false;
         bool no_color = false;
         bool quiet = false;
+        bool refresh_providers = false;
     };
 
     auto flags = std::make_shared<Flags>();
@@ -2145,6 +2231,9 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
                   "Never touches your config.");
     cmd->add_flag("--no-color", flags->no_color, "Disable coloured output");
     cmd->add_flag("-q,--quiet", flags->quiet, "No progress line while it checks");
+    cmd->add_flag("--refresh-providers", flags->refresh_providers,
+                  "Scan the providers first -- each vendor CLI on PATH, its login evidence, each "
+                  "key -- as 'apogee providers scan' does");
 
     cmd->callback([&context, flags]() {
         CheckInputs inputs;
@@ -2160,9 +2249,11 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
 
         // Non-zero on failure so a script can gate on it -- the reason this is
         // a command rather than a page of documentation.
-        if (!run_check_pass(std::move(inputs), CheckPassOptions{.fix = flags->fix,
-                                                                .quiet = flags->quiet,
-                                                                .no_color = flags->no_color})) {
+        if (!run_check_pass(std::move(inputs),
+                            CheckPassOptions{.fix = flags->fix,
+                                             .quiet = flags->quiet,
+                                             .no_color = flags->no_color,
+                                             .refresh_providers = flags->refresh_providers})) {
             throw CLI::RuntimeError(1);
         }
     });
@@ -2207,6 +2298,14 @@ bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options) {
         if (done.empty()) {
             std::cout << "nothing to fix\n";
         }
+    }
+
+    if (options.refresh_providers) {
+        // The explicit scan (28a), before the report reads its cache: the
+        // one place `check` may start a vendor's binary, and only when asked.
+        BusyLine busy{std::cerr, "scanning providers", busy_options(options.quiet)};
+        const secrets::CredentialStore store{secrets::credentials_path(inputs.config_path)};
+        (void)backends::scan_host_providers(backends::ScanOptions{}, &store);
     }
 
     CheckReport report;

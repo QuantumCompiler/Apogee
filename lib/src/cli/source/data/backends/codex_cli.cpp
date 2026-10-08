@@ -3,6 +3,8 @@
 #include <utility>
 
 #include "backends/codex_cli_events.h"
+#include "backends/provider_status.h"
+#include "backends/provider_table.h"
 #include "contracts/errors.h"
 #include "transport/jsonl_framer.h"
 
@@ -82,10 +84,11 @@ std::unique_ptr<CodexCliProvider> CodexCliProvider::from_config(
     }
 
     if (platform::find_on_path(options.binary).empty()) {
+        // The words the doctor repeats (28c): one remedy, in the table.
         throw harness::ProviderError(
-            backend_name, "'" + options.binary +
-                              "' was not found on PATH. Install the Codex CLI and run "
-                              "'codex login', or set 'binary' on this backend to its full path");
+            backend_name,
+            backends::not_on_path(options.binary) + ". " +
+                std::string{backends::provider_for_type(harness::BackendType::CodexCli)->remedy});
     }
 
     return std::make_unique<CodexCliProvider>(

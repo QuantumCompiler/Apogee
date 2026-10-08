@@ -64,7 +64,8 @@ set(forbidden
 # opening it.
 set(knowledge_table "data/backends/provider_table.cpp")
 set(path_patterns "[.]claude/" "claude[.]json" "[.]gemini/" "google_accounts[.]json" "[.]codex/")
-set(existence_only "data/backends/provider_table.cpp" "data/backends/provider_probe.cpp")
+set(existence_only "data/backends/provider_table.cpp" "data/backends/provider_probe.cpp"
+    "data/backends/provider_status.cpp")
 set(reading
     "fstream"
     "fopen"

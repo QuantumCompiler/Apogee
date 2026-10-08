@@ -193,6 +193,8 @@ apogee_add_module(backends
     backends/provider_table.cpp
     backends/provider_cache.h
     backends/provider_cache.cpp
+    backends/provider_status.h
+    backends/provider_status.cpp
     backends/provider_probe.h
     backends/provider_probe.cpp
 )

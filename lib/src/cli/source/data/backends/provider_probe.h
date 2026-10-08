@@ -12,13 +12,9 @@
 #include <vector>
 
 #include "backends/provider_cache.h"
+#include "backends/provider_status.h"
 #include "backends/provider_table.h"
 #include "contracts/config.h"
-
-namespace apogee::secrets {
-class CredentialStore;
-class EnvSnapshot;
-}  // namespace apogee::secrets
 
 /// Provider detection (28a): what this machine has, in the tiers it can
 /// actually know.
@@ -63,40 +59,6 @@ inline constexpr std::chrono::milliseconds kVersionProbeDeadline{10'000};
 /// How long a status command may run.
 inline constexpr std::chrono::milliseconds kStatusProbeDeadline{5'000};
 
-/// The filesystem as the probe may see it: existence and identity, never
-/// contents.
-///
-/// There is no read here, on purpose -- the probe API cannot open a file, so
-/// a credential file's contents cannot reach the detector by any edit short
-/// of changing this interface (`cli.no_vendor_credentials` holds the probe's
-/// own source to having no reading mechanism either).
-class ExistenceView {
-public:
-    ExistenceView() = default;
-    virtual ~ExistenceView() = default;
-    ExistenceView(const ExistenceView&) = delete;
-    ExistenceView& operator=(const ExistenceView&) = delete;
-    ExistenceView(ExistenceView&&) = delete;
-    ExistenceView& operator=(ExistenceView&&) = delete;
-
-    /// `program`'s absolute path when it is executable on PATH -- or, when it
-    /// names a path, that path when it is executable -- else empty.
-    [[nodiscard]] virtual std::string find_program(std::string_view program) const = 0;
-    /// Whether `path` exists.
-    [[nodiscard]] virtual bool exists(const std::filesystem::path& path) const = 0;
-    /// What a binary is: its real path, symlinks followed, and the time it
-    /// last changed -- nullopt when it cannot be read. An updated CLI is a
-    /// new file, or a link moved to one, so either half changing means the
-    /// version must be asked again.
-    [[nodiscard]] virtual std::optional<BinaryFingerprint> fingerprint(
-        const std::filesystem::path& path) const = 0;
-    /// The user's home directory, or nullopt.
-    [[nodiscard]] virtual std::optional<std::filesystem::path> home() const = 0;
-};
-
-/// The real filesystem, through the platform seam.
-[[nodiscard]] std::unique_ptr<ExistenceView> host_existence_view();
-
 /// How a probe child ended.
 struct ProbeRun {
     enum class Outcome : std::uint8_t {
@@ -121,16 +83,6 @@ using ProbeRunner =
 
 /// The real runner, over `platform::start_child`.
 [[nodiscard]] ProbeRunner host_probe_runner();
-
-/// Where an API type's key would come from -- `ANTHROPIC_API_KEY`, `the
-/// store` -- or nullopt when none resolves. Never the key itself.
-using KeyPresence = std::function<std::optional<std::string>(harness::BackendType)>;
-
-/// The real key presence, through the one key resolver: an entry of the type
-/// with no `api_key`, so the store and then the environment answer. The key
-/// the resolver returns is dropped where it is received.
-[[nodiscard]] KeyPresence host_key_presence(const secrets::CredentialStore* store,
-                                            const secrets::EnvSnapshot& env);
 
 /// What one scan does beyond the cheap checks.
 struct ScanOptions {

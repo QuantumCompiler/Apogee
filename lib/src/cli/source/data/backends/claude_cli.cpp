@@ -4,6 +4,8 @@
 #include <utility>
 
 #include "backends/claude_cli_events.h"
+#include "backends/provider_status.h"
+#include "backends/provider_table.h"
 #include "contracts/errors.h"
 
 namespace apogee::backends {
@@ -136,10 +138,11 @@ std::unique_ptr<ClaudeCliProvider> ClaudeCliProvider::from_config(
     if (platform::find_on_path(options.binary).empty()) {
         // Named, so the fix is obvious. Apogee never installs or bundles the
         // vendor binary -- the user installs and logs in themselves.
+        // The words the doctor repeats (28c): one remedy, in the table.
         throw harness::ProviderError(
-            backend_name, "'" + options.binary +
-                              "' was not found on PATH. Install the Claude CLI and log in, or set "
-                              "'binary' on this backend to its full path");
+            backend_name,
+            backends::not_on_path(options.binary) + ". " +
+                std::string{backends::provider_for_type(harness::BackendType::ClaudeCli)->remedy});
     }
 
     return std::make_unique<ClaudeCliProvider>(

@@ -23,47 +23,6 @@ constexpr std::size_t kProbeOutputLimit = 4096;
 /// The longest version string recorded.
 constexpr std::size_t kVersionLimit = 120;
 
-class HostExistenceView final : public ExistenceView {
-public:
-    [[nodiscard]] std::string find_program(std::string_view program) const override {
-        if (program.find('/') == std::string_view::npos &&
-            program.find('\\') == std::string_view::npos) {
-            return platform::find_on_path(program);
-        }
-        std::error_code error;
-        const std::filesystem::path path{program};
-        return std::filesystem::is_regular_file(path, error) ? path.string() : std::string{};
-    }
-
-    [[nodiscard]] bool exists(const std::filesystem::path& path) const override {
-        std::error_code error;
-        return std::filesystem::exists(path, error);
-    }
-
-    [[nodiscard]] std::optional<BinaryFingerprint> fingerprint(
-        const std::filesystem::path& path) const override {
-        std::error_code error;
-        const std::filesystem::path real = std::filesystem::canonical(path, error);
-        if (error) {
-            return std::nullopt;
-        }
-        const auto modified = std::filesystem::last_write_time(real, error);
-        if (error) {
-            return std::nullopt;
-        }
-        return BinaryFingerprint{real.string(),
-                                 static_cast<std::int64_t>(modified.time_since_epoch().count())};
-    }
-
-    [[nodiscard]] std::optional<std::filesystem::path> home() const override {
-        const auto home = platform::home_directory();
-        if (!home) {
-            return std::nullopt;
-        }
-        return std::filesystem::path{*home};
-    }
-};
-
 [[nodiscard]] ProbeRun run_probe(const std::string& program,
                                  const std::vector<std::string>& arguments,
                                  std::chrono::milliseconds deadline_after) {
@@ -265,25 +224,7 @@ void probe_credentials(const ProviderFacts& facts, const ExistenceView& view,
         }
         return;
     }
-    if (facts.evidence_paths.empty()) {
-        status.credential_evidence =
-            "the " + std::string{facts.label} + " leaves no login evidence Apogee can check";
-        return;
-    }
-    const std::optional<std::filesystem::path> home = view.home();
-    if (!home.has_value()) {
-        status.credential_evidence = "no home directory to look in";
-        return;
-    }
-    for (const std::string_view relative : facts.evidence_paths) {
-        if (view.exists(*home / std::filesystem::path{relative})) {
-            status.credentials = CredentialState::Found;
-            status.credential_evidence = "~/" + std::string{relative} + " exists";
-            return;
-        }
-    }
-    status.credentials = CredentialState::NotFound;
-    status.credential_evidence = "no ~/" + std::string{facts.evidence_paths.front()};
+    credentials_from_evidence(facts, view, status);
 }
 
 [[nodiscard]] ProviderStatus scan_one(const ProviderFacts& facts, const ExistenceView& view,
@@ -310,34 +251,8 @@ void probe_credentials(const ProviderFacts& facts, const ExistenceView& view,
 
 }  // namespace
 
-std::unique_ptr<ExistenceView> host_existence_view() {
-    return std::make_unique<HostExistenceView>();
-}
-
 ProbeRunner host_probe_runner() {
     return run_probe;
-}
-
-KeyPresence host_key_presence(const secrets::CredentialStore* store,
-                              const secrets::EnvSnapshot& env) {
-    return [store, env](harness::BackendType type) -> std::optional<std::string> {
-        if (!secrets::takes_api_key(type)) {
-            return std::nullopt;
-        }
-        harness::BackendConfig entry;
-        entry.type = type;
-        const secrets::KeyResolution resolution = secrets::resolve_api_key(entry, store, env);
-        switch (resolution.source) {
-            case secrets::KeySource::Store:
-                return std::string{"the store"};
-            case secrets::KeySource::Environment:
-                return resolution.variable;
-            case secrets::KeySource::Config:
-            case secrets::KeySource::None:
-                break;
-        }
-        return std::nullopt;
-    };
 }
 
 ScanReport scan_providers(const ExistenceView& view, const ProbeRunner& runner,

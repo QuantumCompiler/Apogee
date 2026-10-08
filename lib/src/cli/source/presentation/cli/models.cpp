@@ -17,6 +17,8 @@
 #include "backends/model_profile.h"
 #include "backends/openai.h"
 #include "backends/openai_wire.h"
+#include "backends/provider_status.h"
+#include "backends/provider_table.h"
 #include "backends/sampling.h"
 #include "cli/helpers.h"
 #include "cli/models_pull.h"
@@ -261,11 +263,49 @@ void render_window(std::ostream& out, const models::GgufInfo& info,
 
 }  // namespace
 
+namespace {
+
+/// A provider row's STATE and VERIFIED from the one tier structure (28c): a
+/// vendor CLI's binary there or not -- `no binary` needing attention, with
+/// the use-time error's remedy -- and for every provider the day it last
+/// answered a turn. An API row's STATE stays where its key comes from, which
+/// is that tier's evidence already.
+void fill_provider_columns(ModelRow& row, const harness::BackendConfig& backend,
+                           const ProviderLens& providers, const secrets::CredentialStore* store,
+                           const secrets::EnvSnapshot& env) {
+    if (providers.view == nullptr) {
+        return;
+    }
+    const backends::ProviderCache none;
+    const std::optional<backends::ProviderStatus> status = backends::backend_provider_status(
+        backend, *providers.view, store, env, providers.cache != nullptr ? *providers.cache : none);
+    if (!status.has_value()) {
+        return;
+    }
+    row.verified = status->verified.has_value() ? status->verified->date : "no turn yet";
+    if (!harness::is_vendor_cli(backend.type)) {
+        return;
+    }
+    if (!status->installed) {
+        row.state = "no binary";
+        row.attention = true;
+        row.note = status->installed_evidence + ". " +
+                   std::string{backends::provider_for_type(backend.type)->remedy};
+        return;
+    }
+    backends::ProviderStatus present = *status;
+    present.verified.reset();  // VERIFIED says that; STATE is what is there
+    row.state = std::string{backends::to_string(present.tier())};
+}
+
+}  // namespace
+
 std::vector<ModelRow> build_model_rows(const harness::Config& config,
                                        const std::filesystem::path& models_dir,
                                        const std::filesystem::path& config_path,
                                        const secrets::EnvSnapshot* env,
-                                       const BusyProgress& progress) {
+                                       const BusyProgress& progress,
+                                       const ProviderLens& providers) {
     std::vector<ModelRow> rows;
     rows.reserve(config.backends.size());
 
@@ -444,6 +484,8 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
                 }
             }
             row.verified = "-";
+            fill_provider_columns(row, backend, providers, store.has_value() ? &*store : nullptr,
+                                  snapshot);
             rows.push_back(std::move(row));
             continue;
         }
@@ -1089,8 +1131,8 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
 }  // namespace
 
 std::string render_model_info(const harness::Config& config, std::string_view name,
-                              const BusyProgress& progress,
-                              const std::filesystem::path& models_dir) {
+                              const BusyProgress& progress, const std::filesystem::path& models_dir,
+                              const ProviderLens& providers) {
     const auto entry = config.backends.find(std::string{name});
     if (entry == config.backends.end()) {
         // Not a backend: one set of weights in the store (M4).
@@ -1107,6 +1149,24 @@ std::string render_model_info(const harness::Config& config, std::string_view na
     }
     const std::string roles = roles_for(config, std::string{name});
     out << "roles:        " << (roles.empty() ? "-" : roles) << "\n";
+    if (providers.view != nullptr) {
+        // A provider backend's evidence line (28c): the tier with what backs
+        // it, and the day it last answered a turn -- the cache and the cheap
+        // checks, nothing started.
+        const backends::ProviderCache none;
+        if (const std::optional<backends::ProviderStatus> status =
+                backends::backend_provider_status(
+                    value, *providers.view, providers.store, secrets::EnvSnapshot::process(),
+                    providers.cache != nullptr ? *providers.cache : none)) {
+            out << "provider:     " << backends::describe_status(*status) << "\n";
+            out << "verified:     "
+                << (status->verified.has_value()
+                        ? "last answered a turn on " + status->verified->date + " (" +
+                              status->verified->backend + ")"
+                        : std::string{"no turn recorded yet"})
+                << "\n";
+        }
+    }
 
     if (value.type == harness::BackendType::Mlx) {
         // A model directory run by the MLX driver (27a): the ladder's answer,
@@ -1369,9 +1429,11 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
             // takes seconds: said on one line, gone before the table (M1).
             BusyLine busy{std::cerr, "reading the model store",
                           busy_options(*list_quiet || *format == "stream-json")};
+            const std::unique_ptr<backends::ExistenceView> view = backends::host_existence_view();
+            const backends::ProviderCache cache = backends::load_provider_cache();
             rows = build_model_rows(config, harness::models_dir(),
                                     harness::resolve_config_path(context.config_path), nullptr,
-                                    busy.sink());
+                                    busy.sink(), ProviderLens{view.get(), &cache});
         }
         if (*format == "stream-json") {
             std::cout << render_model_jsonl(rows);
@@ -1392,12 +1454,17 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
         ->type_name(kBackendOrWeightsValue)
         ->required();
     info->add_flag("-q,--quiet", *info_quiet, "No progress line while the model is read");
-    info->callback([load, info_name, info_quiet]() {
+    info->callback([load, info_name, info_quiet, &context]() {
         const harness::Config config = load();
         std::string body;
         {
             BusyLine busy{std::cerr, "reading the model", busy_options(*info_quiet)};
-            body = render_model_info(config, *info_name, busy.sink(), harness::models_dir());
+            const std::unique_ptr<backends::ExistenceView> view = backends::host_existence_view();
+            const backends::ProviderCache cache = backends::load_provider_cache();
+            const secrets::CredentialStore store{
+                secrets::credentials_path(harness::resolve_config_path(context.config_path))};
+            body = render_model_info(config, *info_name, busy.sink(), harness::models_dir(),
+                                     ProviderLens{view.get(), &cache, &store});
         }
         if (body.empty()) {
             // A whole model is not one thing to show: name what it holds.

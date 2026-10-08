@@ -89,6 +89,7 @@ add_library(apogee_tests_data OBJECT
     data/backends/model_profile_test.cpp
     data/backends/chat_template_test.cpp
     data/backends/provider_probe_test.cpp
+    support/fake_existence_view.h
     data/embedstore/store_test.cpp
     data/embedstore/vector_test.cpp
     data/embedstore/fts_query_test.cpp
@@ -686,6 +687,19 @@ if(UNIX)
             ${CMAKE_CURRENT_BINARY_DIR}/providers-e2e
     )
     set_tests_properties(cli.providers_lifecycle PROPERTIES TIMEOUT 60)
+
+    # Provider surfacing (28c) on the real binary with fake vendor CLIs: a
+    # registered claude-cli with no binary warns in `check` with the use-time
+    # remedy, never ok; scanned, the tier in words; `models list` STATE and
+    # VERIFIED; one turn through a fake codex (the recorded fixture) dated in
+    # VERIFIED, `check` and `models info`; check and models spend nothing.
+    add_test(NAME cli.provider_surfacing
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/provider_surfacing_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/provider-surfacing
+            ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/codex_cli/simple_text.jsonl
+    )
+    set_tests_properties(cli.provider_surfacing PROPERTIES TIMEOUT 60)
 
     add_test(NAME cli.complete_opens_no_listening_socket
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/no_listen_check.sh"

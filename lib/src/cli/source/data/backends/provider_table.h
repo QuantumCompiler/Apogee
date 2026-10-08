@@ -40,6 +40,10 @@ struct ProviderFacts {
     /// or the API picks its own default model -- so a provider that has none
     /// to pick is detected and said, never registered half-made.
     bool needs_model = false;
+    /// What to do when the binary is not on PATH -- the use-time error's own
+    /// words, said by the doctor too (28c), so the two cannot drift. Empty for
+    /// an API type.
+    std::string_view remedy;
 };
 
 /// The table: the four vendor-CLI types, then the three API types (decided

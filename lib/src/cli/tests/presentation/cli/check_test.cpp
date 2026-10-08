@@ -13,6 +13,8 @@
 #include <vector>
 
 #include "agentloop/recall.h"
+#include "backends/provider_cache.h"
+#include "backends/provider_table.h"
 #include "contracts/assets.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
@@ -25,6 +27,7 @@
 #include "platform/platform.h"
 #include "secrets/store.h"
 #include "support/env_guard.h"
+#include "support/fake_existence_view.h"
 #include "support/gguf_builder.h"
 #include "support/mlx_model.h"
 #include "training/python_env.h"
@@ -2477,4 +2480,182 @@ TEST_CASE("a suite's row names what its verifier checks, and fails a verifier bi
     row = row_with(unknown, "suite: research");
     REQUIRE(row != nullptr);
     CHECK(row->status == Status::Warn);
+}
+
+// --- 28c: the Providers section --------------------------------------------
+
+namespace {
+
+[[nodiscard]] std::vector<const apogee::commands::CheckRow*> section_rows(
+    const CheckReport& report, std::string_view section) {
+    std::vector<const apogee::commands::CheckRow*> out;
+    for (const apogee::commands::CheckRow& row : report.rows) {
+        if (row.section == section) {
+            out.push_back(&row);
+        }
+    }
+    return out;
+}
+
+void write_scan(const Install& install, const std::vector<apogee::backends::ProviderStatus>& rows,
+                std::string scanned_at = "2026-10-07T12:00:00Z") {
+    apogee::backends::ProviderCache cache;
+    cache.scanned_at = std::move(scanned_at);
+    for (const apogee::backends::ProviderStatus& row : rows) {
+        cache.providers.emplace(row.id, row);
+    }
+    REQUIRE(
+        apogee::backends::store_provider_cache(install.root / "cache" / "providers.json", cache));
+}
+
+[[nodiscard]] apogee::backends::ProviderStatus found(std::string_view id) {
+    apogee::backends::ProviderStatus status;
+    status.id = std::string{id};
+    status.type = apogee::backends::find_provider(id)->type;
+    status.installed = true;
+    status.binary = "/bin/" + std::string{id};
+    status.installed_evidence = status.binary + ", 9.9";
+    return status;
+}
+
+}  // namespace
+
+TEST_CASE("a configured vendor CLI with no binary warns with the use-time remedy, never ok",
+          "[commands][check][providers]") {
+    // The spike's probe, inverted into a test: `claude` stripped from PATH,
+    // and the doctor used to say `ok backend: claude claude-cli`.
+    Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", "backends:\n  claude:\n    type: claude-cli\n");
+    load_into(inputs);
+    apogee::testing::FakeExistenceView view;
+    inputs.provider_view = &view;
+
+    const CheckReport report = run_checks(inputs);
+    INFO(render_report(report, false));
+    const auto* row = row_with(report, "backend: claude");
+    REQUIRE(row != nullptr);
+    CHECK(row->section == "Providers");
+    CHECK(row->status == Status::Warn);
+    CHECK(row->detail == "claude-cli -- 'claude' was not found on PATH");
+    CHECK(row->remedy ==
+          "Install the Claude CLI and log in, or set 'binary' on this backend to its full path");
+    for (const auto* config_row : section_rows(report, "Config")) {
+        CHECK(config_row->name != "backend: claude");  // no config-shape "ok" beside it
+    }
+    // Never scanned: said, with the way to scan -- nothing probed.
+    const auto* scan = row_with(report, "scan");
+    REQUIRE(scan != nullptr);
+    CHECK(scan->detail.starts_with("not scanned yet"));
+    CHECK(scan->remedy == "apogee check --refresh-providers   (or apogee providers scan)");
+    CHECK_FALSE(std::filesystem::exists(install.root / "cache" / "providers.json"));
+    CHECK(report.passed());  // a warning, not a failure
+}
+
+TEST_CASE("with the binary present the tier is said in words, its evidence named",
+          "[commands][check][providers]") {
+    Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml",
+                  "backends:\n  claude:\n    type: claude-cli\n  codex:\n    type: codex-cli\n");
+    load_into(inputs);
+    apogee::testing::FakeExistenceView view;
+    view.install("claude");
+    view.install("codex");
+    view.files.insert("/home/u/.claude.json");
+    inputs.provider_view = &view;
+
+    SECTION("never scanned: what the cheap checks know, the rest said unknown") {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        CHECK(row_with(report, "backend: claude")->detail ==
+              "claude-cli -- credentials found (~/.claude.json exists); version not asked yet");
+        CHECK(row_with(report, "backend: claude")->status == Status::Ok);
+        CHECK(row_with(report, "backend: codex")->detail ==
+              "codex-cli -- installed (`codex login status` not run yet); version not asked yet");
+    }
+    SECTION("scanned: the version and the status command's answer, and when") {
+        apogee::backends::ProviderStatus codex = found("codex");
+        codex.fingerprint = apogee::backends::BinaryFingerprint{"/bin/codex", 1};
+        codex.version_probed = true;
+        codex.version = "codex-cli 9.9";
+        codex.credentials = apogee::backends::CredentialState::Found;
+        codex.credential_evidence = "`codex login status` reports a login";
+        write_scan(install, {codex});
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        CHECK(row_with(report, "backend: codex")->detail ==
+              "codex-cli -- credentials found (`codex login status` reports a login); codex-cli "
+              "9.9");
+        CHECK(row_with(report, "scan")->detail == "last scanned 2026-10-07T12:00:00Z");
+    }
+    SECTION("verified: the day it last answered a turn") {
+        apogee::backends::ProviderCache cache;
+        cache.verified["claude"] = {"2026-10-06", "claude"};
+        REQUIRE(apogee::backends::store_provider_cache(install.root / "cache" / "providers.json",
+                                                       cache));
+        const CheckReport report = run_checks(inputs);
+        CHECK(row_with(report, "backend: claude")
+                  ->detail.starts_with("claude-cli -- verified -- answered a turn on 2026-10-06"));
+    }
+    const CheckReport report = run_checks(inputs);
+    CHECK(render_report(report, false).find("authenticated") == std::string::npos);
+}
+
+TEST_CASE("a pure-local install sees no Providers section; a detected provider is mentioned",
+          "[commands][check][providers]") {
+    Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", "backends:\n  local:\n    type: mock\n");
+    load_into(inputs);
+    apogee::testing::FakeExistenceView view;
+    view.install("claude");  // installed, but nothing scanned it: not mentioned
+    inputs.provider_view = &view;
+    CHECK(section_rows(run_checks(inputs), "Providers").empty());
+
+    apogee::backends::ProviderStatus ollama = found("ollama");
+    write_scan(install, {found("codex"), ollama});
+    const CheckReport report = run_checks(inputs);
+    INFO(render_report(report, false));
+    const auto* codex = row_with(report, "provider: codex");
+    REQUIRE(codex != nullptr);
+    CHECK(codex->status == Status::Ok);
+    CHECK(codex->detail == "installed, not registered");
+    CHECK(codex->remedy == "apogee providers scan --register");
+    CHECK(row_with(report, "provider: ollama")->remedy ==
+          "apogee config add-backend ollama --type ollama-cli --model <model>");
+}
+
+TEST_CASE("an API backend's missing key is the Config row's warning, said once",
+          "[commands][check][providers]") {
+    Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml",
+                  "backends:\n  cloud:\n    type: anthropic\n  mine:\n    type: openai\n"
+                  "    api_key: sk-in-config\n");
+    load_into(inputs);
+    apogee::testing::FakeExistenceView view;
+    inputs.provider_view = &view;
+    const CheckReport report = run_checks(inputs);
+    INFO(render_report(report, false));
+    CHECK(row_with(report, "backend: cloud")->section == "Config");
+    for (const auto* row : section_rows(report, "Providers")) {
+        CHECK(row->name != "backend: cloud");
+    }
+    const auto* mine = row_with(report, "backend: mine");
+    REQUIRE(mine != nullptr);
+    std::vector<std::string> sections;
+    for (const auto& row : report.rows) {
+        if (row.name == "backend: mine") {
+            sections.push_back(row.section);
+        }
+    }
+    CHECK(sections == std::vector<std::string>{"Config", "Providers"});
+    CHECK(render_report(report, false).find("openai -- credentials found (key from config)") !=
+          std::string::npos);
+    CHECK(render_report(report, false).find("sk-in-config") == std::string::npos);
 }

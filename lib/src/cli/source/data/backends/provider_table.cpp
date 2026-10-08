@@ -25,6 +25,19 @@ constexpr std::array<std::string_view, 1> kGeminiEvidence{".gemini/google_accoun
 // logged in (the 2026-10-03 spike).
 constexpr std::array<std::string_view, 2> kCodexStatus{"login", "status"};
 
+// What to do about a missing binary: the use-time error's words, which the
+// backends build their refusal from and the doctor repeats (28c).
+constexpr std::string_view kClaudeRemedy =
+    "Install the Claude CLI and log in, or set 'binary' on this backend to its full path";
+constexpr std::string_view kCodexRemedy =
+    "Install the Codex CLI and run 'codex login', or set 'binary' on this backend to its full "
+    "path";
+constexpr std::string_view kGeminiRemedy =
+    "Install the Gemini CLI and sign in with your Google account, or set 'binary' on this "
+    "backend to its full path";
+constexpr std::string_view kOllamaRemedy =
+    "Install Ollama and run 'ollama signin', or set 'binary' on this backend to its full path";
+
 constexpr std::array<ProviderFacts, 7> kTable{{
     {"claude",
      harness::BackendType::ClaudeCli,
@@ -33,7 +46,8 @@ constexpr std::array<ProviderFacts, 7> kTable{{
      kVersion,
      kClaudeEvidence,
      {},
-     false},
+     false,
+     kClaudeRemedy},
     {"codex",
      harness::BackendType::CodexCli,
      "Codex CLI",
@@ -41,7 +55,8 @@ constexpr std::array<ProviderFacts, 7> kTable{{
      kVersion,
      {},
      kCodexStatus,
-     false},
+     false,
+     kCodexRemedy},
     {"gemini",
      harness::BackendType::GeminiCli,
      "Gemini CLI",
@@ -49,15 +64,24 @@ constexpr std::array<ProviderFacts, 7> kTable{{
      kVersion,
      kGeminiEvidence,
      {},
-     false},
+     false,
+     kGeminiRemedy},
     // Ollama keeps no sign-in evidence offline that tells a signed-in machine
     // from one that only ran the server, so its credentials stay unknown.
     // And an ollama-cli backend needs a model -- there is no default to run --
     // so it is detected and never registered without one (28b).
-    {"ollama", harness::BackendType::OllamaCli, "Ollama CLI", "ollama", kVersion, {}, {}, true},
-    {"anthropic", harness::BackendType::Anthropic, "Anthropic API", "", {}, {}, {}, false},
-    {"openai", harness::BackendType::OpenAI, "OpenAI API", "", {}, {}, {}, false},
-    {"google", harness::BackendType::Google, "Google API", "", {}, {}, {}, false},
+    {"ollama",
+     harness::BackendType::OllamaCli,
+     "Ollama CLI",
+     "ollama",
+     kVersion,
+     {},
+     {},
+     true,
+     kOllamaRemedy},
+    {"anthropic", harness::BackendType::Anthropic, "Anthropic API", "", {}, {}, {}, false, ""},
+    {"openai", harness::BackendType::OpenAI, "OpenAI API", "", {}, {}, {}, false, ""},
+    {"google", harness::BackendType::Google, "Google API", "", {}, {}, {}, false, ""},
 }};
 
 }  // namespace

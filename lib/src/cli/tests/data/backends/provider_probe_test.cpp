@@ -12,11 +12,18 @@
 #include <string>
 #include <vector>
 
+#include "backends/claude_cli.h"
+#include "backends/codex_cli.h"
+#include "backends/gemini_cli.h"
+#include "backends/ollama_cli.h"
 #include "backends/provider_cache.h"
+#include "backends/provider_status.h"
 #include "backends/provider_table.h"
 #include "contracts/layout.h"
 #include "platform/child_process.h"
+#include "secrets/resolve.h"
 #include "support/env_guard.h"
+#include "support/fake_existence_view.h"
 
 /// Provider detection (28a), against a filesystem and a process runner that
 /// are both scripted -- every state of the matrix is an ordinary test, and no
@@ -36,41 +43,7 @@ using apogee::backends::ScanOptions;
 using apogee::backends::ScanReport;
 using apogee::harness::BackendType;
 
-class FakeView final : public ExistenceView {
-public:
-    /// Program name -> where PATH finds it.
-    std::map<std::string, std::string, std::less<>> on_path;
-    /// Paths that exist.
-    std::set<std::string, std::less<>> files;
-    /// Binary path -> its identity.
-    std::map<std::string, BinaryFingerprint, std::less<>> identities;
-    std::optional<std::filesystem::path> home_dir = std::filesystem::path{"/home/u"};
-
-    void install(const std::string& program, std::int64_t modified = 1) {
-        const std::string path = "/bin/" + program;
-        on_path[program] = path;
-        identities[path] = BinaryFingerprint{path, modified};
-    }
-
-    [[nodiscard]] std::string find_program(std::string_view program) const override {
-        const auto found = on_path.find(program);
-        return found == on_path.end() ? std::string{} : found->second;
-    }
-
-    [[nodiscard]] bool exists(const std::filesystem::path& path) const override {
-        return files.contains(path.generic_string());
-    }
-
-    [[nodiscard]] std::optional<BinaryFingerprint> fingerprint(
-        const std::filesystem::path& path) const override {
-        const auto found = identities.find(path.generic_string());
-        return found == identities.end() ? std::nullopt : std::optional{found->second};
-    }
-
-    [[nodiscard]] std::optional<std::filesystem::path> home() const override {
-        return home_dir;
-    }
-};
+using FakeView = apogee::testing::FakeExistenceView;
 
 /// A runner answering from a script, keyed `program args...`, recording every
 /// call. Anything unscripted answers `1.0.0` and exits 0.
@@ -492,3 +465,133 @@ TEST_CASE(
     CHECK(std::filesystem::exists(cache_file));
 }
 #endif
+
+// --- 28c: one configured backend's status, spawn-free ------------------------
+
+TEST_CASE("a configured backend's status: its own binary, the cache's version, never a spawn",
+          "[providers][status]") {
+    FakeView view;
+    const apogee::secrets::EnvSnapshot env;
+    ProviderCache cache;
+    apogee::harness::BackendConfig claude;
+    claude.type = BackendType::ClaudeCli;
+
+    SECTION("no binary: not found, in the use-time error's words") {
+        const auto status =
+            apogee::backends::backend_provider_status(claude, view, nullptr, env, cache);
+        REQUIRE(status.has_value());
+        CHECK(status->tier() == ProviderTier::NotFound);
+        CHECK(status->installed_evidence == "'claude' was not found on PATH");
+        claude.binary = "/opt/elsewhere/claude";
+        CHECK(apogee::backends::backend_provider_status(claude, view, nullptr, env, cache)
+                  ->installed_evidence == "'/opt/elsewhere/claude' was not found on PATH");
+    }
+    SECTION("installed, never scanned: evidence looked for, the version not asked") {
+        view.install("claude", 7);
+        view.files.insert("/home/u/.claude.json");
+        const auto status =
+            apogee::backends::backend_provider_status(claude, view, nullptr, env, cache);
+        CHECK(status->tier() == ProviderTier::CredentialsFound);
+        CHECK(status->installed_evidence == "/bin/claude, version not asked yet");
+        CHECK(apogee::backends::describe_status(*status) ==
+              "credentials found (~/.claude.json exists); version not asked yet");
+    }
+    SECTION("the cache's version counts only for the same binary, unchanged") {
+        view.install("claude", 7);
+        Scan scan;
+        scan.view.install("claude", 7);
+        (void)scan.run();
+        const auto same =
+            apogee::backends::backend_provider_status(claude, view, nullptr, env, scan.cache);
+        CHECK(same->version == "1.0.0");
+        CHECK(apogee::backends::describe_status(*same) == "installed (no ~/.claude.json); 1.0.0");
+        view.identities["/bin/claude"].modified = 8;  // updated since the scan
+        const auto changed =
+            apogee::backends::backend_provider_status(claude, view, nullptr, env, scan.cache);
+        CHECK(changed->version.empty());
+        CHECK(changed->installed_evidence == "/bin/claude, version not asked yet");
+    }
+    SECTION("a status-command provider: the last scan's answer, or not run yet") {
+        apogee::harness::BackendConfig codex;
+        codex.type = BackendType::CodexCli;
+        view.install("codex");
+        CHECK(apogee::backends::backend_provider_status(codex, view, nullptr, env, cache)
+                  ->credential_evidence == "`codex login status` not run yet");
+        Scan scan;
+        scan.view.install("codex");
+        (void)scan.run();
+        const auto known =
+            apogee::backends::backend_provider_status(codex, view, nullptr, env, scan.cache);
+        CHECK(known->credentials == CredentialState::Found);
+        CHECK(known->credential_evidence == "`codex login status` reports a login");
+    }
+    SECTION("verified, from the record, while installed") {
+        view.install("claude");
+        cache.verified["claude"] = {"2026-10-06", "claude"};
+        const auto status =
+            apogee::backends::backend_provider_status(claude, view, nullptr, env, cache);
+        CHECK(status->tier() == ProviderTier::Verified);
+        CHECK(apogee::backends::describe_status(*status).starts_with(
+            "verified -- answered a turn on 2026-10-06; "));
+    }
+    SECTION("an API backend: its own key first, through the one chain") {
+        apogee::harness::BackendConfig anthropic;
+        anthropic.type = BackendType::Anthropic;
+        const auto none =
+            apogee::backends::backend_provider_status(anthropic, view, nullptr, env, cache);
+        CHECK(none->tier() == ProviderTier::NotFound);
+        CHECK(none->installed_evidence == "no key resolves");
+        anthropic.api_key = "sk-SECRET";
+        const auto mine =
+            apogee::backends::backend_provider_status(anthropic, view, nullptr, env, cache);
+        CHECK(mine->tier() == ProviderTier::CredentialsFound);
+        CHECK(apogee::backends::describe_status(*mine) == "credentials found (key from config)");
+        CHECK(apogee::backends::describe_status(*mine).find("SECRET") == std::string::npos);
+    }
+    SECTION("a local type is not a provider") {
+        apogee::harness::BackendConfig local;
+        local.type = BackendType::LlamaCpp;
+        CHECK_FALSE(apogee::backends::backend_provider_status(local, view, nullptr, env, cache)
+                        .has_value());
+    }
+}
+
+TEST_CASE("the doctor's remedy is the use-time error's, word for word", "[providers][status]") {
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("a vendor CLI cannot be built on this platform");
+    }
+    for (const auto& facts : apogee::backends::provider_table()) {
+        if (facts.binary.empty()) {
+            CHECK(facts.remedy.empty());
+            continue;
+        }
+        apogee::harness::BackendConfig entry;
+        entry.type = facts.type;
+        entry.binary = "/nonexistent/apogee-test/" + std::string{facts.binary};
+        entry.model = "some-model";  // ollama refuses a missing model first
+        std::string said;
+        try {
+            switch (facts.type) {
+                case BackendType::ClaudeCli:
+                    (void)apogee::backends::ClaudeCliProvider::from_config("b", entry);
+                    break;
+                case BackendType::CodexCli:
+                    (void)apogee::backends::CodexCliProvider::from_config("b", entry);
+                    break;
+                case BackendType::GeminiCli:
+                    (void)apogee::backends::GeminiCliProvider::from_config("b", entry);
+                    break;
+                case BackendType::OllamaCli:
+                    (void)apogee::backends::OllamaCliProvider::from_config("b", entry);
+                    break;
+                default:
+                    FAIL("a CLI row of an unexpected type");
+            }
+        } catch (const std::exception& e) {
+            said = e.what();
+        }
+        INFO(said);
+        CHECK(said.find(apogee::backends::not_on_path(entry.binary) + ". " +
+                        std::string{facts.remedy}) != std::string::npos);
+    }
+}

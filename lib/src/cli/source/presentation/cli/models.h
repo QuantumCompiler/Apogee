@@ -6,6 +6,8 @@
 #include <vector>
 
 #include "ansi/ansi.h"
+#include "backends/provider_cache.h"
+#include "backends/provider_status.h"
 #include "cli/command.h"
 #include "cli/suite_residency.h"
 #include "contracts/config.h"
@@ -94,6 +96,20 @@ struct ModelRow {
     bool consumed = false;
 };
 
+/// What the listing knows about provider backends (28c): the cheap checks'
+/// view of the filesystem and the provider cache, so a vendor CLI's STATE
+/// says whether its binary is there and VERIFIED when it last answered a
+/// turn. A null `view` leaves provider rows as they were (`-`) -- what a test
+/// of something else wants; `models list` and `models info` pass this
+/// machine's.
+struct ProviderLens {
+    const backends::ExistenceView* view = nullptr;
+    const backends::ProviderCache* cache = nullptr;
+    /// The credential store an API backend's key may come from, for
+    /// `models info` (the listing has its own, beside the config).
+    const secrets::CredentialStore* store = nullptr;
+};
+
 /// Builds the listing: every configured backend, plus every model on disk.
 ///
 /// **Both halves are needed and neither is enough.** A configured backend may
@@ -113,7 +129,8 @@ struct ModelRow {
                                                      const std::filesystem::path& models_dir = {},
                                                      const std::filesystem::path& config_path = {},
                                                      const secrets::EnvSnapshot* env = nullptr,
-                                                     const BusyProgress& progress = {});
+                                                     const BusyProgress& progress = {},
+                                                     const ProviderLens& providers = {});
 
 /// Renders rows as an aligned table. Empty input yields a single explanatory
 /// line, never a bare header with nothing under it.
@@ -149,7 +166,8 @@ struct ModelRow {
 /// converted from it, and whether the listing folds it.
 [[nodiscard]] std::string render_model_info(const harness::Config& config, std::string_view name,
                                             const BusyProgress& progress = {},
-                                            const std::filesystem::path& models_dir = {});
+                                            const std::filesystem::path& models_dir = {},
+                                            const ProviderLens& providers = {});
 
 /// The body of `apogee models status` — which backend each role resolves to,
 /// and whether that backend is actually configured.

@@ -415,6 +415,18 @@ public:
     virtual void register_provider(std::string name, std::shared_ptr<LLMProvider> provider) = 0;
     virtual void use_default_router() = 0;
 
+    /// Hears each turn a registered backend answered without throwing --
+    /// a chat, a stream or a completion, the backend's name (28c: the
+    /// provider cache's verified record). Plain data crossing up, so the
+    /// layer that installs it is never known to the one that calls it. One
+    /// observer; an empty one clears it. A registry that keeps no record
+    /// ignores it.
+    using TurnObserver = std::function<void(const std::string& backend)>;
+
+    virtual void observe_turns(TurnObserver observer) {
+        (void)observer;
+    }
+
 protected:
     ProviderRegistry() = default;
     ProviderRegistry(const ProviderRegistry&) = default;

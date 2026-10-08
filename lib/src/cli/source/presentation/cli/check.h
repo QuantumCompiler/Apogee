@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "backends/provider_status.h"
 #include "cli/command.h"
 #include "contracts/assets.h"
 #include "contracts/config.h"
@@ -108,6 +109,11 @@ struct CheckInputs {
     /// Asks whether a suite's consultable member bills per call (27f). Null
     /// asks a provider built from the config (`provider_metered_probe`).
     MeteredProbe metered;
+
+    /// What the Providers section sees of the filesystem (28c): whether a
+    /// vendor CLI is on PATH and its evidence files exist -- never a read,
+    /// never a spawn. Null is this machine's; a test hands its own.
+    const backends::ExistenceView* provider_view = nullptr;
 };
 
 /// Runs every check and returns the report. Pure with respect to the machine
@@ -129,6 +135,9 @@ struct CheckPassOptions {
     bool quiet = false;
     /// No ANSI colour in the report.
     bool no_color = false;
+    /// Scan the providers first (`--refresh-providers`, 28c): the explicit
+    /// scan `providers scan` runs, its cache then read by the report.
+    bool refresh_providers = false;
     /// Say the repairs that created something as one count rather than a line
     /// each. Recreating a whole layout -- what a reset does -- creates well
     /// over a hundred directories and bundled files, and a line apiece would

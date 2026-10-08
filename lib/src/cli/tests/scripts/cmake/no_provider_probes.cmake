@@ -32,6 +32,7 @@ endif()
 set(allowed
     "data/backends/provider_probe.cpp"
     "presentation/cli/providers_cmd.cpp"
+    "presentation/cli/check.cpp"
 )
 
 # Chat, execute, complete, serve, task run/resume, symphonies play and machine
@@ -52,6 +53,22 @@ set(hot_paths
 )
 set(entry_points "scan_host_providers" "scan_providers" "host_probe_runner")
 
+# Passive only (28c): nothing that detects, records or reports a provider ever
+# issues a turn -- no token is spent to verify on Apogee's initiative. These
+# files may not name a model call at all; the verified record is written by
+# the Harness's turn observer, after a turn the user's own command ran.
+set(passive
+    "data/backends/provider_table.cpp"
+    "data/backends/provider_cache.cpp"
+    "data/backends/provider_status.cpp"
+    "data/backends/provider_probe.cpp"
+    "presentation/cli/provider_offer.cpp"
+    "presentation/cli/providers_cmd.cpp"
+    "presentation/cli/check.cpp"
+    "presentation/cli/models.cpp"
+)
+set(turn_calls "[.]chat[(]" "stream_chat[(]" "[.]complete[(]" "agentloop::run[(]" "run_chat_turn")
+
 foreach(entry IN LISTS allowed)
     if(NOT entry MATCHES "[.]cpp$")
         message(FATAL_ERROR "no-provider-probes: ${entry} is a header; only .cpp files may include "
@@ -62,6 +79,7 @@ endforeach()
 set(offenders "")
 set(seen_prober FALSE)
 set(seen_hot "")
+set(seen_passive "")
 foreach(source IN LISTS sources)
     file(RELATIVE_PATH relative "${SOURCE_DIR}" "${source}")
     file(STRINGS "${source}" includes REGEX "#include \"backends/provider_probe[.]h\"")
@@ -72,6 +90,21 @@ foreach(source IN LISTS sources)
         if(NOT relative IN_LIST allowed)
             list(APPEND offenders "${relative} includes backends/provider_probe.h")
         endif()
+    endif()
+    if(relative IN_LIST passive)
+        list(APPEND seen_passive "${relative}")
+        file(STRINGS "${source}" passive_lines)
+        foreach(line IN LISTS passive_lines)
+            string(STRIP "${line}" stripped)
+            if(stripped MATCHES "^(//|/\\*|\\*)")
+                continue()
+            endif()
+            foreach(call IN LISTS turn_calls)
+                if(line MATCHES "${call}")
+                    list(APPEND offenders "${relative} issues a turn (${call}): ${stripped}")
+                endif()
+            endforeach()
+        endforeach()
     endif()
     if(relative IN_LIST hot_paths)
         list(APPEND seen_hot "${relative}")
@@ -94,6 +127,12 @@ if(NOT seen_prober)
     message(FATAL_ERROR "no-provider-probes: data/backends/provider_probe.cpp was not seen "
                         "including its header -- the prober moved; update this check with it")
 endif()
+foreach(quiet IN LISTS passive)
+    if(NOT quiet IN_LIST seen_passive)
+        message(FATAL_ERROR "no-provider-probes: ${quiet} not found -- a passive file moved; "
+                            "update this check with it")
+    endif()
+endforeach()
 foreach(hot IN LISTS hot_paths)
     if(NOT hot IN_LIST seen_hot)
         message(FATAL_ERROR "no-provider-probes: ${hot} not found -- a hot path moved; update "
@@ -104,9 +143,10 @@ endforeach()
 if(offenders)
     string(REPLACE ";" "\n  " pretty "${offenders}")
     message(FATAL_ERROR
-        "A provider probe is reachable from outside the explicit surfaces:\n  ${pretty}\n"
-        "Detection runs inside `check` or `providers scan` only; a startup path reads the cache "
-        "(backends/provider_cache.h). See backlog 28a and backends/provider_probe.h.")
+        "Provider detection broke one of its rules:\n  ${pretty}\n"
+        "Detection runs inside `check` or `providers scan` only, and a startup path reads the "
+        "cache (backends/provider_cache.h); nothing that detects or reports a provider issues a "
+        "turn -- verification is passive. See backlog 28a/28c and backends/provider_probe.h.")
 endif()
 
 message(STATUS "no-provider-probes check: ${source_count} files, the prober reachable only "
