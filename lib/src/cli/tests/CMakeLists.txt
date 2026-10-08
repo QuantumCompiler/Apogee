@@ -39,6 +39,7 @@ add_library(apogee_tests_infrastructure OBJECT
     support/terminal_model.cpp
     support/embedding_fixtures.h
     support/text_edits.h
+    support/hermetic_stdin.cpp
 )
 target_link_libraries(apogee_tests_infrastructure PRIVATE apogee_infrastructure Catch2::Catch2)
 
@@ -931,6 +932,17 @@ if(UNIX)
                 $<TARGET_FILE:apogee>
         )
         set_tests_properties(cli.busy_line PROPERTIES TIMEOUT 120)
+
+        # The unit suite from a terminal (2026-10-07): the files that drive the
+        # command tree in-process, with all three standard streams on a PTY,
+        # finish and pass exactly as on ctest's pipe -- no test waits on the
+        # keyboard, none is painted into.
+        add_test(NAME cli.unit_suite_under_a_tty
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_unit_suite_check.py"
+                $<TARGET_FILE:apogee_tests>
+        )
+        set_tests_properties(cli.unit_suite_under_a_tty PROPERTIES TIMEOUT 300)
 
         add_test(NAME cli.chat_typeahead_and_crash_safety
             COMMAND "${Python3_EXECUTABLE}"

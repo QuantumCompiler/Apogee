@@ -2,6 +2,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <iostream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -84,6 +86,20 @@ TEST_CASE("make_line_reader falls back to plain without a terminal", "[chat][rea
     REQUIRE(reader != nullptr);
     CHECK_FALSE(reader->interactive());
     CHECK(reader->read({}) == "piped");
+}
+
+TEST_CASE("a conversation fed through std::cin is what the reader reads", "[chat][reader]") {
+    // How the command tests drive a chat: std::cin given another buffer. That
+    // input is read, never the terminal behind it -- the editor is not built,
+    // with or without a terminal on the descriptors.
+    std::istringstream fed{"from the test\n"};
+    std::streambuf* const original = std::cin.rdbuf(fed.rdbuf());
+    const auto reader = apogee::commands::make_line_reader({}, std::cin);
+    const bool interactive = reader->interactive();
+    const std::optional<std::string> line = reader->read({});
+    std::cin.rdbuf(original);
+    CHECK_FALSE(interactive);
+    CHECK(line == "from the test");
 }
 
 TEST_CASE("the history path sits under APOGEE_HOME", "[chat][reader]") {

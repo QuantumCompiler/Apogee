@@ -617,6 +617,32 @@ Asked for directly (Taylor, 2026-09-23, with a Qwen3.5 transcript): "the formatt
 | `serve` | No frame *(for veto)* | Its retrieval has `rag_search`/`rag_result`; progress on `notice` would change that frame's meaning. |
 | Tokens | Not yet reported by any call site | Shown only when truly known. |
 
+### 2026-10-07 — The unit suite from a terminal: a fed or captured stream is a pipe
+
+**The bug.** Run from a developer's terminal, the unit binary stopped in three of eight shards at a `You:` prompt — found during the v0.1.5 group run, invisible to ctest and CI because their stdin is a pipe. The in-process chat tests feed `std::cin` a buffer of their own, but the line reader decided "interactive" from descriptors 0 and 1, so replxx engaged and read the real terminal. Behind those stalls sat seven more failures of the same kind on the output side: tests that capture `std::cout` and `std::cerr` by swapping their buffers were painted into — busy-line repaints and escape codes in the captured text, `ask_user` offered to a "terminal", a consult relayed to the live view — because every decoration decision asked descriptor 1 or 2, not the stream Apogee writes through. And past those, the agents wizard test ran `agents create` on the real stdin and prompted there.
+
+**What was built**
+
+- [x] **`platform::is_terminal` answers for the stream as Apogee uses it** (`platform/platform.h/.cpp`): the descriptor is a terminal AND `std::cin`/`std::cout`/`std::cerr` still has the buffer it was born with (captured at static initialization). One change at the seam all twenty-odd decisions already ask — the line reader, the decoration gates, the prompts, `read_hidden_line`, the typeahead guard — so a process that fed or captured a standard stream in-process is answered as a pipe. No production code swaps a standard stream's buffer, so a real run is unchanged.
+- [x] **`stdin_is_piped()` is that answer** (`cli/helpers.cpp`): its own copy of the original-buffer check (the 2026-09-19 fix for two tests that passed under ctest and failed at a terminal) folded into the platform's, so there is one definition.
+- [x] **The suite never reads the terminal it was started from** (`tests/support/hermetic_stdin.cpp`): a Catch2 listener gives `std::cin` an empty stream for the whole run, as a pipe that has ended. A test needing input still feeds its own buffer and puts this one back (swapping a buffer clears the stream's state, so one test's end of input never leaks into the next). Every in-process runner — some twenty-five copies across the test files — is covered at once, rather than each patched.
+- [x] **`cli.unit_suite_under_a_tty`** (`tests/scripts/py/pty_unit_suite_check.py`): the files that drive the command tree in-process (chat, the session core, suites, execute, the agents wizard, the line reader, the platform) run with all three standard streams on a pseudo-terminal, failing on a stall — named by the last test that finished — or on any failure a pipe does not show. About two seconds.
+- [x] **Tests**: a platform case (each standard stream, given another buffer, is not a terminal — deterministic with or without one), and a line-reader case (a conversation fed through `std::cin` is what is read, the editor never built).
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Where the fix lives | **`platform::is_terminal`**, not each caller or each test *(2026-10-07)* | The same mistake sat behind every failure — the descriptor asked where the stream was meant — and one seam answers it for every caller present and future. |
+| The tests' own stdin | **One listener for the run**, not a patch per in-process runner *(2026-10-07)* | Twenty-five runners; a new test written the old way is covered by construction. |
+| The guard | **A focused PTY run in ctest**, not the whole suite twice *(2026-10-07)* | The whole suite under a PTY is the verification (below); the focused files hold the regression in seconds. |
+
+**Guardrails, mutation-tested.** Two mutants against the PTY check — **2 caught**: without the listener it stalls in the line-reader tests; with `is_terminal` asking the descriptor alone it stalls at the suite chat's `You:`.
+
+**Verified.** All eight shards of the unit binary under pseudo-terminals: before, shards 5, 6 and 7 stalled (at `a chat under a suite that fits states it and proceeds`, `the first exchange titles the conversation, between turns` and `chat's whole surface is byte for byte the one from before the session core was shared`); after, every shard passes. `lib/scripts/cicd.sh --test`: **2,995 of 2,995 passed** (the one PDF case skipped by design), three of them new — the two unit cases and `cli.unit_suite_under_a_tty`. `make format-check` clean.
+
+**Not verified.** Windows (`pty` has no Windows equivalent; the platform change is the same code there, a buffer comparison before `_isatty`).
+
 ## Milestone H — `apogee chat`
 
 **Goal.** The richest v0.1.0 surface, and the one that proves the harness holds together over a conversation rather than a single turn: a persistent, resumable REPL where switching models mid-session is a lookup, not a reconstruction.

@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <iostream>
+#include <sstream>
 #include <string>
 #include <string_view>
 
@@ -81,4 +83,28 @@ TEST_CASE("local_date is the calendar day at the offset it reports", "[platform]
         CHECK(date.utc_offset_minutes >= -12 * 60);
         CHECK(date.utc_offset_minutes <= 14 * 60);
     }
+}
+
+TEST_CASE("a standard stream given another buffer is not a terminal", "[platform][terminal]") {
+    // What every in-process command test does to feed input and capture
+    // output: the stream's buffer swapped. Then it is answered as a pipe,
+    // whatever the descriptor is -- so a test run from a developer's terminal
+    // neither paints into the captured output nor waits on the real keyboard.
+    using apogee::platform::is_terminal;
+    using apogee::platform::StandardStream;
+    std::istringstream in;
+    std::ostringstream out;
+    std::ostringstream err;
+    std::streambuf* const old_in = std::cin.rdbuf(in.rdbuf());
+    std::streambuf* const old_out = std::cout.rdbuf(out.rdbuf());
+    std::streambuf* const old_err = std::cerr.rdbuf(err.rdbuf());
+    const bool in_terminal = is_terminal(StandardStream::In);
+    const bool out_terminal = is_terminal(StandardStream::Out);
+    const bool err_terminal = is_terminal(StandardStream::Err);
+    std::cin.rdbuf(old_in);
+    std::cout.rdbuf(old_out);
+    std::cerr.rdbuf(old_err);
+    CHECK_FALSE(in_terminal);
+    CHECK_FALSE(out_terminal);
+    CHECK_FALSE(err_terminal);
 }

@@ -113,7 +113,15 @@ struct LocalDate {
 /// The three standard streams, for terminal detection.
 enum class StandardStream : std::uint8_t { In, Out, Err };
 
-/// Whether `stream` is attached to a terminal.
+/// Whether `stream` is attached to a terminal, as Apogee reads and writes it:
+/// its descriptor is a terminal AND the C++ standard stream over it --
+/// `std::cin`, `std::cout`, `std::cerr` -- still uses the buffer it was born
+/// with. A process that has given that stream another buffer reads or writes
+/// the buffer, not the terminal, and is answered as a pipe would be: every
+/// in-process command test feeds input and captures output that way, and
+/// asking only the descriptor let a test run from a developer's terminal paint
+/// into its captured output and wait at a prompt on the real keyboard
+/// (2026-10-07).
 ///
 /// This is the gate for ALL decoration. A piped or redirected run must emit
 /// exactly the answer -- no spinner frames, no colour, no status lines -- or
