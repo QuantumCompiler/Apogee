@@ -189,6 +189,12 @@ apogee_add_module(backends
     backends/mlx_local.cpp
     backends/factory.h
     backends/factory.cpp
+    backends/provider_table.h
+    backends/provider_table.cpp
+    backends/provider_cache.h
+    backends/provider_cache.cpp
+    backends/provider_probe.h
+    backends/provider_probe.cpp
 )
 target_link_libraries(apogee_data_backends PUBLIC nlohmann_json::nlohmann_json)
 

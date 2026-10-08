@@ -56,7 +56,28 @@ set(forbidden
     "security find-generic-password"
 )
 
+# The one file that may NAME a vendor's login files (28a): the providers'
+# knowledge table, which lists them so the detector can test that they EXIST.
+# Only the path patterns are lifted there -- never the OAuth or credential-store
+# ones -- and in exchange the table and the probe that reads it are held to
+# having no way to read a file at all (below), so naming a path cannot become
+# opening it.
+set(knowledge_table "data/backends/provider_table.cpp")
+set(path_patterns "[.]claude/" "claude[.]json" "[.]gemini/" "google_accounts[.]json" "[.]codex/")
+set(existence_only "data/backends/provider_table.cpp" "data/backends/provider_probe.cpp")
+set(reading
+    "fstream"
+    "fopen"
+    "fread"
+    "istreambuf_iterator"
+    "getline"
+    "read_config_file"
+    "ReadFile"
+    "mmap"
+)
+
 set(offenders "")
+set(seen_existence_only "")
 foreach(source IN LISTS sources)
     file(RELATIVE_PATH relative "${SOURCE_DIR}" "${source}")
     file(STRINGS "${source}" lines)
@@ -69,6 +90,17 @@ foreach(source IN LISTS sources)
         # inside the config template, which is user-facing documentation that
         # lives as a string literal.
         string(STRIP "${line}" stripped)
+        # The detector's no-reading rule reads `#include` lines too: an
+        # `#include <fstream>` is the first sign of a reader.
+        if(relative IN_LIST existence_only AND NOT stripped MATCHES "^(//|/\\*|\\*)")
+            foreach(pattern IN LISTS reading)
+                if(line MATCHES "${pattern}")
+                    get_filename_component(name "${source}" NAME)
+                    list(APPEND offenders
+                        "${name}:${line_number}: ${stripped} (the detector tests existence only)")
+                endif()
+            endforeach()
+        endif()
         if(stripped MATCHES "^(//|/\\*|\\*|#)")
             continue()
         endif()
@@ -82,12 +114,26 @@ foreach(source IN LISTS sources)
             if(relative STREQUAL "data/secrets/store.h" AND pattern STREQUAL "credentials[.]json")
                 continue()
             endif()
+            if(relative STREQUAL knowledge_table AND pattern IN_LIST path_patterns)
+                continue()
+            endif()
             if(line MATCHES "${pattern}")
                 get_filename_component(name "${source}" NAME)
                 list(APPEND offenders "${name}:${line_number}: ${stripped}")
             endif()
         endforeach()
     endforeach()
+    if(relative IN_LIST existence_only)
+        list(APPEND seen_existence_only "${relative}")
+    endif()
+endforeach()
+
+# Not vacuous: a moved or renamed detector fails here rather than passing.
+foreach(required IN LISTS existence_only)
+    if(NOT required IN_LIST seen_existence_only)
+        message(FATAL_ERROR "no-vendor-credentials check: ${required} not found -- the detector "
+                            "moved; update the exemption with it")
+    endif()
 endforeach()
 
 if(offenders)

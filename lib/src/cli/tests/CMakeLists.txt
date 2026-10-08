@@ -88,6 +88,7 @@ add_library(apogee_tests_data OBJECT
     data/backends/native_tool_calls_test.cpp
     data/backends/model_profile_test.cpp
     data/backends/chat_template_test.cpp
+    data/backends/provider_probe_test.cpp
     data/embedstore/store_test.cpp
     data/embedstore/vector_test.cpp
     data/embedstore/fts_query_test.cpp
@@ -526,6 +527,14 @@ add_test(NAME cli.one_key_resolver
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/one_key_resolver.cmake"
 )
 
+# Provider probes run inside `check` and `providers scan` only, never on a
+# startup path (28a). See the file.
+add_test(NAME cli.no_provider_probes
+    COMMAND "${CMAKE_COMMAND}"
+        -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/no_provider_probes.cmake"
+)
+
 add_test(NAME cli.test_names
     COMMAND "${CMAKE_COMMAND}"
         -DTEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
@@ -655,6 +664,16 @@ if(UNIX)
             ${CMAKE_CURRENT_BINARY_DIR}/execute-e2e
     )
     set_tests_properties(cli.execute_lifecycle PROPERTIES TIMEOUT 120)
+
+    # The provider prober's other half (28a): on the real binary, with fake
+    # vendor CLIs on PATH that log being run, complete, chat and machine mode
+    # run none of them and write no provider cache.
+    add_test(NAME cli.no_provider_probes_at_startup
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/no_provider_probes_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/no-provider-probes
+    )
+    set_tests_properties(cli.no_provider_probes_at_startup PROPERTIES TIMEOUT 60)
 
     add_test(NAME cli.complete_opens_no_listening_socket
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/no_listen_check.sh"
