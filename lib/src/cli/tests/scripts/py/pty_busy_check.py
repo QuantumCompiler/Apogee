@@ -270,9 +270,15 @@ def main():
         with open(prompt, "w") as out:
             out.write("You are slow.\n")
         schema = os.path.join(work, "slow-schema.json")
-        config = os.path.join(env["APOGEE_HOME"], "config", "config.yaml")
-        with open(config, "a") as out:
-            out.write(f"\nagents:\n  slow:\n    prompts: [{prompt}]\n    schemas: [{schema}]\n")
+        config = os.path.join(env["APOGEE_HOME"], "config", "config.json")
+        with open(config) as source:
+            text = source.read()
+        # The JSONC config (28i): the section first, under the opening brace.
+        at = text.index("\n{\n") + 3
+        agents = ('  "agents": {"slow": {"prompts": [%s], "schemas": [%s]}},\n'
+                  % (json.dumps(prompt), json.dumps(schema)))
+        with open(config, "w") as out:
+            out.write(text[:at] + agents + text[at:])
         os.mkfifo(schema)
         schema_text = b'{"type": "object", "properties": {}}'
         raw, _, _, _ = run(binary, ["check"], env, True, True,

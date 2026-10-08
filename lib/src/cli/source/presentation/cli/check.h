@@ -87,6 +87,13 @@ struct CheckInputs {
     harness::Config config;
     std::string config_error;
     bool config_missing = false;
+    /// The file is the older YAML the compat read serves (28i): the Config
+    /// row names `config migrate`.
+    bool config_legacy = false;
+    /// The options this release's starter config has that the file does not
+    /// mention, as dotted paths (28i): the Config row counts them and names
+    /// `config upgrade`. Empty when the file is current, or YAML.
+    std::vector<std::string> config_missing_options;
 
     /// Path of the running binary, for the version and quarantine rows. Empty
     /// skips those.

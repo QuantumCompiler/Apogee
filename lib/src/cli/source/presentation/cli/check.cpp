@@ -33,7 +33,10 @@
 #include "cli/models_pull.h"
 #include "cli/provider_offer.h"
 #include "contracts/assets.h"
+#include "contracts/config_edit.h"
+#include "contracts/config_migrate.h"
 #include "contracts/host.h"
+#include "contracts/jsonc.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "embedstore/ingest.h"
@@ -382,19 +385,36 @@ void check_suites(CheckReport& report, const harness::Config& config, const back
 }
 
 void check_config(CheckReport& report, const CheckInputs& inputs) {
+    const std::string file = inputs.config_path.filename().string();
     if (inputs.config_missing) {
         // A fresh install has no config yet. That is a state with an obvious
         // fix, not a broken installation.
-        add(report, Status::Warn, "Config", "config.yaml",
-            "not found at " + inputs.config_path.string(), "apogee config init");
+        add(report, Status::Warn, "Config", file, "not found at " + inputs.config_path.string(),
+            "apogee config init");
         return;
     }
     if (!inputs.config_error.empty()) {
-        add(report, Status::Fail, "Config", "config.yaml", inputs.config_error);
+        add(report, Status::Fail, "Config", file, inputs.config_error);
         return;
     }
 
-    add(report, Status::Ok, "Config", "config.yaml", "parses cleanly");
+    if (inputs.config_legacy) {
+        // The compat read (28i): healthy, and on its way out.
+        add(report, Status::Ok, "Config", file,
+            "parses cleanly -- the older YAML format, still read; migrate converts it to " +
+                std::string{harness::kConfigFileName} + ", every comment kept",
+            "apogee config migrate");
+    } else if (const std::size_t missing = inputs.config_missing_options.size(); missing > 0) {
+        // Behind the template is healthy: the absent options have their
+        // defaults. Said, so a newer release's options can be found.
+        add(report, Status::Ok, "Config", file,
+            "parses cleanly -- " + std::to_string(missing) +
+                (missing == 1 ? " option" : " options") +
+                " from this release's starter config not in the file (their defaults apply)",
+            "apogee config upgrade");
+    } else {
+        add(report, Status::Ok, "Config", file, "parses cleanly");
+    }
 
     const harness::Config& config = inputs.config;
     if (config.backends.empty()) {
@@ -2061,7 +2081,7 @@ std::vector<std::string> apply_fixes(const CheckInputs& inputs) {
     // was still correct. Two implementations is the bug, even when both agree.
     //
     // Config content is still untouched: seeding creates directories and sets
-    // modes, and never opens config.yaml. Repairing the local install is a
+    // modes, and never opens the config. Repairing the local install is a
     // repair; guessing what a dangling model_path meant is not.
     const harness::SeedResult seeded = harness::seed_data_directory(inputs.home);
 
@@ -2265,7 +2285,19 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
 
     cmd->callback([&context, flags, format]() {
         CheckInputs inputs;
-        inputs.config_path = harness::resolve_config_path(context.config_path);
+        try {
+            inputs.config_path = harness::resolve_config_path(context.config_path);
+        } catch (const std::exception& e) {
+            // Both formats side by side (28i): the Config row says so; the
+            // rest of the install is still worth a look.
+            try {
+                inputs.config_path = harness::config_dir() / harness::kConfigFileName;
+            } catch (const std::exception&) {
+                std::cerr << "apogee check: " << e.what() << "\n";
+                throw CLI::RuntimeError(1);
+            }
+            inputs.config_error = e.what();
+        }
 
         try {
             inputs.home = harness::apogee_home();
@@ -2300,11 +2332,16 @@ bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options) {
     }
 
     std::error_code exists_code;
-    if (!std::filesystem::exists(inputs.config_path, exists_code)) {
+    if (!inputs.config_error.empty()) {
+        // Refused before it was read: nothing to load.
+    } else if (!std::filesystem::exists(inputs.config_path, exists_code)) {
         inputs.config_missing = true;
     } else {
         try {
-            inputs.config = harness::load_config(inputs.config_path);
+            const std::string content = harness::read_config_file(inputs.config_path);
+            inputs.config = harness::parse_config(content, inputs.config_path.string());
+            inputs.config_legacy = !harness::jsonc::looks_like_jsonc(content);
+            inputs.config_missing_options = harness::missing_template_options(content);
         } catch (const harness::ConfigError& e) {
             inputs.config_error = e.what();
         }

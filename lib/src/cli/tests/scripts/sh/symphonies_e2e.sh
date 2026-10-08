@@ -55,6 +55,9 @@ script carrier '{"text": "{\"topic\": {{last_user:json}}, \"people\": [], \"plac
 
 mkdir -p "$APOGEE_HOME/config"
 CONFIG="$APOGEE_HOME/config/config.yaml"
+# A YAML config written by hand, named as the file to read (28i): the compat
+# read under test, and no notice -- the user named the file.
+export APOGEE_CONFIG="$CONFIG"
 {
     echo "# PRESERVE-ME: a comment the editor keeps"
     echo "backends:"

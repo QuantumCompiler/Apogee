@@ -245,7 +245,7 @@ Authorization: Bearer <token>
 ```
 
 The token is a per-install secret generated at the first `apogee serve` as a
-sibling of `config.yaml` (`~/.apogee/config/admin-token`, mode `0600`). Read it,
+sibling of `config.json` (`~/.apogee/config/admin-token`, mode `0600`). Read it,
 generating it if needed, with:
 
 ```bash
@@ -1305,7 +1305,7 @@ forwarded header. A vendor-CLI type (`claude-cli`, `codex-cli`, `gemini-cli`,
 and Apogee never stores, reads or proxies their credentials.
 
 The stored key is used by every backend of that type that has no `api_key` of
-its own in `config.yaml`; a configured `api_key` (literal or `${ENV}`) still
+its own in `config.json`; a configured `api_key` (literal or `${ENV}`) still
 wins, and the ambient `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` /
 `GEMINI_API_KEY` (then `GOOGLE_API_KEY`) is the last resort. Backends read
 their key when they are built, so a stored key reaches a running server after a

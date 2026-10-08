@@ -48,7 +48,7 @@ fresh_home() {
     "$APOGEE_BIN" config init >/dev/null || fail "config init"
     "$APOGEE_BIN" config add-backend mock --type mock --model mock-1 >/dev/null || fail "add mock"
     "$APOGEE_BIN" config set-default mock >/dev/null || fail "set-default"
-    CONFIG="$APOGEE_HOME/config/config.yaml"
+    CONFIG="$APOGEE_HOME/config/config.json"
 }
 
 # --- a scan registers nothing --------------------------------------------------
@@ -86,7 +86,7 @@ grep -q '^registered claude (claude-cli)$' "$WORK_DIR/reg.txt" || fail "claude n
 grep -q '^registered codex (codex-cli)$' "$WORK_DIR/reg.txt" || fail "codex not registered"
 grep -q 'models.default' "$WORK_DIR/reg.txt" && fail "the default was moved off mock"
 "$APOGEE_BIN" config get backends.claude.type </dev/null 2>/dev/null | grep -q claude-cli \
-    || grep -q 'type: claude-cli' "$CONFIG" || fail "no claude-cli entry in the config"
+    || grep -q '"type": "claude-cli"' "$CONFIG" || fail "no claude-cli entry in the config"
 head -1 "$CONFIG" | cmp -s - <(head -1 "$WORK_DIR/before.yaml") || fail "the config's head changed"
 cp "$CONFIG" "$WORK_DIR/registered.yaml"
 "$APOGEE_BIN" providers scan --register </dev/null >"$WORK_DIR/again.txt" 2>&1 || fail "second register failed"
@@ -104,8 +104,8 @@ cp "$CONFIG" "$WORK_DIR/taken.yaml"
 grep -q "^claude: not registered -- a backend named 'claude' already exists (mock)" "$WORK_DIR/taken.txt" \
     || fail "the taken name was not said: $(cat "$WORK_DIR/taken.txt")"
 grep -q '^registered codex (codex-cli)$' "$WORK_DIR/taken.txt" || fail "codex not registered beside it"
-grep -q 'claude-2\|claude_2\|claude-cli:' "$CONFIG" && fail "a suffixed name was written"
-grep -A2 '^  claude:' "$CONFIG" | grep -q 'type: mock' || fail "the existing claude entry was touched"
+grep -q 'claude-2\|claude_2\|"claude-cli": {' "$CONFIG" && fail "a suffixed name was written"
+grep -A2 '^    "claude": {' "$CONFIG" | grep -q '"type": "mock"' || fail "the existing claude entry was touched"
 
 # --- no config: a scan still reads, --register refuses ------------------------
 export APOGEE_HOME="$WORK_DIR/none"
@@ -113,6 +113,7 @@ export APOGEE_HOME="$WORK_DIR/none"
 grep -q "config init" "$WORK_DIR/none.txt" || fail "no pointer to config init"
 "$APOGEE_BIN" providers scan --register </dev/null >"$WORK_DIR/none-reg.txt" 2>&1 \
     && fail "--register without a config succeeded"
-[ -e "$APOGEE_HOME/config/config.yaml" ] && fail "--register created a config"
+[ -e "$APOGEE_HOME/config/config.json" ] && fail "--register created a config"
+[ -e "$APOGEE_HOME/config/config.yaml" ] && fail "--register created a YAML config"
 
 echo "providers: scan, register, idempotence, a taken name and quiet surfaces - OK"

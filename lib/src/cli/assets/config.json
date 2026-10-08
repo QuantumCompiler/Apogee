@@ -1,31 +1,4 @@
-#include <filesystem>
-#include <fstream>
-#include <string_view>
-
-#include "contracts/config.h"
-#include "contracts/config_edit.h"
-
-// The starter config, embedded.
-//
-// C++20 has no #embed (that is C++23, and the standard is pinned at 20 for
-// five-target reasons -- see CLAUDE.md -> Stack & environment), so the bytes
-// live in a raw string literal. They are GENERATED from
-// lib/src/cli/assets/config.json, and a test asserts the two are byte-identical
-// so the shipped sample and `apogee config init` can never drift apart. If you
-// edit one, regenerate the other -- CI fails otherwise.
-//
-// JSONC since 28i: the comments are the teaching, and the editor keeps them.
-// The template is also the one source of truth `config upgrade` and `check`
-// compare a user's file against -- every key written here (not in a comment)
-// is an option an older file can be missing.
-//
-// The drift test guards exactly this class of bug: a documented option that
-// `config init` has quietly stopped writing.
-
-namespace apogee::harness {
-namespace {
-
-constexpr std::string_view kConfigTemplate = R"APOGEE(// Apogee configuration.
+// Apogee configuration.
 //
 // This file ships with everything commented out on purpose: a fresh install has
 // no API keys and no models, and it must still load and pass `apogee check`.
@@ -709,20 +682,3 @@ constexpr std::string_view kConfigTemplate = R"APOGEE(// Apogee configuration.
   //   }
   // }
 }
-)APOGEE";
-
-}  // namespace
-
-std::string_view config_template() noexcept {
-    return kConfigTemplate;
-}
-
-void save_config_template(const std::filesystem::path& path, bool force) {
-    if (!force && std::filesystem::exists(path)) {
-        throw ConfigEditError(path.string() +
-                              ": config already exists; pass --force to overwrite it");
-    }
-    write_file_atomically(path, config_template());
-}
-
-}  // namespace apogee::harness

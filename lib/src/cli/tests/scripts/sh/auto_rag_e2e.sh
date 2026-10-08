@@ -31,7 +31,10 @@ fail() { echo "auto_rag: $*" >&2; exit 1; }
 "$APOGEE_BIN" config add-backend mock --type mock --model mock-1 >/dev/null || fail "add-backend"
 echo "the zarquon protocol requires seventeen widgets" > "$WORK_DIR/corpus/notes.md"
 "$APOGEE_BIN" embed ingest notes "$WORK_DIR/corpus" >/dev/null || fail "ingest"
-printf '\nauto_rag: notes\n' >> "$WORK_DIR/config/config.yaml"
+CONFIG="$WORK_DIR/config/config.json"
+# The key, first in the JSONC config (28i): a line of its own under the brace.
+awk '{ print } /^\{$/ && !done { print "  \"auto_rag\": \"notes\","; done = 1 }' "$CONFIG" \
+    > "$CONFIG.new" && mv "$CONFIG.new" "$CONFIG" || fail "could not set auto_rag"
 
 QUESTION="what does the zarquon protocol require?"
 
@@ -66,8 +69,7 @@ fi
 # The feeder waits two seconds after the first question -- a mock turn takes
 # milliseconds -- then switches the key off in the file, then asks again.
 # A chat that read auto_rag once at startup would announce it on both turns.
-CONFIG="$WORK_DIR/config/config.yaml"
-TWO_TURNS=$( { echo "$QUESTION"; sleep 2; sed -i.bak 's/^auto_rag: notes$/auto_rag: ""/' "$CONFIG"; echo "$QUESTION"; } \
+TWO_TURNS=$( { echo "$QUESTION"; sleep 2; sed -i.bak 's/^  "auto_rag": "notes",$/  "auto_rag": "",/' "$CONFIG"; echo "$QUESTION"; } \
     | "$APOGEE_BIN" chat -m mock 2>&1 ) || fail "two-turn chat failed: $TWO_TURNS"
 ANNOUNCED=$(echo "$TWO_TURNS" | grep -c "(auto_rag)")
 [ "$ANNOUNCED" -eq 1 ] || fail "expected auto_rag on exactly one of two turns, saw $ANNOUNCED:

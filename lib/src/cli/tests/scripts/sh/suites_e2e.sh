@@ -45,29 +45,39 @@ for name in root helper fastroot embedder; do
         --model-path "$WORK_DIR/scripts/$name.json" >/dev/null || fail "add-backend $name"
 done
 "$APOGEE_BIN" config set-default root >/dev/null || fail "set-default"
-CONFIG="$APOGEE_HOME/config/config.yaml"
-BEFORE=$(cat "$CONFIG")
+CONFIG="$APOGEE_HOME/config/config.json"
+cp "$CONFIG" "$WORK_DIR/before.json"
 
 # --- the config unit, through the one editor ---------------------------------
 "$APOGEE_BIN" config add-suite research --chat root --utility helper --embedding embedder \
     >/dev/null || fail "add-suite research"
 "$APOGEE_BIN" config add-suite fast --chat fastroot >/dev/null || fail "add-suite fast"
 # Exactly the old bytes and the new block: nothing else in the file moved.
-AFTER=$(cat "$CONFIG")
-EXPECTED="$BEFORE
-
-suites:
-  research:
-    members:
-      chat: root
-      embedding: embedder
-      utility: helper
-
-  fast:
-    members:
-      chat: fastroot"
-[ "$AFTER" = "$EXPECTED" ] || fail "add-suite wrote more than its block:
-$AFTER"
+python3 - "$WORK_DIR/before.json" "$CONFIG" <<'PY' || fail "add-suite wrote more than its block: $(cat "$CONFIG")"
+import sys
+before, after = (open(path).read() for path in sys.argv[1:3])
+prefix = 0
+while prefix < len(before) and before[prefix] == after[prefix]:
+    prefix += 1
+assert after.endswith(before[prefix:])
+added = after[prefix:len(after) - (len(before) - prefix)]
+expected = """,
+  "suites": {
+    "research": {
+      "members": {
+        "chat": "root",
+        "embedding": "embedder",
+        "utility": "helper"
+      }
+    },
+    "fast": {
+      "members": {
+        "chat": "fastroot"
+      }
+    }
+  }"""
+sys.exit(0 if added == expected else 1)
+PY
 "$APOGEE_BIN" check >"$WORK_DIR/check.txt" 2>&1
 grep -q "suite: research" "$WORK_DIR/check.txt" || fail "check has no row for the suite"
 
@@ -254,7 +264,7 @@ grep -q "consultable utility: 'paid' is billed per call" "$WORK_DIR/billed.txt" 
 [ "$(cat "$CONFIG")" = "$BEFORE_CONSULT" ] || fail "a refused consult edit changed the file"
 "$APOGEE_BIN" config add-suite consult --chat asker --utility oracle --consultable utility \
     >/dev/null || fail "add-suite consult"
-grep -q "    consultable: \[utility\]" "$CONFIG" || fail "consultable was not written: $(cat "$CONFIG")"
+grep -q '^      "consultable": \["utility"\]' "$CONFIG" || fail "consultable was not written: $(cat "$CONFIG")"
 
 echo "what is the codeword?" | "$APOGEE_BIN" chat --suite consult --tools >"$WORK_DIR/consult.txt" 2>&1 \
     || fail "the consulting chat failed: $(cat "$WORK_DIR/consult.txt")"
@@ -330,7 +340,7 @@ grep -q "validate: 'paid' is billed per call" "$WORK_DIR/paidcheck.txt" \
 # --validate is repeatable.
 "$APOGEE_BIN" config add-suite checked --chat deleter --utility verifier \
     --validate tool_args=on --validate extraction=off >/dev/null || fail "add-suite checked"
-grep -q "^    validate:$" "$CONFIG" || fail "validate was not written: $(cat "$CONFIG")"
+grep -q '^      "validate": {$' "$CONFIG" || fail "validate was not written: $(cat "$CONFIG")"
 "$APOGEE_BIN" config get suites.checked.validate >"$WORK_DIR/validate-get.txt" 2>&1 \
     || fail "config get validate"
 grep -qx "verifier utility (default), tool_args on, extraction off, answers request (default)" \

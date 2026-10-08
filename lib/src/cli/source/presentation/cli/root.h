@@ -58,6 +58,13 @@ private:
     /// the root and so must come after it.
     void apply_root_flags();
 
+    /// The compat read's one line (28i): a run reading the older
+    /// `config.yaml` by default says so on stderr, naming `config migrate`.
+    /// Not when `--config` or `--custom` named the file, not for a hidden
+    /// protocol, and not for `check` (its Config row says it) or the config
+    /// verbs that are the answer.
+    void notice_legacy_config() const;
+
     // Declaration order is destruction order reversed: app_ holds callbacks
     // that reference context_, custom_config_ and the commands owned by
     // registry_, so it must be declared last and therefore destroyed first.

@@ -12,6 +12,7 @@
 #include "contracts/config.h"
 #include "contracts/layout.h"
 #include "support/env_guard.h"
+#include "support/text_edits.h"
 
 /// The agent scaffold core: files, the entry, defaults, and every refusal.
 namespace {
@@ -67,7 +68,8 @@ TEST_CASE("create writes a prompt and a schema beside the config and appends the
 
     // The template plus exactly one entry, with the defaults the item fixes:
     // relative paths, read-only, save_subdir = the name.
-    CHECK(tree.bytes().starts_with(before));
+    // Everything the template said, kept in place around the one entry.
+    CHECK(apogee::testing::inserted(before, tree.bytes()).has_value());
     const apogee::harness::Config config = apogee::harness::load_config(tree.config);
     const apogee::harness::AgentConfig* entry = config.find_agent("code-reviewer");
     REQUIRE(entry != nullptr);

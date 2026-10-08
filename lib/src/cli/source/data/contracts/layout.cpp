@@ -21,7 +21,7 @@ constexpr std::array<LayoutEntry, 17> kDirectories{{
     // created it as a special case, `check --fix` enumerated the rows and did
     // not, and the two install paths disagreed by one directory. It is private
     // because a config may carry an inline API key.
-    {"config", "config.yaml and anything else the config engine owns", true, true},
+    {"config", "config.json and anything else the config engine owns", true, true},
     {"logs", "operational log, one file per day", false, true},
     {"sessions", "persisted chat transcripts", true, true},
     // As private as the chats they belong to: an attachment's text is

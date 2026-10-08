@@ -150,17 +150,17 @@ grep -q 'api_key' "$WORK_DIR/admin-list.json" && ! grep -q '"api_key":' "$WORK_D
 
 # An HTTP add-backend the CLI then reads back -- and the file it wrote is the
 # one the CLI would have written.
-cp "$WORK_DIR/config/config.yaml" "$WORK_DIR/before.yaml"
+cp "$WORK_DIR/config/config.json" "$WORK_DIR/before.json"
 CODE="$(curl -s -o "$WORK_DIR/added.json" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" \
     -H 'Content-Type: application/json' \
     -d '{"name":"second","type":"mock","model":"mock-2"}' "$BASE/v1/admin/backends")"
 [ "$CODE" = "201" ] || fail "add-backend over HTTP failed (got $CODE): $(cat "$WORK_DIR/added.json")"
 grep -q '"restart_required":true' "$WORK_DIR/added.json" || fail "a new backend did not report restart_required"
 [ "$("$APOGEE_BIN" config get backends.second.type </dev/null)" = "mock" ] || fail "the CLI does not see the backend added over HTTP"
-cp "$WORK_DIR/config/config.yaml" "$WORK_DIR/http.yaml"
-cp "$WORK_DIR/before.yaml" "$WORK_DIR/config/config.yaml"
+cp "$WORK_DIR/config/config.json" "$WORK_DIR/http.json"
+cp "$WORK_DIR/before.json" "$WORK_DIR/config/config.json"
 "$APOGEE_BIN" config add-backend second --type mock --model mock-2 >/dev/null </dev/null || fail "CLI add-backend"
-cmp -s "$WORK_DIR/config/config.yaml" "$WORK_DIR/http.yaml" || fail "the HTTP edit and the CLI edit produced different bytes"
+cmp -s "$WORK_DIR/config/config.json" "$WORK_DIR/http.json" || fail "the HTTP edit and the CLI edit produced different bytes"
 
 # The lifecycle stream: a session minted over the public plane shows up on it.
 curl -s -N --max-time 3 -H "Authorization: Bearer $TOKEN" "$BASE/v1/admin/events" >"$WORK_DIR/events.txt" 2>/dev/null &
@@ -205,7 +205,7 @@ CODE="$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Bear
 [ "$CODE" = "404" ] || fail "clearing an empty slot was not a 404 (got $CODE)"
 # The secret is in exactly one file. Nothing else that was written mentions it.
 grep -q "$SECRET" "$WORK_DIR/config/credentials.json" || fail "the store does not hold the key"
-for f in "$WORK_DIR"/*.txt "$WORK_DIR"/*.json "$WORK_DIR"/serve.err "$WORK_DIR"/config/config.yaml "$WORK_DIR"/config/admin-token; do
+for f in "$WORK_DIR"/*.txt "$WORK_DIR"/*.json "$WORK_DIR"/serve.err "$WORK_DIR"/config/config.json "$WORK_DIR"/config/admin-token; do
     case "$f" in */credentials.json) continue ;; esac
     [ -f "$f" ] || continue
     grep -q "LEAKPROBE" "$f" && fail "the secret leaked into $f"

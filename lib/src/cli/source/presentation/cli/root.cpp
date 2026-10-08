@@ -55,7 +55,7 @@ RootCommand::RootCommand(CommandRegistry registry)
     // is reported by the config engine, whose message names the fix ("run
     // 'apogee config init'") rather than CLI11's generic one.
     config_option_ = app_->add_option("--config", context_.config_path,
-                                      "Path to the config file (default: config/config.yaml in "
+                                      "Path to the config file (default: config/config.json in "
                                       "the data directory). Names a file only -- the data "
                                       "directory stays put; --custom names both")
                          ->type_name(kPathValue)
@@ -158,6 +158,33 @@ void RootCommand::apply_root_flags() {
     if (version_option_->count() > 0) {
         throw CLI::CallForVersion(version_report(context_), 0);
     }
+    notice_legacy_config();
+}
+
+void RootCommand::notice_legacy_config() const {
+    if (config_option_->count() > 0 || custom_option_->count() > 0) {
+        return;
+    }
+    const std::vector<CLI::App*> chosen = app_->get_subcommands();
+    if (chosen.empty() || chosen.front()->get_group().empty() ||
+        chosen.front()->get_name() == "check") {
+        return;
+    }
+    if (chosen.front()->get_name() == "config") {
+        const std::vector<CLI::App*> verbs = chosen.front()->get_subcommands();
+        if (!verbs.empty() &&
+            (verbs.front()->get_name() == "migrate" || verbs.front()->get_name() == "init")) {
+            return;
+        }
+    }
+    const harness::RootResolution resolved = harness::current_root();
+    if (!resolved.ok() || !harness::is_legacy_config_path(resolved.config)) {
+        return;
+    }
+    std::cerr << "apogee: " << resolved.config.string()
+              << " is in the older YAML format and still loads -- 'apogee config migrate' "
+                 "converts it to "
+              << harness::kConfigFileName << "\n";
 }
 
 namespace {

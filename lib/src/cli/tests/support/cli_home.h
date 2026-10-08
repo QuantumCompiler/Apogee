@@ -15,8 +15,9 @@ namespace apogee::testing {
 /// the binary.
 class CliHome {
 public:
-    /// `config` is the config file's text.
-    explicit CliHome(const std::string& config);
+    /// `config` is the config file's text, at `config/<file>`: the older
+    /// `config.yaml` unless a test names the layout's `config.json` (28i).
+    explicit CliHome(const std::string& config, std::string file = "config.yaml");
 
     [[nodiscard]] const std::filesystem::path& home() const noexcept {
         return root_.path();
@@ -37,7 +38,16 @@ public:
     /// machine mode's events).
     int run(const std::vector<std::string>& args, std::string* out, std::string* err) const;
 
+    /// The same with no `--config`: the run finds its config the way an
+    /// install does -- `config/config.json`, or the `config.yaml` an older
+    /// install holds (28i).
+    int run_default(const std::vector<std::string>& args, std::string* out, std::string* err) const;
+
 private:
+    int run_with(const std::vector<std::string>& args, bool named, std::string* out,
+                 std::string* err) const;
+
+    std::string file_;
     TempDir root_{"cli-home-" + std::to_string(std::random_device{}())};
     EnvGuard guard_{"APOGEE_HOME", root_.path().string()};
 };

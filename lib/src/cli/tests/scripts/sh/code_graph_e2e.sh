@@ -45,7 +45,7 @@ printf 'def vendored():\n    pass\n' > "$SRC_ROOT/src/third_party/dep/dep.py"
 
 "$APOGEE_BIN" config init >/dev/null || fail "config init"
 "$APOGEE_BIN" check --fix >/dev/null 2>&1 || fail "check --fix"
-CONFIG="$APOGEE_HOME/config/config.yaml"
+CONFIG="$APOGEE_HOME/config/config.json"
 # Zero backends: the template configures none.
 if "$APOGEE_BIN" config get backends </dev/null 2>/dev/null | grep -q "type:"; then
     fail "the sandbox has a backend configured"
@@ -68,7 +68,7 @@ grep -q "Files used:       4 (python 4) -- 4 parsed, 0 unchanged" "$WORK_DIR/bui
 grep -q "unsupported language (.lua): 1" "$WORK_DIR/build.txt" || fail "the Lua file was not counted: $(cat "$WORK_DIR/build.txt")"
 grep -q "src/tool.lua" "$WORK_DIR/build.txt" || fail "the Lua file was not named: $(cat "$WORK_DIR/build.txt")"
 grep -q "Excluded:         third_party/ (1 file(s)" "$WORK_DIR/build.txt" || fail "the vendored directory was not left out: $(cat "$WORK_DIR/build.txt")"
-grep -q "sources:" "$CONFIG" || fail "the config has no sources: entry"
+grep -q '"sources":' "$CONFIG" || fail "the config has no sources entry"
 [ -f "$APOGEE_HOME/embeddings/graphs/code.db" ] || fail "no graph database"
 
 # --- stats: the origin split ----------------------------------------------------

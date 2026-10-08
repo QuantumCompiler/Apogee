@@ -18,6 +18,12 @@ apogee_add_module(contracts
     contracts/config_template.cpp
     contracts/config_edit.h
     contracts/config_edit.cpp
+    contracts/config_migrate.h
+    contracts/config_migrate.cpp
+    contracts/config_yaml.h
+    contracts/config_yaml.cpp
+    contracts/jsonc.h
+    contracts/jsonc.cpp
     contracts/symphony_walk.h
     contracts/symphony_walk.cpp
     contracts/host.h

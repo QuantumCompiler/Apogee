@@ -135,6 +135,12 @@ const std::map<std::string, Classification>& table() {
         {"chats delete", backfill("sessions: transcripts on disk")},
         // --- carve-outs: host-local by nature ---------------------------------
         {"config init", carve_out("the server cannot exist without a config to start from")},
+        {"config migrate",
+         carve_out("a file-lifecycle act on the config's format, not a value edit -- the "
+                   "parity law governs edits through the shared editor (28i)")},
+        {"config upgrade",
+         carve_out("a file-lifecycle act -- the starter config's new options carried into the "
+                   "file on the user's word, never a value a client sets (28i)")},
         {"check", carve_out("--fix repairs the local install; host-local by nature")},
         {"providers scan",
          carve_out("detects the vendor CLIs and keys of the host it runs on; host-local by nature, "

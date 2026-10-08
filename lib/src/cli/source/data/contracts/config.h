@@ -1216,8 +1216,8 @@ struct SuiteBackend {
 
 /// The starter config shipped by `apogee config init`, as bytes.
 ///
-/// The checked-in sample at `lib/src/cli/assets/config.yaml` must byte-match
-/// this exactly; a test enforces it, so the two can never drift.
+/// JSONC (28i). The checked-in sample at `lib/src/cli/assets/config.json` must
+/// byte-match this exactly; a test enforces it, so the two can never drift.
 [[nodiscard]] std::string_view config_template() noexcept;
 
 /// Writes config_template() to `path`, creating parent directories.

@@ -12,6 +12,7 @@
 #include "contracts/config.h"
 #include "contracts/layout.h"
 #include "support/env_guard.h"
+#include "support/text_edits.h"
 
 /// The scaffold core: files, the entry, register-only, and every refusal.
 namespace {
@@ -69,7 +70,8 @@ TEST_CASE("create writes a runnable Python server and registers it beside the co
     REQUIRE(entry != nullptr);
     CHECK(entry->command == (result.directory / "server.py").string());
     CHECK(entry->enabled);
-    CHECK(tree.bytes().starts_with(before));
+    // Everything the template said, kept in place around the one entry.
+    CHECK(apogee::testing::inserted(before, tree.bytes()).has_value());
 
     // A second create is refused without force, and replaces with it.
     CHECK_THROWS_AS(create_mcp_server(tree.config, spec), std::runtime_error);

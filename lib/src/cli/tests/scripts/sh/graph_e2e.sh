@@ -57,7 +57,7 @@ JSON
 "$APOGEE_BIN" config add-backend summarizer --type mock --model-path "$WORK_DIR/summarizer.json" >/dev/null || fail "add-backend summarizer"
 "$APOGEE_BIN" config add-backend paid --type anthropic --api-key sk-ant-test >/dev/null || fail "add-backend paid"
 "$APOGEE_BIN" config set-default echo >/dev/null || fail "set-default"
-CONFIG="$APOGEE_HOME/config/config.yaml"
+CONFIG="$APOGEE_HOME/config/config.json"
 
 "$APOGEE_BIN" embed ingest notes "$WORK_DIR/docs" </dev/null >"$WORK_DIR/ingest.txt" 2>&1 || fail "ingest: $(cat "$WORK_DIR/ingest.txt")"
 cp "$CONFIG" "$WORK_DIR/config.before"
@@ -90,8 +90,16 @@ grep -q "^\[graph\] extracting atlas.md (file 1/2, chunk 1/2)" "$WORK_DIR/build.
 if grep -q "$(printf '\033')" "$WORK_DIR/build.txt" "$WORK_DIR/build.err"; then fail "a piped build carries escape bytes"; fi
 grep -q "Files extracted:   2 of 2 planned" "$WORK_DIR/build.txt" || fail "not every file extracted: $(cat "$WORK_DIR/build.txt")"
 grep -q "graph.enabled set on 'notes'" "$WORK_DIR/build.txt" || fail "graph.enabled was not set: $(cat "$WORK_DIR/build.txt")"
-grep -q "^      enabled: true" "$CONFIG" || fail "the config does not carry graph.enabled: $(cat "$CONFIG")"
-head -c "$(wc -c < "$WORK_DIR/config.before")" "$CONFIG" | cmp -s - "$WORK_DIR/config.before" || fail "the enable write changed bytes above the entry"
+grep -q '^        "enabled": true' "$CONFIG" || fail "the config does not carry graph.enabled: $(cat "$CONFIG")"
+# The enable write only inserted: every byte before it is where it was.
+python3 - "$WORK_DIR/config.before" "$CONFIG" <<'PY' || fail "the enable write changed bytes outside the entry"
+import sys
+before, after = (open(path, "rb").read() for path in sys.argv[1:3])
+prefix = 0
+while prefix < len(before) and before[prefix] == after[prefix]:
+    prefix += 1
+sys.exit(0 if after.endswith(before[prefix:]) and len(after) > len(before) else 1)
+PY
 "$APOGEE_BIN" graph stats notes </dev/null >"$WORK_DIR/stats.txt" 2>&1 || fail "stats"
 grep -q "Nodes:     2 (system 2)" "$WORK_DIR/stats.txt" || fail "stats: $(cat "$WORK_DIR/stats.txt")"
 grep -q "Extractor: extractor" "$WORK_DIR/stats.txt" || fail "stats did not name the extractor"
@@ -156,7 +164,7 @@ if "$APOGEE_BIN" config add-graph notes --collections notes </dev/null >/dev/nul
 fi
 grep -q "already a collection name" "$WORK_DIR/collide.err" || fail "the collision ban did not name the rule: $(cat "$WORK_DIR/collide.err")"
 "$APOGEE_BIN" config add-graph work --collections notes,knowledge --extract-backend extractor </dev/null >/dev/null 2>&1 || fail "add-graph work"
-grep -q "^graphs:" "$CONFIG" || fail "the graphs: section was not written"
+grep -q '^  "graphs": {' "$CONFIG" || fail "the graphs section was not written"
 "$APOGEE_BIN" check </dev/null >"$WORK_DIR/check.txt" 2>&1 || fail "check with a graphs: entry: $(cat "$WORK_DIR/check.txt")"
 grep -q "named graph: work" "$WORK_DIR/check.txt" || fail "check did not report the graph: $(cat "$WORK_DIR/check.txt")"
 [ ! -e "$APOGEE_HOME/embeddings/graphs/work.db" ] || fail "add-graph created the database"

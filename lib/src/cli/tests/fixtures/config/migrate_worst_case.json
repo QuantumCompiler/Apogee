@@ -1,0 +1,225 @@
+// My Apogee config -- hand-kept since v0.1.2.
+//
+// Keys live in the environment, never here.
+
+{
+  // Who answers what.
+  "models": {
+    "default": "local", // the everyday model
+    "default_embedding": "embedder",
+    // default_vision: seer  (not yet)
+    "default_utility": "helper",
+    "default_suite": "research"
+  },
+
+  "suites": {
+    "research": {
+      "description": "Deep work, chores on the small one",
+      "members": {
+        "chat": "local",
+        "utility": {
+          "backend": "helper",
+          "context_size": 4096, // small window on purpose
+          "toolset": ["fs", "notes"]
+        }
+      },
+      "consultable": ["utility"],
+      "consult_caps": {
+        "per_turn": 2
+      },
+      "validate": {
+        "tool_args": "on"
+      },
+      "orchestrate": true
+    }
+  },
+
+  "symphonies": {
+    "brief": {
+      "description": "Summarize: then tighten",
+      "stages": [
+        // first the summary
+        {
+          "name": "summarize",
+          "role": "utility",
+          "prompt": "Summarize in three sentences:\n# not a comment -- part of the prompt\n{{input}}\n"
+        },
+        {
+          "name": "tighten", // then the polish
+          "role": "chat",
+          "prompt": "Shorten this to one sentence: {{summarize}}"
+        }
+      ]
+    }
+  },
+
+  "symphony_caps": {
+    "depth": 3,
+    "answer_tokens": 8000
+  },
+
+  "paths": {
+    "gguf_dir": "${HOME}/models", // where the GGUFs are
+    "hf_dir": null,
+    "mcp_dir": "~/mcp",
+    "embeddings_dir": null // none yet
+  },
+
+  "permissions": {
+    "write_file": "allow",
+    "edit_file": "ask",
+    "run_command": "deny" // never on this machine
+  },
+
+  "tools": {
+    "fs_root": "${HOME}/work",
+    "disabled": ["shell"],
+    "allowed_hosts": [
+      "docs.python.org", // the reference
+      "pypi.org"
+    ],
+    "search": {
+      "provider": "searxng",
+      "url": "http://127.0.0.1:8888",
+      "results": 8
+    }
+    // search notes trail inside tools
+  },
+
+  "mcp_servers": {
+    "weather": {
+      "command": "~/.apogee/mcp/weather/server.py",
+      "args": ["--units", "metric"],
+      "enabled": false,
+      "env": ["WEATHER_API_URL=https://example.invalid"]
+    }
+  },
+
+  "agents": {
+    "reviewer": {
+      "model": "local",
+      "tools": "read-only",
+      "prompts": ["prompts/reviewer.txt"],
+      "schemas": ["schemas/reviewer-output.json"],
+      "save_subdir": "reviewer"
+    }
+  },
+
+  "backends": {
+
+    // ── cloud ──
+    "claude": {
+      "type": "anthropic",
+      "api_key": "${ANTHROPIC_API_KEY}",
+      "model": "claude-sonnet-5",
+      "context_size": 200000,
+      "max_tokens": 8192
+    },
+
+    // ── local ──
+    "local": {
+      "type": "llamacpp",
+      "model_path": "${HOME}/.cache/llms/my-model.gguf",
+      "context_size": 65536,
+      "temperature": 0.70,
+      "top_p": 1.0,
+      "seed": 42,
+      "thinking": "auto"
+      // idle_unload_seconds: 900
+    },
+
+    "helper": {
+      "type": "mock"
+    },
+    "embedder": {
+      "type": "mock"
+    }
+
+    // commented-out entries trail the section
+    // spare:
+    //   type: mock
+  },
+
+  "status_mode": "verbose",
+  "color": false,
+  "auto_rag": "notes",
+
+  "embeddings": {
+    "notes": {
+      "chunk_size": 512,
+      "chunk_overlap": 64,
+      "description": "Meeting notes",
+      "retriever": "hybrid",
+      "graph": {
+        "enabled": true,
+        "hops": 2
+      }
+    }
+  },
+
+  "graphs": {
+    "work": {
+      "collections": ["notes"],
+      "max_entities": 8
+    }
+  },
+
+  "attachments": {
+    "graph": "off"
+  },
+
+  "ui": {
+    "markdown": false
+  },
+
+  "knowledge": {
+    "auto_capture": false,
+    "db": "knowledge"
+  },
+
+  "memory": {
+    "recall": true
+  },
+
+  "training": {
+    "trainer": "auto",
+    "retain_versions": 3,
+    "pipelines": {
+      "skills": {
+        "student": "Qwen--Qwen2.5-0.5B",
+        "stages": [
+          {
+            "name": "instructions",
+            "dataset": "instructions",
+            "eval_suite": "instruction-following",
+            "iters": 500
+          },
+          {
+            "name": "reasoning",
+            "dataset": "maths",
+            "eval_suite": "reasoning",
+            "iters": 500,
+            "rehearsal_fraction": 0.1
+          }
+        ]
+      }
+    },
+    "cycle": {
+      "pipeline": "skills",
+      "backend": "local",
+      "regression_threshold": 0.0,
+      "sources": [
+        {
+          "type": "directory"
+        },
+        {
+          "type": "sessions",
+          "log_consent": true,
+          "since": "2026-09-01"
+        }
+      ]
+    }
+  }
+
+  // The end of the file.
+}

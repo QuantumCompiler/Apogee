@@ -2317,7 +2317,8 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             fail_user(
                 "training.cycle is not configured: it needs 'pipeline' (a training.pipelines "
                 "entry or a spec file), 'backend' (where a passing cycle promotes) and at least "
-                "one entry under 'sources' -- see the template block in config.yaml");
+                "one entry under 'sources' -- see the training block in the starter config (apogee "
+                "config init)");
         }
         const harness::PipelineSpec spec = resolve_pipeline_spec(config, settings.pipeline);
         // The datasets are the merged sources; only the suites are resolved.

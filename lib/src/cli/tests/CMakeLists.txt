@@ -38,12 +38,16 @@ add_library(apogee_tests_infrastructure OBJECT
     support/terminal_model.h
     support/terminal_model.cpp
     support/embedding_fixtures.h
+    support/text_edits.h
 )
 target_link_libraries(apogee_tests_infrastructure PRIVATE apogee_infrastructure Catch2::Catch2)
 
 add_library(apogee_tests_data OBJECT
     data/contracts/config_test.cpp
     data/contracts/config_edit_test.cpp
+    data/contracts/jsonc_test.cpp
+    data/contracts/config_migrate_test.cpp
+    data/contracts/config_jsonc_test.cpp
     data/contracts/symphony_spec_test.cpp
     data/contracts/symphony_walk_test.cpp
     data/contracts/host_test.cpp
@@ -241,6 +245,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/models_test.cpp
     presentation/cli/suite_residency_test.cpp
     presentation/cli/config_cmd_test.cpp
+    presentation/cli/config_lifecycle_test.cpp
     presentation/cli/attachment_guard_test.cpp
     presentation/operations/retrieval_test.cpp
     presentation/operations/suites_test.cpp

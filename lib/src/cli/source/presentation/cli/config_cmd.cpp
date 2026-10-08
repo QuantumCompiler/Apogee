@@ -10,13 +10,16 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "cli/config_suites.h"
 #include "cli/graph.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
+#include "contracts/config_migrate.h"
 #include "contracts/host.h"
+#include "contracts/jsonc.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "graph/code_languages.h"
@@ -532,12 +535,91 @@ void bind_init(CLI::App& parent, const RootContext& context) {
     cmd->add_flag("-f,--force", *force, "Overwrite an existing config file");
     cmd->callback([&context, force]() {
         const std::filesystem::path path = config_path_for(context);
+        // An install still on the older YAML has its config: a config.json
+        // beside it would be a second answer, and --force would write JSON
+        // into the YAML file's name. Either way, migrate is the move.
+        if (context.config_path.empty() && harness::is_legacy_config_path(path)) {
+            fail(path.string() +
+                 " is this install's config, in the older YAML format -- 'apogee config migrate' "
+                 "converts it to " +
+                 std::string{harness::kConfigFileName} +
+                 "; init writes a starter config only where there is none");
+        }
         try {
             harness::save_config_template(path, *force);
         } catch (const ConfigEditError& e) {
             fail(e.what());
         }
         std::cout << "wrote " << path.string() << "\n";
+    });
+}
+
+void bind_migrate(CLI::App& parent, const RootContext& context) {
+    CLI::App* cmd = parent.add_subcommand(
+        "migrate",
+        "Convert a YAML config to JSON (JSONC): every key, value and comment carried over, the "
+        "original kept beside it as <file>.bak");
+    cmd->callback([&context]() {
+        const std::filesystem::path path = config_path_for(context);
+        std::error_code code;
+        if (!std::filesystem::exists(path, code)) {
+            fail("no config file at " + path.string() +
+                 " -- nothing to migrate; 'apogee config init' writes a new one");
+        }
+        try {
+            if (harness::jsonc::looks_like_jsonc(harness::read_config_file(path))) {
+                std::cout << path.string() << " is already JSON -- nothing to migrate\n";
+                return;
+            }
+            const harness::MigrationReport report = harness::migrate_config_file(path);
+            std::cout << "migrated " << report.from.string() << " -> " << report.to.string()
+                      << "\n  " << report.keys << (report.keys == 1 ? " section, " : " sections, ")
+                      << report.comments << (report.comments == 1 ? " comment" : " comments")
+                      << " carried; ${ENV} references kept as written\n  the original is at "
+                      << report.backup.string() << "\n";
+        } catch (const ConfigEditError& e) {
+            fail(e.what());
+        } catch (const ConfigError& e) {
+            fail(e.what());
+        }
+    });
+}
+
+void bind_upgrade(CLI::App& parent, const RootContext& context) {
+    CLI::App* cmd = parent.add_subcommand(
+        "upgrade",
+        "Add the options this release's starter config has and yours does not, each with the "
+        "comments that explain it; nothing already there changes");
+    cmd->callback([&context]() {
+        const std::filesystem::path path = config_path_for(context);
+        try {
+            const std::string content = harness::read_config_file(path);
+            if (!harness::jsonc::looks_like_jsonc(content)) {
+                fail(path.string() +
+                     " is in the older YAML format -- 'apogee config migrate' converts it to "
+                     "JSON first; upgrade adds options to a JSON config");
+            }
+            (void)harness::parse_config(content, path.string());
+            const harness::Upgrade upgrade =
+                harness::upgrade_config_text(content, harness::config_template());
+            if (upgrade.added.empty()) {
+                std::cout << path.string()
+                          << " is current -- it has every option this release's starter config "
+                             "has\n";
+                return;
+            }
+            harness::edit_config_file(path, [&upgrade](std::string_view) { return upgrade.text; });
+            std::cout << "added " << upgrade.added.size()
+                      << (upgrade.added.size() == 1 ? " option" : " options") << " to "
+                      << path.string() << ":\n";
+            for (const std::string& option : upgrade.added) {
+                std::cout << "  " << option << "\n";
+            }
+        } catch (const ConfigEditError& e) {
+            fail(e.what());
+        } catch (const ConfigError& e) {
+            fail(e.what());
+        }
     });
 }
 
@@ -1004,6 +1086,8 @@ void ConfigCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->require_subcommand(1);
 
     bind_init(*cmd, context);
+    bind_migrate(*cmd, context);
+    bind_upgrade(*cmd, context);
     bind_path(*cmd, context);
     bind_add_backend(*cmd, context);
     bind_delete_backend(*cmd, context);

@@ -14,7 +14,8 @@
 /// for a release build:
 ///
 ///     ~/.apogee/
-///       config/config.yaml    the config engine's file
+///       config/config.json    the config engine's file (JSONC, 28i; an
+///                             older install's config.yaml still loads)
 ///       sessions/             persisted chats        (chat-cli)
 ///       logs/                 operational log        (chat-cli)
 ///       cache/                downloads, prompt KV   (llamacpp-backend)
@@ -136,7 +137,7 @@ enum class RootRung : std::uint8_t { Flag, Environment, Baked };
 struct RootResolution {
     std::filesystem::path root;
     /// The config file this root reads when `--config` names none:
-    /// `<root>/config/config.yaml`, or the file `--custom` named.
+    /// `config_file_in(<root>/config)`, or the file `--custom` named.
     std::filesystem::path config;
     RootRung rung = RootRung::Baked;
     /// The build's own channel -- a fact about the binary, whichever rung
@@ -162,7 +163,7 @@ struct RootResolution {
 struct RootInputs {
     std::optional<RootFlag> flag;
     /// `APOGEE_HOME`'s value. Empty -- unset, or set to "" -- is no override:
-    /// treating "" as a root would put the config at /config/config.yaml.
+    /// treating "" as a root would put the config at /config/config.json.
     std::string environment;
     /// The build's channel.
     Channel channel = Channel::Release;
@@ -248,9 +249,33 @@ private:
 /// `<apogee_home()>/config`.
 [[nodiscard]] std::filesystem::path config_dir();
 
+/// The config file's name in a root's `config/` directory (28i): JSONC.
+inline constexpr std::string_view kConfigFileName = "config.json";
+
+/// The name it had before: YAML, still read -- with a notice -- until the
+/// user runs `apogee config migrate` (ADR backwards-compatibility).
+inline constexpr std::string_view kLegacyConfigFileName = "config.yaml";
+
+/// The config file a root's `config/` directory holds: `config.json`, or
+/// `config.yaml` when that is the only one there -- the compat read. Where
+/// neither exists, `config.json`: the file a fresh install writes.
+[[nodiscard]] std::filesystem::path config_file_in(const std::filesystem::path& config_directory);
+
+/// Whether `path` is the older YAML config the compat read is serving: named
+/// `config.yaml` by the layout. A `--config` naming a file of another name is
+/// the user's own choice, read by its content and never noticed.
+[[nodiscard]] bool is_legacy_config_path(const std::filesystem::path& path);
+
+/// Non-empty when `config_directory` holds both `config.json` and
+/// `config.yaml`: the refusal, naming both. Which one is current is the
+/// user's call, never guessed.
+[[nodiscard]] std::string config_conflict(const std::filesystem::path& config_directory);
+
 /// The config file a command reads when the user passes no `--config`:
-/// `<apogee_home()>/config/config.yaml`, or the file `--custom` named.
-/// Resolution order for a command is: `--config` flag, then this.
+/// `config_file_in(<apogee_home()>/config)`, or the file `--custom` named.
+/// Resolution order for a command is: `--config` flag, then this. Throws
+/// std::runtime_error when the chain refuses, or when the directory holds
+/// both formats (`config_conflict`).
 [[nodiscard]] std::filesystem::path default_config_path();
 
 /// Resolves the config path a command should use: `flag_value` when non-empty,
@@ -258,7 +283,7 @@ private:
 [[nodiscard]] std::filesystem::path resolve_config_path(const std::string& flag_value);
 
 /// The data directory a config file lives in: the parent of its `config/`
-/// directory. `~/.apogee/config/config.yaml` gives `~/.apogee`; a `--config`
+/// directory. `~/.apogee/config/config.json` gives `~/.apogee`; a `--config`
 /// temp tree gives that tree, which is what keeps every path derived from
 /// it hermetic in tests. The scaffold cores and the agent loader use this
 /// rather than `apogee_home()` for that reason, and `--custom` derives its

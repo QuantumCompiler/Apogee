@@ -131,11 +131,13 @@ chmod +x "$TC_DIR/bin/ollama"
 "$APOGEE_BIN" config add-backend slow --type mock --model-path "$TC_DIR/slow.json" >/dev/null || fail "add slow"
 "$APOGEE_BIN" config add-backend asks --type mock --model-path "$TC_DIR/asks.json" >/dev/null || fail "add asks"
 "$APOGEE_BIN" config add-backend down --type ollama-cli --model m >/dev/null || fail "add down"
-python3 - "$APOGEE_HOME/config/config.yaml" "$TC_DIR/bin/ollama" <<'PY' || fail "could not point the down backend"
-import sys
+python3 - "$APOGEE_HOME/config/config.json" "$TC_DIR/bin/ollama" <<'PY' || fail "could not point the down backend"
+import json, sys
 path, binary = sys.argv[1], sys.argv[2]
 text = open(path).read()
-text = text.replace("  down:\n    type: ollama-cli\n", "  down:\n    type: ollama-cli\n    host: 127.0.0.1:9\n    binary: " + binary + "\n", 1)
+entry = '    "down": {\n      "type": "ollama-cli",\n'
+assert entry in text
+text = text.replace(entry, entry + '      "host": "127.0.0.1:9",\n      "binary": ' + json.dumps(binary) + ',\n', 1)
 open(path, "w").write(text)
 PY
 python3 - "$APOGEE_BIN" "$APOGEE_HOME" <<'PY' || fail "turn ids and cancel"

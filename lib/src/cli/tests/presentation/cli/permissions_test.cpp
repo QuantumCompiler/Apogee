@@ -159,9 +159,10 @@ TEST_CASE("the machine-mode prompt is a permission question answered by one line
         const std::string after = read_all(config_path);
         CHECK(after != shipped);
         std::string expected = shipped;
-        const std::size_t at = expected.find("  write_file: ask");
+        const std::size_t at = expected.find("\"write_file\": \"ask\"");
         REQUIRE(at != std::string::npos);
-        expected.replace(at, std::string{"  write_file: ask"}.size(), "  write_file: allow");
+        expected.replace(at, std::string{"\"write_file\": \"ask\""}.size(),
+                         "\"write_file\": \"allow\"");
         CHECK(after == expected);
     }
     SECTION("a driver that hangs up with the prompt outstanding fails the turn") {
@@ -189,13 +190,13 @@ TEST_CASE("the machine-mode prompt is a permission question answered by one line
         CHECK(make_driver_confirm_fn(reporter, driver, config_path, approvals)(website));
         CHECK(approvals->hosts.contains("docs.python.org"));
         std::string expected = shipped;
-        const std::size_t at = expected.find("  allowed_hosts: []");
+        const std::size_t at = expected.find("\"allowed_hosts\": []");
         REQUIRE(at != std::string::npos);
-        expected.replace(at, std::string{"  allowed_hosts: []"}.size(),
-                         "  allowed_hosts: [docs.python.org]");
+        expected.replace(at, std::string{"\"allowed_hosts\": []"}.size(),
+                         "\"allowed_hosts\": [\"docs.python.org\"]");
         CHECK(read_all(config_path) == expected);
         // The permissions section is untouched: no `fetch_url: allow` line.
-        CHECK(read_all(config_path).find("fetch_url: allow") == std::string::npos);
+        CHECK(read_all(config_path).find("\"fetch_url\": \"allow\"") == std::string::npos);
         const nlohmann::json event = nlohmann::json::parse(out.str());
         CHECK(event["target"] == "docs.python.org");
         CHECK(event["outbound"] == true);

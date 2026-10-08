@@ -1,0 +1,54 @@
+// My config, from an early release.
+{
+  // pointers
+  "models": {
+    "default": "local" // my model
+  },
+
+  // Optional search roots that pre-fill path prompts. Each is optional; null
+  // simply means "no default". ${ENV_VAR} references are expanded.
+  "paths": {
+    "gguf_dir": null,        // .gguf model files
+    "hf_dir": null,          // HuggingFace SafeTensors directories
+    "mcp_dir": null,         // local MCP server scripts
+    "embeddings_dir": null   // embedding database files
+  },
+
+  // what my tools may do
+  "permissions": {
+    "write_file": "allow", // trusted
+    "edit_file": "ask",
+    "delete_file": "ask",
+    "run_command": "ask",
+    "write_note": "ask",
+    "delete_note": "ask"
+  },
+
+  // Where the native toolsets operate, and which websites they may reach.
+  "tools": {
+    // "fs_root": "${HOME}",   // the filesystem tools cannot leave this directory;
+    //                         // unset, it is the folder Apogee was started in
+    // "disabled": ["shell"],  // switch a whole toolset off: fs, shell, git, notes,
+    //                         // rag, graph
+    // The websites fetch_url reaches without asking, by exact host name:
+    // docs.python.org admits neither python.org nor any other subdomain. Any
+    // other website asks first, and where nobody can answer (a pipe, `serve`)
+    // it is refused. The prompt's [a]lways answer adds the website here.
+    "allowed_hosts": []
+    // Web search for the model (web_search), answered by a SearXNG instance you
+    // run. Its JSON output is off by default: add json under search.formats in
+    // its settings.yml. The instance's host is reached without asking; the
+    // pages a search finds are asked about like any other website.
+    // "search": {
+    //   "provider": "searxng",
+    //   "url": "http://127.0.0.1:8888",
+    //   "results": 5            // 1 to 20
+    // }
+  },
+
+  "backends": {
+    "local": {
+      "type": "mock"
+    }
+  }
+}

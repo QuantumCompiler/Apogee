@@ -50,7 +50,7 @@ def sandbox(binary, root):
         if subprocess.run([binary, *args], env=env, stdin=subprocess.DEVNULL,
                           stdout=subprocess.DEVNULL).returncode != 0:
             raise RuntimeError(f"setup failed: {args}")
-    return env, os.path.join(apogee_home, "config", "config.yaml")
+    return env, os.path.join(apogee_home, "config", "config.json")
 
 
 def chat(binary, env, answer):
@@ -131,7 +131,7 @@ def main():
             if line not in screen:
                 failures.append(f"accept: '{line}' not said:\n{screen}")
         text = read(config).decode("utf-8")
-        if "type: claude-cli" not in text or "type: codex-cli" not in text:
+        if '"type": "claude-cli"' not in text or '"type": "codex-cli"' not in text:
             failures.append("accept: the entries are not in the config")
         screen, asked = chat(binary, env, None)
         if asked:

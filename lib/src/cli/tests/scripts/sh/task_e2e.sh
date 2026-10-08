@@ -73,6 +73,9 @@ mkdir -p "$APOGEE_HOME/config"
     echo "memory:"
     echo "  recall: false"
 } > "$APOGEE_HOME/config/config.yaml"
+# A YAML config written by hand, named as the file to read (28i): the compat
+# read under test, and no notice -- the user named the file.
+export APOGEE_CONFIG="$APOGEE_HOME/config/config.yaml"
 "$APOGEE_BIN" check --fix </dev/null >"$WORK_DIR/fix.txt" 2>&1 || fail "check --fix: $(cat "$WORK_DIR/fix.txt")"
 
 # The newest task's id, and a field of a task's ledger.

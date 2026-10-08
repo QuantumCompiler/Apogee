@@ -295,7 +295,7 @@ TEST_CASE("the shipped sample config byte-matches the embedded template", "[conf
     // catches is invisible: `config init` quietly stops writing an option the
     // docs still describe, and nobody notices until a user asks why the key
     // they read about does nothing.
-    const std::filesystem::path sample = std::filesystem::path{APOGEE_ASSETS_DIR} / "config.yaml";
+    const std::filesystem::path sample = std::filesystem::path{APOGEE_ASSETS_DIR} / "config.json";
     REQUIRE(std::filesystem::exists(sample));
 
     std::ifstream in(sample, std::ios::binary);
@@ -635,9 +635,9 @@ TEST_CASE("knowledge: parses auto_capture and db, defaults the collection, and r
     CHECK_THROWS_AS(apogee::harness::parse_config("knowledge:\n  db: a/b\n", "<t>"),
                     apogee::harness::ConfigError);
     // The shipped template documents the section, commented out.
-    CHECK(std::string{apogee::harness::config_template()}.find("# knowledge:") !=
+    CHECK(std::string{apogee::harness::config_template()}.find("// \"knowledge\": {") !=
           std::string::npos);
-    CHECK(std::string{apogee::harness::config_template()}.find("#   auto_capture: false") !=
+    CHECK(std::string{apogee::harness::config_template()}.find("//   \"auto_capture\": false,") !=
           std::string::npos);
 }
 
@@ -1068,7 +1068,7 @@ TEST_CASE("attachments.graph is a method word, unset unless the config says one"
     CHECK_FALSE(
         load_text(std::string{apogee::harness::config_template()}).attachments.graph.has_value());
     CHECK(std::string{apogee::harness::config_template()}.find(
-              "# attachments:\n#   graph: code\n") != std::string::npos);
+              "// \"attachments\": {\n  //   \"graph\": \"code\"\n  // },\n") != std::string::npos);
     // Block and flow forms; `off` is the word, never YAML 1.1's boolean.
     CHECK(load_text("attachments:\n  graph: off\n").attachments.graph ==
           AttachmentGraphMethod::Off);
@@ -1269,7 +1269,8 @@ TEST_CASE("the suite vocabularies are the roles and the toolsets", "[config][sui
     const Config shipped = load_text(apogee::harness::config_template());
     CHECK(shipped.suites.empty());
     CHECK(shipped.models.default_suite.empty());
-    CHECK(std::string{apogee::harness::config_template()}.find("# suites:") != std::string::npos);
+    CHECK(std::string{apogee::harness::config_template()}.find("// \"suites\": {") !=
+          std::string::npos);
 }
 
 TEST_CASE("a suite names the members its root may consult, and the caps", "[config][suites]") {
