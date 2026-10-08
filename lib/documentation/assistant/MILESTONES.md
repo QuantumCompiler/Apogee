@@ -2751,6 +2751,28 @@ The integration spike's walls **W3** (events belonged to "the current turn" by p
 
 **Left for the owner.** A failed turn's persistence (the REPL's, unchanged) — the cancelled line is restored out but a failed one is kept; and a cancel reaching a `user` line not yet started.
 
+### 2026-10-07 — `machine-schema-artifact` (backlog item 28g): the protocol as a JSON Schema
+
+The integration spike's wall **W2** — a host's event vocabulary was hand-transcribed from prose (the naive host's `DOCUMENTED_EVENTS` *was* that transcription), with nothing shipped to validate a stream against — closed by making the vocabulary one declaration with three views.
+
+**What was built**
+
+- [x] **The declaration** (`machine/protocol.h/.cpp`): every outbound event and inbound line as data — `LineSpec` (type, description, fields), `FieldSpec` (name, JSON type, required, description, nested properties or item type) — `machine_events()`, `machine_inbound()`, the type lists `capabilities` announces, and `kMachineProtocolVersion` / `kMachineSchemaVersion` moved here from `json_reporter`.
+- [x] **`apogee __machine-schema`** (`cli/machine_schema_cmd.h/.cpp`): the declaration rendered as a draft-2020-12 JSON Schema (`machine_schema()`), hidden from `--help` like `__complete`, stdout the schema alone. The root validates a line Apogee writes, `#/$defs/inbound` a line a host writes; each type is `#/$defs/event_<type>` / `line_<type>`, reached by an `if`/`then` on `type`, so an unknown type validates; every definition admits unknown fields; growing values are strings; `turn` is on every event but `session`; optional fields are not required; `x-apogee` carries `protocol_version` and `schema` (`2026-10-07`, the same date as `capabilities.schema`). A parity-table row (`read_only`).
+- [x] **In every release archive** (`lib/scripts/package.sh`): `machine-schema.json` staged beside the binary and stubs, printed by that binary under its own temporary home, then — after the proof the binary runs — taken back out of the archive and compared byte for byte with a fresh print; a difference fails the packaging. The action's header, CLAUDE.md's "What ships" and the root README say so; the installers still install only the binary and the completions. Run on this host's `macos-arm64` build: the archive holds the binary, the four stubs and the schema, and a scratch copy of the script that appended a byte to the staged schema failed with `the archive's machine-schema.json is not what the binary prints`.
+- [x] **Held three ways.** A unit test drives every emitter and holds each event to the declaration in both directions (no undeclared key, every required key present, every declared type emitted); `schema_conformance.py` (now given the binary) holds the declaration to `event("…")` and `type == "…"`, the document to both, and the printed schema to all three — and, with a stock validator (`jsonschema`, said when absent), checks the schema is valid 2020-12, accepts an unknown type and an unknown field, and rejects a `result` without `text` and a numeric `answer_delta.text`. Verified against three plants: an emitted type nothing declares, a declared inbound type nothing parses, and a schema built with `additionalProperties: false`.
+- [x] **The real streams validate**: `cli.machine_mode` prints the schema and validates every stream it captured (62 lines across 6 streams on this machine) with the stock validator, and a mangled `result` must not validate. **`naive_host_driver.py`** reads its vocabulary from `__machine-schema` and validates every event it receives: **W2 closes** — with W1, W3 and W4 closed, the spike's walls left are W6 (per-run wiring, 28e, unspecced) and W7 (28h).
+- [x] **The reference** ([machine-mode.md](../reference/machine-mode.md)): "Validating and generating: the schema" — the command, the archive copy, the two entry points, the definitions' names, how the promise is expressed, optional fields, `x-apogee.schema`.
+- [x] **Tests**: `machine_mode_test` (+2: every emitter's events held to the declaration; the schema's shape — draft, `x-apogee`, a definition per type admitting unknown fields, `turn` on all but `session`, unknown types open, `finish_reason` not an enum), the conformance's new directions, the e2e's validation, the naive host.
+
+**Decisions** — folded from the item document: the declaration in `machine/protocol`, the schema rendered from it with the promise expressed structurally; fields pinned by the emitter-driving unit test and the conformance (validator checks said when unavailable); the archive copy made and verified by the one packaging script, no CI job changed; the schema date unmoved since 28d, the first published version holding the handshake, turns and cancel.
+
+**Real weights.** None applies.
+
+**Not verified.** The packaging on the four targets this host cannot build (the script's new lines use `tar` and `7z` as the archive creation does on each); Windows at run time.
+
+**Left for the owner.** The schema's `$id` (a URL under the repository, not served anywhere) and the definition names (`event_<type>`, `line_<type>`) — public names once released.
+
 ## Milestone N — Model operations
 
 **Goal.** Model management, end to end: one shared resolver for the `models:` role pointers, the `apogee models` suite, a real GGUF header reader that `check` uses to tell a working model from a broken one, and — from 2026-09-07 — acquiring, quantizing, and repairing models from Hugging Face and the user's Ollama store without ever leaving a half-downloaded one on disk. From 2026-09-28 (26b), helper models beside the chat model: `vision`, `transcription` and `utility` in the same resolver.

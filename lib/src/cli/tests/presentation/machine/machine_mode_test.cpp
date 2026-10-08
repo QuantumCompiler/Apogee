@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <streambuf>
@@ -20,6 +21,7 @@
 #include "harness/harness.h"
 #include "machine/driver_input.h"
 #include "machine/json_reporter.h"
+#include "machine/protocol.h"
 #include "tasks/ledger.h"
 #include "tasks/task.h"
 #include "tasks/view.h"
@@ -1043,4 +1045,122 @@ TEST_CASE("a question cancelled while it waits fails its turn as Ctrl-C would",
     CHECK_THROWS_AS(apogee::commands::make_driver_ask_fn(reporter, driver)(one_question()),
                     apogee::harness::CancelledError);
     CHECK(types(out.str()) == std::vector<std::string>{"question"});
+}
+
+// --- 28g: the one declaration ----------------------------------------------------
+
+namespace {
+
+/// The declared line for `type`, or null.
+[[nodiscard]] const apogee::commands::LineSpec* declared(
+    std::span<const apogee::commands::LineSpec> lines, const std::string& type) {
+    for (const apogee::commands::LineSpec& line : lines) {
+        if (line.type == type) {
+            return &line;
+        }
+    }
+    return nullptr;
+}
+
+/// Every key of `event` declared for its type, and every required one there.
+void held_to_declaration(const nlohmann::json& event) {
+    INFO(event.dump());
+    const std::string type = event.at("type").get<std::string>();
+    const apogee::commands::LineSpec* line = declared(apogee::commands::machine_events(), type);
+    REQUIRE(line != nullptr);
+    for (const auto& [key, value] : event.items()) {
+        if (key == "type" || (key == "turn" && type != "session")) {
+            continue;
+        }
+        INFO("field: " << key);
+        CHECK(std::ranges::any_of(line->fields, [&key](const apogee::commands::FieldSpec& field) {
+            return field.name == key;
+        }));
+    }
+    for (const apogee::commands::FieldSpec& field : line->fields) {
+        if (field.required) {
+            INFO("required: " << field.name);
+            CHECK(event.contains(std::string{field.name}));
+        }
+    }
+}
+
+}  // namespace
+
+TEST_CASE("every event every emitter writes is the declaration's, field for field",
+          "[commands][machine][schema]") {
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    apogee::commands::MachineCapabilities capabilities;
+    capabilities.accepts = {"user"};
+    capabilities.tools = true;
+    capabilities.ask = true;
+    reporter.begin_session("m", capabilities, 1);
+    reporter.begin_turn(1);
+    reporter.on_recall(2, 1);
+    reporter.on_thinking();
+    reporter.on_thinking_budget_reached();
+    reporter.on_thinking_token("hmm");
+    reporter.on_tool_status("read_file x");
+    apogee::agentloop::SideCall side;
+    side.role = "utility";
+    side.detail = "titling";
+    reporter.on_side_call(side);
+    reporter.on_notice("a note");
+    reporter.on_answer_start();
+    reporter.on_answer_token("hi");
+    reporter.on_answer_end();
+    reporter.emit_question(one_question());
+    reporter.emit_permission_question(
+        apogee::agent::GateRequest{"fetch_url", "example.test", "https://example.test/x", true});
+    apogee::harness::ChatResponse response;
+    response.message = apogee::harness::ChatMessage::assistant("hi");
+    response.model = "m";
+    response.usage.prompt_tokens = 3;
+    response.usage.completion_tokens = 1;
+    reporter.emit_result(response);
+    reporter.emit_error("broke");
+    reporter.end_turn();
+    const t::Task task = lived_task();
+    for (std::size_t index = 0; index < task.transitions.size(); ++index) {
+        reporter.emit_task_transition(task, index, std::nullopt);
+    }
+    reporter.emit_task_grant(task, 1, task.rounds.back().allowed.front());
+
+    std::set<std::string> seen_types;
+    for (const nlohmann::json& event : events(out.str())) {
+        held_to_declaration(event);
+        seen_types.insert(event.at("type").get<std::string>());
+    }
+    // Every declared event was exercised -- a declaration nothing emits is
+    // the drift this pins, in the other direction.
+    for (const std::string_view type : apogee::commands::machine_event_types()) {
+        INFO("never emitted: " << type);
+        CHECK(seen_types.contains(std::string{type}));
+    }
+}
+
+TEST_CASE("the schema is generated from the declaration and keeps the promise",
+          "[commands][machine][schema]") {
+    const nlohmann::json schema = apogee::commands::machine_schema();
+    CHECK(schema.at("$schema") == "https://json-schema.org/draft/2020-12/schema");
+    CHECK(schema.at("x-apogee").at("schema") ==
+          std::string{apogee::commands::kMachineSchemaVersion});
+    CHECK(schema.at("x-apogee").at("protocol_version") ==
+          apogee::commands::kMachineProtocolVersion);
+    const nlohmann::json& defs = schema.at("$defs");
+    for (const apogee::commands::LineSpec& line : apogee::commands::machine_events()) {
+        const nlohmann::json& def = defs.at("event_" + std::string{line.type});
+        CHECK(def.at("additionalProperties") == true);
+        CHECK(def.at("properties").at("type").at("const") == std::string{line.type});
+        CHECK(def.at("properties").contains("turn") == (line.type != "session"));
+    }
+    for (const apogee::commands::LineSpec& line : apogee::commands::machine_inbound()) {
+        CHECK(defs.contains("line_" + std::string{line.type}));
+    }
+    // An unknown type is held to nothing but being an object with a string type.
+    CHECK(defs.at("outbound").at("allOf").size() == apogee::commands::machine_events().size());
+    CHECK(defs.at("outbound").at("properties").at("type").at("type") == "string");
+    // A value that may grow is a string, never a closed enum.
+    CHECK_FALSE(defs.at("event_result").at("properties").at("finish_reason").contains("enum"));
 }

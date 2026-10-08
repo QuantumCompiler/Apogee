@@ -235,6 +235,38 @@ child.close()
 print("turns: ids on every turn event, cancel mid-stream and mid-question, a failure an error - OK")
 PY
 
+# --- the schema artifact (28g): every captured stream validates ----------------
+# The real streams this script captured -- complete, driven chats, handshakes
+# -- validated line by line against what this binary prints as its schema, with
+# a stock validator; and one known event mangled, which must not validate.
+"$APOGEE_BIN" __machine-schema >"$WORK_DIR/machine-schema.json" </dev/null \
+    || fail "__machine-schema failed"
+python3 - "$WORK_DIR/machine-schema.json" "$WORK_DIR" <<'PY' || fail "a captured stream does not validate"
+import glob, json, os, sys
+try:
+    from jsonschema import Draft202012Validator
+except ImportError:
+    print("machine_mode: no jsonschema module -- the captured streams were NOT validated",
+          file=sys.stderr)
+    sys.exit(0)
+schema = json.load(open(sys.argv[1]))
+valid = Draft202012Validator(schema)
+streams = [p for p in glob.glob(os.path.join(sys.argv[2], "**", "*.jsonl"), recursive=True)]
+assert streams, "no captured stream to validate"
+lines = 0
+for path in streams:
+    for line in open(path, encoding="utf-8", errors="replace"):
+        if not line.strip():
+            continue
+        event = json.loads(line)
+        errors = list(valid.iter_errors(event))
+        assert not errors, f"{os.path.basename(path)}: {line.strip()[:200]} -- {errors[0].message}"
+        lines += 1
+mangled = {"type": "result", "model": "m", "finish_reason": "stop", "turn": "one"}
+assert list(valid.iter_errors(mangled)), "a mangled result validated"
+print(f"machine_mode: {lines} captured lines in {len(streams)} streams validate against the schema")
+PY
+
 # --- bytes that are not UTF-8 never end the session ---------------------------
 # Every event, session file and request is a strict JSON dump, and each of
 # these used to end the process with json type_error 316 at the first one: a

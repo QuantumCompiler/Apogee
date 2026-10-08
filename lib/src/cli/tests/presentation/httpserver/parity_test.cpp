@@ -210,6 +210,7 @@ const std::map<std::string, Classification>& table() {
         {"graph export mermaid", read_only()},
         {"version", read_only()},
         {"__complete", read_only()},
+        {"__machine-schema", read_only()},
         {"config get", read_only()},
         {"config path", read_only()},
         {"mcp list", read_only()},

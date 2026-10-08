@@ -35,12 +35,16 @@ import time
 from pathlib import Path
 
 DOCUMENTED_EVENTS = {
-    # The whole outbound vocabulary machine-mode.md names. Anything else is an
-    # unknown type the doc tells us to ignore (rule 1).
+    # The outbound vocabulary, until the binary's own schema replaces it: the
+    # doc (since 28g) points a host at `apogee __machine-schema` instead of a
+    # transcription. Anything else is an unknown type the doc tells us to
+    # ignore (rule 1).
     "session", "thinking", "thinking_delta", "tool_status",
     "answer_start", "answer_delta", "answer_end", "result",
     "question", "error",
 }
+VALIDATOR = None    # the schema's validator, when a stock one is installed
+SCHEMA_ERRORS = []  # events the schema rejected
 
 WALLS = []          # [(id, title, evidence)]
 TRANSCRIPT = []     # every JSONL line both directions, annotated
@@ -108,6 +112,9 @@ class Child:
             except json.JSONDecodeError:
                 sys.exit(f"[{self.log_name}] stdout carried a non-JSON line "
                          f"(the doc forbids this): {line!r}")
+            if VALIDATOR is not None:
+                for error in VALIDATOR.iter_errors(event):
+                    SCHEMA_ERRORS.append(f"{line[:120]} -- {error.message}")
             etype = event.get("type", "")
             if etype not in DOCUMENTED_EVENTS:
                 self.unknown_types.append(etype)  # rule 1: tolerate, note
@@ -224,6 +231,26 @@ def main():
     (work / "actor.json").write_text(json.dumps(script))
 
     print("phase 0: sandbox install", flush=True)
+    # W2 -- the doc says the binary prints its protocol as a JSON Schema: the
+    # host reads its vocabulary from it, and validates every event against it
+    # when a stock validator is at hand.
+    global DOCUMENTED_EVENTS, VALIDATOR
+    printed = run_cli(binary, ["__machine-schema"], env, project, may_fail=True)
+    schema = None
+    if printed.returncode == 0:
+        try:
+            schema = json.loads(printed.stdout)
+        except json.JSONDecodeError:
+            schema = None
+    if schema is not None:
+        DOCUMENTED_EVENTS = {name[len("event_"):] for name in schema.get("$defs", {})
+                             if name.startswith("event_")}
+        try:
+            from jsonschema import Draft202012Validator
+            VALIDATOR = Draft202012Validator(schema)
+        except ImportError:
+            print("  (no jsonschema module: events read by the schema's vocabulary, not "
+                  "validated)", flush=True)
     run_cli(binary, ["config", "init"], env, project)
     run_cli(binary, ["config", "add-backend", "actor", "--type", "mock",
                      "--model-path", str(work / "actor.json")], env, project)
@@ -270,10 +297,16 @@ def main():
           f"banner.txt={'written' if banner.exists() else 'ABSENT'} exit={status}")
 
     # Walls the conversation itself evidences.
-    wall("W2", "No machine-readable schema: the host's event vocabulary is "
-               "hand-transcribed from prose, and nothing ships to validate a "
-               "stream against",
-         "DOCUMENTED_EVENTS in this file IS the transcription")
+    if schema is not None and not SCHEMA_ERRORS:
+        print(f"  W2 closed: the vocabulary read from __machine-schema "
+              f"({len(DOCUMENTED_EVENTS)} event types, schema "
+              f"{schema.get('x-apogee', {}).get('schema')}), every event "
+              f"{'validated' if VALIDATOR is not None else 'read'} against it", flush=True)
+    else:
+        wall("W2", "No machine-readable schema: the host's event vocabulary is "
+                   "hand-transcribed from prose, and nothing ships to validate a "
+                   "stream against",
+             f"__machine-schema: {printed.returncode}; rejected: {SCHEMA_ERRORS[:3]}")
     # W3 -- since 28f the doc says every event of a turn carries `turn`, the
     # number of its user line. The host checks the conversation's results.
     turns = [r.get("turn") for r in results]

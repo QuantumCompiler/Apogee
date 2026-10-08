@@ -15,6 +15,7 @@
 #include "agentloop/question.h"
 #include "agentloop/reporter.h"
 #include "contracts/types.h"
+#include "machine/protocol.h"
 #include "tasks/ledger.h"
 #include "tasks/task.h"
 
@@ -78,30 +79,6 @@
 /// ignores every `thinking*` event reconstructs exactly what a terminal user
 /// saw.
 namespace apogee::commands {
-
-/// Bumped only when an existing event's meaning changes.
-///
-/// Adding a new event type does **not** bump it: drivers are required to ignore
-/// unknown types, so an addition is compatible by construction. The version
-/// exists for the case that is not — a field changing meaning under a name a
-/// driver already reads.
-inline constexpr int kMachineProtocolVersion = 1;
-
-/// The vocabulary's version (28d, 28g): a date, moved when the vocabulary a
-/// release ships grows -- a new event type, a new field, a new inbound type.
-/// `capabilities.schema` carries it, so a host can tell two builds' streams
-/// apart without diffing them. Unlike `protocol_version` it says nothing about
-/// compatibility: every growth is additive under the stability promise.
-inline constexpr std::string_view kMachineSchemaVersion = "2026-10-07";
-
-/// Every event type machine mode can write, in the order the reference
-/// documents them -- the one declaration `capabilities.events` reports and
-/// `cli.machine_schema_conformance` holds to the emitter and the document.
-[[nodiscard]] std::span<const std::string_view> machine_event_types() noexcept;
-
-/// Every line type a driven session reads on stdin: `user`, `answer`,
-/// `attach`, `hello`, and since 28f `cancel`. Held to the parser the same way.
-[[nodiscard]] std::span<const std::string_view> machine_inbound_types() noexcept;
 
 /// What a session can do, announced on its `session` event (28d) so a host
 /// knows before its first turn: the whole outbound vocabulary, the inbound

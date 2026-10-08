@@ -215,6 +215,38 @@ would read goes to stderr, with the outcome; the exit code is the task's (`0`
 done, `130` cancelled, `2` a provider's failure, `1` anything else short of
 done).
 
+## Validating and generating: the schema
+
+The vocabulary above is also a machine-readable artifact: a JSON Schema (draft
+2020-12) that the binary prints for itself —
+
+```bash
+apogee __machine-schema > machine-schema.json
+```
+
+— and that every release archive carries beside the binary as
+`machine-schema.json`, byte for byte what that build prints. The command is the
+truth; the copy is a convenience. Validate a stream against it, or generate a
+client's types from it, instead of transcribing this page:
+
+- **The root validates one line Apogee writes on stdout**; `#/$defs/inbound`
+  validates one line a host writes on stdin. Each event type has its own
+  definition, `#/$defs/event_<type>` (`event_result`), and each inbound line
+  `#/$defs/line_<type>` (`line_user`).
+- **It states the stability promise rather than contradicting it**: an unknown
+  `type` validates (only a known type is held to its definition), every
+  definition admits fields it does not name, and a value that may grow — a
+  `finish_reason`, a `kind` — is a string, never a closed list. A validator
+  built from it accepts exactly what rule 1 tells a host to accept.
+- **Optional is honest**: a field that may be absent — `usage`, a permission
+  question's `kind`, every event's `turn` outside a driven chat — is not
+  required, so generated types make it optional rather than zero.
+- `x-apogee.schema` is the same date `capabilities.schema` announces; a host
+  can compare the two to know its generated types match the binary it spawned.
+
+`apogee __machine-schema` is hidden from `--help`, like `__complete`: a
+protocol, not a feature. Its stdout carries the schema and nothing else.
+
 ## Writing to the child
 
 One JSON object per line on stdin.

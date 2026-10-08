@@ -977,6 +977,8 @@ if(UNIX)
                 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/schema_conformance.py"
                 "${CMAKE_CURRENT_SOURCE_DIR}/../source/presentation/machine/json_reporter.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/reference/machine-mode.md"
+                # The schema this build prints (28g), held to both.
+                $<TARGET_FILE:apogee>
         )
         set_tests_properties(cli.machine_schema_conformance PROPERTIES TIMEOUT 60)
     endif()

@@ -51,6 +51,8 @@ apogee_add_module(machine
     machine/json_reporter.cpp
     machine/driver_input.h
     machine/driver_input.cpp
+    machine/protocol.h
+    machine/protocol.cpp
 )
 target_link_libraries(apogee_presentation_machine PUBLIC nlohmann_json::nlohmann_json)
 
@@ -183,6 +185,8 @@ apogee_add_module(cli
     cli/permissions.cpp
     cli/auth_cmd.h
     cli/auth_cmd.cpp
+    cli/machine_schema_cmd.h
+    cli/machine_schema_cmd.cpp
     cli/provider_offer.h
     cli/provider_offer.cpp
     cli/providers_cmd.h

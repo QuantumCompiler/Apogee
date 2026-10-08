@@ -20,17 +20,6 @@ namespace {
     return object;
 }
 
-// The vocabulary, declared once (28d): what `capabilities` reports and what
-// `cli.machine_schema_conformance` holds to every `event("…")` below, every
-// `type == "…"` the parser reads and machine-mode.md.
-constexpr std::array<std::string_view, 17> kEventTypes{
-    "session",      "thinking",     "thinking_delta", "memory",     "tool_status",   "notice",
-    "answer_start", "answer_delta", "answer_end",     "result",     "question",      "error",
-    "task_started", "task_plan",    "task_round",     "task_grant", "task_finished",
-};
-constexpr std::array<std::string_view, 5> kInboundTypes{"user", "answer", "attach", "hello",
-                                                        "cancel"};
-
 /// A bounded copy of a driver's text for the log: a hello is the client's own
 /// words, and a log line is not the place for an essay.
 [[nodiscard]] std::string bounded(std::string text) {
@@ -67,14 +56,6 @@ void JsonReporter::write(nlohmann::json object) {
     out_->flush();
 }
 
-std::span<const std::string_view> machine_event_types() noexcept {
-    return kEventTypes;
-}
-
-std::span<const std::string_view> machine_inbound_types() noexcept {
-    return kInboundTypes;
-}
-
 void JsonReporter::begin_turn(std::int64_t turn) {
     turn_ = turn;
     turn_text_.clear();
@@ -96,7 +77,7 @@ void JsonReporter::begin_session(std::string_view model, const MachineCapabiliti
     object["model"] = std::string{model};
     nlohmann::json announced = nlohmann::json::object();
     announced["events"] = nlohmann::json::array();
-    for (const std::string_view type : kEventTypes) {
+    for (const std::string_view type : machine_event_types()) {
         announced["events"].push_back(std::string{type});
     }
     announced["accepts"] = nlohmann::json::array();
