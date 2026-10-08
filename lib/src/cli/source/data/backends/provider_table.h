@@ -35,6 +35,11 @@ struct ProviderFacts {
     /// An allow-listed status command that answers "logged in?" by its exit
     /// code -- offline, non-interactive, no spend. Empty for none.
     std::span<const std::string_view> status_arguments;
+    /// Whether a backend of this type cannot run without a `model:` (28b).
+    /// Registration writes an entry named `id` with its type alone -- the CLI
+    /// or the API picks its own default model -- so a provider that has none
+    /// to pick is detected and said, never registered half-made.
+    bool needs_model = false;
 };
 
 /// The table: the four vendor-CLI types, then the three API types (decided

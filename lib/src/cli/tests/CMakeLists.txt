@@ -228,6 +228,7 @@ target_link_libraries(apogee_tests_business PRIVATE apogee_business apogee_data
 
 add_library(apogee_tests_presentation OBJECT
     presentation/cli/registry_test.cpp
+    presentation/cli/provider_offer_test.cpp
     presentation/cli/root_test.cpp
     presentation/cli/models_pull_test.cpp
     presentation/cli/models_migrate_test.cpp
@@ -675,6 +676,17 @@ if(UNIX)
     )
     set_tests_properties(cli.no_provider_probes_at_startup PROPERTIES TIMEOUT 60)
 
+    # Provider registration (28b) on the real binary with fake vendor CLIs:
+    # a scan registers nothing; --register writes two entries through the
+    # editor and is a no-op the second time; a taken name is skipped and
+    # said; complete, machine mode and a piped chat never offer.
+    add_test(NAME cli.providers_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/providers_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/providers-e2e
+    )
+    set_tests_properties(cli.providers_lifecycle PROPERTIES TIMEOUT 60)
+
     add_test(NAME cli.complete_opens_no_listening_socket
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/no_listen_check.sh"
             $<TARGET_FILE:apogee>
@@ -914,6 +926,16 @@ if(UNIX)
         # the screen: drawn, taken by Tab, never at the last column, never left
         # behind -- and a pipe given none of it. Since 27p, Tab after
         # `/attach <path> ` takes `--graph=` and then its value.
+        # The first-launch registration offer (28b): only a terminal can
+        # answer it, so only a PTY can show it -- asked once, a no leaving the
+        # config byte-identical and never asked again, a yes registering.
+        add_test(NAME cli.provider_offer
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_provider_offer_check.py"
+                $<TARGET_FILE:apogee>
+        )
+        set_tests_properties(cli.provider_offer PROPERTIES TIMEOUT 120)
+
         add_test(NAME cli.chat_line_editing
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_lineedit_check.py"

@@ -21,6 +21,7 @@
 #include "cli/knowledge.h"
 #include "cli/mcp_cmd.h"
 #include "cli/models.h"
+#include "cli/providers_cmd.h"
 #include "cli/reset.h"
 #include "cli/serve_cmd.h"
 #include "cli/symphonies_cmd.h"
@@ -88,6 +89,7 @@ CommandRegistry default_registry() {
     registry.add(std::make_unique<KnowledgeCommand>());
     registry.add(std::make_unique<McpCommand>());
     registry.add(std::make_unique<ModelsCommand>());
+    registry.add(std::make_unique<ProvidersCommand>());
     registry.add(std::make_unique<ResetCommand>());
     registry.add(std::make_unique<ServeCommand>());
     registry.add(std::make_unique<SymphoniesCommand>());

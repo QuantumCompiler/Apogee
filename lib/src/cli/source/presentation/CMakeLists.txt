@@ -181,6 +181,10 @@ apogee_add_module(cli
     cli/permissions.cpp
     cli/auth_cmd.h
     cli/auth_cmd.cpp
+    cli/provider_offer.h
+    cli/provider_offer.cpp
+    cli/providers_cmd.h
+    cli/providers_cmd.cpp
     cli/analyze.h
     cli/analyze.cpp
     cli/agents_cmd.h

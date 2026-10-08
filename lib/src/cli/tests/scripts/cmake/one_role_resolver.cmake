@@ -43,6 +43,8 @@ endif()
 #   cli/config_suites.cpp, httpserver/admin_suites.cpp, operations/suites.cpp
 #                        -- the suite verbs, their twins and the rules both
 #                           share write, display and validate members (27d)
+#   cli/provider_offer.cpp -- registration (28b) sets models.default only
+#                           when it is EMPTY as written, never resolving it
 set(allowed
     "business/harness/roles.cpp"
     "data/contracts/config.cpp"
@@ -54,6 +56,7 @@ set(allowed
     "presentation/cli/config_suites.cpp"
     "presentation/httpserver/admin_suites.cpp"
     "presentation/operations/suites.cpp"
+    "presentation/cli/provider_offer.cpp"
 )
 
 # Every allowance names a file that exists: one left behind by a move would

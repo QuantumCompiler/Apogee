@@ -136,6 +136,10 @@ const std::map<std::string, Classification>& table() {
         // --- carve-outs: host-local by nature ---------------------------------
         {"config init", carve_out("the server cannot exist without a config to start from")},
         {"check", carve_out("--fix repairs the local install; host-local by nature")},
+        {"providers scan",
+         carve_out("detects the vendor CLIs and keys of the host it runs on; host-local by nature, "
+                   "and what --register writes a remote client writes through the add-backend "
+                   "twin")},
         {"uninstall", carve_out("removes the binary and the data directory; host-local")},
         {"reset",
          carve_out("resets the data directory to a fresh install; host-local, like uninstall -- "

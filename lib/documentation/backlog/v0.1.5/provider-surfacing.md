@@ -19,7 +19,7 @@
 **Reference.** The doctor precedent is `check` (its per-backend validation catches an unloadable GGUF, so a model that would die on its first turn is caught by the doctor rather than a user — the exact failure-shape this item ports to providers).
 
 **Decisions made** (dated):
-- 2026-10-03 — Split from the provider-detection spike as the surfacing half; gated on 28a only, parallel to [provider-registration.md](provider-registration.md) — the doctor should tell the truth even for hand-registered backends on a machine that never runs a scan.
+- 2026-10-03 — Split from the provider-detection spike as the surfacing half; gated on 28a only, parallel to [28b](../../assistant/MILESTONES.md#milestone-af--provider-detection) — the doctor should tell the truth even for hand-registered backends on a machine that never runs a scan.
 - 2026-10-03 — Verification is passive (the spike's recommendation, the user not objecting): the record is written when the user's own turn succeeds, and no `--verify` probe-turn exists in this item; if one is ever wanted it is a new, explicitly opt-in flag.
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): one verified entry per provider — last success date and the earning backend; no history.
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): the Providers section appears only with a provider configured or detected; pure-local installs see nothing new.
@@ -37,4 +37,4 @@
 - [ ] With no cache file, `check` says providers were not scanned and points at the command — and probes nothing expensive.
 - [ ] No token is ever spent by `check`/`models` paths (structurally pinned).
 
-**Scope note.** Item **28c**, earmarked for **v0.1.5**; gated on 28a — **satisfied: 28a shipped 2026-10-07** ([Milestone AF](../../assistant/MILESTONES.md#milestone-af--provider-detection)), parallel to [provider-registration.md](provider-registration.md). Out of scope: registration and offers (28b); proactive verification turns; changing llamacpp rows' semantics; serving provider status over HTTP (the admin plane follows its own parity rules if ever asked for).
+**Scope note.** Item **28c**, earmarked for **v0.1.5**; gated on 28a — **satisfied: 28a shipped 2026-10-07** ([Milestone AF](../../assistant/MILESTONES.md#milestone-af--provider-detection)), parallel to [28b](../../assistant/MILESTONES.md#milestone-af--provider-detection). Out of scope: registration and offers (28b); proactive verification turns; changing llamacpp rows' semantics; serving provider status over HTTP (the admin plane follows its own parity rules if ever asked for).

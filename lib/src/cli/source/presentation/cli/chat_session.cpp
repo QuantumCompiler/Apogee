@@ -3,6 +3,7 @@
 #include <CLI/CLI.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <future>
 #include <iostream>
@@ -21,6 +22,7 @@
 #include "agentloop/validate.h"
 #include "ansi/ansi.h"
 #include "backends/factory.h"
+#include "backends/provider_cache.h"
 #include "cli/chat_attachments.h"
 #include "cli/chat_completer.h"
 #include "cli/chat_history.h"
@@ -31,10 +33,12 @@
 #include "cli/embed.h"
 #include "cli/helpers.h"
 #include "cli/permissions.h"
+#include "cli/provider_offer.h"
 #include "cli/suite_residency.h"
 #include "cli/symphonies_cmd.h"
 #include "contracts/config.h"
 #include "contracts/errors.h"
+#include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "contracts/utf8.h"
 #include "harness/context_windows.h"
@@ -373,6 +377,30 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         config = harness::load_config(config_path);
     } catch (const harness::ConfigError& e) {
         fail_user(mode, e.what());
+    }
+    // The first-launch registration offer (28b): an interactive start with no
+    // provider backend configured, once ever, offering what the last explicit
+    // scan cached. It reads the cache and never probes -- this is a startup
+    // path (`cli.no_provider_probes`).
+    {
+        OfferContext offer;
+        offer.interactive = platform::is_terminal(platform::StandardStream::In) &&
+                            platform::is_terminal(platform::StandardStream::Out) &&
+                            !stdin_is_piped();
+        offer.machine = flags->output_format != OutputFormat::Text ||
+                        flags->input_format.value_or(InputFormat::Text) != InputFormat::Text;
+        offer.quiet = flags->quiet;
+        offer.config_path = config_path;
+        offer.cache_path = harness::provider_cache_path();
+        offer.today = backends::cache_day(std::chrono::system_clock::now());
+        try {
+            if (offer_registration(offer, config, std::cin, std::cerr) ==
+                OfferOutcome::Registered) {
+                config = harness::load_config(config_path);
+            }
+        } catch (const std::exception& e) {
+            fail_user(mode, e.what());
+        }
     }
     // A suite named on the command line must exist before anything is
     // built for it (27d).

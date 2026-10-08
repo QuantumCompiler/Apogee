@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <cstdio>
 #include <exception>
 #include <fstream>
 #include <iterator>
@@ -13,6 +14,7 @@
 #include "backends/provider_table.h"
 #include "contracts/config_edit.h"
 #include "contracts/layout.h"
+#include "platform/platform.h"
 
 namespace apogee::backends {
 
@@ -163,6 +165,11 @@ ProviderCache parse_provider_cache(std::string_view text) noexcept {
                 }
             }
         }
+        if (const auto offer = document.find("offer");
+            offer != document.end() && offer->is_object()) {
+            cache.offer_answer = string_field(*offer, "answer");
+            cache.offer_date = string_field(*offer, "date");
+        }
         for (auto& [id, status] : cache.providers) {
             if (const auto found = cache.verified.find(id); found != cache.verified.end()) {
                 status.verified = found->second;
@@ -188,6 +195,9 @@ std::string render_provider_cache(const ProviderCache& cache) {
         records[id] = {{"date", record.date}, {"backend", record.backend}};
     }
     document["verified"] = std::move(records);
+    if (!cache.offer_answer.empty()) {
+        document["offer"] = {{"answer", cache.offer_answer}, {"date", cache.offer_date}};
+    }
     return document.dump(2, ' ', false, json::error_handler_t::replace) + "\n";
 }
 
@@ -219,6 +229,25 @@ bool store_provider_cache(const std::filesystem::path& path, const ProviderCache
         std::filesystem::create_directories(path.parent_path(), ignored);
         harness::write_file_atomically(path, render_provider_cache(cache));
         return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+std::string cache_day(std::chrono::system_clock::time_point when) {
+    const platform::LocalDate day = platform::local_date(when);
+    std::array<char, 16> text{};
+    (void)std::snprintf(text.data(), text.size(), "%04d-%02d-%02d", day.year, day.month, day.day);
+    return std::string{text.data()};
+}
+
+bool record_offer_answer(const std::filesystem::path& path, std::string_view answer,
+                         std::string_view date) noexcept {
+    try {
+        ProviderCache cache = load_provider_cache(path);
+        cache.offer_answer = std::string{answer};
+        cache.offer_date = std::string{date};
+        return store_provider_cache(path, cache);
     } catch (const std::exception&) {
         return false;
     }

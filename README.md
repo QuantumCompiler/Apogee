@@ -41,6 +41,12 @@ apogee auth add anthropic   # hidden prompt; or --stdin / --from-env
 apogee chat
 ```
 
+**Subscription CLIs:** if you already use `claude`, `codex` or `gemini`, Apogee can find them — `apogee providers scan` shows what this machine has and the evidence for it, and `--register` adds a backend for each one found (nothing is written without it):
+
+```sh
+apogee providers scan --register
+```
+
 **Local:** pull a model from Hugging Face or your Ollama store, point a `llamacpp` backend at it, and nothing needs the network again:
 
 ```sh

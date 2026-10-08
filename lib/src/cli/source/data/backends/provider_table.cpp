@@ -32,21 +32,32 @@ constexpr std::array<ProviderFacts, 7> kTable{{
      "claude",
      kVersion,
      kClaudeEvidence,
-     {}},
-    {"codex", harness::BackendType::CodexCli, "Codex CLI", "codex", kVersion, {}, kCodexStatus},
+     {},
+     false},
+    {"codex",
+     harness::BackendType::CodexCli,
+     "Codex CLI",
+     "codex",
+     kVersion,
+     {},
+     kCodexStatus,
+     false},
     {"gemini",
      harness::BackendType::GeminiCli,
      "Gemini CLI",
      "gemini",
      kVersion,
      kGeminiEvidence,
-     {}},
+     {},
+     false},
     // Ollama keeps no sign-in evidence offline that tells a signed-in machine
     // from one that only ran the server, so its credentials stay unknown.
-    {"ollama", harness::BackendType::OllamaCli, "Ollama CLI", "ollama", kVersion, {}, {}},
-    {"anthropic", harness::BackendType::Anthropic, "Anthropic API", "", {}, {}, {}},
-    {"openai", harness::BackendType::OpenAI, "OpenAI API", "", {}, {}, {}},
-    {"google", harness::BackendType::Google, "Google API", "", {}, {}, {}},
+    // And an ollama-cli backend needs a model -- there is no default to run --
+    // so it is detected and never registered without one (28b).
+    {"ollama", harness::BackendType::OllamaCli, "Ollama CLI", "ollama", kVersion, {}, {}, true},
+    {"anthropic", harness::BackendType::Anthropic, "Anthropic API", "", {}, {}, {}, false},
+    {"openai", harness::BackendType::OpenAI, "OpenAI API", "", {}, {}, {}, false},
+    {"google", harness::BackendType::Google, "Google API", "", {}, {}, {}, false},
 }};
 
 }  // namespace

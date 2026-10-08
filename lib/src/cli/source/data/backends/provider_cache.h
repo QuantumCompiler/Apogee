@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <map>
@@ -111,6 +112,11 @@ struct ProviderCache {
     std::map<std::string, ProviderStatus, std::less<>> providers;
     /// The verified slot: one record per provider id, the latest.
     std::map<std::string, VerifiedRecord, std::less<>> verified;
+    /// The first-launch registration offer (28b), once answered: `accepted`
+    /// or `declined`, and the day. Asked once ever -- kept here rather than in
+    /// the config, which is the user's file; deleting the cache forgets it.
+    std::string offer_answer;
+    std::string offer_date;
 
     /// Whether a scan has ever been recorded.
     [[nodiscard]] bool scanned() const noexcept {
@@ -140,6 +146,15 @@ inline constexpr int kProviderCacheSchema = 1;
 /// False when it could not be written -- disposable state is never worth
 /// failing the command that refreshed it.
 bool store_provider_cache(const std::filesystem::path& path, const ProviderCache& cache) noexcept;
+
+/// `when` as the local calendar day, `YYYY-MM-DD` -- the date the verified
+/// slot and the offer's answer are recorded with.
+[[nodiscard]] std::string cache_day(std::chrono::system_clock::time_point when);
+
+/// Records the registration offer's answer (`accepted` or `declined`) and the
+/// day in the cache at `path`. False when it could not be written.
+bool record_offer_answer(const std::filesystem::path& path, std::string_view answer,
+                         std::string_view date) noexcept;
 
 /// Records that `backend` -- a backend of `type` -- answered a real turn on
 /// `date`, in the cache at `path`. A no-op for a type the knowledge table

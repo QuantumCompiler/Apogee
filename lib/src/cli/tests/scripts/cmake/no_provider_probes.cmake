@@ -31,6 +31,7 @@ endif()
 # The only files that may run a probe: the prober, and the explicit surfaces.
 set(allowed
     "data/backends/provider_probe.cpp"
+    "presentation/cli/providers_cmd.cpp"
 )
 
 # Chat, execute, complete, serve, task run/resume, symphonies play and machine
@@ -40,6 +41,7 @@ set(hot_paths
     "main.cpp"
     "presentation/cli/chat.cpp"
     "presentation/cli/chat_session.cpp"
+    "presentation/cli/provider_offer.cpp"
     "presentation/cli/chat_turn.cpp"
     "presentation/cli/execute.cpp"
     "presentation/cli/complete.cpp"
