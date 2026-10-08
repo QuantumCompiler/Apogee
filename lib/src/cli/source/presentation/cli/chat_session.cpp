@@ -47,6 +47,7 @@
 #include "knowledge/clerk.h"
 #include "knowledge/record.h"
 #include "logger/operational.h"
+#include "machine/driver_input.h"
 #include "machine/json_reporter.h"
 #include "mcp/registry.h"
 #include "modelstore/footprint.h"
@@ -926,11 +927,20 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         // What this session can do, before its first turn (28d): every
         // inbound line type, tools as wired, and `ask_user` and the
         // permission prompt reaching the driver exactly when tools do.
+        // Each accepted `user` line is a numbered turn (28f), counted past
+        // the turns a resumed conversation already holds.
+        std::int64_t next_turn = static_cast<std::int64_t>(session.turns) + 1;
         machine_reporter.begin_session(
-            session.backend, MachineCapabilities{.accepts = {machine_inbound_types().begin(),
-                                                             machine_inbound_types().end()},
-                                                 .tools = tools_on(),
-                                                 .ask = flags->tools});
+            session.backend,
+            MachineCapabilities{
+                .accepts = {machine_inbound_types().begin(), machine_inbound_types().end()},
+                .tools = tools_on(),
+                .ask = flags->tools},
+            next_turn);
+        // The driver's lines, read while a turn runs, so a `cancel` reaches
+        // it (28f); the loop, a question and the permission prompt all take
+        // their lines from this one reader.
+        DriverInput driver{std::cin};
 
         const auto machine_notice = [](const std::string& message) {
             // stdout carries ONLY protocol events, so a diagnostic goes to
@@ -940,7 +950,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         };
 
         const agentloop::AskFn driver_ask =
-            flags->tools ? make_driver_ask_fn(machine_reporter, std::cin) : agentloop::AskFn{};
+            flags->tools ? make_driver_ask_fn(machine_reporter, driver) : agentloop::AskFn{};
 
         BackgroundTitle title{harness, [&machine_reporter](std::string_view line) {
                                   machine_reporter.on_progress(line);
@@ -974,10 +984,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         for (const std::string& spec : flags->attach) {
             (void)attached.attach(spec, working_directory, attached.graph_method(launch_graph));
         }
-        std::string line;
         bool first_line = true;
-        while (std::getline(std::cin, line)) {
-            const DriverMessage message = parse_driver_line(line);
+        while (const std::optional<DriverLine> got = driver.next_line()) {
+            const DriverMessage message = parse_driver_line(got->text);
             const bool opening = std::exchange(first_line, false);
             if (message.kind == DriverMessage::Kind::Hello) {
                 // A driver introducing itself (28d): recorded on the first
@@ -1009,9 +1018,31 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             }
             if (message.kind != DriverMessage::Kind::User || message.text.empty()) {
                 // Unknown types are ignored rather than fatal: the same
-                // tolerance this protocol asks of its own drivers.
+                // tolerance this protocol asks of its own drivers. An empty
+                // `user` line opens no turn.
+                driver.end_turn(got->sequence);
                 continue;
             }
+            // The turn, numbered (28f): every event until its `result` or
+            // `error` carries it, and a `cancel` until then ends it the way
+            // Ctrl-C would -- the half-turn rolled back, the session left as
+            // the last finished turn left it.
+            const std::int64_t turn = next_turn++;
+            machine_reporter.begin_turn(turn);
+            const logger::Session before = session;
+            const auto close_turn = [&machine_reporter, &driver, &got]() {
+                machine_reporter.end_turn();
+                driver.end_turn(got->sequence);
+            };
+            const auto cancelled_result = [&]() {
+                session = before;
+                logger::save(session);
+                harness::ChatResponse response;
+                response.message = harness::ChatMessage::assistant(machine_reporter.turn_text());
+                response.model = session.backend;
+                response.finish_reason = harness::FinishReason::Cancelled;
+                machine_reporter.emit_result(response);
+            };
             title.settle(session);
             // An execute session plays a `user` line that is a `/play`
             // command, as its REPL does (27s): found through the one table,
@@ -1028,10 +1059,17 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     run_play_turn(harness, session, message.text,
                                   prepare_play(harness.config(), config_path,
                                                parse_play_argument(command->argument)),
-                                  *member_calls, machine_reporter, &recall);
+                                  *member_calls, machine_reporter, &recall, got->turn);
+                if (played.cancelled) {
+                    machine_notice(played.failure);
+                    cancelled_result();
+                    close_turn();
+                    continue;
+                }
                 if (!played.completed) {
                     machine_notice(played.failure);
                     machine_reporter.emit_error(played.failure);
+                    close_turn();
                     continue;
                 }
                 title.start_if_due(session);
@@ -1039,6 +1077,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 response.message = session.messages.back();
                 response.model = session.backend;
                 machine_reporter.emit_result(response);
+                close_turn();
                 continue;
             }
             attach_mentions(
@@ -1050,14 +1089,27 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             // The driver reads structured input, so there IS someone to
             // answer a question -- the loop's "nil AskFn <=> never
             // advertised" rule is satisfied rather than sidestepped.
-            run_chat_turn(harness, session, message.text, tools_on() ? offered : nullptr,
-                          selection.get(), member_calls.get(), driver_ask,
-                          ToolGate{permission,
-                                   flags->tools ? make_driver_confirm_fn(machine_reporter, std::cin,
-                                                                         config_path, approvals)
-                                                : agent::ConfirmFn{}},
-                          machine_reporter, machine_notice, rag_settings, review_note, &attached,
-                          &recall);
+            const ChatTurnResult outcome = run_chat_turn(
+                harness, session, message.text, tools_on() ? offered : nullptr, selection.get(),
+                member_calls.get(), driver_ask,
+                ToolGate{permission, flags->tools ? make_driver_confirm_fn(machine_reporter, driver,
+                                                                           config_path, approvals)
+                                                  : agent::ConfirmFn{}},
+                machine_reporter, machine_notice, rag_settings, review_note, &attached, &recall,
+                got->turn);
+            if (outcome.cancelled) {
+                cancelled_result();
+                close_turn();
+                continue;
+            }
+            if (!outcome.error.empty()) {
+                // A turn that failed ends in `error`, as the protocol has
+                // always said -- not in a `result` whose text was the user's
+                // own line (found pinning the turn accounting, 28f).
+                machine_reporter.emit_error(outcome.error);
+                close_turn();
+                continue;
+            }
             title.start_if_due(session);
             if (session.compactions != saved_compactions) {
                 saved_compactions = session.compactions;
@@ -1070,6 +1122,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                                                         : session.messages.back();
             response.model = session.backend;
             machine_reporter.emit_result(response);
+            close_turn();
         }
 
         // stdin closed: the driver is done. Everything is already persisted

@@ -92,7 +92,7 @@ for stream in (plain, hello):
     session = stream[0]
     assert session["type"] == "session", session
     caps = session["capabilities"]
-    assert caps["accepts"] == ["user", "answer", "attach", "hello"], caps
+    assert caps["accepts"] == ["user", "answer", "attach", "hello", "cancel"], caps
     assert "result" in caps["events"] and "question" in caps["events"], caps
     assert caps["tools"] is False and caps["ask"] is False, caps
     assert isinstance(caps["schema"], str) and caps["schema"], caps
@@ -114,6 +114,126 @@ grep -q '"accepts":\["hello"\]' "$HS_DIR/complete.jsonl" || fail "complete's cap
 "$APOGEE_BIN" complete -m echo --output-format stream-json "an argument" </dev/null \
     >"$HS_DIR/arg.jsonl" 2>&1 || fail "complete with an argument failed"
 grep -q '"accepts":\[\]' "$HS_DIR/arg.jsonl" || fail "complete with an argument claimed to read stdin"
+
+# --- turn ids and cancel (28f) ------------------------------------------------
+# A driver over real pipes: every turn-scoped event carries its turn; a cancel
+# with nothing in flight changes nothing; a cancel mid-stream ends the turn in
+# one `result` with finish_reason `cancelled` and the text streamed so far, the
+# half-turn kept out of the saved session, and the same child answers the next
+# turn; a cancel while a question waits fails the turn the same way; a turn
+# that fails ends in `error`, never a `result` carrying the user's own words.
+TC_DIR="$WORK_DIR/turns"
+mkdir -p "$TC_DIR/bin"
+printf '%s' '{"turns":[{"text":"aaaaaaaabbbbbbbbccccccccddddddddeeeeeeeeffffffffgggggggghhhhhhhh","delay_ms":150},{"text":"echo: {{last_user}}"}]}' >"$TC_DIR/slow.json"
+printf '%s' '{"turns":[{"text":"","tool_calls":[{"name":"ask_user","arguments":{"questions":[{"header":"Pick","question":"Which?","multi_select":false,"options":[{"label":"a","description":"A"},{"label":"b","description":"B"}]}]}}]},{"text":"echo: {{last_user}}"}]}' >"$TC_DIR/asks.json"
+printf '#!/bin/sh\necho x\n' >"$TC_DIR/bin/ollama"
+chmod +x "$TC_DIR/bin/ollama"
+"$APOGEE_BIN" config add-backend slow --type mock --model-path "$TC_DIR/slow.json" >/dev/null || fail "add slow"
+"$APOGEE_BIN" config add-backend asks --type mock --model-path "$TC_DIR/asks.json" >/dev/null || fail "add asks"
+"$APOGEE_BIN" config add-backend down --type ollama-cli --model m >/dev/null || fail "add down"
+python3 - "$APOGEE_HOME/config/config.yaml" "$TC_DIR/bin/ollama" <<'PY' || fail "could not point the down backend"
+import sys
+path, binary = sys.argv[1], sys.argv[2]
+text = open(path).read()
+text = text.replace("  down:\n    type: ollama-cli\n", "  down:\n    type: ollama-cli\n    host: 127.0.0.1:9\n    binary: " + binary + "\n", 1)
+open(path, "w").write(text)
+PY
+python3 - "$APOGEE_BIN" "$APOGEE_HOME" <<'PY' || fail "turn ids and cancel"
+import glob, json, os, subprocess, sys, time
+
+binary, home = sys.argv[1], sys.argv[2]
+
+class Child:
+    def __init__(self, *args):
+        self.p = subprocess.Popen([binary, "chat", "--no-recall", "--output-format", "stream-json",
+                                   "--input-format", "stream-json", *args],
+                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True, bufsize=1)
+    def send(self, obj):
+        self.p.stdin.write(json.dumps(obj) + "\n")
+        self.p.stdin.flush()
+    def read(self):
+        line = self.p.stdout.readline()
+        assert line, "the stream ended early: " + self.p.stderr.read()
+        return json.loads(line)
+    def until(self, kind):
+        seen = []
+        while True:
+            event = self.read()
+            seen.append(event)
+            if event["type"] in kind:
+                return seen
+    def close(self):
+        self.p.stdin.close()
+        assert self.p.wait(timeout=30) == 0, self.p.stderr.read()
+
+def fail(message):
+    print("turns: " + message, file=sys.stderr)
+    sys.exit(1)
+
+# A cancel mid-stream, a cancel with nothing in flight, the next turn.
+child = Child("-m", "slow")
+session = child.read()
+if session["type"] != "session" or session.get("next_turn") != 1 or "turn" in session:
+    fail(f"session: {session}")
+child.send({"type": "cancel"})  # nothing in flight: nothing happens
+child.send({"type": "user", "text": "first"})
+streamed = child.until({"answer_delta", "result"})
+if streamed[-1]["type"] != "answer_delta":
+    fail(f"no delta before the result: {streamed}")
+child.send({"type": "cancel"})
+ended = child.until({"result", "error"})
+result = ended[-1]
+for event in streamed + ended:
+    if event.get("turn") != 1:
+        fail(f"an event of turn 1 lacks it: {event}")
+if result["type"] != "result" or result.get("finish_reason") != "cancelled":
+    fail(f"the cancelled turn did not end in a cancelled result: {result}")
+if not result["text"] or not "aaaaaaaabbbbbbbbccccccccddddddddeeeeeeeeffffffffgggggggghhhhhhhh".startswith(result["text"]):
+    fail(f"the result is not the partial answer: {result!r}")
+if result["text"] == "aaaaaaaabbbbbbbbccccccccddddddddeeeeeeeeffffffffgggggggghhhhhhhh":
+    fail("the turn was not cut short")
+child.send({"type": "user", "text": "second"})
+second = child.until({"result", "error"})
+if second[-1].get("text") != "echo: second" or any(e.get("turn") != 2 for e in second):
+    fail(f"the next turn: {second}")
+child.send({"type": "cancel"})  # a cancel after the result: harmless
+child.close()
+newest = max(glob.glob(os.path.join(home, "sessions", "*.json")), key=os.path.getmtime)
+saved = json.load(open(newest))
+texts = json.dumps(saved.get("messages", []))
+if "first" in texts or "aaaaaaaa" in texts or "second" not in texts:
+    fail(f"the saved session holds the cancelled half-turn: {texts[:400]}")
+
+# A cancel while a question waits.
+child = Child("-m", "asks", "--tools")
+child.read()
+child.send({"type": "user", "text": "ask me"})
+asked = child.until({"question", "result", "error"})
+if asked[-1]["type"] != "question" or asked[-1].get("turn") != 1:
+    fail(f"no question: {asked}")
+child.send({"type": "cancel"})
+ended = child.until({"result", "error"})
+if ended[-1]["type"] != "result" or ended[-1].get("finish_reason") != "cancelled":
+    fail(f"the asked turn did not end cancelled: {ended}")
+child.send({"type": "user", "text": "again"})
+again = child.until({"result", "error"})
+if again[-1].get("text") != "echo: again" or again[-1].get("turn") != 2:
+    fail(f"the turn after a cancelled question: {again}")
+child.close()
+
+# A turn that fails ends in error, numbered -- one terminal event per line.
+child = Child("-m", "down")
+child.read()
+child.send({"type": "user", "text": "my own words"})
+failed = child.until({"result", "error"})
+if failed[-1]["type"] != "error" or failed[-1].get("turn") != 1:
+    fail(f"a failed turn did not end in a numbered error: {failed}")
+if any(e["type"] == "result" for e in failed):
+    fail(f"a failed turn emitted a result: {failed}")
+child.close()
+print("turns: ids on every turn event, cancel mid-stream and mid-question, a failure an error - OK")
+PY
 
 # --- bytes that are not UTF-8 never end the session ---------------------------
 # Every event, session file and request is a strict JSON dump, and each of

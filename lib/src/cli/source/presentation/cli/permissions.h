@@ -25,6 +25,8 @@
 /// nothing at all (`serve`, a pipe), which the gate resolves to deny.
 namespace apogee::commands {
 
+class DriverInput;
+
 /// What the user answered `session` for. Shared between the checker and the
 /// prompt so an answer given once holds for the run and not the next.
 struct SessionApprovals {
@@ -110,7 +112,7 @@ bool revoke_for_session(SessionApprovals& approvals, const GatedName& name);
 /// answered by an ordinary `answer` line -- `yes`, `no`, `always`, `session`.
 /// A driver that closes stdin with the prompt outstanding fails the turn,
 /// the way an unanswered question does.
-[[nodiscard]] agent::ConfirmFn make_driver_confirm_fn(JsonReporter& reporter, std::istream& input,
+[[nodiscard]] agent::ConfirmFn make_driver_confirm_fn(JsonReporter& reporter, DriverInput& input,
                                                       std::filesystem::path config_path,
                                                       std::shared_ptr<SessionApprovals> approvals);
 

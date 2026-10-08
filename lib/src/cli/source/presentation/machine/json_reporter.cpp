@@ -6,6 +6,8 @@
 #include <istream>
 #include <stdexcept>
 
+#include "contracts/errors.h"
+#include "machine/driver_input.h"
 #include "tasks/view.h"
 
 namespace apogee::commands {
@@ -26,7 +28,8 @@ constexpr std::array<std::string_view, 17> kEventTypes{
     "answer_start", "answer_delta", "answer_end",     "result",     "question",      "error",
     "task_started", "task_plan",    "task_round",     "task_grant", "task_finished",
 };
-constexpr std::array<std::string_view, 4> kInboundTypes{"user", "answer", "attach", "hello"};
+constexpr std::array<std::string_view, 5> kInboundTypes{"user", "answer", "attach", "hello",
+                                                        "cancel"};
 
 /// A bounded copy of a driver's text for the log: a hello is the client's own
 /// words, and a log line is not the place for an essay.
@@ -43,7 +46,12 @@ constexpr std::array<std::string_view, 4> kInboundTypes{"user", "answer", "attac
 
 JsonReporter::JsonReporter(std::ostream& out) : out_{&out} {}
 
-void JsonReporter::write(const nlohmann::json& object) {
+void JsonReporter::write(nlohmann::json object) {
+    // Every event of an open turn carries its number (28f) -- the session
+    // event never does: it is before any turn.
+    if (turn_.has_value() && object.value("type", std::string{}) != "session") {
+        object["turn"] = *turn_;
+    }
     // One object per line, flushed immediately. Flushing per event is the point
     // of a streaming protocol: a driver rendering live must not wait for a
     // buffer to fill, and the whole reason this mode exists is that a GUI wants
@@ -67,7 +75,22 @@ std::span<const std::string_view> machine_inbound_types() noexcept {
     return kInboundTypes;
 }
 
-void JsonReporter::begin_session(std::string_view model, const MachineCapabilities& capabilities) {
+void JsonReporter::begin_turn(std::int64_t turn) {
+    turn_ = turn;
+    turn_text_.clear();
+}
+
+void JsonReporter::end_turn() {
+    turn_.reset();
+    turn_text_.clear();
+}
+
+const std::string& JsonReporter::turn_text() const noexcept {
+    return turn_text_;
+}
+
+void JsonReporter::begin_session(std::string_view model, const MachineCapabilities& capabilities,
+                                 std::optional<std::int64_t> next_turn) {
     nlohmann::json object = event("session");
     object["protocol_version"] = kMachineProtocolVersion;
     object["model"] = std::string{model};
@@ -84,6 +107,9 @@ void JsonReporter::begin_session(std::string_view model, const MachineCapabiliti
     announced["ask"] = capabilities.ask;
     announced["schema"] = std::string{kMachineSchemaVersion};
     object["capabilities"] = std::move(announced);
+    if (next_turn.has_value()) {
+        object["next_turn"] = *next_turn;
+    }
     write(object);
 }
 
@@ -162,6 +188,9 @@ void JsonReporter::on_answer_token(std::string_view chunk) {
         return;
     }
     wrote_answer_ = true;
+    if (turn_.has_value()) {
+        turn_text_ += chunk;
+    }
     nlohmann::json object = event("answer_delta");
     object["text"] = std::string{chunk};
     write(object);
@@ -399,6 +428,9 @@ DriverMessage parse_driver_line(std::string_view line) {
         message.kind = DriverMessage::Kind::User;
     } else if (type == "answer") {
         message.kind = DriverMessage::Kind::Answer;
+    } else if (type == "cancel") {
+        message.kind = DriverMessage::Kind::Cancel;
+        return message;
     } else if (type == "hello") {
         // A driver introducing itself (28d): recorded, never acted on in this
         // cut -- and a malformed field is just absent.
@@ -445,14 +477,24 @@ std::string describe_hello(const DriverMessage& hello) {
     return out;
 }
 
-agentloop::AskFn make_driver_ask_fn(JsonReporter& reporter, std::istream& input) {
+agentloop::AskFn make_driver_ask_fn(JsonReporter& reporter, DriverInput& input) {
     return [&reporter, &input](const agentloop::QuestionRequest& request) {
         reporter.emit_question(request);
 
         agentloop::Answers answers;
-        std::string line;
-        while (answers.values.size() < request.questions.size() && std::getline(input, line)) {
-            const DriverMessage message = parse_driver_line(line);
+        while (answers.values.size() < request.questions.size()) {
+            bool cancelled = false;
+            const std::optional<DriverLine> line = input.next_line_in_turn(cancelled);
+            if (cancelled) {
+                // The driver cancelled the turn while it was asked (28f): it
+                // fails as a closed stdin fails it, the half-turn rolled
+                // back, and the session goes on.
+                throw harness::CancelledError();
+            }
+            if (!line.has_value()) {
+                break;
+            }
+            const DriverMessage message = parse_driver_line(line->text);
             if (message.kind == DriverMessage::Kind::Answer) {
                 answers.values.push_back(message.text);
             }

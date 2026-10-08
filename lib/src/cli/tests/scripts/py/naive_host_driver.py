@@ -274,14 +274,45 @@ def main():
                "hand-transcribed from prose, and nothing ships to validate a "
                "stream against",
          "DOCUMENTED_EVENTS in this file IS the transcription")
-    wall("W3", "No turn or correlation ids: deltas and results belong to 'the "
-               "current turn' by position only, so a host cannot pipeline "
-               "turns or attribute events after a race",
-         "result events carry no id; the driver serializes turns to stay safe")
-    wall("W4", "No cancel: the only way out of an in-flight turn is killing "
-               "the child or failing the turn by closing stdin",
-         "machine-mode.md: closing stdin with a question outstanding fails "
-         "the turn; no interrupt message exists")
+    # W3 -- since 28f the doc says every event of a turn carries `turn`, the
+    # number of its user line. The host checks the conversation's results.
+    turns = [r.get("turn") for r in results]
+    if turns == list(range(1, len(results) + 1)) and results:
+        print(f"  W3 closed: results carry their turn numbers {turns}", flush=True)
+    else:
+        wall("W3", "No turn or correlation ids: deltas and results belong to 'the "
+                   "current turn' by position only, so a host cannot pipeline "
+                   "turns or attribute events after a race",
+             f"result turns: {turns}")
+
+    # W4 -- since 28f the doc names `{"type":"cancel"}`. The host's Stop
+    # button: a turn waiting on a question, cancelled; the same child then
+    # answers the next turn.
+    stopper = Child(binary, env, project, "cancel")
+    stopper.send({"type": "user", "text": "Which colour should the banner be?"})
+    stopped, next_turn = None, None
+    for event in stopper.events():
+        if event["type"] == "question" and stopped is None:
+            stopper.send({"type": "cancel"})
+        elif event["type"] == "question":
+            # The next turn may ask too: answered as the conversation did.
+            stopper.send({"type": "answer",
+                          "text": "yes" if event.get("kind") == "permission" else "blue"})
+        elif event["type"] == "result" and stopped is None:
+            stopped = event
+            stopper.send({"type": "user", "text": "thanks!"})
+        elif event["type"] in ("result", "error"):
+            next_turn = event
+            break
+    stopper.close()
+    if stopped and stopped.get("finish_reason") == "cancelled" and next_turn is not None:
+        print(f"  W4 closed: cancel ended turn {stopped.get('turn')} "
+              f"(finish_reason cancelled); turn {next_turn.get('turn')} answered after it",
+              flush=True)
+    else:
+        wall("W4", "No cancel: the only way out of an in-flight turn is killing "
+                   "the child or failing the turn by closing stdin",
+             f"after a cancel: {stopped!r}, then {next_turn!r}")
     if child.unknown_types:
         wall("W5", "Undocumented event types observed (rule 1 absorbed them, "
                    "but a host cannot know if they mattered)",

@@ -100,7 +100,7 @@ inline constexpr std::string_view kMachineSchemaVersion = "2026-10-07";
 [[nodiscard]] std::span<const std::string_view> machine_event_types() noexcept;
 
 /// Every line type a driven session reads on stdin: `user`, `answer`,
-/// `attach`, `hello`. Held to the parser the same way.
+/// `attach`, `hello`, and since 28f `cancel`. Held to the parser the same way.
 [[nodiscard]] std::span<const std::string_view> machine_inbound_types() noexcept;
 
 /// What a session can do, announced on its `session` event (28d) so a host
@@ -131,8 +131,21 @@ public:
 
     /// Emits the opening `session` event, with `capabilities` (28d). Call
     /// once, before the first turn -- unprompted: the child speaks first, and
-    /// a driver's `hello` refines what it reads, never gates it.
-    void begin_session(std::string_view model, const MachineCapabilities& capabilities);
+    /// a driver's `hello` refines what it reads, never gates it. A session of
+    /// `user` lines also names `next_turn` (28f): the number its next turn
+    /// will carry, past those a resumed conversation already holds.
+    void begin_session(std::string_view model, const MachineCapabilities& capabilities,
+                       std::optional<std::int64_t> next_turn = std::nullopt);
+
+    /// A `user` line was accepted as turn `turn` (28f): every event until
+    /// `end_turn` carries `"turn": turn`, so a driver can attribute any event
+    /// to its line by number alone; the answer streamed is kept, for a
+    /// cancelled turn's `result`.
+    void begin_turn(std::int64_t turn);
+    /// The turn's `result` or `error` is out: events are unstamped again.
+    void end_turn();
+    /// The answer text the open turn has streamed so far.
+    [[nodiscard]] const std::string& turn_text() const noexcept;
 
     void on_thinking() override;
     void on_thinking_token(std::string_view chunk) override;
@@ -201,10 +214,12 @@ public:
     [[nodiscard]] bool wrote_answer() const noexcept;
 
 private:
-    void write(const nlohmann::json& object);
+    void write(nlohmann::json object);
 
     std::ostream* out_;
     bool wrote_answer_ = false;
+    std::optional<std::int64_t> turn_;
+    std::string turn_text_;
 };
 
 /// How a driver feeds turns in. `--input-format`.
@@ -278,6 +293,9 @@ struct DriverMessage {
         /// A driver introducing itself (28d) -- its `client` name and version
         /// and what it `wants`, recorded for diagnostics; changes nothing.
         Hello,
+        /// Stop the turn in flight, as Ctrl-C would (28f). Read by the
+        /// session's stdin reader, never queued.
+        Cancel,
         /// A line that parsed but carried no recognised type.
         Unknown,
     };
@@ -315,13 +333,17 @@ struct DriverMessage {
 /// ```
 [[nodiscard]] DriverMessage parse_driver_line(std::string_view line);
 
+class DriverInput;
+
 /// An `AskFn` that asks the driver, over the protocol.
 ///
 /// Offered **only** when the driver reads structured input: with plain-line
 /// stdin an answer is indistinguishable from the next user turn, and the
 /// loop's rule is that the tool exists if and only if there is someone to
 /// answer it. Throws if stdin closes with a question outstanding — the loop
-/// then rolls the half-turn out of history, which is the honest outcome.
-[[nodiscard]] agentloop::AskFn make_driver_ask_fn(JsonReporter& reporter, std::istream& input);
+/// then rolls the half-turn out of history, which is the honest outcome — and
+/// throws `CancelledError` when the driver cancels the turn while it waits
+/// (28f), failing the turn the same way without ending the session.
+[[nodiscard]] agentloop::AskFn make_driver_ask_fn(JsonReporter& reporter, DriverInput& input);
 
 }  // namespace apogee::commands

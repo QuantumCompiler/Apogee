@@ -77,6 +77,20 @@ def main():
                 failures.append(f"the session event carries '{field}' but {document} never "
                                 f"names it")
 
+    # The field every event of a turn carries (28f), stamped in one place.
+    writer = re.search(r"void JsonReporter::write\(.*?\n\}\n", code, re.DOTALL)
+    if writer is None:
+        failures.append(f"{source} has no JsonReporter::write -- the writer moved")
+    else:
+        for field in sorted(set(re.findall(r'\["([a-z_]+)"\]', writer.group(0)))):
+            if f'"{field}"' not in prose and f"`{field}`" not in prose:
+                failures.append(f"every event of a turn carries '{field}' but {document} never "
+                                f"names it")
+    # A cancelled turn's result says so (28f): the value a host switches on.
+    if '"cancelled"' not in prose:
+        failures.append(f'{document} never names finish_reason "cancelled", which a cancelled '
+                        f"turn's result carries")
+
     for kind in sorted(emitted - documented):
         failures.append(
             f"the emitter produces '{kind}' but {document} never describes it -- "

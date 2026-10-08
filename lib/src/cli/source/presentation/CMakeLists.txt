@@ -49,6 +49,8 @@ target_link_libraries(apogee_presentation_views PRIVATE replxx::replxx)
 apogee_add_module(machine
     machine/json_reporter.h
     machine/json_reporter.cpp
+    machine/driver_input.h
+    machine/driver_input.cpp
 )
 target_link_libraries(apogee_presentation_machine PUBLIC nlohmann_json::nlohmann_json)
 

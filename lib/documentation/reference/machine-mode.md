@@ -42,7 +42,7 @@ opened with a suite, and takes both flags as chat does (see
 One JSON object per line on stdout. Every object has a `type`.
 
 ```jsonl
-{"type":"session","protocol_version":1,"model":"claude-sonnet-5","capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello"],"tools":true,"ask":true,"schema":"2026-10-07"}}
+{"type":"session","protocol_version":1,"model":"claude-sonnet-5","next_turn":1,"capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello","cancel"],"tools":true,"ask":true,"schema":"2026-10-07"}}
 {"type":"thinking"}
 {"type":"thinking_delta","text":"…"}
 {"type":"memory","chats":2,"decisions":1}
@@ -66,9 +66,9 @@ One JSON object per line on stdout. Every object has a `type`.
 | `notice` | A line for the user in `text` that is neither progress nor an error — a local model answering without the tools it was given because its chat template cannot take them, or a reply kept as text because it did not match the template's format, or a request trimmed to fit the model's window (`context budget: 2 earlier exchanges not sent`), or what a suite's verifier said (27g): an objection to a tool call returned to the model, a dispute the call runs over, the two positions on an answer under `answers: always` (`validate: …`), a check that could not be made. Show it and keep it; it never ends the turn. |
 | `answer_start` / `answer_end` | Bracket one answer's deltas. |
 | `answer_delta` | A chunk of answer text. Concatenate in order. |
-| `result` | Ends a turn. Carries the whole answer, so a driver that dropped every delta still has it. `usage` is **absent** when the provider reported none — absent is not zero. |
+| `result` | Ends a turn. Carries the whole answer, so a driver that dropped every delta still has it. `usage` is **absent** when the provider reported none — absent is not zero. A turn ended by a `cancel` ends here too, with `finish_reason: "cancelled"` and the text streamed before it. |
 | `question` | `ask_user`. Expects a reply; see below. |
-| `error` | A turn failed. The machine-readable half of a diagnostic. |
+| `error` | A turn failed — it ends the turn in place of a `result`. The machine-readable half of a diagnostic. |
 
 ### `capabilities`
 
@@ -79,7 +79,7 @@ it is talking to:
 | Field | Meaning |
 |---|---|
 | `capabilities.events` | Every event type this build can write. A stream never carries one that is not here. |
-| `capabilities.accepts` | The line types this session reads on stdin: a driven `chat` or `execute` takes `user`, `answer`, `attach` and `hello`; `complete` reading its prompt on stdin takes only a `hello` before it; a `task run` and an agent's run read nothing. |
+| `capabilities.accepts` | The line types this session reads on stdin: a driven `chat` or `execute` takes `user`, `answer`, `attach`, `hello` and `cancel`; `complete` reading its prompt on stdin takes only a `hello` before it; a `task run` and an agent's run read nothing. |
 | `capabilities.tools` | Whether the model can call tools in this session. |
 | `capabilities.ask` | Whether `ask_user` and the permission prompt reach the driver as `question` events. Without it nothing is asked: `ask` resolves to deny and the tool is never offered. |
 | `capabilities.schema` | The vocabulary's version, a date: moved when a release grows the vocabulary (a new type, a new field, a new inbound line). Two builds with the same `schema` speak the same vocabulary. |
@@ -87,6 +87,21 @@ it is talking to:
 It names what the binary can do and nothing about this machine — never a key,
 a path into the data directory or a config value. Like every field, more may
 be added.
+
+### Turns: `turn` and `next_turn`
+
+In a driven `chat` or `execute`, each accepted `user` line is a **turn**,
+numbered from 1, and every event that belongs to it carries `"turn": N` —
+`memory`, `thinking*`, `tool_status`, `notice`, the answer's events,
+`question`, and the `result` or `error` that ends it — so a host can attribute
+any event to the line that caused it by number alone, after a race or reading a
+log. The `session` event carries `next_turn`: the number the next `user` line
+will get — past the turns a resumed conversation (`--resume`, `-c`) already
+holds — and itself never carries `turn`; neither does anything said between
+turns (an `attach`'s notices). **The turn accounting:** every accepted `user`
+line ends in exactly one `result` or one `error`, cancelled or not, so N lines
+sent are N turns closed. A `task run`'s events carry no `turn`: its turns have
+no `user` line.
 
 ### Three rules a driver must follow
 
@@ -207,6 +222,7 @@ One JSON object per line on stdin.
 ```jsonl
 {"type":"hello","client":{"name":"my-host","version":"1.2.0"},"wants":["tools"]}
 {"type":"user","text":"what is 2+2?"}
+{"type":"cancel"}
 {"type":"answer","text":"Yes"}
 {"type":"attach","path":"report.pdf"}
 {"type":"attach","path":"src","graph":"off"}
@@ -214,6 +230,22 @@ One JSON object per line on stdin.
 
 An unrecognised line is ignored rather than fatal — the tolerance this protocol
 asks of drivers, honoured in the other direction.
+
+### Stopping a turn: `cancel`
+
+`{"type":"cancel"}` ends the turn in flight the way Ctrl-C ends a turn at the
+terminal — a host's Stop button. The model call is abandoned, the half-turn is
+rolled back, and the session is left as the last finished turn left it: the
+cancelled line and anything said for it never reach the saved conversation or
+a later request. The turn still ends in one `result` — `finish_reason:
+"cancelled"`, the text streamed before the cancel — and the same child answers
+the next `user` line. A `cancel` reaches the turn of the last `user` line sent
+that has not ended, even one sent a moment before that has not started; with
+no turn open it is ignored, so a cancel racing a turn that just finished is
+harmless. While a `question` or a permission prompt waits, a `cancel` fails the
+turn as closing stdin would — without ending the session. Turns are serial, so
+`cancel` names no turn. `complete` has no `cancel`: it is one-shot, and a host
+stops it by ending the process.
 
 ### Introducing yourself: `hello`
 
@@ -340,7 +372,9 @@ until answered**:
 Reply with one `{"type":"answer","text":"…"}` line per question, in order. The
 offered options are a convenience, not a constraint — free text is always
 accepted. Closing stdin with a question outstanding fails the turn, and the
-half-turn is rolled out of history rather than persisted half-finished.
+half-turn is rolled out of history rather than persisted half-finished. A
+`cancel` while it waits fails the turn the same way, and the session goes on
+([Stopping a turn](#stopping-a-turn-cancel)).
 
 `ask_user` is offered only to a driver reading structured input. With plain-line
 stdin an answer would be indistinguishable from the next user turn, and the
