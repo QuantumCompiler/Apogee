@@ -175,7 +175,7 @@ ROOT<hi>
 {"type":"nonsense"}
 --- exit 0
 --- stdout
-{"model":"root","protocol_version":1,"type":"session"}
+{"capabilities":{"accepts":["user","answer","attach","hello"],"ask":false,"events":["session","thinking","thinking_delta","memory","tool_status","notice","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished"],"schema":"2026-10-07","tools":false},"model":"root","protocol_version":1,"type":"session"}
 {"type":"thinking"}
 {"type":"answer_start"}
 {"text":"ROOT<hel","type":"answer_delta"}
@@ -197,7 +197,7 @@ ROOT<hi>
 {"type":"user","text":"hi"}
 --- exit 0
 --- stdout
-{"model":"root","protocol_version":1,"type":"session"}
+{"capabilities":{"accepts":["user","answer","attach","hello"],"ask":false,"events":["session","thinking","thinking_delta","memory","tool_status","notice","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished"],"schema":"2026-10-07","tools":false},"model":"root","protocol_version":1,"type":"session"}
 {"type":"thinking"}
 {"type":"answer_start"}
 {"text":"ROOT<hi>","type":"answer_delta"}

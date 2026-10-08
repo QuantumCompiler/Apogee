@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <sstream>
+#include <utility>
 
 #include "agentloop/content.h"
 #include "agentloop/loop.h"
@@ -922,7 +923,14 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
 
     if (input_format == InputFormat::StreamJson) {
         JsonReporter machine_reporter{std::cout};
-        machine_reporter.begin_session(session.backend);
+        // What this session can do, before its first turn (28d): every
+        // inbound line type, tools as wired, and `ask_user` and the
+        // permission prompt reaching the driver exactly when tools do.
+        machine_reporter.begin_session(
+            session.backend, MachineCapabilities{.accepts = {machine_inbound_types().begin(),
+                                                             machine_inbound_types().end()},
+                                                 .tools = tools_on(),
+                                                 .ask = flags->tools});
 
         const auto machine_notice = [](const std::string& message) {
             // stdout carries ONLY protocol events, so a diagnostic goes to
@@ -967,8 +975,21 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             (void)attached.attach(spec, working_directory, attached.graph_method(launch_graph));
         }
         std::string line;
+        bool first_line = true;
         while (std::getline(std::cin, line)) {
             const DriverMessage message = parse_driver_line(line);
+            const bool opening = std::exchange(first_line, false);
+            if (message.kind == DriverMessage::Kind::Hello) {
+                // A driver introducing itself (28d): recorded on the first
+                // line, harmless anywhere -- never a session-ending error.
+                if (opening) {
+                    logger::log(logger::Level::Info, std::string{session_command(mode)},
+                                describe_hello(message));
+                } else {
+                    machine_notice("a hello after the first line is ignored");
+                }
+                continue;
+            }
             if (message.kind == DriverMessage::Kind::Attach && !message.text.empty()) {
                 // The line's own `graph`, as `/attach`'s `--graph` (27p):
                 // a word outside the set attaches nothing, and says why.

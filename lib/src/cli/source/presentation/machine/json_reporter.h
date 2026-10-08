@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <ostream>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -86,6 +87,36 @@ namespace apogee::commands {
 /// driver already reads.
 inline constexpr int kMachineProtocolVersion = 1;
 
+/// The vocabulary's version (28d, 28g): a date, moved when the vocabulary a
+/// release ships grows -- a new event type, a new field, a new inbound type.
+/// `capabilities.schema` carries it, so a host can tell two builds' streams
+/// apart without diffing them. Unlike `protocol_version` it says nothing about
+/// compatibility: every growth is additive under the stability promise.
+inline constexpr std::string_view kMachineSchemaVersion = "2026-10-07";
+
+/// Every event type machine mode can write, in the order the reference
+/// documents them -- the one declaration `capabilities.events` reports and
+/// `cli.machine_schema_conformance` holds to the emitter and the document.
+[[nodiscard]] std::span<const std::string_view> machine_event_types() noexcept;
+
+/// Every line type a driven session reads on stdin: `user`, `answer`,
+/// `attach`, `hello`. Held to the parser the same way.
+[[nodiscard]] std::span<const std::string_view> machine_inbound_types() noexcept;
+
+/// What a session can do, announced on its `session` event (28d) so a host
+/// knows before its first turn: the whole outbound vocabulary, the inbound
+/// line types THIS session reads, whether tools are live, whether `ask_user`
+/// (and the permission prompt) can reach the driver, and the vocabulary's
+/// version. Built from what the surface actually wired, never a constant.
+struct MachineCapabilities {
+    /// The inbound types this session reads -- a driven chat all four, a
+    /// one-shot `complete` reading its prompt on stdin only `hello`, a task
+    /// none.
+    std::vector<std::string_view> accepts;
+    bool tools = false;
+    bool ask = false;
+};
+
 class JsonReporter final : public agentloop::Reporter {
 public:
     /// `out` receives the JSONL. It is stdout in practice, and must carry
@@ -98,8 +129,10 @@ public:
     JsonReporter(JsonReporter&&) = delete;
     JsonReporter& operator=(JsonReporter&&) = delete;
 
-    /// Emits the opening `session` event. Call once, before the first turn.
-    void begin_session(std::string_view model);
+    /// Emits the opening `session` event, with `capabilities` (28d). Call
+    /// once, before the first turn -- unprompted: the child speaks first, and
+    /// a driver's `hello` refines what it reads, never gates it.
+    void begin_session(std::string_view model, const MachineCapabilities& capabilities);
 
     void on_thinking() override;
     void on_thinking_token(std::string_view chunk) override;
@@ -242,6 +275,9 @@ struct DriverMessage {
         /// A file, folder or glob to attach to the chat (26d); `text` is its
         /// path.
         Attach,
+        /// A driver introducing itself (28d) -- its `client` name and version
+        /// and what it `wants`, recorded for diagnostics; changes nothing.
+        Hello,
         /// A line that parsed but carried no recognised type.
         Unknown,
     };
@@ -252,7 +288,17 @@ struct DriverMessage {
     /// attach's method over the config's; empty when the line has none. A
     /// value that is not a string arrives as its JSON, to be refused by name.
     std::string graph;
+    /// A `hello` line's client (28d): `client.name` and `client.version` as
+    /// sent, and `wants` as its JSON -- each empty when absent.
+    std::string client_name;
+    std::string client_version;
+    std::string wants;
 };
+
+/// What a driver's `hello` is recorded as (28d): one line for the
+/// operational log, never a value from the config or a secret -- the client's
+/// own words, bounded.
+[[nodiscard]] std::string describe_hello(const DriverMessage& hello);
 
 /// Parses one line of driver input.
 ///
@@ -265,6 +311,7 @@ struct DriverMessage {
 /// {"type":"answer","text":"yes"}
 /// {"type":"attach","path":"report.pdf"}
 /// {"type":"attach","path":"src","graph":"off"}
+/// {"type":"hello","client":{"name":"my-host","version":"1.2"},"wants":["tools"]}
 /// ```
 [[nodiscard]] DriverMessage parse_driver_line(std::string_view line);
 

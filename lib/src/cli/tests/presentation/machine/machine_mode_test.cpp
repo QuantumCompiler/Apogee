@@ -54,7 +54,7 @@ using apogee::commands::JsonReporter;
 
 /// Drives a reporter through a representative turn.
 void one_turn(JsonReporter& reporter) {
-    reporter.begin_session("test-model");
+    reporter.begin_session("test-model", {});
     reporter.on_thinking();
     reporter.on_thinking_token("reasoning about it");
     reporter.on_tool_status("fetch_url https://example.test");
@@ -112,7 +112,7 @@ TEST_CASE("the session event carries a protocol version", "[commands][machine]")
     // an addition is compatible by construction.
     std::ostringstream out;
     JsonReporter reporter{out};
-    reporter.begin_session("m");
+    reporter.begin_session("m", {});
 
     const nlohmann::json session = events(out.str()).front();
     CHECK(session.at("type") == "session");
@@ -320,7 +320,7 @@ public:
 
     std::ostringstream out;
     JsonReporter reporter{out};
-    reporter.begin_session("pieces");
+    reporter.begin_session("pieces", {});
     std::vector<apogee::harness::ChatMessage> history{apogee::harness::ChatMessage::user("hi")};
     apogee::agentloop::Options options;
     options.model = "pieces";
@@ -801,4 +801,75 @@ TEST_CASE("a read's format is text or one JSON document, never a stream",
     std::ostringstream out;
     apogee::commands::write_document(out, nlohmann::json{{"a", 1}, {"b", "two"}});
     CHECK(out.str() == "{\"a\":1,\"b\":\"two\"}\n");
+}
+
+// --- 28d: the handshake ---------------------------------------------------------
+
+TEST_CASE("the session announces its capabilities, today's fields unchanged",
+          "[commands][machine][handshake]") {
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.begin_session(
+        "m", apogee::commands::MachineCapabilities{
+                 .accepts = {"user", "answer", "attach", "hello"}, .tools = true, .ask = true});
+    nlohmann::json session = events(out.str()).front();
+    const nlohmann::json capabilities = session.at("capabilities");
+    CHECK(capabilities.at("accepts") ==
+          nlohmann::json::array({"user", "answer", "attach", "hello"}));
+    CHECK(capabilities.at("tools") == true);
+    CHECK(capabilities.at("ask") == true);
+    CHECK(capabilities.at("schema") == std::string{apogee::commands::kMachineSchemaVersion});
+    std::vector<std::string> announced;
+    for (const nlohmann::json& type : capabilities.at("events")) {
+        announced.push_back(type.get<std::string>());
+    }
+    const auto declared = apogee::commands::machine_event_types();
+    CHECK(announced == std::vector<std::string>(declared.begin(), declared.end()));
+    for (const std::string_view type :
+         {"session", "result", "question", "error", "task_finished"}) {
+        CHECK(std::ranges::find(announced, type) != announced.end());
+    }
+    // The golden: everything a v1 driver read before is byte for byte as it was.
+    session.erase("capabilities");
+    CHECK(session.dump() == R"({"model":"m","protocol_version":1,"type":"session"})");
+    // No secret, path or config value has a slot to ride in.
+    CHECK(capabilities.size() == 5);
+}
+
+TEST_CASE("a session with nothing to read accepts nothing and asks nobody",
+          "[commands][machine][handshake]") {
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.begin_session("m", {});
+    const nlohmann::json capabilities = events(out.str()).front().at("capabilities");
+    CHECK(capabilities.at("accepts").empty());
+    CHECK(capabilities.at("tools") == false);
+    CHECK(capabilities.at("ask") == false);
+}
+
+TEST_CASE("hello is parsed, recorded in words, and malformed fields are just absent",
+          "[commands][machine][handshake]") {
+    using apogee::commands::DriverMessage;
+    const DriverMessage hello = apogee::commands::parse_driver_line(
+        R"({"type":"hello","client":{"name":"my-host","version":"1.2"},"wants":["tools"]})");
+    CHECK(hello.kind == DriverMessage::Kind::Hello);
+    CHECK(hello.client_name == "my-host");
+    CHECK(hello.client_version == "1.2");
+    CHECK(apogee::commands::describe_hello(hello) == R"(hello from my-host 1.2, wants ["tools"])");
+
+    const DriverMessage odd = apogee::commands::parse_driver_line(
+        R"({"type":"hello","client":{"name":7,"version":null},"extra":true})");
+    CHECK(odd.kind == DriverMessage::Kind::Hello);
+    CHECK(odd.client_name.empty());
+    CHECK(apogee::commands::describe_hello(odd) == "hello from an unnamed client");
+    CHECK(apogee::commands::parse_driver_line(R"({"type":"hello"})").kind ==
+          DriverMessage::Kind::Hello);
+
+    const DriverMessage long_name = apogee::commands::parse_driver_line(
+        R"({"type":"hello","client":{"name":")" + std::string(500, 'x') + R"("}})");
+    CHECK(apogee::commands::describe_hello(long_name).size() < 260);
+
+    const auto inbound = apogee::commands::machine_inbound_types();
+    CHECK(std::vector<std::string_view>(inbound.begin(), inbound.end()) ==
+          std::vector<std::string_view>{"user", "answer", "attach", "hello"});
 }

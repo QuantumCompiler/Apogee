@@ -836,7 +836,10 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
 
     if (machine_mode) {
         // Once, first -- the protocol's rule -- then the task's lifecycle.
-        machine_reporter->begin_session(session.backend);
+        // A task reads nothing from its driver, so it accepts no line and
+        // nobody is asked over the protocol (28d).
+        machine_reporter->begin_session(
+            session.backend, MachineCapabilities{.accepts = {}, .tools = task.tools, .ask = false});
     }
 
     // One task event per transition the ledger holds, and one per grant used:

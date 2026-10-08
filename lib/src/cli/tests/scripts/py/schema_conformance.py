@@ -44,6 +44,39 @@ def main():
 
     failures = []
 
+    # The declarations (28d): the vocabulary `capabilities` announces is a
+    # table in the source, and it must be exactly what the emitter and the
+    # parser speak -- a type announced but never written, or written but not
+    # announced, misleads a host that trusts the session event.
+    def declared(name):
+        match = re.search(name + r"\{([^}]*)\}", code)
+        if match is None:
+            failures.append(f"{source} declares no {name} -- the capabilities table moved; "
+                            f"this check is now blind to it")
+            return set()
+        return set(re.findall(r'"([a-z_]+)"', match.group(1)))
+
+    declared_out = declared("kEventTypes")
+    declared_in = declared("kInboundTypes")
+    for kind in sorted(emitted - declared_out):
+        failures.append(f"the emitter produces '{kind}' but kEventTypes never announces it")
+    for kind in sorted(declared_out - emitted):
+        failures.append(f"kEventTypes announces '{kind}' but nothing emits it")
+    for kind in sorted(accepted ^ declared_in):
+        failures.append(f"'{kind}' is in one of kInboundTypes and the parser but not the other")
+
+    # The session event's fields, and the capabilities object's (28d): each
+    # named in the document, so a field a host reads is never undocumented.
+    body = re.search(r"void JsonReporter::begin_session\(.*?\n\}\n", code, re.DOTALL)
+    if body is None:
+        failures.append(f"{source} has no begin_session -- the session event moved")
+    else:
+        for field in sorted(set(re.findall(r'\["([a-z_]+)"\]', body.group(0)))):
+            if f'"{field}"' not in prose and f"`{field}`" not in prose and \
+                    f"`capabilities.{field}`" not in prose:
+                failures.append(f"the session event carries '{field}' but {document} never "
+                                f"names it")
+
     for kind in sorted(emitted - documented):
         failures.append(
             f"the emitter produces '{kind}' but {document} never describes it -- "

@@ -28,6 +28,7 @@
 #include "contracts/paths.h"
 #include "harness/harness.h"
 #include "harness/roles.h"
+#include "logger/operational.h"
 #include "machine/json_reporter.h"
 #include "mcp/registry.h"
 #include "operations/suites.h"
@@ -126,6 +127,16 @@ std::string resolve_prompt(const CompleteFlags& flags) {
         fail_user("no prompt given. Pass one as an argument, or pipe it on stdin");
     }
     std::string piped = read_stdin();
+    // A driver's `hello` before the prompt (28d): recorded, and never part of
+    // what the model is asked.
+    if (flags.output_format == OutputFormat::StreamJson) {
+        const std::size_t end = piped.find('\n');
+        const DriverMessage first = parse_driver_line(std::string_view{piped}.substr(0, end));
+        if (first.kind == DriverMessage::Kind::Hello) {
+            logger::log(logger::Level::Info, "complete", describe_hello(first));
+            piped.erase(0, end == std::string::npos ? piped.size() : end + 1);
+        }
+    }
     while (!piped.empty() && (piped.back() == '\n' || piped.back() == '\r')) {
         piped.pop_back();
     }
@@ -254,7 +265,14 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     // sees, because there is one loop and it can only speak through one seam.
     if (flags.output_format == OutputFormat::StreamJson) {
         JsonReporter reporter{std::cout};
-        reporter.begin_session(model);
+        // One-shot: nobody can be asked, and the only line it may read is a
+        // `hello` before a prompt piped on stdin (28d).
+        MachineCapabilities capabilities;
+        if (flags.prompt.empty()) {
+            capabilities.accepts.emplace_back("hello");
+        }
+        capabilities.tools = flags.tools;
+        reporter.begin_session(model, capabilities);
 
         agentloop::Options machine_options;
         machine_options.model = model;

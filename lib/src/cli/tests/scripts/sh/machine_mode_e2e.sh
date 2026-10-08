@@ -67,6 +67,54 @@ RESULTS=$(grep -c '"type":"result"' "$WORK_DIR/chat.jsonl")
 
 ls "$WORK_DIR"/sessions/*.json >/dev/null 2>&1 || fail "closing stdin persisted no session"
 
+# --- the handshake (28d): capabilities on session, an optional hello ---------
+# The session announces what it can do before the first turn, a driver that
+# says hello sees exactly what one that does not sees, a hello is recorded in
+# the operational log, and one anywhere but the first line is ignored with a
+# note -- never an error. A driver that never sends one is untouched.
+HS_DIR="$WORK_DIR/handshake"
+mkdir -p "$HS_DIR"
+printf '{"turns":[{"text":"echo: {{last_user}}"}]}' >"$HS_DIR/echo.json"
+"$APOGEE_BIN" config add-backend echo --type mock --model-path "$HS_DIR/echo.json" >/dev/null \
+    || fail "add echo backend"
+printf '%s\n' '{"type":"user","text":"one"}' '{"type":"user","text":"two"}' \
+    | "$APOGEE_BIN" chat -m echo --no-recall --output-format stream-json --input-format stream-json \
+        >"$HS_DIR/plain.jsonl" 2>"$HS_DIR/plain.err" || fail "plain driven chat failed"
+printf '%s\n' '{"type":"hello","client":{"name":"e2e-host","version":"9.1"},"wants":["tools"]}' \
+    '{"type":"user","text":"one"}' '{"type":"hello","client":{"name":"late"}}' \
+    '{"type":"user","text":"two"}' \
+    | "$APOGEE_BIN" chat -m echo --no-recall --output-format stream-json --input-format stream-json \
+        >"$HS_DIR/hello.jsonl" 2>"$HS_DIR/hello.err" || fail "hello driven chat failed: $(cat "$HS_DIR/hello.err")"
+python3 - "$HS_DIR/plain.jsonl" "$HS_DIR/hello.jsonl" <<'PY' || fail "the handshake streams disagree"
+import json, sys
+plain, hello = ([json.loads(l) for l in open(p) if l.strip()] for p in sys.argv[1:3])
+for stream in (plain, hello):
+    session = stream[0]
+    assert session["type"] == "session", session
+    caps = session["capabilities"]
+    assert caps["accepts"] == ["user", "answer", "attach", "hello"], caps
+    assert "result" in caps["events"] and "question" in caps["events"], caps
+    assert caps["tools"] is False and caps["ask"] is False, caps
+    assert isinstance(caps["schema"], str) and caps["schema"], caps
+    # Today's fields, as a v1 driver reads them.
+    assert session["protocol_version"] == 1 and session["model"], session
+# Identical turns, hello or not -- the session event aside.
+assert [e for e in plain[1:]] == [e for e in hello[1:]], (plain, hello)
+assert [e["text"] for e in hello if e["type"] == "result"] == ["echo: one", "echo: two"], hello
+PY
+grep -q 'a hello after the first line is ignored' "$HS_DIR/hello.err" || fail "the late hello was not noted"
+grep -rq 'hello from e2e-host 9.1, wants \["tools"\]' "$APOGEE_HOME/logs" || fail "the hello was not recorded"
+grep -rq 'hello from late' "$APOGEE_HOME/logs" && fail "a late hello was recorded"
+# complete, its prompt piped: a hello first is recorded and never asked.
+printf '%s\n%s\n' '{"type":"hello","client":{"name":"one-shot"}}' 'the real prompt' \
+    | "$APOGEE_BIN" complete -m echo --output-format stream-json >"$HS_DIR/complete.jsonl" \
+        2>"$HS_DIR/complete.err" || fail "complete with a hello failed: $(cat "$HS_DIR/complete.err")"
+grep -q '"text":"echo: the real prompt"' "$HS_DIR/complete.jsonl" || fail "the hello reached the prompt: $(cat "$HS_DIR/complete.jsonl")"
+grep -q '"accepts":\["hello"\]' "$HS_DIR/complete.jsonl" || fail "complete's capabilities were wrong"
+"$APOGEE_BIN" complete -m echo --output-format stream-json "an argument" </dev/null \
+    >"$HS_DIR/arg.jsonl" 2>&1 || fail "complete with an argument failed"
+grep -q '"accepts":\[\]' "$HS_DIR/arg.jsonl" || fail "complete with an argument claimed to read stdin"
+
 # --- bytes that are not UTF-8 never end the session ---------------------------
 # Every event, session file and request is a strict JSON dump, and each of
 # these used to end the process with json type_error 316 at the first one: a

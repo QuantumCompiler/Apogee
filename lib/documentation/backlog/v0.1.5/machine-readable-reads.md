@@ -7,7 +7,7 @@
 - **Secrets stay unleakable by construction:** the reads reuse the existing view types (`backend_view` with `api_key_set` and structurally no key; credential *metadata* only). A new rendering must not create a new serialisation path around that discipline.
 - **stdout carries only the document** — the machine-mode rule 3 discipline extends to the reads: diagnostics to stderr, exit codes meaning what they mean today (`check`'s especially).
 - **Additive:** the default human output is byte-unchanged; the flag is opt-in. `--output-format json` on a command that has no JSON rendering yet is a clear refusal naming the supported ones, never silently-prose.
-- **A stable contract once shipped:** these documents join the stability promise ([28d](machine-handshake.md)) — fields are added, not renamed; a host may build on them.
+- **A stable contract once shipped:** these documents join the stability promise ([28d](../../assistant/MILESTONES.md#milestone-m--the-front-end-contract)) — fields are added, not renamed; a host may build on them.
 
 **Seam + files.**
 - `cli/models.cpp`, `chat_history.cpp` (`chats list`), `agents_cmd.cpp`, `mcp_cmd.cpp`, `check.cpp`: the flag, each routing its existing gathered data through the JSON renderer instead of the table printer.

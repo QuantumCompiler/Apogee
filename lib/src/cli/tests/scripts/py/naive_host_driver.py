@@ -78,6 +78,7 @@ class Child:
         self.sel.register(self.proc.stdout, selectors.EVENT_READ)
         self.log_name = log_name
         self.unknown_types = []
+        self.session = None
 
     def send(self, obj) -> None:
         line = json.dumps(obj)
@@ -123,13 +124,21 @@ class Child:
         return status
 
 
-def drive_conversation(child: Child, turns):
-    """Send user turns; answer questions per the doc; collect results."""
+def drive_conversation(child: Child, turns, hello=None):
+    """Send user turns; answer questions per the doc; collect results.
+
+    With `hello`, it is the first line sent -- the doc's optional handshake
+    (28d) -- and the session event is kept on the child for the host to read.
+    """
     results, questions_seen = [], []
     turn_iter = iter(turns)
+    if hello is not None:
+        child.send(hello)
     child.send({"type": "user", "text": next(turn_iter)})
     for event in child.events():
-        if event["type"] == "question":
+        if event["type"] == "session":
+            child.session = event
+        elif event["type"] == "question":
             questions_seen.append(event)
             # A permission question carries kind/tool/target; ask_user does
             # not. The host's whole dispatch is this one field.
@@ -224,17 +233,26 @@ def main():
     print("phase 1: the embedded conversation", flush=True)
 
     # W1 -- before the first byte: how does a host know what this binary
-    # speaks? Nothing to call: the child talks first, and only after a turn.
-    wall("W1", "No handshake or discovery: the host learns protocol_version "
-               "only from the session event after spawning, and cannot "
-               "declare itself or ask what this binary supports",
-         "machine-mode.md names no request; `session` is emitted, not asked")
-
+    # speaks? Since 28d the doc names a `hello` the host may send first and
+    # a `capabilities` object on `session`; the host uses both, knowing only
+    # the doc, and records the wall only if the binary does not deliver.
     child = Child(binary, env, project, "chat")
     results, questions = drive_conversation(
         child, ["Which colour should the banner be? Then write it down.",
-                "thanks!"])
+                "thanks!"],
+        hello={"type": "hello", "client": {"name": "naive-host", "version": "0.0.1"},
+               "wants": ["tools", "ask"]})
     status = child.close()
+    caps = (child.session or {}).get("capabilities")
+    if isinstance(caps, dict) and {"events", "accepts", "tools", "ask", "schema"} <= set(caps):
+        print(f"  W1 closed: session announced capabilities -- accepts={caps['accepts']} "
+              f"tools={caps['tools']} ask={caps['ask']} schema={caps['schema']} "
+              f"({len(caps['events'])} event types)", flush=True)
+    else:
+        wall("W1", "No handshake or discovery: the host learns protocol_version "
+                   "only from the session event after spawning, and cannot "
+                   "declare itself or ask what this binary supports",
+             f"session event: {child.session!r}")
 
     ok = True
     if status != 0:

@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <istream>
 #include <stdexcept>
 
@@ -15,6 +16,27 @@ namespace {
     nlohmann::json object;
     object["type"] = std::string{type};
     return object;
+}
+
+// The vocabulary, declared once (28d): what `capabilities` reports and what
+// `cli.machine_schema_conformance` holds to every `event("…")` below, every
+// `type == "…"` the parser reads and machine-mode.md.
+constexpr std::array<std::string_view, 17> kEventTypes{
+    "session",      "thinking",     "thinking_delta", "memory",     "tool_status",   "notice",
+    "answer_start", "answer_delta", "answer_end",     "result",     "question",      "error",
+    "task_started", "task_plan",    "task_round",     "task_grant", "task_finished",
+};
+constexpr std::array<std::string_view, 4> kInboundTypes{"user", "answer", "attach", "hello"};
+
+/// A bounded copy of a driver's text for the log: a hello is the client's own
+/// words, and a log line is not the place for an essay.
+[[nodiscard]] std::string bounded(std::string text) {
+    constexpr std::size_t kLimit = 200;
+    if (text.size() > kLimit) {
+        text.resize(kLimit);
+        text += "...";
+    }
+    return text;
 }
 
 }  // namespace
@@ -37,10 +59,31 @@ void JsonReporter::write(const nlohmann::json& object) {
     out_->flush();
 }
 
-void JsonReporter::begin_session(std::string_view model) {
+std::span<const std::string_view> machine_event_types() noexcept {
+    return kEventTypes;
+}
+
+std::span<const std::string_view> machine_inbound_types() noexcept {
+    return kInboundTypes;
+}
+
+void JsonReporter::begin_session(std::string_view model, const MachineCapabilities& capabilities) {
     nlohmann::json object = event("session");
     object["protocol_version"] = kMachineProtocolVersion;
     object["model"] = std::string{model};
+    nlohmann::json announced = nlohmann::json::object();
+    announced["events"] = nlohmann::json::array();
+    for (const std::string_view type : kEventTypes) {
+        announced["events"].push_back(std::string{type});
+    }
+    announced["accepts"] = nlohmann::json::array();
+    for (const std::string_view type : capabilities.accepts) {
+        announced["accepts"].push_back(std::string{type});
+    }
+    announced["tools"] = capabilities.tools;
+    announced["ask"] = capabilities.ask;
+    announced["schema"] = std::string{kMachineSchemaVersion};
+    object["capabilities"] = std::move(announced);
     write(object);
 }
 
@@ -356,6 +399,23 @@ DriverMessage parse_driver_line(std::string_view line) {
         message.kind = DriverMessage::Kind::User;
     } else if (type == "answer") {
         message.kind = DriverMessage::Kind::Answer;
+    } else if (type == "hello") {
+        // A driver introducing itself (28d): recorded, never acted on in this
+        // cut -- and a malformed field is just absent.
+        message.kind = DriverMessage::Kind::Hello;
+        if (const auto client = root.find("client"); client != root.end() && client->is_object()) {
+            const auto text_of = [&client](const char* key) {
+                const auto found = client->find(key);
+                return found != client->end() && found->is_string() ? found->get<std::string>()
+                                                                    : std::string{};
+            };
+            message.client_name = text_of("name");
+            message.client_version = text_of("version");
+        }
+        if (const auto wants = root.find("wants"); wants != root.end()) {
+            message.wants = wants->dump();
+        }
+        return message;
     } else if (type == "attach") {
         // A file, folder or glob to attach, as `/attach` takes one (26d),
         // and its method, as `/attach`'s `--graph` (27p).
@@ -371,6 +431,18 @@ DriverMessage parse_driver_line(std::string_view line) {
 
     message.text = root.value("text", std::string{});
     return message;
+}
+
+std::string describe_hello(const DriverMessage& hello) {
+    std::string out = "hello from " + (hello.client_name.empty() ? std::string{"an unnamed client"}
+                                                                 : bounded(hello.client_name));
+    if (!hello.client_version.empty()) {
+        out += " " + bounded(hello.client_version);
+    }
+    if (!hello.wants.empty()) {
+        out += ", wants " + bounded(hello.wants);
+    }
+    return out;
 }
 
 agentloop::AskFn make_driver_ask_fn(JsonReporter& reporter, std::istream& input) {

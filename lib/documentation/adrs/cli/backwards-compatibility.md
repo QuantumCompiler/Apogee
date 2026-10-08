@@ -23,4 +23,4 @@ An installed Apogee owns durable state and external parties: a hand-edited `conf
 
 ## Enforcement
 
-`cli.machine_schema_conformance` pins the protocol; the schema artifact and additivity guarantees are queued to make the promise an artifact ([the machine-mode items, 28d–28h](../../backlog/v0.1.5/machine-handshake.md)); the store's refuse-and-name-the-migration pattern (`find_legacy`/`legacy_refusal`) is the template for any layout change; config loading keeps its absent-safe defaults by test. The release notes' *Known limitations* section owns any deliberate exception, dated.
+`cli.machine_schema_conformance` pins the protocol; the additivity guarantees are written into the protocol reference (28d, [Milestone M](../../assistant/MILESTONES.md#milestone-m--the-front-end-contract)) and the schema artifact is queued to make the promise an artifact ([the machine-mode items](../../backlog/README.md#v015)); the store's refuse-and-name-the-migration pattern (`find_legacy`/`legacy_refusal`) is the template for any layout change; config loading keeps its absent-safe defaults by test. The release notes' *Known limitations* section owns any deliberate exception, dated.

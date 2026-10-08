@@ -82,9 +82,8 @@ Release-agnostic upkeep — polish, performance and ergonomics — claimable at 
 
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
-| 28d | The handshake and the stability promise — an optional `hello` line, `capabilities` on the `session` event, and the additivity guarantees in writing | v0.1.5 | [`machine-handshake.md`](v0.1.5/machine-handshake.md) | 🟢 |
-| 28f | Turn ids and cancel — a `turn` field on every turn-scoped event, and `{"type":"cancel"}` aborting an in-flight turn the way Ctrl-C does | v0.1.5 | [`machine-turn-control.md`](v0.1.5/machine-turn-control.md) | 🔒 28d |
-| 28g | The schema artifact — `apogee __machine-schema` prints the protocol as JSON Schema, conformance-pinned to the code, shipped in the release archives | v0.1.5 | [`machine-schema-artifact.md`](v0.1.5/machine-schema-artifact.md) | 🔒 28d, 28f |
+| 28f | Turn ids and cancel — a `turn` field on every turn-scoped event, and `{"type":"cancel"}` aborting an in-flight turn the way Ctrl-C does | v0.1.5 | [`machine-turn-control.md`](v0.1.5/machine-turn-control.md) | 🟢 |
+| 28g | The schema artifact — `apogee __machine-schema` prints the protocol as JSON Schema, conformance-pinned to the code, shipped in the release archives | v0.1.5 | [`machine-schema-artifact.md`](v0.1.5/machine-schema-artifact.md) | 🔒 28f |
 | 28h | Machine-readable reads — `--output-format json` on `models`/`chats`/`agents`/`mcp`/`check`, the same facts as the human view | v0.1.5 | [`machine-readable-reads.md`](v0.1.5/machine-readable-reads.md) | 🟢 |
 | 28i | The config file moves to JSON — `config.yaml` → `config.json` on the one editor, format-preserving contract intact; **JSONC, comments preserved** (the user's call, 2026-10-03) through edits, migration and the teaching template; existing YAML reads compatibly with a notice, `config migrate` converts losslessly with a backup; `config upgrade` appends missing newer options with their template comments (explicit, additive, never installer-run) and `check` says when the file is behind (extended 2026-10-03, the user's call) | v0.1.5 | [`config-json.md`](v0.1.5/config-json.md) | 🟢 |
 

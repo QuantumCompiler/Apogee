@@ -713,9 +713,12 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
                 fail_user("--interactive has no machine-mode form; drive 'apogee chat' instead");
             }
             JsonReporter reporter{std::cout};
-            reporter.begin_session(model);
             agent::ToolRegistry registry =
                 build_tools([](std::string_view line) { std::cerr << line << "\n"; });
+            // An agent's run reads nothing from a driver (28d).
+            reporter.begin_session(
+                model,
+                MachineCapabilities{.accepts = {}, .tools = !registry.empty(), .ask = false});
             agentloop::Options options;
             options.model = model;
             options.temperature = temperature;

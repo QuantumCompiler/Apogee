@@ -101,7 +101,7 @@ footprint: suite fast
 {"type":"user","text":"/symphonies"}
 --- exit 0
 --- stdout
-{"model":"root","protocol_version":1,"type":"session"}
+{"capabilities":{"accepts":["user","answer","attach","hello"],"ask":false,"events":["session","thinking","thinking_delta","memory","tool_status","notice","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished"],"schema":"2026-10-07","tools":false},"model":"root","protocol_version":1,"type":"session"}
 {"text":"stage 1/2 first — asking utility (helper): One: hello","type":"tool_status"}
 {"text":"stage 2/2 second — asking chat (root): Two: HELPER<One: hello>","type":"tool_status"}
 {"type":"answer_start"}

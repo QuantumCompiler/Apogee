@@ -42,7 +42,7 @@ opened with a suite, and takes both flags as chat does (see
 One JSON object per line on stdout. Every object has a `type`.
 
 ```jsonl
-{"type":"session","protocol_version":1,"model":"claude-sonnet-5"}
+{"type":"session","protocol_version":1,"model":"claude-sonnet-5","capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello"],"tools":true,"ask":true,"schema":"2026-10-07"}}
 {"type":"thinking"}
 {"type":"thinking_delta","text":"…"}
 {"type":"memory","chats":2,"decisions":1}
@@ -58,7 +58,7 @@ One JSON object per line on stdout. Every object has a `type`.
 
 | Event | Meaning |
 |---|---|
-| `session` | Once, first. Names the protocol version and the model. |
+| `session` | Once, first, unprompted. Names the protocol version, the model and the session's `capabilities` (below). |
 | `thinking` | The model began reasoning. No text. Sent again with `"budget_reached": true` when the reasoning reached its thinking budget and was ended there (`--think-budget`, or the backend's `thinking_budget`). |
 | `thinking_delta` | A chunk of reasoning. **Droppable** — see below. |
 | `memory` | `chat` only: what a turn was handed from earlier conversations -- `chats`, past chats' summaries, and `decisions`, recorded knowledge records -- injected for this turn and never into the transcript (26l). Sent before the turn, only when it recalled something. |
@@ -70,11 +70,31 @@ One JSON object per line on stdout. Every object has a `type`.
 | `question` | `ask_user`. Expects a reply; see below. |
 | `error` | A turn failed. The machine-readable half of a diagnostic. |
 
+### `capabilities`
+
+What this session can do, on its `session` event before the first turn — so a
+host need not wait for a turn, or guess from a version number, to know what
+it is talking to:
+
+| Field | Meaning |
+|---|---|
+| `capabilities.events` | Every event type this build can write. A stream never carries one that is not here. |
+| `capabilities.accepts` | The line types this session reads on stdin: a driven `chat` or `execute` takes `user`, `answer`, `attach` and `hello`; `complete` reading its prompt on stdin takes only a `hello` before it; a `task run` and an agent's run read nothing. |
+| `capabilities.tools` | Whether the model can call tools in this session. |
+| `capabilities.ask` | Whether `ask_user` and the permission prompt reach the driver as `question` events. Without it nothing is asked: `ask` resolves to deny and the tool is never offered. |
+| `capabilities.schema` | The vocabulary's version, a date: moved when a release grows the vocabulary (a new type, a new field, a new inbound line). Two builds with the same `schema` speak the same vocabulary. |
+
+It names what the binary can do and nothing about this machine — never a key,
+a path into the data directory or a config value. Like every field, more may
+be added.
+
 ### Three rules a driver must follow
 
-**1. Ignore unknown types.** New event types are added *without* a version bump,
-because drivers are required to tolerate them — that is what lets the schema
-grow. A driver that treats an unfamiliar `type` as an error breaks on upgrade.
+**1. Ignore unknown types — and unknown fields.** New event types, and new
+fields on the events a driver already reads, are added *without* a version
+bump, because drivers are required to tolerate them — that is what lets the
+schema grow. A driver that treats an unfamiliar `type`, or a key it does not
+know on a familiar one, as an error breaks on upgrade.
 
 **2. Drop every `thinking*` event to get what a terminal user saw.** Reasoning
 is distinctly typed precisely so it can be discarded. It never appears in
@@ -89,6 +109,32 @@ puts prose in the middle of your parser's input.
 Currently `1`. It is bumped **only when an existing event's meaning changes** —
 a field changing sense under a name a driver already reads. Additions are
 compatible by construction under rule 1.
+
+### The stability promise
+
+What a host built against `protocol_version: 1` can rely on, for as long as a
+binary says `1`:
+
+- **Nothing it reads changes under it.** Every event type documented here keeps
+  its name and its meaning; every field keeps its name, its type and its
+  meaning; a field documented as sometimes absent (`usage`) stays absent rather
+  than turning up as a zero.
+- **The stream's shape holds.** stdout carries one JSON object per line and
+  nothing else; `session` comes first, unprompted, before anything is read;
+  every accepted `user` line ends in exactly one `result` or one `error`;
+  `question` is the only event that waits for a reply.
+- **Growth is by addition only** — new event types, new fields on existing
+  events, new inbound line types, new values a host can ignore — and each moves
+  `capabilities.schema`. Rule 1 is what makes that safe for a host; the child
+  keeps the same rule inbound: a line it does not recognise is ignored, never
+  fatal, so a host may send something newer than the binary understands (a
+  `hello` to a binary that predates it is simply ignored).
+- **A breaking change is a new `protocol_version`.** Removing an event or a
+  field, renaming one, or changing what one means is never done under `1`. It
+  is announced in the release notes of the release that makes it, and that
+  release's `session` says the new number — so a host that checks
+  `protocol_version` can refuse a stream it was not built for rather than
+  misread it.
 
 ## A task's run
 
@@ -159,6 +205,7 @@ done).
 One JSON object per line on stdin.
 
 ```jsonl
+{"type":"hello","client":{"name":"my-host","version":"1.2.0"},"wants":["tools"]}
 {"type":"user","text":"what is 2+2?"}
 {"type":"answer","text":"Yes"}
 {"type":"attach","path":"report.pdf"}
@@ -167,6 +214,18 @@ One JSON object per line on stdin.
 
 An unrecognised line is ignored rather than fatal — the tolerance this protocol
 asks of drivers, honoured in the other direction.
+
+### Introducing yourself: `hello`
+
+A host may send one optional `hello` as its **first** line: its `client` name
+and version, and what it `wants`, a list of words. It is recorded in Apogee's
+operational log for diagnostics and changes nothing in this release — the
+session has already announced its `capabilities`, because the child speaks
+first and never waits for a `hello` (a driver that predates it would wait
+forever). A `hello` anywhere but the first line is ignored with a note on
+stderr, never an error. `complete --output-format stream-json` reading its
+prompt on stdin takes a `hello` as that input's first line, and the rest is the
+prompt.
 
 ### Attaching files
 

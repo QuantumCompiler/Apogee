@@ -2706,6 +2706,28 @@ Asked for by the user (2026-09-25): the CLI pluggable into **other people's** ha
 
 ---
 
+### 2026-10-07 — `machine-handshake` (backlog item 28d): the handshake and the stability promise
+
+The integration spike's wall **W1** — a host flew blind until after its first turn, learning `protocol_version` from a `session` event that carried only the model, with no way to say who it was — closed additively, under the tolerance rules the spike verified in both directions.
+
+**What was built**
+
+- [x] **`capabilities` on the `session` event** (`machine/json_reporter.h/.cpp`): `events` — every type this build can write, from one declared table (`kEventTypes`, `machine_event_types()`); `accepts` — the inbound line types this session reads (`MachineCapabilities`, filled per surface: a driven `chat`/`execute` `user`, `answer`, `attach`, `hello`; `complete` only `hello`, and only with its prompt piped; `task run` and an agent's run nothing); `tools` and `ask` as the surface wired them; `schema` — the vocabulary's version, `kMachineSchemaVersion` (`2026-10-07`). `begin_session` takes the capabilities at all four call sites (chat's session core, `complete`, `task`, `analyze`). Nothing in it can carry a key, a path or a config value. The child still speaks first.
+- [x] **`hello`** (`DriverMessage::Kind::Hello`, `describe_hello`, `kInboundTypes`): `{"type":"hello","client":{"name","version"},"wants":[…]}` as a driver's first line is recorded in the operational log under the surface's name (`hello from my-host 1.2, wants ["tools"]`, each field bounded) and changes nothing; anywhere later it is ignored with a stderr note. A malformed field is just absent — the parse never throws. `complete --output-format stream-json` reading its prompt on stdin takes a `hello` as that input's first line and asks the rest.
+- [x] **The stability promise in writing** ([machine-mode.md](../reference/machine-mode.md)): a `capabilities` section; rule 1 now "ignore unknown types — and unknown fields"; a "stability promise" section — nothing a v1 host reads changes under it, the stream's shape holds (stdout JSONL only, `session` first and unprompted, one `result` or `error` per accepted `user` line, `question` the only event that waits), growth by addition only with `capabilities.schema` moving, and a breaking change only as a new `protocol_version` announced in its release's notes; and `hello` in "Writing to the child".
+- [x] **The conformance discipline, one notch wider** (`schema_conformance.py`): the declared tables must equal what the code emits (`event("…")`) and parses (`type == "…"`), and every field the `session` event carries — `capabilities` and its five keys among them — must be named in the document. Verified against three plants: a renamed capabilities key, an announced type nothing emits, an inbound type dropped from the table.
+- [x] **Tests**: `machine_mode_test` (+3: the capabilities object with today's fields byte for byte beside it and nothing else in it; a session that reads nothing; `hello` parsed, described, bounded, malformed fields absent); **`cli.machine_mode`** grows a handshake phase on the real binary — a driven chat with a `hello` first (and a late one) and one without produce identical turns, both announcing the same capabilities; the hello is in the operational log and the late one only on stderr; a piped `complete` with a `hello` first answers the prompt alone and announces `accepts: ["hello"]`, and with the prompt as an argument `accepts: []`. **`naive_host_driver.py`** sends a `hello` and reads the capabilities: W1 closes, every other wall as before (W2, W3, W4, W6, W7). The chat and execute whole-surface goldens (`tests/fixtures/cli/*_session.golden`) were re-recorded for the one difference this item makes — the machine-mode `session` lines gained `capabilities`; with it set aside every byte matched.
+
+**Verified against the previous release.** The installed v0.1.4 binary, in a sandbox, sent `{"type":"hello",…}` then a `user` line: it ignored the hello by its own inbound tolerance and answered exactly as without one, nothing on stderr — the compatibility the item promised, in the direction a new host meets an old binary.
+
+**Decisions** — the dated entries the item document carried, folded here: the whole vocabulary in `events` and the inbound types per session; `schema` as a date constant shared with 28g; the hello in the operational log, bounded, a late one a note; a breaking change as a new `protocol_version` announced in its release's notes, no deprecation window promised; sorted keys, today's fields held byte for byte.
+
+**Real weights.** None applies.
+
+**Not verified.** Windows (the e2e is POSIX); `wants` changing anything (by design, nothing in this cut).
+
+**Left for the owner.** `capabilities.events` as the build-wide list rather than per surface, and the promise's breaking-change wording — each a one-place change if vetoed.
+
 ## Milestone N — Model operations
 
 **Goal.** Model management, end to end: one shared resolver for the `models:` role pointers, the `apogee models` suite, a real GGUF header reader that `check` uses to tell a working model from a broken one, and — from 2026-09-07 — acquiring, quantizing, and repairing models from Hugging Face and the user's Ollama store without ever leaving a half-downloaded one on disk. From 2026-09-28 (26b), helper models beside the chat model: `vision`, `transcription` and `utility` in the same resolver.
