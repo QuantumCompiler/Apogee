@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <initializer_list>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -527,6 +528,208 @@ void fill_from_store(AddBackendFlags& flags) {
     std::cout << "filled from the store: "
               << models::weights_handle(stored.model, models::kGgufFormat, stored.id) << "\n  "
               << said << "\n";
+}
+
+// --- config scan (M12): the store against this config ------------------------
+
+/// The default backend name for a stored GGUF: the file's own stem with the
+/// final dash-token's underscores removed -- the chain's registration
+/// spelling (M3: `-Q4_K_M` -> `-Q4KM`, `-F16` unchanged), applied
+/// mechanically to any stored file.
+[[nodiscard]] std::string default_gguf_backend_name(const std::filesystem::path& file) {
+    std::string stem = file.stem().string();
+    const std::size_t dash = stem.rfind('-');
+    if (dash == std::string::npos) {
+        return stem;
+    }
+    std::string tail = stem.substr(dash + 1);
+    std::erase(tail, '_');
+    return stem.substr(0, dash + 1) + tail;
+}
+
+/// One stored model's standing against the config: its default name, what
+/// `--register` would write, and why it would not.
+struct StoreScanRow {
+    std::string name;
+    std::string type;
+    std::filesystem::path path;       ///< the file (gguf) or directory (mlx)
+    std::filesystem::path projector;  ///< beside a gguf, when one is
+    std::string registered_as;        ///< backends already on this path
+    std::string skip;                 ///< why --register leaves it alone
+};
+
+[[nodiscard]] bool scan_registerable(const StoreScanRow& row) {
+    return row.registered_as.empty() && row.skip.empty();
+}
+
+/// A config field's path, comparable with the store's own.
+[[nodiscard]] std::filesystem::path scan_configured_path(const std::string& field) {
+    return field.empty()
+               ? std::filesystem::path{}
+               : std::filesystem::path{harness::expand_env_and_home(field)}.lexically_normal();
+}
+
+/// Every runnable stored model -- GGUF files, MLX directories; snapshots are
+/// weights, not runnable, and stay out -- against `config` (null: none
+/// exists). The standing rules: a backend already on the path says so; a
+/// default name the config holds for another path, or one two stored models
+/// share, is skipped and said, never guessed past (the fill's own refusal,
+/// M7, as a row).
+[[nodiscard]] std::vector<StoreScanRow> scan_store_rows(const models::StoreRoots& roots,
+                                                        const harness::Config* config) {
+    std::vector<StoreScanRow> rows;
+    for (const models::StoredGguf& stored : models::list_store_ggufs(roots)) {
+        StoreScanRow row;
+        row.name = default_gguf_backend_name(stored.file);
+        row.type = std::string{models::backend_type_for_format(models::kGgufFormat)};
+        row.path = stored.file.lexically_normal();
+        row.projector = stored.projector;
+        rows.push_back(std::move(row));
+    }
+    for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
+        StoreScanRow row;
+        row.name = models::stored_mlx_name(stored);
+        row.type = std::string{models::backend_type_for_format(models::kMlxFormat)};
+        row.path = stored.dir.lexically_normal();
+        rows.push_back(std::move(row));
+    }
+    std::map<std::string, std::size_t> names;
+    for (const StoreScanRow& row : rows) {
+        ++names[row.name];
+    }
+    for (StoreScanRow& row : rows) {
+        if (config != nullptr) {
+            for (const auto& [name, backend] : config->backends) {
+                if (scan_configured_path(backend.model_path) == row.path) {
+                    row.registered_as += (row.registered_as.empty() ? "" : ", ") + name;
+                }
+            }
+            if (!row.registered_as.empty()) {
+                continue;
+            }
+            if (config->backends.contains(row.name)) {
+                row.skip = "its default name belongs to a backend on another model -- 'apogee "
+                           "config add-backend' registers it by hand under another";
+                continue;
+            }
+        }
+        if (names[row.name] > 1) {
+            row.skip = std::to_string(names[row.name]) +
+                       " stored models share this default name -- 'apogee config add-backend' "
+                       "registers each by hand";
+        }
+    }
+    return rows;
+}
+
+void render_store_scan(const std::vector<StoreScanRow>& rows, std::size_t snapshots) {
+    std::size_t width = 0;
+    for (const StoreScanRow& row : rows) {
+        width = std::max(width, row.name.size());
+    }
+    for (const StoreScanRow& row : rows) {
+        std::string state = "not registered";
+        if (!row.registered_as.empty()) {
+            state = "backend: " + row.registered_as;
+        } else if (!row.skip.empty()) {
+            state = "not registered -- " + row.skip;
+        }
+        std::string line = row.name;
+        line.append(width + 2 - row.name.size(), ' ');
+        std::cout << line << state << "\n";
+        std::cout << std::string(width + 2, ' ') << row.path.string()
+                  << (row.projector.empty() ? std::string{}
+                                            : std::string{"  (projector beside it)"})
+                  << "\n";
+    }
+    if (snapshots > 0) {
+        std::cout << snapshots
+                  << " SafeTensors snapshot(s) not listed -- weights, not runnable; each "
+                     "registers when converted\n";
+    }
+    if (rows.empty() && snapshots == 0) {
+        std::cout << "the model store is empty -- 'apogee models pull' fills it\n";
+    }
+}
+
+/// `apogee config scan [--register]` (M12): the local twin of `providers
+/// scan` -- the store's runnable models against this config, and
+/// `--register` writing every unregistered one under its default name
+/// through the one editor, exactly as a hand-typed `add-backend` would.
+void bind_scan(CLI::App& parent, const RootContext& context) {
+    auto register_flag = std::make_shared<bool>(false);
+    CLI::App* cmd = parent.add_subcommand(
+        "scan",
+        "Every stored model against this config -- registered, or registerable under its "
+        "default name");
+    cmd->add_flag("--register", *register_flag,
+                  "Register every unregistered stored model under its default name, through the "
+                  "config editor");
+    cmd->callback([&context, register_flag]() {
+        std::filesystem::path path;
+        try {
+            path = harness::resolve_config_path(context.config_path);
+        } catch (const std::exception& e) {
+            fail(e.what());
+        }
+        std::optional<harness::Config> config;
+        std::error_code missing;
+        if (std::filesystem::exists(path, missing)) {
+            try {
+                config = harness::load_config(path);
+            } catch (const harness::ConfigError& e) {
+                fail(e.what());
+            }
+        }
+
+        const models::StoreRoots roots = models::StoreRoots::at(harness::models_dir());
+        const std::vector<StoreScanRow> rows =
+            scan_store_rows(roots, config.has_value() ? &*config : nullptr);
+        const std::size_t snapshots = models::list_store_snapshots(roots).size();
+        render_store_scan(rows, snapshots);
+
+        if (!config.has_value()) {
+            if (*register_flag) {
+                fail("no config file at " + path.string() +
+                     " -- run 'apogee config init' first, then register");
+            }
+            std::cout << "\nno config file yet -- 'apogee config init' writes one\n";
+            return;
+        }
+        std::size_t registerable = 0;
+        for (const StoreScanRow& row : rows) {
+            registerable += scan_registerable(row) ? 1 : 0;
+        }
+        if (!*register_flag) {
+            if (registerable > 0) {
+                std::cout << "\nregister the unregistered ones as backends: apogee config scan "
+                             "--register\n";
+            }
+            return;
+        }
+        if (registerable == 0) {
+            std::cout << "\nnothing to register -- every stored model is registered, or its row "
+                         "says why not\n";
+            return;
+        }
+        std::cout << "\n";
+        for (const StoreScanRow& row : rows) {
+            if (!scan_registerable(row)) {
+                continue;
+            }
+            harness::BackendConfig backend;
+            backend.type = *harness::backend_type_from_string(row.type);
+            backend.model_path = row.path.string();
+            if (!row.projector.empty()) {
+                backend.mmproj_path = row.projector.string();
+            }
+            apply_edit(path, [&row, &backend](std::string_view content) {
+                return harness::append_backend(content, row.name, backend, /*force=*/false);
+            });
+            std::cout << "added backend '" << row.name << "'\n";
+        }
+        std::cout << "registered " << registerable << " backend(s) in " << path.string() << "\n";
+    });
 }
 
 void bind_init(CLI::App& parent, const RootContext& context) {
@@ -1090,6 +1293,7 @@ void ConfigCommand::bind(CLI::App& root, const RootContext& context) {
     bind_upgrade(*cmd, context);
     bind_path(*cmd, context);
     bind_add_backend(*cmd, context);
+    bind_scan(*cmd, context);
     bind_delete_backend(*cmd, context);
     bind_set_role(*cmd, context, "set-default", "default", "Set the default backend");
     bind_set_role(*cmd, context, "set-default-embedding", "default_embedding",

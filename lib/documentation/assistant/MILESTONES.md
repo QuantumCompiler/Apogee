@@ -3444,6 +3444,17 @@ So, **by the user's call**, the item builds on what is installed: no `apogee com
 
 **Verified.** The full suite, 2887/2887 (2877 before: ten new tests); `format-check`; the GCC check, every file; clang-tidy on the touched files, nothing on the error list. Each kind has a test running the verb on every candidate it offers, and on what it leaves out where that is refused; `suites_e2e.sh`, `symphonies_e2e.sh` and `task_e2e.sh` check the real binary's offers.
 
+### 2026-10-08 — `config-scan-register` (maintenance item M12): the store registered in one pass
+
+**Why.** The user's ask, with the spelling given: `apogee config scan --register`, the local-store twin of `providers scan --register` -- every runnable stored model registered under its default name in one pass, instead of one `add-backend` per file.
+
+- [x] **`config scan`** (`config_cmd.cpp`, `bind_scan`): a row per runnable stored model -- GGUF files and MLX directories -- with its default name, its standing (`backend: <names>` for a path a backend already holds, `not registered`, or `not registered -- <why --register leaves it alone>`), its path and projector beneath, the SafeTensors snapshots counted and said (weights, not runnable), and the `--register` pointer when anything is registerable. The default names are the chain's own spelling (M3): a GGUF's file stem with the final dash-token's underscores removed (`a-Q4_K_M.gguf` -> `a-Q4KM`), and `stored_mlx_name` for an MLX set -- no new derivation anywhere.
+- [x] **`--register` is the batch add-backend, byte for byte**: each registerable row becomes a `BackendConfig` (type from `backend_type_for_format`, the path, the projector) through the same `append_backend` the hand-typed verb writes -- proven by the twin-install test, whose scan-registered config equals N hand-typed `add-backend` calls exactly, comments kept. A taken default name, or one two stored models share, is skipped with its reason on the row (the fill's own refusal, M7, as a row); a second run writes nothing and says so.
+- [x] **The providers verb's contract, mirrored**: with no config file the scan still runs and names `config init`; `--register` refuses there, naming it, and never creates one. A carve-out row joins the CLI<->HTTP parity table beside `providers scan`'s: host-local by nature, its write already twinned by the add-backend route. The subcommand and flag complete from the live parser.
+- [x] **Tests** (`config_cmd_test.cpp`, three cases, 31 assertions): the rows and the spelling, the composition pin, idempotence, the taken-name and shared-name skips with the file untouched, the no-config split. Full suite: 2,999 ctest cases, 100% passed.
+
+One deliberate non-feature, recorded: no per-model confirmation -- `config scan` without `--register` is the preview, exactly the providers verb's split.
+
 ## Milestone O — Local multimodal
 
 **Goal.** Make `VisionCapable` tell the truth on the local backend: wire llama.cpp's `mtmd`, add `mmproj_path`, and close the cross-surface guard gap that let one surface accept a picture the other refused.

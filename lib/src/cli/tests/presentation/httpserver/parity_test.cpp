@@ -76,6 +76,10 @@ const std::map<std::string, Classification>& table() {
     static const std::map<std::string, Classification> rows{
         // --- twins: the first CRUD slices -----------------------------------
         {"config add-backend", twin("POST", "/v1/admin/backends")},
+        {"config scan",
+         carve_out("reads the host's own model store; host-local by nature, and what --register "
+                   "writes a remote client writes through the add-backend twin (M12, the "
+                   "providers-scan precedent)")},
         {"config delete-backend", twin("DELETE", "/v1/admin/backends/{id}")},
         {"config set-default", twin("POST", "/v1/admin/backends/default")},
         {"config set-default-embedding", twin("POST", "/v1/admin/backends/default-embedding")},
