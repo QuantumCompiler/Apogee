@@ -155,7 +155,7 @@ TEST_CASE("config.yaml and config.json side by side are refused, both named",
           "[commands][config][jsonc]") {
     const CliHome home{kYaml};
     const std::filesystem::path json = home.home() / "config" / "config.json";
-    std::ofstream{json} << "{}\n";
+    std::ofstream{json, std::ios::binary} << "{}\n";
     const Run listed = run_default(home, {"models", "list"});
     CHECK(listed.code != 0);
     CHECK(listed.err.find(home.config_path().string()) != std::string::npos);

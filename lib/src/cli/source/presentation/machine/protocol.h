@@ -2,6 +2,8 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <array>
+#include <cstddef>
 #include <span>
 #include <string_view>
 
@@ -44,6 +46,39 @@ inline constexpr int kMachineProtocolVersion = 1;
 /// additive under the stability promise.
 inline constexpr std::string_view kMachineSchemaVersion = "2026-10-07";
 
+struct FieldSpec;
+
+/// The fields nested in a field: an object's own, or an array's object items'.
+///
+/// A pointer and a count, not a `std::span<const FieldSpec>`: `FieldSpec`
+/// holds one, so the span would name the type while it is still being
+/// declared, and Xcode 15's libc++ instantiates `span::end` there -- pointer
+/// arithmetic on an incomplete type -- and refuses to compile (2026-10-08).
+class FieldList {
+public:
+    constexpr FieldList() noexcept = default;
+
+    /// From the constant array that lists them -- the declaration's only form,
+    /// implicit so a table names the array as it would a span.
+    template <std::size_t N>
+    constexpr FieldList(const std::array<FieldSpec, N>& fields) noexcept
+        : data_{fields.data()}, size_{N} {}
+
+    [[nodiscard]] constexpr const FieldSpec* begin() const noexcept {
+        return data_;
+    }
+
+    [[nodiscard]] constexpr const FieldSpec* end() const noexcept;
+
+    [[nodiscard]] constexpr bool empty() const noexcept {
+        return size_ == 0;
+    }
+
+private:
+    const FieldSpec* data_ = nullptr;
+    std::size_t size_ = 0;
+};
+
 /// One field of a line.
 struct FieldSpec {
     std::string_view name;
@@ -55,10 +90,14 @@ struct FieldSpec {
     bool required = false;
     std::string_view description;
     /// An object's own fields, or the fields of an array's object items.
-    std::span<const FieldSpec> properties = {};
+    FieldList properties = {};
     /// An array's item type when its items are not objects (`string`).
     std::string_view items = {};
 };
+
+constexpr const FieldSpec* FieldList::end() const noexcept {
+    return data_ + size_;
+}
 
 /// One line type: its `type`, what it is, its fields (beside `type`).
 struct LineSpec {

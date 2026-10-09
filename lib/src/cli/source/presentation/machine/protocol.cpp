@@ -261,15 +261,17 @@ constexpr FieldSpec kTurn{"turn",
     nlohmann::json schema = nlohmann::json::object();
     schema["type"] = type_of(field.type);
     schema["description"] = std::string{field.description};
-    if (field.type.starts_with("object") && !field.properties.empty()) {
-        nlohmann::json nested = object_of(field.properties);
+    const std::span<const FieldSpec> nested_fields{field.properties.begin(),
+                                                   field.properties.end()};
+    if (field.type.starts_with("object") && !nested_fields.empty()) {
+        nlohmann::json nested = object_of(nested_fields);
         schema["properties"] = nested["properties"];
         schema["required"] = nested["required"];
         schema["additionalProperties"] = true;
     }
     if (field.type == "array") {
-        if (!field.properties.empty()) {
-            schema["items"] = object_of(field.properties);
+        if (!nested_fields.empty()) {
+            schema["items"] = object_of(nested_fields);
         } else if (!field.items.empty()) {
             schema["items"] = nlohmann::json{{"type", std::string{field.items}}};
         }
