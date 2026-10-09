@@ -10,7 +10,9 @@
 
 #include "agent/web_search.h"
 #include "contracts/config_edit.h"
+#include "contracts/errors.h"
 #include "contracts/host.h"
+#include "machine/driver_input.h"
 #include "platform/platform.h"
 
 namespace apogee::commands {
@@ -205,15 +207,24 @@ agent::ConfirmFn terminal_confirm_fn(StatusLine& status, ansi::Style style,
     };
 }
 
-agent::ConfirmFn make_driver_confirm_fn(JsonReporter& reporter, std::istream& input,
+agent::ConfirmFn make_driver_confirm_fn(JsonReporter& reporter, DriverInput& input,
                                         std::filesystem::path config_path,
                                         std::shared_ptr<SessionApprovals> approvals) {
     return [&reporter, &input, config_path = std::move(config_path),
             approvals = std::move(approvals)](const agent::GateRequest& request) {
         reporter.emit_permission_question(request);
-        std::string line;
-        while (std::getline(input, line)) {
-            const DriverMessage message = parse_driver_line(line);
+        while (true) {
+            bool cancelled = false;
+            const std::optional<DriverLine> line = input.next_line_in_turn(cancelled);
+            if (cancelled) {
+                // Cancelled while asked (28f): the turn fails as a closed
+                // stdin fails it, and the session goes on.
+                throw harness::CancelledError();
+            }
+            if (!line.has_value()) {
+                break;
+            }
+            const DriverMessage message = parse_driver_line(line->text);
             if (message.kind != DriverMessage::Kind::Answer) {
                 continue;  // the same tolerance the question path keeps
             }

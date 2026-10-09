@@ -16,8 +16,10 @@
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/paths.h"
+#include "machine/json_reporter.h"
 #include "mcp/registry.h"
 #include "mcp/serve_stdio.h"
+#include "operations/read_views.h"
 #include "scaffold/mcp_server.h"
 #include "tools/toolsets.h"
 #include "version/version.h"
@@ -105,14 +107,44 @@ void bind_create(CLI::App& parent, const RootContext& context) {
 void bind_list(CLI::App& parent, const RootContext& context) {
     CLI::App* cmd =
         parent.add_subcommand("list", "List configured MCP servers and connect to each");
-    cmd->callback([&context]() {
+    auto format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    add_read_format(cmd, format);
+    cmd->callback([&context, format]() {
         const harness::Config config = load(config_path_for(context));
+        const bool json = *format == ReadFormat::Json;
         if (config.mcp_servers.empty()) {
+            if (json) {
+                write_document(std::cout, operations::mcp_servers_document(config));
+                return;
+            }
             std::cout << "No MCP servers configured. Create one with: apogee mcp create <name>\n";
             return;
         }
         mcp::Registry registry;
         registry.connect_all(specs_of(config), quiet_registry_options());
+        if (json) {
+            // Each entry as `GET /v1/admin/mcp-servers` serves it, and what
+            // connecting found -- the table's facts (28h).
+            nlohmann::json data = nlohmann::json::array();
+            for (const mcp::ServerStatus& status : registry.status()) {
+                const harness::McpServerConfig* entry = config.find_mcp_server(status.name);
+                nlohmann::json row = entry != nullptr
+                                         ? operations::mcp_server_view(status.name, *entry)
+                                         : nlohmann::json{{"name", status.name}};
+                row["state"] = !status.enabled    ? "disabled"
+                               : status.connected ? "connected"
+                                                  : "not connected";
+                row["protocol_version"] = status.protocol_version;
+                row["tools"] = status.tools;
+                if (!status.connected && status.enabled && !status.error.empty()) {
+                    row["error"] = status.error;
+                }
+                data.push_back(std::move(row));
+            }
+            write_document(std::cout,
+                           nlohmann::json{{"object", "list"}, {"data", std::move(data)}});
+            return;
+        }
         std::cout << pad("NAME", 20) << pad("STATE", 16) << pad("PROTOCOL", 12) << "TOOLS\n";
         for (const mcp::ServerStatus& status : registry.status()) {
             std::string state = !status.enabled    ? "disabled"

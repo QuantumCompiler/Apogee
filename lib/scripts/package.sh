@@ -6,9 +6,14 @@
 # Expects the target already built by `lib/scripts/cicd.sh --platform <target>`
 # in this checkout, and writes two files into <out-dir>:
 #
-#   apogee-<target>.tar.gz | .zip   the archive: the binary and the four
+#   apogee-<target>.tar.gz | .zip   the archive: the binary, the four
 #                                   completion stubs (they are part of the
-#                                   install contract, so they ride along)
+#                                   install contract, so they ride along) and,
+#                                   since 28g, machine-schema.json -- the
+#                                   machine-mode protocol as a JSON Schema,
+#                                   printed by this very binary
+#                                   (`apogee __machine-schema`), never written
+#                                   by hand
 #   apogee-<target>.source          the commit and the source TREE it was
 #                                   built from -- how the release after a
 #                                   merge proves the archive is exactly the
@@ -66,6 +71,11 @@ done
 [ -n "$binary" ] || die "no binary built for $target -- run lib/scripts/cicd.sh --platform $target first"
 cp "$binary" "$stage/"
 cp "$root"/lib/src/cli/completions/* "$stage/completions/"
+# The protocol's schema (28g), from the binary it describes. Its own home, so
+# printing it touches nothing of the runner's.
+APOGEE_HOME="$out/schema-home" "$stage/$(basename "$binary")" __machine-schema \
+    >"$stage/machine-schema.json" || die "the binary could not print its machine-mode schema"
+rm -rf "$out/schema-home"
 
 case "$target" in
     windows-*) (cd "$stage" && 7z a -tzip "$out/apogee-$target.zip" .) ;;
@@ -89,5 +99,16 @@ exe="$stage/apogee"
 "$exe" version
 "$exe" check --fix
 "$exe" check
+
+# The archive's schema is exactly what this build prints -- the copy is a
+# convenience, the command is the truth (28g).
+packed_schema="$out/packed-machine-schema.json"
+case "$target" in
+    windows-*) (cd "$out" && 7z e -so "apogee-$target.zip" machine-schema.json) >"$packed_schema" ;;
+    *) tar -xzf "$out/apogee-$target.tar.gz" -O ./machine-schema.json >"$packed_schema" ;;
+esac
+"$exe" __machine-schema | cmp -s - "$packed_schema" \
+    || die "the archive's machine-schema.json is not what the binary prints"
+rm -f "$packed_schema"
 
 printf 'packaged %s\n' "$out"/apogee-"$target".*

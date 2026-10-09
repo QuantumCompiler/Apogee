@@ -38,12 +38,17 @@ add_library(apogee_tests_infrastructure OBJECT
     support/terminal_model.h
     support/terminal_model.cpp
     support/embedding_fixtures.h
+    support/text_edits.h
+    support/hermetic_stdin.cpp
 )
 target_link_libraries(apogee_tests_infrastructure PRIVATE apogee_infrastructure Catch2::Catch2)
 
 add_library(apogee_tests_data OBJECT
     data/contracts/config_test.cpp
     data/contracts/config_edit_test.cpp
+    data/contracts/jsonc_test.cpp
+    data/contracts/config_migrate_test.cpp
+    data/contracts/config_jsonc_test.cpp
     data/contracts/symphony_spec_test.cpp
     data/contracts/symphony_walk_test.cpp
     data/contracts/host_test.cpp
@@ -88,6 +93,8 @@ add_library(apogee_tests_data OBJECT
     data/backends/native_tool_calls_test.cpp
     data/backends/model_profile_test.cpp
     data/backends/chat_template_test.cpp
+    data/backends/provider_probe_test.cpp
+    support/fake_existence_view.h
     data/embedstore/store_test.cpp
     data/embedstore/vector_test.cpp
     data/embedstore/fts_query_test.cpp
@@ -227,6 +234,8 @@ target_link_libraries(apogee_tests_business PRIVATE apogee_business apogee_data
 
 add_library(apogee_tests_presentation OBJECT
     presentation/cli/registry_test.cpp
+    presentation/cli/provider_offer_test.cpp
+    presentation/cli/read_documents_test.cpp
     presentation/cli/root_test.cpp
     presentation/cli/models_pull_test.cpp
     presentation/cli/models_migrate_test.cpp
@@ -237,6 +246,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/models_test.cpp
     presentation/cli/suite_residency_test.cpp
     presentation/cli/config_cmd_test.cpp
+    presentation/cli/config_lifecycle_test.cpp
     presentation/cli/attachment_guard_test.cpp
     presentation/operations/retrieval_test.cpp
     presentation/operations/suites_test.cpp
@@ -526,6 +536,14 @@ add_test(NAME cli.one_key_resolver
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/one_key_resolver.cmake"
 )
 
+# Provider probes run inside `check` and `providers scan` only, never on a
+# startup path (28a). See the file.
+add_test(NAME cli.no_provider_probes
+    COMMAND "${CMAKE_COMMAND}"
+        -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/no_provider_probes.cmake"
+)
+
 add_test(NAME cli.test_names
     COMMAND "${CMAKE_COMMAND}"
         -DTEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
@@ -655,6 +673,40 @@ if(UNIX)
             ${CMAKE_CURRENT_BINARY_DIR}/execute-e2e
     )
     set_tests_properties(cli.execute_lifecycle PROPERTIES TIMEOUT 120)
+
+    # The provider prober's other half (28a): on the real binary, with fake
+    # vendor CLIs on PATH that log being run, complete, chat and machine mode
+    # run none of them and write no provider cache.
+    add_test(NAME cli.no_provider_probes_at_startup
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/no_provider_probes_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/no-provider-probes
+    )
+    set_tests_properties(cli.no_provider_probes_at_startup PROPERTIES TIMEOUT 60)
+
+    # Provider registration (28b) on the real binary with fake vendor CLIs:
+    # a scan registers nothing; --register writes two entries through the
+    # editor and is a no-op the second time; a taken name is skipped and
+    # said; complete, machine mode and a piped chat never offer.
+    add_test(NAME cli.providers_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/providers_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/providers-e2e
+    )
+    set_tests_properties(cli.providers_lifecycle PROPERTIES TIMEOUT 60)
+
+    # Provider surfacing (28c) on the real binary with fake vendor CLIs: a
+    # registered claude-cli with no binary warns in `check` with the use-time
+    # remedy, never ok; scanned, the tier in words; `models list` STATE and
+    # VERIFIED; one turn through a fake codex (the recorded fixture) dated in
+    # VERIFIED, `check` and `models info`; check and models spend nothing.
+    add_test(NAME cli.provider_surfacing
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/provider_surfacing_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/provider-surfacing
+            ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/codex_cli/simple_text.jsonl
+    )
+    set_tests_properties(cli.provider_surfacing PROPERTIES TIMEOUT 60)
 
     add_test(NAME cli.complete_opens_no_listening_socket
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/no_listen_check.sh"
@@ -881,6 +933,17 @@ if(UNIX)
         )
         set_tests_properties(cli.busy_line PROPERTIES TIMEOUT 120)
 
+        # The unit suite from a terminal (2026-10-07): the files that drive the
+        # command tree in-process, with all three standard streams on a PTY,
+        # finish and pass exactly as on ctest's pipe -- no test waits on the
+        # keyboard, none is painted into.
+        add_test(NAME cli.unit_suite_under_a_tty
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_unit_suite_check.py"
+                $<TARGET_FILE:apogee_tests>
+        )
+        set_tests_properties(cli.unit_suite_under_a_tty PROPERTIES TIMEOUT 300)
+
         add_test(NAME cli.chat_typeahead_and_crash_safety
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_chat_check.py"
@@ -895,6 +958,16 @@ if(UNIX)
         # the screen: drawn, taken by Tab, never at the last column, never left
         # behind -- and a pipe given none of it. Since 27p, Tab after
         # `/attach <path> ` takes `--graph=` and then its value.
+        # The first-launch registration offer (28b): only a terminal can
+        # answer it, so only a PTY can show it -- asked once, a no leaving the
+        # config byte-identical and never asked again, a yes registering.
+        add_test(NAME cli.provider_offer
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_provider_offer_check.py"
+                $<TARGET_FILE:apogee>
+        )
+        set_tests_properties(cli.provider_offer PROPERTIES TIMEOUT 120)
+
         add_test(NAME cli.chat_line_editing
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_lineedit_check.py"
@@ -922,6 +995,8 @@ if(UNIX)
                 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/schema_conformance.py"
                 "${CMAKE_CURRENT_SOURCE_DIR}/../source/presentation/machine/json_reporter.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/reference/machine-mode.md"
+                # The schema this build prints (28g), held to both.
+                $<TARGET_FILE:apogee>
         )
         set_tests_properties(cli.machine_schema_conformance PROPERTIES TIMEOUT 60)
     endif()

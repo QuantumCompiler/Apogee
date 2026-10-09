@@ -35,6 +35,18 @@ using apogee::testing::TempDir;
 
 namespace {
 
+/// The starter config as it shipped before 28i, in YAML: the line editor's
+/// own format, still what an older install holds -- so the YAML transforms
+/// keep their goldens on the file most YAML configs grew from.
+std::string legacy_template() {
+    std::ifstream in{
+        std::filesystem::path{APOGEE_TEST_FIXTURES} / "config" / "legacy_template.yaml",
+        std::ios::binary};
+    std::ostringstream out;
+    out << in.rdbuf();
+    return out.str();
+}
+
 /// A comment-dense fixture -- the case the whole module exists for. If an edit
 /// disturbs a single byte of commentary here, a test fails.
 constexpr std::string_view kCommented = R"YAML(# Apogee configuration.
@@ -1011,10 +1023,10 @@ TEST_CASE(
         apogee::harness::set_backend_model_path("embeddings:\n  tuned:\n    x: 1\n", "tuned", "/x"),
         apogee::harness::ConfigEditError);
 
-    // The promote path on two copies of the shipped template: append a new
+    // The promote path on two copies of the YAML template: append a new
     // llamacpp entry, then repoint it in place -- and the second file equals
     // the first with only the path changed.
-    const std::string shipped{apogee::harness::config_template()};
+    const std::string shipped = legacy_template();
     apogee::harness::BackendConfig entry;
     entry.type = apogee::harness::BackendType::LlamaCpp;
     entry.model_path = "/home/me/.apogee/training/versions/tuned/v1.gguf";
@@ -1080,9 +1092,9 @@ TEST_CASE("set_backend_mmproj_path replaces in place, or lands right after model
 // tools.allowed_hosts -- the edit behind the fetch prompt's [a]lways
 // ---------------------------------------------------------------------------
 
-TEST_CASE("add_allowed_host on the shipped template changes one line, and remove undoes it",
+TEST_CASE("add_allowed_host on the YAML template changes one line, and remove undoes it",
           "[config_edit][hosts]") {
-    const std::string shipped{apogee::harness::config_template()};
+    const std::string shipped = legacy_template();
     const std::string one = apogee::harness::add_allowed_host(shipped, "Docs.Python.org.");
     std::string expected = shipped;
     const std::size_t at = expected.find("  allowed_hosts: []");
@@ -1585,9 +1597,9 @@ TEST_CASE("attachments.graph is set through the one editor, every comment kept",
           "[config_edit][attachments]") {
     using apogee::harness::AttachmentGraphMethod;
     using apogee::harness::set_attachments_graph;
-    // 27p: the shipped template keeps its commented example whole, and the
+    // 27p: the YAML template keeps its commented example whole, and the
     // block is appended after everything -- the only change.
-    const std::string shipped{apogee::harness::config_template()};
+    const std::string shipped = legacy_template();
     const std::string off = set_attachments_graph(shipped, "off");
     CHECK(off == shipped + "\nattachments:\n  graph: off\n");
     CHECK(apogee::harness::parse_config(off, "<test>").attachments.graph ==

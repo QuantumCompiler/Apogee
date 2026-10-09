@@ -1,5 +1,7 @@
 #include "contracts/config_edit.h"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -13,10 +15,18 @@
 #include <system_error>
 #include <utility>
 
+#include "contracts/config_yaml.h"
 #include "contracts/host.h"
+#include "contracts/jsonc.h"
 #include "contracts/layout.h"
 
 namespace apogee::harness {
+
+/// The line editor: every transform, defined once over the YAML text the
+/// config was first written in. A JSONC config reaches it through the bridge
+/// at the end of this file, which is what the declarations in the header
+/// call.
+namespace yaml_text {
 namespace {
 
 /// Entries under a map section sit at exactly this indent.
@@ -2118,6 +2128,264 @@ std::string format_config(std::string_view content) {
         out.pop_back();
     }
     return join_lines(out);
+}
+
+}  // namespace yaml_text
+
+namespace {
+
+/// Applies a YAML transform to `content` in its own format: YAML directly; a
+/// JSONC config through the bridge -- its value written as YAML, the
+/// transform applied, the result spliced back into the JSONC text in place,
+/// so every comment and every byte the edit does not touch stays (28i).
+template <typename Transform>
+std::string in_format(std::string_view content, Transform&& transform) {
+    if (!jsonc::looks_like_jsonc(content)) {
+        return std::forward<Transform>(transform)(content);
+    }
+    nlohmann::ordered_json current;
+    try {
+        current = jsonc::parse_json(content);
+    } catch (const jsonc::JsoncError& e) {
+        throw ConfigEditError(std::string{"the config is not valid JSON: "} + e.what());
+    }
+    if (current.is_null()) {
+        current = nlohmann::ordered_json::object();
+    }
+    const std::string yaml = yaml_of_json(current);
+    const std::string edited = std::forward<Transform>(transform)(std::string_view{yaml});
+    if (edited == yaml) {
+        return std::string{content};
+    }
+    try {
+        return jsonc::patch(content, json_of_yaml(edited, current));
+    } catch (const jsonc::JsoncError& e) {
+        throw ConfigEditError(e.what());
+    }
+}
+
+}  // namespace
+
+std::string yaml_scalar(std::string_view value) {
+    return yaml_text::yaml_scalar(value);
+}
+
+std::vector<std::string> section_entry_names(std::string_view content, std::string_view section) {
+    if (!jsonc::looks_like_jsonc(content)) {
+        return yaml_text::section_entry_names(content, section);
+    }
+    std::vector<std::string> names;
+    try {
+        const nlohmann::ordered_json root = jsonc::parse_json(content);
+        if (root.is_object() && root.contains(section) && root.at(section).is_object()) {
+            for (const auto& [name, entry] : root.at(section).items()) {
+                names.push_back(name);
+            }
+        }
+    } catch (const jsonc::JsoncError&) {
+        // As the YAML reader does on a file it cannot follow: no entries.
+    }
+    return names;
+}
+
+std::optional<std::string> fold_collision(const std::vector<std::string>& existing,
+                                          std::string_view candidate) {
+    return yaml_text::fold_collision(existing, candidate);
+}
+
+std::string append_backend(std::string_view content, std::string_view name,
+                           const BackendConfig& backend, bool force) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::append_backend(text, name, backend, force);
+    });
+}
+
+std::string delete_backend(std::string_view content, std::string_view name) {
+    return in_format(content,
+                     [&](std::string_view text) { return yaml_text::delete_backend(text, name); });
+}
+
+std::string append_embedding(std::string_view content, std::string_view name,
+                             const EmbeddingConfig& collection, bool force) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::append_embedding(text, name, collection, force);
+    });
+}
+
+std::string delete_embedding(std::string_view content, std::string_view name) {
+    return in_format(
+        content, [&](std::string_view text) { return yaml_text::delete_embedding(text, name); });
+}
+
+std::string set_embedding_graph_enabled(std::string_view content, std::string_view collection,
+                                        bool enabled) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::set_embedding_graph_enabled(text, collection, enabled);
+    });
+}
+
+std::string set_backend_model_path(std::string_view content, std::string_view name,
+                                   std::string_view path) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::set_backend_model_path(text, name, path);
+    });
+}
+
+std::string set_backend_mmproj_path(std::string_view content, std::string_view name,
+                                    std::string_view path) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::set_backend_mmproj_path(text, name, path);
+    });
+}
+
+std::vector<std::string_view> models_role_fields() {
+    return yaml_text::models_role_fields();
+}
+
+std::string set_models_role(std::string_view content, std::string_view field,
+                            std::string_view value) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::set_models_role(text, field, value);
+    });
+}
+
+std::string append_mcp_server(std::string_view content, std::string_view name,
+                              const McpServerConfig& server, bool force) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::append_mcp_server(text, name, server, force);
+    });
+}
+
+std::string delete_mcp_server(std::string_view content, std::string_view name) {
+    return in_format(
+        content, [&](std::string_view text) { return yaml_text::delete_mcp_server(text, name); });
+}
+
+std::string set_mcp_server_enabled(std::string_view content, std::string_view name, bool enabled) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::set_mcp_server_enabled(text, name, enabled);
+    });
+}
+
+std::string append_agent(std::string_view content, std::string_view name, const AgentConfig& agent,
+                         bool force) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::append_agent(text, name, agent, force);
+    });
+}
+
+std::string delete_agent(std::string_view content, std::string_view name) {
+    return in_format(content,
+                     [&](std::string_view text) { return yaml_text::delete_agent(text, name); });
+}
+
+std::string append_symphony(std::string_view content, std::string_view name,
+                            const SymphonySpec& spec, bool force) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::append_symphony(text, name, spec, force);
+    });
+}
+
+std::string delete_symphony(std::string_view content, std::string_view name) {
+    return in_format(content,
+                     [&](std::string_view text) { return yaml_text::delete_symphony(text, name); });
+}
+
+std::string render_symphony_spec(const SymphonySpec& spec) {
+    // A spec file, not the config: it stays YAML with the other spec files.
+    return yaml_text::render_symphony_spec(spec);
+}
+
+std::string append_graph(std::string_view content, std::string_view name,
+                         const NamedGraphConfig& graph, bool force) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::append_graph(text, name, graph, force);
+    });
+}
+
+std::string delete_graph(std::string_view content, std::string_view name) {
+    return in_format(content,
+                     [&](std::string_view text) { return yaml_text::delete_graph(text, name); });
+}
+
+std::string append_suite(std::string_view content, std::string_view name, const SuiteConfig& suite,
+                         bool force) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::append_suite(text, name, suite, force);
+    });
+}
+
+std::string delete_suite(std::string_view content, std::string_view name) {
+    return in_format(content,
+                     [&](std::string_view text) { return yaml_text::delete_suite(text, name); });
+}
+
+std::string set_suite_member(std::string_view content, std::string_view suite,
+                             std::string_view role, const std::optional<SuiteMember>& member) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::set_suite_member(text, suite, role, member);
+    });
+}
+
+std::string set_suite_consultable(std::string_view content, std::string_view suite,
+                                  const std::vector<std::string>& roles) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::set_suite_consultable(text, suite, roles);
+    });
+}
+
+std::string set_suite_consult_caps(std::string_view content, std::string_view suite,
+                                   const ConsultCaps& caps) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::set_suite_consult_caps(text, suite, caps);
+    });
+}
+
+std::string set_suite_validate(std::string_view content, std::string_view suite,
+                               const ValidateConfig& validate) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::set_suite_validate(text, suite, validate);
+    });
+}
+
+std::string set_suite_orchestrate(std::string_view content, std::string_view suite,
+                                  bool orchestrate) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::set_suite_orchestrate(text, suite, orchestrate);
+    });
+}
+
+std::string set_default_suite(std::string_view content, std::string_view name) {
+    return in_format(
+        content, [&](std::string_view text) { return yaml_text::set_default_suite(text, name); });
+}
+
+std::string set_attachments_graph(std::string_view content, std::string_view method) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::set_attachments_graph(text, method);
+    });
+}
+
+std::string set_permission(std::string_view content, std::string_view tool,
+                           std::string_view level) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::set_permission(text, tool, level);
+    });
+}
+
+std::string add_allowed_host(std::string_view content, std::string_view host) {
+    return in_format(
+        content, [&](std::string_view text) { return yaml_text::add_allowed_host(text, host); });
+}
+
+std::string remove_allowed_host(std::string_view content, std::string_view host) {
+    return in_format(
+        content, [&](std::string_view text) { return yaml_text::remove_allowed_host(text, host); });
+}
+
+std::string format_config(std::string_view content) {
+    // Whitespace only, never a key or a value: the same tidy in either format.
+    return yaml_text::format_config(content);
 }
 
 std::string read_config_file(const std::filesystem::path& path) {

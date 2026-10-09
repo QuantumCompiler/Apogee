@@ -46,7 +46,7 @@ JSON
 "$APOGEE_BIN" config add-backend prose --type mock --model-path "$WORK_DIR/prose.json" >/dev/null || fail "add-backend prose"
 "$APOGEE_BIN" config add-backend vendor --type claude-cli >/dev/null || fail "add-backend vendor"
 "$APOGEE_BIN" config set-default clerk >/dev/null || fail "set-default"
-CONFIG="$APOGEE_HOME/config/config.yaml"
+CONFIG="$APOGEE_HOME/config/config.json"
 cp "$CONFIG" "$WORK_DIR/config.before"
 
 # --- --dry-run: the clerk runs, nothing is written ---------------------------
@@ -68,7 +68,7 @@ id="$(sed -n 's/^Captured \(kr-[0-9TZ]*-[0-9a-f]*\)$/\1/p' "$WORK_DIR/cap.txt")"
 [ -n "$id" ] || fail "could not read the id: $(cat "$WORK_DIR/cap.txt")"
 grep -q 'Stored in "knowledge" (retriever: lexical)' "$WORK_DIR/cap.txt" || fail "no store line"
 grep -q "registered 'knowledge' in" "$WORK_DIR/cap.txt" || fail "the collection was not registered"
-grep -q "^  knowledge:" "$CONFIG" || fail "no embeddings entry for knowledge in the config"
+grep -q '^    "knowledge": {' "$CONFIG" || fail "no embeddings entry for knowledge in the config"
 [ -f "$APOGEE_HOME/embeddings/knowledge.db" ] || fail "no collection file"
 [ -f "$APOGEE_HOME/knowledge/raw/$id.md" ] || fail "no raw archive for $id"
 grep -q "Bob: yes, testers mistake it for back" "$APOGEE_HOME/knowledge/raw/$id.md" || fail "the archive is not the raw conversation"

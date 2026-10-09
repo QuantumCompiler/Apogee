@@ -11,6 +11,7 @@
 #include "contracts/config_edit.h"
 #include "contracts/host.h"
 #include "harness/roles.h"
+#include "operations/read_views.h"
 #include "scaffold/mcp_server.h"
 #include "tools/toolsets.h"
 
@@ -408,11 +409,7 @@ namespace {
 /// strings a user may well have put a token in, so only its presence is
 /// shown -- the same rule as `api_key_set`.
 nlohmann::json mcp_server_view(std::string_view name, const harness::McpServerConfig& server) {
-    return nlohmann::json{{"name", std::string{name}},
-                          {"command", server.command},
-                          {"args", server.args},
-                          {"enabled", server.enabled},
-                          {"env_set", !server.env.empty()}};
+    return operations::mcp_server_view(name, server);
 }
 
 }  // namespace
@@ -422,11 +419,8 @@ HttpResponse admin_list_mcp_servers(const AdminConfigContext& context) {
     if (!loaded.config.has_value()) {
         return loaded.failure;
     }
-    nlohmann::json data = nlohmann::json::array();
-    for (const auto& [name, server] : loaded.config->mcp_servers) {
-        data.push_back(mcp_server_view(name, server));
-    }
-    return json_response(200, nlohmann::json{{"object", "list"}, {"data", std::move(data)}});
+    // The entries `mcp list --output-format json` starts from too (28h).
+    return json_response(200, operations::mcp_servers_document(*loaded.config));
 }
 
 HttpResponse admin_create_mcp_server(const AdminConfigContext& context,

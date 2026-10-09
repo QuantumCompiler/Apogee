@@ -22,7 +22,7 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/QuantumCompiler/Apogee/stable/lib/scripts/install.ps1 | iex
 ```
 
-Prefer to do it by hand? Take your platform's archive from the [releases page](https://github.com/QuantumCompiler/Apogee/releases) — `apogee-<target>.tar.gz` for macOS and Linux, `apogee-<target>.zip` for Windows, each holding the binary and the completion stubs — then run `apogee check --fix` once.
+Prefer to do it by hand? Take your platform's archive from the [releases page](https://github.com/QuantumCompiler/Apogee/releases) — `apogee-<target>.tar.gz` for macOS and Linux, `apogee-<target>.zip` for Windows, each holding the binary, the completion stubs and `machine-schema.json` (the machine-mode protocol as a JSON Schema, for front-end authors) — then run `apogee check --fix` once.
 
 **Platforms:** `macos-arm64`, `linux-x64`, `linux-arm64`, `windows-x64`, `windows-arm64` — every release binary is built natively on its own runner, with llama.cpp in it. Two notes: macOS binaries are unsigned (a `curl` install is clean; for a browser download, `apogee check` detects the quarantine attribute and prints the exact fix), and on Windows the vendor-CLI backends are not available yet — use a direct-API backend there.
 
@@ -34,11 +34,19 @@ apogee check
 
 The doctor tells you what is installed, configured, and missing — and `apogee check --fix` repairs the install itself.
 
-**Cloud:** uncomment a backend in `~/.apogee/config.yaml` (the starter config documents every entry, and Apogee's own edits preserve your comments), then store the provider's key — keys never go on the command line:
+**Cloud:** uncomment a backend in `~/.apogee/config/config.json` (the starter config documents every entry, and Apogee's own edits preserve your comments), then store the provider's key — keys never go on the command line:
 
 ```sh
 apogee auth add anthropic   # hidden prompt; or --stdin / --from-env
 apogee chat
+```
+
+The config file is JSON with `//` comments (JSONC) — a strict JSON parser reads it once its comments are stripped. An install from before v0.1.5 keeps its `config.yaml` working, with a one-line notice, until `apogee config migrate` converts it (every comment carried over, the original kept as `config.yaml.bak`); `apogee config upgrade` adds the options a newer release documents, with their comments, and `apogee check` says when there are any.
+
+**Subscription CLIs:** if you already use `claude`, `codex` or `gemini`, Apogee can find them — `apogee providers scan` shows what this machine has and the evidence for it, and `--register` adds a backend for each one found (nothing is written without it):
+
+```sh
+apogee providers scan --register
 ```
 
 **Local:** pull a model from Hugging Face or your Ollama store, point a `llamacpp` backend at it, and nothing needs the network again:
@@ -79,8 +87,8 @@ lib/scripts/cicd.sh --test
 
 That builds every application for the host's native target and runs its suite — the same call CI makes. Requirements: CMake ≥ 3.25, a C++20 compiler, and git (libcurl development headers on Linux). llama.cpp is off by default in a source build — configure with `-DAPOGEE_ENABLE_LLAMA=ON` to link it; release binaries always ship with it. `make -C lib/src/cli help` lists the CLI project's own targets.
 
-`make -C lib/src/cli install` puts what you built in `~/.local/bin` with its shell completions, the same install the release scripts make. `MODE=dev` or `MODE=test` installs `apogee-dev` or `apogee-test` beside it instead, each keeping its models, chats and keys in a directory of its own (`~/.apogee-dev`, `~/.apogee-test`), so a development build never touches the install you rely on; `make -C lib/src/cli uninstall MODE=dev` removes it again. Any binary can be pointed at another one for a single run with `--dev`, `--test`, `--release` or `--custom <dir>/config/config.yaml`.
+`make -C lib/src/cli install` puts what you built in `~/.local/bin` with its shell completions, the same install the release scripts make. `MODE=dev` or `MODE=test` installs `apogee-dev` or `apogee-test` beside it instead, each keeping its models, chats and keys in a directory of its own (`~/.apogee-dev`, `~/.apogee-test`), so a development build never touches the install you rely on; `make -C lib/src/cli uninstall MODE=dev` removes it again. Any binary can be pointed at another one for a single run with `--dev`, `--test`, `--release` or `--custom <dir>/config/config.json`.
 
 ## Status
 
-Young and moving fast: [v0.1.0](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.0) (the harness), [v0.1.1](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.1) (the release pipeline), [v0.1.2](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.2) (the terminal and the model directory) and [v0.1.3](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.3) (local agent tools and small-model depth) are out, and `v0.1.4` is in development on its branch. The running board of what's shipped, in flight, and next is [ROADMAP.md](lib/documentation/assistant/ROADMAP.md).
+Young and moving fast: [v0.1.0](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.0) (the harness), [v0.1.1](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.1) (the release pipeline), [v0.1.2](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.2) (the terminal and the model directory), [v0.1.3](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.3) (local agent tools and small-model depth) and [v0.1.4](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.4) (MLX inference, model suites, autonomous tasks and code knowledge graphs) are out, and `v0.1.5` is in development on its branch. The running board of what's shipped, in flight, and next is [ROADMAP.md](lib/documentation/assistant/ROADMAP.md).

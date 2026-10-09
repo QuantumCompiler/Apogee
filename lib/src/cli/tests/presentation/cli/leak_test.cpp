@@ -4,6 +4,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <string>
@@ -12,6 +13,7 @@
 #include "backends/factory.h"
 #include "cli/auth_cmd.h"
 #include "cli/check.h"
+#include "cli/models.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
 #include "events/bus.h"
@@ -20,6 +22,7 @@
 #include "httpserver/admin_config.h"
 #include "httpserver/admin_tasks.h"
 #include "logger/operational.h"
+#include "operations/read_views.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
 #include "support/cli_home.h"
@@ -61,7 +64,16 @@ struct World {
                                       "  stored:\n"
                                       "    type: openai\n"
                                       "  ambient:\n"
-                                      "    type: google\n";
+                                      "    type: google\n"
+                                      // An MCP server whose environment holds the
+                                      // key: its view says only that it sets one.
+                                      "mcp_servers:\n"
+                                      "  probe:\n"
+                                      "    command: /bin/true\n"
+                                      "    enabled: false\n"
+                                      "    env:\n"
+                                      "      - \"TOKEN="
+                                   << kKey << "\"\n";
         config = apogee::harness::load_config(config_path);
         store.put("openai", kKey);
         env = apogee::secrets::EnvSnapshot::capture([](std::string_view name) {
@@ -151,6 +163,20 @@ TEST_CASE("a stored key reaches no listing, report, response, event or log", "[s
         expect_clean("check row " + row.name, row.name + row.detail + row.remedy);
     }
     expect_clean("check report", apogee::commands::render_report(report, false));
+    // The reads' machine faces (28h): the doctor's document, the model
+    // listing's, the agents' and the MCP servers'.
+    expect_clean("check --output-format json",
+                 apogee::commands::render_report_document(report, std::nullopt).dump());
+    expect_clean(
+        "models list --output-format json",
+        apogee::commands::render_model_document(
+            apogee::commands::build_model_rows(world.config, {}, world.config_path, &world.env),
+            true)
+            .dump());
+    expect_clean("agents list --output-format json",
+                 apogee::operations::agents_document(world.config).dump());
+    expect_clean("mcp list --output-format json",
+                 apogee::operations::mcp_servers_document(world.config).dump());
 
     // Every admin response: the listing, a PUT's echo, a DELETE's, and the
     // backend view.

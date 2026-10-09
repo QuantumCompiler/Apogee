@@ -24,11 +24,19 @@
 #include "ansi/ansi.h"
 #include "backends/mlx_local.h"
 #include "backends/prompt_cache.h"
+#include "backends/provider_cache.h"
+#include "backends/provider_probe.h"
+#include "backends/provider_status.h"
+#include "backends/provider_table.h"
 #include "cli/embed.h"
 #include "cli/helpers.h"
 #include "cli/models_pull.h"
+#include "cli/provider_offer.h"
 #include "contracts/assets.h"
+#include "contracts/config_edit.h"
+#include "contracts/config_migrate.h"
 #include "contracts/host.h"
+#include "contracts/jsonc.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "embedstore/ingest.h"
@@ -36,6 +44,7 @@
 #include "harness/roles.h"
 #include "httpserver/admin_auth.h"
 #include "knowledge/store.h"
+#include "machine/json_reporter.h"
 #include "modelstore/gguf_inspect.h"
 #include "modelstore/kv_cache.h"
 #include "modelstore/mlx_info.h"
@@ -376,19 +385,36 @@ void check_suites(CheckReport& report, const harness::Config& config, const back
 }
 
 void check_config(CheckReport& report, const CheckInputs& inputs) {
+    const std::string file = inputs.config_path.filename().string();
     if (inputs.config_missing) {
         // A fresh install has no config yet. That is a state with an obvious
         // fix, not a broken installation.
-        add(report, Status::Warn, "Config", "config.yaml",
-            "not found at " + inputs.config_path.string(), "apogee config init");
+        add(report, Status::Warn, "Config", file, "not found at " + inputs.config_path.string(),
+            "apogee config init");
         return;
     }
     if (!inputs.config_error.empty()) {
-        add(report, Status::Fail, "Config", "config.yaml", inputs.config_error);
+        add(report, Status::Fail, "Config", file, inputs.config_error);
         return;
     }
 
-    add(report, Status::Ok, "Config", "config.yaml", "parses cleanly");
+    if (inputs.config_legacy) {
+        // The compat read (28i): healthy, and on its way out.
+        add(report, Status::Ok, "Config", file,
+            "parses cleanly -- the older YAML format, still read; migrate converts it to " +
+                std::string{harness::kConfigFileName} + ", every comment kept",
+            "apogee config migrate");
+    } else if (const std::size_t missing = inputs.config_missing_options.size(); missing > 0) {
+        // Behind the template is healthy: the absent options have their
+        // defaults. Said, so a newer release's options can be found.
+        add(report, Status::Ok, "Config", file,
+            "parses cleanly -- " + std::to_string(missing) +
+                (missing == 1 ? " option" : " options") +
+                " from this release's starter config not in the file (their defaults apply)",
+            "apogee config upgrade");
+    } else {
+        add(report, Status::Ok, "Config", file, "parses cleanly");
+    }
 
     const harness::Config& config = inputs.config;
     if (config.backends.empty()) {
@@ -552,6 +578,12 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
             continue;
         }
 
+        // A vendor CLI's row is the Providers section's (28c): whether its
+        // binary is there is the one fact that matters, and "ok" for an
+        // entry that merely parses read like a pass.
+        if (harness::is_vendor_cli(backend.type)) {
+            continue;
+        }
         add(report, Status::Ok, "Config", label, std::string{type});
     }
 
@@ -596,6 +628,78 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
         }
         add(report, Status::Ok, "Config", label,
             collection.retriever.empty() ? "auto" : collection.retriever);
+    }
+}
+
+/// The Providers section (28c): each configured provider backend's tier in
+/// plain words -- a vendor CLI whose binary is missing WARNS, with the
+/// use-time error's own remedy, where the config's shape once said ok --
+/// then the providers the last scan found that no backend reaches. Read
+/// from the provider cache and the cheap checks alone: no binary is started
+/// here, and a machine never scanned is said, not probed. Absent entirely
+/// on a pure-local install with nothing detected.
+void check_providers(CheckReport& report, const CheckInputs& inputs) {
+    const backends::ProviderCache cache =
+        backends::load_provider_cache(inputs.home / "cache" / "providers.json");
+    const bool configured_any = std::ranges::any_of(inputs.config.backends, [](const auto& entry) {
+        return backends::provider_for_type(entry.second.type) != nullptr;
+    });
+    std::vector<backends::ProviderStatus> unregistered;
+    for (const backends::ProviderStatus& status : cached_statuses(cache)) {
+        const bool reached = std::ranges::any_of(inputs.config.backends, [&](const auto& entry) {
+            return entry.second.type == status.type;
+        });
+        if (!reached && offerable(status)) {
+            unregistered.push_back(status);
+        }
+    }
+    if (!configured_any && unregistered.empty()) {
+        return;
+    }
+
+    const std::unique_ptr<backends::ExistenceView> host =
+        inputs.provider_view == nullptr ? backends::host_existence_view() : nullptr;
+    const backends::ExistenceView& view =
+        inputs.provider_view != nullptr ? *inputs.provider_view : *host;
+    const secrets::CredentialStore store{secrets::credentials_path(inputs.config_path)};
+    const secrets::EnvSnapshot env = secrets::EnvSnapshot::capture(inputs.env);
+    for (const auto& [name, backend] : inputs.config.backends) {
+        const std::optional<backends::ProviderStatus> status =
+            backends::backend_provider_status(backend, view, &store, env, cache);
+        if (!status.has_value()) {
+            continue;
+        }
+        const std::string label = "backend: " + name;
+        const std::string type{harness::to_string(backend.type)};
+        if (status->tier() == backends::ProviderTier::NotFound) {
+            // An API key that resolves nowhere is the Config row's warning,
+            // said once; a vendor CLI's missing binary is said here.
+            if (harness::is_vendor_cli(backend.type)) {
+                add(report, Status::Warn, "Providers", label,
+                    type + " -- " + status->installed_evidence,
+                    std::string{backends::provider_for_type(backend.type)->remedy});
+            }
+            continue;
+        }
+        add(report, Status::Ok, "Providers", label,
+            type + " -- " + backends::describe_status(*status));
+    }
+    for (const backends::ProviderStatus& status : unregistered) {
+        const backends::ProviderFacts* facts = backends::provider_for_type(status.type);
+        const std::string type{harness::to_string(status.type)};
+        add(report, Status::Ok, "Providers", "provider: " + status.id,
+            std::string{backends::to_string(status.tier())} + ", not registered",
+            facts->needs_model
+                ? "apogee config add-backend " + status.id + " --type " + type + " --model <model>"
+                : std::string{"apogee providers scan --register"});
+    }
+    if (cache.scanned()) {
+        add(report, Status::Ok, "Providers", "scan", "last scanned " + cache.scanned_at);
+    } else {
+        add(report, Status::Ok, "Providers", "scan",
+            "not scanned yet -- versions, status-command logins and providers no backend "
+            "reaches are unknown",
+            "apogee check --refresh-providers   (or apogee providers scan)");
     }
 }
 
@@ -1919,6 +2023,8 @@ CheckReport run_checks(const CheckInputs& inputs) {
     check_version(report, inputs);
     say(inputs, "checking config");
     check_config(report, inputs);
+    say(inputs, "checking providers");
+    check_providers(report, inputs);
     say(inputs, "checking tools");
     check_tools(report, inputs);
     say(inputs, "checking MCP servers");
@@ -1975,7 +2081,7 @@ std::vector<std::string> apply_fixes(const CheckInputs& inputs) {
     // was still correct. Two implementations is the bug, even when both agree.
     //
     // Config content is still untouched: seeding creates directories and sets
-    // modes, and never opens config.yaml. Repairing the local install is a
+    // modes, and never opens the config. Repairing the local install is a
     // repair; guessing what a dangling model_path meant is not.
     const harness::SeedResult seeded = harness::seed_data_directory(inputs.home);
 
@@ -2122,6 +2228,31 @@ std::string render_report(const CheckReport& report, bool use_color) {
     return out.str();
 }
 
+nlohmann::json render_report_document(const CheckReport& report,
+                                      const std::optional<std::vector<std::string>>& fixed) {
+    nlohmann::json rows = nlohmann::json::array();
+    for (const CheckRow& row : report.rows) {
+        nlohmann::json entry{
+            {"section", row.section},
+            {"name", row.name},
+            {"status", row.status == Status::Skipped ? std::string{"skipped"}
+                                                     : std::string{to_string(row.status)}},
+            {"detail", row.detail}};
+        if (!row.remedy.empty()) {
+            entry["remedy"] = row.remedy;
+        }
+        rows.push_back(std::move(entry));
+    }
+    nlohmann::json document{{"rows", std::move(rows)},
+                            {"ok", report.passed()},
+                            {"failures", report.count(Status::Fail)},
+                            {"warnings", report.count(Status::Warn)}};
+    if (fixed.has_value()) {
+        document["fixed"] = *fixed;
+    }
+    return document;
+}
+
 std::string_view CheckCommand::name() const noexcept {
     return "check";
 }
@@ -2135,9 +2266,11 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
         bool fix = false;
         bool no_color = false;
         bool quiet = false;
+        bool refresh_providers = false;
     };
 
     auto flags = std::make_shared<Flags>();
+    auto format = std::make_shared<ReadFormat>(ReadFormat::Text);
 
     CLI::App* cmd = root.add_subcommand(std::string{name()}, std::string{summary()});
     cmd->add_flag("--fix", flags->fix,
@@ -2145,10 +2278,26 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
                   "Never touches your config.");
     cmd->add_flag("--no-color", flags->no_color, "Disable coloured output");
     cmd->add_flag("-q,--quiet", flags->quiet, "No progress line while it checks");
+    cmd->add_flag("--refresh-providers", flags->refresh_providers,
+                  "Scan the providers first -- each vendor CLI on PATH, its login evidence, each "
+                  "key -- as 'apogee providers scan' does");
+    add_read_format(cmd, format);
 
-    cmd->callback([&context, flags]() {
+    cmd->callback([&context, flags, format]() {
         CheckInputs inputs;
-        inputs.config_path = harness::resolve_config_path(context.config_path);
+        try {
+            inputs.config_path = harness::resolve_config_path(context.config_path);
+        } catch (const std::exception& e) {
+            // Both formats side by side (28i): the Config row says so; the
+            // rest of the install is still worth a look.
+            try {
+                inputs.config_path = harness::config_dir() / harness::kConfigFileName;
+            } catch (const std::exception&) {
+                std::cerr << "apogee check: " << e.what() << "\n";
+                throw CLI::RuntimeError(1);
+            }
+            inputs.config_error = e.what();
+        }
 
         try {
             inputs.home = harness::apogee_home();
@@ -2160,9 +2309,12 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
 
         // Non-zero on failure so a script can gate on it -- the reason this is
         // a command rather than a page of documentation.
-        if (!run_check_pass(std::move(inputs), CheckPassOptions{.fix = flags->fix,
-                                                                .quiet = flags->quiet,
-                                                                .no_color = flags->no_color})) {
+        if (!run_check_pass(std::move(inputs),
+                            CheckPassOptions{.fix = flags->fix,
+                                             .quiet = flags->quiet,
+                                             .no_color = flags->no_color,
+                                             .refresh_providers = flags->refresh_providers,
+                                             .json = *format == ReadFormat::Json})) {
             throw CLI::RuntimeError(1);
         }
     });
@@ -2180,17 +2332,26 @@ bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options) {
     }
 
     std::error_code exists_code;
-    if (!std::filesystem::exists(inputs.config_path, exists_code)) {
+    if (!inputs.config_error.empty()) {
+        // Refused before it was read: nothing to load.
+    } else if (!std::filesystem::exists(inputs.config_path, exists_code)) {
         inputs.config_missing = true;
     } else {
         try {
-            inputs.config = harness::load_config(inputs.config_path);
+            const std::string content = harness::read_config_file(inputs.config_path);
+            inputs.config = harness::parse_config(content, inputs.config_path.string());
+            inputs.config_legacy = !harness::jsonc::looks_like_jsonc(content);
+            inputs.config_missing_options = harness::missing_template_options(content);
         } catch (const harness::ConfigError& e) {
             inputs.config_error = e.what();
         }
     }
 
-    if (options.fix) {
+    std::optional<std::vector<std::string>> fixed;
+    if (options.fix && options.json) {
+        // In the document, never on stdout beside it (28h).
+        fixed = apply_fixes(inputs);
+    } else if (options.fix) {
         const std::vector<std::string> done = apply_fixes(inputs);
         std::size_t created = 0;
         for (const std::string& line : done) {
@@ -2209,14 +2370,26 @@ bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options) {
         }
     }
 
+    if (options.refresh_providers) {
+        // The explicit scan (28a), before the report reads its cache: the
+        // one place `check` may start a vendor's binary, and only when asked.
+        BusyLine busy{std::cerr, "scanning providers", busy_options(options.quiet || options.json)};
+        const secrets::CredentialStore store{secrets::credentials_path(inputs.config_path)};
+        (void)backends::scan_host_providers(backends::ScanOptions{}, &store);
+    }
+
     CheckReport report;
     {
         // Every model's header is read, so on a full store this takes
         // seconds: said on one line, gone before the report (M1).
-        BusyLine busy{std::cerr, "checking", busy_options(options.quiet)};
+        BusyLine busy{std::cerr, "checking", busy_options(options.quiet || options.json)};
         inputs.progress = busy.sink();
         report = run_checks(inputs);
         inputs.progress = nullptr;
+    }
+    if (options.json) {
+        write_document(std::cout, render_report_document(report, fixed));
+        return report.passed();
     }
     const ansi::Style style =
         ansi::Style::detect(options.no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto);

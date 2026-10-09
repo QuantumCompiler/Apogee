@@ -15,7 +15,7 @@ endif()
 file(REMOVE_RECURSE "${APOGEE_WORK_DIR}")
 file(MAKE_DIRECTORY "${APOGEE_WORK_DIR}")
 
-set(CONFIG_FILE "${APOGEE_WORK_DIR}/config/config.yaml")
+set(CONFIG_FILE "${APOGEE_WORK_DIR}/config/config.json")
 
 # Runs the binary and fails the test unless the exit code is as expected.
 function(apogee_run expected_code)
@@ -105,7 +105,15 @@ if(NOT APOGEE_OUT MATCHES "registered 'notes' in")
 endif()
 
 file(READ "${CONFIG_FILE}" AFTER_INGEST)
-set(EXPECTED_AFTER_INGEST "${PRISTINE}\nembeddings:\n  notes:\n    chunk_size: 512\n    chunk_overlap: 64\n")
+# JSONC (28i): the new section goes in after the last one, `backends`, ahead
+# of the commented examples that follow it -- one inserted run.
+set(LAST_SECTION_END "\n  }\n\n  // How operational status output is displayed.")
+string(REPLACE "${LAST_SECTION_END}"
+    "\n  },\n  \"embeddings\": {\n    \"notes\": {\n      \"chunk_size\": 512,\n      \"chunk_overlap\": 64\n    }\n  }\n\n  // How operational status output is displayed."
+    EXPECTED_AFTER_INGEST "${PRISTINE}")
+if(EXPECTED_AFTER_INGEST STREQUAL PRISTINE)
+    message(FATAL_ERROR "the template's last section was not found to build the expectation")
+endif()
 if(NOT AFTER_INGEST STREQUAL EXPECTED_AFTER_INGEST)
     message(FATAL_ERROR "ingest changed more than the one new entry:\n${AFTER_INGEST}")
 endif()
@@ -183,7 +191,7 @@ if(NOT APOGEE_ERR MATCHES "f16,q8_0,q4_0")
     message(FATAL_ERROR "a refused cache type did not name the accepted ones: ${APOGEE_ERR}")
 endif()
 file(READ "${CONFIG_FILE}" AFTER_REFUSAL)
-if(AFTER_REFUSAL MATCHES "cached:")
+if(AFTER_REFUSAL MATCHES "\"cached\"")
     message(FATAL_ERROR "a refused cache type still wrote its entry")
 endif()
 
@@ -229,7 +237,9 @@ apogee_run(1 config set-default-utility no-such-backend)
 
 # --- auto_rag: injection with no flag, reported, and switchable off --------
 apogee_run(0 config add-backend mock --type mock --model mock-1)
-file(APPEND "${CONFIG_FILE}" "\nauto_rag: notes\n")
+file(READ "${CONFIG_FILE}" BEFORE_AUTO_RAG)
+string(REPLACE "\n{\n" "\n{\n  \"auto_rag\": \"notes\",\n" WITH_AUTO_RAG "${BEFORE_AUTO_RAG}")
+file(WRITE "${CONFIG_FILE}" "${WITH_AUTO_RAG}")
 apogee_run(0 config get auto_rag)
 expect_equal("${APOGEE_OUT}" "notes" "auto_rag is readable")
 
@@ -374,10 +384,12 @@ if(NOT TURN_OUTPUT MATCHES "\\[hybrid\\]")
 endif()
 
 # A collection pin that `check` must refuse: a typo never silently means auto.
-# Edited INTO the entry the ingest registered -- a second `embeddings:` key
-# would be invalid YAML, and check would be failing for the wrong reason.
+# Edited INTO the entry the ingest registered -- a second `embeddings` key
+# would be refused as a duplicate, and check would be failing for the wrong
+# reason.
 file(READ "${CONFIG_FILE}" WITH_VECS)
-string(REPLACE "  vecs:\n" "  vecs:\n    retriever: hybird\n" WITH_TYPO "${WITH_VECS}")
+string(REPLACE "\"vecs\": {\n" "\"vecs\": {\n      \"retriever\": \"hybird\",\n" WITH_TYPO
+    "${WITH_VECS}")
 if(WITH_TYPO STREQUAL WITH_VECS)
     message(FATAL_ERROR "the registered vecs entry was not found to edit")
 endif()
@@ -460,7 +472,7 @@ if(NOT always_out MATCHES "\"kind\":\"permission\"[^\n]*\"target\":\"127\\.0\\.0
     message(FATAL_ERROR "the permission question did not name the host:\n${always_out}")
 endif()
 file(READ "${CONFIG_FILE}" AFTER_ALWAYS)
-string(REPLACE "  allowed_hosts: []" "  allowed_hosts: [127.0.0.1]" EXPECTED_ALWAYS
+string(REPLACE "\"allowed_hosts\": []" "\"allowed_hosts\": [\"127.0.0.1\"]" EXPECTED_ALWAYS
     "${BEFORE_ALWAYS}")
 if(NOT AFTER_ALWAYS STREQUAL EXPECTED_ALWAYS)
     message(FATAL_ERROR "`always` did not add exactly the host:\n${AFTER_ALWAYS}")

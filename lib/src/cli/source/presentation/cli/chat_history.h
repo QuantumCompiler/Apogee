@@ -1,5 +1,7 @@
 #pragma once
 
+#include <nlohmann/json_fwd.hpp>
+
 #include <string>
 #include <string_view>
 #include <vector>
@@ -12,6 +14,10 @@
 namespace apogee::commands {
 
 /// One row of `apogee chats list`.
+/// One saved conversation as `chats list --output-format json` carries it
+/// (28h): the row's facts -- `id`, `updated`, `turns`, `name`.
+[[nodiscard]] nlohmann::json session_row_view(const logger::Session& session);
+
 [[nodiscard]] std::string format_session_row(const logger::Session& session);
 
 /// The body of `apogee chats info <name>`.

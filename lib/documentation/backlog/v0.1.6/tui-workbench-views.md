@@ -14,7 +14,7 @@
 - `presentation/tui/models_view.h/.cpp`, `chats_view.h/.cpp`, `suites_view.h/.cpp`, `config_view.h/.cpp`: each a renderer over its core's read plus a small action map onto core calls; registered with 32b's view registry, switchable from the shell and the palette.
 - `operations/` (shipped): consumed as-is; a read a view needs that only exists as painted output gets its core carved *there* (the A4 pattern), never implemented in `tui/`.
 - Tests: `tests/presentation/tui/` — per-view headless goldens over scripted core results; the CLI↔TUI byte-parity cases for every mutation a view offers; the secrets-shape pin (the view's data type has no key field); the confirm-wording goldens.
-- Consumes: [32b](tui-shell.md), [32c](tui-session-view.md) (the shell and the session view it sits beside), `operations/` (A4, shipped), 28h's read shapes (v0.1.5, builds first), the one config editor (shipped), 27d's suites unit (shipped, v0.1.4).
+- Consumes: [32b](tui-shell.md), [32c](tui-session-view.md) (the shell and the session view it sits beside), `operations/` (A4, shipped), 28h's read shapes (shipped, v0.1.5 — [Milestone M](../../assistant/MILESTONES.md#milestone-m--the-front-end-contract)), the one config editor (shipped), 27d's suites unit (shipped, v0.1.4).
 
 **Reference.** The anti-pattern, carried on this item by design: a TUI of eight hand-built views, shipped across two releases and removed whole under its per-view parity burden. The in-house counter-precedents: `operations/` (one core, two surfaces — now three), the CLI↔HTTP byte-parity tests (the shape this item re-points), and 28h's `{rows, ok}` reads (the data contract the views render).
 

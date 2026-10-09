@@ -14,6 +14,7 @@
 #include <tuple>
 #include <vector>
 
+#include "backends/provider_cache.h"
 #include "cli/helpers.h"
 #include "harness/roles.h"
 #include "modelstore/gguf_inspect.h"
@@ -23,6 +24,7 @@
 #include "secrets/resolve.h"
 #include "secrets/store.h"
 #include "support/env_guard.h"
+#include "support/fake_existence_view.h"
 #include "support/gguf_builder.h"
 
 /// The `models` listing surface.
@@ -1281,4 +1283,82 @@ TEST_CASE("status with a suite active names the suite rung where it answered",
     // Matched as names are, and spelled as the file spells it afterwards.
     CHECK(apogee::commands::select_suite(config, "RESEARCH").empty());
     CHECK(config.models.default_suite == "research");
+}
+
+// --- 28c: provider rows' STATE and VERIFIED -----------------------------------
+
+TEST_CASE("provider rows say what is there and when it last answered, never dashes",
+          "[commands][models][listing][providers]") {
+    Config config = sample_config();
+    BackendConfig claude;
+    claude.type = BackendType::ClaudeCli;
+    config.backends["claude"] = claude;
+    BackendConfig codex;
+    codex.type = BackendType::CodexCli;
+    config.backends["codex"] = codex;
+    const apogee::secrets::EnvSnapshot empty;
+    apogee::testing::FakeExistenceView view;
+    view.install("codex");
+    apogee::backends::ProviderCache cache;
+    cache.verified["codex"] = {"2026-10-06", "codex"};
+    cache.verified["anthropic"] = {"2026-10-05", "cloud"};
+
+    const std::vector<ModelRow> rows =
+        build_model_rows(config, {}, {}, &empty, {}, apogee::commands::ProviderLens{&view, &cache});
+    const ModelRow& missing = row_for(rows, "claude");
+    CHECK(missing.state == "no binary");
+    CHECK(missing.attention);
+    CHECK(missing.note ==
+          "'claude' was not found on PATH. Install the Claude CLI and log in, or "
+          "set 'binary' on this backend to its full path");
+    CHECK(missing.verified == "no turn yet");
+    const ModelRow& present = row_for(rows, "codex");
+    CHECK(present.state == "installed");
+    CHECK(present.verified == "2026-10-06");
+    CHECK_FALSE(present.attention);
+    // An API row keeps where its key comes from; VERIFIED gains the day.
+    const ModelRow& cloud = row_for(rows, "cloud");
+    CHECK(cloud.state == "no key");
+    CHECK(cloud.verified == "2026-10-05");
+    // A local row is untouched.
+    CHECK(row_for(rows, "embedder").verified != "no turn yet");
+
+    view.files.insert("/home/u/.claude.json");
+    view.install("claude");
+    const std::vector<ModelRow> again =
+        build_model_rows(config, {}, {}, &empty, {}, apogee::commands::ProviderLens{&view, &cache});
+    CHECK(row_for(again, "claude").state == "credentials found");
+
+    // The JSONL carries the same facts as the table.
+    const std::string jsonl = render_model_jsonl(again);
+    CHECK(jsonl.find(R"("state":"credentials found")") != std::string::npos);
+    CHECK(jsonl.find(R"("verified":"2026-10-06")") != std::string::npos);
+    const std::string table = render_model_table(again);
+    CHECK(table.find("credentials found") != std::string::npos);
+    CHECK(table.find("authenticated") == std::string::npos);
+
+    // With no lens, a listing of something else is as it was.
+    const std::vector<ModelRow> unlensed = build_model_rows(config, {}, {}, &empty);
+    CHECK(row_for(unlensed, "claude").verified == "-");
+}
+
+TEST_CASE("models info gives a provider backend its evidence line", "[commands][models][info]") {
+    Config config = sample_config();
+    BackendConfig gemini;
+    gemini.type = BackendType::GeminiCli;
+    config.backends["gem"] = gemini;
+    apogee::testing::FakeExistenceView view;
+    view.install("gemini");
+    apogee::backends::ProviderCache cache;
+    cache.verified["gemini"] = {"2026-10-04", "gem"};
+    const std::string body = apogee::commands::render_model_info(
+        config, "gem", {}, {}, apogee::commands::ProviderLens{&view, &cache, nullptr});
+    CHECK(body.find("provider:     verified -- answered a turn on 2026-10-04; version not asked "
+                    "yet\n") != std::string::npos);
+    CHECK(body.find("verified:     last answered a turn on 2026-10-04 (gem)\n") !=
+          std::string::npos);
+    // A local backend has no provider line.
+    CHECK(apogee::commands::render_model_info(config, "embedder", {}, {},
+                                              apogee::commands::ProviderLens{&view, &cache})
+              .find("provider:") == std::string::npos);
 }

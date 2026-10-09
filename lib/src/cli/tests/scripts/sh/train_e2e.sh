@@ -32,7 +32,36 @@ fail() { echo "train_e2e: $*" >&2; exit 1; }
 
 "$APOGEE_BIN" config init >/dev/null || fail "config init"
 "$APOGEE_BIN" check --fix >/dev/null 2>&1 || fail "check --fix"
-CONFIG="$APOGEE_HOME/config/config.yaml"
+CONFIG="$APOGEE_HOME/config/config.json"
+
+# The JSONC config (28i) gains a member first, under its opening brace: $1,
+# the member's text, on lines of its own with the comma after it.
+config_first() {
+    python3 - "$CONFIG" "$1" <<'PY' || fail "could not edit the config"
+import sys
+path, member = sys.argv[1:3]
+text = open(path).read()
+at = text.index("\n{\n") + 3
+open(path, "w").write(text[:at] + member + ",\n" + text[at:])
+PY
+}
+
+# Exits 0 when $2 is $1 with one run of bytes inserted and nothing else
+# changed, printing the run without the whitespace around it (where an
+# insertion between two indented lines begins is a matter of taste): the
+# editor's byte-exact contract.
+inserted() {
+    python3 - "$1" "$2" <<'PY'
+import sys
+before, after = (open(path).read() for path in sys.argv[1:3])
+prefix = 0
+while prefix < len(before) and before[prefix] == after[prefix]:
+    prefix += 1
+if len(after) <= len(before) or not after.endswith(before[prefix:]):
+    sys.exit(1)
+print(after[prefix:len(after) - (len(before) - prefix)].strip())
+PY
+}
 TRAINING="$APOGEE_HOME/training"
 
 # A student: a SafeTensors set where the model store keeps one --
@@ -96,7 +125,7 @@ grep -q "suite kit:reasoning" "$WORK_DIR/kit.out" || fail "kit suite label: $(ca
 "$APOGEE_BIN" train eval "$RUN" --suite "$WORK_DIR/suite.jsonl" --force </dev/null >/dev/null 2>&1 || fail "eval --force"
 
 # --- promote: byte-exact registration ------------------------------------------
-cp "$CONFIG" "$WORK_DIR/before.yaml"
+cp "$CONFIG" "$WORK_DIR/before.json"
 "$APOGEE_BIN" train promote "$RUN" --as tuned </dev/null >"$WORK_DIR/promote.out" 2>&1 || fail "train promote: $(cat "$WORK_DIR/promote.out")"
 V1=$(served tuned)
 [ -f "$V1" ] || fail "no v1 GGUF at '$V1'"
@@ -109,13 +138,11 @@ esac
 [ -f "$TRAINING/versions/tuned.json" ] || fail "no ledger"
 grep -q "promoted to new backend tuned -> v1" "$WORK_DIR/promote.out" || fail "promote summary: $(cat "$WORK_DIR/promote.out")"
 [ ! -d "$TRAINING/runs/$RUN/fused" ] || fail "the fused checkpoint was kept without --keep-fused"
-# Byte-exact: the diff is exactly the entry's three lines (plus the blank
-# separator the editor adds) at the end of the backends section, and not
-# one byte removed.
-[ "$(diff "$WORK_DIR/before.yaml" "$CONFIG" | grep -c '^<')" = "0" ] || fail "promote removed config lines: $(diff "$WORK_DIR/before.yaml" "$CONFIG")"
-diff "$WORK_DIR/before.yaml" "$CONFIG" | grep '^>' | grep -v '^> *$' > "$WORK_DIR/added.txt" || true
-printf '>   tuned:\n>     type: llamacpp\n>     model_path: %s\n' "$V1" > "$WORK_DIR/expected-diff.txt"
-cmp "$WORK_DIR/expected-diff.txt" "$WORK_DIR/added.txt" || fail "the config is not the previous bytes plus the entry: $(cat "$WORK_DIR/added.txt")"
+# Byte-exact: the previous bytes plus exactly the entry, at the end of the
+# backends section, and not one byte removed.
+inserted "$WORK_DIR/before.json" "$CONFIG" > "$WORK_DIR/added.txt" || fail "promote changed more than it added: $(diff "$WORK_DIR/before.json" "$CONFIG")"
+printf '"tuned": {\n      "type": "llamacpp",\n      "model_path": "%s"\n    }\n' "$V1" > "$WORK_DIR/expected-added.txt"
+cmp "$WORK_DIR/expected-added.txt" "$WORK_DIR/added.txt" || fail "the config is not the previous bytes plus the entry: $(cat "$WORK_DIR/added.txt")"
 [ "$("$APOGEE_BIN" config get backends.tuned.model_path)" = "$V1" ] || fail "config get model_path"
 "$APOGEE_BIN" models info tuned >/dev/null 2>&1 || fail "the promoted GGUF does not inspect"
 
@@ -124,14 +151,14 @@ cmp "$WORK_DIR/expected-diff.txt" "$WORK_DIR/added.txt" || fail "the config is n
 RUN2=$(ls -t "$TRAINING/runs" | head -1)
 [ "$RUN2" != "$RUN" ] || fail "second run id collides"
 "$APOGEE_BIN" train eval "$RUN2" --suite "$WORK_DIR/suite.jsonl" </dev/null >/dev/null 2>&1 || fail "second eval"
-cp "$CONFIG" "$WORK_DIR/before2.yaml"
+cp "$CONFIG" "$WORK_DIR/before2.json"
 "$APOGEE_BIN" train promote "$RUN2" --as tuned </dev/null >"$WORK_DIR/promote2.out" 2>&1 || fail "second promote: $(cat "$WORK_DIR/promote2.out")"
 V2=$(served tuned)
 [ -f "$V2" ] || fail "no v2 GGUF at '$V2'"
 [ "$V2" != "$V1" ] || fail "a second run's weights landed on the first's file"
 grep -q "updated backend tuned -> v2" "$WORK_DIR/promote2.out" || fail "second promote summary: $(cat "$WORK_DIR/promote2.out")"
-sed "s|$V1|$V2|" "$WORK_DIR/before2.yaml" > "$WORK_DIR/expected2.yaml"
-cmp "$WORK_DIR/expected2.yaml" "$CONFIG" || fail "the repoint changed more than the path: $(diff "$WORK_DIR/expected2.yaml" "$CONFIG")"
+sed "s|$V1|$V2|" "$WORK_DIR/before2.json" > "$WORK_DIR/expected2.json"
+cmp "$WORK_DIR/expected2.json" "$CONFIG" || fail "the repoint changed more than the path: $(diff "$WORK_DIR/expected2.json" "$CONFIG")"
 "$APOGEE_BIN" train versions tuned >"$WORK_DIR/versions.out" || fail "train versions"
 grep -q "v2 .*<- active" "$WORK_DIR/versions.out" || fail "v2 not active: $(cat "$WORK_DIR/versions.out")"
 grep -q "^  v1 " "$WORK_DIR/versions.out" || fail "v1 not listed"
@@ -141,14 +168,14 @@ grep -q "^  v1 " "$WORK_DIR/versions.out" || fail "v1 not listed"
 grep -q "v2 -> v1" "$WORK_DIR/rollback.out" || fail "rollback summary: $(cat "$WORK_DIR/rollback.out")"
 [ "$("$APOGEE_BIN" config get backends.tuned.model_path)" = "$V1" ] || fail "rollback did not repoint"
 [ -f "$V2" ] || fail "rollback deleted v2"
-cmp "$WORK_DIR/before2.yaml" "$CONFIG" || fail "rollback is not the exact inverse of the repoint"
+cmp "$WORK_DIR/before2.json" "$CONFIG" || fail "rollback is not the exact inverse of the repoint"
 if "$APOGEE_BIN" train rollback tuned >/dev/null 2>"$WORK_DIR/rollback2.err"; then
     fail "a second rollback found somewhere to go"
 fi
 grep -q "nothing below it to roll back to" "$WORK_DIR/rollback2.err" || fail "rollback refusal wording: $(cat "$WORK_DIR/rollback2.err")"
 
 # --- retention: retain_versions 1 prunes the inactive one, never the active ------
-printf '\ntraining:\n  retain_versions: 1\n' >> "$CONFIG"
+config_first '  "training": {"retain_versions": 1}'
 "$APOGEE_BIN" train promote "$RUN2" --as tuned --force </dev/null >"$WORK_DIR/promote3.out" 2>&1 || fail "third promote: $(cat "$WORK_DIR/promote3.out")"
 V3=$(served tuned)
 grep -q "tuned -> v3" "$WORK_DIR/promote3.out" || fail "numbers must be max + 1, never the count: $(cat "$WORK_DIR/promote3.out")"
@@ -175,30 +202,28 @@ grep -q "ok   converter" "$WORK_DIR/check.out" || fail "check converter row: $(g
 # --- the pipelines item ---------------------------------------------------------
 # The training block is rewritten once for the rest: the mock trainer, a
 # named pipeline, and the cycle over a queue directory with the breaker at 1.
-awk '/^training:$/{exit} {print}' "$CONFIG" > "$WORK_DIR/config.trim" && cp "$WORK_DIR/config.trim" "$CONFIG"
+grep -v '^  "training": ' "$CONFIG" > "$WORK_DIR/config.trim" && cp "$WORK_DIR/config.trim" "$CONFIG"
 mkdir -p "$TRAINING/suites"
 printf '{"prompt": "say hello", "expected": "hello"}\n' > "$TRAINING/suites/hello.jsonl"
 printf '{"prompt": "say nope", "expected": "nope"}\n' > "$TRAINING/suites/nope.jsonl"
-cat >> "$CONFIG" <<EOF2
-training:
-  trainer: mock
-  retain_versions: 0
-  pipelines:
-    nightly:
-      student: tiny
-      stages:
-        - name: base
-          dataset: starter
-          eval_suite: hello
-          iters: 2
-  cycle:
-    pipeline: nightly
-    backend: nightly-model
-    circuit_breaker_k: 1
-    sources:
-      - type: directory
-        dir: $WORK_DIR/queue
-EOF2
+config_first "  \"training\": {
+    \"trainer\": \"mock\",
+    \"retain_versions\": 0,
+    \"pipelines\": {
+      \"nightly\": {
+        \"student\": \"tiny\",
+        \"stages\": [
+          {\"name\": \"base\", \"dataset\": \"starter\", \"eval_suite\": \"hello\", \"iters\": 2}
+        ]
+      }
+    },
+    \"cycle\": {
+      \"pipeline\": \"nightly\",
+      \"backend\": \"nightly-model\",
+      \"circuit_breaker_k\": 1,
+      \"sources\": [{\"type\": \"directory\", \"dir\": \"$WORK_DIR/queue\"}]
+    }
+  }"
 "$APOGEE_BIN" check >"$WORK_DIR/check2.out" 2>&1 || fail "check with the cycle configured: $(cat "$WORK_DIR/check2.out")"
 grep -q "ok   cycle " "$WORK_DIR/check2.out" || fail "check cycle row: $(grep cycle "$WORK_DIR/check2.out")"
 grep -q "ok   pipeline: nightly" "$WORK_DIR/check2.out" || fail "check pipeline row: $(grep pipeline "$WORK_DIR/check2.out")"
@@ -287,13 +312,13 @@ REGIME=$(ls "$TRAINING/regime" | head -1)
 "$APOGEE_BIN" train cycle run </dev/null >"$WORK_DIR/cycle0.out" 2>&1 || fail "cycle run (empty): $(cat "$WORK_DIR/cycle0.out")"
 grep -q "cycle skipped" "$WORK_DIR/cycle0.out" || fail "empty cycle: $(cat "$WORK_DIR/cycle0.out")"
 cp "$TRAINING/datasets/starter.jsonl" "$WORK_DIR/queue/day1.jsonl"
-cp "$CONFIG" "$WORK_DIR/before-cycle.yaml"
+cp "$CONFIG" "$WORK_DIR/before-cycle.json"
 "$APOGEE_BIN" train cycle run </dev/null >"$WORK_DIR/cycle1.out" 2>&1 || fail "cycle run: $(cat "$WORK_DIR/cycle1.out")"
 grep -q "cycle PASSED -- nightly-model promoted to v1" "$WORK_DIR/cycle1.out" || fail "cycle pass: $(cat "$WORK_DIR/cycle1.out")"
 grep -q "anchor set to v1" "$WORK_DIR/cycle1.out" || fail "anchor not set"
 [ -f "$(served nightly-model)" ] || fail "no nightly v1 GGUF"
 [ -f "$WORK_DIR/queue/consumed/day1.jsonl" ] || fail "the queue file was not consumed"
-[ "$(diff "$WORK_DIR/before-cycle.yaml" "$CONFIG" | grep -c '^<')" = "0" ] || fail "the cycle's promote removed config lines"
+inserted "$WORK_DIR/before-cycle.json" "$CONFIG" >/dev/null || fail "the cycle's promote changed more than it added"
 served nightly-model | grep -q "/gguf/.*/nightly-model-v1.gguf" || fail "cycle backend not registered"
 "$APOGEE_BIN" train cycle status >"$WORK_DIR/cstatus.out" || fail "cycle status"
 grep -q "anchor:            v1" "$WORK_DIR/cstatus.out" || fail "cycle status anchor: $(cat "$WORK_DIR/cstatus.out")"

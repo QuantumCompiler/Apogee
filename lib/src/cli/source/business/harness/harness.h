@@ -137,6 +137,10 @@ public:
     /// Call after registering; re-call after registering more.
     void use_default_router() override;
 
+    /// Installs the turn observer (28c): told the backend's name after each
+    /// `chat`, `stream_chat` or `complete` that returns.
+    void observe_turns(TurnObserver observer) override;
+
     void set_router(std::unique_ptr<ModelRouter> router);
 
     [[nodiscard]] const Config& config() const noexcept override {
@@ -345,6 +349,11 @@ private:
     void hold_suite_members();
 
     Config config_;
+    /// The turn observer (28c), when one is installed.
+    TurnObserver turn_observer_;
+    /// Tells the observer `provider`'s turn succeeded, by its registered
+    /// name. Never throws: a record is never worth a turn.
+    void heard(const LLMProvider& provider) const noexcept;
     std::map<std::string, std::shared_ptr<LLMProvider>> providers_;
     std::unique_ptr<ModelRouter> router_;
     /// The backends a session holds (27e), as named to `hold_in_use`.

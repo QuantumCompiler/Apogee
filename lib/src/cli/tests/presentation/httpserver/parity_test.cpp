@@ -135,7 +135,17 @@ const std::map<std::string, Classification>& table() {
         {"chats delete", backfill("sessions: transcripts on disk")},
         // --- carve-outs: host-local by nature ---------------------------------
         {"config init", carve_out("the server cannot exist without a config to start from")},
+        {"config migrate",
+         carve_out("a file-lifecycle act on the config's format, not a value edit -- the "
+                   "parity law governs edits through the shared editor (28i)")},
+        {"config upgrade",
+         carve_out("a file-lifecycle act -- the starter config's new options carried into the "
+                   "file on the user's word, never a value a client sets (28i)")},
         {"check", carve_out("--fix repairs the local install; host-local by nature")},
+        {"providers scan",
+         carve_out("detects the vendor CLIs and keys of the host it runs on; host-local by nature, "
+                   "and what --register writes a remote client writes through the add-backend "
+                   "twin")},
         {"uninstall", carve_out("removes the binary and the data directory; host-local")},
         {"reset",
          carve_out("resets the data directory to a fresh install; host-local, like uninstall -- "
@@ -206,6 +216,7 @@ const std::map<std::string, Classification>& table() {
         {"graph export mermaid", read_only()},
         {"version", read_only()},
         {"__complete", read_only()},
+        {"__machine-schema", read_only()},
         {"config get", read_only()},
         {"config path", read_only()},
         {"mcp list", read_only()},

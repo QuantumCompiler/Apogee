@@ -293,10 +293,34 @@ void Harness::set_active_suite(std::string suite) {
     }
 }
 
+void Harness::observe_turns(TurnObserver observer) {
+    turn_observer_ = std::move(observer);
+}
+
+void Harness::heard(const LLMProvider& provider) const noexcept {
+    if (!turn_observer_) {
+        return;
+    }
+    try {
+        for (const auto& [name, registered] : providers_) {
+            if (registered.get() == &provider) {
+                turn_observer_(name);
+                return;
+            }
+        }
+    } catch (...) {
+        // An observer's failure costs its record, never the turn.
+    }
+}
+
 ChatResponse Harness::chat(const ChatRequest& request,
                            const CancellationToken& cancellation) const {
     const std::optional<ChatRequest> sent = mended(request);
-    return as_text(route(request.model).chat(sent.has_value() ? *sent : request, cancellation));
+    LLMProvider& provider = route(request.model);
+    ChatResponse response =
+        as_text(provider.chat(sent.has_value() ? *sent : request, cancellation));
+    heard(provider);
+    return response;
 }
 
 ChatResponse Harness::stream_chat(const ChatRequest& request, const StreamOptions& options) const {
@@ -328,8 +352,8 @@ ChatResponse Harness::stream_chat(const ChatRequest& request, const StreamOption
         };
     }
     const std::optional<ChatRequest> sent = mended(request);
-    ChatResponse response =
-        route(request.model).stream_chat(sent.has_value() ? *sent : request, whole);
+    LLMProvider& provider = route(request.model);
+    ChatResponse response = provider.stream_chat(sent.has_value() ? *sent : request, whole);
     // A stream that ended inside a character ends in U+FFFD, said as its
     // last piece -- the same text the response and history keep.
     if (options.on_thinking) {
@@ -338,13 +362,18 @@ ChatResponse Harness::stream_chat(const ChatRequest& request, const StreamOption
     if (options.on_token) {
         say(options.on_token, answer.flush());
     }
+    heard(provider);
     return as_text(std::move(response));
 }
 
 ChatResponse Harness::complete(const ChatRequest& request,
                                const CancellationToken& cancellation) const {
     const std::optional<ChatRequest> sent = mended(request);
-    return as_text(route(request.model).complete(sent.has_value() ? *sent : request, cancellation));
+    LLMProvider& provider = route(request.model);
+    ChatResponse response =
+        as_text(provider.complete(sent.has_value() ? *sent : request, cancellation));
+    heard(provider);
+    return response;
 }
 
 std::vector<ModelInfo> Harness::list_all_models(const CancellationToken& cancellation) const {

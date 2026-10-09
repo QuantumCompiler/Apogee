@@ -10,7 +10,7 @@
 ///
 /// The token is a per-install secret: 32 random bytes as hex, generated lazily
 /// the first time a server needs it, written `0600` as a sibling of
-/// `config.yaml` -- so it follows `--config` and stays hermetic in tests -- and
+/// the config file -- so it follows `--config` and stays hermetic in tests -- and
 /// read back with `apogee serve --print-admin-token`. It is accepted
 /// **header-only**: `Authorization: Bearer <token>`. A query-string token is
 /// deliberately refused even when correct, because a query string lands in

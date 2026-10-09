@@ -2,6 +2,8 @@
 
 #include <utility>
 
+#include "backends/provider_status.h"
+#include "backends/provider_table.h"
 #include "contracts/errors.h"
 #include "transport/http_client.h"
 
@@ -83,10 +85,11 @@ std::unique_ptr<OllamaCliProvider> OllamaCliProvider::from_config(
     }
 
     if (platform::find_on_path(options.binary).empty()) {
+        // The words the doctor repeats (28c): one remedy, in the table.
         throw harness::ProviderError(
-            backend_name, "'" + options.binary +
-                              "' was not found on PATH. Install Ollama and run 'ollama signin', or "
-                              "set 'binary' on this backend to its full path");
+            backend_name,
+            backends::not_on_path(options.binary) + ". " +
+                std::string{backends::provider_for_type(harness::BackendType::OllamaCli)->remedy});
     }
 
     return std::make_unique<OllamaCliProvider>(

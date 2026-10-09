@@ -1,0 +1,19 @@
+// My config, from an early release.
+{
+  // pointers
+  "models": {
+    "default": "local" // my model
+  },
+
+  // what my tools may do
+  "permissions": {
+    "write_file": "allow", // trusted
+    "edit_file": "ask"
+  },
+
+  "backends": {
+    "local": {
+      "type": "mock"
+    }
+  }
+}

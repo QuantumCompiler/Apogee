@@ -1,12 +1,16 @@
 #pragma once
 
+#include <nlohmann/json_fwd.hpp>
+
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "backends/provider_status.h"
 #include "cli/command.h"
 #include "contracts/assets.h"
 #include "contracts/config.h"
@@ -83,6 +87,13 @@ struct CheckInputs {
     harness::Config config;
     std::string config_error;
     bool config_missing = false;
+    /// The file is the older YAML the compat read serves (28i): the Config
+    /// row names `config migrate`.
+    bool config_legacy = false;
+    /// The options this release's starter config has that the file does not
+    /// mention, as dotted paths (28i): the Config row counts them and names
+    /// `config upgrade`. Empty when the file is current, or YAML.
+    std::vector<std::string> config_missing_options;
 
     /// Path of the running binary, for the version and quarantine rows. Empty
     /// skips those.
@@ -108,6 +119,11 @@ struct CheckInputs {
     /// Asks whether a suite's consultable member bills per call (27f). Null
     /// asks a provider built from the config (`provider_metered_probe`).
     MeteredProbe metered;
+
+    /// What the Providers section sees of the filesystem (28c): whether a
+    /// vendor CLI is on PATH and its evidence files exist -- never a read,
+    /// never a spawn. Null is this machine's; a test hands its own.
+    const backends::ExistenceView* provider_view = nullptr;
 };
 
 /// Runs every check and returns the report. Pure with respect to the machine
@@ -121,6 +137,13 @@ struct CheckInputs {
 /// Renders a report for a terminal. `color` gates ANSI.
 [[nodiscard]] std::string render_report(const CheckReport& report, bool use_color);
 
+/// The report as one JSON document (28h): `{"rows": [{"section", "name",
+/// "status", "detail", "remedy"?}], "ok", "failures", "warnings"}` -- the
+/// same rows, `skipped` a status of its own, never folded into a pass --
+/// and `fixed`, what `--fix` repaired, when `fixed` is given.
+[[nodiscard]] nlohmann::json render_report_document(
+    const CheckReport& report, const std::optional<std::vector<std::string>>& fixed);
+
 /// How `run_check_pass` runs.
 struct CheckPassOptions {
     /// Repair first (`--fix`), saying what was repaired.
@@ -129,6 +152,13 @@ struct CheckPassOptions {
     bool quiet = false;
     /// No ANSI colour in the report.
     bool no_color = false;
+    /// Scan the providers first (`--refresh-providers`, 28c): the explicit
+    /// scan `providers scan` runs, its cache then read by the report.
+    bool refresh_providers = false;
+    /// Print one JSON document instead of the report (`--output-format
+    /// json`, 28h): the rows, the counts, `ok`, and what `--fix` repaired --
+    /// nothing else on stdout, the exit code as ever.
+    bool json = false;
     /// Say the repairs that created something as one count rather than a line
     /// each. Recreating a whole layout -- what a reset does -- creates well
     /// over a hundred directories and bundled files, and a line apiece would

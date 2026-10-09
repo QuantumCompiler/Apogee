@@ -8,7 +8,7 @@
 
 /// The provider credential store: one slot per API-billing provider type.
 ///
-/// A `0600` JSON file beside `config.yaml` (`credentials.json`, following
+/// A `0600` JSON file beside `config.json` (`credentials.json`, following
 /// `--config`, exactly where the admin token lives), holding a key per
 /// provider *type* -- `anthropic`, `openai`, `google` -- and when it was
 /// stored. Keyed by type rather than by backend entry on purpose: two entries

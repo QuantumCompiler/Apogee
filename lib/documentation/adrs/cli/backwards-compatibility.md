@@ -4,7 +4,7 @@
 
 ## Context
 
-An installed Apogee owns durable state and external parties: a hand-edited `config.yaml`, a model store under `~/.apogee/models`, saved chats and attachment indexes, secrets, training runs — and, since machine mode became the front-end contract, **other people's drivers** speaking `protocol_version: 1` at the binary's pipes. The integration spike proved the tolerance rules live (a naive host kept working while the protocol grew), and the model store already carries the precedent for layout change done right: the legacy flat layout is *refused by name* with `apogee models migrate` offered — never silently reinterpreted, never broken.
+An installed Apogee owns durable state and external parties: a hand-edited config file (`config.json`; an older install's `config.yaml`, read with a notice until `apogee config migrate`), a model store under `~/.apogee/models`, saved chats and attachment indexes, secrets, training runs — and, since machine mode became the front-end contract, **other people's drivers** speaking `protocol_version: 1` at the binary's pipes. The integration spike proved the tolerance rules live (a naive host kept working while the protocol grew), and the model store already carries the precedent for layout change done right: the legacy flat layout is *refused by name* with `apogee models migrate` offered — never silently reinterpreted, never broken.
 
 ## Decision
 
@@ -23,4 +23,4 @@ An installed Apogee owns durable state and external parties: a hand-edited `conf
 
 ## Enforcement
 
-`cli.machine_schema_conformance` pins the protocol; the schema artifact and additivity guarantees are queued to make the promise an artifact ([the machine-mode items, 28d–28h](../../backlog/v0.1.5/machine-handshake.md)); the store's refuse-and-name-the-migration pattern (`find_legacy`/`legacy_refusal`) is the template for any layout change; config loading keeps its absent-safe defaults by test. The release notes' *Known limitations* section owns any deliberate exception, dated.
+`cli.machine_schema_conformance` pins the protocol; the additivity guarantees are written into the protocol reference (28d) and shipped as an artifact — `apogee __machine-schema` prints the protocol as a JSON Schema, packaged in every release archive as `machine-schema.json` (28g; both [Milestone M](../../assistant/MILESTONES.md#milestone-m--the-front-end-contract)); the store's refuse-and-name-the-migration pattern (`find_legacy`/`legacy_refusal`) is the template for any layout change; config loading keeps its absent-safe defaults by test. The release notes' *Known limitations* section owns any deliberate exception, dated.

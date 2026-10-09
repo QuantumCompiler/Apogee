@@ -156,6 +156,13 @@ struct LayoutEntry {
 /// cached prompt.
 [[nodiscard]] std::filesystem::path prompt_cache_dir();
 
+/// `cache/providers.json` -- what the last provider scan found (28a): each
+/// provider's tier and evidence, the binary fingerprints its version probes
+/// were asked for, and the date each provider last answered a real turn.
+/// A file, not a row: created by the first scan, never seeded, and safe to
+/// delete like the rest of `cache/` -- the next scan rebuilds it.
+[[nodiscard]] std::filesystem::path provider_cache_path();
+
 /// What `seed_data_directory()` did.
 struct SeedResult {
     /// Directories -- and bundled asset files -- that did not exist and were

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <ostream>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -14,6 +15,7 @@
 #include "agentloop/question.h"
 #include "agentloop/reporter.h"
 #include "contracts/types.h"
+#include "machine/protocol.h"
 #include "tasks/ledger.h"
 #include "tasks/task.h"
 
@@ -78,13 +80,19 @@
 /// saw.
 namespace apogee::commands {
 
-/// Bumped only when an existing event's meaning changes.
-///
-/// Adding a new event type does **not** bump it: drivers are required to ignore
-/// unknown types, so an addition is compatible by construction. The version
-/// exists for the case that is not — a field changing meaning under a name a
-/// driver already reads.
-inline constexpr int kMachineProtocolVersion = 1;
+/// What a session can do, announced on its `session` event (28d) so a host
+/// knows before its first turn: the whole outbound vocabulary, the inbound
+/// line types THIS session reads, whether tools are live, whether `ask_user`
+/// (and the permission prompt) can reach the driver, and the vocabulary's
+/// version. Built from what the surface actually wired, never a constant.
+struct MachineCapabilities {
+    /// The inbound types this session reads -- a driven chat all four, a
+    /// one-shot `complete` reading its prompt on stdin only `hello`, a task
+    /// none.
+    std::vector<std::string_view> accepts;
+    bool tools = false;
+    bool ask = false;
+};
 
 class JsonReporter final : public agentloop::Reporter {
 public:
@@ -98,8 +106,23 @@ public:
     JsonReporter(JsonReporter&&) = delete;
     JsonReporter& operator=(JsonReporter&&) = delete;
 
-    /// Emits the opening `session` event. Call once, before the first turn.
-    void begin_session(std::string_view model);
+    /// Emits the opening `session` event, with `capabilities` (28d). Call
+    /// once, before the first turn -- unprompted: the child speaks first, and
+    /// a driver's `hello` refines what it reads, never gates it. A session of
+    /// `user` lines also names `next_turn` (28f): the number its next turn
+    /// will carry, past those a resumed conversation already holds.
+    void begin_session(std::string_view model, const MachineCapabilities& capabilities,
+                       std::optional<std::int64_t> next_turn = std::nullopt);
+
+    /// A `user` line was accepted as turn `turn` (28f): every event until
+    /// `end_turn` carries `"turn": turn`, so a driver can attribute any event
+    /// to its line by number alone; the answer streamed is kept, for a
+    /// cancelled turn's `result`.
+    void begin_turn(std::int64_t turn);
+    /// The turn's `result` or `error` is out: events are unstamped again.
+    void end_turn();
+    /// The answer text the open turn has streamed so far.
+    [[nodiscard]] const std::string& turn_text() const noexcept;
 
     void on_thinking() override;
     void on_thinking_token(std::string_view chunk) override;
@@ -168,10 +191,12 @@ public:
     [[nodiscard]] bool wrote_answer() const noexcept;
 
 private:
-    void write(const nlohmann::json& object);
+    void write(nlohmann::json object);
 
     std::ostream* out_;
     bool wrote_answer_ = false;
+    std::optional<std::int64_t> turn_;
+    std::string turn_text_;
 };
 
 /// How a driver feeds turns in. `--input-format`.
@@ -242,6 +267,12 @@ struct DriverMessage {
         /// A file, folder or glob to attach to the chat (26d); `text` is its
         /// path.
         Attach,
+        /// A driver introducing itself (28d) -- its `client` name and version
+        /// and what it `wants`, recorded for diagnostics; changes nothing.
+        Hello,
+        /// Stop the turn in flight, as Ctrl-C would (28f). Read by the
+        /// session's stdin reader, never queued.
+        Cancel,
         /// A line that parsed but carried no recognised type.
         Unknown,
     };
@@ -252,7 +283,17 @@ struct DriverMessage {
     /// attach's method over the config's; empty when the line has none. A
     /// value that is not a string arrives as its JSON, to be refused by name.
     std::string graph;
+    /// A `hello` line's client (28d): `client.name` and `client.version` as
+    /// sent, and `wants` as its JSON -- each empty when absent.
+    std::string client_name;
+    std::string client_version;
+    std::string wants;
 };
+
+/// What a driver's `hello` is recorded as (28d): one line for the
+/// operational log, never a value from the config or a secret -- the client's
+/// own words, bounded.
+[[nodiscard]] std::string describe_hello(const DriverMessage& hello);
 
 /// Parses one line of driver input.
 ///
@@ -265,8 +306,11 @@ struct DriverMessage {
 /// {"type":"answer","text":"yes"}
 /// {"type":"attach","path":"report.pdf"}
 /// {"type":"attach","path":"src","graph":"off"}
+/// {"type":"hello","client":{"name":"my-host","version":"1.2"},"wants":["tools"]}
 /// ```
 [[nodiscard]] DriverMessage parse_driver_line(std::string_view line);
+
+class DriverInput;
 
 /// An `AskFn` that asks the driver, over the protocol.
 ///
@@ -274,7 +318,9 @@ struct DriverMessage {
 /// stdin an answer is indistinguishable from the next user turn, and the
 /// loop's rule is that the tool exists if and only if there is someone to
 /// answer it. Throws if stdin closes with a question outstanding — the loop
-/// then rolls the half-turn out of history, which is the honest outcome.
-[[nodiscard]] agentloop::AskFn make_driver_ask_fn(JsonReporter& reporter, std::istream& input);
+/// then rolls the half-turn out of history, which is the honest outcome — and
+/// throws `CancelledError` when the driver cancels the turn while it waits
+/// (28f), failing the turn the same way without ending the session.
+[[nodiscard]] agentloop::AskFn make_driver_ask_fn(JsonReporter& reporter, DriverInput& input);
 
 }  // namespace apogee::commands

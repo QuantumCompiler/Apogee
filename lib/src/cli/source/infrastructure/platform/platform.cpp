@@ -236,7 +236,39 @@ std::optional<std::string> home_directory() {
 #endif
 }
 
+namespace {
+
+// The buffers the standard streams were born with, captured at static
+// initialization -- before anything can have swapped one -- through a
+// noexcept function: rdbuf() is a plain accessor the standard merely forgot
+// to mark so, and a static initializer must not be able to throw.
+[[nodiscard]] std::streambuf* born_with(const std::ios& stream) noexcept {
+    return stream.rdbuf();
+}
+
+std::streambuf* const kStdinBuffer = born_with(std::cin);
+std::streambuf* const kStdoutBuffer = born_with(std::cout);
+std::streambuf* const kStderrBuffer = born_with(std::cerr);
+
+/// Whether the C++ stream over `stream` still reads or writes its descriptor.
+[[nodiscard]] bool reaches_descriptor(StandardStream stream) noexcept {
+    switch (stream) {
+        case StandardStream::In:
+            return std::cin.rdbuf() == kStdinBuffer;
+        case StandardStream::Out:
+            return std::cout.rdbuf() == kStdoutBuffer;
+        case StandardStream::Err:
+            return std::cerr.rdbuf() == kStderrBuffer;
+    }
+    return false;
+}
+
+}  // namespace
+
 bool is_terminal(StandardStream stream) noexcept {
+    if (!reaches_descriptor(stream)) {
+        return false;
+    }
 #if defined(_WIN32)
     int descriptor = 0;
     switch (stream) {

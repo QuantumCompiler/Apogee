@@ -17,6 +17,7 @@
 #include "agentloop/loop.h"
 #include "cli/helpers.h"
 #include "contracts/config.h"
+#include "machine/driver_input.h"
 #include "machine/json_reporter.h"
 #include "platform/platform.h"
 #include "support/env_guard.h"
@@ -115,8 +116,9 @@ TEST_CASE("the machine-mode prompt is a permission question answered by one line
     SECTION("yes allows once, and the event carries kind, tool and target") {
         std::istringstream in{R"({"type":"answer","text":"yes"})"
                               "\n"};
+        apogee::commands::DriverInput driver{in};
         const apogee::agent::ConfirmFn confirm =
-            make_driver_confirm_fn(reporter, in, config_path, approvals);
+            make_driver_confirm_fn(reporter, driver, config_path, approvals);
         CHECK(confirm(GateRequest{"write_file", "/tmp/x"}));
         const nlohmann::json event = nlohmann::json::parse(out.str());
         CHECK(event["type"] == "question");
@@ -134,13 +136,15 @@ TEST_CASE("the machine-mode prompt is a permission question answered by one line
                               "\n"
                               R"({"type":"answer","text":"nope"})"
                               "\n"};
-        CHECK_FALSE(make_driver_confirm_fn(reporter, in, config_path,
+        apogee::commands::DriverInput driver{in};
+        CHECK_FALSE(make_driver_confirm_fn(reporter, driver, config_path,
                                            approvals)(GateRequest{"write_file", ""}));
     }
     SECTION("session is remembered for the run and not written") {
         std::istringstream in{R"({"type":"answer","text":"session"})"
                               "\n"};
-        CHECK(make_driver_confirm_fn(reporter, in, config_path,
+        apogee::commands::DriverInput driver{in};
+        CHECK(make_driver_confirm_fn(reporter, driver, config_path,
                                      approvals)(GateRequest{"run_command", "ls"}));
         CHECK(approvals->tools.contains("run_command"));
         CHECK(read_all(config_path) == shipped);
@@ -148,20 +152,23 @@ TEST_CASE("the machine-mode prompt is a permission question answered by one line
     SECTION("always is written through the config editor: the shipped file plus one changed line") {
         std::istringstream in{R"({"type":"answer","text":"always"})"
                               "\n"};
-        CHECK(make_driver_confirm_fn(reporter, in, config_path,
+        apogee::commands::DriverInput driver{in};
+        CHECK(make_driver_confirm_fn(reporter, driver, config_path,
                                      approvals)(GateRequest{"write_file", "x"}));
         CHECK(approvals->tools.contains("write_file"));
         const std::string after = read_all(config_path);
         CHECK(after != shipped);
         std::string expected = shipped;
-        const std::size_t at = expected.find("  write_file: ask");
+        const std::size_t at = expected.find("\"write_file\": \"ask\"");
         REQUIRE(at != std::string::npos);
-        expected.replace(at, std::string{"  write_file: ask"}.size(), "  write_file: allow");
+        expected.replace(at, std::string{"\"write_file\": \"ask\""}.size(),
+                         "\"write_file\": \"allow\"");
         CHECK(after == expected);
     }
     SECTION("a driver that hangs up with the prompt outstanding fails the turn") {
         std::istringstream in{""};
-        CHECK_THROWS_AS(make_driver_confirm_fn(reporter, in, config_path,
+        apogee::commands::DriverInput driver{in};
+        CHECK_THROWS_AS(make_driver_confirm_fn(reporter, driver, config_path,
                                                approvals)(GateRequest{"write_file", ""}),
                         std::runtime_error);
     }
@@ -170,7 +177,8 @@ TEST_CASE("the machine-mode prompt is a permission question answered by one line
     SECTION("an outbound session answer remembers the host, not the tool") {
         std::istringstream in{R"({"type":"answer","text":"session"})"
                               "\n"};
-        CHECK(make_driver_confirm_fn(reporter, in, config_path, approvals)(website));
+        apogee::commands::DriverInput driver{in};
+        CHECK(make_driver_confirm_fn(reporter, driver, config_path, approvals)(website));
         CHECK(approvals->hosts.contains("docs.python.org"));
         CHECK_FALSE(approvals->tools.contains("fetch_url"));
         CHECK(read_all(config_path) == shipped);
@@ -178,16 +186,17 @@ TEST_CASE("the machine-mode prompt is a permission question answered by one line
     SECTION("an outbound always adds the host through the editor, byte-exact") {
         std::istringstream in{R"({"type":"answer","text":"always"})"
                               "\n"};
-        CHECK(make_driver_confirm_fn(reporter, in, config_path, approvals)(website));
+        apogee::commands::DriverInput driver{in};
+        CHECK(make_driver_confirm_fn(reporter, driver, config_path, approvals)(website));
         CHECK(approvals->hosts.contains("docs.python.org"));
         std::string expected = shipped;
-        const std::size_t at = expected.find("  allowed_hosts: []");
+        const std::size_t at = expected.find("\"allowed_hosts\": []");
         REQUIRE(at != std::string::npos);
-        expected.replace(at, std::string{"  allowed_hosts: []"}.size(),
-                         "  allowed_hosts: [docs.python.org]");
+        expected.replace(at, std::string{"\"allowed_hosts\": []"}.size(),
+                         "\"allowed_hosts\": [\"docs.python.org\"]");
         CHECK(read_all(config_path) == expected);
         // The permissions section is untouched: no `fetch_url: allow` line.
-        CHECK(read_all(config_path).find("fetch_url: allow") == std::string::npos);
+        CHECK(read_all(config_path).find("\"fetch_url\": \"allow\"") == std::string::npos);
         const nlohmann::json event = nlohmann::json::parse(out.str());
         CHECK(event["target"] == "docs.python.org");
         CHECK(event["outbound"] == true);

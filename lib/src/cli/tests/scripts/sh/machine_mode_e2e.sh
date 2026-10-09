@@ -67,6 +67,208 @@ RESULTS=$(grep -c '"type":"result"' "$WORK_DIR/chat.jsonl")
 
 ls "$WORK_DIR"/sessions/*.json >/dev/null 2>&1 || fail "closing stdin persisted no session"
 
+# --- the handshake (28d): capabilities on session, an optional hello ---------
+# The session announces what it can do before the first turn, a driver that
+# says hello sees exactly what one that does not sees, a hello is recorded in
+# the operational log, and one anywhere but the first line is ignored with a
+# note -- never an error. A driver that never sends one is untouched.
+HS_DIR="$WORK_DIR/handshake"
+mkdir -p "$HS_DIR"
+printf '{"turns":[{"text":"echo: {{last_user}}"}]}' >"$HS_DIR/echo.json"
+"$APOGEE_BIN" config add-backend echo --type mock --model-path "$HS_DIR/echo.json" >/dev/null \
+    || fail "add echo backend"
+printf '%s\n' '{"type":"user","text":"one"}' '{"type":"user","text":"two"}' \
+    | "$APOGEE_BIN" chat -m echo --no-recall --output-format stream-json --input-format stream-json \
+        >"$HS_DIR/plain.jsonl" 2>"$HS_DIR/plain.err" || fail "plain driven chat failed"
+printf '%s\n' '{"type":"hello","client":{"name":"e2e-host","version":"9.1"},"wants":["tools"]}' \
+    '{"type":"user","text":"one"}' '{"type":"hello","client":{"name":"late"}}' \
+    '{"type":"user","text":"two"}' \
+    | "$APOGEE_BIN" chat -m echo --no-recall --output-format stream-json --input-format stream-json \
+        >"$HS_DIR/hello.jsonl" 2>"$HS_DIR/hello.err" || fail "hello driven chat failed: $(cat "$HS_DIR/hello.err")"
+python3 - "$HS_DIR/plain.jsonl" "$HS_DIR/hello.jsonl" <<'PY' || fail "the handshake streams disagree"
+import json, sys
+plain, hello = ([json.loads(l) for l in open(p) if l.strip()] for p in sys.argv[1:3])
+for stream in (plain, hello):
+    session = stream[0]
+    assert session["type"] == "session", session
+    caps = session["capabilities"]
+    assert caps["accepts"] == ["user", "answer", "attach", "hello", "cancel"], caps
+    assert "result" in caps["events"] and "question" in caps["events"], caps
+    assert caps["tools"] is False and caps["ask"] is False, caps
+    assert isinstance(caps["schema"], str) and caps["schema"], caps
+    # Today's fields, as a v1 driver reads them.
+    assert session["protocol_version"] == 1 and session["model"], session
+# Identical turns, hello or not -- the session event aside.
+assert [e for e in plain[1:]] == [e for e in hello[1:]], (plain, hello)
+assert [e["text"] for e in hello if e["type"] == "result"] == ["echo: one", "echo: two"], hello
+PY
+grep -q 'a hello after the first line is ignored' "$HS_DIR/hello.err" || fail "the late hello was not noted"
+grep -rq 'hello from e2e-host 9.1, wants \["tools"\]' "$APOGEE_HOME/logs" || fail "the hello was not recorded"
+grep -rq 'hello from late' "$APOGEE_HOME/logs" && fail "a late hello was recorded"
+# complete, its prompt piped: a hello first is recorded and never asked.
+printf '%s\n%s\n' '{"type":"hello","client":{"name":"one-shot"}}' 'the real prompt' \
+    | "$APOGEE_BIN" complete -m echo --output-format stream-json >"$HS_DIR/complete.jsonl" \
+        2>"$HS_DIR/complete.err" || fail "complete with a hello failed: $(cat "$HS_DIR/complete.err")"
+grep -q '"text":"echo: the real prompt"' "$HS_DIR/complete.jsonl" || fail "the hello reached the prompt: $(cat "$HS_DIR/complete.jsonl")"
+grep -q '"accepts":\["hello"\]' "$HS_DIR/complete.jsonl" || fail "complete's capabilities were wrong"
+"$APOGEE_BIN" complete -m echo --output-format stream-json "an argument" </dev/null \
+    >"$HS_DIR/arg.jsonl" 2>&1 || fail "complete with an argument failed"
+grep -q '"accepts":\[\]' "$HS_DIR/arg.jsonl" || fail "complete with an argument claimed to read stdin"
+
+# --- turn ids and cancel (28f) ------------------------------------------------
+# A driver over real pipes: every turn-scoped event carries its turn; a cancel
+# with nothing in flight changes nothing; a cancel mid-stream ends the turn in
+# one `result` with finish_reason `cancelled` and the text streamed so far, the
+# half-turn kept out of the saved session, and the same child answers the next
+# turn; a cancel while a question waits fails the turn the same way; a turn
+# that fails ends in `error`, never a `result` carrying the user's own words.
+TC_DIR="$WORK_DIR/turns"
+mkdir -p "$TC_DIR/bin"
+printf '%s' '{"turns":[{"text":"aaaaaaaabbbbbbbbccccccccddddddddeeeeeeeeffffffffgggggggghhhhhhhh","delay_ms":150},{"text":"echo: {{last_user}}"}]}' >"$TC_DIR/slow.json"
+printf '%s' '{"turns":[{"text":"","tool_calls":[{"name":"ask_user","arguments":{"questions":[{"header":"Pick","question":"Which?","multi_select":false,"options":[{"label":"a","description":"A"},{"label":"b","description":"B"}]}]}}]},{"text":"echo: {{last_user}}"}]}' >"$TC_DIR/asks.json"
+printf '#!/bin/sh\necho x\n' >"$TC_DIR/bin/ollama"
+chmod +x "$TC_DIR/bin/ollama"
+"$APOGEE_BIN" config add-backend slow --type mock --model-path "$TC_DIR/slow.json" >/dev/null || fail "add slow"
+"$APOGEE_BIN" config add-backend asks --type mock --model-path "$TC_DIR/asks.json" >/dev/null || fail "add asks"
+"$APOGEE_BIN" config add-backend down --type ollama-cli --model m >/dev/null || fail "add down"
+python3 - "$APOGEE_HOME/config/config.json" "$TC_DIR/bin/ollama" <<'PY' || fail "could not point the down backend"
+import json, sys
+path, binary = sys.argv[1], sys.argv[2]
+text = open(path).read()
+entry = '    "down": {\n      "type": "ollama-cli",\n'
+assert entry in text
+text = text.replace(entry, entry + '      "host": "127.0.0.1:9",\n      "binary": ' + json.dumps(binary) + ',\n', 1)
+open(path, "w").write(text)
+PY
+python3 - "$APOGEE_BIN" "$APOGEE_HOME" <<'PY' || fail "turn ids and cancel"
+import glob, json, os, subprocess, sys, time
+
+binary, home = sys.argv[1], sys.argv[2]
+
+class Child:
+    def __init__(self, *args):
+        self.p = subprocess.Popen([binary, "chat", "--no-recall", "--output-format", "stream-json",
+                                   "--input-format", "stream-json", *args],
+                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True, bufsize=1)
+    def send(self, obj):
+        self.p.stdin.write(json.dumps(obj) + "\n")
+        self.p.stdin.flush()
+    def read(self):
+        line = self.p.stdout.readline()
+        assert line, "the stream ended early: " + self.p.stderr.read()
+        return json.loads(line)
+    def until(self, kind):
+        seen = []
+        while True:
+            event = self.read()
+            seen.append(event)
+            if event["type"] in kind:
+                return seen
+    def close(self):
+        self.p.stdin.close()
+        assert self.p.wait(timeout=30) == 0, self.p.stderr.read()
+
+def fail(message):
+    print("turns: " + message, file=sys.stderr)
+    sys.exit(1)
+
+# A cancel mid-stream, a cancel with nothing in flight, the next turn.
+child = Child("-m", "slow")
+session = child.read()
+if session["type"] != "session" or session.get("next_turn") != 1 or "turn" in session:
+    fail(f"session: {session}")
+child.send({"type": "cancel"})  # nothing in flight: nothing happens
+child.send({"type": "user", "text": "first"})
+streamed = child.until({"answer_delta", "result"})
+if streamed[-1]["type"] != "answer_delta":
+    fail(f"no delta before the result: {streamed}")
+child.send({"type": "cancel"})
+ended = child.until({"result", "error"})
+result = ended[-1]
+for event in streamed + ended:
+    if event.get("turn") != 1:
+        fail(f"an event of turn 1 lacks it: {event}")
+if result["type"] != "result" or result.get("finish_reason") != "cancelled":
+    fail(f"the cancelled turn did not end in a cancelled result: {result}")
+if not result["text"] or not "aaaaaaaabbbbbbbbccccccccddddddddeeeeeeeeffffffffgggggggghhhhhhhh".startswith(result["text"]):
+    fail(f"the result is not the partial answer: {result!r}")
+if result["text"] == "aaaaaaaabbbbbbbbccccccccddddddddeeeeeeeeffffffffgggggggghhhhhhhh":
+    fail("the turn was not cut short")
+child.send({"type": "user", "text": "second"})
+second = child.until({"result", "error"})
+if second[-1].get("text") != "echo: second" or any(e.get("turn") != 2 for e in second):
+    fail(f"the next turn: {second}")
+child.send({"type": "cancel"})  # a cancel after the result: harmless
+child.close()
+newest = max(glob.glob(os.path.join(home, "sessions", "*.json")), key=os.path.getmtime)
+saved = json.load(open(newest))
+texts = json.dumps(saved.get("messages", []))
+if "first" in texts or "aaaaaaaa" in texts or "second" not in texts:
+    fail(f"the saved session holds the cancelled half-turn: {texts[:400]}")
+
+# A cancel while a question waits.
+child = Child("-m", "asks", "--tools")
+child.read()
+child.send({"type": "user", "text": "ask me"})
+asked = child.until({"question", "result", "error"})
+if asked[-1]["type"] != "question" or asked[-1].get("turn") != 1:
+    fail(f"no question: {asked}")
+child.send({"type": "cancel"})
+ended = child.until({"result", "error"})
+if ended[-1]["type"] != "result" or ended[-1].get("finish_reason") != "cancelled":
+    fail(f"the asked turn did not end cancelled: {ended}")
+child.send({"type": "user", "text": "again"})
+again = child.until({"result", "error"})
+if again[-1].get("text") != "echo: again" or again[-1].get("turn") != 2:
+    fail(f"the turn after a cancelled question: {again}")
+child.close()
+
+# A turn that fails ends in error, numbered -- one terminal event per line.
+child = Child("-m", "down")
+child.read()
+child.send({"type": "user", "text": "my own words"})
+failed = child.until({"result", "error"})
+if failed[-1]["type"] != "error" or failed[-1].get("turn") != 1:
+    fail(f"a failed turn did not end in a numbered error: {failed}")
+if any(e["type"] == "result" for e in failed):
+    fail(f"a failed turn emitted a result: {failed}")
+child.close()
+print("turns: ids on every turn event, cancel mid-stream and mid-question, a failure an error - OK")
+PY
+
+# --- the schema artifact (28g): every captured stream validates ----------------
+# The real streams this script captured -- complete, driven chats, handshakes
+# -- validated line by line against what this binary prints as its schema, with
+# a stock validator; and one known event mangled, which must not validate.
+"$APOGEE_BIN" __machine-schema >"$WORK_DIR/machine-schema.json" </dev/null \
+    || fail "__machine-schema failed"
+python3 - "$WORK_DIR/machine-schema.json" "$WORK_DIR" <<'PY' || fail "a captured stream does not validate"
+import glob, json, os, sys
+try:
+    from jsonschema import Draft202012Validator
+except ImportError:
+    print("machine_mode: no jsonschema module -- the captured streams were NOT validated",
+          file=sys.stderr)
+    sys.exit(0)
+schema = json.load(open(sys.argv[1]))
+valid = Draft202012Validator(schema)
+streams = [p for p in glob.glob(os.path.join(sys.argv[2], "**", "*.jsonl"), recursive=True)]
+assert streams, "no captured stream to validate"
+lines = 0
+for path in streams:
+    for line in open(path, encoding="utf-8", errors="replace"):
+        if not line.strip():
+            continue
+        event = json.loads(line)
+        errors = list(valid.iter_errors(event))
+        assert not errors, f"{os.path.basename(path)}: {line.strip()[:200]} -- {errors[0].message}"
+        lines += 1
+mangled = {"type": "result", "model": "m", "finish_reason": "stop", "turn": "one"}
+assert list(valid.iter_errors(mangled)), "a mangled result validated"
+print(f"machine_mode: {lines} captured lines in {len(streams)} streams validate against the schema")
+PY
+
 # --- bytes that are not UTF-8 never end the session ---------------------------
 # Every event, session file and request is a strict JSON dump, and each of
 # these used to end the process with json type_error 316 at the first one: a

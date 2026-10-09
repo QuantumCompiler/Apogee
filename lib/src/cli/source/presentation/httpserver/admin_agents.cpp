@@ -14,6 +14,7 @@
 #include "contracts/assets.h"
 #include "contracts/config_edit.h"
 #include "contracts/paths.h"
+#include "operations/read_views.h"
 #include "scaffold/agent.h"
 
 namespace apogee::httpserver {
@@ -158,21 +159,7 @@ std::optional<std::string> read_text(const std::filesystem::path& path) {
 }  // namespace
 
 nlohmann::json agent_view(const harness::NamedAgent& agent) {
-    return nlohmann::json{{"name", agent.name},
-                          {"description", agent.config.description},
-                          {"model", agent.config.model},
-                          {"prompts", agent.config.prompts},
-                          {"schemas", agent.config.schemas},
-                          {"output_format", std::string{to_string(agent.config.output_format)}},
-                          {"tools", std::string{to_string(agent.config.tools)}},
-                          {"mcp", agent.config.mcp},
-                          {"questions", agent.config.questions},
-                          {"collection", agent.config.collection},
-                          {"save_dir", agent.config.save_dir},
-                          {"save_filename", agent.config.save_filename},
-                          {"save_subdir", agent.config.save_subdir},
-                          {"bundled", agent.bundled},
-                          {"overrides_bundled", agent.overrides_bundled}};
+    return operations::agent_view(agent);
 }
 
 HttpResponse admin_list_agents(const AdminConfigContext& context) {
@@ -180,11 +167,8 @@ HttpResponse admin_list_agents(const AdminConfigContext& context) {
     if (!loaded.config.has_value()) {
         return loaded.failure;
     }
-    nlohmann::json data = nlohmann::json::array();
-    for (const harness::NamedAgent& agent : harness::all_agents(*loaded.config)) {
-        data.push_back(agent_view(agent));
-    }
-    return json_response(200, nlohmann::json{{"object", "list"}, {"data", std::move(data)}});
+    // The document `agents list --output-format json` prints too (28h).
+    return json_response(200, operations::agents_document(*loaded.config));
 }
 
 HttpResponse admin_create_agent(const AdminConfigContext& context, const HttpRequest& request) {

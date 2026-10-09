@@ -18,6 +18,12 @@ apogee_add_module(contracts
     contracts/config_template.cpp
     contracts/config_edit.h
     contracts/config_edit.cpp
+    contracts/config_migrate.h
+    contracts/config_migrate.cpp
+    contracts/config_yaml.h
+    contracts/config_yaml.cpp
+    contracts/jsonc.h
+    contracts/jsonc.cpp
     contracts/symphony_walk.h
     contracts/symphony_walk.cpp
     contracts/host.h
@@ -189,6 +195,14 @@ apogee_add_module(backends
     backends/mlx_local.cpp
     backends/factory.h
     backends/factory.cpp
+    backends/provider_table.h
+    backends/provider_table.cpp
+    backends/provider_cache.h
+    backends/provider_cache.cpp
+    backends/provider_status.h
+    backends/provider_status.cpp
+    backends/provider_probe.h
+    backends/provider_probe.cpp
 )
 target_link_libraries(apogee_data_backends PUBLIC nlohmann_json::nlohmann_json)
 

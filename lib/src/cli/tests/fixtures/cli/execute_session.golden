@@ -101,28 +101,28 @@ footprint: suite fast
 {"type":"user","text":"/symphonies"}
 --- exit 0
 --- stdout
-{"model":"root","protocol_version":1,"type":"session"}
-{"text":"stage 1/2 first — asking utility (helper): One: hello","type":"tool_status"}
-{"text":"stage 2/2 second — asking chat (root): Two: HELPER<One: hello>","type":"tool_status"}
-{"type":"answer_start"}
-{"text":"ROOT<Two: HELPER<One: hello>>","type":"answer_delta"}
-{"type":"answer_end"}
-{"finish_reason":"stop","model":"root","text":"ROOT<Two: HELPER<One: hello>>","type":"result"}
-{"type":"thinking"}
-{"type":"answer_start"}
-{"text":"ROOT<wha","type":"answer_delta"}
-{"text":"t was th","type":"answer_delta"}
-{"text":"at?>","type":"answer_delta"}
-{"type":"answer_end"}
-{"finish_reason":"stop","model":"root","text":"ROOT<what was that?>","type":"result"}
-{"message":"'echo2' reads its input (Any text.), and none was given -- /play <symphony> [input]","type":"error"}
-{"type":"thinking"}
-{"type":"answer_start"}
-{"text":"ROOT</sy","type":"answer_delta"}
-{"text":"mphonies","type":"answer_delta"}
-{"text":">","type":"answer_delta"}
-{"type":"answer_end"}
-{"finish_reason":"stop","model":"root","text":"ROOT</symphonies>","type":"result"}
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel"],"ask":false,"events":["session","thinking","thinking_delta","memory","tool_status","notice","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished"],"schema":"2026-10-07","tools":false},"model":"root","next_turn":1,"protocol_version":1,"type":"session"}
+{"text":"stage 1/2 first — asking utility (helper): One: hello","turn":1,"type":"tool_status"}
+{"text":"stage 2/2 second — asking chat (root): Two: HELPER<One: hello>","turn":1,"type":"tool_status"}
+{"turn":1,"type":"answer_start"}
+{"text":"ROOT<Two: HELPER<One: hello>>","turn":1,"type":"answer_delta"}
+{"turn":1,"type":"answer_end"}
+{"finish_reason":"stop","model":"root","text":"ROOT<Two: HELPER<One: hello>>","turn":1,"type":"result"}
+{"turn":2,"type":"thinking"}
+{"turn":2,"type":"answer_start"}
+{"text":"ROOT<wha","turn":2,"type":"answer_delta"}
+{"text":"t was th","turn":2,"type":"answer_delta"}
+{"text":"at?>","turn":2,"type":"answer_delta"}
+{"turn":2,"type":"answer_end"}
+{"finish_reason":"stop","model":"root","text":"ROOT<what was that?>","turn":2,"type":"result"}
+{"message":"'echo2' reads its input (Any text.), and none was given -- /play <symphony> [input]","turn":3,"type":"error"}
+{"turn":4,"type":"thinking"}
+{"turn":4,"type":"answer_start"}
+{"text":"ROOT</sy","turn":4,"type":"answer_delta"}
+{"text":"mphonies","turn":4,"type":"answer_delta"}
+{"text":">","turn":4,"type":"answer_delta"}
+{"turn":4,"type":"answer_end"}
+{"finish_reason":"stop","model":"root","text":"ROOT</symphonies>","turn":4,"type":"result"}
 --- stderr
 [apogee] suite duo: no member holds memory on this machine
 apogee: 'echo2' reads its input (Any text.), and none was given -- /play <symphony> [input]

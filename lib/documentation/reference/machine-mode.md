@@ -42,7 +42,7 @@ opened with a suite, and takes both flags as chat does (see
 One JSON object per line on stdout. Every object has a `type`.
 
 ```jsonl
-{"type":"session","protocol_version":1,"model":"claude-sonnet-5"}
+{"type":"session","protocol_version":1,"model":"claude-sonnet-5","next_turn":1,"capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello","cancel"],"tools":true,"ask":true,"schema":"2026-10-07"}}
 {"type":"thinking"}
 {"type":"thinking_delta","text":"…"}
 {"type":"memory","chats":2,"decisions":1}
@@ -58,7 +58,7 @@ One JSON object per line on stdout. Every object has a `type`.
 
 | Event | Meaning |
 |---|---|
-| `session` | Once, first. Names the protocol version and the model. |
+| `session` | Once, first, unprompted. Names the protocol version, the model and the session's `capabilities` (below). |
 | `thinking` | The model began reasoning. No text. Sent again with `"budget_reached": true` when the reasoning reached its thinking budget and was ended there (`--think-budget`, or the backend's `thinking_budget`). |
 | `thinking_delta` | A chunk of reasoning. **Droppable** — see below. |
 | `memory` | `chat` only: what a turn was handed from earlier conversations -- `chats`, past chats' summaries, and `decisions`, recorded knowledge records -- injected for this turn and never into the transcript (26l). Sent before the turn, only when it recalled something. |
@@ -66,15 +66,50 @@ One JSON object per line on stdout. Every object has a `type`.
 | `notice` | A line for the user in `text` that is neither progress nor an error — a local model answering without the tools it was given because its chat template cannot take them, or a reply kept as text because it did not match the template's format, or a request trimmed to fit the model's window (`context budget: 2 earlier exchanges not sent`), or what a suite's verifier said (27g): an objection to a tool call returned to the model, a dispute the call runs over, the two positions on an answer under `answers: always` (`validate: …`), a check that could not be made. Show it and keep it; it never ends the turn. |
 | `answer_start` / `answer_end` | Bracket one answer's deltas. |
 | `answer_delta` | A chunk of answer text. Concatenate in order. |
-| `result` | Ends a turn. Carries the whole answer, so a driver that dropped every delta still has it. `usage` is **absent** when the provider reported none — absent is not zero. |
+| `result` | Ends a turn. Carries the whole answer, so a driver that dropped every delta still has it. `usage` is **absent** when the provider reported none — absent is not zero. A turn ended by a `cancel` ends here too, with `finish_reason: "cancelled"` and the text streamed before it. |
 | `question` | `ask_user`. Expects a reply; see below. |
-| `error` | A turn failed. The machine-readable half of a diagnostic. |
+| `error` | A turn failed — it ends the turn in place of a `result`. The machine-readable half of a diagnostic. |
+
+### `capabilities`
+
+What this session can do, on its `session` event before the first turn — so a
+host need not wait for a turn, or guess from a version number, to know what
+it is talking to:
+
+| Field | Meaning |
+|---|---|
+| `capabilities.events` | Every event type this build can write. A stream never carries one that is not here. |
+| `capabilities.accepts` | The line types this session reads on stdin: a driven `chat` or `execute` takes `user`, `answer`, `attach`, `hello` and `cancel`; `complete` reading its prompt on stdin takes only a `hello` before it; a `task run` and an agent's run read nothing. |
+| `capabilities.tools` | Whether the model can call tools in this session. |
+| `capabilities.ask` | Whether `ask_user` and the permission prompt reach the driver as `question` events. Without it nothing is asked: `ask` resolves to deny and the tool is never offered. |
+| `capabilities.schema` | The vocabulary's version, a date: moved when a release grows the vocabulary (a new type, a new field, a new inbound line). Two builds with the same `schema` speak the same vocabulary. |
+
+It names what the binary can do and nothing about this machine — never a key,
+a path into the data directory or a config value. Like every field, more may
+be added.
+
+### Turns: `turn` and `next_turn`
+
+In a driven `chat` or `execute`, each accepted `user` line is a **turn**,
+numbered from 1, and every event that belongs to it carries `"turn": N` —
+`memory`, `thinking*`, `tool_status`, `notice`, the answer's events,
+`question`, and the `result` or `error` that ends it — so a host can attribute
+any event to the line that caused it by number alone, after a race or reading a
+log. The `session` event carries `next_turn`: the number the next `user` line
+will get — past the turns a resumed conversation (`--resume`, `-c`) already
+holds — and itself never carries `turn`; neither does anything said between
+turns (an `attach`'s notices). **The turn accounting:** every accepted `user`
+line ends in exactly one `result` or one `error`, cancelled or not, so N lines
+sent are N turns closed. A `task run`'s events carry no `turn`: its turns have
+no `user` line.
 
 ### Three rules a driver must follow
 
-**1. Ignore unknown types.** New event types are added *without* a version bump,
-because drivers are required to tolerate them — that is what lets the schema
-grow. A driver that treats an unfamiliar `type` as an error breaks on upgrade.
+**1. Ignore unknown types — and unknown fields.** New event types, and new
+fields on the events a driver already reads, are added *without* a version
+bump, because drivers are required to tolerate them — that is what lets the
+schema grow. A driver that treats an unfamiliar `type`, or a key it does not
+know on a familiar one, as an error breaks on upgrade.
 
 **2. Drop every `thinking*` event to get what a terminal user saw.** Reasoning
 is distinctly typed precisely so it can be discarded. It never appears in
@@ -89,6 +124,32 @@ puts prose in the middle of your parser's input.
 Currently `1`. It is bumped **only when an existing event's meaning changes** —
 a field changing sense under a name a driver already reads. Additions are
 compatible by construction under rule 1.
+
+### The stability promise
+
+What a host built against `protocol_version: 1` can rely on, for as long as a
+binary says `1`:
+
+- **Nothing it reads changes under it.** Every event type documented here keeps
+  its name and its meaning; every field keeps its name, its type and its
+  meaning; a field documented as sometimes absent (`usage`) stays absent rather
+  than turning up as a zero.
+- **The stream's shape holds.** stdout carries one JSON object per line and
+  nothing else; `session` comes first, unprompted, before anything is read;
+  every accepted `user` line ends in exactly one `result` or one `error`;
+  `question` is the only event that waits for a reply.
+- **Growth is by addition only** — new event types, new fields on existing
+  events, new inbound line types, new values a host can ignore — and each moves
+  `capabilities.schema`. Rule 1 is what makes that safe for a host; the child
+  keeps the same rule inbound: a line it does not recognise is ignored, never
+  fatal, so a host may send something newer than the binary understands (a
+  `hello` to a binary that predates it is simply ignored).
+- **A breaking change is a new `protocol_version`.** Removing an event or a
+  field, renaming one, or changing what one means is never done under `1`. It
+  is announced in the release notes of the release that makes it, and that
+  release's `session` says the new number — so a host that checks
+  `protocol_version` can refuse a stream it was not built for rather than
+  misread it.
 
 ## A task's run
 
@@ -154,12 +215,46 @@ would read goes to stderr, with the outcome; the exit code is the task's (`0`
 done, `130` cancelled, `2` a provider's failure, `1` anything else short of
 done).
 
+## Validating and generating: the schema
+
+The vocabulary above is also a machine-readable artifact: a JSON Schema (draft
+2020-12) that the binary prints for itself —
+
+```bash
+apogee __machine-schema > machine-schema.json
+```
+
+— and that every release archive carries beside the binary as
+`machine-schema.json`, byte for byte what that build prints. The command is the
+truth; the copy is a convenience. Validate a stream against it, or generate a
+client's types from it, instead of transcribing this page:
+
+- **The root validates one line Apogee writes on stdout**; `#/$defs/inbound`
+  validates one line a host writes on stdin. Each event type has its own
+  definition, `#/$defs/event_<type>` (`event_result`), and each inbound line
+  `#/$defs/line_<type>` (`line_user`).
+- **It states the stability promise rather than contradicting it**: an unknown
+  `type` validates (only a known type is held to its definition), every
+  definition admits fields it does not name, and a value that may grow — a
+  `finish_reason`, a `kind` — is a string, never a closed list. A validator
+  built from it accepts exactly what rule 1 tells a host to accept.
+- **Optional is honest**: a field that may be absent — `usage`, a permission
+  question's `kind`, every event's `turn` outside a driven chat — is not
+  required, so generated types make it optional rather than zero.
+- `x-apogee.schema` is the same date `capabilities.schema` announces; a host
+  can compare the two to know its generated types match the binary it spawned.
+
+`apogee __machine-schema` is hidden from `--help`, like `__complete`: a
+protocol, not a feature. Its stdout carries the schema and nothing else.
+
 ## Writing to the child
 
 One JSON object per line on stdin.
 
 ```jsonl
+{"type":"hello","client":{"name":"my-host","version":"1.2.0"},"wants":["tools"]}
 {"type":"user","text":"what is 2+2?"}
+{"type":"cancel"}
 {"type":"answer","text":"Yes"}
 {"type":"attach","path":"report.pdf"}
 {"type":"attach","path":"src","graph":"off"}
@@ -167,6 +262,34 @@ One JSON object per line on stdin.
 
 An unrecognised line is ignored rather than fatal — the tolerance this protocol
 asks of drivers, honoured in the other direction.
+
+### Stopping a turn: `cancel`
+
+`{"type":"cancel"}` ends the turn in flight the way Ctrl-C ends a turn at the
+terminal — a host's Stop button. The model call is abandoned, the half-turn is
+rolled back, and the session is left as the last finished turn left it: the
+cancelled line and anything said for it never reach the saved conversation or
+a later request. The turn still ends in one `result` — `finish_reason:
+"cancelled"`, the text streamed before the cancel — and the same child answers
+the next `user` line. A `cancel` reaches the turn of the last `user` line sent
+that has not ended, even one sent a moment before that has not started; with
+no turn open it is ignored, so a cancel racing a turn that just finished is
+harmless. While a `question` or a permission prompt waits, a `cancel` fails the
+turn as closing stdin would — without ending the session. Turns are serial, so
+`cancel` names no turn. `complete` has no `cancel`: it is one-shot, and a host
+stops it by ending the process.
+
+### Introducing yourself: `hello`
+
+A host may send one optional `hello` as its **first** line: its `client` name
+and version, and what it `wants`, a list of words. It is recorded in Apogee's
+operational log for diagnostics and changes nothing in this release — the
+session has already announced its `capabilities`, because the child speaks
+first and never waits for a `hello` (a driver that predates it would wait
+forever). A `hello` anywhere but the first line is ignored with a note on
+stderr, never an error. `complete --output-format stream-json` reading its
+prompt on stdin takes a `hello` as that input's first line, and the rest is the
+prompt.
 
 ### Attaching files
 
@@ -281,7 +404,9 @@ until answered**:
 Reply with one `{"type":"answer","text":"…"}` line per question, in order. The
 offered options are a convenience, not a constraint — free text is always
 accepted. Closing stdin with a question outstanding fails the turn, and the
-half-turn is rolled out of history rather than persisted half-finished.
+half-turn is rolled out of history rather than persisted half-finished. A
+`cancel` while it waits fails the turn the same way, and the session goes on
+([Stopping a turn](#stopping-a-turn-cancel)).
 
 `ask_user` is offered only to a driver reading structured input. With plain-line
 stdin an answer would be indistinguishable from the next user turn, and the
@@ -417,6 +542,43 @@ refused or failed, an answer outside its stage's schema, the whole walk's
 budget (`symphony_caps`) spent — prints nothing on stdout and exits `1`
 (refused, or the budget) or `2` (a member's failure), the stage named on
 stderr with its position (`outer → inner, stage 2/3 verify (chat): …`).
+
+Since 28h the listings a host UI renders are reads of the same kind:
+
+```bash
+apogee models list --output-format json     # {"object":"list","data":[…],"folded":N}; --all for the folded ones too
+apogee models info <backend> --output-format json    # {"name":…,"fields":[{"field":"backend","value":…},…]}
+apogee models status --output-format json            # {"fields":[{"field":"chat","value":…},…]}
+apogee chats list --output-format json      # {"object":"list","data":[{"id","updated","turns","name"},…]}
+apogee agents list --output-format json     # byte for byte GET /v1/admin/agents
+apogee mcp list --output-format json        # GET /v1/admin/mcp-servers's entries, with what connecting found
+apogee check --output-format json           # {"rows":[{"section","name","status","detail","remedy"?}],"ok":…,"failures":N,"warnings":N}
+```
+
+- **`models list`**: one object per row the table shows — `backend`,
+  `backend_type`, `model`, `roles`, `source`, `architecture`, `profile`,
+  `state`, `verified`, and `note`, `format`, `quant`, `window` where the row has
+  them — the very object each line of `--output-format stream-json` carries
+  (which stays, a row per line). A snapshot a conversion consumed is folded as
+  the table folds it, and `folded` counts them.
+- **`models info`** and **`models status`**: their `label: value` record as
+  `fields`, in order, each label as printed and a value's indented continuation
+  joined to it with a newline. The values are the same words the human view
+  prints.
+- **`chats list`**: newest first, each conversation's `id`, `updated`, `turns`
+  and `name`.
+- **`agents list`** is exactly the body `GET /v1/admin/agents` serves; **`mcp
+  list`** each server as `GET /v1/admin/mcp-servers` serves it — `name`,
+  `command`, `args`, `enabled`, `env_set` (never the environment itself) — plus
+  what connecting to it found: `state` (`connected`, `not connected`,
+  `disabled`), `protocol_version`, `tools`, and `error` when it did not connect.
+- **`check`**: every row the report shows, `status` one of `ok`, `warn`, `fail`
+  and `skipped` — never folded into a pass — `ok` the verdict and the exit code
+  the human run's (non-zero on a failure). With `--fix`, what it repaired is the
+  document's `fixed`, never a line beside it.
+
+No document carries a key or a token. A command that has no JSON face refuses
+`--output-format json` and names the commands that have one.
 
 ## What machine mode does not do
 

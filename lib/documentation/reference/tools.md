@@ -88,15 +88,17 @@ The answer should begin with `{"query": "test"`. A `403 Forbidden` page means
 
 ### 3. Point Apogee at it
 
-Under `tools:` in `~/.apogee/config/config.yaml` (the shipped config carries
+Under `tools` in `~/.apogee/config/config.json` (the shipped config carries
 these lines commented out):
 
-```yaml
-tools:
-  search:
-    provider: searxng
-    url: http://127.0.0.1:8888
-    results: 5          # 1 to 20; how many results each search returns
+```jsonc
+"tools": {
+  "search": {
+    "provider": "searxng",
+    "url": "http://127.0.0.1:8888",
+    "results": 5          // 1 to 20; how many results each search returns
+  }
+}
 ```
 
 `url` may carry `${ENV_VAR}` references and a path, when the instance is
@@ -161,19 +163,24 @@ apogee config add-suite research --chat root --utility helper --consultable util
 apogee chat --suite research --tools
 ```
 
-```yaml
-suites:
-  research:
-    members:
-      chat: root
-      utility:
-        backend: helper
-        context_size: 4096
-    consultable: [utility]
-    consult_caps:          # optional; these are the defaults
-      per_turn: 4
-      brief_tokens: 1024
-      answer_tokens: 512
+```jsonc
+"suites": {
+  "research": {
+    "members": {
+      "chat": "root",
+      "utility": {
+        "backend": "helper",
+        "context_size": 4096
+      }
+    },
+    "consultable": ["utility"],
+    "consult_caps": {          // optional; these are the defaults
+      "per_turn": 4,
+      "brief_tokens": 1024,
+      "answer_tokens": 512
+    }
+  }
+}
 ```
 
 ### What the member sees
@@ -289,17 +296,21 @@ helper reading over the root's shoulder. It is off until a suite's
 apogee config set-suite research --validate tool_args=on --validate extraction=on
 ```
 
-```yaml
-suites:
-  research:
-    members:
-      chat: root
-      utility: helper
-    validate:
-      verifier: utility    # optional: the member that checks; utility by default
-      tool_args: on        # a tool that writes or reaches out, checked before it runs
-      extraction: on       # a knowledge capture's record, checked against its source
-      answers: always      # optional: request (the default -- /check only) or always
+```jsonc
+"suites": {
+  "research": {
+    "members": {
+      "chat": "root",
+      "utility": "helper"
+    },
+    "validate": {
+      "verifier": "utility",    // optional: the member that checks; utility by default
+      "tool_args": "on",        // a tool that writes or reaches out, checked before it runs
+      "extraction": "on",       // a knowledge capture's record, checked against its source
+      "answers": "always"       // optional: request (the default -- /check only) or always
+    }
+  }
+}
 ```
 
 ### What is checked

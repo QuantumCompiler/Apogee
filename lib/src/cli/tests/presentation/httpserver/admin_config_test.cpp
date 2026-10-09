@@ -116,8 +116,8 @@ TEST_CASE("the helper role pointers set over HTTP are byte-identical to the CLI'
             admin_set_role(fixture.context(), field, post(nlohmann::json{{"name", "helper"}}));
         REQUIRE(set.status == 200);
         CHECK(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
-        CHECK(Fixture::bytes(fixture.http_config).find(std::string{"  "} + field + ": helper") !=
-              std::string::npos);
+        CHECK(Fixture::bytes(fixture.http_config)
+                  .find(std::string{"    \""} + field + "\": \"helper\"") != std::string::npos);
     }
     // `config get` reads each one back -- vision moved to a backend of its
     // own, so no pointer can be read in place of another.
@@ -166,8 +166,8 @@ TEST_CASE("each helper role route sets its own pointer, through the mux",
         request.path = std::string{"/v1/admin/backends/"} + route;
         request.headers["authorization"] = "Bearer token";
         REQUIRE(mux.dispatch(request).status == 200);
-        CHECK(Fixture::bytes(fixture.http_config).find(std::string{"  "} + field + ": helper") !=
-              std::string::npos);
+        CHECK(Fixture::bytes(fixture.http_config)
+                  .find(std::string{"    \""} + field + "\": \"helper\"") != std::string::npos);
     }
 }
 
@@ -184,7 +184,8 @@ TEST_CASE("a cache type added over HTTP is byte-identical to the CLI's, and a ba
                                                                     {"cache_type", "q4_0"}}));
     REQUIRE(created.status == 201);
     CHECK(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
-    CHECK(Fixture::bytes(fixture.http_config).find("    cache_type: q4_0\n") != std::string::npos);
+    CHECK(Fixture::bytes(fixture.http_config).find("      \"cache_type\": \"q4_0\"") !=
+          std::string::npos);
     CHECK(parsed(created)["cache_type"] == "q4_0");
 
     const HttpResponse refused =

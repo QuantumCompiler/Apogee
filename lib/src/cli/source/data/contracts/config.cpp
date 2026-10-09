@@ -10,9 +10,11 @@
 #include <cstdlib>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <utility>
 
+#include "contracts/jsonc.h"
 #include "contracts/symphony_walk.h"
 #include "platform/platform.h"
 
@@ -1546,12 +1548,56 @@ std::string expand_env(std::string_view input) {
     return out;
 }
 
+namespace {
+
+/// A JSONC value as the node the typed walk reads (28i): one walk, one set of
+/// rules, whichever format the file is in. A number keeps the token the file
+/// spells, so a value reads exactly as its YAML twin did.
+YAML::Node yaml_node_of(const jsonc::Value& value, std::string_view text) {
+    switch (value.kind) {
+        case jsonc::Kind::Object: {
+            YAML::Node map{YAML::NodeType::Map};
+            for (std::size_t i = 0; i < value.keys.size(); ++i) {
+                map.force_insert(value.keys[i], yaml_node_of(value.children[i], text));
+            }
+            return map;
+        }
+        case jsonc::Kind::Array: {
+            YAML::Node list{YAML::NodeType::Sequence};
+            for (const jsonc::Value& item : value.children) {
+                list.push_back(yaml_node_of(item, text));
+            }
+            return list;
+        }
+        case jsonc::Kind::String:
+            return YAML::Node{jsonc::to_json(value, text).get<std::string>()};
+        case jsonc::Kind::Number:
+        case jsonc::Kind::Boolean:
+            return YAML::Node{std::string{text.substr(value.begin, value.end - value.begin)}};
+        case jsonc::Kind::Null:
+            break;
+    }
+    return YAML::Node{YAML::NodeType::Null};
+}
+
+}  // namespace
+
 Config parse_config(std::string_view content, std::string_view origin) {
     YAML::Node root;
-    try {
-        root = YAML::Load(std::string{content});
-    } catch (const YAML::Exception& e) {
-        fail(origin, std::string{"not valid YAML: "} + e.what());
+    if (jsonc::looks_like_jsonc(content)) {
+        try {
+            if (const std::optional<jsonc::Value> value = jsonc::parse_document(content)) {
+                root = yaml_node_of(*value, content);
+            }
+        } catch (const jsonc::JsoncError& e) {
+            fail(origin, std::string{"not valid JSON: "} + e.what());
+        }
+    } else {
+        try {
+            root = YAML::Load(std::string{content});
+        } catch (const YAML::Exception& e) {
+            fail(origin, std::string{"not valid YAML: "} + e.what());
+        }
     }
 
     Config config;

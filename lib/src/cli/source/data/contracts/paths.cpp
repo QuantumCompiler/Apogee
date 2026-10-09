@@ -84,7 +84,7 @@ CustomRoot custom_root(const std::filesystem::path& config_file) {
     const auto refuse = [&](const std::string& why, const std::string& fix) {
         out.error = std::string{kCustomFlag} + " " + config_file.string() + ": " + why +
                     ". It takes a config file at <root>/config/<file> -- the layout's own place "
-                    "for one, as ~/.apogee/config/config.yaml roots ~/.apogee -- and roots "
+                    "for one, as ~/.apogee/config/config.json roots ~/.apogee -- and roots "
                     "everything at <root>" +
                     fix;
     };
@@ -137,12 +137,12 @@ RootResolution resolve_root(const RootInputs& inputs) {
             if (!inputs.home_directory.has_value()) {
                 out.error = "cannot determine your home directory, which " + flag.spelling() +
                             " roots Apogee under; name a root with " + std::string{kCustomFlag} +
-                            " <root>/config/config.yaml instead";
+                            " <root>/config/config.json instead";
                 return out;
             }
             out.root = std::filesystem::path{*inputs.home_directory} /
                        std::string{channel_directory(*flag.channel)};
-            out.config = out.root / "config" / "config.yaml";
+            out.config = config_file_in(out.root / "config");
         } else {
             CustomRoot custom = custom_root(flag.custom_config);
             if (!custom.error.empty()) {
@@ -165,7 +165,7 @@ RootResolution resolve_root(const RootInputs& inputs) {
     if (!inputs.environment.empty()) {
         out.rung = RootRung::Environment;
         out.root = std::filesystem::path{inputs.environment};
-        out.config = out.root / "config" / "config.yaml";
+        out.config = config_file_in(out.root / "config");
         return out;
     }
 
@@ -178,7 +178,7 @@ RootResolution resolve_root(const RootInputs& inputs) {
     out.rung = RootRung::Baked;
     out.root =
         std::filesystem::path{*inputs.home_directory} / std::string{channel_directory(out.channel)};
-    out.config = out.root / "config" / "config.yaml";
+    out.config = config_file_in(out.root / "config");
     return out;
 }
 
@@ -237,10 +237,43 @@ std::filesystem::path config_dir() {
     return apogee_home() / "config";
 }
 
+std::filesystem::path config_file_in(const std::filesystem::path& config_directory) {
+    std::error_code code;
+    const std::filesystem::path current = config_directory / kConfigFileName;
+    const std::filesystem::path legacy = config_directory / kLegacyConfigFileName;
+    if (!std::filesystem::exists(current, code) && std::filesystem::is_regular_file(legacy, code)) {
+        return legacy;
+    }
+    return current;
+}
+
+bool is_legacy_config_path(const std::filesystem::path& path) {
+    return path.filename() == kLegacyConfigFileName;
+}
+
+std::string config_conflict(const std::filesystem::path& config_directory) {
+    std::error_code code;
+    const std::filesystem::path current = config_directory / kConfigFileName;
+    const std::filesystem::path legacy = config_directory / kLegacyConfigFileName;
+    if (!std::filesystem::exists(current, code) || !std::filesystem::exists(legacy, code)) {
+        return {};
+    }
+    return "both " + legacy.string() + " and " + current.string() +
+           " exist, and which one is current is yours to say -- move the other aside (once "
+           "config.yaml is the one, 'apogee config migrate' converts it)";
+}
+
 std::filesystem::path default_config_path() {
     RootResolution resolved = current_root();
     if (!resolved.ok()) {
         throw std::runtime_error(resolved.error);
+    }
+    const bool custom = resolved.flag.has_value() && !resolved.flag->channel.has_value();
+    if (!custom) {
+        if (std::string conflict = config_conflict(resolved.config.parent_path());
+            !conflict.empty()) {
+            throw std::runtime_error(conflict);
+        }
     }
     return std::move(resolved.config);
 }

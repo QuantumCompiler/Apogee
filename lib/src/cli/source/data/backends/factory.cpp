@@ -1,6 +1,10 @@
 #include "backends/factory.h"
 
+#include <chrono>
+#include <filesystem>
+#include <map>
 #include <optional>
+#include <string>
 #include <utility>
 
 #include "backends/anthropic.h"
@@ -13,7 +17,10 @@
 #include "backends/mock.h"
 #include "backends/ollama_cli.h"
 #include "backends/openai.h"
+#include "backends/provider_cache.h"
+#include "backends/provider_table.h"
 #include "contracts/errors.h"
+#include "contracts/paths.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
 
@@ -200,6 +207,40 @@ std::shared_ptr<harness::LLMProvider> make_provider(const std::string& name,
     return nullptr;
 }
 
+namespace {
+
+/// The verified record (28c): a provider backend's successful turn, kept in
+/// the provider cache of the install the config belongs to -- and only when
+/// the config sits in an install's `config/` directory, so a test's config
+/// in a bare temp directory never writes a record anywhere, least of all in
+/// the real home. Passive: the turn was the user's; nothing is spent to
+/// earn it.
+void observe_verified_turns(harness::ProviderRegistry& registry, const BuildOptions& options) {
+    if (options.config_path.empty() || options.config_path.parent_path().filename() != "config") {
+        return;
+    }
+    const std::filesystem::path cache =
+        harness::home_for_config(options.config_path) / "cache" / "providers.json";
+    std::map<std::string, harness::BackendType, std::less<>> types;
+    for (const auto& [name, entry] : registry.config().backends) {
+        if (provider_for_type(entry.type) != nullptr) {
+            types.emplace(name, entry.type);
+        }
+    }
+    if (types.empty()) {
+        return;
+    }
+    registry.observe_turns([cache, types = std::move(types)](const std::string& backend) {
+        const auto found = types.find(backend);
+        if (found != types.end()) {
+            record_verified_turn(cache, found->second, backend,
+                                 cache_day(std::chrono::system_clock::now()));
+        }
+    });
+}
+
+}  // namespace
+
 BuildResult build_providers(harness::ProviderRegistry& harness, const BuildOptions& options) {
     BuildResult result;
 
@@ -225,6 +266,7 @@ BuildResult build_providers(harness::ProviderRegistry& harness, const BuildOptio
     }
 
     harness.use_default_router();
+    observe_verified_turns(harness, options);
     return result;
 }
 

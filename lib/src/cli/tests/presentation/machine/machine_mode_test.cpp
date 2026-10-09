@@ -2,19 +2,26 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <condition_variable>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <stdexcept>
+#include <streambuf>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "agentloop/loop.h"
 #include "contracts/config.h"
+#include "contracts/errors.h"
 #include "contracts/provider.h"
 #include "harness/harness.h"
+#include "machine/driver_input.h"
 #include "machine/json_reporter.h"
+#include "machine/protocol.h"
 #include "tasks/ledger.h"
 #include "tasks/task.h"
 #include "tasks/view.h"
@@ -54,7 +61,7 @@ using apogee::commands::JsonReporter;
 
 /// Drives a reporter through a representative turn.
 void one_turn(JsonReporter& reporter) {
-    reporter.begin_session("test-model");
+    reporter.begin_session("test-model", {});
     reporter.on_thinking();
     reporter.on_thinking_token("reasoning about it");
     reporter.on_tool_status("fetch_url https://example.test");
@@ -112,7 +119,7 @@ TEST_CASE("the session event carries a protocol version", "[commands][machine]")
     // an addition is compatible by construction.
     std::ostringstream out;
     JsonReporter reporter{out};
-    reporter.begin_session("m");
+    reporter.begin_session("m", {});
 
     const nlohmann::json session = events(out.str()).front();
     CHECK(session.at("type") == "session");
@@ -320,7 +327,7 @@ public:
 
     std::ostringstream out;
     JsonReporter reporter{out};
-    reporter.begin_session("pieces");
+    reporter.begin_session("pieces", {});
     std::vector<apogee::harness::ChatMessage> history{apogee::harness::ChatMessage::user("hi")};
     apogee::agentloop::Options options;
     options.model = "pieces";
@@ -525,9 +532,10 @@ TEST_CASE("the driver's answer comes back through the AskFn", "[commands][machin
     std::ostringstream out;
     JsonReporter reporter{out};
     std::istringstream in{"{\"type\":\"answer\",\"text\":\"Yes\"}\n"};
+    apogee::commands::DriverInput driver{in};
 
     const apogee::agentloop::Answers answers =
-        apogee::commands::make_driver_ask_fn(reporter, in)(one_question());
+        apogee::commands::make_driver_ask_fn(reporter, driver)(one_question());
 
     CHECK(answers.values == std::vector<std::string>{"Yes"});
     CHECK(types(out.str()) == std::vector<std::string>{"question"});
@@ -539,8 +547,9 @@ TEST_CASE("free text is accepted where an option was offered", "[commands][machi
     std::ostringstream out;
     JsonReporter reporter{out};
     std::istringstream in{"{\"type\":\"answer\",\"text\":\"only if it is a backup\"}\n"};
+    apogee::commands::DriverInput driver{in};
 
-    CHECK(apogee::commands::make_driver_ask_fn(reporter, in)(one_question()).values ==
+    CHECK(apogee::commands::make_driver_ask_fn(reporter, driver)(one_question()).values ==
           std::vector<std::string>{"only if it is a backup"});
 }
 
@@ -554,8 +563,9 @@ TEST_CASE("noise before an answer is skipped, not treated as one", "[commands][m
         "{\"type\":\"user\",\"text\":\"a different question\"}\n"
         "{\"type\":\"invented_later\"}\n"
         "{\"type\":\"answer\",\"text\":\"No\"}\n"};
+    apogee::commands::DriverInput driver{in};
 
-    CHECK(apogee::commands::make_driver_ask_fn(reporter, in)(one_question()).values ==
+    CHECK(apogee::commands::make_driver_ask_fn(reporter, driver)(one_question()).values ==
           std::vector<std::string>{"No"});
 }
 
@@ -566,8 +576,9 @@ TEST_CASE("a driver that hangs up mid-question fails the turn", "[commands][mach
     std::ostringstream out;
     JsonReporter reporter{out};
     std::istringstream in{""};
+    apogee::commands::DriverInput driver{in};
 
-    CHECK_THROWS_AS(apogee::commands::make_driver_ask_fn(reporter, in)(one_question()),
+    CHECK_THROWS_AS(apogee::commands::make_driver_ask_fn(reporter, driver)(one_question()),
                     std::runtime_error);
 }
 
@@ -579,8 +590,10 @@ TEST_CASE("every question must be answered before the turn resumes", "[commands]
     std::ostringstream out;
     JsonReporter reporter{out};
     std::istringstream in{"{\"type\":\"answer\",\"text\":\"Yes\"}\n"};
+    apogee::commands::DriverInput driver{in};
 
-    CHECK_THROWS_AS(apogee::commands::make_driver_ask_fn(reporter, in)(two), std::runtime_error);
+    CHECK_THROWS_AS(apogee::commands::make_driver_ask_fn(reporter, driver)(two),
+                    std::runtime_error);
 }
 
 TEST_CASE("the input format parses independently of the output one", "[commands][machine]") {
@@ -801,4 +814,353 @@ TEST_CASE("a read's format is text or one JSON document, never a stream",
     std::ostringstream out;
     apogee::commands::write_document(out, nlohmann::json{{"a", 1}, {"b", "two"}});
     CHECK(out.str() == "{\"a\":1,\"b\":\"two\"}\n");
+}
+
+// --- 28d: the handshake ---------------------------------------------------------
+
+TEST_CASE("the session announces its capabilities, today's fields unchanged",
+          "[commands][machine][handshake]") {
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.begin_session(
+        "m", apogee::commands::MachineCapabilities{
+                 .accepts = {"user", "answer", "attach", "hello"}, .tools = true, .ask = true});
+    nlohmann::json session = events(out.str()).front();
+    const nlohmann::json capabilities = session.at("capabilities");
+    CHECK(capabilities.at("accepts") ==
+          nlohmann::json::array({"user", "answer", "attach", "hello"}));
+    CHECK(capabilities.at("tools") == true);
+    CHECK(capabilities.at("ask") == true);
+    CHECK(capabilities.at("schema") == std::string{apogee::commands::kMachineSchemaVersion});
+    std::vector<std::string> announced;
+    for (const nlohmann::json& type : capabilities.at("events")) {
+        announced.push_back(type.get<std::string>());
+    }
+    const auto declared = apogee::commands::machine_event_types();
+    CHECK(announced == std::vector<std::string>(declared.begin(), declared.end()));
+    for (const std::string_view type :
+         {"session", "result", "question", "error", "task_finished"}) {
+        CHECK(std::ranges::find(announced, type) != announced.end());
+    }
+    // The golden: everything a v1 driver read before is byte for byte as it was.
+    session.erase("capabilities");
+    CHECK(session.dump() == R"({"model":"m","protocol_version":1,"type":"session"})");
+    // No secret, path or config value has a slot to ride in.
+    CHECK(capabilities.size() == 5);
+}
+
+TEST_CASE("a session with nothing to read accepts nothing and asks nobody",
+          "[commands][machine][handshake]") {
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.begin_session("m", {});
+    const nlohmann::json capabilities = events(out.str()).front().at("capabilities");
+    CHECK(capabilities.at("accepts").empty());
+    CHECK(capabilities.at("tools") == false);
+    CHECK(capabilities.at("ask") == false);
+}
+
+TEST_CASE("hello is parsed, recorded in words, and malformed fields are just absent",
+          "[commands][machine][handshake]") {
+    using apogee::commands::DriverMessage;
+    const DriverMessage hello = apogee::commands::parse_driver_line(
+        R"({"type":"hello","client":{"name":"my-host","version":"1.2"},"wants":["tools"]})");
+    CHECK(hello.kind == DriverMessage::Kind::Hello);
+    CHECK(hello.client_name == "my-host");
+    CHECK(hello.client_version == "1.2");
+    CHECK(apogee::commands::describe_hello(hello) == R"(hello from my-host 1.2, wants ["tools"])");
+
+    const DriverMessage odd = apogee::commands::parse_driver_line(
+        R"({"type":"hello","client":{"name":7,"version":null},"extra":true})");
+    CHECK(odd.kind == DriverMessage::Kind::Hello);
+    CHECK(odd.client_name.empty());
+    CHECK(apogee::commands::describe_hello(odd) == "hello from an unnamed client");
+    CHECK(apogee::commands::parse_driver_line(R"({"type":"hello"})").kind ==
+          DriverMessage::Kind::Hello);
+
+    const DriverMessage long_name = apogee::commands::parse_driver_line(
+        R"({"type":"hello","client":{"name":")" + std::string(500, 'x') + R"("}})");
+    CHECK(apogee::commands::describe_hello(long_name).size() < 260);
+
+    const auto inbound = apogee::commands::machine_inbound_types();
+    CHECK(std::vector<std::string_view>(inbound.begin(), inbound.end()) ==
+          std::vector<std::string_view>{"user", "answer", "attach", "hello", "cancel"});
+}
+
+// --- 28f: turn ids and cancel ---------------------------------------------------
+
+TEST_CASE("every event of an open turn carries its number; the session never does",
+          "[commands][machine][turns]") {
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.begin_session("m", {}, 4);
+    reporter.on_notice("between turns");
+    reporter.begin_turn(4);
+    reporter.on_thinking();
+    reporter.on_tool_status("reading");
+    reporter.on_answer_start();
+    reporter.on_answer_token("par");
+    reporter.on_answer_token("tial");
+    CHECK(reporter.turn_text() == "partial");
+    reporter.on_answer_end();
+    reporter.emit_error("it broke");
+    reporter.end_turn();
+    reporter.on_notice("after");
+    CHECK(reporter.turn_text().empty());
+
+    const std::vector<nlohmann::json> seen = events(out.str());
+    REQUIRE(seen.size() == 10);
+    CHECK(seen[0].at("type") == "session");
+    CHECK(seen[0].at("next_turn") == 4);
+    CHECK_FALSE(seen[0].contains("turn"));
+    CHECK_FALSE(seen[1].contains("turn"));  // a notice between turns
+    for (std::size_t i = 2; i < 9; ++i) {
+        INFO(seen[i].dump());
+        CHECK(seen[i].at("turn") == 4);
+    }
+    CHECK_FALSE(seen[9].contains("turn"));
+
+    // A session with no user lines names no next turn.
+    std::ostringstream plain;
+    JsonReporter quiet{plain};
+    quiet.begin_session("m", {});
+    CHECK_FALSE(events(plain.str()).front().contains("next_turn"));
+}
+
+TEST_CASE("cancel is read as its own line type", "[commands][machine][turns]") {
+    CHECK(apogee::commands::parse_driver_line(R"({"type":"cancel"})").kind ==
+          apogee::commands::DriverMessage::Kind::Cancel);
+    CHECK(apogee::commands::parse_driver_line(R"({"type":"cancel","turn":3})").kind ==
+          apogee::commands::DriverMessage::Kind::Cancel);
+}
+
+namespace {
+
+/// An input a test feeds as it goes: a read waits for what was pushed, and
+/// ends once closed -- so a test controls which line the reader sees when.
+class FeedBuffer final : public std::streambuf {
+public:
+    void push(const std::string& text) {
+        const std::lock_guard lock{mutex_};
+        pending_ += text;
+        ready_.notify_all();
+    }
+
+    void close() {
+        const std::lock_guard lock{mutex_};
+        closed_ = true;
+        ready_.notify_all();
+    }
+
+protected:
+    int_type underflow() override {
+        std::unique_lock lock{mutex_};
+        ready_.wait(lock, [this] { return !pending_.empty() || closed_; });
+        if (pending_.empty()) {
+            return traits_type::eof();
+        }
+        current_ = std::move(pending_);
+        pending_.clear();
+        setg(current_.data(), current_.data(), current_.data() + current_.size());
+        return traits_type::to_int_type(current_.front());
+    }
+
+private:
+    std::mutex mutex_;
+    std::condition_variable ready_;
+    std::string pending_;
+    std::string current_;
+    bool closed_ = false;
+};
+
+}  // namespace
+
+TEST_CASE("the driver's reader: a cancel reaches the open turn, and is ignored with none",
+          "[commands][machine][turns]") {
+    using apogee::commands::DriverInput;
+    using apogee::commands::DriverLine;
+
+    SECTION("a cancel right after a user line reaches it, even before it starts") {
+        std::istringstream in{R"({"type":"user","text":"one"})"
+                              "\n"
+                              R"({"type":"cancel"})"
+                              "\n"};
+        DriverInput driver{in};
+        const std::optional<DriverLine> line = driver.next_line();
+        REQUIRE(line.has_value());
+        CHECK(line->sequence == 1);
+        CHECK(line->turn.stop_requested());
+        CHECK_FALSE(driver.next_line().has_value());  // the cancel was consumed, never queued
+    }
+    SECTION("a cancel with no turn open is ignored, and the next turn is untouched") {
+        std::istringstream in{R"({"type":"cancel"})"
+                              "\n"
+                              R"({"type":"attach","path":"x"})"
+                              "\n"
+                              R"({"type":"user","text":"two"})"
+                              "\n"};
+        DriverInput driver{in};
+        const std::optional<DriverLine> attach = driver.next_line();
+        REQUIRE(attach.has_value());
+        CHECK(attach->sequence == 0);
+        const std::optional<DriverLine> user = driver.next_line();
+        REQUIRE(user.has_value());
+        CHECK_FALSE(user->turn.stop_requested());
+    }
+    SECTION("an ended turn is out of a later cancel's reach") {
+        // Fed a line at a time, so the cancel arrives after the turn ended --
+        // the race a driver's Stop button loses by a moment.
+        FeedBuffer feed;
+        std::istream in{&feed};
+        DriverInput driver{in};
+        feed.push(R"({"type":"user","text":"one"})"
+                  "\n");
+        const std::optional<DriverLine> line = driver.next_line();
+        REQUIRE(line.has_value());
+        driver.end_turn(line->sequence);
+        feed.push(R"({"type":"cancel"})"
+                  "\n"
+                  R"({"type":"user","text":"two"})"
+                  "\n");
+        const std::optional<DriverLine> next = driver.next_line();
+        REQUIRE(next.has_value());
+        CHECK_FALSE(line->turn.stop_requested());
+        CHECK_FALSE(next->turn.stop_requested());
+        feed.close();
+        CHECK_FALSE(driver.next_line().has_value());
+    }
+}
+
+TEST_CASE("a question cancelled while it waits fails its turn as Ctrl-C would",
+          "[commands][machine][turns][ask]") {
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    std::istringstream in{R"({"type":"user","text":"go"})"
+                          "\n"
+                          R"({"type":"cancel"})"
+                          "\n"};
+    apogee::commands::DriverInput driver{in};
+    const std::optional<apogee::commands::DriverLine> turn = driver.next_line();
+    REQUIRE(turn.has_value());
+    CHECK_THROWS_AS(apogee::commands::make_driver_ask_fn(reporter, driver)(one_question()),
+                    apogee::harness::CancelledError);
+    CHECK(types(out.str()) == std::vector<std::string>{"question"});
+}
+
+// --- 28g: the one declaration ----------------------------------------------------
+
+namespace {
+
+/// The declared line for `type`, or null.
+[[nodiscard]] const apogee::commands::LineSpec* declared(
+    std::span<const apogee::commands::LineSpec> lines, const std::string& type) {
+    for (const apogee::commands::LineSpec& line : lines) {
+        if (line.type == type) {
+            return &line;
+        }
+    }
+    return nullptr;
+}
+
+/// Every key of `event` declared for its type, and every required one there.
+void held_to_declaration(const nlohmann::json& event) {
+    INFO(event.dump());
+    const std::string type = event.at("type").get<std::string>();
+    const apogee::commands::LineSpec* line = declared(apogee::commands::machine_events(), type);
+    REQUIRE(line != nullptr);
+    for (const auto& [key, value] : event.items()) {
+        if (key == "type" || (key == "turn" && type != "session")) {
+            continue;
+        }
+        INFO("field: " << key);
+        CHECK(std::ranges::any_of(line->fields, [&key](const apogee::commands::FieldSpec& field) {
+            return field.name == key;
+        }));
+    }
+    for (const apogee::commands::FieldSpec& field : line->fields) {
+        if (field.required) {
+            INFO("required: " << field.name);
+            CHECK(event.contains(std::string{field.name}));
+        }
+    }
+}
+
+}  // namespace
+
+TEST_CASE("every event every emitter writes is the declaration's, field for field",
+          "[commands][machine][schema]") {
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    apogee::commands::MachineCapabilities capabilities;
+    capabilities.accepts = {"user"};
+    capabilities.tools = true;
+    capabilities.ask = true;
+    reporter.begin_session("m", capabilities, 1);
+    reporter.begin_turn(1);
+    reporter.on_recall(2, 1);
+    reporter.on_thinking();
+    reporter.on_thinking_budget_reached();
+    reporter.on_thinking_token("hmm");
+    reporter.on_tool_status("read_file x");
+    apogee::agentloop::SideCall side;
+    side.role = "utility";
+    side.detail = "titling";
+    reporter.on_side_call(side);
+    reporter.on_notice("a note");
+    reporter.on_answer_start();
+    reporter.on_answer_token("hi");
+    reporter.on_answer_end();
+    reporter.emit_question(one_question());
+    reporter.emit_permission_question(
+        apogee::agent::GateRequest{"fetch_url", "example.test", "https://example.test/x", true});
+    apogee::harness::ChatResponse response;
+    response.message = apogee::harness::ChatMessage::assistant("hi");
+    response.model = "m";
+    response.usage.prompt_tokens = 3;
+    response.usage.completion_tokens = 1;
+    reporter.emit_result(response);
+    reporter.emit_error("broke");
+    reporter.end_turn();
+    const t::Task task = lived_task();
+    for (std::size_t index = 0; index < task.transitions.size(); ++index) {
+        reporter.emit_task_transition(task, index, std::nullopt);
+    }
+    reporter.emit_task_grant(task, 1, task.rounds.back().allowed.front());
+
+    std::set<std::string> seen_types;
+    for (const nlohmann::json& event : events(out.str())) {
+        held_to_declaration(event);
+        seen_types.insert(event.at("type").get<std::string>());
+    }
+    // Every declared event was exercised -- a declaration nothing emits is
+    // the drift this pins, in the other direction.
+    for (const std::string_view type : apogee::commands::machine_event_types()) {
+        INFO("never emitted: " << type);
+        CHECK(seen_types.contains(std::string{type}));
+    }
+}
+
+TEST_CASE("the schema is generated from the declaration and keeps the promise",
+          "[commands][machine][schema]") {
+    const nlohmann::json schema = apogee::commands::machine_schema();
+    CHECK(schema.at("$schema") == "https://json-schema.org/draft/2020-12/schema");
+    CHECK(schema.at("x-apogee").at("schema") ==
+          std::string{apogee::commands::kMachineSchemaVersion});
+    CHECK(schema.at("x-apogee").at("protocol_version") ==
+          apogee::commands::kMachineProtocolVersion);
+    const nlohmann::json& defs = schema.at("$defs");
+    for (const apogee::commands::LineSpec& line : apogee::commands::machine_events()) {
+        const nlohmann::json& def = defs.at("event_" + std::string{line.type});
+        CHECK(def.at("additionalProperties") == true);
+        CHECK(def.at("properties").at("type").at("const") == std::string{line.type});
+        CHECK(def.at("properties").contains("turn") == (line.type != "session"));
+    }
+    for (const apogee::commands::LineSpec& line : apogee::commands::machine_inbound()) {
+        CHECK(defs.contains("line_" + std::string{line.type}));
+    }
+    // An unknown type is held to nothing but being an object with a string type.
+    CHECK(defs.at("outbound").at("allOf").size() == apogee::commands::machine_events().size());
+    CHECK(defs.at("outbound").at("properties").at("type").at("type") == "string");
+    // A value that may grow is a string, never a closed enum.
+    CHECK_FALSE(defs.at("event_result").at("properties").at("finish_reason").contains("enum"));
 }

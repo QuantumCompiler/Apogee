@@ -132,9 +132,9 @@ EOF
 
 grep -q '"text":"\[tool\] read_file"' "$WORK_DIR/chat.jsonl" \
     || fail "the call was not dispatched: $(cat "$WORK_DIR/chat.jsonl")"
-grep -q '"text":"The secret is pineapple.","type":"result"' "$WORK_DIR/chat.jsonl" \
+grep -q '"text":"The secret is pineapple.","turn":1,"type":"result"' "$WORK_DIR/chat.jsonl" \
     || fail "the tool's result never reached the answer: $(grep result "$WORK_DIR/chat.jsonl")"
-grep -q '"text":"Still pineapple.","type":"result"' "$WORK_DIR/chat.jsonl" \
+grep -q '"text":"Still pineapple.","turn":2,"type":"result"' "$WORK_DIR/chat.jsonl" \
     || fail "the second turn was not answered"
 if grep -q NOISY "$WORK_DIR/chat.jsonl" "$WORK_DIR/chat-err.txt"; then
     fail "the driver's stderr reached the terminal in a chat"

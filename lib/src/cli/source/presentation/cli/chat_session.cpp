@@ -3,12 +3,14 @@
 #include <CLI/CLI.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <future>
 #include <iostream>
 #include <memory>
 #include <optional>
 #include <sstream>
+#include <utility>
 
 #include "agentloop/content.h"
 #include "agentloop/loop.h"
@@ -21,6 +23,7 @@
 #include "agentloop/validate.h"
 #include "ansi/ansi.h"
 #include "backends/factory.h"
+#include "backends/provider_cache.h"
 #include "cli/chat_attachments.h"
 #include "cli/chat_completer.h"
 #include "cli/chat_history.h"
@@ -31,10 +34,12 @@
 #include "cli/embed.h"
 #include "cli/helpers.h"
 #include "cli/permissions.h"
+#include "cli/provider_offer.h"
 #include "cli/suite_residency.h"
 #include "cli/symphonies_cmd.h"
 #include "contracts/config.h"
 #include "contracts/errors.h"
+#include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "contracts/utf8.h"
 #include "harness/context_windows.h"
@@ -42,6 +47,7 @@
 #include "knowledge/clerk.h"
 #include "knowledge/record.h"
 #include "logger/operational.h"
+#include "machine/driver_input.h"
 #include "machine/json_reporter.h"
 #include "mcp/registry.h"
 #include "modelstore/footprint.h"
@@ -373,6 +379,30 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         config = harness::load_config(config_path);
     } catch (const harness::ConfigError& e) {
         fail_user(mode, e.what());
+    }
+    // The first-launch registration offer (28b): an interactive start with no
+    // provider backend configured, once ever, offering what the last explicit
+    // scan cached. It reads the cache and never probes -- this is a startup
+    // path (`cli.no_provider_probes`).
+    {
+        OfferContext offer;
+        offer.interactive = platform::is_terminal(platform::StandardStream::In) &&
+                            platform::is_terminal(platform::StandardStream::Out) &&
+                            !stdin_is_piped();
+        offer.machine = flags->output_format != OutputFormat::Text ||
+                        flags->input_format.value_or(InputFormat::Text) != InputFormat::Text;
+        offer.quiet = flags->quiet;
+        offer.config_path = config_path;
+        offer.cache_path = harness::provider_cache_path();
+        offer.today = backends::cache_day(std::chrono::system_clock::now());
+        try {
+            if (offer_registration(offer, config, std::cin, std::cerr) ==
+                OfferOutcome::Registered) {
+                config = harness::load_config(config_path);
+            }
+        } catch (const std::exception& e) {
+            fail_user(mode, e.what());
+        }
     }
     // A suite named on the command line must exist before anything is
     // built for it (27d).
@@ -894,7 +924,23 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
 
     if (input_format == InputFormat::StreamJson) {
         JsonReporter machine_reporter{std::cout};
-        machine_reporter.begin_session(session.backend);
+        // What this session can do, before its first turn (28d): every
+        // inbound line type, tools as wired, and `ask_user` and the
+        // permission prompt reaching the driver exactly when tools do.
+        // Each accepted `user` line is a numbered turn (28f), counted past
+        // the turns a resumed conversation already holds.
+        std::int64_t next_turn = static_cast<std::int64_t>(session.turns) + 1;
+        machine_reporter.begin_session(
+            session.backend,
+            MachineCapabilities{
+                .accepts = {machine_inbound_types().begin(), machine_inbound_types().end()},
+                .tools = tools_on(),
+                .ask = flags->tools},
+            next_turn);
+        // The driver's lines, read while a turn runs, so a `cancel` reaches
+        // it (28f); the loop, a question and the permission prompt all take
+        // their lines from this one reader.
+        DriverInput driver{std::cin};
 
         const auto machine_notice = [](const std::string& message) {
             // stdout carries ONLY protocol events, so a diagnostic goes to
@@ -904,7 +950,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         };
 
         const agentloop::AskFn driver_ask =
-            flags->tools ? make_driver_ask_fn(machine_reporter, std::cin) : agentloop::AskFn{};
+            flags->tools ? make_driver_ask_fn(machine_reporter, driver) : agentloop::AskFn{};
 
         BackgroundTitle title{harness, [&machine_reporter](std::string_view line) {
                                   machine_reporter.on_progress(line);
@@ -938,9 +984,21 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         for (const std::string& spec : flags->attach) {
             (void)attached.attach(spec, working_directory, attached.graph_method(launch_graph));
         }
-        std::string line;
-        while (std::getline(std::cin, line)) {
-            const DriverMessage message = parse_driver_line(line);
+        bool first_line = true;
+        while (const std::optional<DriverLine> got = driver.next_line()) {
+            const DriverMessage message = parse_driver_line(got->text);
+            const bool opening = std::exchange(first_line, false);
+            if (message.kind == DriverMessage::Kind::Hello) {
+                // A driver introducing itself (28d): recorded on the first
+                // line, harmless anywhere -- never a session-ending error.
+                if (opening) {
+                    logger::log(logger::Level::Info, std::string{session_command(mode)},
+                                describe_hello(message));
+                } else {
+                    machine_notice("a hello after the first line is ignored");
+                }
+                continue;
+            }
             if (message.kind == DriverMessage::Kind::Attach && !message.text.empty()) {
                 // The line's own `graph`, as `/attach`'s `--graph` (27p):
                 // a word outside the set attaches nothing, and says why.
@@ -960,9 +1018,31 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             }
             if (message.kind != DriverMessage::Kind::User || message.text.empty()) {
                 // Unknown types are ignored rather than fatal: the same
-                // tolerance this protocol asks of its own drivers.
+                // tolerance this protocol asks of its own drivers. An empty
+                // `user` line opens no turn.
+                driver.end_turn(got->sequence);
                 continue;
             }
+            // The turn, numbered (28f): every event until its `result` or
+            // `error` carries it, and a `cancel` until then ends it the way
+            // Ctrl-C would -- the half-turn rolled back, the session left as
+            // the last finished turn left it.
+            const std::int64_t turn = next_turn++;
+            machine_reporter.begin_turn(turn);
+            const logger::Session before = session;
+            const auto close_turn = [&machine_reporter, &driver, &got]() {
+                machine_reporter.end_turn();
+                driver.end_turn(got->sequence);
+            };
+            const auto cancelled_result = [&]() {
+                session = before;
+                logger::save(session);
+                harness::ChatResponse response;
+                response.message = harness::ChatMessage::assistant(machine_reporter.turn_text());
+                response.model = session.backend;
+                response.finish_reason = harness::FinishReason::Cancelled;
+                machine_reporter.emit_result(response);
+            };
             title.settle(session);
             // An execute session plays a `user` line that is a `/play`
             // command, as its REPL does (27s): found through the one table,
@@ -979,10 +1059,17 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     run_play_turn(harness, session, message.text,
                                   prepare_play(harness.config(), config_path,
                                                parse_play_argument(command->argument)),
-                                  *member_calls, machine_reporter, &recall);
+                                  *member_calls, machine_reporter, &recall, got->turn);
+                if (played.cancelled) {
+                    machine_notice(played.failure);
+                    cancelled_result();
+                    close_turn();
+                    continue;
+                }
                 if (!played.completed) {
                     machine_notice(played.failure);
                     machine_reporter.emit_error(played.failure);
+                    close_turn();
                     continue;
                 }
                 title.start_if_due(session);
@@ -990,6 +1077,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 response.message = session.messages.back();
                 response.model = session.backend;
                 machine_reporter.emit_result(response);
+                close_turn();
                 continue;
             }
             attach_mentions(
@@ -1001,14 +1089,27 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             // The driver reads structured input, so there IS someone to
             // answer a question -- the loop's "nil AskFn <=> never
             // advertised" rule is satisfied rather than sidestepped.
-            run_chat_turn(harness, session, message.text, tools_on() ? offered : nullptr,
-                          selection.get(), member_calls.get(), driver_ask,
-                          ToolGate{permission,
-                                   flags->tools ? make_driver_confirm_fn(machine_reporter, std::cin,
-                                                                         config_path, approvals)
-                                                : agent::ConfirmFn{}},
-                          machine_reporter, machine_notice, rag_settings, review_note, &attached,
-                          &recall);
+            const ChatTurnResult outcome = run_chat_turn(
+                harness, session, message.text, tools_on() ? offered : nullptr, selection.get(),
+                member_calls.get(), driver_ask,
+                ToolGate{permission, flags->tools ? make_driver_confirm_fn(machine_reporter, driver,
+                                                                           config_path, approvals)
+                                                  : agent::ConfirmFn{}},
+                machine_reporter, machine_notice, rag_settings, review_note, &attached, &recall,
+                got->turn);
+            if (outcome.cancelled) {
+                cancelled_result();
+                close_turn();
+                continue;
+            }
+            if (!outcome.error.empty()) {
+                // A turn that failed ends in `error`, as the protocol has
+                // always said -- not in a `result` whose text was the user's
+                // own line (found pinning the turn accounting, 28f).
+                machine_reporter.emit_error(outcome.error);
+                close_turn();
+                continue;
+            }
             title.start_if_due(session);
             if (session.compactions != saved_compactions) {
                 saved_compactions = session.compactions;
@@ -1021,6 +1122,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                                                         : session.messages.back();
             response.model = session.backend;
             machine_reporter.emit_result(response);
+            close_turn();
         }
 
         // stdin closed: the driver is done. Everything is already persisted

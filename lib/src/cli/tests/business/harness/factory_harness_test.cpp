@@ -1,11 +1,19 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <filesystem>
+#include <functional>
+#include <memory>
 #include <random>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "backends/factory.h"
+#include "backends/mock.h"
+#include "backends/provider_cache.h"
 #include "contracts/config.h"
+#include "contracts/errors.h"
 #include "harness/harness.h"
 #include "secrets/store.h"
 #include "support/env_guard.h"
@@ -164,4 +172,110 @@ suites:
     const auto missing = apogee::backends::rebuild_providers(harness, {"ghost"}, no_env());
     CHECK_FALSE(missing.statuses.front().constructed);
     CHECK(missing.statuses.front().reason == "not configured");
+}
+
+// --- 28c: the verified record, passively ---------------------------------------
+
+namespace {
+
+[[nodiscard]] apogee::harness::ChatRequest ask(std::string model) {
+    apogee::harness::ChatRequest request;
+    request.model = std::move(model);
+    request.messages.push_back(apogee::harness::ChatMessage::user("hello"));
+    return request;
+}
+
+[[nodiscard]] std::shared_ptr<apogee::backends::MockProvider> mock_named(
+    const std::string& name, std::function<void(const apogee::harness::ChatRequest&)> hook = {}) {
+    apogee::backends::MockProvider::Options options;
+    options.backend_name = name;
+    options.on_request = std::move(hook);
+    return std::make_shared<apogee::backends::MockProvider>(std::move(options));
+}
+
+}  // namespace
+
+TEST_CASE("the Harness tells its observer which backend answered, and only on success",
+          "[harness][observer]") {
+    Harness harness{config_from(R"(
+backends:
+  a:
+    type: mock
+  b:
+    type: mock
+)")};
+    harness.register_provider("a", mock_named("a"));
+    harness.register_provider("b", mock_named("b", [](const apogee::harness::ChatRequest&) {
+                                  throw apogee::harness::ProviderError("b", "down");
+                              }));
+    harness.use_default_router();
+    std::vector<std::string> heard;
+    harness.observe_turns([&heard](const std::string& backend) { heard.push_back(backend); });
+
+    (void)harness.chat(ask("a"));
+    (void)harness.complete(ask("a"));
+    (void)harness.stream_chat(ask("a"), apogee::harness::StreamOptions{});
+    CHECK(heard == std::vector<std::string>{"a", "a", "a"});
+    CHECK_THROWS(harness.chat(ask("b")));
+    CHECK(heard.size() == 3);
+
+    // An observer that throws costs its record, never the turn.
+    harness.observe_turns([](const std::string&) { throw std::runtime_error("full disk"); });
+    CHECK_NOTHROW(harness.chat(ask("a")));
+    harness.observe_turns({});
+    CHECK_NOTHROW(harness.chat(ask("a")));
+}
+
+TEST_CASE("a provider backend's successful turn is recorded in its install's cache",
+          "[backends][factory][verified]") {
+    const apogee::testing::TempDir root{"verified-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path config_path = root.path() / "config" / "config.yaml";
+    std::filesystem::create_directories(config_path.parent_path());
+    Harness harness{config_from(R"(
+backends:
+  cloud:
+    type: anthropic
+    api_key: sk-test
+  local:
+    type: mock
+)")};
+    apogee::backends::BuildOptions options = no_env();
+    options.config_path = config_path;
+    (void)build_providers(harness, options);
+    // The anthropic entry answered by a mock under its name: the factory's
+    // observer knows `cloud` as an anthropic backend, and no network is used.
+    harness.register_provider("cloud", mock_named("cloud"));
+    harness.use_default_router();
+
+    const std::filesystem::path cache = root.path() / "cache" / "providers.json";
+    (void)harness.chat(ask("local"));
+    CHECK_FALSE(std::filesystem::exists(cache));  // a local backend is not a provider
+    (void)harness.chat(ask("cloud"));
+    const apogee::backends::ProviderCache recorded = apogee::backends::load_provider_cache(cache);
+    REQUIRE(recorded.verified.contains("anthropic"));
+    CHECK(recorded.verified.at("anthropic").backend == "cloud");
+    CHECK(recorded.verified.at("anthropic").date ==
+          apogee::backends::cache_day(std::chrono::system_clock::now()));
+}
+
+TEST_CASE("a config outside an install's config directory records nothing anywhere",
+          "[backends][factory][verified]") {
+    const apogee::testing::TempDir root{"verified-bare-" + std::to_string(std::random_device{}())};
+    // A name no other run uses, so a record anywhere it could land is seen.
+    const std::string name = "cloud" + std::to_string(std::random_device{}());
+    Harness harness{config_from("backends:\n  " + name + ":\n    type: anthropic\n" +
+                                "    api_key: sk-test\n")};
+    apogee::backends::BuildOptions options = no_env();
+    options.config_path = root.path() / "my.yaml";  // not <root>/config/<file>
+    (void)build_providers(harness, options);
+    harness.register_provider(name, mock_named(name));
+    harness.use_default_router();
+    (void)harness.chat(ask(name));
+    CHECK_FALSE(std::filesystem::exists(root.path() / "cache"));
+    // Where a parent-of-parent derivation would have put it -- the temp root.
+    const apogee::backends::ProviderCache outside = apogee::backends::load_provider_cache(
+        root.path().parent_path() / "cache" / "providers.json");
+    for (const auto& [provider, record] : outside.verified) {
+        CHECK(record.backend != name);
+    }
 }

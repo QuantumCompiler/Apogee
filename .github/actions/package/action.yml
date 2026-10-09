@@ -20,9 +20,11 @@
 # run's CLI -- the release after a merge, a GUI pipeline one day -- finds it in
 # the same place, holding two files:
 #
-#   apogee-<target>.tar.gz | .zip   the archive: the binary and the four
+#   apogee-<target>.tar.gz | .zip   the archive: the binary, the four
 #                                   completion stubs (they are part of the
-#                                   install contract, so they ride along)
+#                                   install contract, so they ride along) and
+#                                   machine-schema.json (28g, printed by the
+#                                   binary -- see lib/scripts/package.sh)
 #   apogee-<target>.source          built: the commit and the source TREE it
 #                                   was built from -- how the release after a
 #                                   merge proves the archive is exactly the

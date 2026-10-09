@@ -1,11 +1,15 @@
 #pragma once
 
+#include <nlohmann/json_fwd.hpp>
+
 #include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "ansi/ansi.h"
+#include "backends/provider_cache.h"
+#include "backends/provider_status.h"
 #include "cli/command.h"
 #include "cli/suite_residency.h"
 #include "contracts/config.h"
@@ -94,6 +98,20 @@ struct ModelRow {
     bool consumed = false;
 };
 
+/// What the listing knows about provider backends (28c): the cheap checks'
+/// view of the filesystem and the provider cache, so a vendor CLI's STATE
+/// says whether its binary is there and VERIFIED when it last answered a
+/// turn. A null `view` leaves provider rows as they were (`-`) -- what a test
+/// of something else wants; `models list` and `models info` pass this
+/// machine's.
+struct ProviderLens {
+    const backends::ExistenceView* view = nullptr;
+    const backends::ProviderCache* cache = nullptr;
+    /// The credential store an API backend's key may come from, for
+    /// `models info` (the listing has its own, beside the config).
+    const secrets::CredentialStore* store = nullptr;
+};
+
 /// Builds the listing: every configured backend, plus every model on disk.
 ///
 /// **Both halves are needed and neither is enough.** A configured backend may
@@ -113,7 +131,8 @@ struct ModelRow {
                                                      const std::filesystem::path& models_dir = {},
                                                      const std::filesystem::path& config_path = {},
                                                      const secrets::EnvSnapshot* env = nullptr,
-                                                     const BusyProgress& progress = {});
+                                                     const BusyProgress& progress = {},
+                                                     const ProviderLens& providers = {});
 
 /// Renders rows as an aligned table. Empty input yields a single explanatory
 /// line, never a bare header with nothing under it.
@@ -133,6 +152,19 @@ struct ModelRow {
 /// beyond chat, and the flag already exists.
 [[nodiscard]] std::string render_model_jsonl(const std::vector<ModelRow>& rows);
 
+/// One row as the JSONL line and the JSON document both carry it.
+[[nodiscard]] nlohmann::json model_row_json(const ModelRow& row);
+
+/// `models list --output-format json` (28h): `{"object": "list", "data":
+/// [rows], "folded": N}` -- the table's rows, a consumed snapshot folded
+/// unless `all`, as the table folds it.
+[[nodiscard]] nlohmann::json render_model_document(const std::vector<ModelRow>& rows, bool all);
+
+/// `models info` and `models status` as JSON (28h): their record of
+/// `label: value` lines as `{"fields": [{"field", "value"}...]}`, in order,
+/// labels as printed and a value's indented continuation joined to it.
+[[nodiscard]] nlohmann::json render_record_document(std::string_view text);
+
 /// The body of `apogee models info <name>`: a backend, or -- with
 /// `models_dir` -- one set of weights in the store by its handle or id.
 /// Empty when `name` is neither.
@@ -149,7 +181,8 @@ struct ModelRow {
 /// converted from it, and whether the listing folds it.
 [[nodiscard]] std::string render_model_info(const harness::Config& config, std::string_view name,
                                             const BusyProgress& progress = {},
-                                            const std::filesystem::path& models_dir = {});
+                                            const std::filesystem::path& models_dir = {},
+                                            const ProviderLens& providers = {});
 
 /// The body of `apogee models status` — which backend each role resolves to,
 /// and whether that backend is actually configured.

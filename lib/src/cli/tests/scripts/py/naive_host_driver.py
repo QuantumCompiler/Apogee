@@ -35,12 +35,16 @@ import time
 from pathlib import Path
 
 DOCUMENTED_EVENTS = {
-    # The whole outbound vocabulary machine-mode.md names. Anything else is an
-    # unknown type the doc tells us to ignore (rule 1).
+    # The outbound vocabulary, until the binary's own schema replaces it: the
+    # doc (since 28g) points a host at `apogee __machine-schema` instead of a
+    # transcription. Anything else is an unknown type the doc tells us to
+    # ignore (rule 1).
     "session", "thinking", "thinking_delta", "tool_status",
     "answer_start", "answer_delta", "answer_end", "result",
     "question", "error",
 }
+VALIDATOR = None    # the schema's validator, when a stock one is installed
+SCHEMA_ERRORS = []  # events the schema rejected
 
 WALLS = []          # [(id, title, evidence)]
 TRANSCRIPT = []     # every JSONL line both directions, annotated
@@ -78,6 +82,7 @@ class Child:
         self.sel.register(self.proc.stdout, selectors.EVENT_READ)
         self.log_name = log_name
         self.unknown_types = []
+        self.session = None
 
     def send(self, obj) -> None:
         line = json.dumps(obj)
@@ -107,6 +112,9 @@ class Child:
             except json.JSONDecodeError:
                 sys.exit(f"[{self.log_name}] stdout carried a non-JSON line "
                          f"(the doc forbids this): {line!r}")
+            if VALIDATOR is not None:
+                for error in VALIDATOR.iter_errors(event):
+                    SCHEMA_ERRORS.append(f"{line[:120]} -- {error.message}")
             etype = event.get("type", "")
             if etype not in DOCUMENTED_EVENTS:
                 self.unknown_types.append(etype)  # rule 1: tolerate, note
@@ -123,13 +131,21 @@ class Child:
         return status
 
 
-def drive_conversation(child: Child, turns):
-    """Send user turns; answer questions per the doc; collect results."""
+def drive_conversation(child: Child, turns, hello=None):
+    """Send user turns; answer questions per the doc; collect results.
+
+    With `hello`, it is the first line sent -- the doc's optional handshake
+    (28d) -- and the session event is kept on the child for the host to read.
+    """
     results, questions_seen = [], []
     turn_iter = iter(turns)
+    if hello is not None:
+        child.send(hello)
     child.send({"type": "user", "text": next(turn_iter)})
     for event in child.events():
-        if event["type"] == "question":
+        if event["type"] == "session":
+            child.session = event
+        elif event["type"] == "question":
             questions_seen.append(event)
             # A permission question carries kind/tool/target; ask_user does
             # not. The host's whole dispatch is this one field.
@@ -215,6 +231,26 @@ def main():
     (work / "actor.json").write_text(json.dumps(script))
 
     print("phase 0: sandbox install", flush=True)
+    # W2 -- the doc says the binary prints its protocol as a JSON Schema: the
+    # host reads its vocabulary from it, and validates every event against it
+    # when a stock validator is at hand.
+    global DOCUMENTED_EVENTS, VALIDATOR
+    printed = run_cli(binary, ["__machine-schema"], env, project, may_fail=True)
+    schema = None
+    if printed.returncode == 0:
+        try:
+            schema = json.loads(printed.stdout)
+        except json.JSONDecodeError:
+            schema = None
+    if schema is not None:
+        DOCUMENTED_EVENTS = {name[len("event_"):] for name in schema.get("$defs", {})
+                             if name.startswith("event_")}
+        try:
+            from jsonschema import Draft202012Validator
+            VALIDATOR = Draft202012Validator(schema)
+        except ImportError:
+            print("  (no jsonschema module: events read by the schema's vocabulary, not "
+                  "validated)", flush=True)
     run_cli(binary, ["config", "init"], env, project)
     run_cli(binary, ["config", "add-backend", "actor", "--type", "mock",
                      "--model-path", str(work / "actor.json")], env, project)
@@ -224,17 +260,26 @@ def main():
     print("phase 1: the embedded conversation", flush=True)
 
     # W1 -- before the first byte: how does a host know what this binary
-    # speaks? Nothing to call: the child talks first, and only after a turn.
-    wall("W1", "No handshake or discovery: the host learns protocol_version "
-               "only from the session event after spawning, and cannot "
-               "declare itself or ask what this binary supports",
-         "machine-mode.md names no request; `session` is emitted, not asked")
-
+    # speaks? Since 28d the doc names a `hello` the host may send first and
+    # a `capabilities` object on `session`; the host uses both, knowing only
+    # the doc, and records the wall only if the binary does not deliver.
     child = Child(binary, env, project, "chat")
     results, questions = drive_conversation(
         child, ["Which colour should the banner be? Then write it down.",
-                "thanks!"])
+                "thanks!"],
+        hello={"type": "hello", "client": {"name": "naive-host", "version": "0.0.1"},
+               "wants": ["tools", "ask"]})
     status = child.close()
+    caps = (child.session or {}).get("capabilities")
+    if isinstance(caps, dict) and {"events", "accepts", "tools", "ask", "schema"} <= set(caps):
+        print(f"  W1 closed: session announced capabilities -- accepts={caps['accepts']} "
+              f"tools={caps['tools']} ask={caps['ask']} schema={caps['schema']} "
+              f"({len(caps['events'])} event types)", flush=True)
+    else:
+        wall("W1", "No handshake or discovery: the host learns protocol_version "
+                   "only from the session event after spawning, and cannot "
+                   "declare itself or ask what this binary supports",
+             f"session event: {child.session!r}")
 
     ok = True
     if status != 0:
@@ -252,18 +297,55 @@ def main():
           f"banner.txt={'written' if banner.exists() else 'ABSENT'} exit={status}")
 
     # Walls the conversation itself evidences.
-    wall("W2", "No machine-readable schema: the host's event vocabulary is "
-               "hand-transcribed from prose, and nothing ships to validate a "
-               "stream against",
-         "DOCUMENTED_EVENTS in this file IS the transcription")
-    wall("W3", "No turn or correlation ids: deltas and results belong to 'the "
-               "current turn' by position only, so a host cannot pipeline "
-               "turns or attribute events after a race",
-         "result events carry no id; the driver serializes turns to stay safe")
-    wall("W4", "No cancel: the only way out of an in-flight turn is killing "
-               "the child or failing the turn by closing stdin",
-         "machine-mode.md: closing stdin with a question outstanding fails "
-         "the turn; no interrupt message exists")
+    if schema is not None and not SCHEMA_ERRORS:
+        print(f"  W2 closed: the vocabulary read from __machine-schema "
+              f"({len(DOCUMENTED_EVENTS)} event types, schema "
+              f"{schema.get('x-apogee', {}).get('schema')}), every event "
+              f"{'validated' if VALIDATOR is not None else 'read'} against it", flush=True)
+    else:
+        wall("W2", "No machine-readable schema: the host's event vocabulary is "
+                   "hand-transcribed from prose, and nothing ships to validate a "
+                   "stream against",
+             f"__machine-schema: {printed.returncode}; rejected: {SCHEMA_ERRORS[:3]}")
+    # W3 -- since 28f the doc says every event of a turn carries `turn`, the
+    # number of its user line. The host checks the conversation's results.
+    turns = [r.get("turn") for r in results]
+    if turns == list(range(1, len(results) + 1)) and results:
+        print(f"  W3 closed: results carry their turn numbers {turns}", flush=True)
+    else:
+        wall("W3", "No turn or correlation ids: deltas and results belong to 'the "
+                   "current turn' by position only, so a host cannot pipeline "
+                   "turns or attribute events after a race",
+             f"result turns: {turns}")
+
+    # W4 -- since 28f the doc names `{"type":"cancel"}`. The host's Stop
+    # button: a turn waiting on a question, cancelled; the same child then
+    # answers the next turn.
+    stopper = Child(binary, env, project, "cancel")
+    stopper.send({"type": "user", "text": "Which colour should the banner be?"})
+    stopped, next_turn = None, None
+    for event in stopper.events():
+        if event["type"] == "question" and stopped is None:
+            stopper.send({"type": "cancel"})
+        elif event["type"] == "question":
+            # The next turn may ask too: answered as the conversation did.
+            stopper.send({"type": "answer",
+                          "text": "yes" if event.get("kind") == "permission" else "blue"})
+        elif event["type"] == "result" and stopped is None:
+            stopped = event
+            stopper.send({"type": "user", "text": "thanks!"})
+        elif event["type"] in ("result", "error"):
+            next_turn = event
+            break
+    stopper.close()
+    if stopped and stopped.get("finish_reason") == "cancelled" and next_turn is not None:
+        print(f"  W4 closed: cancel ended turn {stopped.get('turn')} "
+              f"(finish_reason cancelled); turn {next_turn.get('turn')} answered after it",
+              flush=True)
+    else:
+        wall("W4", "No cancel: the only way out of an in-flight turn is killing "
+                   "the child or failing the turn by closing stdin",
+             f"after a cancel: {stopped!r}, then {next_turn!r}")
     if child.unknown_types:
         wall("W5", "Undocumented event types observed (rule 1 absorbed them, "
                    "but a host cannot know if they mattered)",
@@ -322,20 +404,28 @@ def main():
         round_trip = False
 
     # ================= Phase 3: the read surface =============================
+    # Since 28h the doc's CLI-command section names `--output-format json` on
+    # the reads a host UI needs: the host populates a model picker and lists
+    # the rest without screen-scraping, and records W7 only if they are prose.
     print("phase 3: the read surface a host UI gets", flush=True)
-    models_out = run_cli(binary, ["models"], env, project, may_fail=True)
-    first = (models_out.stdout or models_out.stderr).strip().splitlines()
-    is_json = False
-    try:
-        json.loads(first[0]) if first else None
-        is_json = True
-    except (json.JSONDecodeError, IndexError):
-        pass
-    wall("W7", "Reads are prose: 'everything else is a CLI command', but the "
-               "read commands emit human text, so a host UI listing models or "
-               "servers screen-scrapes or re-reads config files itself",
-         f"`apogee models` first line: {first[0][:100] if first else '(empty)'!r} "
-         f"(json={is_json}); no --output-format on read commands")
+    reads = {}
+    for command in (["models", "list"], ["chats", "list"], ["agents", "list"],
+                    ["mcp", "list"], ["check"]):
+        proc = run_cli(binary, [*command, "--output-format", "json"], env, project,
+                       may_fail=True)
+        try:
+            reads[" ".join(command)] = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            reads[" ".join(command)] = None
+    picker = [row.get("backend") for row in (reads.get("models list") or {}).get("data", [])]
+    if all(isinstance(document, dict) for document in reads.values()) and picker:
+        print(f"  W7 closed: {len(reads)} reads as JSON documents; the model picker: {picker}",
+              flush=True)
+    else:
+        wall("W7", "Reads are prose: 'everything else is a CLI command', but the "
+                   "read commands emit human text, so a host UI listing models or "
+                   "servers screen-scrapes or re-reads config files itself",
+             f"documents: { {k: isinstance(v, dict) for k, v in reads.items()} }")
 
     # ---- write the evidence -------------------------------------------------
     (findings / "transcript.txt").write_text("\n".join(TRANSCRIPT) + "\n")

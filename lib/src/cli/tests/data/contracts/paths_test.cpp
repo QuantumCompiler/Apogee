@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
+#include <fstream>
 #include <optional>
 #include <random>
 #include <stdexcept>
@@ -24,7 +25,7 @@ TEST_CASE("APOGEE_HOME relocates the whole tree", "[paths]") {
     CHECK(apogee_home() == std::filesystem::path{"/tmp/apogee-somewhere"});
     CHECK(apogee::harness::config_dir() == std::filesystem::path{"/tmp/apogee-somewhere/config"});
     CHECK(apogee::harness::default_config_path() ==
-          std::filesystem::path{"/tmp/apogee-somewhere/config/config.yaml"});
+          std::filesystem::path{"/tmp/apogee-somewhere/config/config.json"});
 }
 
 TEST_CASE("without the override the tree is ~/.apogee", "[paths]") {
@@ -34,14 +35,14 @@ TEST_CASE("without the override the tree is ~/.apogee", "[paths]") {
 #if !defined(_WIN32)
     CHECK(apogee_home() == std::filesystem::path{"/home/tester/.apogee"});
     CHECK(apogee::harness::default_config_path() ==
-          std::filesystem::path{"/home/tester/.apogee/config/config.yaml"});
+          std::filesystem::path{"/home/tester/.apogee/config/config.json"});
 #else
     SUCCEED("HOME is not how Windows reports a home directory");
 #endif
 }
 
 TEST_CASE("an empty APOGEE_HOME is ignored rather than rooting at the filesystem root", "[paths]") {
-    // Treating "" as a valid root would put the config at /config/config.yaml.
+    // Treating "" as a valid root would put the config at /config/config.json.
     const EnvGuard empty{"APOGEE_HOME", ""};
     const EnvGuard home{"HOME", "/home/tester"};
 
@@ -74,7 +75,7 @@ TEST_CASE("an explicit --config wins over the default location", "[paths]") {
     CHECK(apogee::harness::resolve_config_path("/elsewhere/mine.yaml") ==
           std::filesystem::path{"/elsewhere/mine.yaml"});
     CHECK(apogee::harness::resolve_config_path("") ==
-          std::filesystem::path{"/tmp/apogee-somewhere/config/config.yaml"});
+          std::filesystem::path{"/tmp/apogee-somewhere/config/config.json"});
 }
 
 // --- The root chain (M10) ---------------------------------------------------
@@ -159,7 +160,7 @@ TEST_CASE("with no flag and no APOGEE_HOME each channel's build owns its own roo
         const RootResolution resolved = apogee::harness::resolve_root(at_home(channel));
         REQUIRE(resolved.ok());
         CHECK(resolved.root == home_root(channel));
-        CHECK(resolved.config == home_root(channel) / "config" / "config.yaml");
+        CHECK(resolved.config == home_root(channel) / "config" / "config.json");
         CHECK(resolved.rung == RootRung::Baked);
         CHECK(resolved.channel == channel);
         CHECK(apogee::harness::root_reason(resolved) ==
@@ -193,7 +194,7 @@ TEST_CASE("a channel flag beats the baked channel, every flag against every buil
             const RootResolution resolved = apogee::harness::resolve_root(inputs);
             REQUIRE(resolved.ok());
             CHECK(resolved.root == home_root(asked));
-            CHECK(resolved.config == home_root(asked) / "config" / "config.yaml");
+            CHECK(resolved.config == home_root(asked) / "config" / "config.json");
             CHECK(resolved.rung == RootRung::Flag);
             // The channel is the build's, whatever root a flag points it at.
             CHECK(resolved.channel == baked);
@@ -383,7 +384,7 @@ TEST_CASE("a channel flag in force roots the run at that channel's directory",
         const apogee::harness::RootFlagScope scope{flag_for(Channel::Test)};
         CHECK(apogee_home() == sandbox.home.path() / ".apogee-test");
         CHECK(apogee::harness::default_config_path() ==
-              sandbox.home.path() / ".apogee-test" / "config" / "config.yaml");
+              sandbox.home.path() / ".apogee-test" / "config" / "config.json");
         CHECK(apogee::harness::current_root().rung == RootRung::Flag);
     }
     // The scope gone, the flag is gone: a run's choice is never persisted.
@@ -449,4 +450,33 @@ TEST_CASE("uninstall's root is the build's own, whatever flag is in force",
     // APOGEE_HOME is still honored: every sandboxed uninstall stays hermetic.
     const EnvGuard override_root{"APOGEE_HOME", sandbox.elsewhere.path().string()};
     CHECK(apogee::harness::install_home() == sandbox.elsewhere.path());
+}
+
+TEST_CASE("a root's config is config.json, or the config.yaml an older install holds",
+          "[paths][config]") {
+    const apogee::testing::TempDir dir{"paths-config-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path config = dir.path() / "config";
+    std::filesystem::create_directories(config);
+    const auto touch = [](const std::filesystem::path& file) { std::ofstream{file} << ""; };
+    // Nothing there: the file a fresh install writes.
+    CHECK(apogee::harness::config_file_in(config) == config / "config.json");
+    CHECK(apogee::harness::config_conflict(config).empty());
+    // Only the YAML: the compat read serves it, and names it legacy.
+    touch(config / "config.yaml");
+    CHECK(apogee::harness::config_file_in(config) == config / "config.yaml");
+    CHECK(apogee::harness::is_legacy_config_path(config / "config.yaml"));
+    CHECK_FALSE(apogee::harness::is_legacy_config_path(config / "config.json"));
+    CHECK(apogee::harness::config_conflict(config).empty());
+    // Both: the JSON is the layout's, and the pair is refused, both named --
+    // which one is current is never guessed.
+    touch(config / "config.json");
+    CHECK(apogee::harness::config_file_in(config) == config / "config.json");
+    const std::string conflict = apogee::harness::config_conflict(config);
+    CHECK(conflict.find("config.yaml") != std::string::npos);
+    CHECK(conflict.find("config.json") != std::string::npos);
+    const EnvGuard home{"APOGEE_HOME", dir.path().string()};
+    CHECK_THROWS_AS((void)apogee::harness::default_config_path(), std::runtime_error);
+    // Only the JSON: silent.
+    std::filesystem::remove(config / "config.yaml");
+    CHECK(apogee::harness::default_config_path() == config / "config.json");
 }

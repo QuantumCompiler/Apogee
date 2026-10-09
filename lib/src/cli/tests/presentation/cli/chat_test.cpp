@@ -1554,8 +1554,10 @@ TEST_CASE("answers always: every answer checked, in chat and machine mode alike"
                      "\n") == 0);
     INFO(chat.out);
     // Said as notices: events of a type the protocol already has.
+    // Inside the turn, so it carries the turn's number (28f).
     CHECK(chat.out.find("{\"text\":\"validate: utility (helper) objects to the answer -- \\\"17 x "
-                        "23 is 391, not 381.\\\"\",\"type\":\"notice\"}") != std::string::npos);
+                        "23 is 391, not 381.\\\"\",\"turn\":1,\"type\":\"notice\"}") !=
+          std::string::npos);
     CHECK(chat.out.find("\"validate — asking utility (helper): Check an answer against the "
                         "question it answers.") != std::string::npos);
     const apogee::logger::Session session = HelperChat::only_session();

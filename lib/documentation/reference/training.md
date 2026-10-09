@@ -64,17 +64,18 @@ terminal, and on a pipe refuses naming this command.
 `--trainer auto` picks `mlx` on macOS/arm64, `peft` where `nvidia-smi` is on
 PATH, and says so when neither fits. Versions are floors, not exact pins.
 
-```yaml
-training:
-  python: /opt/homebrew/bin/python3.12   # the interpreter the venv is seeded FROM
-  trainer: auto            # mlx on Apple Silicon, peft with nvidia-smi; or name one
-  judge_backend: paid      # judges eval items with no `expected`; unset = they skip
-  eval_suite_path: ~/.apogee/training/suites/mine.jsonl   # `train eval` without --suite
-  retain_versions: 3       # promoted GGUFs kept per backend; 0 keeps all
-  gate_mode: hard          # hard: promote refuses an unevaluated/failing run; soft: warns
-  pipelines: {...}         # named pipelines -- see Pipelines
-  regimes: {...}           # named regimes -- see Regimes
-  cycle: {...}             # the unattended loop -- see The cycle
+```jsonc
+"training": {
+  "python": "/opt/homebrew/bin/python3.12",   // the interpreter the venv is seeded FROM
+  "trainer": "auto",            // mlx on Apple Silicon, peft with nvidia-smi; or name one
+  "judge_backend": "paid",      // judges eval items with no `expected`; unset = they skip
+  "eval_suite_path": "~/.apogee/training/suites/mine.jsonl",   // `train eval` without --suite
+  "retain_versions": 3,         // promoted GGUFs kept per backend; 0 keeps all
+  "gate_mode": "hard",          // hard: promote refuses an unevaluated/failing run; soft: warns
+  "pipelines": {},              // named pipelines -- see Pipelines
+  "regimes": {},                // named regimes -- see Regimes
+  "cycle": {}                   // the unattended loop -- see The cycle
+}
 ```
 
 `apogee check` reports the environment and its sets, every seeded script
@@ -503,17 +504,20 @@ skills -- and the last passing stage is promoted as `--as` unless
 `--no-promote`. A regime is ad hoc from flags, a `training.regimes:` entry
 by name, or a spec file, and **flags always win** over a loaded spec:
 
-```yaml
-training:
-  regimes:
-    everything:
-      teacher: paid
-      student: Qwen--Qwen2.5-0.5B
-      kits: [instruction-following, reasoning]   # ordered; each becomes one stage
-      count: 200            # examples per kit; unset = each kit's synth.count
-      promote_as: qwen-tuned
-      iters: 500            # per stage; unset = each kit's train.iters
-      temperature: 0.8      # the teacher's; unset = each kit's
+```jsonc
+"training": {
+  "regimes": {
+    "everything": {
+      "teacher": "paid",
+      "student": "Qwen--Qwen2.5-0.5B",
+      "kits": ["instruction-following", "reasoning"],   // ordered; each becomes one stage
+      "count": 200,            // examples per kit; unset = each kit's synth.count
+      "promote_as": "qwen-tuned",
+      "iters": 500,            // per stage; unset = each kit's train.iters
+      "temperature": 0.8       // the teacher's; unset = each kit's
+    }
+  }
+}
 ```
 
 `--all-kits` runs every installed kit alphabetically; an explicit `--kit`
@@ -536,19 +540,24 @@ Unattended, scheduler-invoked training: one invocation is **one gated
 pass**, and there is no daemon and no `--watch` -- schedule it with
 launchd or cron. Configure it under `training.cycle:`:
 
-```yaml
-training:
-  cycle:
-    pipeline: skills              # a training.pipelines: name, or a spec file
-    backend: qwen-nightly         # where a passing cycle promotes
-    regression_threshold: 0.0     # tolerated drop against the last pass and the anchor
-    circuit_breaker_k: 3          # consecutive failures that halt the loop; 0 disables
-    sources:
-      - type: directory           # *.jsonl in training/cycle/queue/ (or `dir:`)
-      - type: sessions            # your own chats
-        log_consent: true         # REQUIRED for this source
-        backend: qwen-nightly     # only chats on this backend (optional)
-        since: 2026-09-01         # only chats from this date (optional)
+```jsonc
+"training": {
+  "cycle": {
+    "pipeline": "skills",              // a training.pipelines name, or a spec file
+    "backend": "qwen-nightly",         // where a passing cycle promotes
+    "regression_threshold": 0.0,       // tolerated drop against the last pass and the anchor
+    "circuit_breaker_k": 3,            // consecutive failures that halt the loop; 0 disables
+    "sources": [
+      {"type": "directory"},           // *.jsonl in training/cycle/queue/ (or `dir`)
+      {
+        "type": "sessions",            // your own chats
+        "log_consent": true,           // REQUIRED for this source
+        "backend": "qwen-nightly",     // only chats on this backend (optional)
+        "since": "2026-09-01"          // only chats from this date (optional)
+      }
+    ]
+  }
+}
 ```
 
 One pass: the **lock** (`cycle/cycle.lock`, created exclusively; a second

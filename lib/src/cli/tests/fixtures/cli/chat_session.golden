@@ -175,21 +175,21 @@ ROOT<hi>
 {"type":"nonsense"}
 --- exit 0
 --- stdout
-{"model":"root","protocol_version":1,"type":"session"}
-{"type":"thinking"}
-{"type":"answer_start"}
-{"text":"ROOT<hel","type":"answer_delta"}
-{"text":"lo>","type":"answer_delta"}
-{"type":"answer_end"}
-{"finish_reason":"stop","model":"root","text":"ROOT<hello>","type":"result"}
-{"type":"thinking"}
-{"type":"answer_start"}
-{"text":"ROOT</pl","type":"answer_delta"}
-{"text":"ay summa","type":"answer_delta"}
-{"text":"rize-ver","type":"answer_delta"}
-{"text":"ify x>","type":"answer_delta"}
-{"type":"answer_end"}
-{"finish_reason":"stop","model":"root","text":"ROOT</play summarize-verify x>","type":"result"}
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel"],"ask":false,"events":["session","thinking","thinking_delta","memory","tool_status","notice","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished"],"schema":"2026-10-07","tools":false},"model":"root","next_turn":1,"protocol_version":1,"type":"session"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"answer_start"}
+{"text":"ROOT<hel","turn":1,"type":"answer_delta"}
+{"text":"lo>","turn":1,"type":"answer_delta"}
+{"turn":1,"type":"answer_end"}
+{"finish_reason":"stop","model":"root","text":"ROOT<hello>","turn":1,"type":"result"}
+{"turn":2,"type":"thinking"}
+{"turn":2,"type":"answer_start"}
+{"text":"ROOT</pl","turn":2,"type":"answer_delta"}
+{"text":"ay summa","turn":2,"type":"answer_delta"}
+{"text":"rize-ver","turn":2,"type":"answer_delta"}
+{"text":"ify x>","turn":2,"type":"answer_delta"}
+{"turn":2,"type":"answer_end"}
+{"finish_reason":"stop","model":"root","text":"ROOT</play summarize-verify x>","turn":2,"type":"result"}
 {"text":"no file or folder at nothing-here","type":"notice"}
 --- stderr
 === apogee chat --suite duo --output-format stream-json
@@ -197,12 +197,12 @@ ROOT<hi>
 {"type":"user","text":"hi"}
 --- exit 0
 --- stdout
-{"model":"root","protocol_version":1,"type":"session"}
-{"type":"thinking"}
-{"type":"answer_start"}
-{"text":"ROOT<hi>","type":"answer_delta"}
-{"type":"answer_end"}
-{"finish_reason":"stop","model":"root","text":"ROOT<hi>","type":"result"}
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel"],"ask":false,"events":["session","thinking","thinking_delta","memory","tool_status","notice","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished"],"schema":"2026-10-07","tools":false},"model":"root","next_turn":1,"protocol_version":1,"type":"session"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"answer_start"}
+{"text":"ROOT<hi>","turn":1,"type":"answer_delta"}
+{"turn":1,"type":"answer_end"}
+{"finish_reason":"stop","model":"root","text":"ROOT<hi>","turn":1,"type":"result"}
 --- stderr
 [apogee] suite duo: no member holds memory on this machine
 === apogee chat --suite nope

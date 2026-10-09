@@ -87,22 +87,6 @@ Resolved find_or_fail(const harness::Config& config, const std::filesystem::path
                     .catalog = std::move(found.catalog)};
 }
 
-/// `--output-format text|json` on a read, the 27j convention.
-void add_read_format(CLI::App* command, const std::shared_ptr<ReadFormat>& format) {
-    command
-        ->add_option_function<std::string>(
-            "--output-format",
-            [format](const std::string& value) {
-                const std::optional<ReadFormat> parsed = read_format_from_string(value);
-                if (!parsed.has_value()) {
-                    throw CLI::ValidationError("--output-format", "expected 'text' or 'json'");
-                }
-                *format = *parsed;
-            },
-            "Output format: text (default) or json -- one JSON document of the same facts")
-        ->type_name(words_value(read_format_names()));
-}
-
 /// `text` padded with spaces to `width` display cells, at least one after.
 std::string padded(std::string_view text, std::size_t width) {
     const std::size_t cells = ansi::display_width(text);
