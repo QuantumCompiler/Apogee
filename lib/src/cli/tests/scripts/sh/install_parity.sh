@@ -120,6 +120,16 @@ if ! APOGEE_HOME="$WORK/a" "$APOGEE_BIN" check >/dev/null 2>&1; then
     APOGEE_HOME="$WORK/a" "$APOGEE_BIN" check >&2 || true
     exit 1
 fi
+# ...and with ZERO warnings (M11): --fix seeded the starter config, and the
+# opt-in rows (the training env, the MLX runtime) are skips -- so a fresh
+# install leaves nothing for the user to resolve, and any future feature
+# that re-warns on a fresh install fails here rather than shipping.
+if ! APOGEE_HOME="$WORK/a" "$APOGEE_BIN" check --output-format json 2>/dev/null \
+        | grep -q '"warnings":0'; then
+    echo "INSTALL PARITY: a freshly seeded install reports warnings -- installs end green (M11)" >&2
+    APOGEE_HOME="$WORK/a" "$APOGEE_BIN" check >&2 || true
+    exit 1
+fi
 
 # --- Path C: a channel install, under its own root ---------------------------
 # Everything here runs with APOGEE_HOME unset and HOME pointed into the work
@@ -176,6 +186,13 @@ if [ -n "$CHANNEL_BIN" ]; then
     same_tree "$root" "the $channel channel's install"
     if ! env -u APOGEE_HOME HOME="$user" "$CHANNEL_BIN" check >/dev/null 2>&1; then
         echo "INSTALL PARITY: a fresh $channel install does not pass its own 'check'" >&2
+        env -u APOGEE_HOME HOME="$user" "$CHANNEL_BIN" check >&2 || true
+        exit 1
+    fi
+    # Zero warnings here too (M11): every channel's fresh install ends green.
+    if ! env -u APOGEE_HOME HOME="$user" "$CHANNEL_BIN" check --output-format json 2>/dev/null \
+            | grep -q '"warnings":0'; then
+        echo "INSTALL PARITY: a fresh $channel install reports warnings -- installs end green (M11)" >&2
         env -u APOGEE_HOME HOME="$user" "$CHANNEL_BIN" check >&2 || true
         exit 1
     fi

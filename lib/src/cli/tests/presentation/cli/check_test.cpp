@@ -508,6 +508,58 @@ TEST_CASE("check --fix never touches config", "[commands][check]") {
     CHECK(after == kConfig);
 }
 
+TEST_CASE("check --fix seeds the starter config where none exists, and only there",
+          "[commands][check]") {
+    // M11: an absent config has no meaning to preserve -- `--fix` creates the
+    // starter template, byte-identical to `config init`'s output, and says
+    // so. An existing file of either format is never touched (the case
+    // above), and a path a --config flag named elsewhere is not the
+    // install's to seed.
+    Install install;
+    install.seed();
+
+    CheckInputs inputs = inputs_for(install);
+    inputs.config_path = install.root / "config" / apogee::harness::kConfigFileName;
+    REQUIRE_FALSE(std::filesystem::exists(inputs.config_path));
+
+    // Without --fix: the warning, exactly as before.
+    const CheckReport before = run_checks(inputs);
+    const auto* row = row_with(before, std::string{apogee::harness::kConfigFileName});
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Warn);
+    CHECK(row->remedy == "apogee config init");
+
+    const std::vector<std::string> fixed = apogee::commands::apply_fixes(inputs);
+    bool seeded = false;
+    for (const std::string& line : fixed) {
+        seeded = seeded || line.find("starter config") != std::string::npos;
+    }
+    CHECK(seeded);
+    REQUIRE(std::filesystem::exists(inputs.config_path));
+
+    // Byte-identical to what `config init` writes.
+    std::ifstream in(inputs.config_path, std::ios::binary);
+    const std::string written{std::istreambuf_iterator<char>{in},
+                              std::istreambuf_iterator<char>{}};
+    CHECK(written == std::string{apogee::harness::config_template()});
+
+    // A second pass seeds nothing: the file exists now.
+    load_into(inputs);
+    for (const std::string& line : apogee::commands::apply_fixes(inputs)) {
+        CHECK(line.find("starter config") == std::string::npos);
+    }
+
+    // A config path named elsewhere is not the install's config: never seeded.
+    Install other;
+    other.seed();
+    CheckInputs elsewhere = inputs_for(other);
+    elsewhere.config_path = other.root / "elsewhere.json";
+    for (const std::string& line : apogee::commands::apply_fixes(elsewhere)) {
+        CHECK(line.find("starter config") == std::string::npos);
+    }
+    CHECK_FALSE(std::filesystem::exists(elsewhere.config_path));
+}
+
 TEST_CASE("a world-readable private directory fails and --fix tightens it",
           "[commands][check][modes]") {
     if (!apogee::harness::supports_private_modes()) {
@@ -1214,8 +1266,9 @@ TEST_CASE("the doctor's Graph section checks a code graph's trees and languages"
 }
 
 TEST_CASE(
-    "the training rows: the environment a warning with its command, seeded kits and the "
-    "script ok, an edited script kept, a broken kit a failure, a missing hf_dir a warning",
+    "the training rows: the environment a skip with its command (M11 -- set up on request, "
+    "like the MLX rows), seeded kits and the script ok, an edited script kept, a broken kit "
+    "a failure, a missing hf_dir a warning",
     "[commands][check][training]") {
     Install install;
     install.seed();
@@ -1224,7 +1277,8 @@ TEST_CASE(
     CheckReport report = run_checks(inputs);
     const apogee::commands::CheckRow* env = row_with(report, "python env");
     REQUIRE(env != nullptr);
-    CHECK(env->status == Status::Warn);
+    CHECK(env->status == Status::Skipped);
+    CHECK(env->detail.find("only 'datasets prepare'") != std::string::npos);
     CHECK(env->remedy == "apogee train setup");
     const apogee::commands::CheckRow* missing = row_with(report, "script: prepare_dataset.py");
     REQUIRE(missing != nullptr);

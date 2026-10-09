@@ -418,7 +418,12 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
 
     const harness::Config& config = inputs.config;
     if (config.backends.empty()) {
-        add(report, Status::Warn, "Config", "backends", "none configured",
+        // A fresh install's natural state, not a defect (M11): the config is
+        // seeded before any key or model exists, like the models row's
+        // "bundles none". The offer and the scan exist to move it along.
+        add(report, Status::Skipped, "Config", "backends",
+            "none configured yet -- a chat needs one; 'apogee providers scan --register' finds "
+            "this machine's providers",
             "apogee config add-backend <name> --type <type>");
         return;
     }
@@ -1724,8 +1729,12 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
     const training::PythonEnv env{training / "venv"};
     const training::PythonEnvStatus status = env.status();
     if (!status.exists) {
-        add(report, Status::Warn, "Training", "python env",
-            "not created -- 'datasets prepare' and the trainers need it (never the system Python)",
+        // Not set up is not a defect (M11): the environment is created on
+        // request, like the MLX runtime rows beside it -- a skip with its
+        // command, so a fresh install reports zero warnings.
+        add(report, Status::Skipped, "Training", "python env",
+            "not set up -- only 'datasets prepare' and the trainers need it (never the system "
+            "Python)",
             "apogee train setup");
     } else if (!status.error.empty()) {
         add(report, Status::Warn, "Training", "python env",
@@ -2080,9 +2089,12 @@ std::vector<std::string> apply_fixes(const CheckInputs& inputs) {
     // not caught by anything, because the copy the installers actually reached
     // was still correct. Two implementations is the bug, even when both agree.
     //
-    // Config content is still untouched: seeding creates directories and sets
-    // modes, and never opens the config. Repairing the local install is a
-    // repair; guessing what a dangling model_path meant is not.
+    // An EXISTING config is still untouched, whatever its format or state:
+    // repairing the local install is a repair; guessing what a dangling
+    // model_path meant is not. The one config act below (M11) is seeding the
+    // starter template where NO config file exists at all -- an absent file
+    // has no meaning to preserve, so creating it decides nothing -- and only
+    // at the install's own path, never one a --config flag named elsewhere.
     const harness::SeedResult seeded = harness::seed_data_directory(inputs.home);
 
     std::vector<std::string> done;
@@ -2098,6 +2110,16 @@ std::vector<std::string> apply_fixes(const CheckInputs& inputs) {
     }
     if (!seeded.ok()) {
         done.push_back("could not finish: " + seeded.error);
+    }
+    if (inputs.config_missing && inputs.config_error.empty() &&
+        inputs.config_path == inputs.home / "config" / harness::kConfigFileName) {
+        try {
+            harness::save_config_template(inputs.config_path, /*force=*/false);
+            done.push_back("seeded " + inputs.config_path.string() +
+                           " -- the starter config (no config file existed)");
+        } catch (const std::exception& e) {
+            done.push_back("could not seed the starter config: " + std::string{e.what()});
+        }
     }
     // Staging an interrupted run left in the model store: Apogee's own
     // scratch, never the user's file, and never a live run's (see the
@@ -2274,8 +2296,9 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
 
     CLI::App* cmd = root.add_subcommand(std::string{name()}, std::string{summary()});
     cmd->add_flag("--fix", flags->fix,
-                  "Repair what is safely repairable: missing directories and private modes. "
-                  "Never touches your config.");
+                  "Repair what is safely repairable: missing directories, private modes, and "
+                  "the starter config where no config file exists at all. Never touches an "
+                  "existing config.");
     cmd->add_flag("--no-color", flags->no_color, "Disable coloured output");
     cmd->add_flag("-q,--quiet", flags->quiet, "No progress line while it checks");
     cmd->add_flag("--refresh-providers", flags->refresh_providers,
@@ -2331,21 +2354,27 @@ bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options) {
         inputs.executable = platform::executable_path();
     }
 
-    std::error_code exists_code;
-    if (!inputs.config_error.empty()) {
-        // Refused before it was read: nothing to load.
-    } else if (!std::filesystem::exists(inputs.config_path, exists_code)) {
-        inputs.config_missing = true;
-    } else {
-        try {
-            const std::string content = harness::read_config_file(inputs.config_path);
-            inputs.config = harness::parse_config(content, inputs.config_path.string());
-            inputs.config_legacy = !harness::jsonc::looks_like_jsonc(content);
-            inputs.config_missing_options = harness::missing_template_options(content);
-        } catch (const harness::ConfigError& e) {
-            inputs.config_error = e.what();
+    const auto read_config_state = [](CheckInputs& state) {
+        std::error_code exists_code;
+        if (!state.config_error.empty()) {
+            // Refused before it was read: nothing to load.
+            return;
         }
-    }
+        if (!std::filesystem::exists(state.config_path, exists_code)) {
+            state.config_missing = true;
+            return;
+        }
+        state.config_missing = false;
+        try {
+            const std::string content = harness::read_config_file(state.config_path);
+            state.config = harness::parse_config(content, state.config_path.string());
+            state.config_legacy = !harness::jsonc::looks_like_jsonc(content);
+            state.config_missing_options = harness::missing_template_options(content);
+        } catch (const harness::ConfigError& e) {
+            state.config_error = e.what();
+        }
+    };
+    read_config_state(inputs);
 
     std::optional<std::vector<std::string>> fixed;
     if (options.fix && options.json) {
@@ -2368,6 +2397,11 @@ bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options) {
         if (done.empty()) {
             std::cout << "nothing to fix\n";
         }
+    }
+    if (options.fix && inputs.config_missing) {
+        // A seeded starter config (M11) is part of this same pass's report:
+        // read it the one way the pass reads any config.
+        read_config_state(inputs);
     }
 
     if (options.refresh_providers) {

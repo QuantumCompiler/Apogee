@@ -2204,6 +2204,17 @@ Asked for directly (Taylor), in three reports: "Not all subcommands have tab aut
 **Verified.** The full suite on macOS, 2912/2912; `format-check`; the GCC check, all 537 files with the MinGW-w64 compiler the x64 job uses. Nothing local compiles the arm64 job's libc++ side; the next pull-request run is the proof for both Windows jobs.
 
 
+### 2026-10-08 — `install-ends-green` (maintenance item M11): a fresh install reports zero warnings
+
+**Why.** A real fresh-install `check` ended `no failures, 2 warning(s)` -- the missing config and the training venv -- and the user's call was that installing should resolve its own warnings. The two needed different fixes, because one is offline and deterministic while the other is pip over the network, which the SPEC's *installers download nothing unasked* forbids.
+
+- [x] **`check --fix` seeds the starter config where no config file exists at all** (`check.cpp`: the seed in `apply_fixes`, right after the one seeding path runs): the JSONC template, byte-identical to `config init`'s output, written only at the install's own `config/config.json` -- never at a path a `--config` flag named elsewhere -- and said as `seeded <path> -- the starter config (no config file existed)`. The same pass's report then reads the seeded file (`read_config_state`, the one loader hoisted and re-run after fixes), so `--fix` ends green rather than reporting the warning it just repaired. An existing config of either format is never touched under any flag; the invariant's letter in CLAUDE.md now says so beside the new power.
+- [x] **The opt-in rows are skips, not warnings.** The training venv row joins the MLX rows' idiom (`not set up -- only 'datasets prepare' and the trainers need it (never the system Python)`): created on request, its command kept. And the tightened gate found a third warning the user's transcript could never show -- `backends: none configured` renders only once a config parses, which the seed made true on every fresh install -- reclassified the same way, its detail now naming `providers scan --register` as the found-for-you path. A fresh install has no keys and no models by design; the models row already reads "bundles none" as ok.
+- [x] **`cli.install_parity` enforces it**: a freshly seeded install must report `"warnings":0` (the compact JSON document), on the release path and on every channel's own root -- so a future feature that quietly re-warns on fresh installs fails the suite rather than shipping. The gate caught the backends row in this very build, which is the point.
+- [x] **Tests**: the seed-if-absent table in `check_test.cpp` (absent -> created, said, byte-equal to the template; present YAML and JSONC -> untouched byte-for-byte; a path named elsewhere -> never seeded; a second pass -> a no-op), the venv skip's wording, the existing `--fix`-never-touches-config case unchanged and green. Full suite: 2,996 ctest cases, 100% passed.
+
+Trade-off, recorded: `warn` is now reserved for real defects -- a fresh install shows only `ok` and `skip` rows, and every skip carries the command that changes it.
+
 ## Milestone L — The vendor-CLI family
 
 **Goal.** A fifth backend and, more importantly, the machinery the rest of the vendor-CLI family will be built on: Claude driven through the official `claude` CLI as a **long-lived child process** — the subscription-auth path beside the API-key path from Milestone D. It reuses that backend's IR mapping and typed sinks and none of its HTTP: this one speaks JSONL over pipes.
