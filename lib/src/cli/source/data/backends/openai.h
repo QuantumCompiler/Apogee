@@ -20,7 +20,8 @@ namespace apogee::backends {
 /// behind one key, so one entry does both: `model` answers, `embedding_model`
 /// vectorises. That is the per-provider capability the harness discovers; a
 /// type allowlist would have had to be edited to learn this.
-class OpenAIProvider final : public harness::LLMProvider, public harness::EmbeddingCapable {
+class OpenAIProvider final : public harness::LLMProvider, public harness::EmbeddingCapable,
+                            public harness::CatalogListing {
 public:
     struct Options {
         std::string backend_name = "openai";
@@ -57,6 +58,11 @@ public:
 
     [[nodiscard]] std::vector<harness::ModelInfo> list_models(
         const harness::CancellationToken& cancellation) override;
+    /// The vendor's live model catalogue (M13): ids verbatim from the models
+    /// endpoint, paging followed; authenticated with this entry's key.
+    [[nodiscard]] std::vector<harness::ModelInfo> list_catalog(
+        const harness::CancellationToken& cancellation) override;
+
 
     // --- EmbeddingCapable ---------------------------------------------------
 

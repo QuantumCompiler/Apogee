@@ -61,6 +61,7 @@ add_library(apogee_tests_data OBJECT
     data/transport/sse_parser_test.cpp
     data/transport/http_client_test.cpp
     data/backends/anthropic_test.cpp
+    data/backends/model_roster_test.cpp
     data/backends/factory_test.cpp
     data/backends/openai_test.cpp
     data/backends/google_test.cpp
@@ -249,6 +250,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/config_lifecycle_test.cpp
     presentation/cli/attachment_guard_test.cpp
     presentation/operations/retrieval_test.cpp
+    presentation/operations/backend_names_test.cpp
     presentation/operations/suites_test.cpp
     presentation/cli/helpers_test.cpp
     presentation/cli/tool_vectors_test.cpp

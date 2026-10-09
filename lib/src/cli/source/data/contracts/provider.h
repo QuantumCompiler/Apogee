@@ -106,6 +106,32 @@ public:
     }
 };
 
+/// Implemented by a provider that can list its vendor's live model
+/// catalogue (M13) -- every model the service offers today, from the
+/// vendor's own models endpoint.
+///
+/// Deliberately not `list_models`, whose scope is the one model a backend
+/// entry pins (its own recorded reason): the catalogue is the vendor's
+/// roster, fetched on the user's word at registration or an explicit
+/// refresh, cached disposably, and never read on a hot path. A capability,
+/// not a type test: whether a provider can answer is the provider's to say.
+class CatalogListing {
+public:
+    CatalogListing() = default;
+    virtual ~CatalogListing() = default;
+    CatalogListing(const CatalogListing&) = delete;
+    CatalogListing& operator=(const CatalogListing&) = delete;
+    CatalogListing(CatalogListing&&) = delete;
+    CatalogListing& operator=(CatalogListing&&) = delete;
+
+    /// The vendor's models, as its endpoint lists them today -- ids
+    /// verbatim, paging followed. Network, authenticated through the entry's
+    /// own key; throws a ProviderError the caller reports, never a partial
+    /// roster.
+    [[nodiscard]] virtual std::vector<ModelInfo> list_catalog(
+        const CancellationToken& cancellation) = 0;
+};
+
 /// Implemented by a provider whose model loads lazily and can report progress.
 class StatusReporting {
 public:

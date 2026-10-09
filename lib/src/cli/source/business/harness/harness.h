@@ -217,6 +217,14 @@ public:
     /// Non-owning; valid as long as the provider stays registered.
     [[nodiscard]] EmbeddingCapable* embedder_for(std::string_view model) const noexcept;
 
+    /// Whether the backend serving `model` can list its vendor's live model
+    /// catalogue (M13). False for an unroutable model.
+    [[nodiscard]] bool can_list_catalog(std::string_view model) const noexcept;
+
+    /// The catalogue interface for `model`, or nullptr when it cannot list.
+    /// Non-owning; valid as long as the provider stays registered.
+    [[nodiscard]] CatalogListing* catalog_for(std::string_view model) const noexcept;
+
     /// Whether the backend serving `model` puts tool calls in the text stream.
     [[nodiscard]] bool uses_in_text_tool_calls(std::string_view model) const noexcept;
 

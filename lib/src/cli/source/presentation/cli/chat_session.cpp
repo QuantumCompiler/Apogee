@@ -439,6 +439,31 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // Every configured backend is constructed up front, which is what makes
     // /model an instant switch rather than a reconstruction -- and why
     // history has to be neutral IR rather than a vendor transcript.
+    // A model that is neither a backend key nor an entry's `model:` may be a
+    // vendor roster's (M13): a sole configured owner pins that entry's model
+    // for this run, in memory only -- the config file never changes; two
+    // owners refuse naming both; none falls through to the existing refusal.
+    SessionFlags roster_adjusted;
+    if (!flags->model.empty() && !names_a_configured_backend(config, flags->model)) {
+        const RosterResolution roster = resolve_roster_model(config, flags->model);
+        if (roster.owners.size() > 1) {
+            std::string owners;
+            for (const std::string& type : roster.owners) {
+                owners += (owners.empty() ? std::string{} : " and ") + type;
+            }
+            fail_user(mode, "'" + flags->model + "' is on " + owners +
+                      "'s rosters -- pin it to one entry with 'apogee config add-backend "
+                      "<name> --type <type> --model " + flags->model + "'");
+        }
+        if (!roster.backend.empty()) {
+            config.backends.at(roster.backend).model = roster.model;
+            std::cerr << "model '" << roster.model << "' -- " << roster.owners.front()
+                      << "'s roster, on backend '" << roster.backend << "'\n";
+            roster_adjusted = *flags;
+            roster_adjusted.model = roster.backend;
+            flags = &roster_adjusted;
+        }
+    }
     harness::Harness harness{config};
     backends::BuildOptions build_options;
     build_options.web_search = flags->search;

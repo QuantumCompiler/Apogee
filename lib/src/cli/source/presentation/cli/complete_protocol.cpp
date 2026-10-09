@@ -9,6 +9,7 @@
 #include <sstream>
 #include <string_view>
 
+#include "backends/model_roster.h"
 #include "cli/complete_sources.h"
 #include "contracts/paths.h"
 
@@ -146,10 +147,27 @@ namespace {
         case ValueKind::Names:
             return offer_names(value, sources, context, current);
         case ValueKind::Backend: {
-            const std::vector<std::string> names = config.backend_names();
+            std::vector<std::string> names = config.backend_names();
             if (names.empty()) {
                 completion.hint =
                     value.hint + " -- no backends configured yet ('apogee config add-backend')";
+            }
+            // The cached vendor rosters (M13): every model a configured
+            // provider type's roster lists completes beside the backend
+            // keys -- read from the disposable cache, never fetched here.
+            const backends::RosterCache rosters = backends::load_roster_cache();
+            for (const auto& [type, roster] : rosters.rosters) {
+                const bool configured_type =
+                    std::any_of(config.backends.begin(), config.backends.end(),
+                                [&type = type](const auto& entry) {
+                                    return harness::to_string(entry.second.type) == type;
+                                });
+                if (!configured_type) {
+                    continue;
+                }
+                for (const backends::RosterModel& model : roster.models) {
+                    names.push_back(model.id);
+                }
             }
             completion.candidates = filter_prefix(names, current);
             break;

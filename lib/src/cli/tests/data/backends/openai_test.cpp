@@ -428,3 +428,18 @@ TEST_CASE("a response schema becomes text.format json_schema, beside the tools",
     (void)plain.provider->stream_chat(chat_request(), {});
     CHECK_FALSE(json::parse(plain.transport->requests()[0].body).contains("text"));
 }
+
+TEST_CASE("list_catalog reads the vendor's one-page models document",
+          "[backends][openai][catalog]") {
+    Fixture f = make_provider({FakeTransport::Reply{
+        200, R"({"object":"list","data":[{"id":"gpt-5.2"},{"id":"gpt-5.2-mini"}]})"}});
+    const std::vector<apogee::harness::ModelInfo> models =
+        f.provider->list_catalog(apogee::harness::CancellationToken{});
+    REQUIRE(models.size() == 2);
+    CHECK(models[0].id == "gpt-5.2");
+    CHECK(models[1].id == "gpt-5.2-mini");
+    const auto& requests = f.transport->requests();
+    REQUIRE(requests.size() == 1);
+    CHECK(requests[0].method == "GET");
+    CHECK(requests[0].url.find("/v1/models") != std::string::npos);
+}

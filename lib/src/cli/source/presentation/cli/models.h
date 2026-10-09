@@ -96,6 +96,9 @@ struct ModelRow {
     /// from this -- with no backend on it and nothing needing attention. The
     /// table folds it unless asked for everything (M4); nothing else changes.
     bool consumed = false;
+    /// A cloud roster's model (M13): a row `models list` folds behind one
+    /// dim per-vendor line unless --all asks, like a consumed snapshot's.
+    bool roster = false;
 };
 
 /// What the listing knows about provider backends (28c): the cheap checks'

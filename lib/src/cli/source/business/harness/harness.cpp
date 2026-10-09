@@ -408,6 +408,18 @@ EmbeddingCapable* Harness::embedder_for(std::string_view model) const noexcept {
     }
 }
 
+bool Harness::can_list_catalog(std::string_view model) const noexcept {
+    return catalog_for(model) != nullptr;
+}
+
+CatalogListing* Harness::catalog_for(std::string_view model) const noexcept {
+    try {
+        return dynamic_cast<CatalogListing*>(&route(model));
+    } catch (const HarnessError&) {
+        return nullptr;
+    }
+}
+
 bool Harness::uses_in_text_tool_calls(std::string_view model) const noexcept {
     try {
         const auto* caller = dynamic_cast<const InTextToolCalling*>(&route(model));

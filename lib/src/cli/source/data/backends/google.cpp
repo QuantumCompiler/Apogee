@@ -277,4 +277,55 @@ std::vector<harness::ModelInfo> GoogleProvider::list_models(
     return {harness::ModelInfo{options_.model, options_.model, "google", options_.backend_name}};
 }
 
+std::vector<harness::ModelInfo> GoogleProvider::list_catalog(
+    const harness::CancellationToken& cancellation) {
+    // The vendor's catalogue (M13): pages followed through nextPageToken;
+    // the endpoint names models as `models/<id>`, and the id is kept
+    // verbatim past that prefix. The key rides the header, as everywhere.
+    std::vector<harness::ModelInfo> out;
+    std::string token;
+    while (true) {
+        cancellation.throw_if_cancelled();
+        HttpRequest request;
+        request.method = "GET";
+        request.url = options_.base_url + "/" + options_.api_version + "/models?pageSize=200" +
+                      (token.empty() ? std::string{} : "&pageToken=" + token);
+        request.headers = {{"x-goog-api-key", options_.api_key}};
+        request.timeout = std::chrono::seconds{120};
+        const HttpResponse response = client_->send(request, {}, cancellation);
+        if (!response.ok()) {
+            fail(response.status, response.body);
+        }
+        const nlohmann::json parsed = nlohmann::json::parse(response.body, nullptr, false);
+        if (parsed.is_discarded() || !parsed.is_object() || !parsed.contains("models") ||
+            !parsed["models"].is_array()) {
+            throw harness::ProviderError(
+                options_.backend_name,
+                "the models endpoint did not return its documented shape");
+        }
+        for (const nlohmann::json& row : parsed["models"]) {
+            if (!row.is_object()) {
+                continue;
+            }
+            std::string id = row.value("name", std::string{});
+            if (const std::size_t slash = id.rfind('/'); slash != std::string::npos) {
+                id = id.substr(slash + 1);
+            }
+            harness::ModelInfo info;
+            info.id = id;
+            info.name = row.value("displayName", id);
+            info.provider = "google";
+            info.backend = options_.backend_name;
+            if (!info.id.empty()) {
+                out.push_back(std::move(info));
+            }
+        }
+        token = parsed.value("nextPageToken", std::string{});
+        if (token.empty()) {
+            break;
+        }
+    }
+    return out;
+}
+
 }  // namespace apogee::backends

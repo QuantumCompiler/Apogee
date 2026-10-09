@@ -2,6 +2,7 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "contracts/config.h"
 #include "harness/roles.h"
@@ -46,5 +47,27 @@ namespace apogee::commands {
 /// it serves is a set of keys.
 [[nodiscard]] std::string configured_backend_key(const harness::Config& config,
                                                  std::string_view model);
+
+/// The roster resolution (M13): what a model name that is neither a backend
+/// key nor an entry's `model:` field means, read from the cached vendor
+/// rosters -- zero network, the cache only.
+struct RosterResolution {
+    /// The backend key to run on, set only when exactly one configured
+    /// vendor type's roster lists the name (that type's first entry, by key
+    /// order -- deterministic).
+    std::string backend;
+    /// The roster id to pin for the run, verbatim.
+    std::string model;
+    /// Every configured type whose roster lists the name -- the refusal
+    /// names them all when there is more than one.
+    std::vector<std::string> owners;
+};
+
+/// Resolves `model` against the cached rosters of the *configured* provider
+/// types. One owner fills `backend`/`model`; several fill only `owners`
+/// (the caller refuses naming them); none returns everything empty and the
+/// caller's existing error stands.
+[[nodiscard]] RosterResolution resolve_roster_model(const harness::Config& config,
+                                                    std::string_view model);
 
 }  // namespace apogee::commands

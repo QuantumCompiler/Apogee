@@ -867,3 +867,41 @@ TEST_CASE("the fold leaves an ordinary turn untouched: its text and its real cal
     CHECK(response.message.tool_calls[0].id == "toolu_7");
     CHECK(response.finish_reason == FinishReason::ToolCalls);
 }
+
+TEST_CASE("list_catalog pages through the vendor's models, ids verbatim",
+          "[backends][anthropic][catalog]") {
+    // M13: two pages via has_more/last_id; GET with the chat path's auth
+    // headers; the roster is the vendor's answer, nothing invented.
+    Fixture fixture = make_provider(
+        {FakeTransport::Reply{
+             200,
+             R"({"data":[{"id":"claude-opus-5-5","display_name":"Claude Opus 5.5"},)"
+             R"({"id":"claude-sonnet-5-5","display_name":"Claude Sonnet 5.5"}],)"
+             R"("has_more":true,"last_id":"claude-sonnet-5-5"})"},
+         FakeTransport::Reply{
+             200,
+             R"({"data":[{"id":"claude-haiku-4-5","display_name":"Claude Haiku 4.5"}],)"
+             R"("has_more":false})"}});
+
+    const std::vector<apogee::harness::ModelInfo> models =
+        fixture.provider->list_catalog(apogee::harness::CancellationToken{});
+    REQUIRE(models.size() == 3);
+    CHECK(models[0].id == "claude-opus-5-5");
+    CHECK(models[0].name == "Claude Opus 5.5");
+    CHECK(models[0].provider == "anthropic");
+    CHECK(models[2].id == "claude-haiku-4-5");
+
+    const auto& requests = fixture.transport->requests();
+    REQUIRE(requests.size() == 2);
+    CHECK(requests[0].method == "GET");
+    CHECK(requests[0].url.find("/v1/models?limit=100") != std::string::npos);
+    CHECK(requests[1].url.find("after_id=claude-sonnet-5-5") != std::string::npos);
+    CHECK(requests[0].body.empty());
+}
+
+TEST_CASE("list_catalog refuses a shape that is not the endpoint's",
+          "[backends][anthropic][catalog]") {
+    Fixture fixture = make_provider({FakeTransport::Reply{200, R"({"unexpected":true})"}});
+    CHECK_THROWS_AS(fixture.provider->list_catalog(apogee::harness::CancellationToken{}),
+                    apogee::harness::ProviderError);
+}

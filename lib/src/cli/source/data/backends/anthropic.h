@@ -23,7 +23,7 @@
 /// server-side `web_search` tool instead of a shelled-out search.
 namespace apogee::backends {
 
-class AnthropicProvider final : public harness::LLMProvider {
+class AnthropicProvider final : public harness::LLMProvider, public harness::CatalogListing {
 public:
     struct Options {
         std::string backend_name = "anthropic";
@@ -80,6 +80,11 @@ public:
 
     [[nodiscard]] std::vector<harness::ModelInfo> list_models(
         const harness::CancellationToken& cancellation) override;
+    /// The vendor's live model catalogue (M13): ids verbatim from the models
+    /// endpoint, paging followed; authenticated with this entry's key.
+    [[nodiscard]] std::vector<harness::ModelInfo> list_catalog(
+        const harness::CancellationToken& cancellation) override;
+
 
     /// Exact input-token count for `request`, via /v1/messages/count_tokens.
     ///

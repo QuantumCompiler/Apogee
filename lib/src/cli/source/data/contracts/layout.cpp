@@ -112,6 +112,10 @@ std::filesystem::path provider_cache_path() {
     return cache_dir() / "providers.json";
 }
 
+std::filesystem::path roster_cache_path() {
+    return cache_dir() / "model-rosters.json";
+}
+
 std::filesystem::path training_dir() {
     return apogee_home() / "training";
 }

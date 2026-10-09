@@ -1,5 +1,9 @@
 #include "operations/backend_names.h"
 
+#include <algorithm>
+
+#include "backends/model_roster.h"
+
 #include "harness/harness.h"
 
 namespace apogee::commands {
@@ -37,6 +41,38 @@ std::string configured_backend_key(const harness::Config& config, std::string_vi
 
 bool names_a_configured_backend(const harness::Config& config, std::string_view model) {
     return !configured_backend_key(config, model).empty();
+}
+
+RosterResolution resolve_roster_model(const harness::Config& config, std::string_view model) {
+    RosterResolution out;
+    const backends::RosterCache cache = backends::load_roster_cache();
+    for (const auto& [type, roster] : cache.rosters) {
+        const bool listed = std::any_of(
+            roster.models.begin(), roster.models.end(),
+            [model](const backends::RosterModel& entry) { return entry.id == model; });
+        if (!listed) {
+            continue;
+        }
+        // Only a *configured* type's roster owns anything: the first entry of
+        // that type, by key order, is the one a sole owner runs on.
+        for (const auto& [name, entry] : config.backends) {
+            if (harness::to_string(entry.type) == type) {
+                if (out.owners.empty() || out.owners.back() != type) {
+                    out.owners.push_back(type);
+                    if (out.backend.empty()) {
+                        out.backend = name;
+                    }
+                }
+                break;
+            }
+        }
+    }
+    if (out.owners.size() == 1) {
+        out.model = std::string{model};
+    } else {
+        out.backend.clear();
+    }
+    return out;
 }
 
 }  // namespace apogee::commands

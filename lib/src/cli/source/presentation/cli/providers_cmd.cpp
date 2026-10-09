@@ -9,14 +9,20 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
+#include <vector>
 
+#include "backends/factory.h"
+#include "backends/model_roster.h"
 #include "backends/provider_probe.h"
 #include "backends/provider_table.h"
 #include "cli/helpers.h"
 #include "cli/provider_offer.h"
 #include "contracts/config.h"
 #include "contracts/paths.h"
+#include "harness/harness.h"
+#include "platform/platform.h"
 #include "secrets/store.h"
 
 namespace apogee::commands {
@@ -66,6 +72,67 @@ struct ScanFlags {
     bool register_found = false;
     bool refresh = false;
 };
+
+
+/// The rosters (M13): each catalogue-capable provider type's live model
+/// list, fetched on the user's word -- right after a registration, or on an
+/// explicit --refresh -- and cached disposably. Never on a plain scan, and
+/// never on a hot path: the cache is what everything else reads. One fetch
+/// per vendor type; a failure keeps the cached roster, said with its date.
+void fetch_rosters(const std::filesystem::path& config_path, bool refresh_all) {
+    harness::Config config;
+    try {
+        config = harness::load_config(config_path);
+    } catch (const harness::ConfigError&) {
+        return;  // the scan already said what is wrong with the config
+    }
+    harness::Harness harness{config};
+    backends::BuildOptions build_options;
+    build_options.config_path = config_path;
+    (void)backends::build_providers(harness, build_options);
+
+    backends::RosterCache cache = backends::load_roster_cache();
+    bool changed = false;
+    std::set<std::string> asked;
+    for (const auto& [name, backend] : config.backends) {
+        const std::string type{harness::to_string(backend.type)};
+        if (!asked.insert(type).second) {
+            continue;  // the catalogue is the vendor's: one fetch per type
+        }
+        harness::CatalogListing* catalog = harness.catalog_for(name);
+        if (catalog == nullptr) {
+            continue;
+        }
+        const backends::ProviderRoster* cached = cache.roster_for(type);
+        if (!refresh_all && cached != nullptr) {
+            continue;  // a registration fetches the missing; --refresh re-fetches all
+        }
+        try {
+            const std::vector<harness::ModelInfo> models =
+                catalog->list_catalog(harness::CancellationToken{});
+            backends::ProviderRoster roster;
+            roster.fetched_at = platform::utc_time(std::chrono::system_clock::now(), "%Y-%m-%d");
+            for (const harness::ModelInfo& model : models) {
+                roster.models.push_back(backends::RosterModel{model.id, model.name});
+            }
+            const std::size_t count = roster.models.size();
+            cache.rosters.insert_or_assign(type, std::move(roster));
+            changed = true;
+            std::cout << "fetched " << type << "\'s models: " << count << " on the roster\n";
+        } catch (const std::exception& e) {
+            std::cout << "could not fetch " << type << "\'s models: " << e.what()
+                      << (cached != nullptr
+                              ? " -- the roster from " + cached->fetched_at + " stands"
+                              : std::string{})
+                      << "\n";
+        }
+    }
+    if (changed) {
+        if (const std::string error = backends::save_roster_cache(cache); !error.empty()) {
+            std::cout << "could not keep the rosters: " << error << "\n";
+        }
+    }
+}
 
 }  // namespace
 
@@ -150,6 +217,10 @@ void ProvidersCommand::bind(CLI::App& root, const RootContext& context) {
         }
         const RegistrationPlan plan = plan_registration(report.providers, *config);
         if (!flags->register_found) {
+            if (flags->refresh) {
+                // An explicit refresh re-fetches every roster (M13).
+                fetch_rosters(config_path, /*refresh_all=*/true);
+            }
             if (plan.registers() > 0) {
                 std::cout << "\nregister the detected ones as backends: apogee providers scan "
                              "--register\n";
@@ -162,6 +233,9 @@ void ProvidersCommand::bind(CLI::App& root, const RootContext& context) {
             fail(e.what());
         }
         std::cout << "\n" << render_registration(plan, /*applied=*/true);
+        // Registration brings the models (M13): the rosters of the types now
+        // configured, fetched on this -- the user's -- word.
+        fetch_rosters(config_path, /*refresh_all=*/flags->refresh);
     });
 }
 

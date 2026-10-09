@@ -375,8 +375,60 @@ std::vector<harness::ModelInfo> AnthropicProvider::list_models(
     cancellation.throw_if_cancelled();
     // The configured model, not a live catalogue call. A backend entry pins one
     // model; listing the vendor's full catalogue here would report models this
-    // entry cannot actually serve.
+    // entry cannot actually serve. The catalogue is list_catalog (M13).
     return {harness::ModelInfo{options_.model, options_.model, "anthropic", options_.backend_name}};
+}
+
+std::vector<harness::ModelInfo> AnthropicProvider::list_catalog(
+    const harness::CancellationToken& cancellation) {
+    // The vendor's catalogue (M13): ids verbatim, pages followed through
+    // has_more/last_id. The chat path's auth headers; a bounded timeout,
+    // because one JSON body is not a generation.
+    std::vector<harness::ModelInfo> out;
+    std::string after;
+    while (true) {
+        cancellation.throw_if_cancelled();
+        HttpRequest request;
+        request.method = "GET";
+        request.url = options_.base_url + "/v1/models?limit=100" +
+                      (after.empty() ? std::string{} : "&after_id=" + after);
+        request.headers = {{"x-api-key", options_.api_key},
+                           {"anthropic-version", options_.api_version}};
+        request.timeout = std::chrono::seconds{120};
+        const HttpResponse response = client_->send(request, {}, cancellation);
+        if (!response.ok()) {
+            fail(response.status, response.body);
+        }
+        const nlohmann::json parsed = nlohmann::json::parse(response.body, nullptr, false);
+        if (parsed.is_discarded() || !parsed.is_object() || !parsed.contains("data") ||
+            !parsed["data"].is_array()) {
+            throw harness::ProviderError(
+                options_.backend_name,
+                "the models endpoint did not return its documented shape");
+        }
+        for (const nlohmann::json& row : parsed["data"]) {
+            if (!row.is_object()) {
+                continue;
+            }
+            harness::ModelInfo info;
+            info.id = row.value("id", std::string{});
+            info.name = row.value("display_name", info.id);
+            info.provider = "anthropic";
+            info.backend = options_.backend_name;
+            if (!info.id.empty()) {
+                out.push_back(std::move(info));
+            }
+        }
+        if (!parsed.value("has_more", false)) {
+            break;
+        }
+        after = parsed.value("last_id", std::string{});
+        if (after.empty()) {
+            // A paging contract broken is an ended list, never a loop.
+            break;
+        }
+    }
+    return out;
 }
 
 std::int64_t AnthropicProvider::count_tokens(const harness::ChatRequest& request,

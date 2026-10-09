@@ -11,6 +11,7 @@
 #include <sstream>
 
 #include "backends/anthropic_wire.h"
+#include "backends/model_roster.h"
 #include "backends/google.h"
 #include "backends/google_wire.h"
 #include "backends/mlx_local.h"
@@ -694,6 +695,36 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
                         std::ranges::find(mlx_sources, row.model) != mlx_sources.end());
     }
 
+    // The cloud rosters (M13): each configured vendor type's catalogue as
+    // the vendor last listed it, ids verbatim from the disposable cache --
+    // folded behind one dim line each unless --all asks. Zero network here:
+    // fetching is registration's and --refresh's, never a listing's.
+    {
+        const backends::RosterCache roster_cache = backends::load_roster_cache();
+        for (const auto& [type, roster] : roster_cache.rosters) {
+            const bool configured_type = std::ranges::any_of(
+                config.backends, [&type = type](const auto& entry) {
+                    return harness::to_string(entry.second.type) == type;
+                });
+            if (!configured_type) {
+                continue;
+            }
+            for (const backends::RosterModel& model : roster.models) {
+                ModelRow row;
+                row.backend = "(" + type + " roster)";
+                row.type = type;
+                row.model = model.id;
+                row.provenance = "roster";
+                row.architecture = "-";
+                row.profile = "-";
+                row.state = "-";
+                row.verified = "fetched " + roster.fetched_at;
+                row.roster = true;
+                rows.push_back(std::move(row));
+            }
+        }
+    }
+
     std::ranges::sort(rows,
                       [](const ModelRow& a, const ModelRow& b) { return a.backend < b.backend; });
     return rows;
@@ -707,9 +738,15 @@ std::string render_model_table(const std::vector<ModelRow>& all_rows, const ansi
     // Consumed snapshots fold out unless asked for, and the fold is said (M4).
     std::vector<ModelRow> rows;
     std::size_t folded = 0;
+    // Roster rows fold per vendor (M13), each behind its own dim line.
+    std::map<std::string, std::pair<std::size_t, std::string>> roster_folds;
     for (const ModelRow& row : all_rows) {
         if (row.consumed && !all) {
             ++folded;
+        } else if (row.roster && !all) {
+            auto& fold = roster_folds[row.type];
+            ++fold.first;
+            fold.second = row.verified;
         } else {
             rows.push_back(row);
         }
@@ -766,6 +803,15 @@ std::string render_model_table(const std::vector<ModelRow>& all_rows, const ansi
                                            " snapshots consumed by conversions are folded -- "
                                            "--all lists them")
             << "\n";
+    }
+    if (!roster_folds.empty()) {
+        out << (folded > 0 ? "" : "\n");
+        for (const auto& [type, fold] : roster_folds) {
+            out << style.dim(type + "'s roster: " + std::to_string(fold.first) +
+                             " models (" + fold.second +
+                             ") -- --all lists them; any runs with 'apogee chat -m <id>'")
+                << "\n";
+        }
     }
     return out.str();
 }
@@ -1564,6 +1610,28 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
                     }
                 }
                 fail("'" + *info_name + "' is a model -- name one set of its weights:" + sets);
+            }
+            // A cached vendor roster may know it (M13): say whose, and how
+            // it runs -- an answer, not a refusal.
+            {
+                const backends::RosterCache rosters = backends::load_roster_cache();
+                std::string owners;
+                std::string fetched;
+                for (const auto& [type, roster] : rosters.rosters) {
+                    for (const backends::RosterModel& model : roster.models) {
+                        if (model.id == *info_name) {
+                            owners += (owners.empty() ? std::string{} : ", ") + type;
+                            fetched = roster.fetched_at;
+                            break;
+                        }
+                    }
+                }
+                if (!owners.empty()) {
+                    std::cout << *info_name << "  on " << owners << "'s roster (fetched "
+                              << fetched << ") -- runs with 'apogee chat -m " << *info_name
+                              << "'\n";
+                    return;
+                }
             }
             fail("no backend or stored weights named '" + *info_name + "'");
         }

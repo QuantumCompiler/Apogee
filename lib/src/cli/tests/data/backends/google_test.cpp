@@ -417,3 +417,22 @@ TEST_CASE("a response schema becomes responseSchema only when no tools are in pl
     CHECK(cleaned.contains("type"));
     CHECK_FALSE(cleaned.contains("$schema"));
 }
+
+TEST_CASE("list_catalog pages by nextPageToken and keeps ids past the models/ prefix",
+          "[backends][google][catalog]") {
+    Fixture f = make_provider(
+        {FakeTransport::Reply{200,
+                              R"({"models":[{"name":"models/gemini-3-pro","displayName":"Gemini 3 Pro"}],)"
+                              R"("nextPageToken":"page2"})"},
+         FakeTransport::Reply{200, R"({"models":[{"name":"models/gemini-3-flash"}]})"}});
+    const std::vector<apogee::harness::ModelInfo> models =
+        f.provider->list_catalog(apogee::harness::CancellationToken{});
+    REQUIRE(models.size() == 2);
+    CHECK(models[0].id == "gemini-3-pro");
+    CHECK(models[0].name == "Gemini 3 Pro");
+    CHECK(models[1].id == "gemini-3-flash");
+    const auto& requests = f.transport->requests();
+    REQUIRE(requests.size() == 2);
+    CHECK(requests[0].method == "GET");
+    CHECK(requests[1].url.find("pageToken=page2") != std::string::npos);
+}

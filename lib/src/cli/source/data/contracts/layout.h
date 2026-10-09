@@ -163,6 +163,12 @@ struct LayoutEntry {
 /// delete like the rest of `cache/` -- the next scan rebuilds it.
 [[nodiscard]] std::filesystem::path provider_cache_path();
 
+/// `cache/model-rosters.json` -- each cloud provider type's live model
+/// roster as its vendor last listed it (M13), with the date it was fetched.
+/// A file like the provider cache: created by a registration or an explicit
+/// refresh, never seeded, disposable, rebuilt on the next fetch.
+[[nodiscard]] std::filesystem::path roster_cache_path();
+
 /// What `seed_data_directory()` did.
 struct SeedResult {
     /// Directories -- and bundled asset files -- that did not exist and were
