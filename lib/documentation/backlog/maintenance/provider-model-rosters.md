@@ -25,6 +25,7 @@
 
 **Decisions made** (dated):
 - 2026-10-08 — Asked for by the user; placed in **v0.1.6** (their call), 32f by the release-prefix rule; gated on nothing — the whole provider chain it extends shipped with v0.1.5.
+- 2026-10-08 — **Moved to Maintenance as M13 the same day** (the user's call): release-agnostic registration plumbing, claimable at any time by name; 32f stays a vacated spent identity.
 - 2026-10-08 — The roster is the vendor's list **verbatim**: no client-side filtering or curation — a filter is a hardwired opinion about a list whose whole point is that Apogee doesn't own it. What a vendor returns is what the user sees and can select.
 - 2026-10-08 — Live means *on the user's word*: fetched at registration and `--refresh`, read from cache everywhere else, age always shown. "Update in live time" is satisfied at the moments the user acts, never by ambient network calls a listing didn't ask for.
 - 2026-10-08 — Vendor-CLI backend types (claude-cli and kin) are out of this item's scope: they have no models endpoint to ask; their roster story, if any, is a later item with its own evidence.
@@ -45,4 +46,4 @@
 - [ ] `providers scan --refresh` re-fetches rosters; with the network down, the stale roster keeps rendering with its age and the failure is said — nothing blanks, nothing blocks.
 - [ ] With a cold cache, no command performs a network call until the user registers or refreshes — asserted by the startup sweep and the seam test.
 
-**Scope note.** Item **32f**, earmarked for **v0.1.6**; gated on nothing pending (the v0.1.5 provider chain shipped; in-table it is independent — [32d](tui-workbench-views.md)'s models view renders what this item caches, interplay not a gate). Out of scope: vendor-CLI rosters (no endpoint; a later item); client-side model curation or grouping (the verbatim rule); pricing/capability metadata beyond what the models endpoint returns; auto-refresh by age (a later deliberate item if wanted — the age is shown, the refresh is named).
+**Scope note.** Maintenance item **M13** (32f at birth, 2026-10-08, v0.1.6's tail; moved to Maintenance the same day — the user's call, 32f a vacated identity kept here); gated on nothing (the v0.1.5 provider chain shipped; [32d](../v0.1.6/tui-workbench-views.md)'s models view renders what this item caches, interplay not a gate). Out of scope: vendor-CLI rosters (no endpoint; a later item); client-side model curation or grouping (the verbatim rule); pricing/capability metadata beyond what the models endpoint returns; auto-refresh by age (a later deliberate item if wanted — the age is shown, the refresh is named).
