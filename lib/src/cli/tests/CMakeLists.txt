@@ -24,6 +24,7 @@ add_library(apogee_tests_infrastructure OBJECT
     infrastructure/platform/pid_lock_test.cpp
     infrastructure/platform/child_process_test.cpp
     infrastructure/platform/ffmpeg_test.cpp
+    infrastructure/platform/system_info_test.cpp
     infrastructure/ansi/ansi_test.cpp
     infrastructure/events/bus_test.cpp
     support/env_guard.h
@@ -237,6 +238,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/registry_test.cpp
     presentation/cli/provider_offer_test.cpp
     presentation/cli/read_documents_test.cpp
+    presentation/cli/system_cmd_test.cpp
     presentation/cli/root_test.cpp
     presentation/cli/models_pull_test.cpp
     presentation/cli/models_migrate_test.cpp
@@ -252,6 +254,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/operations/retrieval_test.cpp
     presentation/operations/backend_names_test.cpp
     presentation/operations/suites_test.cpp
+    presentation/operations/system_view_test.cpp
     presentation/cli/helpers_test.cpp
     presentation/cli/tool_vectors_test.cpp
     presentation/views/thinking_view_test.cpp

@@ -26,6 +26,7 @@
 #include "cli/reset.h"
 #include "cli/serve_cmd.h"
 #include "cli/symphonies_cmd.h"
+#include "cli/system_cmd.h"
 #include "cli/task_cmd.h"
 #include "cli/train.h"
 #include "cli/uninstall.h"
@@ -94,6 +95,7 @@ CommandRegistry default_registry() {
     registry.add(std::make_unique<ResetCommand>());
     registry.add(std::make_unique<ServeCommand>());
     registry.add(std::make_unique<SymphoniesCommand>());
+    registry.add(std::make_unique<SystemCommand>());
     registry.add(std::make_unique<TaskCommand>());
     registry.add(std::make_unique<UninstallCommand>());
     registry.add(std::make_unique<VersionCommand>());

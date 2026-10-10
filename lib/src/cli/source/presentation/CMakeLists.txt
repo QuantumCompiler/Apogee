@@ -77,6 +77,8 @@ apogee_add_module(operations
     operations/run_settings.cpp
     operations/suites.h
     operations/suites.cpp
+    operations/system_view.h
+    operations/system_view.cpp
 )
 target_link_libraries(apogee_presentation_operations PUBLIC nlohmann_json::nlohmann_json)
 
@@ -199,6 +201,8 @@ apogee_add_module(cli
     cli/agents_cmd.cpp
     cli/symphonies_cmd.h
     cli/symphonies_cmd.cpp
+    cli/system_cmd.h
+    cli/system_cmd.cpp
     cli/graph.h
     cli/graph.cpp
     cli/graph_navigate.h

@@ -553,6 +553,7 @@ apogee chats list --output-format json      # {"object":"list","data":[{"id","up
 apogee agents list --output-format json     # byte for byte GET /v1/admin/agents
 apogee mcp list --output-format json        # GET /v1/admin/mcp-servers's entries, with what connecting found
 apogee check --output-format json           # {"rows":[{"section","name","status","detail","remedy"?}],"ok":…,"failures":N,"warnings":N}
+apogee system --output-format json          # {"cpu":{…},"memory":{…},"apogee":{…},"gpu":{…},"disk":{…}}
 ```
 
 - **`models list`**: one object per row the table shows — `backend`,
@@ -576,6 +577,16 @@ apogee check --output-format json           # {"rows":[{"section","name","status
   and `skipped` — never folded into a pass — `ok` the verdict and the exit code
   the human run's (non-zero on a failure). With `--fix`, what it repaired is the
   document's `fixed`, never a line beside it.
+- **`system`** (since 32a): the machine as one reading — `cpu` (`model`,
+  `architecture`, the core counts, `load`, `utilization` with its `window_ms`),
+  `memory` (`total_bytes`, `used_bytes`, `available_bytes`), `apogee`
+  (`process_bytes`, `models_held`), `gpu` (`name`, `unified_memory`,
+  `model_budget_bytes` — the memory a model may offload to, the number window
+  sizing reads) and `disk` (the model store's `store_bytes` and its volume).
+  Every field is always there; one the platform cannot read is `null`, with
+  the reason beside it where there is one (`load_unknown`, `gpu.unknown`,
+  `model_budget_unknown`). The read takes about half a second: the CPU's
+  utilization is measured over a 500 ms window.
 
 No document carries a key or a token. A command that has no JSON face refuses
 `--output-format json` and names the commands that have one.

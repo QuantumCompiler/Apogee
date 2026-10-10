@@ -15,6 +15,8 @@ apogee_add_module(platform
     platform/pid_lock.cpp
     platform/platform.h
     platform/platform.cpp
+    platform/system_info.h
+    platform/system_info.cpp
 )
 
 # A leaf: includes nothing else from the project, so anything may publish.
