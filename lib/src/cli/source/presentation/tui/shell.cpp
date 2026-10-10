@@ -117,7 +117,7 @@ constexpr std::size_t kNumberedViews = 9;
     rows.push_back(hbox({title, filler(), hbox(std::move(tabs)), text(" ")}));
     rows.push_back(separator());
     rows.push_back(state.views.empty() ? text(" nothing to show yet") | dim | flex
-                                       : state.stage->Render() | yframe | flex);
+                                       : clip(state.stage->Render()));
     if (!state.notice.empty()) {
         rows.push_back(text(" " + state.notice) | dim);
     }

@@ -1,5 +1,10 @@
 #include "tui/paint.h"
 
+#include <ftxui/dom/node.hpp>
+#include <ftxui/dom/requirement.hpp>
+#include <ftxui/screen/box.hpp>
+#include <ftxui/screen/screen.hpp>
+#include <ftxui/util/autoreset.hpp>
 #include <utility>
 
 namespace apogee::tui {
@@ -64,6 +69,42 @@ ftxui::Element paint_row(const markdown::Row& row, const Theme& theme) {
         spans.push_back(std::move(element));
     }
     return ftxui::hbox(std::move(spans));
+}
+
+namespace {
+
+class Clip final : public ftxui::Node {
+public:
+    explicit Clip(ftxui::Element child) : Node(ftxui::Elements{std::move(child)}) {}
+
+    void ComputeRequirement() override {
+        Node::ComputeRequirement();
+        // Any height will do, and it takes what there is: the child is laid
+        // out to the box, not the box to the child.
+        requirement_.min_y = 0;
+        requirement_.flex_grow_y = 1;
+        requirement_.flex_shrink_y = 1;
+        // What the child focuses scrolls the child's own frames, never the
+        // stage around it.
+        requirement_.focused = ftxui::Requirement::Focused{};
+    }
+
+    void SetBox(ftxui::Box box) override {
+        Node::SetBox(box);
+        children_[0]->SetBox(box);
+    }
+
+    void Render(ftxui::Screen& screen) override {
+        const ftxui::AutoReset<ftxui::Box> stencil(&screen.stencil,
+                                                   ftxui::Box::Intersection(box_, screen.stencil));
+        children_[0]->Render(screen);
+    }
+};
+
+}  // namespace
+
+ftxui::Element clip(ftxui::Element child) {
+    return std::make_shared<Clip>(std::move(child));
 }
 
 int frame_width() noexcept {

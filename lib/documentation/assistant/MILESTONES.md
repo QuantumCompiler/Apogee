@@ -6465,6 +6465,8 @@ Trade-off, recorded: the roster lives in cache, not the config -- one provider e
 - **A line entered while the session is busy stays in the input** until it is read, rather than queueing unseen -- the shell's answer to the terminal's typeahead guard.
 - **The core styles each line once**: the shell reads the terminal's SGR back into spans rather than growing a second styling path; the resting label (`Thinking… · base model`) is the terminal spinner's and not repeated -- the header and banner say `base model`.
 
+**Fixed after shipping (2026-10-10).** In a conversation longer than the screen the input row vanished: the shell wrapped its stage in an FTXUI `yframe`, which hands the view its whole natural height and scrolls to whatever the view has focused -- the transcript's last row -- so the input below it fell off the bottom. The stage is now `tui/paint`'s `clip`: the view is laid out at exactly the stage's size, drawn clipped and never scrolled, so the transcript region shrinks and scrolls inside it and the input stays on screen; a new `session_view_test` case (sixty lines on a twenty-row screen) holds it, and a seventy-line answer on a real terminal left the input drawn.
+
 **Notes.** Out of scope as specced: the workbench views (32d), any machine-mode or wire change (none), and execute mode's suite surfaces inside the shell -- an execute session is not offered there yet. On a resize, an answer already rendered keeps the width it was wrapped at.
 
 ### 2026-10-10 — `tui-workbench-views` (backlog item 32d): the rest of the product on screen

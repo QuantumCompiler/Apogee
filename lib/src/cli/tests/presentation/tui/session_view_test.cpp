@@ -308,3 +308,25 @@ TEST_CASE("completion offers the session's completer and Tab takes the first", "
     CHECK(stage.shell.press(Key::named(Key::Name::Tab)));
     CHECK(has(stage.frame(), " › /model"));
 }
+
+TEST_CASE(
+    "a transcript taller than the stage scrolls inside its own region, the input always "
+    "on screen",
+    "[tui][session]") {
+    // Found 2026-10-10 in a long conversation: the shell scrolled the whole
+    // view to the transcript's last row and the input fell off the bottom.
+    Stage stage;
+    stage.view.begin_session();
+    for (int i = 0; i < 60; ++i) {
+        stage.view.say("line " + std::to_string(i));
+    }
+    stage.view.set_status("prompt 3475 tokens");
+    const std::string frame = stage.frame(64, 20);
+    CHECK(has(frame, "\n line 59\n"));               // the newest row shown
+    CHECK_FALSE(has(frame, "\n line 0\n"));          // the oldest scrolled away
+    CHECK(has(frame, "\n prompt 3475 tokens\n ›"));  // the status, then the input
+    CHECK(frame.ends_with(" Ctrl-D quit · Tab next view · F1–F9 a view\n"));
+    // Scrolled back, the input stays where it is.
+    (void)stage.shell.press(apogee::tui::Key::named(apogee::tui::Key::Name::PageUp));
+    CHECK(has(stage.frame(64, 20), "\n ›"));
+}
