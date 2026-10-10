@@ -99,6 +99,14 @@ public:
     /// What the session's turns report to: the fourth Reporter adapter.
     [[nodiscard]] agentloop::Reporter& reporter();
 
+    /// Enters `line` as if it were typed and Enter pressed -- what a
+    /// workbench view sends the conversation (`/suite <name>`, `/exit`).
+    /// False, and nothing entered, when the conversation is not waiting for a
+    /// line. The shell's thread.
+    [[nodiscard]] bool enter(std::string line);
+    /// Whether a conversation is open and waiting for its next line.
+    [[nodiscard]] bool waiting_for_line() const;
+
     // --- the session's thread --------------------------------------------
 
     /// The next line the person enters, or nothing once the view closes.

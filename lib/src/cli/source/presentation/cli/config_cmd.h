@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -14,6 +15,31 @@ namespace apogee::commands {
 /// completion offers for `config get <TAB>`. Beside `lookup`, which it must
 /// agree with; a test asks `config get` for every key listed here.
 [[nodiscard]] std::vector<std::string> config_keys(const harness::Config& config);
+
+/// The default pointers as the config writes them -- what `config get
+/// models.default` and `config get models.default_suite` print, unresolved --
+/// for a view that shows them and marks what they name (32d). Empty when
+/// unset.
+struct WrittenDefaults {
+    std::string backend;
+    std::string suite;
+};
+
+[[nodiscard]] WrittenDefaults written_defaults(const harness::Config& config);
+
+/// Points `models.<field>` at backend `name` in the config at `path`, through
+/// the one editor -- what `config set-default` (and each `set-default-*`)
+/// runs, and the full-screen shell's "make default" (32d). Refused, naming
+/// what is configured, when no backend is called `name`. Returns what was
+/// set: `models.default = local`.
+[[nodiscard]] std::string point_role(const std::filesystem::path& path, std::string_view field,
+                                     const std::string& name);
+
+/// Removes backend `name`'s entry from the config at `path` through the one
+/// editor -- `config delete-backend`, and the shell's remove (32d). Returns
+/// what was done: `removed backend 'local' from <path>`.
+[[nodiscard]] std::string remove_backend(const std::filesystem::path& path,
+                                         const std::string& name);
 
 /// `apogee config` -- inspect and edit the config file.
 ///

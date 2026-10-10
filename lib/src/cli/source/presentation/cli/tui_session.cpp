@@ -178,13 +178,18 @@ void TuiOutput::end_turn() {
     view_.end_turn();
 }
 
-std::shared_ptr<SessionFlags> shell_session_flags(CLI::App& app, const std::string& chat_id) {
+std::shared_ptr<SessionFlags> shell_session_flags(CLI::App& app, const std::string& chat_id,
+                                                  const std::string& suite) {
     auto flags = std::make_shared<SessionFlags>();
     bind_session_flags(app, flags, SessionMode::Chat);
     std::vector<std::string> args{"chat", "--tools"};
     if (!chat_id.empty()) {
         args.emplace_back("--resume");
         args.push_back(chat_id);
+    }
+    if (!suite.empty()) {
+        args.emplace_back("--suite");
+        args.push_back(suite);
     }
     std::vector<const char*> argv;
     argv.reserve(args.size());
@@ -195,9 +200,9 @@ std::shared_ptr<SessionFlags> shell_session_flags(CLI::App& app, const std::stri
     return flags;
 }
 
-TuiSessionDriver::TuiSessionDriver(tui::SessionView& view, const RootContext& context,
-                                   MachineBudgetSource machine)
-    : view_{view}, context_{context}, machine_{std::move(machine)} {}
+TuiSessionDriver::TuiSessionDriver(tui::SessionView& view, tui::Pump& pump,
+                                   const RootContext& context, MachineBudgetSource machine)
+    : view_{view}, pump_{pump}, context_{context}, machine_{std::move(machine)} {}
 
 TuiSessionDriver::~TuiSessionDriver() {
     stop();
@@ -230,22 +235,50 @@ void TuiSessionDriver::show_picker() {
     view_.show_picker(saved_chats(), [this](std::string chat_id) { open(std::move(chat_id)); });
 }
 
-void TuiSessionDriver::open(std::string chat_id) {
+void TuiSessionDriver::open(std::string chat_id, std::string suite) {
     if (worker_.joinable()) {
         worker_.join();  // the last conversation, ended: its thread is done
     }
     if (view_.closed()) {
         return;
     }
-    worker_ = std::thread{[this, id = std::move(chat_id)]() { run(id); }};
+    open_ = true;
+    worker_ = std::thread{
+        [this, id = std::move(chat_id), suite = std::move(suite)]() { run(id, suite); }};
 }
 
-void TuiSessionDriver::run(const std::string& chat_id) {
+std::string TuiSessionDriver::open_chat(const std::string& chat_id) {
+    if (!open_) {
+        open(chat_id);
+        return "opened " + chat_id;
+    }
+    if (!view_.waiting_for_line()) {
+        return "not now: the conversation is busy -- Ctrl-C there stops a turn";
+    }
+    // The open one ends as /exit ends it -- saved, summarised when due --
+    // and the chosen one opens after it.
+    pending_ = chat_id;
+    (void)view_.enter("/exit");
+    return "opened " + chat_id;
+}
+
+std::string TuiSessionDriver::use_suite(const std::string& suite) {
+    if (!open_) {
+        open({}, suite);
+        return "a new chat under suite " + suite;
+    }
+    if (!view_.enter("/suite " + suite)) {
+        return "not now: the conversation is busy -- Ctrl-C there stops a turn";
+    }
+    return "/suite " + suite + " sent to the conversation";
+}
+
+void TuiSessionDriver::run(const std::string& chat_id, const std::string& suite) {
     view_.begin_session();
     TuiOutput output{view_};
     try {
         CLI::App app{"the shell's conversation", "chat"};
-        const std::shared_ptr<SessionFlags> flags = shell_session_flags(app, chat_id);
+        const std::shared_ptr<SessionFlags> flags = shell_session_flags(app, chat_id, suite);
         run_session(context_, *flags, machine_, SessionMode::Chat, &output);
     } catch (const CLI::RuntimeError&) {
         // The session said why it could not go on, on stderr -- the shell's
@@ -253,9 +286,19 @@ void TuiSessionDriver::run(const std::string& chat_id) {
     } catch (const std::exception& e) {
         view_.say(output.style().tag(ansi::Role::Error) + " " + e.what());
     }
-    if (!view_.closed()) {
-        show_picker();  // the chat just left among the saved
+    open_ = false;
+    if (view_.closed()) {
+        return;
     }
+    // Opened from the workbench while this one was open: that one next, from
+    // the shell's thread, which joins this one first.
+    pump_.post([this]() {
+        if (pending_.has_value()) {
+            open(*std::exchange(pending_, std::nullopt));
+            return;
+        }
+        show_picker();  // the chat just left among the saved
+    });
 }
 
 void TuiSessionDriver::stop() {

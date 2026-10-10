@@ -137,6 +137,23 @@ struct ProviderLens {
                                                      const BusyProgress& progress = {},
                                                      const ProviderLens& providers = {});
 
+/// The rows `models list` reads -- the config's backends and the store's
+/// models, each provider row through this machine's lens (28c) -- what the
+/// listing and the full-screen shell's Models view (32d) both draw.
+/// `config_path` locates the credential store and the provider cache's
+/// verified records.
+[[nodiscard]] std::vector<ModelRow> read_model_rows(const harness::Config& config,
+                                                    const std::filesystem::path& config_path,
+                                                    const BusyProgress& progress = {});
+
+/// `models info`'s body for `name`, read as the command reads it -- the
+/// provider lens and the credential store beside `config_path` -- for the
+/// command and the shell's Models view alike. Empty when `name` is a whole
+/// stored model rather than one thing to show.
+[[nodiscard]] std::string read_model_info(const harness::Config& config, std::string_view name,
+                                          const std::filesystem::path& config_path,
+                                          const BusyProgress& progress = {});
+
 /// Renders rows as an aligned table. Empty input yields a single explanatory
 /// line, never a bare header with nothing under it.
 ///

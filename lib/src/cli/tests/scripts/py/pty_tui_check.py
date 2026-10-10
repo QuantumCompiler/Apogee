@@ -171,7 +171,7 @@ def main():
 
         def switch_views(session):
             session.send(b"\t")
-            session.wait_for(b"[2 Home]", 5, "views")
+            session.wait_for(b"[2 Models]", 5, "views")
             mark = len(session.output)
             session.send(b"\x1bOP")  # F1
             deadline = time.time() + 5

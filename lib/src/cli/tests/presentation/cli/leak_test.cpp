@@ -14,6 +14,7 @@
 #include "cli/auth_cmd.h"
 #include "cli/check.h"
 #include "cli/models.h"
+#include "cli/tui_workbench.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
 #include "events/bus.h"
@@ -228,6 +229,39 @@ TEST_CASE("a stored key reaches no listing, report, response, event or log", "[s
 /// as JSON, the admin plane's task routes, and machine mode's stream of a
 /// task's run, each of which says an answer existed and never what it said.
 /// Nor does any of those name the ledger's path.
+TEST_CASE("the shell's workbench views draw no key, wherever it was stored",
+          "[secrets][leak][tui]") {
+    // The full-screen shell's views (32d) report on backends too: every row,
+    // heading and detail each draws, searched for the key in every rung.
+    const World world;
+    apogee::commands::RootContext context;
+    context.config_path = world.config_path.string();
+    for (const apogee::tui::ListOptions& options :
+         {apogee::commands::models_view_options(context),
+          apogee::commands::config_view_options(context),
+          apogee::commands::suites_view_options(context, {}),
+          apogee::commands::chats_view_options({})}) {
+        const auto [heading, rows] = options.load();
+        std::string drawn;
+        for (const std::string& line : heading) {
+            drawn += line + "\n";
+        }
+        for (const apogee::tui::ListRow& row : rows) {
+            drawn += row.key + ":";
+            for (const std::string& cell : row.cells) {
+                drawn += " " + cell;
+            }
+            drawn += "\n";
+            if (options.detail) {
+                for (const std::string& line : options.detail(row)) {
+                    drawn += "  " + line + "\n";
+                }
+            }
+        }
+        expect_clean("the shell's " + options.title + " view", drawn);
+    }
+}
+
 TEST_CASE("a task's declared answer is found only where it belongs", "[tasks][leak][policy]") {
     apogee::testing::CliHome home{""};
     const std::filesystem::path script = home.home() / "script.json";

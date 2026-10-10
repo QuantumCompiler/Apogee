@@ -3,6 +3,7 @@
 #include <CLI/CLI.hpp>
 
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -11,8 +12,10 @@
 #include "cli/helpers.h"
 #include "cli/suite_residency.h"
 #include "cli/tui_session.h"
+#include "cli/tui_workbench.h"
 #include "cli/version_command.h"
 #include "platform/platform.h"
+#include "tui/list_view.h"
 #include "tui/pump.h"
 #include "tui/session_view.h"
 #include "tui/shell.h"
@@ -41,9 +44,19 @@ namespace {
     tui::TerminalPump pump;
     // The conversation first: where a bare `apogee` lands (32c).
     tui::SessionView session{pump, theme};
-    shell.add(session.view());
+    const std::size_t session_view = shell.add(session.view());
+    TuiSessionDriver driver{session, pump, context, machine_budget};
+    // The workbench beside it (32d): reads drawn, cores called.
+    const WorkbenchHooks hooks{
+        .open_chat = [&driver](const std::string& chat_id) { return driver.open_chat(chat_id); },
+        .use_suite = [&driver](const std::string& suite) { return driver.use_suite(suite); },
+        .show_session = [&shell, session_view]() { shell.activate(session_view); }};
+    const std::vector<std::unique_ptr<tui::ListView>> workbench =
+        make_workbench(pump, theme, context, hooks);
+    for (const std::unique_ptr<tui::ListView>& view : workbench) {
+        (void)shell.add(view->view());
+    }
     add_shell_views(shell, context);
-    TuiSessionDriver driver{session, context, machine_budget};
     driver.start();
     const int code = pump.run(shell);
     driver.stop();

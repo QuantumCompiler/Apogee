@@ -200,6 +200,7 @@ std::size_t Shell::add(View view) {
 void Shell::activate(std::size_t index) {
     if (index < state_->views.size()) {
         state_->selected = static_cast<int>(index);
+        state_->views.at(index).shown();
     }
 }
 

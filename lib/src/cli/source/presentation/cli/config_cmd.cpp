@@ -608,8 +608,9 @@ struct StoreScanRow {
                 continue;
             }
             if (config->backends.contains(row.name)) {
-                row.skip = "its default name belongs to a backend on another model -- 'apogee "
-                           "config add-backend' registers it by hand under another";
+                row.skip =
+                    "its default name belongs to a backend on another model -- 'apogee "
+                    "config add-backend' registers it by hand under another";
                 continue;
             }
         }
@@ -965,11 +966,7 @@ void bind_delete_backend(CLI::App& parent, const RootContext& context) {
     CLI::App* cmd = parent.add_subcommand("delete-backend", "Remove a backend entry");
     cmd->add_option("name", *name, "Backend to remove")->type_name(kBackendValue)->required();
     cmd->callback([&context, name]() {
-        const std::filesystem::path path = config_path_for(context);
-        apply_edit(path, [name](std::string_view content) {
-            return harness::delete_backend(content, *name);
-        });
-        std::cout << "removed backend '" << *name << "' from " << path.string() << "\n";
+        std::cout << remove_backend(config_path_for(context), *name) << "\n";
     });
 }
 
@@ -982,12 +979,7 @@ void bind_set_role(CLI::App& parent, const RootContext& context, const std::stri
         ->type_name(kBackendValue)
         ->required();
     cmd->callback([&context, name, field]() {
-        const std::filesystem::path path = config_path_for(context);
-        require_backend_exists(path, *name);
-        apply_edit(path, [name, field](std::string_view content) {
-            return harness::set_models_role(content, field, *name);
-        });
-        std::cout << "models." << field << " = " << *name << "\n";
+        std::cout << point_role(config_path_for(context), field, *name) << "\n";
     });
 }
 
@@ -1212,6 +1204,26 @@ void bind_format(CLI::App& parent, const RootContext& context) {
 }
 
 }  // namespace
+
+WrittenDefaults written_defaults(const harness::Config& config) {
+    return WrittenDefaults{.backend = config.models.default_backend,
+                           .suite = config.models.default_suite};
+}
+
+std::string point_role(const std::filesystem::path& path, std::string_view field,
+                       const std::string& name) {
+    require_backend_exists(path, name);
+    apply_edit(path, [field, &name](std::string_view content) {
+        return harness::set_models_role(content, std::string{field}, name);
+    });
+    return "models." + std::string{field} + " = " + name;
+}
+
+std::string remove_backend(const std::filesystem::path& path, const std::string& name) {
+    apply_edit(
+        path, [&name](std::string_view content) { return harness::delete_backend(content, name); });
+    return "removed backend '" + name + "' from " + path.string();
+}
 
 std::vector<std::string> config_keys(const harness::Config& config) {
     std::vector<std::string> keys{"status_mode",

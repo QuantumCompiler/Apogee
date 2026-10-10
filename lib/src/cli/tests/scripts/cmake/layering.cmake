@@ -261,6 +261,38 @@ if(NOT VIOLATIONS STREQUAL "")
                         "markdown/ may include only ansi/ and itself.")
 endif()
 
+# `tui/` is the full-screen shell (32b-32e): it paints and composes, and is
+# handed what it shows. It may include itself, `ansi/` and `markdown/` (the
+# looks and the one renderer's operations), and the seams it renders by name:
+# the Reporter and what a turn reports (`agentloop/reporter.h`,
+# `side_call.h`, `recall.h`), a turn's token and its cancellation
+# (`contracts/cancellation.h`, `errors.h`), the line reader's completions
+# (`views/line_reader.h`) and the machine read (`platform/system_info.h`,
+# `operations/system_view.h`). Never a business package where a core exists,
+# never `cli/` -- the composition root builds the views over the cores, and
+# a view that reached for one itself would be the hand-built-views
+# anti-pattern returning.
+file(GLOB_RECURSE tui_sources "${PACKAGE_DIR_tui}/*.h" "${PACKAGE_DIR_tui}/*.cpp")
+if(tui_sources STREQUAL "")
+    message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_tui} — "
+                        "this check would pass vacuously")
+endif()
+foreach(source IN LISTS tui_sources)
+    file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+    foreach(line IN LISTS project_includes)
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(tui/|ansi/|markdown/|agentloop/(reporter|side_call|recall)\\.h|contracts/(cancellation|errors)\\.h|views/line_reader\\.h|platform/system_info\\.h|operations/system_view\\.h)")
+            get_filename_component(name "${source}" NAME)
+            list(APPEND VIOLATIONS "  tui/${name} reaches past its seams: ${line}")
+        endif()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "the tui package includes more than its seams:\n${pretty}\n"
+                        "tui/ may include itself, ansi/, markdown/ and the seams it renders "
+                        "by name; the views are built over the cores in cli/.")
+endif()
+
 # `knowledge/` is a domain core: it may include the chunk store, the loop,
 # the harness, the platform seam and itself -- never a surface. The day it
 # includes `cli/` or `httpserver/`, the record logic every surface

@@ -301,3 +301,44 @@ TEST_CASE("a conversation crosses between the shell and apogee chat with nothing
     CHECK(loaded.session.turns == 3);
     CHECK(apogee::logger::list_sessions().size() == 1);
 }
+
+TEST_CASE("the workbench's choices reach the conversation through its own commands",
+          "[cli][tui][session][workbench]") {
+    // The driver behind the views (32d): a suite chosen is the session's own
+    // `/suite`; a chat chosen ends the open one as `/exit` does, then opens.
+    const nlohmann::json script = {{"turns", {{{"text", "answer to {{last_user}}"}}}}};
+    Conversation chat{script};
+    {
+        std::ofstream config{chat.home.config_path(), std::ios::binary};
+        config << "{\n  \"backends\": {\"local\": {\"type\": \"mock\", \"model_path\": "
+               << nlohmann::json((chat.home.home() / "script.json").generic_string()).dump()
+               << "}},\n  \"models\": {\"default\": \"local\"},\n"
+                  "  \"suites\": {\"duo\": {\"members\": {\"chat\": \"local\"}}}\n}\n";
+    }
+    apogee::logger::Session saved;
+    saved.chat_id = "20261009-100000-aaaa";
+    saved.title = "an earlier chat";
+    saved.backend = "local";
+    saved.started_at = "2026-10-09T10:00:00Z";
+    saved.updated_at = "2026-10-09T10:00:00Z";
+    apogee::logger::save(saved);
+
+    apogee::commands::TuiSessionDriver driver{chat.view, chat.pump, chat.context,
+                                              []() { return apogee::models::MachineBudget{}; }};
+    CHECK(driver.use_suite("duo") == "a new chat under suite duo");
+    chat.until([&chat]() { return has(chat.frame(), "suite duo"); }, "the chat under duo");
+    chat.until([&chat]() { return chat.view.waiting_for_line(); }, "the chat reading");
+    CHECK(driver.use_suite("duo") == "/suite duo sent to the conversation");
+    chat.until([&chat]() { return has(chat.frame(), "You: /suite duo"); }, "/suite entered");
+
+    chat.until([&chat]() { return chat.view.waiting_for_line(); }, "the chat reading again");
+    CHECK(driver.open_chat("20261009-100000-aaaa") == "opened 20261009-100000-aaaa");
+    chat.until([&chat]() { return has(chat.frame(), "chat 20261009-100000-aaaa"); },
+               "the chosen chat open");
+    chat.send("hello again");
+    chat.until([&chat]() { return has(chat.frame(), "answer to hello again"); }, "its answer");
+    driver.stop();
+    const apogee::logger::LoadedSession loaded = apogee::logger::load("20261009-100000-aaaa", {});
+    REQUIRE(loaded.session.messages.size() == 2);
+    CHECK(loaded.session.messages.back().content.plain_text() == "answer to hello again");
+}

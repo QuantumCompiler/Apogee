@@ -159,6 +159,8 @@ apogee_add_module(tui
     tui/styled_text.cpp
     tui/session_view.h
     tui/session_view.cpp
+    tui/list_view.h
+    tui/list_view.cpp
 )
 target_link_libraries(apogee_presentation_tui PRIVATE ftxui::component)
 
@@ -231,6 +233,8 @@ apogee_add_module(cli
     cli/session_output.cpp
     cli/tui_session.h
     cli/tui_session.cpp
+    cli/tui_workbench.h
+    cli/tui_workbench.cpp
     cli/graph.h
     cli/graph.cpp
     cli/graph_navigate.h

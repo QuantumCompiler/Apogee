@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 /// A view the shell shows on its stage (32b): a title for the tab strip, and
@@ -36,10 +37,23 @@ public:
         return body_;
     }
 
+    /// Called each time the shell shows the view -- a list reading its data
+    /// afresh (32d).
+    void when_shown(std::function<void()> shown) {
+        shown_ = std::move(shown);
+    }
+
+    void shown() const {
+        if (shown_) {
+            shown_();
+        }
+    }
+
 private:
     std::string title_;
     std::shared_ptr<Body> body_;
     std::function<bool()> takes_text_;
+    std::function<void()> shown_;
 };
 
 /// A page of text: the lines it is given, top to bottom, scrolled with the

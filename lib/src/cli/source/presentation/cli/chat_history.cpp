@@ -238,31 +238,33 @@ void ChatsCommand::bind(CLI::App& root, const RootContext& context) {
     auto delete_name = std::make_shared<std::string>();
     CLI::App* remove = cmd->add_subcommand("delete", "Delete a conversation");
     remove->add_option("name", *delete_name, "Chat id or name")->type_name(kChatValue)->required();
-    remove->callback([delete_name]() {
-        try {
-            const logger::Session session = logger::load(*delete_name, {}).session;
-            // A live task writes this chat every round, and resumes into it
-            // (27h): it is not deleted under the task.
-            if (const std::string held = task_holds_chat(session); !held.empty()) {
-                fail(held);
-            }
-            std::error_code ec;
-            std::filesystem::remove(logger::session_path(session.chat_id), ec);
-            if (ec) {
-                fail("could not delete: " + ec.message());
-            }
-            // Its attachments' index goes with it (26d): an attachment's text is
-            // as private as the chat it belonged to.
-            ChatAttachments::remove_index(session.chat_id);
-            // And its summary: a deleted chat is recalled no more (26l).
-            forget_recall(session.chat_id);
-            std::cout << "deleted " << session.chat_id << "\n";
-        } catch (const CLI::RuntimeError&) {
-            throw;
-        } catch (const std::exception& e) {
-            fail(e.what());
+    remove->callback([delete_name]() { std::cout << delete_chat(*delete_name) << "\n"; });
+}
+
+std::string delete_chat(const std::string& name) {
+    try {
+        const logger::Session session = logger::load(name, {}).session;
+        // A live task writes this chat every round, and resumes into it
+        // (27h): it is not deleted under the task.
+        if (const std::string held = task_holds_chat(session); !held.empty()) {
+            fail(held);
         }
-    });
+        std::error_code ec;
+        std::filesystem::remove(logger::session_path(session.chat_id), ec);
+        if (ec) {
+            fail("could not delete: " + ec.message());
+        }
+        // Its attachments' index goes with it (26d): an attachment's text is
+        // as private as the chat it belonged to.
+        ChatAttachments::remove_index(session.chat_id);
+        // And its summary: a deleted chat is recalled no more (26l).
+        forget_recall(session.chat_id);
+        return "deleted " + session.chat_id;
+    } catch (const CLI::RuntimeError&) {
+        throw;
+    } catch (const std::exception& e) {
+        fail(e.what());
+    }
 }
 
 }  // namespace apogee::commands

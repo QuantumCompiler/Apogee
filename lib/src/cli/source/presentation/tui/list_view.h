@@ -1,0 +1,97 @@
+#pragma once
+
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "tui/pump.h"
+#include "tui/theme.h"
+#include "tui/view.h"
+
+/// A workbench view (32d): a read drawn as a table, and actions that call
+/// cores. The anti-pattern this is built against -- a TUI of hand-built
+/// views, each a second implementation of what the CLI already did -- is
+/// answered by its shape: the view is handed a read to draw and a core per
+/// key, and computes nothing of its own. The composition root (`cli/`)
+/// gives it the rows `models list`, `chats list` and the config's own reads
+/// return, and actions that call what `config set-default`, `config
+/// delete-backend`, `config set-default-suite` and `chats delete` call.
+namespace apogee::tui {
+
+/// One row: what identifies it to its actions, and its cells as the read
+/// words them.
+struct ListRow {
+    std::string key;
+    std::vector<std::string> cells;
+    enum class Look : std::uint8_t { Plain, Dim, Attention, Active };
+    Look look = Look::Plain;
+};
+
+/// A key that runs a core on the selected row.
+struct ListAction {
+    /// The key that runs it -- never a digit or `q`, which stay the shell's.
+    std::string key;
+    /// What the hint bar calls it: `make default`.
+    std::string label;
+    /// Whether it applies to `row`; null: every row.
+    std::function<bool(const ListRow&)> applies;
+    /// The question asked first, answered `y` or anything else, no; null
+    /// runs it at once.
+    std::function<std::string(const ListRow&)> confirm;
+    /// Runs it, on the view's worker thread, and returns what to say; a
+    /// throw is said as the reason it was not done. The table is read again
+    /// after.
+    std::function<std::string(const ListRow&)> run;
+};
+
+struct ListOptions {
+    /// The tab strip's name: `Models`.
+    std::string title;
+    std::vector<std::string> columns;
+    /// The read: lines above the table, then its rows -- on the view's worker
+    /// thread, each time the view is shown and after each action.
+    std::function<std::pair<std::vector<std::string>, std::vector<ListRow>>()> load;
+    /// Enter, as a read: the selected row's detail, drawn under the table
+    /// until Esc. On the worker thread.
+    std::function<std::vector<std::string>(const ListRow&)> detail;
+    /// Enter, as an act instead: what the row opens, on the shell's thread
+    /// (the chats view opens a conversation).
+    std::function<void(const ListRow&)> open;
+    /// What the hint bar calls Enter: `info`, `open`.
+    std::string enter_label;
+    /// The key that shows `detail` when Enter opens instead (the chats
+    /// view's `i`); empty when Enter shows it.
+    std::string detail_key;
+    std::vector<ListAction> actions;
+};
+
+class ListView {
+public:
+    ListView(Pump& pump, Theme theme, ListOptions options);
+    ~ListView();
+
+    ListView(const ListView&) = delete;
+    ListView& operator=(const ListView&) = delete;
+    ListView(ListView&&) = delete;
+    ListView& operator=(ListView&&) = delete;
+
+    /// The view to register with the shell: read afresh each time it is
+    /// shown.
+    [[nodiscard]] View view();
+
+    /// Reads again, off the shell's thread; any thread.
+    void refresh();
+
+    /// Waits for the work the view has handed its thread -- a read, an
+    /// action -- to finish: for a test, before it looks.
+    void settle();
+
+    struct State;
+
+private:
+    std::shared_ptr<State> state_;
+};
+
+}  // namespace apogee::tui

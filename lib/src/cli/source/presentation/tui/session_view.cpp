@@ -886,6 +886,26 @@ void SessionView::close() {
     state_->changed.notify_all();
 }
 
+bool SessionView::enter(std::string line) {
+    {
+        const std::lock_guard lock{state_->mutex};
+        if (!state_->waiting_for_line || state_->mode != State::Mode::Conversation) {
+            return false;
+        }
+        state_->entered.push_back(line);
+        state_->waiting_for_line = false;
+    }
+    state_->changed.notify_all();
+    state_->blocks.push_back(Block{.kind = Block::Kind::User, .text = std::move(line)});
+    state_->scrollback = 0;
+    return true;
+}
+
+bool SessionView::waiting_for_line() const {
+    const std::lock_guard lock{state_->mutex};
+    return state_->waiting_for_line;
+}
+
 std::vector<std::string> SessionView::key_lines() {
     return {
         "Enter              send the line; / lists the chat's commands",

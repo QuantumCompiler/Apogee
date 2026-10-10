@@ -1,6 +1,8 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -74,14 +76,15 @@ private:
 /// from its option. Tools are on because a person is at the screen to answer
 /// every gated call -- the condition `--tools` exists to require.
 [[nodiscard]] std::shared_ptr<SessionFlags> shell_session_flags(CLI::App& app,
-                                                                const std::string& chat_id);
+                                                                const std::string& chat_id,
+                                                                const std::string& suite = {});
 
 /// The session view's driver: the picker over the saved conversations --
 /// straight into a new chat when there are none -- and a chosen one run as
 /// chat's session on a thread of its own, back to the picker when it ends.
 class TuiSessionDriver {
 public:
-    TuiSessionDriver(tui::SessionView& view, const RootContext& context,
+    TuiSessionDriver(tui::SessionView& view, tui::Pump& pump, const RootContext& context,
                      MachineBudgetSource machine);
     ~TuiSessionDriver();
 
@@ -101,11 +104,25 @@ public:
     /// is joined.
     void stop();
 
+    /// Opens saved chat `chat_id` in the view -- the conversation open now,
+    /// if any, ended first as `/exit` ends it. Returns what was done, or why
+    /// not: a turn running is never cut off. The shell's thread.
+    [[nodiscard]] std::string open_chat(const std::string& chat_id);
+    /// Moves the conversation to suite `suite` through its own `/suite`, or,
+    /// with none open, opens a new chat under it (`chat --suite`). Returns
+    /// what was done, or why not. The shell's thread.
+    [[nodiscard]] std::string use_suite(const std::string& suite);
+
 private:
-    void open(std::string chat_id);
-    void run(const std::string& chat_id);
+    void open(std::string chat_id, std::string suite = {});
+    void run(const std::string& chat_id, const std::string& suite);
 
     tui::SessionView& view_;
+    tui::Pump& pump_;
+    /// A conversation is open on the worker.
+    std::atomic<bool> open_{false};
+    /// What to open once the conversation now ending has ended.
+    std::optional<std::string> pending_;
     const RootContext& context_;
     MachineBudgetSource machine_;
     std::thread worker_;

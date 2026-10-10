@@ -604,27 +604,30 @@ void bind_set_default_suite(CLI::App& parent, const RootContext& context) {
         ->type_name(kModelSuiteOrOffValue)
         ->required();
     cmd->callback([&context, name]() {
-        const std::filesystem::path path = config_path_for(context);
-        std::string value;
-        if (*name != harness::kSuiteOff) {
-            const Config config = load(path);
-            const auto found = config.suites.find(*name);
-            if (found == config.suites.end()) {
-                const std::vector<std::string> known = config.suite_names();
-                fail("no suite named '" + *name + "'" +
-                     (known.empty() ? " (none is configured -- 'apogee config add-suite')"
-                                    : " (configured: " + joined(known) + ")"));
-            }
-            value = found->first;
-        }
-        apply_edit(path, [&value](std::string_view content) {
-            return harness::set_default_suite(content, value);
-        });
-        std::cout << "models.default_suite = " << (value.empty() ? "(none)" : value) << "\n";
+        std::cout << point_default_suite(config_path_for(context), *name) << "\n";
     });
 }
 
 }  // namespace
+
+std::string point_default_suite(const std::filesystem::path& path, const std::string& name) {
+    std::string value;
+    if (name != harness::kSuiteOff) {
+        const Config config = load(path);
+        const auto found = config.suites.find(name);
+        if (found == config.suites.end()) {
+            const std::vector<std::string> known = config.suite_names();
+            fail("no suite named '" + name + "'" +
+                 (known.empty() ? " (none is configured -- 'apogee config add-suite')"
+                                : " (configured: " + joined(known) + ")"));
+        }
+        value = found->first;
+    }
+    apply_edit(path, [&value](std::string_view content) {
+        return harness::set_default_suite(content, value);
+    });
+    return "models.default_suite = " + (value.empty() ? std::string{"(none)"} : value);
+}
 
 std::string parse_role_argument(std::string_view text, RoleArgument& out) {
     const std::size_t equals = text.find('=');

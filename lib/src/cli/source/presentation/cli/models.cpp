@@ -11,11 +11,11 @@
 #include <sstream>
 
 #include "backends/anthropic_wire.h"
-#include "backends/model_roster.h"
 #include "backends/google.h"
 #include "backends/google_wire.h"
 #include "backends/mlx_local.h"
 #include "backends/model_profile.h"
+#include "backends/model_roster.h"
 #include "backends/openai.h"
 #include "backends/openai_wire.h"
 #include "backends/provider_status.h"
@@ -702,8 +702,8 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
     {
         const backends::RosterCache roster_cache = backends::load_roster_cache();
         for (const auto& [type, roster] : roster_cache.rosters) {
-            const bool configured_type = std::ranges::any_of(
-                config.backends, [&type = type](const auto& entry) {
+            const bool configured_type =
+                std::ranges::any_of(config.backends, [&type = type](const auto& entry) {
                     return harness::to_string(entry.second.type) == type;
                 });
             if (!configured_type) {
@@ -807,8 +807,8 @@ std::string render_model_table(const std::vector<ModelRow>& all_rows, const ansi
     if (!roster_folds.empty()) {
         out << (folded > 0 ? "" : "\n");
         for (const auto& [type, fold] : roster_folds) {
-            out << style.dim(type + "'s roster: " + std::to_string(fold.first) +
-                             " models (" + fold.second +
+            out << style.dim(type + "'s roster: " + std::to_string(fold.first) + " models (" +
+                             fold.second +
                              ") -- --all lists them; any runs with 'apogee chat -m <id>'")
                 << "\n";
         }
@@ -1370,6 +1370,25 @@ std::string render_model_info(const harness::Config& config, std::string_view na
     return out.str();
 }
 
+std::vector<ModelRow> read_model_rows(const harness::Config& config,
+                                      const std::filesystem::path& config_path,
+                                      const BusyProgress& progress) {
+    const std::unique_ptr<backends::ExistenceView> view = backends::host_existence_view();
+    const backends::ProviderCache cache = backends::load_provider_cache();
+    return build_model_rows(config, harness::models_dir(), config_path, nullptr, progress,
+                            ProviderLens{view.get(), &cache});
+}
+
+std::string read_model_info(const harness::Config& config, std::string_view name,
+                            const std::filesystem::path& config_path,
+                            const BusyProgress& progress) {
+    const std::unique_ptr<backends::ExistenceView> view = backends::host_existence_view();
+    const backends::ProviderCache cache = backends::load_provider_cache();
+    const secrets::CredentialStore store{secrets::credentials_path(config_path)};
+    return render_model_info(config, name, progress, harness::models_dir(),
+                             ProviderLens{view.get(), &cache, &store});
+}
+
 std::string render_role_status(const harness::Config& config, const BusyProgress& progress,
                                const MachineBudgetSource& machine) {
     std::ostringstream out;
@@ -1538,11 +1557,8 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
             BusyLine busy{
                 std::cerr, "reading the model store",
                 busy_options(*list_quiet || *format == "stream-json" || *format == "json")};
-            const std::unique_ptr<backends::ExistenceView> view = backends::host_existence_view();
-            const backends::ProviderCache cache = backends::load_provider_cache();
-            rows = build_model_rows(config, harness::models_dir(),
-                                    harness::resolve_config_path(context.config_path), nullptr,
-                                    busy.sink(), ProviderLens{view.get(), &cache});
+            rows = read_model_rows(config, harness::resolve_config_path(context.config_path),
+                                   busy.sink());
         }
         if (*format == "stream-json") {
             std::cout << render_model_jsonl(rows);
@@ -1575,12 +1591,8 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
         {
             BusyLine busy{std::cerr, "reading the model",
                           busy_options(*info_quiet || *info_format == ReadFormat::Json)};
-            const std::unique_ptr<backends::ExistenceView> view = backends::host_existence_view();
-            const backends::ProviderCache cache = backends::load_provider_cache();
-            const secrets::CredentialStore store{
-                secrets::credentials_path(harness::resolve_config_path(context.config_path))};
-            body = render_model_info(config, *info_name, busy.sink(), harness::models_dir(),
-                                     ProviderLens{view.get(), &cache, &store});
+            body = read_model_info(config, *info_name,
+                                   harness::resolve_config_path(context.config_path), busy.sink());
         }
         if (body.empty()) {
             // A whole model is not one thing to show: name what it holds.
@@ -1627,9 +1639,8 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
                     }
                 }
                 if (!owners.empty()) {
-                    std::cout << *info_name << "  on " << owners << "'s roster (fetched "
-                              << fetched << ") -- runs with 'apogee chat -m " << *info_name
-                              << "'\n";
+                    std::cout << *info_name << "  on " << owners << "'s roster (fetched " << fetched
+                              << ") -- runs with 'apogee chat -m " << *info_name << "'\n";
                     return;
                 }
             }
