@@ -278,6 +278,13 @@ if(tui_sources STREQUAL "")
                         "this check would pass vacuously")
 endif()
 foreach(source IN LISTS tui_sources)
+    # One probe (32e): the machine is read through 32a's SystemSource, never
+    # a second reader of the OS here.
+    file(READ "${source}" whole)
+    if(whole MATCHES "/proc/|sysctl|host_statistics|GlobalMemoryStatus|GetSystemTimes|getloadavg")
+        get_filename_component(name "${source}" NAME)
+        list(APPEND VIOLATIONS "  tui/${name} reads the machine itself: ${CMAKE_MATCH_0}")
+    endif()
     file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
     foreach(line IN LISTS project_includes)
         if(NOT line MATCHES "#[ \t]*include[ \t]*\"(tui/|ansi/|markdown/|agentloop/(reporter|side_call|recall)\\.h|contracts/(cancellation|errors)\\.h|views/line_reader\\.h|platform/system_info\\.h|operations/system_view\\.h)")

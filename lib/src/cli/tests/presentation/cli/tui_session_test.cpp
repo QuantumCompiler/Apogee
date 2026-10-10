@@ -10,6 +10,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -90,7 +91,10 @@ struct Conversation {
         ended = false;
         view.begin_session();
         worker = std::thread{[this, chat_id]() {
-            apogee::commands::TuiOutput output{view};
+            apogee::commands::TuiOutput output{view, [this](std::vector<std::string> backends) {
+                                                   const std::lock_guard lock{held_mutex};
+                                                   held.push_back(std::move(backends));
+                                               }};
             try {
                 CLI::App app{"test", "chat"};
                 const auto flags = apogee::commands::shell_session_flags(app, chat_id);
@@ -163,6 +167,9 @@ struct Conversation {
     std::thread worker;
     std::atomic<bool> ended{false};
     std::string failure;
+    std::mutex held_mutex;
+    /// What the session said it holds, each time it said it (32e).
+    std::vector<std::vector<std::string>> held;
 };
 
 [[nodiscard]] bool has(const std::string& text, const std::string& part) {
@@ -202,6 +209,12 @@ TEST_CASE("a tool-using, permission-prompted turn runs to its answer on the shel
     CHECK(slurp(chat.work() / "note.txt") == "hi");
     chat.finish();
     CHECK(chat.failure.empty());
+    {
+        // Said before each line was read, and empty once the session ended.
+        const std::lock_guard lock{chat.held_mutex};
+        REQUIRE(chat.held.size() >= 3);
+        CHECK(chat.held.back().empty());
+    }
 
     // `always` through the shell is the config edit every prompt makes: the
     // same answer given machine mode's way, on the same starting file.

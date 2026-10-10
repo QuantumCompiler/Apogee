@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -15,7 +16,9 @@
 #include "cli/tui_workbench.h"
 #include "cli/version_command.h"
 #include "platform/platform.h"
+#include "platform/system_info.h"
 #include "tui/list_view.h"
+#include "tui/monitor_bar.h"
 #include "tui/pump.h"
 #include "tui/session_view.h"
 #include "tui/shell.h"
@@ -42,10 +45,29 @@ namespace {
     tui::Shell shell{
         tui::ShellOptions{.title = "apogee " + std::string{version::semantic()}, .theme = theme}};
     tui::TerminalPump pump;
+
+    // The machine on the bottom bar (32e): 32a's probe, on the pump's tick,
+    // the models the conversation holds beside it.
+    struct Held {
+        std::mutex mutex;
+        std::vector<std::string> backends;
+    };
+
+    const auto held = std::make_shared<Held>();
+    tui::MonitorBar monitor{pump, theme, platform::host_system(),
+                            tui::MonitorOptions{.held = [held]() {
+                                const std::lock_guard lock{held->mutex};
+                                return held->backends;
+                            }}};
+    shell.set_bottom_bar(monitor.view());
     // The conversation first: where a bare `apogee` lands (32c).
     tui::SessionView session{pump, theme};
     const std::size_t session_view = shell.add(session.view());
-    TuiSessionDriver driver{session, pump, context, machine_budget};
+    TuiSessionDriver driver{session, pump, context, machine_budget,
+                            [held](std::vector<std::string> backends) {
+                                const std::lock_guard lock{held->mutex};
+                                held->backends = std::move(backends);
+                            }};
     // The workbench beside it (32d): reads drawn, cores called.
     const WorkbenchHooks hooks{
         .open_chat = [&driver](const std::string& chat_id) { return driver.open_chat(chat_id); },
@@ -58,6 +80,7 @@ namespace {
     }
     add_shell_views(shell, context);
     driver.start();
+    monitor.start();
     const int code = pump.run(shell);
     driver.stop();
     return code;

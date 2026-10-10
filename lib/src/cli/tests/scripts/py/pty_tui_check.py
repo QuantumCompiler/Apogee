@@ -157,7 +157,16 @@ def main():
         env = dict(os.environ, TERM="xterm-256color", APOGEE_HOME=home, HOME=home)
         env.pop("NO_COLOR", None)
 
-        screen_case(binary, env, "quit", lambda s: s.send(b"q"), 0)
+        def quit_promptly(session):
+            # The tick dies with the loop: nothing keeps the process alive.
+            session.wait_for(b"mem ", 15, "quit")
+            session.send(b"q")
+            started = time.time()
+            session.read_for(5)
+            if not session.closed or time.time() - started > 3:
+                fail("quit", "the shell did not end promptly after q", session.output)
+
+        screen_case(binary, env, "quit", quit_promptly, 0)
         screen_case(binary, env, "ctrl-c", lambda s: s.send(b"\x03"), 0)
         screen_case(binary, env, "sigint",
                     lambda s: os.kill(s.apogee_pid("sigint"), signal.SIGINT),
@@ -202,6 +211,8 @@ def main():
 
         def converse(session):
             session.wait_for(b"/help for commands", 15, "session")
+            # The machine on the bottom bar (32e), sampled on the shell's tick.
+            session.wait_for(b"mem ", 15, "session")
             session.send(b"please write a note\r")
             session.wait_for(b"Allow?", 15, "session")
             session.send(b"a")

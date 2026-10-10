@@ -145,4 +145,26 @@ using Wait = std::function<void(std::chrono::milliseconds)>;
 [[nodiscard]] MachineSnapshot read_machine(const SystemSource& source,
                                            std::chrono::milliseconds window, const Wait& wait = {});
 
+/// What changes from one moment to the next, read cheaply (32e): the
+/// monitor's partial read, over the same `SystemSource` -- never a second
+/// reader of the machine. The CPU, the GPU and a volume, which do not move or
+/// move too slowly to watch, are left out.
+struct MachineSample {
+    /// This reading's CPU counters, for the next sample to measure against.
+    std::optional<CpuTimes> times;
+    /// How busy the CPU was since `previous`; empty on a first reading.
+    std::optional<double> utilization;
+    std::optional<LoadAverage> load;
+    MemoryInfo memory;
+    std::optional<std::int64_t> process_footprint;
+
+    /// Nothing at all was read: a failed sample, which a monitor keeps its
+    /// last values over rather than blanking.
+    [[nodiscard]] bool empty() const noexcept;
+};
+
+/// One partial reading, measured against `previous` counters when given.
+[[nodiscard]] MachineSample sample_machine(const SystemSource& source,
+                                           const std::optional<CpuTimes>& previous);
+
 }  // namespace apogee::platform

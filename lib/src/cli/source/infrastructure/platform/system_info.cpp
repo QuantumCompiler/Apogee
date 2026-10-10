@@ -79,6 +79,23 @@ MachineSnapshot read_machine(const SystemSource& source, std::chrono::millisecon
     return snapshot;
 }
 
+bool MachineSample::empty() const noexcept {
+    return !times.has_value() && !load.has_value() && !memory.total.has_value() &&
+           !memory.available.has_value() && !process_footprint.has_value();
+}
+
+MachineSample sample_machine(const SystemSource& source, const std::optional<CpuTimes>& previous) {
+    MachineSample sample;
+    sample.times = source.cpu_times();
+    if (previous.has_value() && sample.times.has_value()) {
+        sample.utilization = utilization(*previous, *sample.times);
+    }
+    sample.load = source.load_average();
+    sample.memory = source.memory();
+    sample.process_footprint = source.process_footprint();
+    return sample;
+}
+
 namespace {
 
 /// The GPU's story where no cheap read exists: said, never guessed.

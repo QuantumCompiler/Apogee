@@ -122,8 +122,15 @@ constexpr std::size_t kNumberedViews = 9;
         rows.push_back(text(" " + state.notice) | dim);
     }
     rows.push_back(separator());
-    rows.push_back(state.bottom.has_value() ? state.bottom->body()->component->Render()
-                                            : hints(state));
+    if (state.bottom.has_value()) {
+        // The bar (32e) beside the one key every view needs.
+        const bool typing = !state.views.empty() &&
+                            state.views.at(static_cast<std::size_t>(state.selected)).takes_text();
+        rows.push_back(hbox({state.bottom->body()->component->Render() | flex,
+                             text(typing ? " Ctrl-D quit " : " q quit ") | dim}));
+    } else {
+        rows.push_back(hints(state));
+    }
     return vbox(std::move(rows));
 }
 

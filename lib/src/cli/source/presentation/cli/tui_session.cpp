@@ -40,7 +40,14 @@ private:
 
 }  // namespace
 
-TuiOutput::TuiOutput(tui::SessionView& view) : view_{view} {}
+TuiOutput::TuiOutput(tui::SessionView& view, std::function<void(std::vector<std::string>)> held)
+    : view_{view}, held_{std::move(held)} {}
+
+void TuiOutput::set_held(std::vector<std::string> backends) {
+    if (held_) {
+        held_(std::move(backends));
+    }
+}
 
 void TuiOutput::print_line(const std::string& line) {
     view_.say(line);
@@ -201,8 +208,13 @@ std::shared_ptr<SessionFlags> shell_session_flags(CLI::App& app, const std::stri
 }
 
 TuiSessionDriver::TuiSessionDriver(tui::SessionView& view, tui::Pump& pump,
-                                   const RootContext& context, MachineBudgetSource machine)
-    : view_{view}, pump_{pump}, context_{context}, machine_{std::move(machine)} {}
+                                   const RootContext& context, MachineBudgetSource machine,
+                                   std::function<void(std::vector<std::string>)> held)
+    : view_{view},
+      pump_{pump},
+      held_{std::move(held)},
+      context_{context},
+      machine_{std::move(machine)} {}
 
 TuiSessionDriver::~TuiSessionDriver() {
     stop();
@@ -275,7 +287,7 @@ std::string TuiSessionDriver::use_suite(const std::string& suite) {
 
 void TuiSessionDriver::run(const std::string& chat_id, const std::string& suite) {
     view_.begin_session();
-    TuiOutput output{view_};
+    TuiOutput output{view_, held_};
     try {
         CLI::App app{"the shell's conversation", "chat"};
         const std::shared_ptr<SessionFlags> flags = shell_session_flags(app, chat_id, suite);

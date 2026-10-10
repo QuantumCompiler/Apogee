@@ -1,10 +1,12 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <vector>
 
 #include "tui/shell.h"
 
@@ -28,6 +30,16 @@ public:
 
     /// Ends the loop. Safe from any thread.
     virtual void exit() = 0;
+
+    /// Runs `task` on the shell's thread every `period` while the loop runs
+    /// (32e's tick). A tick that comes due again before it ran -- the loop
+    /// busy, the machine asleep -- fires once, never in a burst to catch up,
+    /// and none outlives the loop.
+    virtual void every(std::chrono::milliseconds period, std::function<void()> task) = 0;
+
+    /// The loop's clock: the steady clock in the terminal, a test's script in
+    /// a test's.
+    [[nodiscard]] virtual std::chrono::steady_clock::time_point now() const = 0;
 };
 
 /// The terminal's loop: the shell full screen on the alternate screen until
@@ -50,8 +62,11 @@ public:
 
     void post(std::function<void()> task) override;
     void exit() override;
+    void every(std::chrono::milliseconds period, std::function<void()> task) override;
+    [[nodiscard]] std::chrono::steady_clock::time_point now() const override;
 
-    /// Runs `shell` until it quits. Returns the exit code: 0.
+    /// Runs `shell` until it quits. Returns the exit code: 0. The ticks run
+    /// while it does, and stop -- their thread joined -- before it returns.
     int run(Shell& shell);
 
 private:
@@ -73,15 +88,29 @@ public:
 
     void post(std::function<void()> task) override;
     void exit() override;
+    void every(std::chrono::milliseconds period, std::function<void()> task) override;
+    [[nodiscard]] std::chrono::steady_clock::time_point now() const override;
 
     /// Runs everything posted so far, and anything that posts; returns how
     /// many tasks ran.
     std::size_t drain();
     [[nodiscard]] bool exited() const;
 
+    /// Moves the clock on by `by`, posting each tick that came due -- once,
+    /// however many periods passed.
+    void advance(std::chrono::milliseconds by);
+
 private:
+    struct Tick {
+        std::chrono::milliseconds period{0};
+        std::function<void()> task;
+        std::chrono::steady_clock::time_point next{};
+    };
+
     mutable std::mutex mutex_;
     std::deque<std::function<void()>> tasks_;
+    std::vector<Tick> ticks_;
+    std::chrono::steady_clock::time_point clock_{std::chrono::hours{1}};
     bool exited_ = false;
 };
 

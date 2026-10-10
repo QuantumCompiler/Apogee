@@ -161,6 +161,8 @@ apogee_add_module(tui
     tui/session_view.cpp
     tui/list_view.h
     tui/list_view.cpp
+    tui/monitor_bar.h
+    tui/monitor_bar.cpp
 )
 target_link_libraries(apogee_presentation_tui PRIVATE ftxui::component)
 

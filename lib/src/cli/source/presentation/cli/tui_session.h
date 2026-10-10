@@ -26,7 +26,9 @@ namespace apogee::commands {
 /// The session view as the session core's front-end.
 class TuiOutput final : public SessionOutput {
 public:
-    explicit TuiOutput(tui::SessionView& view);
+    /// `held`, when given, hears what the session holds (the monitor bar's).
+    explicit TuiOutput(tui::SessionView& view,
+                       std::function<void(std::vector<std::string>)> held = {});
 
     [[nodiscard]] agentloop::Reporter& reporter() override {
         return view_.reporter();
@@ -53,6 +55,7 @@ public:
     void set_resting_label(std::string label) override;
     void on_model_load(std::string_view backend, const harness::StatusEvent& event) override;
     void set_header(const std::string& line) override;
+    void set_held(std::vector<std::string> backends) override;
 
     [[nodiscard]] std::function<void(std::string_view)> mcp_status() override;
     [[nodiscard]] agentloop::AskFn ask_fn() override;
@@ -67,6 +70,7 @@ public:
 
 private:
     tui::SessionView& view_;
+    std::function<void(std::vector<std::string>)> held_;
     ansi::Style style_{true};
 };
 
@@ -84,8 +88,10 @@ private:
 /// chat's session on a thread of its own, back to the picker when it ends.
 class TuiSessionDriver {
 public:
+    /// `held` hears what each conversation holds in memory (the monitor bar).
     TuiSessionDriver(tui::SessionView& view, tui::Pump& pump, const RootContext& context,
-                     MachineBudgetSource machine);
+                     MachineBudgetSource machine,
+                     std::function<void(std::vector<std::string>)> held = {});
     ~TuiSessionDriver();
 
     TuiSessionDriver(const TuiSessionDriver&) = delete;
@@ -119,6 +125,7 @@ private:
 
     tui::SessionView& view_;
     tui::Pump& pump_;
+    std::function<void(std::vector<std::string>)> held_;
     /// A conversation is open on the worker.
     std::atomic<bool> open_{false};
     /// What to open once the conversation now ending has ended.

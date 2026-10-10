@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "agent/tool.h"
 #include "agentloop/question.h"
@@ -63,6 +64,13 @@ public:
     /// apart from the transcript; the terminal says them in its banner.
     virtual void set_header(const std::string& line) {
         (void)line;
+    }
+
+    /// The backends whose models the session holds in memory now (27e's
+    /// residency), for a surface that shows them -- the shell's monitor bar
+    /// (32e). Said before each line the session reads, and empty when it ends.
+    virtual void set_held(std::vector<std::string> backends) {
+        (void)backends;
     }
 
     /// Where an MCP server's startup lines go.

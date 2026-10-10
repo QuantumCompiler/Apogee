@@ -1331,11 +1331,24 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         }
     };
 
+    // What the session holds in memory, for a front-end that shows it (32e):
+    // said before each line is read, so after every turn and every switch.
+    const auto report_held = [&]() {
+        std::vector<std::string> held;
+        for (const std::string& backend : config.backend_names()) {
+            if (harness.resident(backend).value_or(false)) {
+                held.push_back(backend);
+            }
+        }
+        out.set_held(std::move(held));
+    };
+
     // --- the REPL --------------------------------------------------------
     BackgroundTitle title{harness,
                           [&out](std::string_view line) { out.reporter().on_progress(line); }};
     bool running = true;
     while (running) {
+        report_held();
         // The editor draws its own prompt; the plain reader ignores it and
         // the prompt goes to stderr so a piped run's stdout stays clean.
         std::optional<std::string> line;
@@ -1950,6 +1963,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     if (decorate) {
         out.print_line(style.tag(ansi::Role::Apogee) + " saved " + session.chat_id);
     }
+    out.set_held({});
 }
 
 std::string execute_suite_refusal(const harness::Config& config) {
