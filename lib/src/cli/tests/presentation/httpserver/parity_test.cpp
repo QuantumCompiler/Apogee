@@ -221,6 +221,8 @@ const std::map<std::string, Classification>& table() {
         {"version", read_only()},
         // The machine as this process reads it (32a): one-shot, and the host's own.
         {"system", read_only()},
+        // The full-screen shell (32b): an interactive surface, as chat is.
+        {"tui", read_only()},
         {"__complete", read_only()},
         {"__machine-schema", read_only()},
         {"config get", read_only()},

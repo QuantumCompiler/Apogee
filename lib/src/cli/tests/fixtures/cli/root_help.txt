@@ -1,0 +1,47 @@
+Apogee -- run local and cloud LLMs from one harness.
+
+Cloud backends (Anthropic, OpenAI, Google, Ollama) and local inference via
+llama.cpp sit behind one interface, so which model runs is configuration
+rather than architecture.
+Usage: apogee [OPTIONS] [SUBCOMMAND]
+
+Options:
+  -h,--help                   Print this help message and exit
+  -V,--version                Print version information and exit
+  --config PATH (Env:APOGEE_CONFIG)
+                              Path to the config file (default: config/config.json in the data directory). Names a file only -- the data directory stays put; --custom names both
+  --release Excludes: --dev --test --custom
+                              Use the release channel's data directory, ~/.apogee, for this run only: the whole layout, never saved (uninstall ignores it)
+  --dev Excludes: --release --test --custom
+                              Use the dev channel's data directory, ~/.apogee-dev, for this run only: the whole layout, never saved (uninstall ignores it)
+  --test Excludes: --release --dev --custom
+                              Use the test channel's data directory, ~/.apogee-test, for this run only: the whole layout, never saved (uninstall ignores it)
+  --custom PATH Excludes: --release --dev --test
+                              Use the install a config file sits in, for this run only: <root>/config/<file> roots the whole layout at <root> and reads that file (uninstall ignores it)
+
+Subcommands:
+  agents                      Create and manage agent workflows (apogee analyze --agent)
+  analyze                     Run a named agent workflow against an input
+  auth                        Store, list, and clear provider API keys
+  chat                        Start or resume an interactive conversation
+  check                       Diagnose this installation
+  chats                       List, inspect, and rename saved conversations
+  complete                    Get a one-shot completion for a prompt
+  config                      Inspect and edit the config file
+  datasets                    Create, prepare, and distil training datasets
+  embed                       Ingest documents into a searchable collection, and query it
+  execute                     Open a session with a suite: chat's session, its symphonies playable (/play)
+  graph                       Build and inspect the knowledge graph over a collection or a named graph
+  knowledge, kn               Capture the why behind decisions as searchable records
+  mcp                         Manage MCP tool servers
+  models                      List configured models, inspect one, and show role assignments
+  providers                   See which providers this machine has, and register them as backends
+  reset                       Reset the data directory to a fresh install, keeping the rows you name
+  serve                       Serve the OpenAI-compatible HTTP API (server deployments only)
+  symphonies                  Define and play symphonies: staged prompt processes over a suite's members
+  system                      Show this machine as Apogee reads it: CPU, memory, GPU, the model store's disk
+  task                        Hand the application a goal: it plans, drives turns, checks and corrects
+  tui                         Open the full-screen shell -- what a bare `apogee` opens at a terminal
+  uninstall                   Remove Apogee, its data directory, and its completions
+  version                     Print version, build, and target information
+  train                       Fine-tune local models: setup, run, eval, promote, rollback, versions, status, pipeline, regime, cycle

@@ -239,6 +239,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/provider_offer_test.cpp
     presentation/cli/read_documents_test.cpp
     presentation/cli/system_cmd_test.cpp
+    presentation/cli/tui_cmd_test.cpp
     presentation/cli/root_test.cpp
     presentation/cli/models_pull_test.cpp
     presentation/cli/models_migrate_test.cpp
@@ -255,6 +256,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/operations/backend_names_test.cpp
     presentation/operations/suites_test.cpp
     presentation/operations/system_view_test.cpp
+    presentation/tui/shell_test.cpp
     presentation/cli/helpers_test.cpp
     presentation/cli/tool_vectors_test.cpp
     presentation/views/thinking_view_test.cpp
@@ -492,11 +494,28 @@ set(APOGEE_LINKED_VISITED "")
 set(APOGEE_LINKED_ARCHIVES "")
 apogee_collect_static_archives(apogee APOGEE_LINKED_VISITED APOGEE_LINKED_ARCHIVES)
 string(JOIN "|" APOGEE_LINKED_ARCHIVE_LIST ${APOGEE_LINKED_ARCHIVES})
+# FTXUI (32b) reaches the executable through `tui/` and is scanned by the walk
+# like any static dependency -- said once, explicitly, so a shell that stopped
+# reaching the binary could not leave a compositor's code unscanned.
+if(NOT "$<TARGET_FILE:component>" IN_LIST APOGEE_LINKED_ARCHIVES)
+    message(FATAL_ERROR "cli.no_listen_symbols would not scan FTXUI's component library: "
+                        "the link walk no longer reaches it through apogee_presentation_tui")
+endif()
 add_test(NAME cli.no_listen_symbols
     COMMAND "${CMAKE_COMMAND}"
         "-DAPOGEE_ARCHIVES=${APOGEE_LINKED_ARCHIVE_LIST}"
         -DAPOGEE_LISTENER_OBJECT=serve.cpp${CMAKE_CXX_OUTPUT_EXTENSION}
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/no_listen_symbols.cmake"
+)
+
+# A bare `apogee` off a terminal is the help, byte for byte (32b): the full-screen
+# shell is strictly additive, and the root help is pinned beside the suite.
+add_test(NAME cli.bare_help
+    COMMAND "${CMAKE_COMMAND}"
+        -DAPOGEE=$<TARGET_FILE:apogee>
+        -DGOLDEN=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/cli/root_help.txt
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/bare-help
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/bare_help.cmake"
 )
 
 # `apogee serve` exists, and its help must say what a server deployment needs
@@ -948,6 +967,17 @@ if(UNIX)
                 $<TARGET_FILE:apogee_tests>
         )
         set_tests_properties(cli.unit_suite_under_a_tty PROPERTIES TIMEOUT 300)
+
+        # The full-screen shell (32b) on a real terminal: entered and left on the
+        # alternate screen, the terminal's modes exactly as they were after a
+        # quit, Ctrl-C, SIGINT, SIGTERM and a planted crash's SIGABRT; views
+        # switched by Tab and F1; a pipe and TERM=dumb given the help instead.
+        add_test(NAME cli.tui_shell
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_tui_check.py"
+                $<TARGET_FILE:apogee>
+        )
+        set_tests_properties(cli.tui_shell PROPERTIES TIMEOUT 180)
 
         add_test(NAME cli.chat_typeahead_and_crash_safety
             COMMAND "${Python3_EXECUTABLE}"

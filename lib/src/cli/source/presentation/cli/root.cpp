@@ -42,8 +42,10 @@ constexpr auto kConfigEnvVar = "APOGEE_CONFIG";
 
 }  // namespace
 
-RootCommand::RootCommand(CommandRegistry registry)
-    : registry_{std::move(registry)}, app_{std::make_unique<CLI::App>(kDescription, "apogee")} {
+RootCommand::RootCommand(CommandRegistry registry, ShellEntry shell)
+    : registry_{std::move(registry)},
+      shell_{std::move(shell)},
+      app_{std::make_unique<CLI::App>(kDescription, "apogee")} {
     // A plain flag, answered in apply_root_flags(), rather than CLI11's
     // set_version_flag: that one is answered while the flags are still being
     // read, before a root flag is in force -- and `--dev --version` must name
@@ -240,8 +242,9 @@ std::string json_readers(const CLI::App& app) {
 
 int RootCommand::run(int argc, const char* const* argv) {
     if (argc <= 1) {
-        std::cout << app_->help();
-        return 0;
+        // The shell at an interactive terminal (32b); the help, unchanged,
+        // everywhere else.
+        return open_bare(shell_, context_, *app_);
     }
 
     try {

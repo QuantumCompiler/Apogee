@@ -140,6 +140,22 @@ apogee_add_module(httpserver
 target_link_libraries(apogee_presentation_httpserver PUBLIC nlohmann_json::nlohmann_json
                       PRIVATE httplib::httplib)
 
+# The full-screen shell (32b): the only module that links FTXUI -- PRIVATE,
+# its headers naming none of FTXUI's types -- and the link policy holds it so.
+apogee_add_module(tui
+    tui/theme.h
+    tui/theme.cpp
+    tui/view.h
+    tui/view.cpp
+    tui/view_body.h
+    tui/shell.h
+    tui/shell.cpp
+    tui/shell_state.h
+    tui/pump.h
+    tui/pump.cpp
+)
+target_link_libraries(apogee_presentation_tui PRIVATE ftxui::component)
+
 apogee_add_module(cli
     cli/command.h
     cli/model_chain.h
@@ -203,6 +219,8 @@ apogee_add_module(cli
     cli/symphonies_cmd.cpp
     cli/system_cmd.h
     cli/system_cmd.cpp
+    cli/tui_cmd.h
+    cli/tui_cmd.cpp
     cli/graph.h
     cli/graph.cpp
     cli/graph_navigate.h

@@ -362,6 +362,37 @@ std::optional<int> terminal_height() noexcept {
 #endif
 }
 
+std::string full_screen_refusal() {
+#if defined(_WIN32)
+#if !defined(ENABLE_VIRTUAL_TERMINAL_PROCESSING)
+    constexpr DWORD ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004;
+#endif
+    const HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD mode = 0;
+    if (out == INVALID_HANDLE_VALUE || GetConsoleMode(out, &mode) == 0) {
+        return "the output is not a Windows console";
+    }
+    if ((mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0) {
+        return {};
+    }
+    if (SetConsoleMode(out, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) == 0) {
+        return "this console does not take virtual-terminal sequences, which a full screen is "
+               "drawn with";
+    }
+    SetConsoleMode(out, mode);  // put back: the shell turns them on itself
+    return {};
+#else
+    const char* term = std::getenv("TERM");  // NOLINT(concurrency-mt-unsafe): read once, at entry
+    if (term == nullptr || *term == '\0') {
+        return "TERM is not set, so nothing says this terminal can place the cursor";
+    }
+    if (std::string_view{term} == "dumb") {
+        return "this terminal (TERM=dumb) cannot place the cursor";
+    }
+    return {};
+#endif
+}
+
 #if !defined(_WIN32)
 namespace {
 

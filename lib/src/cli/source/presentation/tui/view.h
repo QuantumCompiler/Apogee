@@ -1,0 +1,45 @@
+#pragma once
+
+#include <memory>
+#include <string>
+#include <vector>
+
+/// A view the shell shows on its stage (32b): a title for the tab strip, and
+/// what it draws and does -- a body built by `tui/`'s own sources over FTXUI,
+/// which nothing outside `tui/` names (the link policy holds that).
+namespace apogee::tui {
+
+class View {
+public:
+    /// What the view draws and does: defined in `tui/view_body.h`, which only
+    /// `tui/`'s sources include.
+    struct Body;
+
+    /// `takes_text`: the view's keys are typing -- a printable key, a number
+    /// or `q` among them, goes to it and never switches a view or quits.
+    View(std::string title, std::shared_ptr<Body> body, bool takes_text = false);
+
+    [[nodiscard]] const std::string& title() const noexcept {
+        return title_;
+    }
+
+    [[nodiscard]] bool takes_text() const noexcept {
+        return takes_text_;
+    }
+
+    [[nodiscard]] const std::shared_ptr<Body>& body() const noexcept {
+        return body_;
+    }
+
+private:
+    std::string title_;
+    std::shared_ptr<Body> body_;
+    bool takes_text_ = false;
+};
+
+/// A page of text: the lines it is given, top to bottom, scrolled with the
+/// arrow keys and Page Up/Down when they outrun the stage -- what a view
+/// rendering a read it was handed is, at its simplest.
+[[nodiscard]] View text_view(std::string title, std::vector<std::string> lines);
+
+}  // namespace apogee::tui

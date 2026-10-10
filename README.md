@@ -58,6 +58,8 @@ apogee chat -m <backend>
 
 The four surfaces: `apogee complete "…"` is the scriptable one-shot (it reads stdin, too), `apogee chat` is the persistent, resumable conversation — line editing, streamed Markdown rendering, mid-session `/model` switching, context monitoring — `apogee execute` is that conversation opened with a model suite, its symphonies playable with `/play`, and `apogee serve` is the OpenAI-compatible HTTP server for **server deployments**, where a remote client makes REST calls to a machine you run it on. Beside them, `apogee task run "<goal>"` works a goal unattended: it plans, drives rounds of the same agent loop, and checks the acceptance you state after each, every step in a ledger you can watch, halt and resume.
 
+Run `apogee` with nothing after it at a terminal and it opens a full-screen shell (`apogee tui` spells it out); every command still runs exactly as before, and off a terminal a bare `apogee` prints the help as it always has.
+
 ## What's in the harness
 
 - **Nine backends behind one interface** — Anthropic, OpenAI and Google over their direct APIs with streaming, native tool use and typed thinking display; the same vendors plus Ollama through their official CLIs (`claude-cli`, `codex-cli`, `gemini-cli`, `ollama-cli`), each driven as a child process whose credentials Apogee never reads; llama.cpp in-process, with vision, KV-cached sessions and quantization; and, opt-in on Apple silicon, Apple's MLX (`mlx`), a model directory run by `mlx-lm` in a Python child over pipes.

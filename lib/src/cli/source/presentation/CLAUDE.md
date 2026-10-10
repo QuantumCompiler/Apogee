@@ -1,12 +1,12 @@
 # The Presentation layer
 
-**Position.** The top of the four ([ADR 0001](../../../../documentation/adrs/cli/layer-enforcement.md)): how Apogee is shown and driven -- the command line, the terminal views, machine mode, the HTTP server.
+**Position.** The top of the four ([ADR 0001](../../../../documentation/adrs/cli/layer-enforcement.md)): how Apogee is shown and driven -- the command line, the terminal views, the full-screen shell, machine mode, the HTTP server.
 
-**Modules:** `markdown`, `render`, `views`, `machine`, `operations`, `httpserver`, `cli` -- one static library each, `apogee_presentation_<module>`, linked as its row in [`cmake/modules.cmake`](../../cmake/modules.cmake) says ([ADR 0008](../../../../documentation/adrs/cli/module-map.md)).
+**Modules:** `markdown`, `render`, `views`, `machine`, `operations`, `httpserver`, `tui`, `cli` -- one static library each, `apogee_presentation_<module>`, linked as its row in [`cmake/modules.cmake`](../../cmake/modules.cmake) says ([ADR 0008](../../../../documentation/adrs/cli/module-map.md)).
 
 **May include:** every layer.
 
-**Enforced by:** the build -- a module sees its own layer's include root and those its links bring up, so an include up a layer does not compile, and the link policy refuses a link up, a cycle or an undeclared link at configure -- and [`harness.layering`](../../tests/scripts/cmake/layering.cmake), which holds every include of another module to the map and keeps the named rules. The rules here: `markdown/` includes only `ansi/`; `views/` paints and never parses argv (no `cli/`, `machine/` or CLI11); `machine/` never paints; `cli/` is the composition root; `operations/` holds what the command line and the HTTP server both run, so neither includes the other.
+**Enforced by:** the build -- a module sees its own layer's include root and those its links bring up, so an include up a layer does not compile, and the link policy refuses a link up, a cycle or an undeclared link at configure -- and [`harness.layering`](../../tests/scripts/cmake/layering.cmake), which holds every include of another module to the map and keeps the named rules. The rules here: `markdown/` includes only `ansi/`; `views/` paints and never parses argv (no `cli/`, `machine/` or CLI11); `machine/` never paints; `cli/` is the composition root; `operations/` holds what the command line and the HTTP server both run, so neither includes the other; `tui/` paints the full-screen shell (32b) and is the one module that links FTXUI -- privately, its headers naming none of FTXUI's types, the link policy refusing any other target that links it -- while `cli/` builds its views over the cores.
 
 **Changing this layer:**
 - A change reaches every mode it applies to -- the command line, HTTP, machine -- in the same change, or the skipped mode is named ([ADR 0002](../../../../documentation/adrs/cli/mode-parity.md)).
