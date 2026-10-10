@@ -6,8 +6,10 @@
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/screen.hpp>
 #include <ftxui/screen/string.hpp>
+#include <ftxui/screen/terminal.hpp>
 #include <utility>
 
+#include "tui/paint.h"
 #include "tui/shell_state.h"
 #include "tui/view_body.h"
 
@@ -95,6 +97,8 @@ constexpr std::size_t kNumberedViews = 9;
 
 [[nodiscard]] ftxui::Element draw_frame(Shell::State& state) {
     using namespace ftxui;  // NOLINT(google-build-using-namespace): the DOM's vocabulary
+    // What the views wrap to, before any of them draws.
+    set_frame_width(state.fixed_width > 0 ? state.fixed_width : Terminal::Size().dimx);
     Elements tabs;
     for (std::size_t i = 0; i < state.views.size(); ++i) {
         const std::string label = std::to_string(i + 1) + " " + state.views.at(i).title();
@@ -237,7 +241,9 @@ bool Shell::press(const Key& key) {
 std::string Shell::render_text(int width, int height) {
     ftxui::Screen screen =
         ftxui::Screen::Create(ftxui::Dimension::Fixed(width), ftxui::Dimension::Fixed(height));
+    state_->fixed_width = width;
     ftxui::Render(screen, state_->root->Render());
+    state_->fixed_width = 0;
     std::string out;
     for (int y = 0; y < height; ++y) {
         std::string row;

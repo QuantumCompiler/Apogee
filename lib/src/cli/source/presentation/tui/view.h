@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -18,13 +19,17 @@ public:
     /// `takes_text`: the view's keys are typing -- a printable key, a number
     /// or `q` among them, goes to it and never switches a view or quits.
     View(std::string title, std::shared_ptr<Body> body, bool takes_text = false);
+    /// As above, asked each time a key arrives: a view whose keys are typing
+    /// only some of the time (the session view: its picker is not, its
+    /// conversation is).
+    View(std::string title, std::shared_ptr<Body> body, std::function<bool()> takes_text);
 
     [[nodiscard]] const std::string& title() const noexcept {
         return title_;
     }
 
-    [[nodiscard]] bool takes_text() const noexcept {
-        return takes_text_;
+    [[nodiscard]] bool takes_text() const {
+        return takes_text_ ? takes_text_() : false;
     }
 
     [[nodiscard]] const std::shared_ptr<Body>& body() const noexcept {
@@ -34,7 +39,7 @@ public:
 private:
     std::string title_;
     std::shared_ptr<Body> body_;
-    bool takes_text_ = false;
+    std::function<bool()> takes_text_;
 };
 
 /// A page of text: the lines it is given, top to bottom, scrolled with the

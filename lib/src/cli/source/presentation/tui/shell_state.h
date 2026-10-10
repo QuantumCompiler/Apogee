@@ -25,6 +25,8 @@ struct Shell::State {
     std::optional<View> bottom;
     std::string notice;
     bool quit = false;
+    /// The width `render_text` draws at; 0 in the terminal, which is asked.
+    int fixed_width = 0;
     std::function<void()> exit;
 };
 

@@ -15,6 +15,10 @@ records the terminal's modes (`stty -g`) before it and after it:
             terminal is still put back.
   views     Tab shows the next view and F1 the first: the tab strip's bracket
             follows.
+  session   With a configured model (32c): the conversation on the screen --
+            a line sent, a tool's permission prompt answered `a`, the answer
+            rendered, the config holding `always`'s one edit and the tool's
+            file written -- then Ctrl-D, the terminal put back.
   pipe      A pipe on stdout: no screen at all, the help as `--help` prints it.
   dumb      TERM=dumb: the refusal said, the help printed, no screen.
 
@@ -34,6 +38,7 @@ import tempfile
 import time
 
 import fcntl
+import json
 import termios
 
 ENTER_ALT = b"\x1b[?1049h"
@@ -124,9 +129,12 @@ def modes_and_exit(name, output):
     return without_pendin(states[0]), without_pendin(states[-1]), int(status.group(1))
 
 
-def screen_case(binary, env, name, act, expect_exit):
+def screen_case(binary, env, name, act, expect_exit, ready=b"New chat"):
     session = Session(f'stty -g; "{binary}"; echo "EXIT:$?"; stty -g', env)
-    session.wait_for(b"[1 Home]", 15, name)
+    # The session view first (32c): with no model configured its chat cannot
+    # open, and it waits on the picker, where q and Ctrl-C are the shell's.
+    session.wait_for(b"[1 Session]", 15, name)
+    session.wait_for(ready, 15, name)
     act(session)
     output = session.finish(name)
     before, after, code = modes_and_exit(name, output)
@@ -163,17 +171,53 @@ def main():
 
         def switch_views(session):
             session.send(b"\t")
-            session.wait_for(b"[2 Keys]", 5, "views")
+            session.wait_for(b"[2 Home]", 5, "views")
             mark = len(session.output)
             session.send(b"\x1bOP")  # F1
             deadline = time.time() + 5
-            while b"[1 Home]" not in session.output[mark:]:
+            while b"[1 Session]" not in session.output[mark:]:
                 if time.time() > deadline:
                     fail("views", "F1 did not bring back the first view", session.output)
                 session.read_for(0.1)
             session.send(b"q")
 
         screen_case(binary, env, "views", switch_views, 0)
+
+    with tempfile.TemporaryDirectory(prefix="apogee-tui-session-") as home:
+        work = os.path.join(home, "work")
+        os.makedirs(os.path.join(home, "config"))
+        os.makedirs(work)
+        script = os.path.join(home, "script.json")
+        with open(script, "w") as out:
+            json.dump({"turns": [
+                {"text": "", "tool_calls": [{"name": "write_file", "arguments":
+                    json.dumps({"path": "note.txt", "content": "hi"})}]},
+                {"text": "I wrote **note.txt** for you."}]}, out)
+        config = os.path.join(home, "config", "config.json")
+        with open(config, "w") as out:
+            json.dump({"backends": {"local": {"type": "mock", "model_path": script}},
+                       "models": {"default": "local"}, "tools": {"fs_root": work}}, out)
+        env = dict(os.environ, TERM="xterm-256color", APOGEE_HOME=home, HOME=home)
+        env.pop("NO_COLOR", None)
+
+        def converse(session):
+            session.wait_for(b"/help for commands", 15, "session")
+            session.send(b"please write a note\r")
+            session.wait_for(b"Allow?", 15, "session")
+            session.send(b"a")
+            session.wait_for(b"for you.", 15, "session")
+            if b"**note.txt**" in session.output:
+                fail("session", "the answer's Markdown was not rendered", session.output)
+            session.send(b"\x04")  # Ctrl-D
+
+        screen_case(binary, env, "session", converse, 0, ready=b"[1 Session]")
+        with open(config) as written:
+            if json.load(written).get("permissions", {}).get("write_file") != "allow":
+                fail("session", "always did not write permissions.write_file = allow")
+        with open(os.path.join(work, "note.txt")) as note:
+            if note.read() != "hi":
+                fail("session", "the tool's file was not written")
+        print("ok   session: a permission-prompted turn on screen, always written once")
 
         help_text = subprocess.run([binary, "--help"], stdin=subprocess.DEVNULL,
                                    capture_output=True, env=env).stdout

@@ -11,7 +11,12 @@
 namespace apogee::tui {
 
 View::View(std::string title, std::shared_ptr<Body> body, bool takes_text)
-    : title_{std::move(title)}, body_{std::move(body)}, takes_text_{takes_text} {}
+    : title_{std::move(title)},
+      body_{std::move(body)},
+      takes_text_{[takes_text]() { return takes_text; }} {}
+
+View::View(std::string title, std::shared_ptr<Body> body, std::function<bool()> takes_text)
+    : title_{std::move(title)}, body_{std::move(body)}, takes_text_{std::move(takes_text)} {}
 
 View text_view(std::string title, std::vector<std::string> lines) {
     struct Page {

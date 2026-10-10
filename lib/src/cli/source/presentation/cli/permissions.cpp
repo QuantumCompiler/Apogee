@@ -162,6 +162,12 @@ agent::PermissionChecker make_permission_checker(const harness::Config& config,
         };
 }
 
+bool answer_permission(std::string_view text, const agent::GateRequest& request,
+                       const std::filesystem::path& config_path,
+                       const std::shared_ptr<SessionApprovals>& approvals, std::string& note) {
+    return apply_answer(parse_answer(text), request, config_path, approvals, note);
+}
+
 agent::ConfirmFn terminal_confirm_fn(StatusLine& status, ansi::Style style,
                                      std::filesystem::path config_path,
                                      std::shared_ptr<SessionApprovals> approvals) {
@@ -195,8 +201,7 @@ agent::ConfirmFn terminal_confirm_fn(StatusLine& status, ansi::Style style,
             }
         }
         std::string note;
-        const bool allowed =
-            apply_answer(parse_answer(line), request, config_path, approvals, note);
+        const bool allowed = answer_permission(line, request, config_path, approvals, note);
         if (!note.empty()) {
             status.print_line(style.dim("  " + note));
         }
@@ -229,7 +234,7 @@ agent::ConfirmFn make_driver_confirm_fn(JsonReporter& reporter, DriverInput& inp
                 continue;  // the same tolerance the question path keeps
             }
             std::string note;
-            return apply_answer(parse_answer(message.text), request, config_path, approvals, note);
+            return answer_permission(message.text, request, config_path, approvals, note);
         }
         throw std::runtime_error("the driver closed stdin with a permission prompt unanswered");
     };

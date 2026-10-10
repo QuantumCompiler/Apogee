@@ -58,11 +58,16 @@ std::string ask_one(StatusLine& status, const ansi::Style& style,
     if (!read_line(line)) {
         return {};
     }
-    const std::string answer = trim(line);
+    return chosen_answer(question, line);
+}
+
+}  // namespace
+
+std::string chosen_answer(const agentloop::Question& question, std::string_view typed) {
+    const std::string answer = trim(typed);
     if (answer.empty()) {
         return {};
     }
-
     // A bare number selects an option; anything else is taken verbatim.
     std::size_t choice = 0;
     const auto* begin = answer.data();
@@ -73,8 +78,6 @@ std::string ask_one(StatusLine& status, const ansi::Style& style,
     }
     return answer;
 }
-
-}  // namespace
 
 agentloop::AskFn terminal_ask_fn(StatusLine& status, ansi::Style style) {
     // Both ends must be a terminal: stdin because the answer is read from it,

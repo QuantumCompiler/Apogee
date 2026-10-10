@@ -58,7 +58,7 @@ apogee chat -m <backend>
 
 The four surfaces: `apogee complete "…"` is the scriptable one-shot (it reads stdin, too), `apogee chat` is the persistent, resumable conversation — line editing, streamed Markdown rendering, mid-session `/model` switching, context monitoring — `apogee execute` is that conversation opened with a model suite, its symphonies playable with `/play`, and `apogee serve` is the OpenAI-compatible HTTP server for **server deployments**, where a remote client makes REST calls to a machine you run it on. Beside them, `apogee task run "<goal>"` works a goal unattended: it plans, drives rounds of the same agent loop, and checks the acceptance you state after each, every step in a ledger you can watch, halt and resume.
 
-Run `apogee` with nothing after it at a terminal and it opens a full-screen shell (`apogee tui` spells it out); every command still runs exactly as before, and off a terminal a bare `apogee` prints the help as it always has.
+Run `apogee` with nothing after it at a terminal and it opens a full-screen shell (`apogee tui` spells it out): your saved chats, then a conversation — chat's own session, tools on, every permission asked on screen, Ctrl-C stopping a turn — that `apogee chat --resume` picks up and back. Every command still runs exactly as before, and off a terminal a bare `apogee` prints the help as it always has.
 
 ## What's in the harness
 

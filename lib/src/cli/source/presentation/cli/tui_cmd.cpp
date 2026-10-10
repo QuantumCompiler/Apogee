@@ -9,9 +9,12 @@
 #include <vector>
 
 #include "cli/helpers.h"
+#include "cli/suite_residency.h"
+#include "cli/tui_session.h"
 #include "cli/version_command.h"
 #include "platform/platform.h"
 #include "tui/pump.h"
+#include "tui/session_view.h"
 #include "tui/shell.h"
 #include "tui/theme.h"
 #include "tui/view.h"
@@ -32,11 +35,19 @@ namespace {
 }
 
 [[nodiscard]] int run_full_screen(const RootContext& context) {
-    tui::Shell shell{tui::ShellOptions{.title = "apogee " + std::string{version::semantic()},
-                                       .theme = tui::detect_theme()}};
-    add_shell_views(shell, context);
+    const tui::Theme theme = tui::detect_theme();
+    tui::Shell shell{
+        tui::ShellOptions{.title = "apogee " + std::string{version::semantic()}, .theme = theme}};
     tui::TerminalPump pump;
-    return pump.run(shell);
+    // The conversation first: where a bare `apogee` lands (32c).
+    tui::SessionView session{pump, theme};
+    shell.add(session.view());
+    add_shell_views(shell, context);
+    TuiSessionDriver driver{session, context, machine_budget};
+    driver.start();
+    const int code = pump.run(shell);
+    driver.stop();
+    return code;
 }
 
 }  // namespace
@@ -57,7 +68,13 @@ void add_shell_views(tui::Shell& shell, const RootContext& context) {
     home.emplace_back("Every command runs as it always has -- `apogee <command>` at a prompt, and");
     home.emplace_back("`apogee --help` lists them. Tab moves between the views; q quits.");
     shell.add(tui::text_view("Home", std::move(home)));
-    shell.add(tui::text_view("Keys", tui::Shell::key_lines()));
+    std::vector<std::string> keys = tui::Shell::key_lines();
+    keys.emplace_back();
+    keys.emplace_back("In the session:");
+    for (const std::string& line : tui::SessionView::key_lines()) {
+        keys.push_back(line);
+    }
+    shell.add(tui::text_view("Keys", std::move(keys)));
 }
 
 int open_bare(const ShellEntry& entry, const RootContext& context, CLI::App& app) {

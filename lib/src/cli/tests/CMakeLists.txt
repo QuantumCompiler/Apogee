@@ -240,6 +240,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/read_documents_test.cpp
     presentation/cli/system_cmd_test.cpp
     presentation/cli/tui_cmd_test.cpp
+    presentation/cli/tui_session_test.cpp
     presentation/cli/root_test.cpp
     presentation/cli/models_pull_test.cpp
     presentation/cli/models_migrate_test.cpp
@@ -257,6 +258,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/operations/suites_test.cpp
     presentation/operations/system_view_test.cpp
     presentation/tui/shell_test.cpp
+    presentation/tui/session_view_test.cpp
     presentation/cli/helpers_test.cpp
     presentation/cli/tool_vectors_test.cpp
     presentation/views/thinking_view_test.cpp

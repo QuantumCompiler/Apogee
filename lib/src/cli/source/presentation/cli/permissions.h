@@ -108,6 +108,18 @@ bool revoke_for_session(SessionApprovals& approvals, const GatedName& name);
                                                    std::filesystem::path config_path,
                                                    std::shared_ptr<SessionApprovals> approvals);
 
+/// The answer `text` gives a permission prompt, applied: `yes`/`y` allows
+/// once, `session`/`s` remembers it for the run, `always`/`a` remembers it
+/// and writes it to the config through the one editor (`permissions.<tool>:
+/// allow`, or the host into `tools.allowed_hosts`); anything else denies.
+/// Returns whether the call may run; `note` says what was written, or why
+/// writing failed. The one path every prompt -- the terminal's, machine
+/// mode's, the full-screen shell's (32c) -- answers through.
+[[nodiscard]] bool answer_permission(std::string_view text, const agent::GateRequest& request,
+                                     const std::filesystem::path& config_path,
+                                     const std::shared_ptr<SessionApprovals>& approvals,
+                                     std::string& note);
+
 /// Machine mode's prompt: a `question` event with `"kind": "permission"`,
 /// answered by an ordinary `answer` line -- `yes`, `no`, `always`, `session`.
 /// A driver that closes stdin with the prompt outstanding fails the turn,

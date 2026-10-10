@@ -43,6 +43,8 @@ class Option;
 /// was before the core was shared (`chat_session_test`'s golden).
 namespace apogee::commands {
 
+class SessionOutput;
+
 /// The command a `mode` session is: `chat` or `execute`.
 [[nodiscard]] std::string_view session_command(SessionMode mode) noexcept;
 
@@ -142,8 +144,13 @@ void bind_session_flags(CLI::App& command, const std::shared_ptr<SessionFlags>& 
 /// `apogee execute`. `machine` is where a suite's admission reads the
 /// machine's budget (27e). Fails by throwing `CLI::RuntimeError` with the
 /// exit code, the reason said on stderr first.
+///
+/// `front`, when given, is where the session's REPL writes and reads instead
+/// of the terminal -- the full-screen shell's session view (32c): its lines,
+/// its prompts, its turns' Ctrl-C. Everything else is the same session.
 void run_session(const RootContext& context, const SessionFlags& flags,
-                 const MachineBudgetSource& machine, SessionMode mode);
+                 const MachineBudgetSource& machine, SessionMode mode,
+                 SessionOutput* front = nullptr);
 
 /// Why an execute session cannot open under `config` as it stands (27s):
 /// no suite was named, the session had none and the config has no default --

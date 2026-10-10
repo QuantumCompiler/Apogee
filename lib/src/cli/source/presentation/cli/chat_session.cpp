@@ -35,6 +35,7 @@
 #include "cli/helpers.h"
 #include "cli/permissions.h"
 #include "cli/provider_offer.h"
+#include "cli/session_output.h"
 #include "cli/suite_residency.h"
 #include "cli/symphonies_cmd.h"
 #include "contracts/config.h"
@@ -151,6 +152,24 @@ void attach_mentions(ChatAttachments& attached, std::string_view message,
 /// -- the next turn, a slash command, the exit -- calls `settle()` first. That
 /// waits for a title still in flight (seconds at most: a few dozen tokens with
 /// the reasoning skipped) and records it.
+/// A turn's span on the session's front-end (32c): the token that stops it,
+/// and its end said however the turn leaves -- answered, cancelled, thrown.
+struct TurnScope {
+    explicit TurnScope(SessionOutput& output) : out{output}, token{output.begin_turn()} {}
+
+    ~TurnScope() {
+        out.end_turn();
+    }
+
+    TurnScope(const TurnScope&) = delete;
+    TurnScope& operator=(const TurnScope&) = delete;
+    TurnScope(TurnScope&&) = delete;
+    TurnScope& operator=(TurnScope&&) = delete;
+
+    SessionOutput& out;
+    harness::CancellationToken token;
+};
+
 class BackgroundTitle {
 public:
     /// `progress` hears which model titled the chat, for `--verbose` (26b).
@@ -368,9 +387,11 @@ void bind_session_flags(CLI::App& command, const std::shared_ptr<SessionFlags>& 
 }
 
 void run_session(const RootContext& context, const SessionFlags& session_flags,
-                 const MachineBudgetSource& machine, SessionMode mode) {
+                 const MachineBudgetSource& machine, SessionMode mode, SessionOutput* front) {
     const SessionFlags* flags = &session_flags;
-    const bool decorate = platform::is_terminal(platform::StandardStream::Out);
+    // A front-end given -- the full-screen shell's session view (32c) --
+    // decorates as a terminal does: its banner, its spacing.
+    const bool decorate = front != nullptr || platform::is_terminal(platform::StandardStream::Out);
 
     harness::Config config;
     std::filesystem::path config_path;
@@ -386,9 +407,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // path (`cli.no_provider_probes`).
     {
         OfferContext offer;
-        offer.interactive = platform::is_terminal(platform::StandardStream::In) &&
-                            platform::is_terminal(platform::StandardStream::Out) &&
-                            !stdin_is_piped();
+        // Asked on the terminal's stdin: never under the shell, which owns it.
+        offer.interactive =
+            front == nullptr && platform::is_terminal(platform::StandardStream::In) &&
+            platform::is_terminal(platform::StandardStream::Out) && !stdin_is_piped();
         offer.machine = flags->output_format != OutputFormat::Text ||
                         flags->input_format.value_or(InputFormat::Text) != InputFormat::Text;
         offer.quiet = flags->quiet;
@@ -452,8 +474,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 owners += (owners.empty() ? std::string{} : " and ") + type;
             }
             fail_user(mode, "'" + flags->model + "' is on " + owners +
-                      "'s rosters -- pin it to one entry with 'apogee config add-backend "
-                      "<name> --type <type> --model " + flags->model + "'");
+                                "'s rosters -- pin it to one entry with 'apogee config add-backend "
+                                "<name> --type <type> --model " +
+                                flags->model + "'");
         }
         if (!roster.backend.empty()) {
             config.backends.at(roster.backend).model = roster.model;
@@ -478,18 +501,19 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         fail_user(mode, message);
     }
 
-    TerminalWriter status_writer{std::cerr};
-    CliReporter::Options reporter_options;
-    reporter_options.answer_stream = &std::cout;
-    reporter_options.decorate = decorate;
-    reporter_options.verbosity = flags->verbose ? ansi::Verbosity::Verbose : ansi::Verbosity::Line;
-    reporter_options.style =
-        ansi::Style::detect(flags->no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto);
-    reporter_options.width = static_cast<std::size_t>(platform::terminal_width().value_or(80));
-    reporter_options.markdown = !flags->raw && config.ui.markdown;
-    reporter_options.hyperlinks = ansi::hyperlinks_supported();
-    CliReporter reporter{status_writer, reporter_options};
-    const ansi::Style& style = reporter_options.style;
+    // Where everything below writes and reads (32c): the terminal's status
+    // line, line editor and answer view, built here as they always were --
+    // or the front-end the caller gave, the shell's session view.
+    std::unique_ptr<TerminalOutput> terminal_output;
+    if (front == nullptr) {
+        terminal_output = std::make_unique<TerminalOutput>(
+            TerminalOutput::Options{.decorate = decorate,
+                                    .verbose = flags->verbose,
+                                    .no_color = flags->no_color,
+                                    .markdown = !flags->raw && config.ui.markdown});
+    }
+    SessionOutput& out = front != nullptr ? *front : *terminal_output;
+    const ansi::Style& style = out.style();
     // A model loading for any reason -- the chat's first turn, a
     // helper's first chore, an embedding -- says so on the spinner rather
     // than in silence (27e). Never into machine mode's stream. Every model
@@ -497,8 +521,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // and the attachments settle first, and both are declared after it.
     if (flags->output_format != OutputFormat::StreamJson) {
         harness.listen_for_loads(
-            [&reporter](std::string_view backend, const harness::StatusEvent& event) {
-                reporter.on_model_load(backend, event);
+            [&out](std::string_view backend, const harness::StatusEvent& event) {
+                out.on_model_load(backend, event);
             });
     }
 
@@ -523,8 +547,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             session = std::move(loaded.session);
             // Resume degrades, never fails: every problem is a note.
             for (const logger::ResumeWarning& warning : loaded.warnings) {
-                reporter.status().print_line(style.tag(ansi::Role::Warning) + " [resume] " +
-                                             warning.message);
+                out.print_line(style.tag(ansi::Role::Warning) + " [resume] " + warning.message);
                 if (warning.kind == logger::WarningKind::BackendMissing) {
                     session.backend.clear();  // fall back to the default
                 }
@@ -562,7 +585,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     if (chosen_suite.has_value() && *chosen_suite != config.models.default_suite) {
         for (const std::string& line :
              activate_suite(harness, config, *chosen_suite, build_options)) {
-            reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + line);
+            out.print_line(style.tag(ansi::Role::Warning) + " " + line);
         }
     }
     // A resumed session that had no suite, under a config with no default,
@@ -630,7 +653,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // not; a chat a process that died left due is summarised now.
     ChatRecall recall{harness, config, session, config.memory.recall && !flags->no_recall};
     for (const std::string& line : recall.catch_up({})) {
-        reporter.status().print_line(style.dim("[memory] " + line));
+        out.print_line(style.dim("[memory] " + line));
     }
 
     // Retrieval settings follow the same precedence as every other saved
@@ -697,7 +720,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             .review = *live_review,
             .live_review = live_review,
             .mcp = mcp_registry,
-            .mcp_status = mcp_status_line(reporter.status()),
+            .mcp_status = out.mcp_status(),
             // A server's stderr never reaches the terminal unless asked
             // for: with --verbose it is the raw stream, otherwise the
             // bounded tail rides the connect-failure message.
@@ -758,7 +781,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             flags->tools ? tools::consult_offer(harness) : tools::ConsultOffer{};
         if (consult.description != offered_consult) {
             for (const std::string& note : consult.notes) {
-                reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + note);
+                out.print_line(style.tag(ansi::Role::Warning) + " " + note);
             }
         }
         offered_consult = consult.description;
@@ -792,13 +815,13 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 const std::string line =
                     "orchestrate: not offering " + withheld.symphony + " -- " + withheld.reason;
                 if (!withheld.structural) {
-                    reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + line);
+                    out.print_line(style.tag(ansi::Role::Warning) + " " + line);
                 } else if (flags->verbose) {
-                    reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " + line);
+                    out.print_line(style.tag(ansi::Role::Apogee) + " " + line);
                 }
             }
             if (orchestra->offered.empty()) {
-                reporter.status().print_line(
+                out.print_line(
                     style.tag(ansi::Role::Warning) +
                     " orchestrate: no symphony can be offered as a tool -- the model answers "
                     "without plays");
@@ -808,10 +831,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         std::string ranked_by;
         selection = make_tool_selection(harness, config, *offered, config_path, ranked_by);
         if (selection != nullptr && flags->verbose) {
-            reporter.status().print_line("[tools] " + std::to_string(offered->size()) +
-                                         " registered: each turn offers the ones its question "
-                                         "needs, ranked by " +
-                                         ranked_by);
+            out.print_line("[tools] " + std::to_string(offered->size()) +
+                           " registered: each turn offers the ones its question "
+                           "needs, ranked by " +
+                           ranked_by);
         }
     };
     const auto reoffer_tools = [&]() {
@@ -866,7 +889,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         // A base model is said in the banner and the spinner, all session
         // (26r) -- never on an answer. Under execute the banner counts what
         // the session can play (27s).
-        reporter.status().print_line(
+        out.print_line(
             style.tag(ansi::Role::Apogee) + " " +
             session_banner(mode, model, is_base_model(harness, model), config.models.default_suite,
                            forced,
@@ -878,12 +901,27 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                                : std::nullopt,
                            session.chat_id));
     }
+    // The same facts as the banner, for a front-end that keeps them in view
+    // apart from the transcript (32c) -- said again as /model and /suite move
+    // them.
+    const auto refresh_header = [&]() {
+        out.set_header(session_banner(
+            mode, session.backend, is_base_model(harness, session.backend),
+            config.models.default_suite, !config.models.default_suite.empty() && forced,
+            mode == SessionMode::Execute
+                ? session_catalog(harness.config(), config_path).definitions.size()
+                : 0,
+            offered_orchestra.has_value()
+                ? std::optional<std::size_t>{offered_orchestra->offered.size()}
+                : std::nullopt,
+            session.chat_id));
+    };
+    refresh_header();
     // What the suite takes of this machine, stated where the session
     // starts -- on a pipe too, on stderr -- and, asked for, its members
     // loaded now on the busy line rather than at their first use (27e).
     if (footprint.has_value()) {
-        reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " +
-                                     admission_line(*footprint, forced));
+        out.print_line(style.tag(ansi::Role::Apogee) + " " + admission_line(*footprint, forced));
     }
     if (flags->warm) {
         std::vector<std::string> unwarmed;
@@ -894,19 +932,18 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             unwarmed = warm_suite(harness, config, busy);
         }
         for (const std::string& line : unwarmed) {
-            reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + line);
+            out.print_line(style.tag(ansi::Role::Warning) + " " + line);
         }
     }
     // Tools withheld from a base model are said once, at the start, on a
     // terminal and a pipe alike -- never into machine mode's stream.
     if (tools_on() && flags->output_format != OutputFormat::StreamJson &&
         is_base_model(harness, model)) {
-        reporter.status().print_line(style.tag(ansi::Role::Warning) + " " +
-                                     base_model_tools_note(model));
+        out.print_line(style.tag(ansi::Role::Warning) + " " + base_model_tools_note(model));
     }
     if (decorate) {
         // The banner stands apart from the first prompt.
-        reporter.status().print_line("");
+        out.print_line("");
     }
 
     // --- machine mode ----------------------------------------------------
@@ -1165,38 +1202,25 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // --- attachments (26d) ------------------------------------------------
     std::error_code cwd_error;
     const std::filesystem::path working_directory = std::filesystem::current_path(cwd_error);
-    const bool asked_on_terminal = platform::is_terminal(platform::StandardStream::In);
     ChatAttachments attached{
         harness, session, ChatAttachments::index_for(session.chat_id),
         ChatAttachments::Hooks{
             .say =
-                [&reporter, &style](const std::string& line, bool warning) {
-                    reporter.status().print_line(
-                        style.tag(warning ? ansi::Role::Warning : ansi::Role::Apogee) + " " + line);
+                [&out, &style](const std::string& line, bool warning) {
+                    out.print_line(style.tag(warning ? ansi::Role::Warning : ansi::Role::Apogee) +
+                                   " " + line);
                 },
             .progress =
-                [&reporter, &style](const std::string& line) {
+                [&out, &style](const std::string& line) {
                     if (line.empty()) {
-                        reporter.status().clear();
+                        out.clear_status();
                     } else {
-                        reporter.status().set(style.tag(ansi::Role::Apogee) + " " + line);
+                        out.set_status(style.tag(ansi::Role::Apogee) + " " + line);
                     }
                 },
             // A pipe cannot be asked, so a folder over the size guard is
             // refused there.
-            .confirm_large =
-                asked_on_terminal
-                    ? std::function<bool(const std::string&)>{[&reporter, &style](
-                                                                  const std::string& question) {
-                          reporter.status().print_line(style.tag(ansi::Role::Warning) + " " +
-                                                       question + " [y/N]");
-                          std::string answer;
-                          if (!std::getline(std::cin, answer)) {
-                              return false;
-                          }
-                          return answer == "y" || answer == "Y" || answer == "yes";
-                      }}
-                    : std::function<bool(const std::string&)>{},
+            .confirm_large = out.confirm_large(),
             .save = true,
             // A folder of code builds its graph (27n), unless the config
             // or the attach says otherwise (27p).
@@ -1209,7 +1233,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     }
 
     // Once, immediately before the first prompt -- never between turns.
-    discard_startup_typeahead();
+    if (out.terminal()) {
+        discard_startup_typeahead();
+    }
 
     // `/` lists the commands as they are typed, a command's values follow
     // it, and `@` completes paths -- all from the one command table. A
@@ -1241,8 +1267,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     };
     reader_options.live = true;
     reader_options.color = style.color_enabled();
-    const std::unique_ptr<LineReader> reader =
-        make_line_reader(std::move(reader_options), std::cin);
+    const std::unique_ptr<LineReader> reader = out.line_reader(std::move(reader_options));
 
     // --- capture: this conversation as one knowledge record --------------
     //
@@ -1257,8 +1282,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         attached.settle();
         const std::string transcript = logger::transcript_text(session.messages);
         if (transcript.empty()) {
-            reporter.status().print_line(style.tag(ansi::Role::Warning) +
-                                         " nothing to capture yet -- have a conversation first");
+            out.print_line(style.tag(ansi::Role::Warning) +
+                           " nothing to capture yet -- have a conversation first");
             return;
         }
         if (overrides.source.empty()) {
@@ -1268,8 +1293,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         inputs.raw = transcript;
         inputs.overrides = std::move(overrides);
         // A verifier checking the record (27g) is said where the clerk is.
-        inputs.narrate = [&reporter](const agentloop::SideCall& call) {
-            reporter.on_side_call(call);
+        inputs.narrate = [&out](const agentloop::SideCall& call) {
+            out.reporter().on_side_call(call);
         };
         // The clerk is the chat's own model -- loaded already, so no second
         // load (Milestone Y) -- unless a utility model is named (26b).
@@ -1278,38 +1303,37 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         // Narrated in the thinking block like any side call, which then
         // collapses: the clerk is a model call of its own (26n).
         std::optional<agentloop::SideCallScope> said;
-        said.emplace([&reporter](const agentloop::SideCall& call) { reporter.on_side_call(call); },
+        said.emplace([&out](const agentloop::SideCall& call) { out.reporter().on_side_call(call); },
                      "clerk", "distilling this conversation into a record with " + clerk);
         const CaptureResult result = capture_and_store(
             harness, config, config_path, inputs, knowledge::make_structured_clerk(harness, clerk));
         said.reset();
-        reporter.on_clear_status();
+        out.reporter().on_clear_status();
         if (!result.ok()) {
             // The clerk named, as the line its narration replaced did:
             // on a pipe that line is not drawn at all (26n).
-            reporter.status().print_line(style.tag(ansi::Role::Error) + " capture by " + clerk +
-                                         " failed: " + result.error);
+            out.print_line(style.tag(ansi::Role::Error) + " capture by " + clerk +
+                           " failed: " + result.error);
             return;
         }
         for (const std::string& note : result.notes) {
-            reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + note);
+            out.print_line(style.tag(ansi::Role::Warning) + " " + note);
         }
-        reporter.status().print_line(style.tag(ansi::Role::Apogee) + " captured " +
-                                     result.record.id + " [" + result.record.status + "] -- " +
-                                     preview_text(result.record.intent, 80));
+        out.print_line(style.tag(ansi::Role::Apogee) + " captured " + result.record.id + " [" +
+                       result.record.status + "] -- " + preview_text(result.record.intent, 80));
         if (result.validation.has_value()) {
             const bool clean = result.validation->result == agentloop::Validated::Result::Passed ||
                                result.validation->result == agentloop::Validated::Result::Revised;
             for (const std::string& line : agentloop::extraction_lines(*result.validation)) {
-                reporter.status().print_line(
-                    style.tag(clean ? ansi::Role::Apogee : ansi::Role::Warning) + " " + line);
+                out.print_line(style.tag(clean ? ansi::Role::Apogee : ansi::Role::Warning) + " " +
+                               line);
             }
         }
     };
 
     // --- the REPL --------------------------------------------------------
     BackgroundTitle title{harness,
-                          [&reporter](std::string_view line) { reporter.on_progress(line); }};
+                          [&out](std::string_view line) { out.reporter().on_progress(line); }};
     bool running = true;
     while (running) {
         // The editor draws its own prompt; the plain reader ignores it and
@@ -1342,8 +1366,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             const std::string& argument = command->argument;
             const ChatCommandSpec* spec = find_chat_command(command->name, mode);
             if (spec == nullptr) {
-                reporter.status().print_line(style.tag(ansi::Role::Error) + " unknown command '/" +
-                                             command->name + "' -- /help lists them");
+                out.print_line(style.tag(ansi::Role::Error) + " unknown command '/" +
+                               command->name + "' -- /help lists them");
                 continue;
             }
 
@@ -1364,11 +1388,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     const symphony::Catalog catalog =
                         session_catalog(harness.config(), config_path);
                     for (const std::string& row : symphony_list_lines(catalog)) {
-                        reporter.status().print_line("  " + row);
+                        out.print_line("  " + row);
                     }
                     for (const std::string& problem : catalog.problems) {
-                        reporter.status().print_line(style.tag(ansi::Role::Warning) + " skipped " +
-                                                     problem);
+                        out.print_line(style.tag(ansi::Role::Warning) + " skipped " + problem);
                     }
                     break;
                 }
@@ -1380,31 +1403,32 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     const PreparedPlay prepared =
                         prepare_play(harness.config(), config_path, parse_play_argument(argument));
                     if (!prepared.refusal.empty()) {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) + " " +
-                                                     prepared.refusal);
+                        out.print_line(style.tag(ansi::Role::Error) + " " + prepared.refusal);
                         break;
                     }
                     // Its stages are model calls: one at a time (26e).
                     attached.settle();
                     if (decorate) {
-                        reporter.status().print_line("");
+                        out.print_line("");
                     }
                     // As a turn: keystrokes typed while it plays wait unseen.
                     std::optional<platform::TypeaheadGuard> typeahead;
-                    if (reader->interactive()) {
+                    if (reader->interactive() && out.terminal()) {
                         typeahead.emplace();
                     }
-                    const PlayTurnResult played = run_play_turn(harness, session, input, prepared,
-                                                                *member_calls, reporter, &recall);
+                    const PlayTurnResult played = [&]() {
+                        const TurnScope turn{out};
+                        return run_play_turn(harness, session, input, prepared, *member_calls,
+                                             out.reporter(), &recall, turn.token);
+                    }();
                     typeahead.reset();
                     if (played.completed) {
                         title.start_if_due(session);
                     } else {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) + " " +
-                                                     played.failure);
+                        out.print_line(style.tag(ansi::Role::Error) + " " + played.failure);
                     }
                     if (decorate) {
-                        reporter.status().print_line("");
+                        out.print_line("");
                     }
                     break;
                 }
@@ -1416,19 +1440,18 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         } else if (config.memory.recall && !flags->no_recall) {
                             state = "off for this chat";
                         }
-                        reporter.status().print_line(style.tag(ansi::Role::Apogee) +
-                                                     " recall: " + state);
+                        out.print_line(style.tag(ansi::Role::Apogee) + " recall: " + state);
                     } else if (argument == "on" || argument == "off") {
                         recall.set_session(argument == "on");
                     } else {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                                     " not on or off: '" + argument + "'");
+                        out.print_line(style.tag(ansi::Role::Error) + " not on or off: '" +
+                                       argument + "'");
                     }
                     break;
                 case ChatVerb::Permissions:
                     for (const std::string& line :
                          describe_permissions(config, *approvals, gated)) {
-                        reporter.status().print_line("  " + line);
+                        out.print_line("  " + line);
                     }
                     break;
                 case ChatVerb::Allow:
@@ -1438,14 +1461,13 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         // Alone, `/allow` lists: listing beats an error.
                         for (const std::string& line :
                              describe_permissions(config, *approvals, gated)) {
-                            reporter.status().print_line("  " + line);
+                            out.print_line("  " + line);
                         }
                         break;
                     }
                     const GatedName name = name_gated(argument, gated);
                     if (!name.error.empty()) {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) + " " +
-                                                     name.error);
+                        out.print_line(style.tag(ansi::Role::Error) + " " + name.error);
                         break;
                     }
                     const std::string what = name.host ? "website " + name.key : name.key;
@@ -1454,7 +1476,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         const bool config_denies =
                             !name.host &&
                             config.permissions.level(name.key) == harness::PermissionLevel::Deny;
-                        reporter.status().print_line(
+                        out.print_line(
                             style.tag(ansi::Role::Apogee) + " " + what +
                             (config_denies
                                  ? " stays denied: the config says deny, and a chat never "
@@ -1462,51 +1484,45 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                                  : " allowed for this chat"));
                     } else if (spec->id == ChatVerb::Deny) {
                         deny_for_session(*approvals, name);
-                        reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " + what +
-                                                     " denied for this chat");
+                        out.print_line(style.tag(ansi::Role::Apogee) + " " + what +
+                                       " denied for this chat");
                     } else if (revoke_for_session(*approvals, name)) {
-                        reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " + what +
-                                                     ": asked again from now on");
+                        out.print_line(style.tag(ansi::Role::Apogee) + " " + what +
+                                       ": asked again from now on");
                     } else if (!name.host && config.permissions.levels.contains(name.key)) {
-                        reporter.status().print_line(
-                            style.tag(ansi::Role::Apogee) + " " + what +
-                            " is the config's answer -- change it with 'apogee config "
-                            "set-permission " +
-                            name.key + " ask'");
+                        out.print_line(style.tag(ansi::Role::Apogee) + " " + what +
+                                       " is the config's answer -- change it with 'apogee config "
+                                       "set-permission " +
+                                       name.key + " ask'");
                     } else {
-                        reporter.status().print_line(style.tag(ansi::Role::Apogee) +
-                                                     " this chat has no answer for " + what);
+                        out.print_line(style.tag(ansi::Role::Apogee) +
+                                       " this chat has no answer for " + what);
                     }
                     break;
                 }
                 case ChatVerb::Private:
                     recall.make_private();
                     logger::save(session);
-                    reporter.status().print_line(
-                        style.tag(ansi::Role::Apogee) +
-                        " this chat is private: it will never be summarised for recall");
+                    out.print_line(style.tag(ansi::Role::Apogee) +
+                                   " this chat is private: it will never be summarised for recall");
                     break;
                 case ChatVerb::Help:
-                    for (const std::string& row : chat_help_lines(
-                             reader->interactive()
-                                 ? static_cast<std::size_t>(platform::terminal_width().value_or(0))
-                                 : 0,
-                             mode)) {
-                        reporter.status().print_line(row);
+                    for (const std::string& row :
+                         chat_help_lines(reader->interactive() ? out.width() : 0, mode)) {
+                        out.print_line(row);
                     }
                     break;
                 case ChatVerb::Models:
                     for (const std::string& backend : config.backend_names()) {
-                        reporter.status().print_line((backend == session.backend ? "* " : "  ") +
-                                                     backend);
+                        out.print_line((backend == session.backend ? "* " : "  ") + backend);
                     }
                     break;
                 case ChatVerb::Model:
                     if (argument.empty()) {
-                        reporter.status().print_line(session.backend);
+                        out.print_line(session.backend);
                     } else if (config.find_backend(argument) == nullptr) {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                                     " no backend named '" + argument + "'");
+                        out.print_line(style.tag(ansi::Role::Error) + " no backend named '" +
+                                       argument + "'");
                     } else {
                         // Instant, and history carries over: every backend
                         // was constructed up front and history is neutral IR.
@@ -1514,20 +1530,20 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         harness.resume_conversation(session.backend, session.chat_id);
                         // A suite's toolset pin follows the backend (27d).
                         reoffer_tools();
+                        refresh_header();
                         const bool base = is_base_model(harness, argument);
-                        reporter.status().print_line(style.tag(ansi::Role::Apogee) +
-                                                     " switched to " + argument +
-                                                     (base ? " -- a base model" : ""));
+                        out.print_line(style.tag(ansi::Role::Apogee) + " switched to " + argument +
+                                       (base ? " -- a base model" : ""));
                         if (base && flags->tools) {
-                            reporter.status().print_line(style.tag(ansi::Role::Warning) + " " +
-                                                         base_model_tools_note(argument));
+                            out.print_line(style.tag(ansi::Role::Warning) + " " +
+                                           base_model_tools_note(argument));
                         }
                     }
                     break;
                 case ChatVerb::Suite: {
                     if (argument.empty()) {
-                        reporter.status().print_line(style.tag(ansi::Role::Apogee) +
-                                                     " suite: " + active_suite_summary(config));
+                        out.print_line(style.tag(ansi::Role::Apogee) +
+                                       " suite: " + active_suite_summary(config));
                         // The session's own status (27e): each member
                         // resident or not, and the set's total.
                         if (!config.models.default_suite.empty()) {
@@ -1536,7 +1552,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                                      [&harness](std::string_view backend) {
                                          return harness.resident(backend);
                                      })) {
-                                reporter.status().print_line(row);
+                                out.print_line(row);
                             }
                         }
                         break;
@@ -1570,7 +1586,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         refused = "--warm loads a suite's members; off has none";
                     }
                     if (!refused.empty()) {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) + " " + refused);
+                        out.print_line(style.tag(ansi::Role::Error) + " " + refused);
                         break;
                     }
                     // Rebuilding a backend is a model call's business:
@@ -1578,7 +1594,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     attached.settle();
                     for (const std::string& said : activate_suite(
                              harness, config, probe.models.default_suite, build_options)) {
-                        reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + said);
+                        out.print_line(style.tag(ansi::Role::Warning) + " " + said);
                     }
                     session.suite = config.models.default_suite;
                     // The suite's chat member speaks for the conversation,
@@ -1593,24 +1609,24 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         moved = chat.key;
                     }
                     reoffer_tools();
+                    refresh_header();
                     logger::save(session);
                     if (config.models.default_suite.empty()) {
-                        reporter.status().print_line(
-                            style.tag(ansi::Role::Apogee) +
-                            " suite off -- the roles follow the global pointers; the "
-                            "conversation stays on " +
-                            session.backend);
+                        out.print_line(style.tag(ansi::Role::Apogee) +
+                                       " suite off -- the roles follow the global pointers; the "
+                                       "conversation stays on " +
+                                       session.backend);
                     } else {
-                        reporter.status().print_line(style.tag(ansi::Role::Apogee) + " suite " +
-                                                     active_suite_summary(config));
+                        out.print_line(style.tag(ansi::Role::Apogee) + " suite " +
+                                       active_suite_summary(config));
                         if (priced.has_value()) {
-                            reporter.status().print_line(
+                            out.print_line(
                                 style.tag(ansi::Role::Apogee) + " " +
                                 admission_line(
                                     *priced, priced->admission() == models::Admission::OverBudget));
                         }
                         if (!moved.empty()) {
-                            reporter.status().print_line(
+                            out.print_line(
                                 style.tag(ansi::Role::Apogee) + " switched to " + moved +
                                 (is_base_model(harness, moved) ? " -- a base model" : ""));
                         }
@@ -1623,8 +1639,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                                 unwarmed = warm_suite(harness, config, busy);
                             }
                             for (const std::string& said : unwarmed) {
-                                reporter.status().print_line(style.tag(ansi::Role::Warning) + " " +
-                                                             said);
+                                out.print_line(style.tag(ansi::Role::Warning) + " " + said);
                             }
                         }
                     }
@@ -1632,10 +1647,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 }
                 case ChatVerb::Branch:
                     if (argument.empty()) {
-                        reporter.status().print_line(
-                            style.tag(ansi::Role::Apogee) + " review: " +
-                            (review.active() ? agentloop::review_summary(review)
-                                             : "off -- /branch <head>, <base>..<head>, or off"));
+                        out.print_line(style.tag(ansi::Role::Apogee) + " review: " +
+                                       (review.active()
+                                            ? agentloop::review_summary(review)
+                                            : "off -- /branch <head>, <base>..<head>, or off"));
                     } else {
                         // Deterministic from the argument: the tools'
                         // defaults and the note change together, the
@@ -1645,7 +1660,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         review = agentloop::parse_branch_arg(argument, review);
                         sync_review();
                         review_note = agentloop::review_note(review);
-                        reporter.status().print_line(
+                        out.print_line(
                             style.tag(ansi::Role::Apogee) + " review " +
                             (review.active() ? agentloop::review_summary(review) : "off"));
                     }
@@ -1666,15 +1681,14 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 }
                 case ChatVerb::System:
                     session.params.system_prompt = harness::valid_utf8(argument);
-                    reporter.status().print_line(style.tag(ansi::Role::Apogee) +
-                                                 " system prompt updated");
+                    out.print_line(style.tag(ansi::Role::Apogee) + " system prompt updated");
                     break;
                 case ChatVerb::Temperature:
                     try {
                         session.params.temperature = std::stod(argument);
                     } catch (const std::exception&) {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                                     " not a number: '" + argument + "'");
+                        out.print_line(style.tag(ansi::Role::Error) + " not a number: '" +
+                                       argument + "'");
                     }
                     break;
                 case ChatVerb::Think:
@@ -1682,7 +1696,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         const harness::Thinking thinking = resolve_thinking(
                             session.params.thinking, session.params.thinking_budget,
                             harness.config(), session.backend);
-                        reporter.status().print_line(
+                        out.print_line(
                             style.tag(ansi::Role::Apogee) +
                             " thinking: " + std::string{harness::to_string(thinking.mode)} +
                             (thinking.budget.has_value()
@@ -1693,22 +1707,21 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                                thinking.has_value()) {
                         session.params.thinking = thinking;
                     } else {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                                     " not a thinking mode: '" + argument +
-                                                     "' (on, off or auto)");
+                        out.print_line(style.tag(ansi::Role::Error) + " not a thinking mode: '" +
+                                       argument + "' (on, off or auto)");
                     }
                     break;
                 case ChatVerb::MaxTokens:
                     try {
                         session.params.max_tokens = std::stoll(argument);
                     } catch (const std::exception&) {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                                     " not a number: '" + argument + "'");
+                        out.print_line(style.tag(ansi::Role::Error) + " not a number: '" +
+                                       argument + "'");
                     }
                     break;
                 case ChatVerb::Retriever:
                     if (argument.empty()) {
-                        reporter.status().print_line(
+                        out.print_line(
                             style.tag(ansi::Role::Rag) + " retriever: " +
                             (session.retriever.empty() ? "auto" : session.retriever) +
                             (session.retriever.empty()
@@ -1716,59 +1729,54 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                                    "embedding backend, else lexical; hybrid only when asked"
                                  : ""));
                     } else if (!agentloop::valid_retriever(argument)) {
-                        reporter.status().print_line(
-                            style.tag(ansi::Role::Error) + " " +
-                            agentloop::retriever_values_message("/retriever", argument));
+                        out.print_line(style.tag(ansi::Role::Error) + " " +
+                                       agentloop::retriever_values_message("/retriever", argument));
                     } else {
                         session.retriever = argument == "auto" ? std::string{} : argument;
                         // Persisted now, so a resume continues with this.
                         logger::save(session);
-                        reporter.status().print_line(
-                            style.tag(ansi::Role::Rag) + " retriever set to " +
-                            (session.retriever.empty() ? "auto" : session.retriever));
+                        out.print_line(style.tag(ansi::Role::Rag) + " retriever set to " +
+                                       (session.retriever.empty() ? "auto" : session.retriever));
                     }
                     break;
                 case ChatVerb::Rerank:
                     if (argument.empty()) {
-                        reporter.status().print_line(
-                            style.tag(ansi::Role::Rag) + " rerank: " +
-                            (session.rerank.empty() ? "following each collection's rerank: pin"
-                                                    : session.rerank) +
-                            " -- /rerank <backend>|off|auto");
+                        out.print_line(style.tag(ansi::Role::Rag) + " rerank: " +
+                                       (session.rerank.empty()
+                                            ? "following each collection's rerank: pin"
+                                            : session.rerank) +
+                                       " -- /rerank <backend>|off|auto");
                     } else if (argument == "auto") {
                         session.rerank.clear();
                         logger::save(session);
-                        reporter.status().print_line(style.tag(ansi::Role::Rag) +
-                                                     " rerank follows the collection's pin");
+                        out.print_line(style.tag(ansi::Role::Rag) +
+                                       " rerank follows the collection's pin");
                     } else if (!agentloop::valid_rerank(argument, config)) {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                                     " no backend named '" + argument + "'");
+                        out.print_line(style.tag(ansi::Role::Error) + " no backend named '" +
+                                       argument + "'");
                     } else {
                         session.rerank = argument;
                         logger::save(session);
-                        reporter.status().print_line(style.tag(ansi::Role::Rag) +
-                                                     " rerank set to " + argument);
+                        out.print_line(style.tag(ansi::Role::Rag) + " rerank set to " + argument);
                     }
                     break;
                 case ChatVerb::Title:
                     session.custom_name = argument;
                     logger::save(session);
-                    reporter.status().print_line(style.tag(ansi::Role::Apogee) + " renamed");
+                    out.print_line(style.tag(ansi::Role::Apogee) + " renamed");
                     break;
                 case ChatVerb::Attach: {
                     // The path first, then its flags (27p): `--graph`
                     // over the config's default, for this attach alone.
                     const AttachArgument asked = parse_attach_argument(argument);
                     if (!asked.error.empty()) {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) + " " +
-                                                     asked.error);
+                        out.print_line(style.tag(ansi::Role::Error) + " " + asked.error);
                         break;
                     }
                     if (asked.spec.empty()) {
-                        reporter.status().print_line(
-                            style.tag(ansi::Role::Error) +
-                            " /attach takes a file, a folder or a glob -- " +
-                            std::string{kAttachShape});
+                        out.print_line(style.tag(ansi::Role::Error) +
+                                       " /attach takes a file, a folder or a glob -- " +
+                                       std::string{kAttachShape});
                         break;
                     }
                     (void)attached.attach(asked.spec, working_directory,
@@ -1779,22 +1787,21 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     attached.settle();
                     const std::vector<std::string> lines = attached.describe();
                     if (lines.empty()) {
-                        reporter.status().print_line(style.tag(ansi::Role::Apogee) +
-                                                     " nothing attached -- /attach <path>");
+                        out.print_line(style.tag(ansi::Role::Apogee) +
+                                       " nothing attached -- /attach <path>");
                     }
                     for (const std::string& row : lines) {
-                        reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " + row);
+                        out.print_line(style.tag(ansi::Role::Apogee) + " " + row);
                     }
                     break;
                 }
                 case ChatVerb::Detach: {
                     attached.settle();
                     const std::string name = unquoted(argument);
-                    reporter.status().print_line(
-                        attached.detach(name)
-                            ? style.tag(ansi::Role::Apogee) + " detached " + name
-                            : style.tag(ansi::Role::Error) + " nothing attached as '" + name +
-                                  "' -- /attachments lists them");
+                    out.print_line(attached.detach(name)
+                                       ? style.tag(ansi::Role::Apogee) + " detached " + name
+                                       : style.tag(ansi::Role::Error) + " nothing attached as '" +
+                                             name + "' -- /attachments lists them");
                     break;
                 }
                 case ChatVerb::Check: {
@@ -1805,22 +1812,20 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     // conversation.
                     const agentloop::VerifierRole role = agentloop::verifier_role(harness.config());
                     if (!role.missing.empty()) {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                                     " check: " + role.missing);
+                        out.print_line(style.tag(ansi::Role::Error) + " check: " + role.missing);
                         break;
                     }
                     if (session.messages.empty() ||
                         session.messages.back().role != harness::Role::Assistant ||
                         session.messages.back().content.plain_text().empty()) {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                                     " check: there is no answer to check yet");
+                        out.print_line(style.tag(ansi::Role::Error) +
+                                       " check: there is no answer to check yet");
                         break;
                     }
                     attached.settle();
-                    const agentloop::SideCallSink side =
-                        [&reporter](const agentloop::SideCall& call) {
-                            reporter.on_side_call(call);
-                        };
+                    const agentloop::SideCallSink side = [&out](const agentloop::SideCall& call) {
+                        out.reporter().on_side_call(call);
+                    };
                     agentloop::Validated checked;
                     try {
                         // A turn of its own: the suite's cap bounds it,
@@ -1833,15 +1838,14 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                             agentloop::check_answer(harness, session.backend, session.messages,
                                                     verifier, side, session.params.max_tokens, {});
                     } catch (const harness::HarnessError& e) {
-                        reporter.on_clear_status();
-                        reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                                     " check: " + e.what());
+                        out.reporter().on_clear_status();
+                        out.print_line(style.tag(ansi::Role::Error) + " check: " + e.what());
                         break;
                     }
-                    reporter.on_clear_status();
+                    out.reporter().on_clear_status();
                     const bool agreed = checked.result == agentloop::Validated::Result::Passed;
                     for (const std::string& line : agentloop::answer_lines(checked)) {
-                        reporter.status().print_line(
+                        out.print_line(
                             style.tag(agreed ? ansi::Role::Apogee : ansi::Role::Warning) + " " +
                             line);
                     }
@@ -1858,9 +1862,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     ++session.compactions;
                     attached.after_compaction();
                     logger::save(session);
-                    reporter.status().print_line(
-                        style.tag(ansi::Role::Apogee) + " history compacted" +
-                        (compactor == session.backend ? "" : " by " + compactor));
+                    out.print_line(style.tag(ansi::Role::Apogee) + " history compacted" +
+                                   (compactor == session.backend ? "" : " by " + compactor));
                     break;
                 }
             }
@@ -1873,51 +1876,52 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         // --- the turn ------------------------------------------------------
         // What the message mentions with `@` is attached as `/attach`
         // would, and what is still indexing settles first (26d).
-        attach_mentions(attached, input, working_directory,
-                        [&reporter, &style](const std::string& note) {
-                            reporter.status().print_line(style.dim(note));
-                        });
+        attach_mentions(
+            attached, input, working_directory,
+            [&out, &style](const std::string& note) { out.print_line(style.dim(note)); });
         attached.settle();
         rescope_tools(attached);
         if (decorate) {
             // One blank line between the question and whatever answers it
             // -- the thinking block, or the answer itself -- as there is
             // one after the answer.
-            reporter.status().print_line("");
+            out.print_line("");
         }
         // Keystrokes typed while the model answers stay unseen, queued for
         // the next prompt, which shows them once -- instead of echoing into
         // the answer and then again at the prompt (2026-09-23).
         std::optional<platform::TypeaheadGuard> typeahead;
-        if (reader->interactive()) {
+        if (reader->interactive() && out.terminal()) {
             typeahead.emplace();
         }
-        reporter.set_resting_label(
-            is_base_model(harness, session.backend) ? "Thinking… · base model" : "Thinking…");
-        run_chat_turn(
-            harness, session, input, tools_on() ? offered : nullptr, selection.get(),
-            member_calls.get(),
-            flags->tools ? terminal_ask_fn(reporter.status(), style) : agentloop::AskFn{},
-            ToolGate{permission, flags->tools ? terminal_confirm_fn(reporter.status(), style,
-                                                                    config_path, approvals)
-                                              : agent::ConfirmFn{}},
-            reporter,
-            [&reporter, &style](const std::string& message) {
-                // Above the thinking block when side calls have opened
-                // one (26n): never inside its rows.
-                reporter.keep_line(style.tag(ansi::Role::Warning) + " " + message);
-            },
-            rag_settings, review_note, &attached, &recall);
+        out.set_resting_label(is_base_model(harness, session.backend) ? "Thinking… · base model"
+                                                                      : "Thinking…");
+        {
+            const TurnScope turn{out};
+            run_chat_turn(
+                harness, session, input, tools_on() ? offered : nullptr, selection.get(),
+                member_calls.get(), flags->tools ? out.ask_fn() : agentloop::AskFn{},
+                ToolGate{permission, flags->tools ? out.confirm_fn(config_path, approvals)
+                                                  : agent::ConfirmFn{}},
+                out.reporter(),
+                [&out, &style](const std::string& message) {
+                    // Above the thinking block when side calls have opened
+                    // one (26n): never inside its rows.
+                    out.keep_line(style.tag(ansi::Role::Warning) + " " + message);
+                },
+                rag_settings, review_note, &attached, &recall, turn.token);
+        }
         title.start_if_due(session);
         if (session.compactions != saved_compactions) {
             saved_compactions = session.compactions;
-            harness.save_conversation(session.backend, session.chat_id, progress_sink(reporter));
+            harness.save_conversation(session.backend, session.chat_id,
+                                      progress_sink(out.reporter()));
         }
         typeahead.reset();
         if (decorate) {
             // One blank line between an answer and the next prompt, so
             // turns read as turns rather than one run of text.
-            reporter.status().print_line("");
+            out.print_line("");
         }
     }
 
@@ -1931,9 +1935,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     if (!reader->interrupted()) {
         // The chat's summary for recall too (26l): only a clean exit.
         if (const std::string said = recall.finish({}); !said.empty()) {
-            reporter.status().print_line(style.dim("[memory] " + said));
+            out.print_line(style.dim("[memory] " + said));
         }
-        harness.save_conversation(session.backend, session.chat_id, progress_sink(reporter));
+        harness.save_conversation(session.backend, session.chat_id, progress_sink(out.reporter()));
     }
     // Opt-in auto-capture on a CLEAN exit -- /exit, /quit, the end of the
     // input -- with the still-loaded model as the clerk. Never on an
@@ -1944,7 +1948,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         capture_session({});
     }
     if (decorate) {
-        reporter.status().print_line(style.tag(ansi::Role::Apogee) + " saved " + session.chat_id);
+        out.print_line(style.tag(ansi::Role::Apogee) + " saved " + session.chat_id);
     }
 }
 
