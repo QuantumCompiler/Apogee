@@ -87,6 +87,15 @@ struct ListOptions {
     /// The question is about the selected row (the collection searched, the
     /// graph a node is in): offered only with one.
     bool ask_needs_row = false;
+    /// The key that opens the input row (37d: the Symphonies view's `p`).
+    std::string ask_key = "/";
+    /// Enter asks with nothing typed too (37d: a play whose input is
+    /// optional).
+    bool ask_may_be_empty = false;
+    /// The question is an act on the shell's thread rather than a read on the
+    /// worker (37d: a play handed to the session): asked there, its answer's
+    /// first line said on the notice row.
+    bool ask_here = false;
 };
 
 class ListView {

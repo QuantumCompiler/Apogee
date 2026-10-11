@@ -45,6 +45,14 @@ struct PickerEntry {
     int turns = 0;
 };
 
+/// A door the picker offers between the new chat and the saved ones (37d:
+/// an execute session under a suite): what it says, and what choosing it
+/// does, on the shell's thread.
+struct PickerDoor {
+    std::string label;
+    std::function<void()> open;
+};
+
 /// One way to answer a prompt: the key that picks it and what it says.
 struct Choice {
     std::string key;
@@ -79,12 +87,15 @@ public:
 
     // --- any thread -------------------------------------------------------
 
-    /// The picker: a new chat first, then `entries`, newest first. Enter on
-    /// one calls `pick`, on the shell's thread, with its id -- empty for the
-    /// new chat.
-    void show_picker(std::vector<PickerEntry> entries, std::function<void(std::string)> pick);
+    /// The picker: a new chat first, then `doors`, then `entries`, newest
+    /// first. Enter on a saved chat or the new one calls `pick`, on the
+    /// shell's thread, with its id -- empty for the new chat; on a door, the
+    /// door's own `open`.
+    void show_picker(std::vector<PickerEntry> entries, std::function<void(std::string)> pick,
+                     std::vector<PickerDoor> doors = {});
 
-    /// A conversation begins: the transcript empties and input is taken.
+    /// A conversation begins: the transcript empties, a line queued for one
+    /// before it is dropped, and input is taken.
     void begin_session();
     /// What is typed completes through `suggest` -- chat's own completer,
     /// the one command table's rows and values.
@@ -104,6 +115,12 @@ public:
     /// False, and nothing entered, when the conversation is not waiting for a
     /// line. The shell's thread.
     [[nodiscard]] bool enter(std::string line);
+    /// Queues `line` as the conversation's next line, taken by its next read
+    /// whether or not it is reading yet, and shown as typed -- what a view
+    /// hands a conversation it opens for it (37d: the play a Symphonies view
+    /// asked for, a new session's first line). Any thread; called after
+    /// `begin_session` from the same thread, it lands in that conversation.
+    void queue_line(std::string line);
     /// Whether a conversation is open and waiting for its next line.
     [[nodiscard]] bool waiting_for_line() const;
 

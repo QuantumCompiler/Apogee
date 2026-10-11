@@ -105,6 +105,7 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
     enum class Mode : std::uint8_t { Empty, Picker, Conversation };
     Mode mode = Mode::Empty;
     std::vector<PickerEntry> picker;
+    std::vector<PickerDoor> doors;
     std::size_t picked = 0;
     std::function<void(std::string)> pick;
 
@@ -289,12 +290,14 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
         Elements rows;
         rows.push_back(text(" Chats -- Enter opens one; a new chat starts afresh") | dim);
         rows.push_back(text(""));
-        for (std::size_t i = 0; i <= picker.size(); ++i) {
+        for (std::size_t i = 0; i <= doors.size() + picker.size(); ++i) {
             std::string line = i == picked ? " › " : "   ";
             if (i == 0) {
                 line += "New chat";
+            } else if (i <= doors.size()) {
+                line += doors.at(i - 1).label;
             } else {
-                const PickerEntry& entry = picker.at(i - 1);
+                const PickerEntry& entry = picker.at(i - 1 - doors.size());
                 line += entry.name + "  ·  " + entry.updated + "  ·  " +
                         std::to_string(entry.turns) + (entry.turns == 1 ? " turn" : " turns");
             }
@@ -605,11 +608,20 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
             return true;
         }
         if (event == ftxui::Event::ArrowDown) {
-            picked = std::min(picked + 1, picker.size());
+            picked = std::min(picked + 1, doors.size() + picker.size());
+            return true;
+        }
+        if (event == ftxui::Event::Return && picked > 0 && picked <= doors.size()) {
+            const std::function<void()> open = doors.at(picked - 1).open;
+            mode = Mode::Empty;
+            if (open) {
+                open();
+            }
             return true;
         }
         if (event == ftxui::Event::Return && pick) {
-            const std::string id = picked == 0 ? std::string{} : picker.at(picked - 1).id;
+            const std::string id =
+                picked == 0 ? std::string{} : picker.at(picked - 1 - doors.size()).id;
             const std::function<void(std::string)> chosen = pick;
             mode = Mode::Empty;
             chosen(id);
@@ -762,10 +774,13 @@ View SessionView::view() {
 }
 
 void SessionView::show_picker(std::vector<PickerEntry> entries,
-                              std::function<void(std::string)> pick) {
-    state_->post([entries = std::move(entries), pick = std::move(pick)](State& state) mutable {
+                              std::function<void(std::string)> pick,
+                              std::vector<PickerDoor> doors) {
+    state_->post([entries = std::move(entries), pick = std::move(pick),
+                  doors = std::move(doors)](State& state) mutable {
         state.mode = State::Mode::Picker;
         state.picker = std::move(entries);
+        state.doors = std::move(doors);
         state.picked = 0;
         state.pick = std::move(pick);
         state.prompt.reset();
@@ -773,6 +788,12 @@ void SessionView::show_picker(std::vector<PickerEntry> entries,
 }
 
 void SessionView::begin_session() {
+    {
+        // A line left for a conversation that never read it -- one that
+        // refused to start -- is not the next one's.
+        const std::lock_guard lock{state_->mutex};
+        state_->entered.clear();
+    }
     state_->post([](State& state) { state.begin_conversation({}); });
 }
 
@@ -884,6 +905,18 @@ void SessionView::close() {
     }
     token.cancel();
     state_->changed.notify_all();
+}
+
+void SessionView::queue_line(std::string line) {
+    {
+        const std::lock_guard lock{state_->mutex};
+        state_->entered.push_back(line);
+    }
+    state_->changed.notify_all();
+    state_->post([line = std::move(line)](State& state) {
+        state.blocks.push_back(Block{.kind = Block::Kind::User, .text = line});
+        state.scrollback = 0;
+    });
 }
 
 bool SessionView::enter(std::string line) {

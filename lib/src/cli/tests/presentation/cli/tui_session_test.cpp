@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -11,18 +12,24 @@
 #include <iostream>
 #include <iterator>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
 #include "backends/model_roster.h"
 #include "cli/chat_session.h"
 #include "cli/permissions.h"
+#include "cli/tui_symphonies.h"
+#include "cli/tui_workbench.h"
 #include "logger/session.h"
 #include "machine/driver_input.h"
 #include "machine/json_reporter.h"
 #include "support/cli_home.h"
+#include "support/env_guard.h"
+#include "tui/list_view.h"
 #include "tui/pump.h"
 #include "tui/session_view.h"
 #include "tui/shell.h"
@@ -175,6 +182,50 @@ struct Conversation {
 
 [[nodiscard]] bool has(const std::string& text, const std::string& part) {
     return text.find(part) != std::string::npos;
+}
+
+/// Execute's world (37d), as `execute_test` builds it: members that echo
+/// what they were sent, the suite `duo` over them -- the default when
+/// `with_default` -- and `echo2`, two stages, the second given the first's
+/// answer.
+[[nodiscard]] std::string execute_config(const fs::path& scripts, bool with_default = true) {
+    fs::create_directories(scripts);
+    std::ofstream{scripts / "root.json"} << R"({"turns": [{"text": "ROOT<{{last_user}}>"}]})";
+    std::ofstream{scripts / "helper.json"} << R"({"turns": [{"text": "HELPER<{{last_user}}>"}]})";
+    nlohmann::json config = {
+        {"backends",
+         {{"root", {{"type", "mock"}, {"model_path", (scripts / "root.json").generic_string()}}},
+          {"helper",
+           {{"type", "mock"}, {"model_path", (scripts / "helper.json").generic_string()}}}}},
+        {"models", {{"default", "root"}}},
+        {"memory", {{"recall", false}}},
+        {"suites",
+         {{"duo",
+           {{"description", "The root and its helper."},
+            {"members", {{"chat", "root"}, {"utility", "helper"}}}}}}},
+        {"symphonies",
+         {{"echo2",
+           {{"description", "Two stages, the second given the first's answer."},
+            {"input", {{"description", "Any text."}}},
+            {"stages",
+             {{{"name", "first"}, {"role", "utility"}, {"prompt", "One: {{input}}"}},
+              {{"name", "second"}, {"role", "chat"}, {"prompt", "Two: {{first}}"}}}}}}}}};
+    if (with_default) {
+        config["models"]["default_suite"] = "duo";
+    }
+    return config.dump(2) + "\n";
+}
+
+constexpr std::string_view kPlayed = "ROOT<Two: HELPER<One: hello>>";
+
+/// A saved conversation's messages as `role: text` lines.
+[[nodiscard]] std::vector<std::string> transcript(const apogee::logger::Session& session) {
+    std::vector<std::string> out;
+    for (const apogee::harness::ChatMessage& message : session.messages) {
+        out.push_back(std::string{apogee::harness::to_string(message.role)} + ": " +
+                      message.content.plain_text());
+    }
+    return out;
 }
 
 }  // namespace
@@ -392,4 +443,200 @@ TEST_CASE("the workbench's choices reach the conversation through its own comman
     const apogee::logger::LoadedSession loaded = apogee::logger::load("20261009-100000-aaaa", {});
     REQUIRE(loaded.session.messages.size() == 2);
     CHECK(loaded.session.messages.back().content.plain_text() == "answer to hello again");
+}
+
+TEST_CASE("the picker's execute door opens execute's session, and a play there is execute's",
+          "[cli][tui][session][execute]") {
+    // The twin first: the same play driven through machine mode's execute.
+    std::vector<std::string> twin_transcript;
+    std::optional<std::string> twin_suite;
+    {
+        apogee::testing::CliHome twin{"{}\n", "config.json"};
+        std::ofstream{twin.config_path(), std::ios::binary | std::ios::trunc}
+            << execute_config(twin.home() / "scripts");
+        const std::istringstream fed{R"({"type":"user","text":"/play echo2 hello"})"
+                                     "\n"};
+        std::streambuf* old_in = std::cin.rdbuf(fed.rdbuf());
+        std::string out;
+        std::string err;
+        const int code =
+            twin.run({"execute", "--suite", "duo", "--output-format", "stream-json"}, &out, &err);
+        std::cin.rdbuf(old_in);
+        std::cin.clear();
+        INFO(out << err);
+        REQUIRE(code == 0);
+        const apogee::testing::EnvGuard guard{"APOGEE_HOME", twin.home().string()};
+        const std::vector<apogee::logger::Session> saved = apogee::logger::list_sessions();
+        REQUIRE(saved.size() == 1);
+        twin_transcript = transcript(saved.front());
+        twin_suite = saved.front().suite;
+    }
+
+    const nlohmann::json script = {{"turns", {{{"text", "unused"}}}}};
+    Conversation chat{script};
+    apogee::commands::TuiSessionDriver driver{chat.view, chat.pump, chat.context,
+                                              []() { return apogee::models::MachineBudget{}; }};
+    // No suite configured: no door, rather than one that refuses.
+    driver.show_picker();
+    chat.until([&chat]() { return has(chat.frame(), "New chat"); }, "the picker");
+    CHECK_FALSE(has(chat.frame(), "Execute under"));
+
+    std::ofstream{chat.home.config_path(), std::ios::binary | std::ios::trunc}
+        << execute_config(chat.home.home() / "scripts");
+    driver.show_picker();
+    chat.until([&chat]() { return has(chat.frame(), "Execute under suite duo (default)"); },
+               "the execute door");
+    (void)chat.shell.press(Key::named(Key::Name::Down));
+    (void)chat.shell.press(Key::named(Key::Name::Return));
+    // Execute's banner, rows and completions: the suite named, what it plays.
+    chat.until([&chat]() { return chat.view.waiting_for_line(); }, "the execute session reading");
+    const std::string opened = chat.frame();
+    CHECK(has(opened, "suite duo"));
+    CHECK(has(opened, "symphon"));
+    for (const char c : std::string{"/pl"}) {
+        (void)chat.shell.press(Key::character(std::string(1, c)));
+    }
+    chat.until([&chat]() { return has(chat.frame(), "/play"); }, "/play offered");
+    for (int i = 0; i < 3; ++i) {
+        (void)chat.shell.press(Key::named(Key::Name::Backspace));
+    }
+
+    chat.send("/play echo2 hello");
+    chat.until([&chat]() { return has(chat.frame(), std::string{kPlayed}); }, "the play's output");
+    // The stages' side calls drawn in the turn's thinking block, folded into
+    // its summary once the play is over, above the answer -- as the terminal
+    // draws them (their words are machine mode's, `execute_test`'s).
+    const std::string played = chat.frame();
+    CHECK(played.find("✻ Worked for") > played.find("You: /play echo2 hello"));
+    CHECK(played.find("✻ Worked for") < played.find(std::string{kPlayed}));
+    driver.stop();
+    const std::vector<apogee::logger::Session> saved = apogee::logger::list_sessions();
+    REQUIRE(saved.size() == 1);
+    // Saved as machine mode's execute saves the same play.
+    CHECK(transcript(saved.front()) == twin_transcript);
+    CHECK(twin_transcript == std::vector<std::string>{"user: /play echo2 hello",
+                                                      "assistant: " + std::string{kPlayed}});
+    CHECK(saved.front().suite == twin_suite);
+    CHECK(saved.front().turns == 1);
+}
+
+TEST_CASE("the Symphonies view draws symphonies list's document, and plays through the session",
+          "[cli][tui][session][execute]") {
+    const nlohmann::json script = {{"turns", {{{"text", "unused"}}}}};
+    Conversation chat{script};
+    std::ofstream{chat.home.config_path(), std::ios::binary | std::ios::trunc}
+        << execute_config(chat.home.home() / "scripts");
+    apogee::commands::TuiSessionDriver driver{chat.view, chat.pump, chat.context,
+                                              []() { return apogee::models::MachineBudget{}; }};
+    // The shell's hook: the session's own /play, the session shown when sent.
+    const apogee::commands::WorkbenchHooks hooks{
+        .play_symphony = [&driver, &chat](const std::string& symphony, const std::string& input) {
+            const apogee::commands::TuiSessionDriver::Handed handed = driver.play(symphony, input);
+            if (handed.sent) {
+                chat.shell.activate(0);
+            }
+            return handed.said;
+        }};
+    const apogee::tui::ListOptions options =
+        apogee::commands::symphonies_view_options(chat.context, hooks);
+
+    // The rows: `symphonies list --output-format json`'s, drawn.
+    std::string out;
+    std::string err;
+    REQUIRE(chat.home.run({"symphonies", "list", "--output-format", "json"}, &out, &err) == 0);
+    const nlohmann::json document = nlohmann::json::parse(out);
+    const auto [heading, rows] = options.load();
+    REQUIRE(rows.size() == document["data"].size());
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        const nlohmann::json& definition = document["data"].at(i);
+        INFO(definition.dump());
+        CHECK(rows.at(i).key == definition["name"].get<std::string>());
+        CHECK(rows.at(i).cells.at(0) == definition["name"].get<std::string>());
+        CHECK(rows.at(i).cells.at(2) == definition["source"].get<std::string>());
+        if (definition["problems"].empty()) {
+            CHECK(rows.at(i).cells.at(3) == definition["description"].get<std::string>());
+        }
+    }
+    const auto echo2 = std::ranges::find_if(
+        rows, [](const apogee::tui::ListRow& row) { return row.key == "echo2"; });
+    REQUIRE(echo2 != rows.end());
+    CHECK(echo2->cells.at(1) == "utility → chat");
+    // Enter: `symphonies show`'s card.
+    REQUIRE(chat.home.run({"symphonies", "show", "echo2"}, &out, &err) == 0);
+    std::string card;
+    for (const std::string& line : options.detail(*echo2)) {
+        card += line + "\n";
+    }
+    CHECK(card == out);
+
+    // `p` with no session open: execute's session under the default suite,
+    // the play its first line.
+    apogee::tui::ListView view{chat.pump, {.color = false}, options};
+    (void)chat.shell.add(view.view());
+    chat.shell.activate(1);
+    const auto settled = [&chat, &view]() {
+        view.settle();
+        return chat.frame();
+    };
+    chat.until([&]() { return has(settled(), "echo2"); }, "the symphonies read");
+    while (!has(settled(), "› echo2")) {
+        (void)chat.shell.press(Key::named(Key::Name::Down));
+    }
+    CHECK(has(settled(), "p play"));
+    (void)chat.shell.press(Key::character("p"));
+    for (const char c : std::string{"hello"}) {
+        (void)chat.shell.press(Key::character(std::string(1, c)));
+    }
+    CHECK(has(settled(), "play: hello"));
+    (void)chat.shell.press(Key::named(Key::Name::Return));
+    // The session shown, the play run there and its output the answer.
+    chat.until([&chat]() { return has(chat.frame(), std::string{kPlayed}); }, "the play's output");
+    CHECK(has(chat.frame(), "You: /play echo2 hello"));
+
+    // Open and reading: entered there; a play missing its input is refused in
+    // the session's own words, and nothing kept.
+    chat.until([&chat]() { return chat.view.waiting_for_line(); }, "the session reading");
+    const apogee::commands::TuiSessionDriver::Handed bare = driver.play("echo2", "");
+    CHECK(bare.sent);
+    CHECK(bare.said == "/play echo2 sent to the conversation");
+    chat.until(
+        [&chat]() {
+            return has(chat.frame(), "'echo2' reads its input (Any text.), and none was given");
+        },
+        "the session's refusal");
+    driver.stop();
+    const std::vector<apogee::logger::Session> saved = apogee::logger::list_sessions();
+    REQUIRE(saved.size() == 1);
+    CHECK(
+        transcript(saved.front()) ==
+        std::vector<std::string>{"user: /play echo2 hello", "assistant: " + std::string{kPlayed}});
+}
+
+TEST_CASE("a play is never offered outside execute: a chat open, or no default suite, says why",
+          "[cli][tui][session][execute]") {
+    const nlohmann::json script = {{"turns", {{{"text", "answer to {{last_user}}"}}}}};
+    Conversation chat{script};
+    std::ofstream{chat.home.config_path(), std::ios::binary | std::ios::trunc}
+        << execute_config(chat.home.home() / "scripts", /*with_default=*/false);
+    apogee::commands::TuiSessionDriver driver{chat.view, chat.pump, chat.context,
+                                              []() { return apogee::models::MachineBudget{}; }};
+    // Nothing open and no suite the default: no session to open under.
+    const apogee::commands::TuiSessionDriver::Handed none = driver.play("echo2", "hello");
+    CHECK_FALSE(none.sent);
+    CHECK(has(none.said, "no suite is the default"));
+    // A chat open: /play is not in its table.
+    CHECK(driver.use_model("root") == "a new chat on root");
+    chat.until([&chat]() { return chat.view.waiting_for_line(); }, "the chat reading");
+    const apogee::commands::TuiSessionDriver::Handed in_chat = driver.play("echo2", "hello");
+    CHECK_FALSE(in_chat.sent);
+    CHECK(has(in_chat.said, "the conversation open is a chat"));
+    CHECK_FALSE(has(chat.frame(), "/play"));
+    // The execute door from the workbench ends the chat as /exit does and
+    // opens execute's session under the suite chosen.
+    CHECK(driver.open_execute("duo") == "an execute session under suite duo");
+    chat.until([&chat]() { return has(chat.frame(), "suite duo"); }, "execute under duo");
+    chat.until([&chat]() { return chat.view.waiting_for_line(); }, "execute reading");
+    CHECK(driver.play("echo2", "hello").sent);
+    chat.until([&chat]() { return has(chat.frame(), std::string{kPlayed}); }, "the play's output");
+    driver.stop();
 }

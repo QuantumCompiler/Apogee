@@ -78,15 +78,17 @@ private:
 /// resuming `chat_id` when one is named, parsed through chat's own flag table
 /// into `app` -- which must outlive them, since a flag's presence is read
 /// from its option. Tools are on because a person is at the screen to answer
-/// every gated call -- the condition `--tools` exists to require.
-[[nodiscard]] std::shared_ptr<SessionFlags> shell_session_flags(CLI::App& app,
-                                                                const std::string& chat_id,
-                                                                const std::string& suite = {},
-                                                                const std::string& model = {});
+/// every gated call -- the condition `--tools` exists to require. In execute
+/// mode (37d) it is `apogee execute --tools`, through execute's own table.
+[[nodiscard]] std::shared_ptr<SessionFlags> shell_session_flags(
+    CLI::App& app, const std::string& chat_id, const std::string& suite = {},
+    const std::string& model = {}, SessionMode mode = SessionMode::Chat);
 
 /// The session view's driver: the picker over the saved conversations --
 /// straight into a new chat when there are none -- and a chosen one run as
 /// chat's session on a thread of its own, back to the picker when it ends.
+/// Since 37d the picker's execute door: one per configured suite, the default
+/// first, each opening execute's session under it.
 class TuiSessionDriver {
 public:
     /// `held` hears what each conversation holds in memory (the monitor bar).
@@ -123,18 +125,49 @@ public:
     /// with none open, opens a new chat on it (`chat -m`). Returns what was
     /// done, or why not. The shell's thread.
     [[nodiscard]] std::string use_model(const std::string& model);
+    /// Opens execute's session under suite `suite` (37d), as `apogee execute
+    /// --suite` opens one -- the conversation open now ended first, as
+    /// `/exit` ends it. Returns what was done, or why not. The shell's thread.
+    [[nodiscard]] std::string open_execute(const std::string& suite);
+
+    /// What handing a play to the session came to.
+    struct Handed {
+        /// The line reached the session: it is the session's to answer now.
+        bool sent = false;
+        std::string said;
+    };
+
+    /// Plays `symphony` through the session's own `/play` (37d): the line
+    /// entered in the execute session open now, or, with none open, the
+    /// first line of a new one under the config's default suite. Refused,
+    /// saying why, when the conversation open is a chat (`/play` is not in
+    /// its table), is busy, or no suite is the default. The walk's own
+    /// refusals are the session's to say. The shell's thread.
+    [[nodiscard]] Handed play(const std::string& symphony, const std::string& input);
 
 private:
-    void open(std::string chat_id, std::string suite = {}, std::string model = {});
-    void run(const std::string& chat_id, const std::string& suite, const std::string& model);
+    /// A conversation to open: what `chat` or `execute` is given.
+    struct Opening {
+        std::string chat_id;
+        std::string suite;
+        std::string model;
+        SessionMode mode = SessionMode::Chat;
+        /// A line it takes first, as if typed (37d: a play asked for).
+        std::string first_line;
+    };
+
+    void open(Opening opening);
+    void run(const Opening& opening);
 
     tui::SessionView& view_;
     tui::Pump& pump_;
     std::function<void(std::vector<std::string>)> held_;
     /// A conversation is open on the worker.
     std::atomic<bool> open_{false};
+    /// The one open is execute's (37d).
+    std::atomic<bool> execute_{false};
     /// What to open once the conversation now ending has ended.
-    std::optional<std::string> pending_;
+    std::optional<Opening> pending_;
     const RootContext& context_;
     MachineBudgetSource machine_;
     std::thread worker_;

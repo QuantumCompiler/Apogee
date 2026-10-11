@@ -243,6 +243,8 @@ apogee_add_module(cli
     cli/tui_parity.h
     cli/tui_parity.cpp
     cli/tui_session.cpp
+    cli/tui_symphonies.h
+    cli/tui_symphonies.cpp
     cli/tui_workbench.h
     cli/tui_workbench.cpp
     cli/graph.h

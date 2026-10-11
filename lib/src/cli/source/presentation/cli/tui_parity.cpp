@@ -25,9 +25,9 @@ constexpr std::array kSurfaces{
     ShellSurface{"knowledge", View, "Knowledge"},
     ShellSurface{"embed", View, "Collections"},
     ShellSurface{"graph", View, "Graph"},
+    ShellSurface{"execute", View, "Session (the picker's execute door)"},
+    ShellSurface{"symphonies", View, "Symphonies"},
     // --- backfills: track 37 draws them ---------------------------------------
-    ShellSurface{"execute", Backfill, "37d"},
-    ShellSurface{"symphonies", Backfill, "37d"},
     ShellSurface{"task", Backfill, "37e"},
     ShellSurface{"train", Backfill, "37f"},
     ShellSurface{"datasets", Backfill, "37f"},

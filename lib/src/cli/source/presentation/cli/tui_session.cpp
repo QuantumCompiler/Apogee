@@ -7,6 +7,8 @@
 #include <vector>
 
 #include "cli/chat_session.h"
+#include "cli/tui_common.h"
+#include "contracts/config.h"
 #include "logger/session.h"
 #include "views/ask_prompt.h"
 
@@ -187,10 +189,10 @@ void TuiOutput::end_turn() {
 
 std::shared_ptr<SessionFlags> shell_session_flags(CLI::App& app, const std::string& chat_id,
                                                   const std::string& suite,
-                                                  const std::string& model) {
+                                                  const std::string& model, SessionMode mode) {
     auto flags = std::make_shared<SessionFlags>();
-    bind_session_flags(app, flags, SessionMode::Chat);
-    std::vector<std::string> args{"chat", "--tools"};
+    bind_session_flags(app, flags, mode);
+    std::vector<std::string> args{mode == SessionMode::Execute ? "execute" : "chat", "--tools"};
     if (!chat_id.empty()) {
         args.emplace_back("--resume");
         args.push_back(chat_id);
@@ -249,10 +251,39 @@ void TuiSessionDriver::start() {
 }
 
 void TuiSessionDriver::show_picker() {
-    view_.show_picker(saved_chats(), [this](std::string chat_id) { open(std::move(chat_id)); });
+    // The execute door (37d): a session under each configured suite, the
+    // default first -- absent, rather than refusing, with none.
+    std::vector<tui::PickerDoor> doors;
+    try {
+        if (const std::optional<harness::Config> config = config_if_any(config_file(context_));
+            config.has_value()) {
+            const std::string& fallback = config->models.default_suite;
+            std::vector<std::string> suites;
+            for (const auto& [name, suite] : config->suites) {
+                if (name == fallback) {
+                    suites.insert(suites.begin(), name);
+                } else {
+                    suites.push_back(name);
+                }
+            }
+            for (const std::string& name : suites) {
+                doors.push_back(tui::PickerDoor{
+                    .label = "Execute under suite " + name + (name == fallback ? " (default)" : ""),
+                    .open = [this, name]() {
+                        open(Opening{.suite = name, .mode = SessionMode::Execute});
+                    }});
+            }
+        }
+    } catch (const std::exception&) {
+        // A config that will not load offers no door; the session says why.
+    }
+    view_.show_picker(
+        saved_chats(),
+        [this](std::string chat_id) { open(Opening{.chat_id = std::move(chat_id)}); },
+        std::move(doors));
 }
 
-void TuiSessionDriver::open(std::string chat_id, std::string suite, std::string model) {
+void TuiSessionDriver::open(Opening opening) {
     if (worker_.joinable()) {
         worker_.join();  // the last conversation, ended: its thread is done
     }
@@ -260,13 +291,13 @@ void TuiSessionDriver::open(std::string chat_id, std::string suite, std::string 
         return;
     }
     open_ = true;
-    worker_ = std::thread{[this, id = std::move(chat_id), suite = std::move(suite),
-                           model = std::move(model)]() { run(id, suite, model); }};
+    execute_ = opening.mode == SessionMode::Execute;
+    worker_ = std::thread{[this, opening = std::move(opening)]() { run(opening); }};
 }
 
 std::string TuiSessionDriver::open_chat(const std::string& chat_id) {
     if (!open_) {
-        open(chat_id);
+        open(Opening{.chat_id = chat_id});
         return "opened " + chat_id;
     }
     if (!view_.waiting_for_line()) {
@@ -274,14 +305,62 @@ std::string TuiSessionDriver::open_chat(const std::string& chat_id) {
     }
     // The open one ends as /exit ends it -- saved, summarised when due --
     // and the chosen one opens after it.
-    pending_ = chat_id;
+    pending_ = Opening{.chat_id = chat_id};
     (void)view_.enter("/exit");
     return "opened " + chat_id;
 }
 
+std::string TuiSessionDriver::open_execute(const std::string& suite) {
+    const Opening opening{.suite = suite, .mode = SessionMode::Execute};
+    if (!open_) {
+        open(opening);
+        return "an execute session under suite " + suite;
+    }
+    if (!view_.waiting_for_line()) {
+        return "not now: the conversation is busy -- Ctrl-C there stops a turn";
+    }
+    pending_ = opening;
+    (void)view_.enter("/exit");
+    return "an execute session under suite " + suite;
+}
+
+TuiSessionDriver::Handed TuiSessionDriver::play(const std::string& symphony,
+                                                const std::string& input) {
+    const std::string line = "/play " + symphony + (input.empty() ? "" : " " + input);
+    if (open_) {
+        if (!execute_) {
+            return {.said =
+                        "not now: the conversation open is a chat, and /play is execute's -- "
+                        "/exit it, then the picker's execute door opens one"};
+        }
+        if (!view_.enter(line)) {
+            return {.said = "not now: the conversation is busy -- Ctrl-C there stops a turn"};
+        }
+        return {.sent = true, .said = line + " sent to the conversation"};
+    }
+    // None open: execute's session under the default suite, the play its
+    // first line -- execute's own rule, a suite insisted on.
+    std::string fallback;
+    try {
+        if (const std::optional<harness::Config> config = config_if_any(config_file(context_));
+            config.has_value()) {
+            fallback = config->models.default_suite;
+        }
+    } catch (const std::exception& e) {
+        return {.said = std::string{"not played: "} + e.what()};
+    }
+    if (fallback.empty()) {
+        return {.said =
+                    "not played: no suite is the default to open an execute session under -- "
+                    "'apogee config set-default-suite <name>' names one"};
+    }
+    open(Opening{.suite = fallback, .mode = SessionMode::Execute, .first_line = line});
+    return {.sent = true, .said = line + " in a new execute session under suite " + fallback};
+}
+
 std::string TuiSessionDriver::use_suite(const std::string& suite) {
     if (!open_) {
-        open({}, suite);
+        open(Opening{.suite = suite});
         return "a new chat under suite " + suite;
     }
     if (!view_.enter("/suite " + suite)) {
@@ -292,7 +371,7 @@ std::string TuiSessionDriver::use_suite(const std::string& suite) {
 
 std::string TuiSessionDriver::use_model(const std::string& model) {
     if (!open_) {
-        open({}, {}, model);
+        open(Opening{.model = model});
         return "a new chat on " + model;
     }
     if (!view_.enter("/model " + model)) {
@@ -301,14 +380,18 @@ std::string TuiSessionDriver::use_model(const std::string& model) {
     return "/model " + model + " sent to the conversation";
 }
 
-void TuiSessionDriver::run(const std::string& chat_id, const std::string& suite,
-                           const std::string& model) {
+void TuiSessionDriver::run(const Opening& opening) {
     view_.begin_session();
+    if (!opening.first_line.empty()) {
+        view_.queue_line(opening.first_line);
+    }
     TuiOutput output{view_, held_};
     try {
-        CLI::App app{"the shell's conversation", "chat"};
-        const std::shared_ptr<SessionFlags> flags = shell_session_flags(app, chat_id, suite, model);
-        run_session(context_, *flags, machine_, SessionMode::Chat, &output);
+        CLI::App app{"the shell's conversation",
+                     opening.mode == SessionMode::Execute ? "execute" : "chat"};
+        const std::shared_ptr<SessionFlags> flags =
+            shell_session_flags(app, opening.chat_id, opening.suite, opening.model, opening.mode);
+        run_session(context_, *flags, machine_, opening.mode, &output);
     } catch (const CLI::RuntimeError&) {
         // The session said why it could not go on, on stderr -- the shell's
         // notice row while it holds the screen.
@@ -316,6 +399,7 @@ void TuiSessionDriver::run(const std::string& chat_id, const std::string& suite,
         view_.say(output.style().tag(ansi::Role::Error) + " " + e.what());
     }
     open_ = false;
+    execute_ = false;
     if (view_.closed()) {
         return;
     }

@@ -184,6 +184,17 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
 
     /// Asks the view's question, the answer drawn as a detail.
     void ask(ListRow row, std::string text) {
+        if (options.ask_here) {
+            std::string said;
+            try {
+                said = options.ask(row, text);
+            } catch (const std::exception& e) {
+                said = std::string{"could not ask: "} + e.what();
+            }
+            const std::vector<std::string> lines = said_lines(said);
+            notice = lines.empty() ? std::string{} : lines.front();
+            return;
+        }
         notice = options.ask_label + "…";
         detail.reset();
         submit([this, row = std::move(row), text = std::move(text)]() {
@@ -316,7 +327,7 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
             add("Enter " + options.enter_label);
         }
         if (askable()) {
-            add("/ " + options.ask_label);
+            add(options.ask_key + " " + options.ask_label);
         }
         if (!options.detail_key.empty() && !detail.has_value()) {
             add(options.detail_key + " info");
@@ -343,7 +354,7 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
             return true;
         }
         if (event == ftxui::Event::Return) {
-            if (!typing->empty()) {
+            if (!typing->empty() || options.ask_may_be_empty) {
                 last_asked = *typing;
                 typing.reset();
                 ask(selected < rows.size() ? rows.at(selected) : ListRow{}, last_asked);
@@ -399,7 +410,7 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
             detail.reset();
             return true;
         }
-        if (event == ftxui::Event::Character('/') && askable()) {
+        if (event == ftxui::Event::Character(options.ask_key) && askable()) {
             typing = last_asked;
             return true;
         }

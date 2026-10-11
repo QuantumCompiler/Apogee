@@ -15,6 +15,7 @@
 #include "cli/tui_doctor.h"
 #include "cli/tui_knowledge.h"
 #include "cli/tui_session.h"
+#include "cli/tui_symphonies.h"
 #include "cli/tui_workbench.h"
 #include "cli/version_command.h"
 #include "platform/platform.h"
@@ -75,12 +76,24 @@ namespace {
         .open_chat = [&driver](const std::string& chat_id) { return driver.open_chat(chat_id); },
         .use_suite = [&driver](const std::string& suite) { return driver.use_suite(suite); },
         .use_model = [&driver](const std::string& model) { return driver.use_model(model); },
-        .show_session = [&shell, session_view]() { shell.activate(session_view); }};
+        .show_session = [&shell, session_view]() { shell.activate(session_view); },
+        // A play is the session's own /play (37d), shown where it narrates.
+        .play_symphony =
+            [&driver, &shell, session_view](const std::string& symphony, const std::string& input) {
+                const TuiSessionDriver::Handed handed = driver.play(symphony, input);
+                if (handed.sent) {
+                    shell.activate(session_view);
+                }
+                return handed.said;
+            }};
     const std::vector<std::unique_ptr<tui::ListView>> workbench =
         make_workbench(pump, theme, context, hooks);
     for (const std::unique_ptr<tui::ListView>& view : workbench) {
         (void)shell.add(view->view());
     }
+    // The symphonies beside them (37d), played through the session.
+    tui::ListView symphonies{pump, theme, symphonies_view_options(context, hooks)};
+    (void)shell.add(symphonies.view());
     // The doctor beside it (37b): the report, the providers, the machine.
     const std::vector<std::unique_ptr<tui::ListView>> doctor =
         make_doctor_views(pump, theme, context);

@@ -40,6 +40,10 @@ struct WorkbenchHooks {
     std::function<std::string(const std::string& model)> use_model;
     /// Shows the session view.
     std::function<void()> show_session;
+    /// Plays a symphony through the session's own `/play` (37d), its input
+    /// as typed; returns what was done or why not, the session shown when the
+    /// line reached it.
+    std::function<std::string(const std::string& symphony, const std::string& input)> play_symphony;
 };
 
 /// Each view's options, over the config `context` names -- the reads and

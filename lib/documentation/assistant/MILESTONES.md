@@ -6776,3 +6776,27 @@ Decisions taken while building, for veto:
 - **Views past the ninth are reached by Tab**: with these three the shell holds thirteen, and the digits and F-keys reach 1-9. Collections and Graph are the first views past them.
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,117 of 3,117, the pdftotext case skipped as before. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+### 2026-10-10 — `tui-execute-session` (backlog item 37d): execute in the shell, and the Symphonies view
+
+**Why.** The shell's conversation was chat's alone. 32c shipped the session view with execute out of scope, so `/play` and `/symphonies`, execute's rows in the one command table, never lit up on the stage, and `symphonies` had no view although `list` and `show` print documents. This closes wall W4.
+
+- [x] **The picker's execute door** (`cli/tui_session`): one door per configured suite between the new chat and the saved ones, the default suite first and marked `(default)`, none at all with no suite. Choosing one opens execute's session exactly as `apogee execute --suite <it>` opens one: `shell_session_flags` now takes the mode and parses `execute --tools` through execute's own flag table, so the banner, the rows (`/play`, `/symphonies`), the completions and the suite's `orchestrate: true` are execute's by construction. `open_execute` does the same from a view, ending the open conversation first as `/exit` ends it.
+- [x] **A play reaches the session through its own `/play`** (`TuiSessionDriver::play`): the line entered in the execute session open; with nothing open, the first line of a new execute session under the default suite (`SessionView::queue_line`, shown as typed). It is refused, saying why, when the conversation open is a chat (`/play` is not in its table), when it is busy, or when no suite is the default. The walk, its caps and its refusals stay the runner's: a play missing its input is refused in the session in `/play`'s own words.
+- [x] **The Symphonies view** (`cli/tui_symphonies`): the definitions as `symphonies list --output-format json` states them -- the name, the stages' roles chained as `list` chains them, the source, the description or `cannot be played` -- with the spec files that could not be read above. Enter shows `symphonies show`'s card (`symphony_show_text`); `p` opens the input row for the play's input, typed or none, and hands `/play` to the session (`WorkbenchHooks::play_symphony`), which the shell then shows. `list` now reads through the same `read_symphony_catalog`.
+- [x] **`ListView`'s ask row grows three switches**: its key (`ask_key`), an answer with nothing typed (`ask_may_be_empty`), and an act on the shell's thread whose answer is said on the notice row (`ask_here`). **The session view's picker takes doors** (`PickerDoor`), and `begin_session` drops a line queued for a conversation that never read it.
+- [x] **The law**: `execute` (the picker's execute door) and `symphonies` flipped to views in `tui_parity.cpp`.
+- [x] **Tests**:
+  - `tui_session_test`: no door without a suite; the execute door opening execute's session with its banner and `/play` completing; the play's output the answer, and the saved session equal to the same play driven through machine mode's `execute` on a twin home; the Symphonies rows against `symphonies list --output-format json`, Enter `symphonies show`'s card, `p` with nothing open playing in a new execute session under the default suite, and a play missing its input refused in the session's words with nothing kept; a play refused with a chat open or no default suite, and `open_execute` ending the chat to play in execute;
+  - `session_view_test`: the doors' place and picking, a saved chat below them picked by its id; a queued line taken next and dropped by a new conversation;
+  - the leak test's row for the Symphonies view.
+
+Decisions taken while building, for veto:
+- **A door per suite**, rather than one door and then a choice of suite: the default suite "preselected" is the first door, marked. The picker's cursor still starts on New chat, so a bare `apogee` lands where it always has.
+- **`p` asks for the play's input** in the input row, with none allowed, since `/play` takes `<symphony> [input]`.
+- **A play with a chat open is refused**, naming the way to execute, rather than ending the chat from the Symphonies view: ending a conversation is the picker's door's and `open_execute`'s to do.
+- **A saved conversation reopens from the picker as chat**: a saved session records its suite, not the mode it ran in, so an execute session is resumed in execute with `apogee execute --resume`, or opened afresh from the door.
+- **The stages' narration is the thinking block's, as on the terminal**: drawn as side calls while the play runs, folded into the block's summary once it ends. The scripted members answer at once (a member call never takes the mock's streaming delay), so the shell's test holds the summary above the answer and the saved session's parity with machine mode, whose stage-by-stage events `execute_test` already pins.
+- **The Symphonies view sits after the workbench's four**, before the doctor's.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,122 of 3,122, the pdftotext case skipped as before. `clang-format` is clean on every touched file, and `make lint` was not run.

@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <future>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -174,6 +175,60 @@ TEST_CASE("the picker offers a new chat first, then the saved ones, and opens th
     (void)stage.frame();
     CHECK(stage.shell.press(Key::character("q")));
     CHECK(stage.shell.quit_requested());
+}
+
+TEST_CASE("the picker's doors sit between the new chat and the saved ones, each opening itself",
+          "[tui][session]") {
+    // 37d: the execute door, one per suite -- chosen, it opens; a saved chat
+    // below the doors is still picked by its id.
+    Stage stage;
+    std::vector<std::string> picked;
+    std::vector<std::string> opened;
+    stage.view.show_picker(
+        {{.id = "c1", .name = "planning", .updated = "2026-10-09T10:00:00Z", .turns = 4}},
+        [&picked](std::string id) { picked.push_back(std::move(id)); },
+        {{.label = "Execute under suite duo (default)",
+          .open = [&opened]() { opened.emplace_back("duo"); }},
+         {.label = "Execute under suite solo",
+          .open = [&opened]() { opened.emplace_back("solo"); }}});
+    const std::string frame = stage.frame();
+    CHECK(frame.find(" › New chat\n") < frame.find("   Execute under suite duo (default)\n"));
+    CHECK(frame.find("   Execute under suite solo\n") < frame.find("   planning  ·"));
+    (void)stage.shell.press(Key::named(Key::Name::Down));
+    (void)stage.shell.press(Key::named(Key::Name::Down));
+    CHECK(has(stage.frame(), " › Execute under suite solo"));
+    (void)stage.shell.press(Key::named(Key::Name::Return));
+    CHECK(opened == std::vector<std::string>{"solo"});
+    CHECK(picked.empty());
+
+    stage.view.show_picker(
+        {{.id = "c1", .name = "planning", .updated = "2026-10-09T10:00:00Z", .turns = 4}},
+        [&picked](std::string id) { picked.push_back(std::move(id)); },
+        {{.label = "Execute under suite duo",
+          .open = [&opened]() { opened.emplace_back("duo"); }}});
+    (void)stage.frame();
+    for (int i = 0; i < 5; ++i) {  // past the end stays on the last
+        (void)stage.shell.press(Key::named(Key::Name::Down));
+    }
+    CHECK(has(stage.frame(), " › planning"));
+    (void)stage.shell.press(Key::named(Key::Name::Return));
+    CHECK(picked == std::vector<std::string>{"c1"});
+}
+
+TEST_CASE("a queued line is the conversation's next, shown as typed; a new one drops it",
+          "[tui][session]") {
+    Stage stage;
+    stage.view.begin_session();
+    stage.view.queue_line("/play echo2 hello");
+    (void)stage.frame();
+    CHECK(has(stage.frame(), "You: /play echo2 hello"));
+    CHECK(stage.view.read_line() == std::optional<std::string>{"/play echo2 hello"});
+    // Left for a conversation that never read it: not the next one's.
+    stage.view.queue_line("stale");
+    stage.view.begin_session();
+    stage.view.queue_line("fresh");
+    (void)stage.frame();
+    CHECK(stage.view.read_line() == std::optional<std::string>{"fresh"});
 }
 
 TEST_CASE("a line typed reaches the session's thread, and only while it waits for one",
