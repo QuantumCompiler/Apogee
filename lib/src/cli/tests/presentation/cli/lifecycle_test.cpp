@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "backends/model_roster.h"
 #include "cli/complete_protocol.h"
 #include "cli/complete_sources.h"
 #include "cli/registry.h"
@@ -188,6 +189,37 @@ TEST_CASE("the short model flag completes too", "[commands][completion]") {
         completion_candidates(request, two_backends(), commands());
     REQUIRE(candidates.size() == 1);
     CHECK(candidates.front() == "claude");
+}
+
+TEST_CASE("after -m, <backend>: completes that entry's roster, once the colon is typed",
+          "[commands][completion][pins]") {
+    // 34: `-m codex:gpt-5.5` from the cache, never fetched; a bare `-m`
+    // offers no `<backend>:` pairs.
+    const apogee::testing::TempDir home{"pins-" + std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    apogee::backends::RosterCache cache;
+    cache.rosters["codex-cli"] = apogee::backends::ProviderRoster{
+        {{"gpt-5.5", "GPT-5.5"}, {"gpt-5.6-terra", "Terra"}}, "2026-10-10"};
+    REQUIRE(apogee::backends::save_roster_cache(cache).empty());
+    const apogee::harness::Config config = apogee::harness::parse_config(R"(
+backends:
+  codex:
+    type: codex-cli
+  claude:
+    type: claude-cli
+)",
+                                                                         "test");
+    CompletionRequest request;
+    request.words = {"complete", "-m"};
+    request.current = "codex:gpt-5.6";
+    CHECK(completion_candidates(request, config, commands()) ==
+          std::vector<std::string>{"codex:gpt-5.6-terra"});
+    request.current = "";
+    const std::vector<std::string> bare = completion_candidates(request, config, commands());
+    CHECK(contains(bare, "gpt-5.5"));
+    CHECK_FALSE(contains(bare, "codex:gpt-5.5"));
+    request.current = "claude:";
+    CHECK(completion_candidates(request, config, commands()).empty());
 }
 
 TEST_CASE("config verbs taking a backend complete to backend names", "[commands][completion]") {

@@ -1,5 +1,7 @@
 #include "backends/codex_cli.h"
 
+#include <nlohmann/json.hpp>
+
 #include <utility>
 
 #include "backends/codex_cli_events.h"
@@ -272,6 +274,104 @@ CodexCliProvider::Outcome CodexCliProvider::run_turn(const std::string& prompt,
         }
     }
     return outcome;
+}
+
+std::vector<harness::ModelInfo> CodexCliProvider::list_catalog(
+    const harness::CancellationToken& cancellation) {
+    platform::ChildCommand command;
+    command.program = options_.binary;
+    command.arguments = {"debug", "models"};
+
+    ++spawns_;
+    std::string error;
+    std::unique_ptr<platform::ChildProcess> child = spawner_(command, error);
+    if (child == nullptr) {
+        throw harness::ProviderError(options_.backend_name,
+                                     error.empty() ? "could not start the Codex CLI" : error);
+    }
+    child->close_stdin();
+
+    std::string document;
+    std::string chunk;
+    const auto deadline = std::chrono::steady_clock::now() + options_.catalog_timeout;
+    for (;;) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+            child->terminate();
+            throw harness::ProviderError(options_.backend_name,
+                                         "the Codex CLI did not list its models in time");
+        }
+        cancellation.throw_if_cancelled();
+        const platform::ReadStatus status =
+            child->read_stdout(chunk, std::chrono::milliseconds{200});
+        if (status == platform::ReadStatus::Data) {
+            document += chunk;
+            continue;
+        }
+        if (status == platform::ReadStatus::Timeout) {
+            continue;
+        }
+        break;
+    }
+
+    std::string diagnostics;
+    std::string piece;
+    while (child->read_stderr(piece, std::chrono::milliseconds{0}) == platform::ReadStatus::Data) {
+        diagnostics += piece;
+        if (diagnostics.size() > 8192) {
+            diagnostics.erase(0, diagnostics.size() - 8192);
+        }
+    }
+    const std::optional<int> status = child->wait_for_exit(std::chrono::seconds{5});
+    if (status.has_value() && *status != 0) {
+        throw harness::ProviderError(options_.backend_name,
+                                     "'codex debug models' exited with status " +
+                                         std::to_string(*status) +
+                                         (diagnostics.empty() ? "" : ": " + diagnostics));
+    }
+    return parse_catalog(options_.backend_name, document);
+}
+
+std::vector<harness::ModelInfo> CodexCliProvider::parse_catalog(std::string_view backend_name,
+                                                                std::string_view document) {
+    const std::string backend{backend_name};
+    const auto refuse = [&backend]() {
+        return harness::ProviderError(
+            backend,
+            "'codex debug models' printed no catalog Apogee can read -- the CLI's "
+            "debug output may have changed shape");
+    };
+    const nlohmann::json parsed = nlohmann::json::parse(document, nullptr, false);
+    if (parsed.is_discarded() || !parsed.is_object()) {
+        throw refuse();
+    }
+    const auto models = parsed.find("models");
+    if (models == parsed.end() || !models->is_array()) {
+        throw refuse();
+    }
+    std::vector<harness::ModelInfo> out;
+    for (const nlohmann::json& entry : *models) {
+        if (!entry.is_object()) {
+            throw refuse();
+        }
+        const auto slug = entry.find("slug");
+        if (slug == entry.end() || !slug->is_string() || slug->get<std::string>().empty()) {
+            throw refuse();
+        }
+        if (const auto visibility = entry.find("visibility");
+            visibility != entry.end() && visibility->is_string() &&
+            visibility->get<std::string>() != "list") {
+            continue;
+        }
+        harness::ModelInfo info;
+        info.id = slug->get<std::string>();
+        const auto display = entry.find("display_name");
+        info.name =
+            display != entry.end() && display->is_string() ? display->get<std::string>() : info.id;
+        info.provider = "codex-cli";
+        info.backend = backend;
+        out.push_back(std::move(info));
+    }
+    return out;
 }
 
 harness::ChatResponse CodexCliProvider::chat(const harness::ChatRequest& request,

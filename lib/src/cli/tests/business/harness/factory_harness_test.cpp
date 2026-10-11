@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "backends/codex_cli.h"
 #include "backends/factory.h"
 #include "backends/mock.h"
 #include "backends/provider_cache.h"
@@ -17,6 +18,7 @@
 #include "harness/harness.h"
 #include "secrets/store.h"
 #include "support/env_guard.h"
+#include "support/fake_child.h"
 
 /// The provider factory filling a real Harness: the registrations, the router
 /// it installs, the capability the Harness discovers. Moved from the
@@ -172,6 +174,90 @@ suites:
     const auto missing = apogee::backends::rebuild_providers(harness, {"ghost"}, no_env());
     CHECK_FALSE(missing.statuses.front().constructed);
     CHECK(missing.statuses.front().reason == "not configured");
+}
+
+TEST_CASE("a pinned model is the Harness's view of its entry: rebuilt to run, restored exactly",
+          "[backends][factory][roster]") {
+    // 33: `-m` or `/model` naming a vendor roster's model runs it on its
+    // owner's entry -- the Harness's config, never the file -- and the
+    // entry rebuilt is the one that runs it.
+    Harness harness{config_from(R"(
+models:
+  default: root
+backends:
+  root:
+    type: mock
+    model: root-own
+  helper:
+    type: mock
+)")};
+    (void)build_providers(harness, no_env());
+    const auto runs = [&harness](const std::string& name) {
+        return harness.provider(name).list_models({}).front().id;
+    };
+    REQUIRE(runs("root") == "root-own");
+    apogee::harness::LLMProvider* helper = &harness.provider("helper");
+
+    CHECK(harness.pin_model("Root", "mock-pro"));  // the key as the file has it
+    CHECK(harness.config().find_backend("root")->model == "mock-pro");
+    CHECK(runs("root") == "root-own");  // built before the pin: rebuilt to run it
+    REQUIRE(apogee::backends::rebuild_providers(harness, {"root"}, no_env())
+                .statuses.front()
+                .constructed);
+    CHECK(runs("root") == "mock-pro");
+    CHECK(harness.route("mock-pro").backend_name() == "root");  // routed by its model too
+    CHECK(&harness.provider("helper") == helper);
+
+    // A second pin replaces the first; restoring gives back the file's model,
+    // not the pin before.
+    CHECK(harness.pin_model("root", "mock-mini"));
+    CHECK(harness.pin_model("root", ""));
+    CHECK(harness.config().find_backend("root")->model == "root-own");
+    (void)apogee::backends::rebuild_providers(harness, {"root"}, no_env());
+    CHECK(runs("root") == "root-own");
+
+    // Restoring an entry never pinned changes nothing; a name with no entry
+    // is refused.
+    CHECK(harness.pin_model("helper", ""));
+    CHECK(harness.config().find_backend("helper")->model.empty());
+    CHECK_FALSE(harness.pin_model("ghost", "mock-pro"));
+}
+
+TEST_CASE("the Codex CLI's catalog is a capability the Harness finds; a mock has none",
+          "[backends][codex][catalog]") {
+    // 34: providers scan asks every built entry through `catalog_for`; the
+    // Codex backend answers it by running its own CLI.
+    Harness harness{config_from(R"(
+models:
+  default: codex
+backends:
+  codex:
+    type: codex-cli
+  root:
+    type: mock
+)")};
+    auto spawner = std::make_shared<apogee::testing::FakeSpawner>();
+    spawner->stdout_scripts = {R"({"models": [{"slug": "gpt-5.5", "visibility": "list"}]})"};
+    apogee::backends::CodexCliProvider::Options options;
+    options.backend_name = "codex";
+    harness.register_provider(
+        "codex", std::make_shared<apogee::backends::CodexCliProvider>(
+                     std::move(options),
+                     [spawner](const apogee::platform::ChildCommand& command, std::string& error) {
+                         return (*spawner)(command, error);
+                     }));
+    apogee::backends::MockProvider::Options mock_options;
+    mock_options.backend_name = "root";
+    harness.register_provider(
+        "root", std::make_shared<apogee::backends::MockProvider>(std::move(mock_options)));
+    harness.use_default_router();
+
+    apogee::harness::CatalogListing* catalog = harness.catalog_for("codex");
+    REQUIRE(catalog != nullptr);
+    const auto models = catalog->list_catalog({});
+    REQUIRE(models.size() == 1);
+    CHECK(models.front().id == "gpt-5.5");
+    CHECK_FALSE(harness.can_list_catalog("root"));
 }
 
 // --- 28c: the verified record, passively ---------------------------------------

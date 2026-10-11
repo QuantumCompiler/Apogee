@@ -537,6 +537,30 @@ TEST_CASE("a chat's suite is saved as left, and a chat with none saves as before
     }
 }
 
+TEST_CASE("a chat's roster pin is saved with it, and a chat with none saves as before",
+          "[logger][session][roster]") {
+    // 33: no pin, no new key -- the file is the one an older Apogee wrote.
+    const Session plain = sample();
+    const std::string plain_text = apogee::logger::serialize(plain);
+    CHECK_FALSE(nlohmann::json::parse(plain_text).contains("model"));
+    CHECK(deserialize(plain_text, {}).session.model.empty());
+
+    Session pinned = sample();
+    pinned.model = "claude-sonnet-5-5";
+    const std::string text = apogee::logger::serialize(pinned);
+    CHECK(nlohmann::json::parse(text).at("model") == "claude-sonnet-5-5");
+    const auto loaded = deserialize(text, {});
+    CHECK(loaded.warnings.empty());
+    CHECK(loaded.session.model == "claude-sonnet-5-5");
+    CHECK(loaded.session.backend == pinned.backend);
+
+    // A shape it cannot read is dropped with a warning, the chat resumed.
+    const auto odd = deserialize(R"({"schema_version": 2, "chat_id": "c", "model": 7})", {});
+    CHECK(odd.session.model.empty());
+    REQUIRE(odd.warnings.size() == 1);
+    CHECK(odd.warnings.front().kind == WarningKind::FieldDropped);
+}
+
 TEST_CASE("a suite since deleted is dropped with a warning, never fatal",
           "[logger][session][suites]") {
     Session session = sample();

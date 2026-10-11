@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -307,4 +308,79 @@ TEST_CASE("list_models reports the configured model", "[backends][codex]") {
     REQUIRE(models.size() == 1);
     CHECK(models.front().provider == "codex-cli");
     CHECK(models.front().id == "gpt-5-codex");
+}
+
+// --- 34: the CLI's own catalog ------------------------------------------------
+
+namespace {
+
+/// The shape `codex debug models` printed on codex-cli 0.153.4, trimmed: a
+/// listed model, one the CLI hides, one with no visibility given.
+constexpr const char* kCatalog = R"({"models": [
+  {"slug": "gpt-5.5", "display_name": "GPT-5.5", "visibility": "list", "supported_in_api": false},
+  {"slug": "codex-auto-review", "display_name": "Codex Auto Review", "visibility": "hide"},
+  {"slug": "kimi-k3:cloud", "display_name": "kimi-k3:cloud", "visibility": "list"},
+  {"slug": "plain-model"}
+]})";
+
+}  // namespace
+
+TEST_CASE("the catalog is the CLI's own: what it lists, slugs verbatim",
+          "[backends][codex][catalog]") {
+    Fixture fixture{{kCatalog}};
+    const auto models = fixture.provider->list_catalog({});
+    REQUIRE(fixture.spawner->commands.size() == 1);
+    CHECK(fixture.spawner->commands.front() == std::vector<std::string>{"debug", "models"});
+    CHECK(fixture.spawner->children.front()->stdin_closed);
+    std::vector<std::string> ids;
+    for (const auto& model : models) {
+        ids.push_back(model.id);
+        CHECK(model.provider == "codex-cli");
+        CHECK(model.backend == "codex");
+    }
+    CHECK(ids == std::vector<std::string>{"gpt-5.5", "kimi-k3:cloud", "plain-model"});
+    CHECK(models.front().name == "GPT-5.5");
+    CHECK(models.back().name == "plain-model");
+}
+
+TEST_CASE(
+    "a catalog the CLI did not print whole, or failed to print, is refused, never read in part",
+    "[backends][codex][catalog]") {
+    for (const char* odd : {"", "not json", "[]", R"({"models": {}})",
+                            R"({"models": [{"slug": "gpt-5.5"}, {"display_name": "no slug"}]})",
+                            R"({"models": [{"slug": ""}]})", R"({"models": ["gpt-5.5"]})"}) {
+        Fixture fixture{{odd}};
+        INFO(odd);
+        try {
+            (void)fixture.provider->list_catalog({});
+            FAIL("an unreadable catalog was accepted");
+        } catch (const apogee::harness::ProviderError& error) {
+            CHECK(std::string{error.what()}.find("codex debug models") != std::string::npos);
+        }
+    }
+
+    // A failed run says its status and the CLI's own words.
+    Fixture failed{{kCatalog}};
+    failed.spawner->exit_status = 2;
+    failed.spawner->stderr_script = "error: not logged in";
+    try {
+        (void)failed.provider->list_catalog({});
+        FAIL("a failed run was accepted");
+    } catch (const apogee::harness::ProviderError& error) {
+        CHECK(std::string{error.what()}.find("exited with status 2: error: not logged in") !=
+              std::string::npos);
+    }
+}
+
+TEST_CASE("a catalog run that hangs is cut off at its bound", "[backends][codex][catalog]") {
+    auto spawner = std::make_shared<FakeSpawner>();
+    spawner->hang = true;
+    CodexCliProvider::Options options;
+    options.backend_name = "codex";
+    options.catalog_timeout = std::chrono::milliseconds{50};
+    CodexCliProvider provider{std::move(options),
+                              [spawner](const apogee::platform::ChildCommand& command,
+                                        std::string& error) { return (*spawner)(command, error); }};
+    CHECK_THROWS_AS(provider.list_catalog({}), apogee::harness::ProviderError);
+    CHECK(spawner->children.front()->terminated);
 }

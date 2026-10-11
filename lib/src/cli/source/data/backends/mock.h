@@ -42,7 +42,9 @@ struct MockTurn {
     /// `{{thinking}}` is the thinking the request asked for -- `on`, `off`
     /// or `auto`, with `:N` for a budget (26i). `{{tool_count}}` is how many
     /// tool definitions the request carried (26r), `{{tool_names}}` their
-    /// names, comma-separated in the request's order (27o).
+    /// names, comma-separated in the request's order (27o). `{{model}}` is
+    /// the model the provider was built to run -- its entry's `model:`, or a
+    /// roster model pinned on it (33).
     std::string text;
 
     /// Tool calls to attach to the response.

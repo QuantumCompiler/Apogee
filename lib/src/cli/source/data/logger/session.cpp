@@ -118,6 +118,9 @@ std::string serialize(const Session& session) {
         {"compactions", session.compactions},
         {"messages", session.messages},
     };
+    if (!session.model.empty()) {
+        out["model"] = session.model;
+    }
     if (session.private_chat) {
         out["private"] = true;
     }
@@ -218,6 +221,7 @@ LoadedSession deserialize(std::string_view text, const KnownDependencies& known)
     session.custom_name = string_field(parsed, "custom_name", loaded.warnings);
     session.title = string_field(parsed, "title", loaded.warnings);
     session.backend = string_field(parsed, "backend", loaded.warnings);
+    session.model = string_field(parsed, "model", loaded.warnings);
     session.retriever = string_field(parsed, "retriever", loaded.warnings);
     session.rerank = string_field(parsed, "rerank", loaded.warnings);
     // A judge that has since been deleted: resume without reranking, and say

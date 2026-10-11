@@ -142,6 +142,11 @@ struct Session {
     std::string title;
 
     std::string backend;
+    /// The vendor roster model the chat runs on `backend` in place of the
+    /// model its entry names (33), as `-m` or `/model` pinned it -- re-pinned
+    /// when the chat resumes. Empty for a chat on its backend's own model,
+    /// which writes nothing, so it saves exactly as before.
+    std::string model;
     InferenceParams params;
 
     /// The conversation, in neutral IR.

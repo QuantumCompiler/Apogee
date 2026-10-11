@@ -38,7 +38,7 @@ ROOT<hello>
 HELPER<again>
 --- stderr
   /help                   List these commands
-  /model [backend]        Show the backend answering, or switch to another
+  /model [backend|model]  Show the backend answering, or switch: a backend, a roster model, or backend:model
   /models                 List the configured backends
   /suite [name|off]       Show the suite and what its members hold, or switch to another (then --force, --warm) or off
   /system <text>          Replace the system prompt

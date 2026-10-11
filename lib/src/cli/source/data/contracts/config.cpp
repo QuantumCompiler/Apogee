@@ -1119,6 +1119,24 @@ bool is_vendor_cli(BackendType type) noexcept {
     return false;
 }
 
+bool names_its_model(BackendType type) noexcept {
+    switch (type) {
+        case BackendType::Anthropic:
+        case BackendType::OpenAI:
+        case BackendType::Google:
+        case BackendType::ClaudeCli:
+        case BackendType::CodexCli:
+        case BackendType::GeminiCli:
+        case BackendType::OllamaCli:
+        case BackendType::Mock:
+            return true;
+        case BackendType::LlamaCpp:
+        case BackendType::Mlx:
+            return false;
+    }
+    return false;
+}
+
 std::string_view to_string(AgentToolPolicy policy) noexcept {
     for (const auto& [name, candidate] : kAgentToolPolicyNames) {
         if (candidate == policy) {

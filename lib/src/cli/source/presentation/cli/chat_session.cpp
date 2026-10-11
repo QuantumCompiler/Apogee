@@ -23,6 +23,7 @@
 #include "agentloop/validate.h"
 #include "ansi/ansi.h"
 #include "backends/factory.h"
+#include "backends/model_roster.h"
 #include "backends/provider_cache.h"
 #include "cli/chat_attachments.h"
 #include "cli/chat_completer.h"
@@ -52,6 +53,7 @@
 #include "machine/json_reporter.h"
 #include "mcp/registry.h"
 #include "modelstore/footprint.h"
+#include "operations/backend_names.h"
 #include "operations/knowledge_core.h"
 #include "operations/suites.h"
 #include "platform/platform.h"
@@ -108,6 +110,74 @@ std::optional<SlashCommand> parse_slash(std::string_view line) {
 }
 
 namespace {
+
+/// What the conversation runs on, as the banner, the header and `/model` say
+/// it: its backend, and the roster model pinned on it (33).
+[[nodiscard]] std::string model_label(const logger::Session& session) {
+    return session.model.empty() ? session.backend : session.backend + " (" + session.model + ")";
+}
+
+/// Moves the conversation's roster pin (33) to `pinned` on `backend` -- ""
+/// for none: the entry it leaves runs the model its file names again, the one
+/// it lands on runs `pinned`, each rebuilt as a suite switch rebuilds what it
+/// re-pins (27d). One pin at most, and only on the conversation's backend --
+/// the caller moves `session.backend` to `backend` once this succeeds. A
+/// backend that cannot be rebuilt puts every pin back as it was and returns
+/// why.
+[[nodiscard]] std::string move_pin(harness::Harness& harness, logger::Session& session,
+                                   const std::string& backend, const std::string& pinned,
+                                   const backends::BuildOptions& options) {
+    const bool moved = session.backend != backend || session.model != pinned;
+    const bool leaving = moved && !session.model.empty();
+    const bool landing = moved && !pinned.empty();
+    std::vector<std::string> rebuilt;
+    if (leaving) {
+        (void)harness.pin_model(session.backend, {});
+        rebuilt.push_back(session.backend);
+    }
+    if (landing) {
+        (void)harness.pin_model(backend, pinned);
+        if (rebuilt.empty() || rebuilt.front() != backend) {
+            rebuilt.push_back(backend);
+        }
+    }
+    if (rebuilt.empty()) {
+        return {};
+    }
+    for (const backends::BackendStatus& status :
+         backends::rebuild_providers(harness, rebuilt, options).statuses) {
+        if (!status.constructed) {
+            if (landing) {
+                (void)harness.pin_model(backend, {});
+            }
+            if (leaving) {
+                (void)harness.pin_model(session.backend, session.model);
+            }
+            (void)backends::rebuild_providers(harness, rebuilt, options);
+            return status.name + " could not be rebuilt: " + status.reason;
+        }
+    }
+    session.model = pinned;
+    return {};
+}
+
+/// Each configured provider type's cached roster, folded to one line as
+/// `models list` folds it (M13) -- what `/models` says beside the backends.
+[[nodiscard]] std::vector<std::string> roster_folds(const harness::Config& config) {
+    std::vector<std::string> lines;
+    for (const auto& [type, roster] : backends::load_roster_cache().rosters) {
+        if (roster.models.empty() ||
+            std::ranges::none_of(config.backends, [&wanted = type](const auto& entry) {
+                return harness::to_string(entry.second.type) == wanted;
+            })) {
+            continue;
+        }
+        lines.push_back(type + "'s roster: " + std::to_string(roster.models.size()) +
+                        " models (fetched " + roster.fetched_at +
+                        ") -- /model <id> runs one; Tab lists them");
+    }
+    return lines;
+}
 
 /// `text` without the double quotes a path with spaces is typed in.
 std::string unquoted(std::string_view text) {
@@ -462,32 +532,26 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // /model an instant switch rather than a reconstruction -- and why
     // history has to be neutral IR rather than a vendor transcript.
     // A model that is neither a backend key nor an entry's `model:` may be a
-    // vendor roster's (M13): a sole configured owner pins that entry's model
-    // for this run, in memory only -- the config file never changes; two
-    // owners refuse naming both; none falls through to the existing refusal.
+    // vendor roster's (M13), resolved as `/model` resolves it (33): a sole
+    // configured owner runs it for this chat, pinned on the Harness's view of
+    // that entry -- the config file, and this session's view of it, never
+    // change; two owners refuse naming both; none falls through to the
+    // existing refusal.
     SessionFlags roster_adjusted;
-    if (!flags->model.empty() && !names_a_configured_backend(config, flags->model)) {
-        const RosterResolution roster = resolve_roster_model(config, flags->model);
-        if (roster.owners.size() > 1) {
-            std::string owners;
-            for (const std::string& type : roster.owners) {
-                owners += (owners.empty() ? std::string{} : " and ") + type;
-            }
-            fail_user(mode, "'" + flags->model + "' is on " + owners +
-                                "'s rosters -- pin it to one entry with 'apogee config add-backend "
-                                "<name> --type <type> --model " +
-                                flags->model + "'");
-        }
-        if (!roster.backend.empty()) {
-            config.backends.at(roster.backend).model = roster.model;
-            std::cerr << "model '" << roster.model << "' -- " << roster.owners.front()
-                      << "'s roster, on backend '" << roster.backend << "'\n";
-            roster_adjusted = *flags;
-            roster_adjusted.model = roster.backend;
-            flags = &roster_adjusted;
-        }
+    const SessionModel launched = resolve_session_model(config, flags->model);
+    if (!launched.refusal.empty()) {
+        fail_user(mode, launched.refusal);
+    }
+    if (!launched.pinned.empty()) {
+        std::cerr << "model '" << launched.pinned << "' -- " << roster_pin_note(launched) << "\n";
+        roster_adjusted = *flags;
+        roster_adjusted.model = launched.backend;
+        flags = &roster_adjusted;
     }
     harness::Harness harness{config};
+    if (!launched.pinned.empty()) {
+        (void)harness.pin_model(launched.backend, launched.pinned);
+    }
     backends::BuildOptions build_options;
     build_options.web_search = flags->search;
     build_options.config_path = config_path;
@@ -560,6 +624,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     } else {
         session.chat_id = logger::new_chat_id();
     }
+    // The backend a resumed chat was left on, which a roster pin rides (33).
+    const std::string saved_backend = session.backend;
 
     // The chat's suite (27d): the flag, else what the chat last had, else
     // the config's default. Chosen before the chat's backend, which the
@@ -643,6 +709,32 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                                      .override = flags->model,
                                      .entry_backend = session.backend});
     session.backend = model;
+    // The chat's roster pin (33): the launch's; else, unless -m named a
+    // backend, the one the chat was left on -- pinned again when the chat
+    // lands back on its backend, and said as the launch's is. Anything else
+    // runs its backend's own model.
+    if (!launched.pinned.empty()) {
+        session.model = launched.pinned;
+    } else if (!flags->model.empty() || session.backend != saved_backend) {
+        session.model.clear();
+    } else if (!session.model.empty()) {
+        // Said as it was pinned: a roster's model as the roster's, any
+        // other as `<backend>:<model>`'s (34).
+        const std::string saved_model = std::exchange(session.model, {});
+        SessionModel resumed = resolve_session_model(config, saved_model);
+        if (resumed.backend != session.backend || resumed.pinned != saved_model) {
+            resumed = SessionModel{.backend = session.backend, .pinned = saved_model};
+        }
+        if (const std::string refused =
+                move_pin(harness, session, resumed.backend, resumed.pinned, build_options);
+            refused.empty()) {
+            std::cerr << "model '" << resumed.pinned << "' -- " << roster_pin_note(resumed) << "\n";
+        } else {
+            out.print_line(style.tag(ansi::Role::Warning) + " [resume] " + resumed.pinned +
+                           " could not be pinned again (" + refused + ") -- the chat runs on " +
+                           resumed.backend + "'s own model");
+        }
+    }
     // A resumed chat starts from its saved state when its backend kept
     // one (26j); a new one is named so it can be saved.
     harness.resume_conversation(session.backend, session.chat_id);
@@ -891,8 +983,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         // the session can play (27s).
         out.print_line(
             style.tag(ansi::Role::Apogee) + " " +
-            session_banner(mode, model, is_base_model(harness, model), config.models.default_suite,
-                           forced,
+            session_banner(mode, model_label(session), is_base_model(harness, model),
+                           config.models.default_suite, forced,
                            mode == SessionMode::Execute
                                ? session_catalog(harness.config(), config_path).definitions.size()
                                : 0,
@@ -906,7 +998,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // them.
     const auto refresh_header = [&]() {
         out.set_header(session_banner(
-            mode, session.backend, is_base_model(harness, session.backend),
+            mode, model_label(session), is_base_model(harness, session.backend),
             config.models.default_suite, !config.models.default_suite.empty() && forced,
             mode == SessionMode::Execute
                 ? session_catalog(harness.config(), config_path).definitions.size()
@@ -1527,32 +1619,62 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     break;
                 case ChatVerb::Models:
                     for (const std::string& backend : config.backend_names()) {
-                        out.print_line((backend == session.backend ? "* " : "  ") + backend);
+                        out.print_line(backend == session.backend ? "* " + model_label(session)
+                                                                  : "  " + backend);
+                    }
+                    // What else `/model` takes (33): each configured
+                    // provider's roster, folded.
+                    for (const std::string& fold : roster_folds(config)) {
+                        out.print_line(style.dim("  " + fold));
                     }
                     break;
-                case ChatVerb::Model:
+                case ChatVerb::Model: {
                     if (argument.empty()) {
-                        out.print_line(session.backend);
-                    } else if (config.find_backend(argument) == nullptr) {
-                        out.print_line(style.tag(ansi::Role::Error) + " no backend named '" +
-                                       argument + "'");
-                    } else {
-                        // Instant, and history carries over: every backend
-                        // was constructed up front and history is neutral IR.
-                        session.backend = argument;
-                        harness.resume_conversation(session.backend, session.chat_id);
-                        // A suite's toolset pin follows the backend (27d).
-                        reoffer_tools();
-                        refresh_header();
-                        const bool base = is_base_model(harness, argument);
-                        out.print_line(style.tag(ansi::Role::Apogee) + " switched to " + argument +
-                                       (base ? " -- a base model" : ""));
-                        if (base && flags->tools) {
-                            out.print_line(style.tag(ansi::Role::Warning) + " " +
-                                           base_model_tools_note(argument));
-                        }
+                        out.print_line(model_label(session));
+                        break;
+                    }
+                    // What -m takes (33): a backend, an entry's model, or a
+                    // roster's model on its sole configured owner -- read
+                    // against the file's view, so a pin is never mistaken
+                    // for its entry's own model.
+                    const SessionModel asked = resolve_session_model(config, argument);
+                    if (asked.backend.empty()) {
+                        out.print_line(style.tag(ansi::Role::Error) + " " +
+                                       (asked.refusal.empty()
+                                            ? "no backend named '" + argument + "'"
+                                            : asked.refusal));
+                        break;
+                    }
+                    if (!asked.pinned.empty() || !session.model.empty()) {
+                        // Rebuilding a backend is a model call's business:
+                        // what is reading an attachment settles first.
+                        attached.settle();
+                    }
+                    if (const std::string refused =
+                            move_pin(harness, session, asked.backend, asked.pinned, build_options);
+                        !refused.empty()) {
+                        out.print_line(style.tag(ansi::Role::Error) + " " + refused);
+                        break;
+                    }
+                    // Instant, and history carries over: every backend
+                    // was constructed up front and history is neutral IR.
+                    session.backend = asked.backend;
+                    harness.resume_conversation(session.backend, session.chat_id);
+                    // A suite's toolset pin follows the backend (27d).
+                    reoffer_tools();
+                    refresh_header();
+                    const bool base = is_base_model(harness, session.backend);
+                    out.print_line(style.tag(ansi::Role::Apogee) + " switched to " +
+                                   (asked.pinned.empty()
+                                        ? session.backend
+                                        : asked.pinned + " -- " + roster_pin_note(asked)) +
+                                   (base ? " -- a base model" : ""));
+                    if (base && flags->tools) {
+                        out.print_line(style.tag(ansi::Role::Warning) + " " +
+                                       base_model_tools_note(session.backend));
                     }
                     break;
+                }
                 case ChatVerb::Suite: {
                     if (argument.empty()) {
                         out.print_line(style.tag(ansi::Role::Apogee) +
@@ -1617,6 +1739,13 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                             config, harness::RoleRequest{.role = harness::ModelRole::Chat});
                         chat.from == harness::ResolvedFrom::Suite && chat.key != session.backend &&
                         config.find_backend(chat.key) != nullptr) {
+                        // A roster pin stays with the backend it rode (33).
+                        if (const std::string unpinned =
+                                move_pin(harness, session, chat.key, {}, build_options);
+                            !unpinned.empty()) {
+                            out.print_line(style.tag(ansi::Role::Warning) + " " + unpinned);
+                            session.model.clear();  // the conversation moves on regardless
+                        }
                         session.backend = chat.key;
                         harness.resume_conversation(session.backend, session.chat_id);
                         moved = chat.key;

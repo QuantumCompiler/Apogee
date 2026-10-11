@@ -5,12 +5,14 @@
 #include <algorithm>
 #include <fstream>
 #include <map>
+#include <random>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "agentloop/retriever.h"
 #include "ansi/text_width.h"
+#include "backends/model_roster.h"
 #include "cli/chat.h"
 #include "cli/chat_attachments.h"
 #include "cli/suite_residency.h"
@@ -134,8 +136,9 @@ TEST_CASE("/help lines up its descriptions", "[chat][completer]") {
         const ChatCommandSpec& spec = chat_commands()[i];
         CHECK(help[i].find(std::string{spec.description}) == column);
     }
-    CHECK(help[1] == "  /model [backend]" + std::string(column - 18, ' ') +
-                         "Show the backend answering, or switch to another");
+    CHECK(help[1] == "  /model [backend|model]" + std::string(column - 24, ' ') +
+                         "Show the backend answering, or switch: a backend, a roster model, or "
+                         "backend:model");
 }
 
 // --- commands ----------------------------------------------------------------
@@ -314,6 +317,9 @@ backends:
     type: mock
 )",
                                                                          "test");
+    // A home of the test's own: the sources read the roster cache (33).
+    const apogee::testing::TempDir home{"sources-" + std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
     const ChatCompletionSources sources =
         apogee::commands::chat_completion_sources(config, "/work");
     REQUIRE(sources.backends.size() == 3);
@@ -499,4 +505,102 @@ TEST_CASE("/attach completes its flag and the flag's values after the path, from
     CHECK(named);
     // Other commands' arguments are as they were: no flags, no rows.
     CHECK(suggest_chat_input("/detach x ", project()).candidates.empty());
+}
+
+TEST_CASE(
+    "/model completes a configured provider's roster beside the backends, and /rerank does not",
+    "[chat][completer][roster]") {
+    ChatCompletionSources sources = project();
+    sources.roster_models = {{"claude-opus-5-5", "anthropic's roster"},
+                             {"claude", "anthropic's roster"},
+                             {"claude-sonnet-5-5", "anthropic's roster"}};
+    const Suggestions model = suggest_chat_input("/model ", sources);
+    // The backends first, then the roster -- a name already a backend once.
+    CHECK(texts(model) == std::vector<std::string>{"claude", "local", "mock", "claude-opus-5-5",
+                                                   "claude-sonnet-5-5"});
+    CHECK(model.candidates[0].description == "anthropic · claude-sonnet-5");
+    CHECK(model.candidates[3].description == "anthropic's roster");
+    CHECK(texts(suggest_chat_input("/model claude-s", sources)) ==
+          std::vector<std::string>{"claude-sonnet-5-5"});
+    // A reranker is a configured entry's job, never a roster pin's.
+    CHECK(texts(suggest_chat_input("/rerank ", sources)) ==
+          std::vector<std::string>{"off", "on", "auto", "claude", "local", "mock"});
+}
+
+TEST_CASE(
+    "the sources read the configured types' rosters from the cache, and a cold cache offers none",
+    "[chat][completer][roster]") {
+    const apogee::testing::TempDir home{"rosters-" + std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    const apogee::harness::Config config = apogee::harness::parse_config(R"(
+backends:
+  claude:
+    type: anthropic
+    model: claude-sonnet-5
+  test:
+    type: mock
+)",
+                                                                         "test");
+    CHECK(apogee::commands::chat_completion_sources(config, "/work").roster_models.empty());
+
+    apogee::backends::RosterCache cache;
+    cache.rosters["anthropic"] = apogee::backends::ProviderRoster{
+        {{"claude-opus-5-5", "Opus"}, {"claude-sonnet-5-5", "Sonnet"}}, "2026-10-09"};
+    cache.rosters["openai"] = apogee::backends::ProviderRoster{{{"gpt-5.2", "GPT"}}, "2026-10-09"};
+    REQUIRE(apogee::backends::save_roster_cache(cache).empty());
+    const ChatCompletionSources sources =
+        apogee::commands::chat_completion_sources(config, "/work");
+    std::vector<std::string> names;
+    for (const auto& model : sources.roster_models) {
+        names.push_back(model.name);
+        CHECK(model.description == "anthropic's roster");
+    }
+    // OpenAI is not configured: its roster offers nothing.
+    CHECK(names == std::vector<std::string>{"claude-opus-5-5", "claude-sonnet-5-5"});
+}
+
+TEST_CASE(
+    "/model <backend>: completes that entry's roster, and a colon after anything else is the "
+    "name's",
+    "[chat][completer][pins]") {
+    ChatCompletionSources sources = project();
+    sources.roster_models = {{"gpt-5.5", "codex-cli's roster"},
+                             {"kimi-k3:cloud", "codex-cli's roster"}};
+    sources.backend_rosters["codex"] = sources.roster_models;
+    CHECK(texts(suggest_chat_input("/model codex:", sources)) ==
+          std::vector<std::string>{"codex:gpt-5.5", "codex:kimi-k3:cloud"});
+    const Suggestions narrowed = suggest_chat_input("/model codex:k", sources);
+    CHECK(narrowed.from == 7);
+    CHECK(texts(narrowed) == std::vector<std::string>{"codex:kimi-k3:cloud"});
+    CHECK(narrowed.candidates.front().description == "codex-cli's roster");
+    // An entry with no roster offers nothing after its colon, never a guess.
+    CHECK(suggest_chat_input("/model claude:", sources).candidates.empty());
+    // A roster id's own colon is not a backend's.
+    CHECK(texts(suggest_chat_input("/model kimi-k3:", sources)) ==
+          std::vector<std::string>{"kimi-k3:cloud"});
+}
+
+TEST_CASE("the sources carry each entry's roster by its key", "[chat][completer][pins]") {
+    const apogee::testing::TempDir home{"by-key-" + std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    const apogee::harness::Config config = apogee::harness::parse_config(R"(
+backends:
+  codex:
+    type: codex-cli
+  work:
+    type: codex-cli
+  claude:
+    type: claude-cli
+)",
+                                                                         "test");
+    apogee::backends::RosterCache cache;
+    cache.rosters["codex-cli"] =
+        apogee::backends::ProviderRoster{{{"gpt-5.5", "GPT-5.5"}}, "2026-10-10"};
+    REQUIRE(apogee::backends::save_roster_cache(cache).empty());
+    const ChatCompletionSources sources =
+        apogee::commands::chat_completion_sources(config, "/work");
+    REQUIRE(sources.backend_rosters.size() == 2);
+    CHECK(sources.backend_rosters.at("codex").front().name == "gpt-5.5");
+    CHECK(sources.backend_rosters.at("work").front().name == "gpt-5.5");
+    CHECK_FALSE(sources.backend_rosters.contains("claude"));
 }

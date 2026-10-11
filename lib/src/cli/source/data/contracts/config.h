@@ -91,6 +91,13 @@ enum class KvCacheType : std::uint8_t { F16, Q8_0, Q4_0 };
 /// tools outside Apogee's gate, so an agent's tool policy cannot hold there.
 [[nodiscard]] bool is_vendor_cli(BackendType type) noexcept;
 
+/// Whether an entry of `type` picks its model by name -- its `model:`, which
+/// the vendor's API or CLI resolves -- rather than running the weights at its
+/// `model_path` (34). Where it does, a model can be pinned on the entry by
+/// name (`/model <backend>:<model>`); where it does not, there is nothing to
+/// pin.
+[[nodiscard]] bool names_its_model(BackendType type) noexcept;
+
 /// The largest `top_k` and `seed` a backend may name (26h). A vocabulary runs
 /// to a few hundred thousand tokens, and llama.cpp reads the 32-bit maximum as
 /// "draw a seed", so a fixed one stops just short of it.

@@ -45,7 +45,9 @@
 /// local execution, which is not a trade a chat backend gets to offer.
 namespace apogee::backends {
 
-class CodexCliProvider final : public harness::LLMProvider, public harness::StatusReporting {
+class CodexCliProvider final : public harness::LLMProvider,
+                               public harness::StatusReporting,
+                               public harness::CatalogListing {
 public:
     using Spawner = std::function<std::unique_ptr<platform::ChildProcess>(
         const platform::ChildCommand&, std::string&)>;
@@ -64,6 +66,8 @@ public:
         std::string binary = "codex";
         std::string model;
         std::chrono::milliseconds turn_timeout{600000};
+        /// How long `codex debug models` may take to print its catalog.
+        std::chrono::milliseconds catalog_timeout{30000};
     };
 
     CodexCliProvider(Options options, Spawner spawner);
@@ -93,6 +97,24 @@ public:
         const harness::CancellationToken& cancellation) override;
 
     [[nodiscard]] harness::StatusEvent model_status() const override;
+
+    /// The CLI's own model catalog (34): `codex debug models`, run over the
+    /// spawner like a turn -- stdin closed, its stderr captured, bounded by
+    /// `catalog_timeout` -- and read by `parse_catalog`. Run only when the
+    /// user asks for rosters (`providers scan --register`, `--refresh`).
+    /// Throws harness::ProviderError when the CLI cannot be run, fails, or
+    /// prints nothing readable: never a partial roster.
+    [[nodiscard]] std::vector<harness::ModelInfo> list_catalog(
+        const harness::CancellationToken& cancellation) override;
+
+    /// The catalog `codex debug models` prints: `{"models": [{"slug": ...,
+    /// "display_name": ..., "visibility": "list"|"hide", ...}]}`. Each entry
+    /// the CLI lists -- `visibility` "list", or none given -- as its slug,
+    /// verbatim; one the CLI hides is left out, as the CLI leaves it out.
+    /// It is a debug subcommand, so any other shape is refused, naming the
+    /// backend, rather than read in part.
+    [[nodiscard]] static std::vector<harness::ModelInfo> parse_catalog(
+        std::string_view backend_name, std::string_view document);
 
     /// The argv for one turn.
     ///

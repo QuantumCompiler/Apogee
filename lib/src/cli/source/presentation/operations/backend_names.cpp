@@ -3,7 +3,6 @@
 #include <algorithm>
 
 #include "backends/model_roster.h"
-
 #include "harness/harness.h"
 
 namespace apogee::commands {
@@ -47,9 +46,9 @@ RosterResolution resolve_roster_model(const harness::Config& config, std::string
     RosterResolution out;
     const backends::RosterCache cache = backends::load_roster_cache();
     for (const auto& [type, roster] : cache.rosters) {
-        const bool listed = std::any_of(
-            roster.models.begin(), roster.models.end(),
-            [model](const backends::RosterModel& entry) { return entry.id == model; });
+        const bool listed =
+            std::any_of(roster.models.begin(), roster.models.end(),
+                        [model](const backends::RosterModel& entry) { return entry.id == model; });
         if (!listed) {
             continue;
         }
@@ -73,6 +72,61 @@ RosterResolution resolve_roster_model(const harness::Config& config, std::string
         out.backend.clear();
     }
     return out;
+}
+
+SessionModel resolve_session_model(const harness::Config& config, std::string_view name) {
+    SessionModel out;
+    if (std::string key = configured_backend_key(config, name); !key.empty()) {
+        out.backend = std::move(key);
+        return out;
+    }
+    if (name.empty()) {
+        return out;
+    }
+    const RosterResolution roster = resolve_roster_model(config, name);
+    if (roster.owners.size() > 1) {
+        std::string owners;
+        for (const std::string& type : roster.owners) {
+            owners += (owners.empty() ? std::string{} : " and ") + type;
+        }
+        out.refusal = "'" + std::string{name} + "' is on " + owners +
+                      "'s rosters -- pin it to one entry with 'apogee config add-backend <name> "
+                      "--type <type> --model " +
+                      std::string{name} + "'";
+        return out;
+    }
+    if (!roster.backend.empty()) {
+        out.backend = roster.backend;
+        out.pinned = roster.model;
+        out.roster = roster.owners.front();
+        return out;
+    }
+    // `<backend>:<model>` (34): the first colon whose left side is a key.
+    for (std::size_t colon = name.find(':'); colon != std::string_view::npos;
+         colon = name.find(':', colon + 1)) {
+        const auto entry = config.backends.find(name.substr(0, colon));
+        if (entry == config.backends.end()) {
+            continue;
+        }
+        if (!harness::names_its_model(entry->second.type)) {
+            out.refusal = "'" + entry->first +
+                          "' runs the weights at its model_path -- a model is pinned by name "
+                          "only on an API or vendor-CLI backend";
+            return out;
+        }
+        out.backend = entry->first;
+        if (const std::string_view model = name.substr(colon + 1);
+            !model.empty() && model != entry->second.model) {
+            out.pinned = std::string{model};
+        }
+        return out;
+    }
+    return out;
+}
+
+std::string roster_pin_note(const SessionModel& model) {
+    const std::string on = "on backend '" + model.backend + "'";
+    return model.roster.empty() ? on : model.roster + "'s roster, " + on;
 }
 
 }  // namespace apogee::commands

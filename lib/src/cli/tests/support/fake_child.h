@@ -50,9 +50,16 @@ public:
         stdin_closed = true;
     }
 
+    /// When set, stdout never yields: every read times out, as a child that
+    /// hangs without printing.
+    bool hang = false;
+
     [[nodiscard]] platform::ReadStatus read_stdout(std::string& out,
                                                    std::chrono::milliseconds) override {
         out.clear();
+        if (hang && !dead_) {
+            return platform::ReadStatus::Timeout;
+        }
         ++reads_;
         if (die_after_reads >= 0 && reads_ > die_after_reads) {
             dead_ = true;
@@ -130,6 +137,10 @@ public:
     /// framer would see non-JSON in front of its first event.
     std::string stderr_script;
 
+    /// The status every child exits with, and whether each hangs.
+    int exit_status = 0;
+    bool hang = false;
+
     [[nodiscard]] std::unique_ptr<platform::ChildProcess> operator()(
         const platform::ChildCommand& command, std::string& error) {
         const int index = static_cast<int>(commands.size());
@@ -149,6 +160,8 @@ public:
         }
         state->chunk_size = chunk_size;
         state->stderr_script = stderr_script;
+        state->exit_status = exit_status;
+        state->hang = hang;
         children.push_back(state);
         return std::make_unique<Handle>(state);
     }

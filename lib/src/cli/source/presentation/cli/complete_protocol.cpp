@@ -168,6 +168,17 @@ namespace {
                 for (const backends::RosterModel& model : roster.models) {
                     names.push_back(model.id);
                 }
+                // Past an entry's colon, its roster as `<backend>:<model>`
+                // (34) -- offered only once the colon is typed.
+                if (const std::size_t colon = current.find(':'); colon != std::string_view::npos) {
+                    if (const auto entry = config.backends.find(current.substr(0, colon));
+                        entry != config.backends.end() &&
+                        harness::to_string(entry->second.type) == type) {
+                        for (const backends::RosterModel& model : roster.models) {
+                            names.push_back(entry->first + ":" + model.id);
+                        }
+                    }
+                }
             }
             completion.candidates = filter_prefix(names, current);
             break;

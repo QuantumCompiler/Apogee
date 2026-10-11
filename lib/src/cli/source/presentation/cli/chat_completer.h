@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <span>
 #include <string>
 #include <string_view>
@@ -86,6 +87,9 @@ enum class ChatVerb : std::uint8_t {
 enum class ArgumentValues : std::uint8_t {
     None,
     Backends,
+    /// The backends, then each configured provider's roster models (33):
+    /// what `/model` takes, as `-m` takes it.
+    Models,
     Retrievers,
     /// `off`, `auto`, and the backends.
     RerankTargets,
@@ -182,6 +186,12 @@ struct NamedChoice {
 struct ChatCompletionSources {
     /// Each configured backend, in config order, described by type and model.
     std::vector<NamedChoice> backends;
+    /// Each configured provider type's roster models (M13), described by
+    /// whose roster they are on -- read from the cache, never fetched (33).
+    std::vector<NamedChoice> roster_models;
+    /// Each configured entry whose type has a cached roster, by its key, with
+    /// that roster's models (34): what `/model <backend>:` completes.
+    std::map<std::string, std::vector<NamedChoice>, std::less<>> backend_rosters;
     /// Each configured suite, described by what it is for (27d).
     std::vector<NamedChoice> suites;
     /// What `@` paths are relative to.

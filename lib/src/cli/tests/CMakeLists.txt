@@ -41,6 +41,7 @@ add_library(apogee_tests_infrastructure OBJECT
     support/embedding_fixtures.h
     support/text_edits.h
     support/hermetic_stdin.cpp
+    support/hermetic_home.cpp
 )
 target_link_libraries(apogee_tests_infrastructure PRIVATE apogee_infrastructure Catch2::Catch2)
 
@@ -281,6 +282,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/attachment_graph_test.cpp
     presentation/operations/graph_sources_test.cpp
     presentation/cli/chat_completer_test.cpp
+    presentation/cli/chat_roster_test.cpp
     presentation/cli/chat_session_test.cpp
     presentation/cli/execute_test.cpp
     presentation/httpserver/handler_test.cpp

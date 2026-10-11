@@ -13,6 +13,7 @@
 #include "agentloop/rerank.h"
 #include "agentloop/retriever.h"
 #include "ansi/text_width.h"
+#include "backends/model_roster.h"
 #include "knowledge/record.h"
 
 namespace apogee::commands {
@@ -33,8 +34,10 @@ constexpr std::array kSuiteFlags{
 
 constexpr std::array kCommands{
     ChatCommandSpec{"help", ChatVerb::Help, "", "List these commands"},
-    ChatCommandSpec{"model", ChatVerb::Model, "[backend]",
-                    "Show the backend answering, or switch to another", ArgumentValues::Backends},
+    ChatCommandSpec{"model", ChatVerb::Model, "[backend|model]",
+                    "Show the backend answering, or switch: a backend, a roster model, or "
+                    "backend:model",
+                    ArgumentValues::Models},
     ChatCommandSpec{"models", ChatVerb::Models, "", "List the configured backends"},
     ChatCommandSpec{"suite", ChatVerb::Suite, "[name|off]",
                     "Show the suite and what its members hold, or switch to another (then "
@@ -272,6 +275,16 @@ std::vector<NamedChoice> argument_choices(ArgumentValues values,
             break;
         case ArgumentValues::Backends:
             choices = sources.backends;
+            break;
+        case ArgumentValues::Models:
+            choices = sources.backends;
+            for (const NamedChoice& model : sources.roster_models) {
+                if (std::ranges::none_of(choices, [&model](const NamedChoice& named) {
+                        return named.name == model.name;
+                    })) {
+                    choices.push_back(model);
+                }
+            }
             break;
         case ArgumentValues::Retrievers:
             for (const std::string_view name : agentloop::retriever_names()) {
@@ -587,6 +600,28 @@ ChatCompletionSources chat_completion_sources(const harness::Config& config,
         }
         sources.backends.push_back({name, std::move(description)});
     }
+    // The cached rosters of the configured provider types (M13): what
+    // `/model` can switch to beside the backends (33).
+    for (const auto& [type, roster] : backends::load_roster_cache().rosters) {
+        if (std::ranges::none_of(config.backends, [&wanted = type](const auto& entry) {
+                return harness::to_string(entry.second.type) == wanted;
+            })) {
+            continue;
+        }
+        for (const backends::RosterModel& model : roster.models) {
+            sources.roster_models.push_back({model.id, type + "'s roster"});
+        }
+        // Each entry of the type, for `<backend>:` (34).
+        for (const auto& [name, entry] : config.backends) {
+            if (harness::to_string(entry.type) != type) {
+                continue;
+            }
+            std::vector<NamedChoice>& models = sources.backend_rosters[name];
+            for (const backends::RosterModel& model : roster.models) {
+                models.push_back({model.id, type + "'s roster"});
+            }
+        }
+    }
     for (const std::string& name : config.suite_names()) {
         const harness::SuiteConfig* suite = config.find_suite(name);
         sources.suites.push_back({name, suite != nullptr ? suite->description : std::string{}});
@@ -675,6 +710,23 @@ Suggestions suggest_chat_input(std::string_view before_cursor,
         return out;
     }
     out.from = from;
+    // Past a backend's colon, its roster's models as `<backend>:<model>`
+    // (34). A colon after anything else is the name's own: a roster id may
+    // hold one.
+    if (spec->values == ArgumentValues::Models) {
+        if (const std::size_t colon = typed.find(':'); colon != std::string_view::npos) {
+            if (const auto listed = sources.backend_rosters.find(typed.substr(0, colon));
+                listed != sources.backend_rosters.end()) {
+                for (const NamedChoice& model : listed->second) {
+                    std::string pinned = listed->first + ":" + model.name;
+                    if (pinned.starts_with(typed)) {
+                        out.candidates.push_back({std::move(pinned), {}, model.description});
+                    }
+                }
+                return out;
+            }
+        }
+    }
     for (NamedChoice& choice : argument_choices(spec->values, sources)) {
         if (choice.name.starts_with(typed)) {
             out.candidates.push_back({choice.name, {}, std::move(choice.description)});

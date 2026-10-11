@@ -16,6 +16,7 @@
 #include <thread>
 #include <vector>
 
+#include "backends/model_roster.h"
 #include "cli/chat_session.h"
 #include "cli/permissions.h"
 #include "logger/session.h"
@@ -235,6 +236,43 @@ TEST_CASE("a tool-using, permission-prompted turn runs to its answer on the shel
     const std::vector<apogee::logger::Session> saved = apogee::logger::list_sessions();
     REQUIRE(saved.size() == 1);
     CHECK(saved.front().turns == 1);
+}
+
+TEST_CASE("/model moves the shell's conversation onto a roster model, its header following",
+          "[cli][tui][session][roster]") {
+    // 33: the shell has no -m; /model is how a roster model is reached.
+    Conversation chat{nlohmann::json{{"turns", {{{"text", "ran on {{model}}"}}}}}};
+    apogee::backends::RosterCache cache;
+    cache.rosters["mock"] = apogee::backends::ProviderRoster{
+        {{"mock-pro", "Pro"}, {"mock-mini", "Mini"}}, "2026-10-09"};
+    REQUIRE(apogee::backends::save_roster_cache(cache).empty());
+    const std::string before = slurp(chat.home.config_path());
+    chat.open();
+    // The input offers the roster beside the backends: chat's one completer.
+    chat.until([&chat]() { return has(chat.frame(), "\n ›"); }, "the input");
+    for (const char c : std::string{"/model mock-"}) {
+        (void)chat.shell.press(Key::character(std::string(1, c)));
+    }
+    chat.until([&chat]() { return has(chat.frame(), "mock's roster"); }, "the roster offered");
+    CHECK(has(chat.frame(), "mock-mini"));
+    for (int i = 0; i < 12; ++i) {
+        (void)chat.shell.press(Key::named(Key::Name::Backspace));
+    }
+    chat.send("/model mock-pro");
+    chat.until(
+        [&chat]() {
+            return has(chat.frame(), "switched to mock-pro -- mock's roster, on backend 'local'");
+        },
+        "the switch");
+    CHECK(has(chat.frame(), "local (mock-pro)"));  // the header
+    chat.send("hello");
+    chat.until([&chat]() { return has(chat.frame(), "ran on mock-pro"); }, "the answer");
+    chat.finish();
+    CHECK(chat.failure.empty());
+    CHECK(slurp(chat.home.config_path()) == before);
+    const std::vector<apogee::logger::Session> saved = apogee::logger::list_sessions();
+    REQUIRE(saved.size() == 1);
+    CHECK(saved.front().model == "mock-pro");
 }
 
 TEST_CASE("a session grant writes nothing and dies with the session", "[cli][tui][session]") {

@@ -708,7 +708,8 @@ TEST_CASE("execute's /help, golden", "[execute][completer]") {
     CHECK(c::chat_help_lines(0, c::SessionMode::Execute) ==
           std::vector<std::string>{
               "  /help                     List these commands",
-              "  /model [backend]          Show the backend answering, or switch to another",
+              "  /model [backend|model]    Show the backend answering, or switch: a backend, a "
+              "roster model, or backend:model",
               "  /models                   List the configured backends",
               "  /suite [name]             Show the suite and what its members hold, or switch "
               "to another (then --force, --warm)",

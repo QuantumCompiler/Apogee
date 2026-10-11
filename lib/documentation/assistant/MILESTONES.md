@@ -6388,12 +6388,91 @@ Three of four families walked the attached tree through the scoped tools, and **
 
 - [x] **`CatalogListing`** (`contracts/provider.h`): the vendor's live catalogue as a capability interface, discovered by the Harness (`catalog_for`/`can_list_catalog`, the `can_embed` idiom -- the one cast stays in the Harness). Implemented by the three API providers over their own models endpoints, each through the injected HTTP client: Anthropic paged by `has_more`/`after_id`, Google by `nextPageToken` with the `models/` prefix stripped, OpenAI one page -- ids **verbatim**, no model id anywhere in source, a malformed response a `ProviderError`, never a partial roster. A broken paging contract ends the list, never loops.
 - [x] **The roster cache** (`backends/model_roster.h/.cpp`, `cache/model-rosters.json` via `harness::roster_cache_path()`): the provider cache's disposable idiom verbatim -- schema 1, absent/truncated/corrupt/other-schema read as empty, atomic writes, a failed write costing the record and said -- keyed by backend *type*, because the catalogue is the vendor's. Fetched **on the user's word only**: after `providers scan --register` registers (the missing types), and on `--refresh` (all types), each fetch one narrated line, a failure keeping the cached roster with its date. A plain scan, a listing, a completion: zero network, by construction.
-- [x] **Surfaced everywhere a model name is wanted**: `models list` folds each configured vendor's roster behind one dim line (`anthropic's roster: N models (fetched <date>) -- --all lists them`), `--all` showing every id as a dim `(anthropic roster)` row (M4's folding mechanics); `models info <roster id>` answers whose roster holds it; `-m`/`/model` tab-complete the roster ids beside the backend keys (the cache, never a fetch).
+- [x] **Surfaced everywhere a model name is wanted**: `models list` folds each configured vendor's roster behind one dim line (`anthropic's roster: N models (fetched <date>) -- --all lists them`), `--all` showing every id as a dim `(anthropic roster)` row (M4's folding mechanics); `models info <roster id>` answers whose roster holds it; `-m` tab-completes the roster ids beside the backend keys (the cache, never a fetch) -- `/model`'s in-session completion, claimed here at the time, arrived only with item 33.
 - [x] **A bare roster model runs** (`operations/backend_names`' `resolve_roster_model`, called by `complete` and the session core before the Harness is built): a name that is neither a backend key nor an entry's `model:` with exactly **one** configured owner pins that entry's model **in memory for the run** -- the config file never changes, the pin said on stderr (`model 'claude-opus-5-5' -- anthropic's roster, on backend 'claude'`); two owners refuse naming both; zero falls to the existing refusal. The mode named as skipped per the parity ADR: `serve`'s per-request override is a wire-shape change deserving its own item.
 - [x] **The layering test earned its keep**: `operations` reading the roster cache was an undeclared module edge, refused by `harness.layering` and then declared in `cmake/modules.cmake` (`operations` -> `backends`, the lawful direction). The map stays the one truth.
 - [x] **Tests**: the three vendors' wire fixtures (paging followed, GET with each entry's own auth, ids verbatim, the malformed-shape refusal), the cache's disposability table, the resolution table (sole owner / unconfigured type owns nothing / two owners named / unknown empty), and the scan/list/info/completion surfaces. Full suite: 3,005 ctest cases, 100% passed.
 
 Trade-off, recorded: the roster lives in cache, not the config -- one provider entry, every model addressable; `config add-backend --model <id>` still pins one as its own entry when a user wants a name for it.
+
+### 2026-10-10 — `roster-model-switching` (backlog item 33): `/model` takes what `-m` takes
+
+**Why.** With one Anthropic entry registered and its roster fetched, a conversation could not move onto another of the vendor's models once it had started. `-m claude-opus-5-5` ran a roster model at launch, but `/model` took backend keys only, and the full-screen shell has no launch flag at all, so from the TUI only the entry's own model could be reached. The user asked how to register every Anthropic model as its own backend. Offered that or switching in session, they chose switching: M13's one-entry design kept, the config untouched. M13's own spec had promised that `/model` accepts and completes roster models; the session's completer never offered them.
+
+- [x] **One reading of a model name** (`operations/backend_names`' `resolve_session_model`): a key or an entry's `model:` first, then a roster model with exactly one configured owner, two owners refused in one set of words, nothing for an unknown name. Launch `-m`, `/model` and `complete -m` all call it, so they can't disagree. M13's two copies of the launch logic (the session core's and `complete`'s) are gone into it. It reads the config as the file has it, so a pin is never mistaken for its entry's own model.
+- [x] **The pin is the Harness's view, never the file** (`Harness::pin_model`, beside 27d's `set_active_suite`): one entry runs a roster model in the Harness's config, and `""` restores exactly the model it replaced. The caller rebuilds the entry through `rebuild_providers`, the path a suite switch already takes. The launch pin moved here too: the session's own config view no longer changes.
+- [x] **`/model` switches onto it, and back** (`chat_session`'s `move_pin`): one pin at a time, only on the conversation's backend. Leaving it, by `/model` anywhere else (the entry's bare key included) or by a `/suite` that moves the conversation, restores the entry and rebuilds it. A rebuild that fails puts every pin back and says why, and the conversation stays where it was. Attachments settle before a rebuild, as `/suite` settles them. The switch is said as the launch pin is (`switched to claude-sonnet-5-5 -- anthropic's roster, on backend 'claude'`), and `/model`, the banner and the TUI header read `claude (claude-sonnet-5-5)` while it holds. `/models` marks the pinned entry and folds each configured roster to one line. As a side effect, `/model Claude` now lands on the file's spelling, so `/models` stars it.
+- [x] **Saved with the chat** (`Session::model`, written only when set): launch `-m` and `/model` record the pin. A resume pins it again when the chat lands back on its backend, said on stderr as `-m` says it, so a chat reopened from the TUI's picker never quietly answers from a different model. `-m` on a resume replaces it, and an older binary ignores the field and resumes on the entry's own model.
+- [x] **Completed where it is typed** (`ArgumentValues::Models`): `/model ` offers the backends, then every configured type's cached roster ids, described `<type>'s roster`, read from the cache and never fetched. That covers the REPL and the TUI's input alike, one completer. `/rerank` keeps the backends alone.
+- [x] **Parity, named** ([ADR 0002](../adrs/cli/mode-parity.md)): the REPL and the shell share `run_session`, so they are one change. Machine mode has no `/model` (a `/`-line other than `/play` is a prompt there); its `-m` already resolved, and the resume re-pin reaches it through the same core. `serve`'s per-request roster override stays skipped, M13's consumed decision, and machine mode's `result.model` still names the backend key (a recorded default).
+- [x] **The mock says what it runs**: `{{model}}` expands to the model the provider was built to run, so a script proves which model a pin put it on.
+- [x] **Tests**:
+  - the resolution table: a key in any case, an entry's own model, a key that is also a roster id, a sole owner, two owners, unknown and empty;
+  - the Harness pin rebuilt, routed, replaced and restored;
+  - the record's round trip;
+  - the completer's rows, the sources reading only configured types, and a cold cache;
+  - `apogee chat` in process on mocks that answer with their model: a switch and back, a leave that restores, a resume that pins again, `-m` saved, both refusals, a `/suite` that restores, the config byte-identical throughout;
+  - the TUI session view: the roster offered in its input, the switch, the header following, and the chat saved with its pin.
+
+  Chat's and execute's surface goldens changed in one row, `/model [backend|model]`.
+
+**Verified on the real binary**, in a scratch `APOGEE_HOME` holding a mock entry and a hand-written roster cache:
+- a piped chat ran on the entry's own model, switched with `/model mock-pro`, answered from it, and `/models` folded the roster;
+- `chat -c` pinned it again with the launch's line and answered from it;
+- `complete -m mock-mini` ran on its owner;
+- `__complete chat -m mock-` offered both ids.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,085 of 3,085, the pdftotext case skipped as before. `clang-format` is clean on every file this item touched. The violations `make format-check` still reports are all in M13's files, which this item doesn't touch. `make lint` was not run.
+
+Trade-off, recorded: helper roles that resolve to the pinned entry run the pinned model while it holds, the same as M13's launch pin did for a whole run. A roster model for one role alone is still `config add-backend --model <id>`'s job.
+
+### 2026-10-10 — `backend-model-pins` (backlog item 34): `/model <backend>:<model>`
+
+**Why.** Item 33 shipped, and the user's next run of it failed: "it isn't working." Reproduced in a scratch home:
+- The user's cloud backends are the vendor CLIs (Claude Code, Codex, Gemini), and no API key resolves for any provider.
+- Registration adds the three CLIs and fetches no roster for them, since M13 left CLIs out for having no models endpoint, so a roster id had nothing to resolve against.
+
+The CLIs were asked directly. Claude Code's `--model` takes an alias (`fable`, `opus`, `sonnet`) or a full name, and it lists nothing. Codex prints its own catalog (`codex debug models`). Gemini takes `-m` and lists nothing. Each backend already handed an entry's `model:` to its CLI as `--model`.
+
+- [x] **`<backend>:<model>`**, the third rung of `resolve_session_model`. It splits at the first colon whose left side is a configured key, so `ollama:gemma4:31b:cloud` keeps its model's own colons, and a key holding a colon still works.
+  - The model is the user's words, handed to the vendor verbatim. Nothing is hardwired, and a bad name is the vendor's to refuse, said as any turn's error is.
+  - It sits after the first two rungs, so an entry's own colon-holding model (`llama3:8b`) and a roster id holding a colon (`kimi-k3:cloud`) mean what they meant.
+  - Launch `-m`, `/model`, `complete -m` and the resume all reach it through the one function. The pin is item 33's: the Harness's view, one per conversation, saved with the chat, the config byte-identical.
+- [x] **Only where a name picks the model**: `names_its_model(type)`, beside `is_vendor_cli` in `contracts/config`, an exhaustive switch.
+  - An entry that runs the weights at its `model_path` (llamacpp, mlx) is refused, naming why.
+  - `<backend>:` alone, or `<backend>:<its own model>`, is the entry itself.
+- [x] **Said as what it is**: `switched to opus -- on backend 'claude'`. Launch and resume say `model 'opus' -- on backend 'claude'`, and the resume reads the saved pin back through the one resolution, so a roster pin is still said as the roster's.
+- [x] **Codex's catalog as its roster**: `CodexCliProvider` is a `CatalogListing`, so M13's `fetch_rosters` picks it up with no change.
+  - `codex debug models` runs over the provider's own spawner, with stdin closed, the stderr tail kept and a 30-second bound.
+  - Each entry the CLI lists becomes its slug, verbatim, and the ones its own `visibility` hides are left out.
+  - Any other shape is refused, naming the backend, rather than read in part. It is a debug subcommand, a recorded risk, and the cached roster stands when it fails.
+  - `cli.no_provider_probes` now bans `list_catalog` and `catalog_for` from every hot path, so a turn can never start the run. M13's spec had asked for that guard, and it was never written.
+- [x] **Completion past the colon**: `/model codex:` (REPL and TUI, one completer) and `-m codex:` (`__complete`) offer that entry's cached roster as `codex:<id>`, only once the colon is typed. An entry with no roster offers nothing after its colon. The bash stub already kept `:` inside a word.
+- [x] **Tests**:
+  - the type fact;
+  - the rung's table (CLI, API, Gemini, case, colon-holding models and keys, the entry's own model, a file-run refusal, an unknown key);
+  - Codex's catalog over a fake child (argv, the visibility rule, seven malformed documents, a failed run, a hang cut off and terminated), with the fake spawner gaining an exit status and a hang;
+  - the Harness finding the capability;
+  - the completer and the protocol after a colon;
+  - a chat on mocks pinning `other:custom-x`, the refusal, a resume and a launch `-m`.
+
+  Chat's and execute's surface goldens changed in `/model`'s description.
+
+**Verified on the user's own three CLIs**, in a scratch `APOGEE_HOME`:
+- `providers scan --register` registered `claude`, `codex` and `gemini` and fetched Codex's catalog: 8 listed models, 2 hidden ones left out.
+- A piped chat switched to `claude:opus`, Codex's `gpt-5.5` (bare, from its roster), `gemini:gemini-2.5-pro`, and back to `claude`, each said, with `/models` folding the roster.
+- `__complete chat -m codex:gpt` offered the three `codex:gpt-*` ids.
+- One real turn, `complete -m claude:sonnet`, answered `OK`. A pass-through wrapper recorded `--model sonnet` in Claude Code's argv.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,095 of 3,095, the pdftotext case skipped as before. `clang-format` is clean on every file this item touched, and `make lint` was not run.
+
+**Fixed alongside (2026-10-10): the suite's own home.** Building this item showed that completion and listing tests read the developer's real roster cache: they called the completer or `build_model_rows` without a home of their own. Codex's catalog now fills that cache for anyone with the CLI, so the suite's results would have depended on the machine it ran on.
+- Found by running the unit suite twice, under an empty `APOGEE_HOME` and under one whose roster cache lists a decoy model for every backend type. Five cases changed outcome only with the decoys: two in `models_test`, three in `lifecycle_test`.
+- Fixed structurally rather than case by case: `tests/support/hermetic_home.cpp`, a Catch2 listener beside `hermetic_stdin.cpp`, gives the whole run an empty `APOGEE_HOME` of its own. A test's own guard still wins for its scope, and the root-resolution tests already unset the variable explicitly.
+- Rerun with the decoy cache in the environment, all five pass and nothing else changes. The only failures left are the mlx-driver tests colliding when run in parallel, which pass serially.
+- The full suite through `cicd.sh --test` (llama.cpp on) passes 3,095 of 3,095 with the hook, the pdftotext case skipped as before.
+
+Trade-off, recorded: Claude Code and Gemini still complete nothing after their colon. Neither prints its models, and an alias table in source would be the hardwiring M13 refused. The name is the user's to type, and the vendor's to accept or refuse.
 
 ## Milestone AG — System insight
 

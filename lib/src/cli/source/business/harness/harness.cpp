@@ -293,6 +293,26 @@ void Harness::set_active_suite(std::string suite) {
     }
 }
 
+bool Harness::pin_model(std::string_view name, std::string model) {
+    const auto entry = config_.backends.find(name);
+    if (entry == config_.backends.end()) {
+        return false;
+    }
+    const auto saved = unpinned_.find(entry->first);
+    if (model.empty()) {
+        if (saved != unpinned_.end()) {
+            entry->second.model = saved->second;
+            unpinned_.erase(saved);
+        }
+        return true;
+    }
+    if (saved == unpinned_.end()) {
+        unpinned_.emplace(entry->first, entry->second.model);
+    }
+    entry->second.model = std::move(model);
+    return true;
+}
+
 void Harness::observe_turns(TurnObserver observer) {
     turn_observer_ = std::move(observer);
 }
