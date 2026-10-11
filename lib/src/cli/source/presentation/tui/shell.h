@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 
+#include "tui/runner_view.h"
 #include "tui/theme.h"
 #include "tui/view.h"
 
@@ -87,6 +88,10 @@ public:
 
     /// The bottom bar: `bar`'s body drawn in place of the key hints.
     void set_bottom_bar(View bar);
+
+    /// The exec line (37h): `:` on a view not taking typing opens it scoped
+    /// to the view's group, `!` unscoped; it takes the keys while open.
+    void set_exec_line(ExecLineOptions options);
 
     /// One line on the notice row, replacing the last -- what the process
     /// said on stderr while the shell held the screen. The shell's thread

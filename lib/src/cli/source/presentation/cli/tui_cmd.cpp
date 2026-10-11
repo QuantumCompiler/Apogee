@@ -2,6 +2,7 @@
 
 #include <CLI/CLI.hpp>
 
+#include <array>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -15,6 +16,7 @@
 #include "cli/tui_agents.h"
 #include "cli/tui_doctor.h"
 #include "cli/tui_knowledge.h"
+#include "cli/tui_runner.h"
 #include "cli/tui_session.h"
 #include "cli/tui_symphonies.h"
 #include "cli/tui_task.h"
@@ -89,47 +91,59 @@ namespace {
                 }
                 return handed.said;
             }};
+    // Each view with the command group its exec line is scoped to (37h).
+    const auto add = [&shell](tui::View view, std::string group) {
+        view.set_group(std::move(group));
+        return shell.add(std::move(view));
+    };
     const std::vector<std::unique_ptr<tui::ListView>> workbench =
         make_workbench(pump, theme, context, hooks);
-    for (const std::unique_ptr<tui::ListView>& view : workbench) {
-        (void)shell.add(view->view());
+    for (std::size_t i = 0; i < workbench.size(); ++i) {
+        // Models, Chats, Suites, Config -- the suites are the config's.
+        static constexpr std::array<const char*, 4> kGroups{"models", "chats", "config", "config"};
+        (void)add(workbench.at(i)->view(), i < kGroups.size() ? kGroups.at(i) : "");
     }
     // The symphonies beside them (37d), played through the session.
     tui::ListView symphonies{pump, theme, symphonies_view_options(context, hooks)};
-    (void)shell.add(symphonies.view());
+    (void)add(symphonies.view(), "symphonies");
     // The tasks (37e): a run's narration through the progress seam, which
     // stops a run still going before the shell's own end.
     const auto task_run = std::make_shared<tui::Progress>(pump);
     tui::ListView tasks{pump, theme, task_view_options(context, task_run, machine_budget)};
-    (void)shell.add(tasks.view());
+    (void)add(tasks.view(), "task");
     // Training (37f): each run the command itself, a child of this binary,
     // narrated through the seam.
     const std::filesystem::path self = platform::executable_path();
     const auto training_run = std::make_shared<tui::Progress>(pump);
     tui::ListView train{pump, theme, train_view_options(context, training_run, self)};
-    (void)shell.add(train.view());
+    (void)add(train.view(), "train");
     const auto datasets_run = std::make_shared<tui::Progress>(pump);
     tui::ListView datasets{pump, theme, datasets_view_options(context, datasets_run, self)};
-    (void)shell.add(datasets.view());
+    (void)add(datasets.view(), "datasets");
     // The tooling (37g): agents, MCP servers, and the keys as metadata only.
     tui::ListView agents{pump, theme, agents_view_options(context, self)};
-    (void)shell.add(agents.view());
+    (void)add(agents.view(), "agents");
     tui::ListView mcp_servers{pump, theme, mcp_view_options(context, self)};
-    (void)shell.add(mcp_servers.view());
+    (void)add(mcp_servers.view(), "mcp");
     tui::ListView auth{pump, theme, auth_view_options(context)};
-    (void)shell.add(auth.view());
+    (void)add(auth.view(), "auth");
     // The doctor beside it (37b): the report, the providers, the machine.
     const std::vector<std::unique_ptr<tui::ListView>> doctor =
         make_doctor_views(pump, theme, context);
-    for (const std::unique_ptr<tui::ListView>& view : doctor) {
-        (void)shell.add(view->view());
+    for (std::size_t i = 0; i < doctor.size(); ++i) {
+        static constexpr std::array<const char*, 3> kGroups{"check", "providers", "system"};
+        (void)add(doctor.at(i)->view(), i < kGroups.size() ? kGroups.at(i) : "");
     }
     // The knowledge beside them (37c): records, collections, graphs.
     const std::vector<std::unique_ptr<tui::ListView>> knowledge =
         make_knowledge_views(pump, theme, context);
-    for (const std::unique_ptr<tui::ListView>& view : knowledge) {
-        (void)shell.add(view->view());
+    for (std::size_t i = 0; i < knowledge.size(); ++i) {
+        static constexpr std::array<const char*, 3> kGroups{"knowledge", "embed", "graph"};
+        (void)add(knowledge.at(i)->view(), i < kGroups.size() ? kGroups.at(i) : "");
     }
+    // The command runner (37h): every verb and flag, a child of this binary.
+    const auto command_run = std::make_shared<tui::Progress>(pump);
+    shell.set_exec_line(exec_line_options(context, command_run, self));
     add_shell_views(shell, context);
     driver.start();
     monitor.start();

@@ -6902,3 +6902,34 @@ Decisions taken while building, for veto:
 - **Agents, MCP and Auth sit after Datasets.**
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,144 of 3,144, the pdftotext case skipped as before, the child-process cases run against the built binary. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+### 2026-10-10 — `tui-command-runner` (backlog item 37h): the command runner
+
+**Why.** Track 37's views give the shell curated surfaces; this gives it the whole command language. The second parity spike counted 119 leaf command surfaces carrying 434 flags, which rules out a form per verb. One exec line that speaks the CLI's own grammar, and runs each typed command as a captured child of the shell's own binary, makes every verb and flag work in the shell by construction.
+
+- [x] **The exec line** (`tui/runner_view`): `:` on any view that is not taking typing opens it scoped to the view's group (`View::group`; `:pull …` in Models runs `models pull …`), and `!` opens it unscoped. What is typed is the command minus the leading `apogee`.
+  - Tab offers the completion core's candidates for the word under the cursor. One is taken whole and ends the word; several are extended to what they share and listed.
+  - Enter runs the line, or says why the shell refuses it. ↑ and ↓ recall earlier lines.
+  - The output streams through the progress seam above the line, its exit line last.
+  - Esc closes the line with a run going on behind it, and `:` shows it again.
+  - Ctrl-C stops the running command and nothing else; with nothing running it closes the line, and it never quits the shell.
+
+  The shell holds the line (`Shell::set_exec_line`) and gives it keys before the view, and its hints and Keys view name it.
+- [x] **The runner** (`cli/tui_runner`):
+  - `exec_words` splits a line once with `cli/line_tokens` (shipped with 37f as this item's splitter), prefixes the scope, and refuses a line that cannot be split, is empty, or names a refusal of the law's table. `exec_refusal` reads `shell_refusals()` after any root flag: one source, each refusal naming its recorded reason.
+  - `exec_candidates` is Tab's answer: the completion core's for those words over the live command tree, the config and the data directory, as `__complete` gives them.
+  - `exec_line_options` runs a line as the shell's child (`start_child_run`): the shell's root carried, stdin closed, stderr and stdout streamed. `cli/tui_cmd` gives every view its group.
+- [x] **The law, live**: ADR 0010 gains a dated note that the exec line reads its refusals from the table, and that the table now holds views, runner-covered rows and carve-outs only.
+- [x] **Tests**:
+  - `tui_runner_test`: the words a line runs, scoped and split; every refused verb refused with its reason, its neighbours running; Tab equal to `__complete` across a verb, a flag and a value; the shell's keys (`:` scoped, `!` unscoped, a `q` and a digit typed, Tab, Enter, ↑, Esc, Ctrl-C closing and never quitting). As children of the built binary (skipped where the build made none): a read's bytes and a mutation's file the command's on a pipe, a refusal running nothing, a slow command's frames never held back, and Ctrl-C stopping it with the shell going on.
+  - The leak test runs `models list`, `config get`, `auth list`, `mcp list`, `check` and `providers` through the exec line in the world with the key in every rung, and finds it in no output.
+  - `cli.tui_shell` gains a case on a real terminal: `!version` typed on the Models view, its exit line on the stage, Esc, `q`, the terminal's modes restored.
+
+Decisions taken while building, for veto:
+- **`:` and `!` open the line only on a view that is not taking typing.** In the Session view they are characters of the conversation; Tab to another view first.
+- **Completion answers from the shell's own root.** A typed root flag (`--dev`) does not re-root the completion as `__complete` does, because the process is shared with a conversation and a run that read their root as they go. The child is given the shell's root, and a typed root flag that disagrees with it is the child's to refuse.
+- **Ctrl-C interrupts the child** (SIGINT), as Ctrl-C at a terminal would, rather than killing it, so a command that handles it records its own cancellation; the exit line says how it ended (`exit 130`, or `stopped by a signal`).
+- **The output is the plain pipe rendering, stderr waited on before stdout** (the 37f reader), so the line shows what a script sees: a command's narration, then its outcome, then `exit N`. The exit line is drawn as the output's last line, not dimmed.
+- **The output shows while the line is open**, its newest twelve lines; history lives for the shell's run, not across runs.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,150 of 3,150, the pdftotext case skipped as before, the child-process and PTY cases run against the built binary. `clang-format` is clean on every touched file, and `make lint` was not run.

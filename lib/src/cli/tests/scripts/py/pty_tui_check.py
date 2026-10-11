@@ -192,6 +192,22 @@ def main():
 
         screen_case(binary, env, "views", switch_views, 0)
 
+        def exec_line(session):
+            # The command runner (37h): a command typed on a view that is not
+            # typing, run as the shell's own child, its output and exit line
+            # on the stage -- then the line closed and the shell quit as ever.
+            session.send(b"\t")
+            session.wait_for(b"[2 Models]", 5, "exec-line")
+            session.send(b"!")
+            session.wait_for(b" :", 5, "exec-line")
+            session.send(b"version\r")
+            session.wait_for(b"exit 0", 15, "exec-line")
+            session.send(b"\x1b")  # Esc closes the line
+            session.read_for(0.5)
+            session.send(b"q")
+
+        screen_case(binary, env, "exec-line", exec_line, 0)
+
     with tempfile.TemporaryDirectory(prefix="apogee-tui-session-") as home:
         work = os.path.join(home, "work")
         os.makedirs(os.path.join(home, "config"))

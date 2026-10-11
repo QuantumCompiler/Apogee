@@ -72,7 +72,7 @@ TEST_CASE("focus moves through the views with Tab and back with Shift+Tab, wrapp
     add_views(shell);
     CHECK(shell.press(Key::named(Key::Name::Tab)));
     CHECK(shell.active() == 1);
-    CHECK(shell.render_text(72, 12) ==
+    CHECK(shell.render_text(72, 14) ==
           " apogee test                                            1 Home [2 Keys]\n"
           "────────────────────────────────────────────────────────────────────────\n"
           " F1–F9, Alt+1–9     show a view by its number\n"
@@ -82,6 +82,8 @@ TEST_CASE("focus moves through the views with Tab and back with Shift+Tab, wrapp
           " q                  quit, while the view is not taking typing\n"
           " Ctrl-D             quit\n"
           " Ctrl-C             quit, once the view has nothing running to stop\n"
+          " :                  a command, scoped to the view (:pull in Models)\n"
+          " !                  a command, unscoped; Tab completes, Esc closes\n"
           "\n"
           "────────────────────────────────────────────────────────────────────────\n"
           " q quit · Tab next view · 1–9 a view\n");

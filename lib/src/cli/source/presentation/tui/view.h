@@ -49,11 +49,23 @@ public:
         }
     }
 
+    /// The command group the exec line is scoped to on this view (37h):
+    /// `models` on Models, so `:pull …` there runs `models pull …`. Empty
+    /// for a view that is no command's (Home, Keys).
+    [[nodiscard]] const std::string& group() const noexcept {
+        return group_;
+    }
+
+    void set_group(std::string group) {
+        group_ = std::move(group);
+    }
+
 private:
     std::string title_;
     std::shared_ptr<Body> body_;
     std::function<bool()> takes_text_;
     std::function<void()> shown_;
+    std::string group_;
 };
 
 /// A page of text: the lines it is given, top to bottom, scrolled with the

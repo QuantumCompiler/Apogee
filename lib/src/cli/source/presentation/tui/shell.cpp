@@ -92,6 +92,9 @@ constexpr std::size_t kNumberedViews = 9;
                         state.views.at(static_cast<std::size_t>(state.selected)).takes_text();
     std::string text = typing ? " Ctrl-D quit · Tab next view · F1–F9 a view"
                               : " q quit · Tab next view · 1–9 a view";
+    if (!typing && state.exec_line.has_value()) {
+        text += " · : a command";
+    }
     return ftxui::text(std::move(text)) | ftxui::dim;
 }
 
@@ -199,6 +202,9 @@ constexpr std::size_t kNumberedViews = 9;
     rows.push_back(separator());
     rows.push_back(state.views.empty() ? text(" nothing to show yet") | dim | flex
                                        : clip(state.stage->Render()));
+    if (state.exec_line.has_value() && state.exec_line->open) {
+        rows.push_back(draw_exec_line(*state.exec_line, state.options.theme));
+    }
     if (!state.notice.empty()) {
         rows.push_back(text(" " + state.notice) | dim);
     }
@@ -217,8 +223,23 @@ constexpr std::size_t kNumberedViews = 9;
 
 /// The shell's keys, before or after the active view's as each needs.
 [[nodiscard]] bool handle(Shell& shell, Shell::State& state, const ftxui::Event& event) {
+    // The exec line, while it is open, takes the keys it uses (37h).
+    if (state.exec_line.has_value() && state.exec_line->open &&
+        exec_line_key(*state.exec_line, event)) {
+        return true;
+    }
     const bool typing = !state.views.empty() &&
                         state.views.at(static_cast<std::size_t>(state.selected)).takes_text();
+    // `:` opens it scoped to the view's group, `!` unscoped -- on a view that
+    // is not taking typing, where neither key is a character of anything.
+    if (!typing && state.exec_line.has_value() && !state.exec_line->open &&
+        (event == ftxui::Event::Character(':') || event == ftxui::Event::Character('!'))) {
+        open_exec_line(*state.exec_line,
+                       event == ftxui::Event::Character(':') && !state.views.empty()
+                           ? state.views.at(static_cast<std::size_t>(state.selected)).group()
+                           : std::string{});
+        return true;
+    }
     // A view by its number comes first: F-keys and Alt never type.
     if (const std::optional<std::size_t> index = numbered_view(event, !typing); index.has_value()) {
         if (*index < state.views.size()) {
@@ -300,6 +321,10 @@ std::size_t Shell::size() const noexcept {
     return state_->views.size();
 }
 
+void Shell::set_exec_line(ExecLineOptions options) {
+    state_->exec_line = ExecLineState{.options = std::move(options)};
+}
+
 void Shell::set_bottom_bar(View bar) {
     state_->bottom = std::move(bar);
 }
@@ -361,6 +386,8 @@ std::vector<std::string> Shell::key_lines() {
         "q                  quit, while the view is not taking typing",
         "Ctrl-D             quit",
         "Ctrl-C             quit, once the view has nothing running to stop",
+        ":                  a command, scoped to the view (:pull in Models)",
+        "!                  a command, unscoped; Tab completes, Esc closes",
     };
 }
 

@@ -9,6 +9,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 
 #include "backends/factory.h"
 #include "cli/auth_cmd.h"
@@ -17,6 +18,7 @@
 #include "cli/tui_agents.h"
 #include "cli/tui_doctor.h"
 #include "cli/tui_knowledge.h"
+#include "cli/tui_runner.h"
 #include "cli/tui_symphonies.h"
 #include "cli/tui_task.h"
 #include "cli/tui_training.h"
@@ -35,6 +37,9 @@
 #include "support/cli_home.h"
 #include "support/env_guard.h"
 #include "tasks/ledger.h"
+#include "tui/progress.h"
+#include "tui/pump.h"
+#include "tui/runner_view.h"
 
 /// The leak test: one distinctive key, stored every way a key can be stored,
 /// then every surface that reports on keys is rendered and searched for it.
@@ -278,6 +283,40 @@ TEST_CASE("the shell's workbench views draw no key, wherever it was stored",
             }
         }
         expect_clean("the shell's " + options.title + " view", drawn);
+    }
+}
+
+TEST_CASE("the exec line's output region draws no key, wherever it was stored",
+          "[secrets][leak][tui][child]") {
+    // The runner (37h) shows a command's own output: the reads that report on
+    // backends and servers, run as the shell's child in the world with the
+    // key in every rung, searched whole.
+    const std::filesystem::path binary{APOGEE_EXECUTABLE};
+    std::error_code missing;
+    if (!std::filesystem::is_regular_file(binary, missing)) {
+        SKIP("this build made no apogee binary to run as the shell's child");
+    }
+    const World world;
+    apogee::commands::RootContext context;
+    context.config_path = world.config_path.string();
+    apogee::tui::ManualPump pump;
+    const auto output = std::make_shared<apogee::tui::Progress>(pump);
+    const apogee::tui::ExecLineOptions options =
+        apogee::commands::exec_line_options(context, output, binary);
+    for (const char* line : {"models list", "config get backends.cfg", "auth list", "mcp list",
+                             "check", "providers"}) {
+        REQUIRE(options.run("", line).empty());
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{60};
+        while (output->running()) {
+            REQUIRE(std::chrono::steady_clock::now() < deadline);
+            (void)pump.drain();
+            std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        }
+        std::string drawn = output->heading() + "\n";
+        for (const std::string& said : output->lines()) {
+            drawn += said + "\n";
+        }
+        expect_clean(std::string{"the exec line's output of "} + line, drawn);
     }
 }
 
