@@ -566,6 +566,7 @@ apogee train versions [backend] --output-format json   # byte for byte GET /v1/a
 apogee datasets list --output-format json   # byte for byte GET /v1/admin/datasets
 apogee datasets info <name> --output-format json       # byte for byte GET /v1/admin/datasets/{name}
 apogee datasets kits --output-format json   # byte for byte GET /v1/admin/datasets/kits
+apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: metadata only
 ```
 
 - **`models list`**: one object per row the table shows — `backend`,
@@ -627,6 +628,12 @@ apogee datasets kits --output-format json   # byte for byte GET /v1/admin/datase
   37f): the control plane's bodies -- each dataset's `name`, `path`, `lines`,
   `bytes` and `shape`; each kit's `name`, `path`, `description`,
   `eval_items` and `error` when it cannot be read.
+- **`auth list`** (since 37g): the control plane's body -- each stored slot's
+  `provider` and `stored_at`, which rung answers for each configured backend
+  that takes a key (`backends`: `name`, `type`, `source`, and the `variable`
+  when it is one), and the store's `warning` when it could not be read. A
+  stored credential is metadata by type: there is no field a key could be
+  written to.
 - **`system`** (since 32a): the machine as one reading — `cpu` (`model`,
   `architecture`, the core counts, `load`, `utilization` with its `window_ms`),
   `memory` (`total_bytes`, `used_bytes`, `available_bytes`), `apogee`

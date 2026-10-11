@@ -14,6 +14,7 @@
 #include "cli/auth_cmd.h"
 #include "cli/check.h"
 #include "cli/models.h"
+#include "cli/tui_agents.h"
 #include "cli/tui_doctor.h"
 #include "cli/tui_knowledge.h"
 #include "cli/tui_symphonies.h"
@@ -255,7 +256,10 @@ TEST_CASE("the shell's workbench views draw no key, wherever it was stored",
           apogee::commands::symphonies_view_options(context, {}),
           apogee::commands::task_view_options(context, nullptr),
           apogee::commands::train_view_options(context, nullptr, {}),
-          apogee::commands::datasets_view_options(context, nullptr, {})}) {
+          apogee::commands::datasets_view_options(context, nullptr, {}),
+          apogee::commands::agents_view_options(context, {}),
+          apogee::commands::mcp_view_options(context, {}),
+          apogee::commands::auth_view_options(context)}) {
         const auto [heading, rows] = options.load();
         std::string drawn;
         for (const std::string& line : heading) {

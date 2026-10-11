@@ -7,6 +7,7 @@
 #include <string>
 
 #include "contracts/config.h"
+#include "operations/credential_views.h"
 #include "secrets/store.h"
 
 namespace apogee::httpserver {
@@ -56,39 +57,11 @@ nlohmann::json metadata_json(const secrets::CredentialMetadata& entry) {
 }  // namespace
 
 HttpResponse admin_list_credentials(const AdminAuthContext& context) {
-    const secrets::CredentialStore store{secrets::credentials_path(context.config_path)};
-    nlohmann::json data = nlohmann::json::array();
-    for (const secrets::CredentialMetadata& entry : store.list()) {
-        data.push_back(metadata_json(entry));
-    }
-    nlohmann::json backends = nlohmann::json::array();
-    try {
-        const harness::Config config = harness::load_config(context.config_path);
-        const secrets::EnvSnapshot& env =
-            context.env != nullptr ? *context.env : secrets::EnvSnapshot::process();
-        for (const auto& [name, entry] : config.backends) {
-            if (!secrets::takes_api_key(entry.type)) {
-                continue;
-            }
-            const secrets::KeyResolution resolution = secrets::resolve_api_key(entry, &store, env);
-            nlohmann::json row{{"name", name},
-                               {"type", std::string{harness::to_string(entry.type)}},
-                               {"source", std::string{secrets::to_string(resolution.source)}}};
-            if (!resolution.variable.empty()) {
-                row["variable"] = resolution.variable;
-            }
-            backends.push_back(std::move(row));
-        }
-    } catch (const harness::ConfigError&) {
-        // The store is still listable without a config; the backends column
-        // simply has nothing to say.
-    }
-    nlohmann::json out{
-        {"object", "list"}, {"data", std::move(data)}, {"backends", std::move(backends)}};
-    if (!store.warning().empty()) {
-        out["warning"] = store.warning();
-    }
-    return json_response(200, out);
+    // The CLI's `auth list --output-format json`, byte for byte (37g).
+    return json_response(
+        200, operations::credentials_document(
+                 context.config_path,
+                 context.env != nullptr ? *context.env : secrets::EnvSnapshot::process()));
 }
 
 HttpResponse admin_put_credential(const AdminAuthContext& context, std::string_view provider,

@@ -5,6 +5,7 @@
 #include <optional>
 #include <utility>
 
+#include "cli/line_tokens.h"
 #include "contracts/paths.h"
 
 namespace apogee::commands {
@@ -137,6 +138,45 @@ ChildOutput run_child_text(const platform::ChildCommand& command) {
     output.code =
         run_child_lines(command, [&output](std::string line) { output.text += line + "\n"; });
     return output;
+}
+
+std::string child_answer(const RootContext& context, const std::filesystem::path& binary,
+                         const std::vector<std::string>& words) {
+    const ChildOutput output = run_child_text(self_command(context, binary, words));
+    return output.code == 0 ? output.text : output.text + exit_line(output.code) + "\n";
+}
+
+bool start_child_run(tui::Progress& progress, const RootContext& context,
+                     const std::filesystem::path& binary, std::vector<std::string> words,
+                     std::string heading) {
+    const auto stop = std::make_shared<ChildStop>();
+    return progress.start(
+        std::move(heading),
+        [&context, binary, words = std::move(words), stop](const tui::Progress::Say& say) {
+            const int code = run_child_lines(
+                self_command(context, binary, words),
+                [&say](std::string line) { say(std::move(line)); }, stop.get());
+            say(exit_line(code));
+        },
+        [stop]() { stop->stop(); });
+}
+
+std::string run_typed(tui::Progress& progress, const RootContext& context,
+                      const std::filesystem::path& binary, const std::string& group,
+                      const std::string& line) {
+    const LineTokens split = line_tokens(line);
+    if (!split.error.empty()) {
+        return "not run: " + split.error;
+    }
+    if (split.words.empty()) {
+        return "not run: nothing was typed";
+    }
+    std::vector<std::string> words{group};
+    words.insert(words.end(), split.words.begin(), split.words.end());
+    if (!start_child_run(progress, context, binary, std::move(words), group + " " + line)) {
+        return "not now: a run is going -- Ctrl-C stops it";
+    }
+    return "running 'apogee " + group + " " + line + "' -- its narration is below";
 }
 
 std::string exit_line(int code) {

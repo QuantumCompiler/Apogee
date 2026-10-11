@@ -1,5 +1,7 @@
 #pragma once
 
+#include <nlohmann/json_fwd.hpp>
+
 #include <string_view>
 
 #include "cli/command.h"
@@ -18,6 +20,12 @@
 /// MCP client -- or Apogee's own test fleet -- can use them with nothing to
 /// install.
 namespace apogee::commands {
+
+/// `mcp list --output-format json` (28h): every configured server connected
+/// to -- each bounded, its stderr kept off the terminal -- as the control
+/// plane serves its entry, with what connecting found; the MCP view's rows
+/// (37g). Throws `harness::ConfigError` for a config that will not load.
+[[nodiscard]] nlohmann::json mcp_list_document(const RootContext& context);
 
 class McpCommand final : public Command {
 public:

@@ -1299,7 +1299,9 @@ The stored provider credentials as **metadata** — `{"object":"list","data":[{p
 and which `source` currently answers for it (`config`, `store`, `env` with the
 `variable`, or `none`). No key is ever in this response; the type it serializes
 has no field for one. A store file that cannot be read is reported as an empty
-list with a `warning`, never an error.
+list with a `warning`, never an error. Since 37g `apogee auth list
+--output-format json` prints this body byte for byte (one builder,
+`operations/credential_views`).
 
 ### `PUT /v1/admin/auth/{id}`
 

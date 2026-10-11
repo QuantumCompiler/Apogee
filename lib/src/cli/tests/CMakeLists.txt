@@ -242,6 +242,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/system_cmd_test.cpp
     presentation/cli/tui_cmd_test.cpp
     presentation/cli/line_tokens_test.cpp
+    presentation/cli/tui_agents_test.cpp
     presentation/cli/tui_doctor_test.cpp
     presentation/cli/tui_knowledge_test.cpp
     presentation/cli/tui_parity_test.cpp

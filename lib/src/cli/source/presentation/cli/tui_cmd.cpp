@@ -12,6 +12,7 @@
 
 #include "cli/helpers.h"
 #include "cli/suite_residency.h"
+#include "cli/tui_agents.h"
 #include "cli/tui_doctor.h"
 #include "cli/tui_knowledge.h"
 #include "cli/tui_session.h"
@@ -110,6 +111,13 @@ namespace {
     const auto datasets_run = std::make_shared<tui::Progress>(pump);
     tui::ListView datasets{pump, theme, datasets_view_options(context, datasets_run, self)};
     (void)shell.add(datasets.view());
+    // The tooling (37g): agents, MCP servers, and the keys as metadata only.
+    tui::ListView agents{pump, theme, agents_view_options(context, self)};
+    (void)shell.add(agents.view());
+    tui::ListView mcp_servers{pump, theme, mcp_view_options(context, self)};
+    (void)shell.add(mcp_servers.view());
+    tui::ListView auth{pump, theme, auth_view_options(context)};
+    (void)shell.add(auth.view());
     // The doctor beside it (37b): the report, the providers, the machine.
     const std::vector<std::unique_ptr<tui::ListView>> doctor =
         make_doctor_views(pump, theme, context);

@@ -56,7 +56,7 @@ TEST_CASE("an unclassified subcommand breaks the law, named; an empty registry n
     CHECK(none.front() == "no subcommands registered -- the law would pass vacuously");
 }
 
-TEST_CASE("the table is today's truth: the views, the backfills, the exec line's refusals",
+TEST_CASE("the table is today's truth: the views, no backfill left, the exec line's refusals",
           "[cli][tui][parity]") {
     const auto kind = [](std::string_view command) {
         const apogee::commands::ShellSurface* surface =
@@ -65,15 +65,16 @@ TEST_CASE("the table is today's truth: the views, the backfills, the exec line's
         return surface->kind;
     };
     for (const char* view :
-         {"chat", "chats", "models", "config", "version", "tui", "system", "check", "providers",
-          "knowledge", "embed", "graph", "execute", "symphonies", "task", "train", "datasets"}) {
+         {"chat",  "chats",     "models",    "config", "version", "tui",     "system",
+          "check", "providers", "knowledge", "embed",  "graph",   "execute", "symphonies",
+          "task",  "train",     "datasets",  "agents", "mcp",     "auth"}) {
         INFO(view);
         CHECK(kind(view) == ShellSurfaceKind::View);
     }
-    for (const char* pending : {"agents", "mcp", "auth"}) {
-        INFO(pending);
-        CHECK(kind(pending) == ShellSurfaceKind::Backfill);
-        CHECK(apogee::commands::find_shell_surface(pending)->detail.starts_with("37"));
+    // Track 37 drew every backfill (37g the last): none is left pending.
+    for (const apogee::commands::ShellSurface& surface : apogee::commands::shell_surfaces()) {
+        INFO(surface.command);
+        CHECK(surface.kind != ShellSurfaceKind::Backfill);
     }
     CHECK(kind("complete") == ShellSurfaceKind::RunnerCovered);
     CHECK(kind("analyze") == ShellSurfaceKind::RunnerCovered);

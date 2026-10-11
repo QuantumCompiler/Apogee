@@ -24,51 +24,6 @@ namespace apogee::commands {
 
 namespace {
 
-/// The command `words` name, run in the widget as a child of the shell's own
-/// binary; its lines as it writes them, then how it ended. False while a run
-/// is going.
-[[nodiscard]] bool start_child_run(tui::Progress& progress, const RootContext& context,
-                                   const std::filesystem::path& binary,
-                                   std::vector<std::string> words, std::string heading) {
-    const auto stop = std::make_shared<ChildStop>();
-    return progress.start(
-        std::move(heading),
-        [&context, binary, words = std::move(words), stop](const tui::Progress::Say& say) {
-            const int code = run_child_lines(
-                self_command(context, binary, words),
-                [&say](std::string line) { say(std::move(line)); }, stop.get());
-            say(exit_line(code));
-        },
-        [stop]() { stop->stop(); });
-}
-
-/// `apogee <group> <line>` from the input row, in the widget.
-[[nodiscard]] std::string run_typed(tui::Progress& progress, const RootContext& context,
-                                    const std::filesystem::path& binary, const std::string& group,
-                                    const std::string& line) {
-    const LineTokens split = line_tokens(line);
-    if (!split.error.empty()) {
-        return "not run: " + split.error;
-    }
-    if (split.words.empty()) {
-        return "not run: nothing was typed";
-    }
-    std::vector<std::string> words{group};
-    words.insert(words.end(), split.words.begin(), split.words.end());
-    if (!start_child_run(progress, context, binary, std::move(words), group + " " + line)) {
-        return "not now: a run is going -- Ctrl-C stops it";
-    }
-    return "running 'apogee " + group + " " + line + "' -- its narration is below";
-}
-
-/// A short act's whole answer, run as the command: its output, and its exit
-/// when it failed.
-[[nodiscard]] std::string run_short(const RootContext& context, const std::filesystem::path& binary,
-                                    const std::vector<std::string>& words) {
-    const ChildOutput output = run_child_text(self_command(context, binary, words));
-    return output.code == 0 ? output.text : output.text + exit_line(output.code) + "\n";
-}
-
 /// A version row: its ledger's facts the keys need.
 struct VersionRow {
     std::string backend;
@@ -215,28 +170,28 @@ tui::ListOptions train_view_options(const RootContext& context,
                     return std::string{"running the cycle -- its narration is below"};
                 },
             .whole_view = true},
-        tui::ListAction{.key = "R",
-                        .label = "rollback",
-                        .applies =
-                            [version_of](const tui::ListRow& row) {
-                                const std::optional<VersionRow> version = version_of(row);
-                                return version.has_value() && version->can_roll_back;
-                            },
-                        .confirm =
-                            [version_of](const tui::ListRow& row) {
-                                const std::string backend =
-                                    version_of(row).value_or(VersionRow{}).backend;
-                                return "Roll " + backend +
-                                       " back to its previous version ('apogee train "
-                                       "rollback " +
-                                       backend + "')?";
-                            },
-                        .run =
-                            [&context, binary, version_of](const tui::ListRow& row) {
-                                return run_short(context, binary,
-                                                 {"train", "rollback",
-                                                  version_of(row).value_or(VersionRow{}).backend});
-                            }}};
+        tui::ListAction{
+            .key = "R",
+            .label = "rollback",
+            .applies =
+                [version_of](const tui::ListRow& row) {
+                    const std::optional<VersionRow> version = version_of(row);
+                    return version.has_value() && version->can_roll_back;
+                },
+            .confirm =
+                [version_of](const tui::ListRow& row) {
+                    const std::string backend = version_of(row).value_or(VersionRow{}).backend;
+                    return "Roll " + backend +
+                           " back to its previous version ('apogee train "
+                           "rollback " +
+                           backend + "')?";
+                },
+            .run =
+                [&context, binary, version_of](const tui::ListRow& row) {
+                    return child_answer(
+                        context, binary,
+                        {"train", "rollback", version_of(row).value_or(VersionRow{}).backend});
+                }}};
     return options;
 }
 
@@ -316,8 +271,8 @@ tui::ListOptions datasets_view_options(const RootContext& context,
                             },
                         .run =
                             [&context, binary](const tui::ListRow& row) {
-                                return run_short(context, binary,
-                                                 {"datasets", "delete", row.key, "--yes"});
+                                return child_answer(context, binary,
+                                                    {"datasets", "delete", row.key, "--yes"});
                             }}};
     return options;
 }

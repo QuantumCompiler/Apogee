@@ -30,10 +30,12 @@ constexpr std::array kSurfaces{
     ShellSurface{"task", View, "Tasks (a run narrated through the progress seam)"},
     ShellSurface{"train", View, "Train (a run narrated through the progress seam)"},
     ShellSurface{"datasets", View, "Datasets"},
-    // --- backfills: track 37 draws them ---------------------------------------
-    ShellSurface{"agents", Backfill, "37g"},
-    ShellSurface{"mcp", Backfill, "37g"},
-    ShellSurface{"auth", Backfill, "37g"},
+    ShellSurface{"agents", View, "Agents (edit stays the $EDITOR's, refused below)"},
+    ShellSurface{"mcp", View, "MCP"},
+    ShellSurface{"auth", View,
+                 "Auth, metadata only (a key is stored at a real prompt: add's secret input "
+                 "never enters the shell)"},
+    // --- backfills: track 37 draws them -- none left since 37g -----------------
     // --- runner-covered: one-shot scripting surfaces, the exec line's (37h) ---
     ShellSurface{"complete", RunnerCovered,
                  "a one-shot completion for scripts: the session view is the shell's "

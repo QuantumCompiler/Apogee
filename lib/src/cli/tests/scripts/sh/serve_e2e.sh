@@ -191,6 +191,13 @@ CODE="$(curl -s -o "$WORK_DIR/auth-get.json" -w '%{http_code}' -H "Authorization
 [ "$CODE" = "200" ] || fail "GET /v1/admin/auth failed (got $CODE): $(cat "$WORK_DIR/auth-get.json")"
 grep -q '"provider":"openai"' "$WORK_DIR/auth-get.json" || fail "the credential listing did not name the openai slot: $(cat "$WORK_DIR/auth-get.json")"
 grep -q '"stored_at"' "$WORK_DIR/auth-get.json" || fail "the credential listing carried no stored_at"
+# The CLI's read is that body, byte for byte (37g), and carries no key either.
+"$APOGEE_BIN" auth list --output-format json </dev/null >"$WORK_DIR/auth-list.json" 2>/dev/null \
+    || fail "auth list --output-format json failed"
+python3 -c 'import json,sys
+assert json.load(open(sys.argv[1])) == json.load(open(sys.argv[2]))' "$WORK_DIR/auth-list.json" "$WORK_DIR/auth-get.json" \
+    || fail "auth list --output-format json is not the control plane body: $(cat "$WORK_DIR/auth-list.json")"
+grep -q "$SECRET" "$WORK_DIR/auth-list.json" && fail "the key appeared in auth list's document"
 CODE="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/admin/auth")"
 [ "$CODE" = "401" ] || fail "an unauthenticated credential listing was not a 401 (got $CODE)"
 CODE="$(curl -s -o "$WORK_DIR/auth-put.json" -w '%{http_code}' -X PUT -H "Authorization: Bearer $TOKEN" \

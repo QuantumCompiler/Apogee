@@ -60,6 +60,8 @@ apogee_add_module(operations
     operations/backend_names.h
     operations/backend_names.cpp
     operations/collections.h
+    operations/credential_views.h
+    operations/credential_views.cpp
     operations/collections.cpp
     operations/dataset_core.h
     operations/dataset_core.cpp
@@ -240,6 +242,8 @@ apogee_add_module(cli
     cli/tui_session.h
     cli/line_tokens.h
     cli/line_tokens.cpp
+    cli/tui_agents.h
+    cli/tui_agents.cpp
     cli/tui_child.h
     cli/tui_child.cpp
     cli/tui_common.h

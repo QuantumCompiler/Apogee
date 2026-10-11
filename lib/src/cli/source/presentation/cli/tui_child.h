@@ -8,6 +8,7 @@
 
 #include "cli/command.h"
 #include "platform/child_process.h"
+#include "tui/progress.h"
 
 /// The shell runs a command as a captured child of its own binary (37f; the
 /// design 37h's exec line records): the command itself, never a second
@@ -59,6 +60,25 @@ struct ChildOutput {
 };
 
 [[nodiscard]] ChildOutput run_child_text(const platform::ChildCommand& command);
+
+/// A short act's answer, run as the command (37f, 37g: a rollback, a delete,
+/// an enable): its output, and its exit line when it failed.
+[[nodiscard]] std::string child_answer(const RootContext& context,
+                                       const std::filesystem::path& binary,
+                                       const std::vector<std::string>& words);
+
+/// The command `words` name, run in `progress` as a child under `heading`:
+/// its lines as it writes them, then how it ended, Ctrl-C interrupting it.
+/// False while a run is going.
+[[nodiscard]] bool start_child_run(tui::Progress& progress, const RootContext& context,
+                                   const std::filesystem::path& binary,
+                                   std::vector<std::string> words, std::string heading);
+
+/// `apogee <group> <line>` from an input row, in `progress`: the line split
+/// by the one splitter. Returns what to say -- that it runs, or why not.
+[[nodiscard]] std::string run_typed(tui::Progress& progress, const RootContext& context,
+                                    const std::filesystem::path& binary, const std::string& group,
+                                    const std::string& line);
 
 /// A finished run's last line, in the scripts' terms: `exit 0`, `exit 2`, or
 /// `stopped by a signal`.

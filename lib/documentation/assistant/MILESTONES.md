@@ -6877,3 +6877,28 @@ Decisions taken while building, for veto:
 - **Train and Datasets sit after Tasks.**
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,139 of 3,139, the pdftotext case skipped as before, the child-process cases run against the built binary. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+### 2026-10-10 — `tui-agents-mcp-views` (backlog item 37g): Agents, MCP, Auth
+
+**Why.** The last uncovered slice. `agents list` and `mcp list` had view-ready documents and no view, and `auth` had neither. Two walls are settled here by recorded carve-out rather than by capability: the `$EDITOR` wall (`agents edit`, `symphonies edit`) and the secret-input wall (`auth add`). With this item the classification table holds no backfill.
+
+- [x] **`auth list --output-format json`**: the body `GET /v1/admin/auth` serves, byte for byte. The builder moved to `operations/credential_views` (`credentials_document`, which the control plane calls too), and `operations` now links `secrets` for it. A stored credential is metadata by type, so there is no field a key could reach.
+- [x] **`mcp list`'s document split out** (`mcp_list_document`): every server connected to as the command connects, bounded, its stderr kept off the screen. The command's JSON path calls it.
+- [x] **The Agents view** (`cli/tui_agents`): `agents list --output-format json`'s rows, Enter the agent's definition as its document states it. `x` deletes the entry after an ask, through `agents delete` run as the shell's child, so its prompt and schema files are kept exactly as the command keeps them with nobody at a terminal to ask. A bundled agent with no entry is not offered `x`.
+- [x] **The MCP view**: `mcp list --output-format json`'s rows (state, protocol, tools), Enter the server's entry. `t` opens the input row on `<server> `, the tool and its JSON arguments typed, and runs `mcp test`, its answer the command's narration then its result. `e`/`d` run `mcp enable|disable`, asked nothing (the confirmed default: a reversible edit whose answer names it).
+- [x] **The Auth view**: the stored credentials as `auth list --output-format json` states them, with which rung answers for each backend above them, and the way a key is stored -- at a real prompt, `apogee auth add <provider>`, never in the shell.
+- [x] **The child seam's helpers shared** (`child_answer`, `start_child_run`, `run_typed`, moved into `cli/tui_child` from the training views).
+- [x] **The law**: `agents`, `mcp` and `auth` flipped to views. Auth's row records the secret-input carve-out; the `$EDITOR` refusals were recorded in 37a. The table holds no backfill now, and `tui_parity_test` holds that.
+- [x] **Tests**:
+  - `tui_agents_test`: the three views' rows against their documents, a stored key in no heading, row or frame of the Auth view. As children of the built binary (skipped where the build made none): `e`/`d` leaving `mcp enable|disable`'s config byte for byte; `t` over Apogee's own `__mcp-tools` server answering as `mcp test` does; `x` leaving `agents delete`'s config, a no keeping the entry and the prompt file kept.
+  - The leak test's rows for all three views (the planted key searched in the Auth view's every heading and row).
+  - `cli.serve_lifecycle` comparing `auth list --output-format json` with `GET /v1/admin/auth` off the real binary, with a key stored and in neither.
+
+Decisions taken while building, for veto:
+- **Every act is the command run as the shell's child**, as in 37f: `agents delete`, `mcp test`, `mcp enable|disable`. The config each writes is the command's by construction.
+- **`t` takes the tool and its arguments typed**: `mcp test` invokes one tool, and the "bounded handshake" the document named is that call's connect, which the command bounds. The answer includes the command's own `[mcp]` narration from stderr, as a script reading both streams sees it.
+- **The MCP view connects to each server on every read**, as `mcp list` does. That is bounded per server and done on the view's worker, and a disabled server is not connected to.
+- **The Auth view has no keys of its own**: `auth clear` runs through the exec line (37h), and `auth add` stays the real prompt's.
+- **Agents, MCP and Auth sit after Datasets.**
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,144 of 3,144, the pdftotext case skipped as before, the child-process cases run against the built binary. `clang-format` is clean on every touched file, and `make lint` was not run.

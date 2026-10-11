@@ -11,6 +11,8 @@
 
 #include "cli/helpers.h"
 #include "contracts/paths.h"
+#include "machine/json_reporter.h"
+#include "operations/credential_views.h"
 #include "platform/platform.h"
 
 namespace apogee::commands {
@@ -213,11 +215,19 @@ void AuthCommand::bind(CLI::App& root, const RootContext& context) {
     });
 
     // --- list --------------------------------------------------------------
+    auto list_format = std::make_shared<ReadFormat>(ReadFormat::Text);
     CLI::App* list = cmd->add_subcommand("list",
                                          "Show stored keys (metadata only) and which "
                                          "source each configured backend uses");
-    list->callback([&context]() {
+    add_read_format(list, list_format);
+    list->callback([&context, list_format]() {
         const std::filesystem::path config_path = config_path_for(context);
+        if (*list_format == ReadFormat::Json) {
+            // The body `GET /v1/admin/auth` serves (37g): metadata only.
+            write_document(std::cout, operations::credentials_document(
+                                          config_path, secrets::EnvSnapshot::process()));
+            return;
+        }
         harness::Config config;
         try {
             config = harness::load_config(config_path);
