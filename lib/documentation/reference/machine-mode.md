@@ -555,6 +555,12 @@ apogee mcp list --output-format json        # GET /v1/admin/mcp-servers's entrie
 apogee check --output-format json           # {"rows":[{"section","name","status","detail","remedy"?}],"ok":…,"failures":N,"warnings":N}
 apogee providers scan --output-format json  # {"object":"list","data":[{"provider","type","label","tier","backend","evidence":[…]}]}
 apogee system --output-format json          # {"cpu":{…},"memory":{…},"apogee":{…},"gpu":{…},"disk":{…}}
+apogee knowledge list --output-format json  # {"object":"list","db":…,"data":[records]}
+apogee knowledge info <id> --output-format json      # the record, as --json prints it
+apogee embed list --output-format json      # {"object":"list","data":[{"name","chunks","sources","error"?}]}
+apogee embed info <name> --output-format json        # {"collection","path","schema","chunks","vectors":{…}|null,"index","sources":[…]}
+apogee graph stats <name> --output-format json       # {"object":"graph.stats","graph","kind","built",…}
+apogee graph show <name> <entity> --output-format json   # {"object":"graph.show","match",…,"data":[entities]}
 ```
 
 - **`models list`**: one object per row the table shows — `backend`,
@@ -579,6 +585,32 @@ apogee system --output-format json          # {"cpu":{…},"memory":{…},"apoge
   the human run's (non-zero on a failure). With `--fix`, what it repaired is the
   document's `fixed`, never a line beside it.
 - **`providers scan`** (since 37b): a row per provider in the knowledge table, as the human scan prints them -- `provider` (`claude`), `type` (`claude-cli`), `label` (`Claude CLI`), `tier` (`credentials found`, `verified 2026-10-06`, `not found`), `backend` (which configured backends reach it, `not registered` when it could be, else empty) and `evidence`, a line each. It is the explicit scan, so it may start a vendor's binary for its version as the human scan does. With `--register`, what registering did is the document's `registration` and the rosters it fetched its `rosters`, a line each; with `--refresh`, the rosters re-fetched are `rosters` too.
+- **`knowledge list`** and **`knowledge info`** (since 37c): the records the
+  human list counts, newest first and kept to `--status`/`--discipline` as it
+  is, each record the object `--json` prints (which stays, a bare array for
+  `list`); `db` names the collection read.
+- **`embed list`** and **`embed info`** (since 37c): each collection's `name`,
+  `chunks` and `sources` count, or the `error` that kept it from being read;
+  one collection's `path`, `schema`, `chunks`, `vectors` (`chunks`,
+  `dimension`, `model` when one is pinned, `widths`) or `null` when it has
+  none, its lexical `index`, and its `sources`.
+- **`graph stats`** (since 37c): the counts the text prints, whole --
+  `kind` (`named` or `collection`), `built`, `nodes` with `nodes_by_type`,
+  `edges` with their `edges_extracted`/`edges_inferred` origin, `mentions`,
+  coverage (`total_chunks`, `chunks_with_mentions`), `nodes_with_vectors`,
+  the code layer (`code_files`, `code_files_by_language`, `code_mentions`,
+  `unresolved_names`), `extract_model`, `stale_files`, `failed_chunks` and
+  the communities; a named graph adds its entry's `collections` and
+  `sources`, its `embed_model`, each member's share in `members`, and
+  `membership_changed_from` when the entry moved since the build. A graph not
+  built yet is `"built": false`, not a refusal.
+- **`graph show`** (since 37c): `match` (`exact`, or `closest` with
+  `also_matched` as the text's lines say) and each entity in `data` -- `name`,
+  `type`, the whole `description`, `mentions`, `vector_dim`, a decision node's
+  `status` and `discipline`, a code node's `stated_at`, its `relations`
+  (`relation`, `direction`, `peer`, `peer_type`, `weight`, `origin`,
+  `description`, an extracted edge's first `sites`) and its supporting
+  `chunks`, their text whole.
 - **`system`** (since 32a): the machine as one reading — `cpu` (`model`,
   `architecture`, the core counts, `load`, `utilization` with its `window_ms`),
   `memory` (`total_bytes`, `used_bytes`, `available_bytes`), `apogee`

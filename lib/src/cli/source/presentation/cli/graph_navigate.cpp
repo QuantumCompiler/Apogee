@@ -6,6 +6,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -89,30 +90,30 @@ void with_graph(const RootContext& context, const Selection& selection,
     return {};
 }
 
-void print_entry(const graph::NeighborEntry& entry) {
-    std::cout << "    " << graph::node_label(entry.node);
+void print_entry(std::ostream& out, const graph::NeighborEntry& entry) {
+    out << "    " << graph::node_label(entry.node);
     if (entry.weight > 1) {
-        std::cout << " x" << entry.weight;
+        out << " x" << entry.weight;
     }
     if (!entry.at.empty()) {
-        std::cout << "  at " << entry.at;
+        out << "  at " << entry.at;
     }
     if (!entry.description.empty()) {
-        std::cout << " -- " << entry.description;
+        out << " -- " << entry.description;
     }
-    std::cout << "\n";
+    out << "\n";
 }
 
-void print_groups(const std::vector<graph::NeighborGroup>& groups) {
+void print_groups(std::ostream& out, const std::vector<graph::NeighborGroup>& groups) {
     for (const graph::NeighborGroup& group : groups) {
-        std::cout << "  " << group.relation << (group.outgoing ? " ->" : " <-") << " ("
-                  << group.total << ")\n";
+        out << "  " << group.relation << (group.outgoing ? " ->" : " <-") << " (" << group.total
+            << ")\n";
         for (const graph::NeighborEntry& entry : group.shown) {
-            print_entry(entry);
+            print_entry(out, entry);
         }
         if (std::cmp_greater(group.total, group.shown.size())) {
-            std::cout << "    ... and "
-                      << group.total - static_cast<std::int64_t>(group.shown.size()) << " more\n";
+            out << "    ... and " << group.total - static_cast<std::int64_t>(group.shown.size())
+                << " more\n";
         }
     }
 }
@@ -175,68 +176,66 @@ void print_path(const graph::PathResult& result, const graph::PathRequest& reque
 
 /// Where a card's node is stated: its lines for code, its chunks for prose,
 /// the first few, then how many more.
-void print_provenance(const graph::NodeCard& card) {
+void print_provenance(std::ostream& out, const graph::NodeCard& card) {
     if (!card.code_mentions.empty()) {
-        std::cout << (card.node.unresolved ? "Referenced at:" : "Stated at:") << "\n";
+        out << (card.node.unresolved ? "Referenced at:" : "Stated at:") << "\n";
         for (const embedstore::CodeMention& at : card.code_mentions) {
-            std::cout << "  " << at.role << "  " << at.collection << ": " << at.file << ":"
-                      << at.line;
+            out << "  " << at.role << "  " << at.collection << ": " << at.file << ":" << at.line;
             if (at.end_line > at.line) {
-                std::cout << "-" << at.end_line;
+                out << "-" << at.end_line;
             }
-            std::cout << "\n";
+            out << "\n";
         }
     }
     if (!card.chunk_mentions.empty()) {
-        std::cout << "Mentioned in:\n";
+        out << "Mentioned in:\n";
         for (const graph::ChunkMention& mention : card.chunk_mentions) {
-            std::cout << "  " << (mention.collection.empty() ? "" : mention.collection + ": ");
+            out << "  " << (mention.collection.empty() ? "" : mention.collection + ": ");
             if (mention.missing) {
-                std::cout << "chunk id " << mention.chunk_id
-                          << " (no longer present -- `apogee graph build` reconciles it)\n";
+                out << "chunk id " << mention.chunk_id
+                    << " (no longer present -- `apogee graph build` reconciles it)\n";
             } else {
-                std::cout << mention.source << " [chunk " << mention.chunk << "]\n";
+                out << mention.source << " [chunk " << mention.chunk << "]\n";
             }
         }
     }
     const std::size_t listed = card.code_mentions.size() + card.chunk_mentions.size();
     if (std::cmp_greater(card.mentions, listed) && listed > 0) {
-        std::cout << "  ... and " << card.mentions - static_cast<std::int64_t>(listed) << " more\n";
+        out << "  ... and " << card.mentions - static_cast<std::int64_t>(listed) << " more\n";
     }
 }
 
-void print_card(const graph::NodeCard& card, std::string_view address) {
+void print_card(std::ostream& out, const graph::NodeCard& card, std::string_view address) {
     if (const std::string note = matched_note(address, card.matched, card.node); !note.empty()) {
-        std::cout << "(" << note << ")\n";
+        out << "(" << note << ")\n";
     }
-    std::cout << graph::node_label(card.node) << " in graph \"" << card.graph << "\"\n";
+    out << graph::node_label(card.node) << " in graph \"" << card.graph << "\"\n";
     if (!card.description.empty()) {
-        std::cout << "  " << card.description << "\n";
+        out << "  " << card.description << "\n";
     }
     if (!card.node.discipline.empty()) {
-        std::cout << "  Discipline: " << card.node.discipline << "\n";
+        out << "  Discipline: " << card.node.discipline << "\n";
     }
-    std::cout << "  Degree: " << degree_text(card.degree) << "; " << card.mentions
-              << " mention(s)\n";
-    print_provenance(card);
+    out << "  Degree: " << degree_text(card.degree) << "; " << card.mentions << " mention(s)\n";
+    print_provenance(out, card);
     if (!card.relations.empty()) {
-        std::cout << "Relations:\n";
-        print_groups(card.relations);
+        out << "Relations:\n";
+        print_groups(out, card.relations);
     }
     for (const graph::CommunityRef& community : card.communities) {
-        std::cout << "Community #" << community.id << " (" << community.size << " members): "
-                  << (community.summary.empty() ? "(no summary -- clustered with no model)"
-                                                : community.summary)
-                  << "\n";
+        out << "Community #" << community.id << " (" << community.size << " members): "
+            << (community.summary.empty() ? "(no summary -- clustered with no model)"
+                                          : community.summary)
+            << "\n";
     }
     if (!card.decisions.empty()) {
-        std::cout << "Decisions:\n";
+        out << "Decisions:\n";
         for (const graph::DecisionRef& decision : card.decisions) {
-            std::cout << "  " << graph::node_label(decision.node);
+            out << "  " << graph::node_label(decision.node);
             if (!decision.decision.empty()) {
-                std::cout << ": " << decision.decision;
+                out << ": " << decision.decision;
             }
-            std::cout << "\n";
+            out << "\n";
         }
     }
 }
@@ -261,7 +260,7 @@ void print_neighbors(const graph::Neighborhood& result, std::string_view address
         std::cout << "\n";
         return;
     }
-    print_groups(result.groups);
+    print_groups(std::cout, result.groups);
 }
 
 // ---- query -----------------------------------------------------------------------
@@ -306,6 +305,19 @@ void print_query(const graph::QueryResult& result) {
 }
 
 }  // namespace
+
+std::string graph_explain_text(const RootContext& context, const std::string& graph,
+                               const std::string& node) {
+    const harness::Config config =
+        harness::load_config(harness::resolve_config_path(context.config_path));
+    const graph::OpenGraph open{
+        graph::resolve_graph_target(config, graph::GraphSelection{.graph = graph})};
+    graph::CardRequest request;
+    request.node = node;
+    std::ostringstream out;
+    print_card(out, graph::explain_node(open, request), request.node);
+    return out.str();
+}
 
 void bind_graph_navigation(CLI::App& graph_command, const RootContext& context) {
     // ---- path ----------------------------------------------------------------
@@ -356,7 +368,7 @@ void bind_graph_navigation(CLI::App& graph_command, const RootContext& context) 
                     write_document(std::cout, graph::to_json(card));
                     return;
                 }
-                print_card(card, request->node);
+                print_card(std::cout, card, request->node);
             });
         });
     }

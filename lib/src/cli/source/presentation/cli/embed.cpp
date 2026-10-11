@@ -1,6 +1,7 @@
 #include "cli/embed.h"
 
 #include <CLI/CLI.hpp>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <iomanip>
@@ -15,6 +16,7 @@
 #include "agentloop/rerank.h"
 #include "agentloop/retriever.h"
 #include "backends/factory.h"
+#include "cli/helpers.h"
 #include "cli/graph.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
@@ -23,6 +25,7 @@
 #include "embedstore/ingest.h"
 #include "embedstore/store.h"
 #include "harness/harness.h"
+#include "machine/json_reporter.h"
 #include "views/status_line.h"
 
 namespace apogee::commands {
@@ -38,14 +41,50 @@ namespace {
 /// The same rule `models delete` follows: a collection is NAMED, not pathed. A
 /// `..` or an absolute path here would turn "search my notes" into a way to
 /// address any file on the machine.
-void require_plain_name(std::string_view name) {
+[[nodiscard]] std::string plain_name_error(std::string_view name) {
     if (name.empty()) {
-        fail("a collection needs a name");
+        return "a collection needs a name";
     }
     if (name.find("..") != std::string_view::npos || name.find('/') != std::string_view::npos ||
         name.find('\\') != std::string_view::npos) {
-        fail("'" + std::string{name} + "' is not a plain collection name");
+        return "'" + std::string{name} + "' is not a plain collection name";
     }
+    return {};
+}
+
+void require_plain_name(std::string_view name) {
+    if (const std::string error = plain_name_error(name); !error.empty()) {
+        fail(error);
+    }
+}
+
+/// The collection's file, refused as the commands refuse a name that is not
+/// plain or names nothing.
+[[nodiscard]] std::filesystem::path existing_collection(const std::string& name) {
+    if (const std::string error = plain_name_error(name); !error.empty()) {
+        throw std::runtime_error{error};
+    }
+    const std::filesystem::path path = collection_path(name);
+    std::error_code code;
+    if (!std::filesystem::exists(path, code)) {
+        throw std::runtime_error{"no collection named '" + name + "'"};
+    }
+    return path;
+}
+
+/// Runs a carved read for a command: its text on stdout, its refusal the
+/// command's own failure.
+template <typename Read>
+void print_or_fail(Read read) {
+    std::string text;
+    try {
+        text = read();
+    } catch (const CLI::Error&) {
+        throw;
+    } catch (const std::exception& e) {
+        fail(e.what());
+    }
+    std::cout << text;
 }
 
 [[nodiscard]] std::string two_places(double value) {
@@ -366,106 +405,15 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
         ->type_name(kBackendValue);
 
     query->callback([&context, q_collection, q_text, q_limit, q_retriever, q_rerank]() {
-        require_plain_name(*q_collection);
-        const std::filesystem::path path = collection_path(*q_collection);
-        std::error_code code;
-        if (!std::filesystem::exists(path, code)) {
-            fail("no collection named '" + *q_collection + "'. Create one with 'apogee embed " +
-                 "ingest " + *q_collection + " <path>'");
-        }
-
-        // The same decision `complete` and `chat` make, from the same facts.
-        std::optional<harness::Config> config;
-        std::filesystem::path config_path;
         try {
-            config_path = harness::resolve_config_path(context.config_path);
-            config = harness::load_config(config_path);
-        } catch (const std::exception&) {
-            // No config is the lexical floor's home ground; the resolver sees
-            // no embedder and no pins.
-        }
-        std::string pin;
-        std::string rerank_pin;
-        std::string collection_backend;
-        if (config.has_value()) {
-            if (const harness::EmbeddingConfig* entry = config->find_embedding(*q_collection);
-                entry != nullptr) {
-                pin = entry->retriever;
-                rerank_pin = entry->rerank;
-                collection_backend = entry->backend;
-            }
-        }
-        std::optional<Providers> providers;
-        std::optional<agentloop::Embedder> embedder;
-        std::string embedder_reason;
-        if (config.has_value() && *q_retriever != "lexical" && pin != "lexical") {
-            providers.emplace(*config, config_path);
-            embedder = agentloop::resolve_embedder(providers->harness, *config, collection_backend,
-                                                   embedder_reason);
-        }
-
-        try {
-            const embedstore::Store store{path};
-            const agentloop::TurnRetrieval decision = agentloop::resolve_turn_retriever(
-                *q_retriever, pin, facts_for(embedder), facts_for(store));
-            if (!decision.error.empty()) {
-                fail(decision.error);
-            }
-            if (decision.excluded) {
-                std::cout << decision.note << "\n";
-                return;
-            }
-            if (!decision.note.empty()) {
-                std::cout << decision.note << "\n";
-            }
-
-            agentloop::RerankChoice judge;
-            if (config.has_value()) {
-                judge = agentloop::resolve_turn_rerank(*q_rerank, rerank_pin, *config);
-                if (!judge.note.empty()) {
-                    std::cout << judge.note << "\n";
-                }
-                if (!judge.backend.empty() && !providers.has_value()) {
-                    providers.emplace(*config, config_path);
-                }
-            }
-            const int fetch = agentloop::rerank_fetch_limit(*q_limit, !judge.backend.empty());
-
-            std::vector<embedstore::SearchHit> hits;
-            if (decision.retriever == agentloop::Retriever::Lexical) {
-                hits = store.search(*q_text, fetch);
-            } else {
-                const std::vector<std::vector<float>> vectors = embedder->embed({*q_text}, {});
-                hits = decision.retriever == agentloop::Retriever::Vector
-                           ? store.search_vector(vectors.front(), fetch)
-                           : store.search_hybrid(vectors.front(), *q_text, fetch);
-            }
-            bool reranked = false;
-            if (!judge.backend.empty()) {
-                const agentloop::RerankOutcome judged = agentloop::rerank(
-                    providers->harness, judge.backend, *q_text, hits, *q_limit, {});
-                hits = judged.hits;
-                reranked = judged.applied;
-                if (!judged.note.empty()) {
-                    std::cout << judged.note << "\n";
-                }
-            } else if (*q_limit > 0 && static_cast<std::size_t>(*q_limit) < hits.size()) {
-                hits.resize(static_cast<std::size_t>(*q_limit));
-            }
-
-            if (hits.empty()) {
-                std::cout << "no matches [" << agentloop::to_string(decision.retriever) << "]\n";
-                return;
-            }
-            for (const embedstore::SearchHit& hit : hits) {
-                // The retriever is printed with every score. Lexical, vector
-                // and RRF scales are incomparable, and a bare number invites
-                // exactly the comparison that cannot be made.
-                std::cout << two_places(hit.score) << "  [" << hit.retriever
-                          << (reranked ? ", reranked" : "") << "]  " << hit.chunk.source << "#"
-                          << hit.chunk.ordinal << "\n";
-                std::cout << "    " << preview(hit.chunk.text, 100) << "\n";
-            }
+            print_collection_query(std::cout, context,
+                                   CollectionQuery{.collection = *q_collection,
+                                                   .text = *q_text,
+                                                   .limit = *q_limit,
+                                                   .retriever = *q_retriever,
+                                                   .rerank = *q_rerank});
+        } catch (const CLI::Error&) {
+            throw;
         } catch (const std::exception& e) {
             fail(e.what());
         }
@@ -473,22 +421,15 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
 
     // ---- list ---------------------------------------------------------------
     CLI::App* list = cmd->add_subcommand("list", "List collections");
-    list->callback([]() {
-        const std::vector<std::string> names = collection_names();
-        if (names.empty()) {
-            std::cout << "no collections yet -- create one with 'apogee embed ingest <name> "
-                         "<path>'\n";
+    auto list_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    add_read_format(list, list_format);
+    list->callback([list_format]() {
+        const std::vector<CollectionRow> rows = collection_rows();
+        if (*list_format == ReadFormat::Json) {
+            write_document(std::cout, collection_list_document(rows));
             return;
         }
-        for (const std::string& name : names) {
-            try {
-                const embedstore::Store store{collection_path(name)};
-                std::cout << name << "  " << store.chunk_count() << " chunk(s), "
-                          << store.sources().size() << " source(s)\n";
-            } catch (const std::exception& e) {
-                std::cout << name << "  (unreadable: " << e.what() << ")\n";
-            }
-        }
+        std::cout << render_collection_rows(rows);
     });
 
     // ---- info ---------------------------------------------------------------
@@ -497,51 +438,20 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
     info->add_option("collection", *info_collection, "Collection name")
         ->type_name(kCollectionValue)
         ->required();
-    info->callback([info_collection]() {
-        require_plain_name(*info_collection);
-        const std::filesystem::path path = collection_path(*info_collection);
-        std::error_code code;
-        if (!std::filesystem::exists(path, code)) {
-            fail("no collection named '" + *info_collection + "'");
-        }
-
-        try {
-            const embedstore::Store store{path};
-            std::cout << "collection:  " << *info_collection << "\n";
-            std::cout << "path:        " << path.string() << "\n";
-            std::cout << "schema:      v" << store.schema_version() << "\n";
-            const embedstore::Store::Stats stats = store.stats();
-            const embedstore::Store::EmbeddingBinding binding = store.embedding_model();
-            std::cout << "chunks:      " << stats.chunk_count << "\n";
-            std::cout
-                << "lexical:     BM25 over every chunk -- works with no model and no network\n";
-            if (stats.dimension == 0) {
-                std::cout << "vectors:     none (ingest with --retriever vector to build them)\n";
-            } else {
-                std::cout << "vectors:     " << (stats.chunk_count - stats.lexical_only) << " of "
-                          << stats.chunk_count << " chunk(s), " << stats.dimension << "-d";
-                if (binding.recorded()) {
-                    std::cout << " [" << binding.model << "]";
-                } else {
-                    std::cout << " [model not recorded -- re-ingest to bind]";
-                }
-                if (stats.vector_dims > 1) {
-                    std::cout << " -- MIXED: " << stats.vector_dims << " widths";
-                }
-                std::cout << "\n";
+    auto info_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    add_read_format(info, info_format);
+    info->callback([info_collection, info_format]() {
+        if (*info_format == ReadFormat::Json) {
+            nlohmann::json document;
+            try {
+                document = collection_info_document(*info_collection);
+            } catch (const std::exception& e) {
+                fail(e.what());
             }
-
-            const std::string trouble = store.verify_index();
-            std::cout << "index:       " << (trouble.empty() ? "ok" : "FAILED -- " + trouble)
-                      << "\n";
-
-            std::cout << "\nsources:\n";
-            for (const std::string& source : store.sources()) {
-                std::cout << "  " << source << "\n";
-            }
-        } catch (const std::exception& e) {
-            fail(e.what());
+            write_document(std::cout, document);
+            return;
         }
+        print_or_fail([&]() { return collection_info_text(*info_collection); });
     });
 
     // ---- delete -------------------------------------------------------------
@@ -575,23 +485,243 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
             return;
         }
 
-        std::cout << "will delete the whole collection:\n  " << path.string() << "\n";
         if (!*del_yes) {
+            std::cout << "will delete the whole collection:\n  " << path.string() << "\n";
             std::cout << "\nre-run with --yes to delete.\n";
             return;
         }
-        std::filesystem::remove(path, code);
-        if (code) {
-            fail("could not delete: " + code.message());
-        }
-        // WAL and shared-memory siblings, which SQLite leaves beside the file.
-        for (const char* suffix : {"-wal", "-shm"}) {
-            std::filesystem::path sibling = path;
-            sibling += suffix;
-            std::filesystem::remove(sibling, code);
-        }
-        std::cout << "\ndeleted.\n";
+        print_or_fail([&]() { return delete_collection(*del_collection); });
     });
+}
+
+std::vector<CollectionRow> collection_rows() {
+    std::vector<CollectionRow> rows;
+    for (const std::string& name : collection_names()) {
+        CollectionRow row;
+        row.name = name;
+        try {
+            const embedstore::Store store{collection_path(name)};
+            row.chunks = store.chunk_count();
+            row.sources = store.sources().size();
+        } catch (const std::exception& e) {
+            row.error = e.what();
+        }
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+
+std::string render_collection_rows(const std::vector<CollectionRow>& rows) {
+    if (rows.empty()) {
+        return "no collections yet -- create one with 'apogee embed ingest <name> <path>'\n";
+    }
+    std::string out;
+    for (const CollectionRow& row : rows) {
+        out += row.error.empty() ? row.name + "  " + std::to_string(row.chunks) + " chunk(s), " +
+                                       std::to_string(row.sources) + " source(s)\n"
+                                 : row.name + "  (unreadable: " + row.error + ")\n";
+    }
+    return out;
+}
+
+nlohmann::json collection_list_document(const std::vector<CollectionRow>& rows) {
+    nlohmann::json data = nlohmann::json::array();
+    for (const CollectionRow& row : rows) {
+        nlohmann::json object{{"name", row.name}, {"chunks", row.chunks}, {"sources", row.sources}};
+        if (!row.error.empty()) {
+            object["error"] = row.error;
+        }
+        data.push_back(std::move(object));
+    }
+    return nlohmann::json{{"object", "list"}, {"data", std::move(data)}};
+}
+
+std::string collection_info_text(const std::string& name) {
+    const std::filesystem::path path = existing_collection(name);
+    const embedstore::Store store{path};
+    std::ostringstream out;
+    out << "collection:  " << name << "\n";
+    out << "path:        " << path.string() << "\n";
+    out << "schema:      v" << store.schema_version() << "\n";
+    const embedstore::Store::Stats stats = store.stats();
+    const embedstore::Store::EmbeddingBinding binding = store.embedding_model();
+    out << "chunks:      " << stats.chunk_count << "\n";
+    out << "lexical:     BM25 over every chunk -- works with no model and no network\n";
+    if (stats.dimension == 0) {
+        out << "vectors:     none (ingest with --retriever vector to build them)\n";
+    } else {
+        out << "vectors:     " << (stats.chunk_count - stats.lexical_only) << " of "
+            << stats.chunk_count << " chunk(s), " << stats.dimension << "-d";
+        if (binding.recorded()) {
+            out << " [" << binding.model << "]";
+        } else {
+            out << " [model not recorded -- re-ingest to bind]";
+        }
+        if (stats.vector_dims > 1) {
+            out << " -- MIXED: " << stats.vector_dims << " widths";
+        }
+        out << "\n";
+    }
+    const std::string trouble = store.verify_index();
+    out << "index:       " << (trouble.empty() ? "ok" : "FAILED -- " + trouble) << "\n";
+    out << "\nsources:\n";
+    for (const std::string& source : store.sources()) {
+        out << "  " << source << "\n";
+    }
+    return out.str();
+}
+
+nlohmann::json collection_info_document(const std::string& name) {
+    const std::filesystem::path path = existing_collection(name);
+    const embedstore::Store store{path};
+    const embedstore::Store::Stats stats = store.stats();
+    const embedstore::Store::EmbeddingBinding binding = store.embedding_model();
+    nlohmann::json vectors = nullptr;
+    if (stats.dimension != 0) {
+        vectors = nlohmann::json{{"chunks", stats.chunk_count - stats.lexical_only},
+                                 {"dimension", stats.dimension},
+                                 {"widths", stats.vector_dims}};
+        if (binding.recorded()) {
+            vectors["model"] = binding.model;
+        }
+    }
+    const std::string trouble = store.verify_index();
+    return nlohmann::json{{"collection", name},
+                          {"path", path.string()},
+                          {"schema", store.schema_version()},
+                          {"chunks", stats.chunk_count},
+                          {"vectors", std::move(vectors)},
+                          {"index", trouble.empty() ? std::string{"ok"} : "FAILED -- " + trouble},
+                          {"sources", store.sources()}};
+}
+
+std::string delete_collection(const std::string& name) {
+    const std::filesystem::path path = existing_collection(name);
+    std::error_code code;
+    std::filesystem::remove(path, code);
+    if (code) {
+        throw std::runtime_error{"could not delete: " + code.message()};
+    }
+    // WAL and shared-memory siblings, which SQLite leaves beside the file.
+    for (const char* suffix : {"-wal", "-shm"}) {
+        std::filesystem::path sibling = path;
+        sibling += suffix;
+        std::filesystem::remove(sibling, code);
+    }
+    return "will delete the whole collection:\n  " + path.string() + "\n\ndeleted.\n";
+}
+
+void print_collection_query(std::ostream& out, const RootContext& context,
+                            const CollectionQuery& query) {
+    if (const std::string error = plain_name_error(query.collection); !error.empty()) {
+        throw std::runtime_error{error};
+    }
+    const std::filesystem::path path = collection_path(query.collection);
+    std::error_code code;
+    if (!std::filesystem::exists(path, code)) {
+        throw std::runtime_error{"no collection named '" + query.collection +
+                                 "'. Create one with 'apogee embed ingest " + query.collection +
+                                 " <path>'"};
+    }
+
+    // The same decision `complete` and `chat` make, from the same facts.
+    std::optional<harness::Config> config;
+    std::filesystem::path config_path;
+    try {
+        config_path = harness::resolve_config_path(context.config_path);
+        config = harness::load_config(config_path);
+    } catch (const std::exception&) {
+        // No config is the lexical floor's home ground; the resolver sees
+        // no embedder and no pins.
+    }
+    std::string pin;
+    std::string rerank_pin;
+    std::string collection_backend;
+    if (config.has_value()) {
+        if (const harness::EmbeddingConfig* entry = config->find_embedding(query.collection);
+            entry != nullptr) {
+            pin = entry->retriever;
+            rerank_pin = entry->rerank;
+            collection_backend = entry->backend;
+        }
+    }
+    std::optional<Providers> providers;
+    std::optional<agentloop::Embedder> embedder;
+    std::string embedder_reason;
+    if (config.has_value() && query.retriever != "lexical" && pin != "lexical") {
+        providers.emplace(*config, config_path);
+        embedder = agentloop::resolve_embedder(providers->harness, *config, collection_backend,
+                                               embedder_reason);
+    }
+
+    {
+        const embedstore::Store store{path};
+        const agentloop::TurnRetrieval decision = agentloop::resolve_turn_retriever(
+            query.retriever, pin, facts_for(embedder), facts_for(store));
+        if (!decision.error.empty()) {
+            throw std::runtime_error{decision.error};
+        }
+        if (decision.excluded) {
+            out << decision.note << "\n";
+            return;
+        }
+        if (!decision.note.empty()) {
+            out << decision.note << "\n";
+        }
+
+        agentloop::RerankChoice judge;
+        if (config.has_value()) {
+            judge = agentloop::resolve_turn_rerank(query.rerank, rerank_pin, *config);
+            if (!judge.note.empty()) {
+                out << judge.note << "\n";
+            }
+            if (!judge.backend.empty() && !providers.has_value()) {
+                providers.emplace(*config, config_path);
+            }
+        }
+        const int fetch = agentloop::rerank_fetch_limit(query.limit, !judge.backend.empty());
+
+        std::vector<embedstore::SearchHit> hits;
+        if (decision.retriever == agentloop::Retriever::Lexical) {
+            hits = store.search(query.text, fetch);
+        } else {
+            const std::vector<std::vector<float>> vectors = embedder->embed({query.text}, {});
+            hits = decision.retriever == agentloop::Retriever::Vector
+                       ? store.search_vector(vectors.front(), fetch)
+                       : store.search_hybrid(vectors.front(), query.text, fetch);
+        }
+        bool reranked = false;
+        if (!judge.backend.empty()) {
+            const agentloop::RerankOutcome judged = agentloop::rerank(
+                providers->harness, judge.backend, query.text, hits, query.limit, {});
+            hits = judged.hits;
+            reranked = judged.applied;
+            if (!judged.note.empty()) {
+                out << judged.note << "\n";
+            }
+        } else if (query.limit > 0 && static_cast<std::size_t>(query.limit) < hits.size()) {
+            hits.resize(static_cast<std::size_t>(query.limit));
+        }
+
+        if (hits.empty()) {
+            out << "no matches [" << agentloop::to_string(decision.retriever) << "]\n";
+            return;
+        }
+        for (const embedstore::SearchHit& hit : hits) {
+            // The retriever is printed with every score. Lexical, vector
+            // and RRF scales are incomparable, and a bare number invites
+            // exactly the comparison that cannot be made.
+            out << two_places(hit.score) << "  [" << hit.retriever << (reranked ? ", reranked" : "")
+                << "]  " << hit.chunk.source << "#" << hit.chunk.ordinal << "\n";
+            out << "    " << preview(hit.chunk.text, 100) << "\n";
+        }
+    }
+}
+
+std::string collection_query_text(const RootContext& context, const CollectionQuery& query) {
+    std::ostringstream out;
+    print_collection_query(out, context, query);
+    return out.str();
 }
 
 }  // namespace apogee::commands

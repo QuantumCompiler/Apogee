@@ -106,6 +106,30 @@ grep -q "Extractor: extractor" "$WORK_DIR/stats.txt" || fail "stats did not name
 "$APOGEE_BIN" graph show notes atlas </dev/null >"$WORK_DIR/show.txt" 2>&1 || fail "show"
 grep -q "Atlas (system) -- 2 mention(s)" "$WORK_DIR/show.txt" || fail "show: $(cat "$WORK_DIR/show.txt")"
 grep -q -- "-> Vault (system)" "$WORK_DIR/show.txt" || fail "show lacks the relation"
+# The reads as documents (37c): the counts and the entity the text prints,
+# nothing else on stdout.
+"$APOGEE_BIN" graph stats notes --output-format json </dev/null >"$WORK_DIR/stats.json" 2>/dev/null \
+    || fail "graph stats --output-format json failed"
+"$APOGEE_BIN" graph show notes atlas --output-format json </dev/null >"$WORK_DIR/show.json" 2>/dev/null \
+    || fail "graph show --output-format json failed"
+"$APOGEE_BIN" embed list --output-format json </dev/null >"$WORK_DIR/collections.json" 2>/dev/null \
+    || fail "embed list --output-format json failed"
+"$APOGEE_BIN" embed info notes --output-format json </dev/null >"$WORK_DIR/collection.json" 2>/dev/null \
+    || fail "embed info --output-format json failed"
+python3 -c 'import json,sys
+stats, show, listed, info = (json.load(open(path)) for path in sys.argv[1:5])
+assert stats["object"] == "graph.stats" and stats["graph"] == "notes", stats
+assert stats["kind"] == "collection" and stats["built"] is True, stats
+assert stats["nodes"] == 2 and stats["nodes_by_type"] == {"system": 2}, stats
+assert stats["extract_model"] == "extractor", stats
+assert show["object"] == "graph.show" and show["match"] == "exact", show
+atlas = show["data"][0]
+assert atlas["name"] == "Atlas" and atlas["mentions"] == 2, atlas
+assert any(r["peer"] == "Vault" and r["direction"] == "out" for r in atlas["relations"]), atlas
+assert listed["object"] == "list" and "notes" in [row["name"] for row in listed["data"]], listed
+assert info["collection"] == "notes" and info["chunks"] >= 1, info' \
+    "$WORK_DIR/stats.json" "$WORK_DIR/show.json" "$WORK_DIR/collections.json" "$WORK_DIR/collection.json" \
+    || fail "a read's document was wrong: $(cat "$WORK_DIR/stats.json" "$WORK_DIR/show.json")"
 "$APOGEE_BIN" graph build notes -m extractor </dev/null >"$WORK_DIR/build2.txt" 2>&1 || fail "second build"
 grep -q "Nothing to extract" "$WORK_DIR/build2.txt" || fail "a second build re-extracted: $(cat "$WORK_DIR/build2.txt")"
 

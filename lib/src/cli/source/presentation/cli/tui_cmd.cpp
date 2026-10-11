@@ -13,6 +13,7 @@
 #include "cli/helpers.h"
 #include "cli/suite_residency.h"
 #include "cli/tui_doctor.h"
+#include "cli/tui_knowledge.h"
 #include "cli/tui_session.h"
 #include "cli/tui_workbench.h"
 #include "cli/version_command.h"
@@ -84,6 +85,12 @@ namespace {
     const std::vector<std::unique_ptr<tui::ListView>> doctor =
         make_doctor_views(pump, theme, context);
     for (const std::unique_ptr<tui::ListView>& view : doctor) {
+        (void)shell.add(view->view());
+    }
+    // The knowledge beside them (37c): records, collections, graphs.
+    const std::vector<std::unique_ptr<tui::ListView>> knowledge =
+        make_knowledge_views(pump, theme, context);
+    for (const std::unique_ptr<tui::ListView>& view : knowledge) {
         (void)shell.add(view->view());
     }
     add_shell_views(shell, context);

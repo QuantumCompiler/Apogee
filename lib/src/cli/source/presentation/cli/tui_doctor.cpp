@@ -47,15 +47,6 @@ struct LastRead {
     Rows rows;
 };
 
-/// The config as the scan reads it: loaded, or null when there is none yet.
-[[nodiscard]] std::optional<harness::Config> config_if_any(const std::filesystem::path& path) {
-    std::error_code missing;
-    if (!std::filesystem::exists(path, missing)) {
-        return std::nullopt;
-    }
-    return harness::load_config(path);
-}
-
 }  // namespace
 
 tui::ListOptions check_view_options(const RootContext& context) {
@@ -64,7 +55,6 @@ tui::ListOptions check_view_options(const RootContext& context) {
     options.title = "Check";
     options.columns = {"STATUS", "SECTION", "CHECK", "DETAIL"};
     options.load = [&context, last]() {
-        // `apogee check`'s own read: the same inputs, the same report.
         // `apogee check`'s own read: the same inputs, the same report, its
         // rows as its JSON document words them.
         const CheckInputs inputs = check_inputs(context);

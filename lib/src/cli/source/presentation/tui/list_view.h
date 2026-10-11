@@ -75,6 +75,18 @@ struct ListOptions {
     /// The read is a page, not a table (37b: the System view): its lines
     /// are the content, drawn plain, with no column header and no rows.
     bool page = false;
+    /// A question asked of the view (37c: a knowledge query, a node's card):
+    /// `/` opens an input row under the table -- the view takes its keys as
+    /// typing until Enter asks or Esc closes it, the last question kept to
+    /// refine. The answer, on the worker, with the selected row or an empty
+    /// one, is drawn under the table as a detail is; a throw is said as the
+    /// reason it could not be asked.
+    std::function<std::string(const ListRow& row, const std::string& text)> ask;
+    /// What the hint bar and the input row call it: `query`, `explain`.
+    std::string ask_label;
+    /// The question is about the selected row (the collection searched, the
+    /// graph a node is in): offered only with one.
+    bool ask_needs_row = false;
 };
 
 class ListView {

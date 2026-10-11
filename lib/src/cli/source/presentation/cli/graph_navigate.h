@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include "cli/command.h"
 
 namespace CLI {
@@ -20,6 +22,12 @@ class App;
 /// plane serves, byte for byte. Nothing here writes; a node that cannot be
 /// resolved, or several that could, is a user error naming the candidates.
 namespace apogee::commands {
+
+/// `graph explain NODE --graph GRAPH`'s card as the command prints it (37c):
+/// the Graph view's card, the command's own lines. A config, resolution or
+/// node failure throws its std::runtime_error with the command's message.
+[[nodiscard]] std::string graph_explain_text(const RootContext& context, const std::string& graph,
+                                             const std::string& node);
 
 /// Adds the four verbs under `graph` (the `GraphCommand` binds them).
 void bind_graph_navigation(CLI::App& graph, const RootContext& context);

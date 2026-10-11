@@ -238,6 +238,8 @@ apogee_add_module(cli
     cli/tui_common.cpp
     cli/tui_doctor.h
     cli/tui_doctor.cpp
+    cli/tui_knowledge.h
+    cli/tui_knowledge.cpp
     cli/tui_parity.h
     cli/tui_parity.cpp
     cli/tui_session.cpp

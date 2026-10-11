@@ -2,12 +2,22 @@
 
 #include <nlohmann/json.hpp>
 
+#include <system_error>
+
 #include "contracts/paths.h"
 
 namespace apogee::commands {
 
 std::filesystem::path config_file(const RootContext& context) {
     return harness::resolve_config_path(context.config_path);
+}
+
+std::optional<harness::Config> config_if_any(const std::filesystem::path& path) {
+    std::error_code missing;
+    if (!std::filesystem::exists(path, missing)) {
+        return std::nullopt;
+    }
+    return harness::load_config(path);
 }
 
 std::string field(const nlohmann::json& object, const char* key) {

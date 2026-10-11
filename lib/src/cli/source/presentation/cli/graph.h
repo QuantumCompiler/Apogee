@@ -1,7 +1,10 @@
 #pragma once
 
+#include <nlohmann/json_fwd.hpp>
+
 #include <map>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -83,6 +86,23 @@ struct GraphBuildRequest {
 };
 
 void run_graph_build(const RootContext& context, const GraphBuildRequest& request);
+
+/// A refusal a carved graph read throws, in the command's words: the command
+/// prints it as its user error, a view shows it.
+class GraphRefusal : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
+/// `graph stats NAME` as a person reads it, and as one document (37c) --
+/// `{"object": "graph.stats", "graph", "kind": "named"|"collection",
+/// "built", "nodes", "edges", ...}`, the counts the text prints, plus a named
+/// graph's `collections`, `sources`, `members` and `embed_model`. A graph not
+/// built yet is a read (`"built": false`), not a refusal; each throws
+/// `GraphRefusal` for a name that is not plain or names nothing.
+[[nodiscard]] std::string graph_stats_text(const RootContext& context, const std::string& name);
+[[nodiscard]] nlohmann::json graph_stats_document(const RootContext& context,
+                                                  const std::string& name);
 
 /// Whether `graph update` refreshes `graph`: it has source trees to re-parse
 /// (27k). The verb's refusal and its completion both ask this.

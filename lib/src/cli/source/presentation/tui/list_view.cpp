@@ -29,6 +29,24 @@ constexpr std::size_t kColumnCap = 40;
     return cells >= width ? text : text + std::string(width - cells, ' ');
 }
 
+/// What a core said, as lines: the trailing empty ones dropped.
+[[nodiscard]] std::vector<std::string> said_lines(const std::string& said) {
+    std::vector<std::string> lines;
+    std::size_t at = 0;
+    while (at <= said.size()) {
+        const std::size_t end = said.find('\n', at);
+        lines.push_back(said.substr(at, end == std::string::npos ? end : end - at));
+        if (end == std::string::npos) {
+            break;
+        }
+        at = end + 1;
+    }
+    while (!lines.empty() && lines.back().empty()) {
+        lines.pop_back();
+    }
+    return lines;
+}
+
 }  // namespace
 
 struct ListView::State : std::enable_shared_from_this<ListView::State> {
@@ -55,6 +73,9 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
     std::string notice;
     std::optional<std::size_t> confirming;  // the action whose question is open
     std::string question;
+    /// The input row's text while it is open (37c).
+    std::optional<std::string> typing;
+    std::string last_asked;
     bool loading = true;
     ftxui::Component component;
 
@@ -151,19 +172,7 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
             post([said = std::move(said)](State& state) {
                 // One line is a notice; several -- a fix pass's report -- are
                 // drawn whole under the table, the first on the notice row.
-                std::vector<std::string> lines;
-                std::size_t at = 0;
-                while (at <= said.size()) {
-                    const std::size_t end = said.find('\n', at);
-                    lines.push_back(said.substr(at, end == std::string::npos ? end : end - at));
-                    if (end == std::string::npos) {
-                        break;
-                    }
-                    at = end + 1;
-                }
-                while (!lines.empty() && lines.back().empty()) {
-                    lines.pop_back();
-                }
+                std::vector<std::string> lines = said_lines(said);
                 state.notice = lines.empty() ? std::string{} : lines.front();
                 if (lines.size() > 1) {
                     state.detail = std::move(lines);
@@ -171,6 +180,29 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
             });
         });
         reload();
+    }
+
+    /// Asks the view's question, the answer drawn as a detail.
+    void ask(ListRow row, std::string text) {
+        notice = options.ask_label + "…";
+        detail.reset();
+        submit([this, row = std::move(row), text = std::move(text)]() {
+            std::string said;
+            try {
+                said = options.ask(row, text);
+            } catch (const std::exception& e) {
+                said = std::string{"could not ask: "} + e.what();
+            }
+            post([said = std::move(said)](State& state) {
+                state.notice.clear();
+                state.detail = said_lines(said);
+            });
+        });
+    }
+
+    /// Whether the question can be asked now.
+    [[nodiscard]] bool askable() const {
+        return options.ask && (!options.ask_needs_row || selected < rows.size());
     }
 
     /// Whether a view's own action takes `r` from "read again".
@@ -259,7 +291,9 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
             }
             frame.push_back(vbox(std::move(shown)));
         }
-        if (confirming.has_value()) {
+        if (typing.has_value()) {
+            frame.push_back(text(" " + options.ask_label + ": " + *typing + "▏") | bold);
+        } else if (confirming.has_value()) {
             frame.push_back(text(" " + question + " [y/N]") | bold);
         } else if (!notice.empty()) {
             frame.push_back(text(" " + notice) | dim);
@@ -273,10 +307,16 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
         const auto add = [&said](const std::string& part) {
             said += (said.empty() ? "" : " · ") + part;
         };
+        if (typing.has_value()) {
+            return "Enter asks · Esc closes";
+        }
         if (detail.has_value()) {
             add("Esc closes");
         } else if (!options.enter_label.empty()) {
             add("Enter " + options.enter_label);
+        }
+        if (askable()) {
+            add("/ " + options.ask_label);
         }
         if (!options.detail_key.empty() && !detail.has_value()) {
             add(options.detail_key + " info");
@@ -296,7 +336,42 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
 
     // --- keys -------------------------------------------------------------------------
 
+    /// The input row's keys: typing, until Enter asks or Esc closes it.
+    [[nodiscard]] bool on_typing(const ftxui::Event& event) {
+        if (event == ftxui::Event::Escape) {
+            typing.reset();
+            return true;
+        }
+        if (event == ftxui::Event::Return) {
+            if (!typing->empty()) {
+                last_asked = *typing;
+                typing.reset();
+                ask(selected < rows.size() ? rows.at(selected) : ListRow{}, last_asked);
+            }
+            return true;
+        }
+        if (event == ftxui::Event::Backspace) {
+            // A whole character: its UTF-8 continuation bytes with it.
+            while (!typing->empty() &&
+                   (static_cast<unsigned char>(typing->back()) & 0xC0U) == 0x80U) {
+                typing->pop_back();
+            }
+            if (!typing->empty()) {
+                typing->pop_back();
+            }
+            return true;
+        }
+        if (event.is_character()) {
+            *typing += event.character();
+            return true;
+        }
+        return false;
+    }
+
     [[nodiscard]] bool on_key(const ftxui::Event& event) {
+        if (typing.has_value()) {
+            return on_typing(event);
+        }
         if (confirming.has_value()) {
             const std::size_t action = *confirming;
             confirming.reset();
@@ -322,6 +397,10 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
         }
         if (event == ftxui::Event::Escape && detail.has_value()) {
             detail.reset();
+            return true;
+        }
+        if (event == ftxui::Event::Character('/') && askable()) {
+            typing = last_asked;
             return true;
         }
         if (event == ftxui::Event::Character('r') && !r_taken()) {
@@ -411,8 +490,14 @@ ListView::~ListView() {
 }
 
 View ListView::view() {
-    View shown{state_->options.title, std::make_shared<View::Body>(View::Body{state_->component})};
     const std::weak_ptr<State> state = state_;
+    // Typing while the input row is open (37c): a digit or `q` is the
+    // question's, not the shell's.
+    View shown{state_->options.title, std::make_shared<View::Body>(View::Body{state_->component}),
+               std::function<bool()>{[state]() {
+                   const std::shared_ptr<State> held = state.lock();
+                   return held != nullptr && held->typing.has_value();
+               }}};
     shown.when_shown([state]() {
         if (const std::shared_ptr<State> held = state.lock(); held != nullptr) {
             held->reload();
