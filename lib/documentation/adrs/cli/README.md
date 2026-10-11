@@ -20,3 +20,4 @@ The standing rules of the CLI's architecture, each written once, dated, and kept
 | [0006](backwards-compatibility.md) | Older versions keep working |
 | [0007](tab-completion.md) | Tab completion is answered by the binary, from live state |
 | [0008](module-map.md) | The module map is the layer law's one declaration |
+| [0009](built-in-model-lists.md) | Model lists Apogee carries are kept current with their vendors |

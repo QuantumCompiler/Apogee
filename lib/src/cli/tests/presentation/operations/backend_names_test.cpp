@@ -186,3 +186,20 @@ TEST_CASE("<backend>:<model> pins any model on an entry that names its model, an
     CHECK(none.backend.empty());
     CHECK(none.refusal.empty());
 }
+
+TEST_CASE("a built-in CLI model resolves bare on its CLI's entry, with no fetch",
+          "[operations][backend-names][aliases]") {
+    // 35: Claude Code's list and the Gemini CLI's aliases are rosters too.
+    Fixture fixture;
+    fixture.backend("claude", BackendType::ClaudeCli);
+    fixture.backend("gem", BackendType::GeminiCli);
+    const auto opus = resolve_session_model(fixture.config, "claude-opus-5");
+    CHECK(opus.backend == "claude");
+    CHECK(opus.pinned == "claude-opus-5");
+    CHECK(opus.roster == "claude-cli");
+    const auto flash = resolve_session_model(fixture.config, "flash");
+    CHECK(flash.backend == "gem");
+    CHECK(flash.pinned == "flash");
+    // A model no list names still runs through `<backend>:<model>` (34).
+    CHECK(resolve_session_model(fixture.config, "claude:claude-next").pinned == "claude-next");
+}

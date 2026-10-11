@@ -34,6 +34,11 @@ Work through the system in this order (read [`CLAUDE.md`](../../../lib/documenta
 7. **Root `README.md`** — if one exists and the branch changed how the project builds or installs, it says so. (There is deliberately **no** repo-root `CLAUDE.md` pointer — `lib/documentation/assistant/CLAUDE.md` is the entry point.)
 8. **Skills** (`.claude/skills/*/SKILL.md`) — any paths or process steps they reference that this branch moved or renamed.
 9. **The pipeline** — if the diff touches `.github/` or `lib/scripts/`, walk [DEVELOPER.md → Changing the pipeline](../../../lib/documentation/assistant/DEVELOPER.md#changing-the-pipeline) against it: `pr-ci.sh` mirrors any changed pull-request job, `changed.sh` covers anything new the CLI build reads, and `required-checks.py`'s stated assumptions still hold. If a CI job's name, matrix or set changed, the required checks must be re-applied before the merge. Run `lib/scripts/required-checks.py --pr <N>` (the dry run; it reads, never writes) if the pull request exists, and carry its output into the report.
+10. **The carried model lists** ([ADR 0009](../../../lib/documentation/adrs/cli/built-in-model-lists.md)) — check them whenever the diff touches a backend (`source/data/backends/`), the rosters, completion or model selection, or whenever a vendor has shipped, renamed or retired a model since a list's `…Reviewed` date.
+    - Read `built_in_rosters()`'s tables in `model_roster.cpp` against their sources, as the [DEVELOPER.md recipe](../../../lib/documentation/assistant/DEVELOPER.md#updating-a-carried-model-list) names them.
+    - A stale list is a finding, fixed in this branch by that recipe: rows, reviewed date, the roster test, a MILESTONES line.
+    - A CLI that has gained a list command means its carried list goes and `CatalogListing` comes, in this branch.
+    - Carry each list's reviewed date into the report.
 
 ## 3. Mechanical validation
 

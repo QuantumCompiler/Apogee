@@ -81,7 +81,8 @@ private:
 /// every gated call -- the condition `--tools` exists to require.
 [[nodiscard]] std::shared_ptr<SessionFlags> shell_session_flags(CLI::App& app,
                                                                 const std::string& chat_id,
-                                                                const std::string& suite = {});
+                                                                const std::string& suite = {},
+                                                                const std::string& model = {});
 
 /// The session view's driver: the picker over the saved conversations --
 /// straight into a new chat when there are none -- and a chosen one run as
@@ -118,10 +119,14 @@ public:
     /// with none open, opens a new chat under it (`chat --suite`). Returns
     /// what was done, or why not. The shell's thread.
     [[nodiscard]] std::string use_suite(const std::string& suite);
+    /// Moves the conversation onto `model` through its own `/model` (35), or,
+    /// with none open, opens a new chat on it (`chat -m`). Returns what was
+    /// done, or why not. The shell's thread.
+    [[nodiscard]] std::string use_model(const std::string& model);
 
 private:
-    void open(std::string chat_id, std::string suite = {});
-    void run(const std::string& chat_id, const std::string& suite);
+    void open(std::string chat_id, std::string suite = {}, std::string model = {});
+    void run(const std::string& chat_id, const std::string& suite, const std::string& model);
 
     tui::SessionView& view_;
     tui::Pump& pump_;

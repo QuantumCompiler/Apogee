@@ -13,8 +13,9 @@
 /// commands run and actions that call those cores -- never a second
 /// implementation of either.
 ///
-/// - Models: `models list`'s rows (`read_model_rows`); Enter `models info`,
-///   d `config set-default`.
+/// - Models: `models list`'s rows (`read_model_rows`) -- its backends and
+///   the models each runs from its roster (35); Enter `/model` in the
+///   session, i `models info`, d `config set-default`.
 /// - Chats: `chats list`'s rows (`session_row_view`); Enter opens one in the
 ///   session, i `chats info`, x `chats delete`.
 /// - Suites: the config's suites; Enter `/suite` in the session, d `config
@@ -34,13 +35,17 @@ struct WorkbenchHooks {
     std::function<std::string(const std::string& chat_id)> open_chat;
     /// Moves the session to a suite; returns what was done or why not.
     std::function<std::string(const std::string& suite)> use_suite;
+    /// Moves the session onto a backend or a model one runs (35), as `/model`
+    /// takes it; returns what was done or why not.
+    std::function<std::string(const std::string& model)> use_model;
     /// Shows the session view.
     std::function<void()> show_session;
 };
 
 /// Each view's options, over the config `context` names -- the reads and
 /// actions, for the shell and for the tests that hold them to the commands.
-[[nodiscard]] tui::ListOptions models_view_options(const RootContext& context);
+[[nodiscard]] tui::ListOptions models_view_options(const RootContext& context,
+                                                   const WorkbenchHooks& hooks);
 [[nodiscard]] tui::ListOptions chats_view_options(const WorkbenchHooks& hooks);
 [[nodiscard]] tui::ListOptions suites_view_options(const RootContext& context,
                                                    const WorkbenchHooks& hooks);

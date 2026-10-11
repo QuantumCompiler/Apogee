@@ -72,6 +72,7 @@ namespace {
     const WorkbenchHooks hooks{
         .open_chat = [&driver](const std::string& chat_id) { return driver.open_chat(chat_id); },
         .use_suite = [&driver](const std::string& suite) { return driver.use_suite(suite); },
+        .use_model = [&driver](const std::string& model) { return driver.use_model(model); },
         .show_session = [&shell, session_view]() { shell.activate(session_view); }};
     const std::vector<std::unique_ptr<tui::ListView>> workbench =
         make_workbench(pump, theme, context, hooks);

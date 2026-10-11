@@ -14,6 +14,7 @@
 #include "contracts/paths.h"
 #include "httpserver/admin_config.h"
 #include "logger/session.h"
+#include "operations/backend_names.h"
 
 namespace apogee::commands {
 
@@ -71,7 +72,7 @@ namespace {
 
 }  // namespace
 
-tui::ListOptions models_view_options(const RootContext& context) {
+tui::ListOptions models_view_options(const RootContext& context, const WorkbenchHooks& hooks) {
     tui::ListOptions options;
     options.title = "Models";
     options.columns = {"BACKEND", "TYPE", "MODEL", "ROLES", "STATE", "VERIFIED"};
@@ -100,7 +101,22 @@ tui::ListOptions models_view_options(const RootContext& context) {
         }
         return std::pair{config_heading(path, config), std::move(rows)};
     };
-    options.enter_label = "info";
+    // Enter moves the conversation onto the row (35) -- a backend, or a model
+    // one runs, named as `/model` takes it -- and i reads `models info`. A
+    // row `/model` cannot take (stored weights no entry runs) stays put.
+    options.enter_label = "use in the session";
+    options.open = [&context, hooks](const tui::ListRow& row) {
+        if (!hooks.use_model ||
+            resolve_session_model(harness::load_config(config_file(context)), row.key)
+                .backend.empty()) {
+            return;
+        }
+        (void)hooks.use_model(row.key);
+        if (hooks.show_session) {
+            hooks.show_session();
+        }
+    };
+    options.detail_key = "i";
     options.detail = [&context](const tui::ListRow& row) {
         const std::filesystem::path path = config_file(context);
         return lines_of(read_model_info(harness::load_config(path), row.key, path));
@@ -222,7 +238,8 @@ std::vector<std::unique_ptr<tui::ListView>> make_workbench(tui::Pump& pump, tui:
                                                            const RootContext& context,
                                                            const WorkbenchHooks& hooks) {
     std::vector<std::unique_ptr<tui::ListView>> views;
-    views.push_back(std::make_unique<tui::ListView>(pump, theme, models_view_options(context)));
+    views.push_back(
+        std::make_unique<tui::ListView>(pump, theme, models_view_options(context, hooks)));
     views.push_back(std::make_unique<tui::ListView>(pump, theme, chats_view_options(hooks)));
     views.push_back(
         std::make_unique<tui::ListView>(pump, theme, suites_view_options(context, hooks)));

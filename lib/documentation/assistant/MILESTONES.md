@@ -6472,7 +6472,80 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,095 
 - Rerun with the decoy cache in the environment, all five pass and nothing else changes. The only failures left are the mlx-driver tests colliding when run in parallel, which pass serially.
 - The full suite through `cicd.sh --test` (llama.cpp on) passes 3,095 of 3,095 with the hook, the pdftotext case skipped as before.
 
-Trade-off, recorded: Claude Code and Gemini still complete nothing after their colon. Neither prints its models, and an alias table in source would be the hardwiring M13 refused. The name is the user's to type, and the vendor's to accept or refuse.
+Trade-off, recorded: Claude Code and Gemini still complete nothing after their colon. Neither prints its models, and an alias table in source would be the hardwiring M13 refused. The name is the user's to type, and the vendor's to accept or refuse. *(Superseded the same day by item 35, at the user's call: built-in lists for both.)*
+
+### 2026-10-10 — `cli-model-aliases` (backlog item 35): every CLI's models in the table
+
+**Why.** After item 34, the user's `models list` still showed `claude`, `codex` and `gemini` as one row each: "the sub models for each cli are not registering under the models table." Two causes:
+- Codex's catalog *was* fetched, but `models list` folded every roster behind one line at the bottom of the table.
+- Claude Code and the Gemini CLI print no model list, so items 33 and 34 had nothing to show for them.
+
+The user asked whether `claude model list` could be reused. No such command exists (Claude Code 2.1.289, and its `--help` names none). The user's calls:
+- **a built-in list** for the two CLIs, relaxing M13's "nothing hardwired" for them alone, with Claude Code's list being "the sub models for each anthropic e.g. Opus5.5, Opus5, Fable5.1, Fable5";
+- **every roster row shown in the plain table.**
+
+- [x] **The built-in lists** (`backends/model_roster`'s `built_in_rosters()`), with their source and date in the code beside the table:
+  - **Claude Code** gets Anthropic's published model ids, everything its models overview listed on 2026-10-10 as current or still available: `claude-fable-5-1`, `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`, `claude-fable-5`, `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6`, plus `claude-opus-4-5` and `claude-haiku-4-5` by the API's aliases for the dated snapshots. Each id was checked against Anthropic's model-id page (the dateless `claude-{name}-{major}[-{minor}]` form). Claude Code 2.1.289 carries the 5.x ids itself, and it passes any id to the API.
+  - **Gemini CLI** gets its own aliases, `pro`, `flash` and `flash-lite`, the `GEMINI_MODEL_ALIAS_*` constants of Gemini CLI 0.46.0. No Google id list was verified to stand beside them.
+  - Each roster is `built_in`, never written to the cache (`save_roster_cache` skips it). `known_rosters()` reads it beside the cache, so an upgrade's list is live on its first run, and a roster fetched for the same type always wins.
+- [x] **One read for every reader**: completion (REPL, TUI and `__complete`), resolution, `models list`/`info`, `/models` and the workbench read `known_rosters()`. Only `providers scan`'s fetch reads and writes the cache itself. A built-in id resolves bare on its sole owner (`/model claude-opus-5`), and completes after `claude:`.
+- [x] **Rows, unfolded and named as they are selected** (`build_model_rows`):
+  - `claude:claude-opus-5-5`, `codex:gpt-5.5`, `gemini:flash`, under their entry, with no `--all`;
+  - `SOURCE` reads `built in` or `roster`, and `VERIFIED` reads `reviewed <date>` or `fetched <date>`;
+  - the JSON listing carries the same rows. M13's `(<type> roster)` spelling never shipped in a release.
+- [x] **`models info` for those names** (`render_pinned_model`): the entry, the list naming the model (built in, a fetched roster, or none, handed to the CLI as given), and how to select it. It replaces M13's one-line roster answer.
+- [x] **`/models`** lists each backend's models under it, in place of the folded line.
+- [x] **The TUI's Models view**: Enter moves the conversation onto the selected row, a backend or a model one runs (`WorkbenchHooks::use_model`, `TuiSessionDriver::use_model`: `/model <name>` into an open conversation, or a new chat on it, as Suites' Enter is `/suite`). `i` reads `models info`. A row `/model` cannot take (stored weights no entry runs) stays put.
+- [x] **Tests**: the built-in lists (read beside an empty cache, never saved, a fetch winning); the table's rows, order, provenance and JSON; `models info` for a listed, a bare and an unlisted model; resolution of a built-in id and a Gemini alias; the workbench's Enter and `i`. Three earlier tests moved to an Ollama entry for "a type with no list", since Claude Code now has one.
+
+**Verified on the user's own CLIs**, in a scratch `APOGEE_HOME`:
+- `models list` showed the 13 Anthropic ids under `claude`, Codex's 8 fetched models under `codex`, and the three aliases under `gemini`, with no `--all`.
+- `models info claude:claude-opus-5` named the entry and the list.
+- A piped chat switched to `claude-opus-5` and `flash` bare, each said.
+- One real turn, `complete -m claude-haiku-5-5` (an id the installed Claude Code binary does not itself carry), answered `OK`, with `--model claude-haiku-5-5` in Claude Code's recorded argv.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,100 of 3,100, the pdftotext case skipped as before. `clang-format` is clean on every file this item touched, and the violations left are all in M13's API-backend files, which this item doesn't touch. `make lint` was not run.
+
+Trade-off, recorded: Claude Code's list is Apogee's to keep current. A new Anthropic model is a row in `model_roster.cpp`, and a retired one a deletion, until Claude Code prints a list of its own. Then the fetched roster wins at once, with no change here.
+
+**Made a standing rule the same day (the user's word): [ADR 0009](../adrs/cli/built-in-model-lists.md), model lists Apogee carries are kept current with their vendors.** The lists are updated during development whenever relevant, by the change that finds them stale:
+- a vendor shipping, renaming or retiring a model;
+- a change touching a backend, the rosters, completion or model selection;
+- every release roll.
+
+A CLI that learns to list its models gets `CatalogListing` and loses its carried list. It is carried in four places:
+- each table now has its `...Reviewed` date (`kClaudeCodeReviewed`, `kGeminiCliReviewed`), shown to users as `reviewed <date>` in `models list` and `models info`, the way a fetched roster shows `fetched <date>`;
+- CLAUDE.md's per-change checklist;
+- a DEVELOPER.md recipe (Updating a carried model list: each list's source, the steps, the one-turn proof);
+- an audit step in the pre-MR docs skill, and a gate check in the release-roll skill, which reports and never edits.
+
+The roster test now holds that each reviewed date is a real date.
+
+### 2026-10-10 — `models-list-sections` (backlog item 36): cloud by provider, local by format
+
+**Why.** With item 35's rows in place, the user's `models list` was one table of 50 rows: local GGUFs, three vendor CLIs and their sub-models, sorted together by name. Their ask was cloud backends tabled by provider, adaptable to any number of providers and backends, and local backends split by format: SafeTensors, GGUF, then MLX.
+
+- [x] **Each row placed from the row alone** (`model_group`).
+  - A cloud row goes by its provider's backend type, ordered and labelled by the providers' table (28a): `Claude CLI · claude-cli`, `Codex CLI · codex-cli`, `Anthropic API · anthropic`, and so on. A provider with no entry has no table, and a new provider is a new table with no change here.
+  - A local row goes by what it is stored as: SafeTensors, GGUF, MLX, in the user's order. The Ollama CLI follows them, since it runs models on this machine, and Other comes last (a mock entry, anything with no format).
+- [x] **Sections of tables** (`render_model_table`): "Cloud backends", then "Local backends". Each table is headed and sizes its own columns, and leaves out:
+  - TYPE, which its heading names;
+  - ARCH and PROFILE on the cloud side;
+  - any column empty or `-` in every one of its rows.
+
+  A provider's sub-models stay under their entry. M4's consumed-snapshot fold is said under the SafeTensors table, with `--all` listing them as before.
+- [x] **The same placement in the JSON**: `section` (`cloud`/`local`) and `group` (the provider's type, or `safetensors`/`gguf`/`mlx`/`ollama-cli`/`other`), additive, with the rows and their order unchanged. The TUI's Models view, which mirrors the JSON row for row, is untouched, and the fields make grouping it a small later change.
+- [x] **Tests**:
+  - the sections over hand-built rows of every kind: headings in order, a missing provider absent, TYPE nowhere, each table's exact header line, a sub-model under its entry, the JSON fields;
+  - the fold under SafeTensors, and `--all` swapping it for the row;
+  - the colour test's header check made position-free;
+  - `cli.provider_surfacing`'s greps now finding the Claude CLI table by its heading, and rows by name with no TYPE column.
+
+**Verified on the user's install, read-only** (`models list` writes nothing):
+- the Claude CLI, Codex CLI and Gemini CLI tables under "Cloud backends", each entry's models under it, with no ARCH or PROFILE;
+- under "Local backends", the SafeTensors heading with its 13 folded snapshots said, then the GGUF table with no TYPE and no ROLES (no row has one).
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,101 of 3,101, the pdftotext case skipped as before. `clang-format` is clean on every file this item touched, and `make lint` was not run.
 
 ## Milestone AG — System insight
 

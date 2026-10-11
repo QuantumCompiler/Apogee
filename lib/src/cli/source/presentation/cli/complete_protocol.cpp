@@ -155,7 +155,7 @@ namespace {
             // The cached vendor rosters (M13): every model a configured
             // provider type's roster lists completes beside the backend
             // keys -- read from the disposable cache, never fetched here.
-            const backends::RosterCache rosters = backends::load_roster_cache();
+            const backends::RosterCache rosters = backends::known_rosters();
             for (const auto& [type, roster] : rosters.rosters) {
                 const bool configured_type =
                     std::any_of(config.backends.begin(), config.backends.end(),

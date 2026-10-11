@@ -31,7 +31,13 @@ struct RosterModel {
 /// One provider type's roster.
 struct ProviderRoster {
     std::vector<RosterModel> models;
-    std::string fetched_at;  ///< YYYY-MM-DD, shown wherever the roster is
+    /// YYYY-MM-DD, shown wherever the roster is: the day it was fetched -- or,
+    /// for a built-in list, the day it was last checked against its source
+    /// (ADR 0009).
+    std::string fetched_at;
+    /// Carried in the binary rather than fetched (35): a CLI that prints no
+    /// list of its own. Never written to the cache.
+    bool built_in = false;
 
     bool operator==(const ProviderRoster&) const = default;
 };
@@ -50,5 +56,17 @@ struct RosterCache {
 /// Writes the cache atomically. A failure is returned as its reason, never
 /// thrown -- the caller says it and moves on.
 [[nodiscard]] std::string save_roster_cache(const RosterCache& cache);
+
+/// The rosters Apogee carries for the vendor CLIs that print no model list
+/// (35, the user's call, relaxing M13's "nothing hardwired" for these two):
+/// Claude Code's is Anthropic's published model ids, its Gemini sibling's the
+/// CLI's own aliases. Each is `built_in`, with no fetch date.
+[[nodiscard]] RosterCache built_in_rosters();
+
+/// Every roster a model name is read from (35): the cache's, and each built-in
+/// one whose type the cache has none for -- a fetched roster always wins.
+/// What completion, resolution, the listings and `/models` read; only a fetch
+/// reads and writes the cache itself (`load_roster_cache`).
+[[nodiscard]] RosterCache known_rosters();
 
 }  // namespace apogee::backends

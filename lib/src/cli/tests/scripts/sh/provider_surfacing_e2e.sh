@@ -64,7 +64,10 @@ grep -q '^  ok   scan  not scanned yet' "$WORK_DIR/strip.txt" || fail "an unscan
 grep -q 'check --refresh-providers' "$WORK_DIR/strip.txt" || fail "no way to scan named"
 [ -e "$APOGEE_HOME/cache/providers.json" ] && fail "a plain check wrote the provider cache"
 PATH="$WORK_DIR/empty:/usr/bin:/bin" "$APOGEE_BIN" models list </dev/null >"$WORK_DIR/strip-list.txt" 2>&1
-grep -E '^claude +claude-cli .* no binary +no turn yet' "$WORK_DIR/strip-list.txt" >/dev/null \
+# Since 36 each provider is its own table, headed by its label and type.
+grep -q '^Claude CLI · claude-cli$' "$WORK_DIR/strip-list.txt" \
+    || fail "models list had no Claude CLI table: $(cat "$WORK_DIR/strip-list.txt")"
+grep -E '^claude +.* no binary +no turn yet' "$WORK_DIR/strip-list.txt" >/dev/null \
     || fail "models list did not say no binary: $(cat "$WORK_DIR/strip-list.txt")"
 
 export PATH="$WORK_DIR/bin:/usr/bin:/bin"
@@ -82,7 +85,7 @@ grep -q '^  ok   scan  last scanned ' "$WORK_DIR/scan.txt" || fail "the scan's t
 grep -qi 'authenticated' "$WORK_DIR/scan.txt" && fail "check claimed authentication"
 
 "$APOGEE_BIN" models list </dev/null >"$WORK_DIR/list.txt" 2>&1
-grep -E '^codex +codex-cli .* credentials found +no turn yet' "$WORK_DIR/list.txt" >/dev/null \
+grep -E '^codex +.* credentials found +no turn yet' "$WORK_DIR/list.txt" >/dev/null \
     || fail "codex's row lacked its tier: $(cat "$WORK_DIR/list.txt")"
 [ -s "$LOG" ] && fail "check or models list ran a turn: $(cat "$LOG")"
 
@@ -93,9 +96,9 @@ grep -q hello "$WORK_DIR/turn.txt" || fail "the turn did not answer"
 [ "$(grep -c exec "$LOG")" -eq 1 ] || fail "expected exactly one exec: $(cat "$LOG")"
 TODAY=$(date +%Y-%m-%d)
 "$APOGEE_BIN" models list </dev/null >"$WORK_DIR/after.txt" 2>&1
-grep -E "^codex +codex-cli .* credentials found +$TODAY" "$WORK_DIR/after.txt" >/dev/null \
+grep -E "^codex +.* credentials found +$TODAY" "$WORK_DIR/after.txt" >/dev/null \
     || fail "VERIFIED did not carry today: $(cat "$WORK_DIR/after.txt")"
-grep -E '^claude +claude-cli .* no turn yet' "$WORK_DIR/after.txt" >/dev/null \
+grep -E '^claude +.* no turn yet' "$WORK_DIR/after.txt" >/dev/null \
     || fail "claude was marked verified without a turn"
 "$APOGEE_BIN" check --no-color </dev/null >"$WORK_DIR/verified.txt" 2>&1
 grep -q "backend: codex  codex-cli -- verified -- answered a turn on $TODAY" "$WORK_DIR/verified.txt" \

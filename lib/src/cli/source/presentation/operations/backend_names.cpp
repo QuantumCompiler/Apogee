@@ -44,7 +44,7 @@ bool names_a_configured_backend(const harness::Config& config, std::string_view 
 
 RosterResolution resolve_roster_model(const harness::Config& config, std::string_view model) {
     RosterResolution out;
-    const backends::RosterCache cache = backends::load_roster_cache();
+    const backends::RosterCache cache = backends::known_rosters();
     for (const auto& [type, roster] : cache.rosters) {
         const bool listed =
             std::any_of(roster.models.begin(), roster.models.end(),

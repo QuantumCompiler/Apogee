@@ -14,6 +14,7 @@
 #include <tuple>
 #include <vector>
 
+#include "backends/model_roster.h"
 #include "backends/provider_cache.h"
 #include "cli/helpers.h"
 #include "harness/roles.h"
@@ -697,7 +698,7 @@ TEST_CASE("rows are coloured by what they are, and align the same without colour
     CHECK(line_starting("broken") == yellow);
     CHECK(line_starting("    no model_path set") == yellow);  // a note is its row's colour
     CHECK(line_starting("(not configured)") == dim);
-    CHECK(coloured.find("BACKEND") == 0);  // the header stays plain
+    CHECK(line_starting("BACKEND").empty());  // the header stays plain
 
     // Colour is laid over the text, never counted into a column's width.
     CHECK(std::regex_replace(coloured, std::regex{"\033\\[[0-9;]*m"}, "") == plain);
@@ -866,20 +867,30 @@ TEST_CASE("a snapshot a conversion consumed folds out of the listing, and the fo
     const std::string folded = render_model_table(rows);
     CHECK(folded.find("org--m/safetensors/aaaaaaaaaaaa") == std::string::npos);
     CHECK(folded.find("org--e2b/safetensors/cccccccccccc") != std::string::npos);
-    CHECK(folded.ends_with("\n1 snapshot consumed by a conversion is folded -- --all lists it\n"));
+    // Said under the SafeTensors table (36), right after its rows.
+    const std::size_t heading = folded.find("\nSafeTensors\n");
+    const std::size_t fold =
+        folded.find("\n1 snapshot consumed by a conversion is folded -- --all lists it\n");
+    REQUIRE(heading != std::string::npos);
+    REQUIRE(fold != std::string::npos);
+    CHECK(heading < folded.find("org--e2b/safetensors/cccccccccccc"));
+    CHECK(folded.find("org--e2b/safetensors/cccccccccccc") < fold);
 
-    // --all: everything, and no tail line -- every line the folded table has
-    // (its tail aside) is in it.
+    // --all: everything, and no fold line -- every line the folded table has
+    // (the fold line aside) is in it.
     const std::string all = render_model_table(rows, {}, true);
     CHECK(all.find("org--m/safetensors/aaaaaaaaaaaa") != std::string::npos);
     CHECK(all.find("folded") == std::string::npos);
     const std::vector<std::string> folded_lines = lines_of(folded);
     const std::vector<std::string> all_lines = lines_of(all);
-    for (std::size_t at = 0; at + 2 < folded_lines.size(); ++at) {
-        INFO(folded_lines[at]);
-        CHECK(std::ranges::find(all_lines, folded_lines[at]) != all_lines.end());
+    for (const std::string& line : folded_lines) {
+        if (line.find("folded") != std::string::npos) {
+            continue;
+        }
+        INFO(line);
+        CHECK(std::ranges::find(all_lines, line) != all_lines.end());
     }
-    CHECK(all_lines.size() == folded_lines.size() - 2 + 1);
+    CHECK(all_lines.size() == folded_lines.size());  // the fold line, a row in its place
 
     // The fold is the table's: a machine reader gets every row.
     CHECK(render_model_jsonl(rows).find("org--m/safetensors/aaaaaaaaaaaa") != std::string::npos);
@@ -1361,4 +1372,161 @@ TEST_CASE("models info gives a provider backend its evidence line", "[commands][
     CHECK(apogee::commands::render_model_info(config, "embedder", {}, {},
                                               apogee::commands::ProviderLens{&view, &cache})
               .find("provider:") == std::string::npos);
+}
+
+TEST_CASE("every model an entry runs is a row under it, named as it is selected",
+          "[commands][models][aliases]") {
+    // 35: no fold -- Claude Code's and the Gemini CLI's built-in lists and
+    // Codex's fetched one, each under its entry, without --all.
+    const apogee::testing::TempDir home{"rows-" + std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    apogee::backends::RosterCache cache;
+    cache.rosters["codex-cli"] = apogee::backends::ProviderRoster{
+        {{"gpt-5.5", "GPT-5.5"}, {"kimi-k3:cloud", "kimi"}}, "2026-10-11"};
+    cache.rosters["openai"] =
+        apogee::backends::ProviderRoster{{{"gpt-unconfigured", "x"}}, "2026-10-11"};
+    REQUIRE(apogee::backends::save_roster_cache(cache).empty());
+    const Config config = apogee::harness::parse_config(R"(
+backends:
+  claude:
+    type: claude-cli
+  codex:
+    type: codex-cli
+  gemini:
+    type: gemini-cli
+)",
+                                                        "test");
+    const std::vector<ModelRow> rows = build_model_rows(config);
+    std::vector<std::string> names;
+    for (const ModelRow& row : rows) {
+        names.push_back(row.backend);
+    }
+    // Sorted under its entry: the entry, then what it runs.
+    const auto at = [&names](const std::string& name) {
+        return std::find(names.begin(), names.end(), name) - names.begin();
+    };
+    REQUIRE(at("claude:claude-opus-5-5") < static_cast<std::ptrdiff_t>(names.size()));
+    CHECK(at("claude") < at("claude:claude-fable-5"));
+    CHECK(at("claude:claude-sonnet-4-6") < at("codex"));
+    CHECK(at("codex") < at("codex:gpt-5.5"));
+    CHECK(at("codex:kimi-k3:cloud") < at("gemini"));
+    CHECK(at("gemini") < at("gemini:flash"));
+    CHECK(at("gemini:pro") < static_cast<std::ptrdiff_t>(names.size()));
+    // An unconfigured type's roster shows nothing.
+    CHECK(std::none_of(names.begin(), names.end(), [](const std::string& name) {
+        return name.find("gpt-unconfigured") != std::string::npos;
+    }));
+
+    const ModelRow& opus = rows.at(static_cast<std::size_t>(at("claude:claude-opus-5-5")));
+    CHECK(opus.type == "claude-cli");
+    CHECK(opus.model == "claude-opus-5-5");
+    CHECK(opus.provenance == "built in");
+    CHECK(opus.verified.starts_with("reviewed 20"));  // its age, shown (ADR 0009)
+    const ModelRow& gpt = rows.at(static_cast<std::size_t>(at("codex:gpt-5.5")));
+    CHECK(gpt.provenance == "roster");
+    CHECK(gpt.verified == "fetched 2026-10-11");
+
+    // The plain table shows them all; nothing is folded.
+    const std::string table = render_model_table(rows);
+    CHECK(table.find("claude:claude-fable-5-1") != std::string::npos);
+    CHECK(table.find("codex:kimi-k3:cloud") != std::string::npos);
+    CHECK(table.find("gemini:flash-lite") != std::string::npos);
+    CHECK(table.find("--all lists") == std::string::npos);
+    // And the JSON listing carries the same rows.
+    CHECK(render_model_jsonl(rows).find(R"("backend":"claude:claude-opus-5")") !=
+          std::string::npos);
+}
+
+TEST_CASE("models info answers for a model an entry runs, listed or given",
+          "[commands][models][aliases]") {
+    const apogee::testing::TempDir home{"info-" + std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    const Config config = apogee::harness::parse_config(R"(
+backends:
+  claude:
+    type: claude-cli
+)",
+                                                        "test");
+    const std::string listed = render_model_info(config, "claude:claude-opus-5");
+    CHECK(listed.find("model:        claude-opus-5\n") != std::string::npos);
+    CHECK(listed.find("backend:      claude (claude-cli)\n") != std::string::npos);
+    CHECK(listed.find("listed:       built into apogee (Claude Opus 5), reviewed 20") !=
+          std::string::npos);
+    CHECK(listed.find("runs with:    /model claude:claude-opus-5") != std::string::npos);
+    // A bare id resolves on its sole owner.
+    CHECK(render_model_info(config, "claude-fable-5-1").find("backend:      claude") !=
+          std::string::npos);
+    // A model no list names is still the entry's to run.
+    CHECK(render_model_info(config, "claude:some-new-model")
+              .find("listed:       no list names it -- handed to claude as given") !=
+          std::string::npos);
+}
+
+TEST_CASE("the listing is a cloud section by provider and a local one by format, from the rows",
+          "[commands][models][listing][sections]") {
+    // 36: tables appear for what the rows hold, in a fixed order, each
+    // saying only what its rows say.
+    const auto row = [](std::string backend, std::string type, std::string format,
+                        std::string model) {
+        ModelRow made;
+        made.backend = std::move(backend);
+        made.type = std::move(type);
+        made.format = std::move(format);
+        made.model = std::move(model);
+        made.provenance = "-";
+        made.architecture = "-";
+        made.profile = "-";
+        made.state = "-";
+        made.verified = "-";
+        return made;
+    };
+    std::vector<ModelRow> rows;
+    rows.push_back(row("api", "anthropic", "", "claude-opus-5-5"));
+    rows.back().state = "key: store";
+    rows.push_back(row("claude", "claude-cli", "", ""));
+    rows.back().roles = "chat";
+    rows.push_back(row("claude:claude-opus-5", "claude-cli", "", "claude-opus-5"));
+    rows.back().provenance = "built in";
+    rows.push_back(row("local", "llamacpp", "gguf", "m.gguf"));
+    rows.back().architecture = "llama";
+    rows.push_back(row("lm", "mlx", "mlx", "org--m/mlx/aaaa"));
+    rows.push_back(row("(not configured)", "-", "safetensors", "org--s/safetensors/bbbb"));
+    rows.push_back(row("olla", "ollama-cli", "", "llama3"));
+    rows.push_back(row("test", "mock", "", "mock-1"));
+
+    const std::string table = render_model_table(rows);
+    std::size_t at = 0;
+    for (const char* heading :
+         {"Cloud backends\n", "\nClaude CLI · claude-cli\n", "\nAnthropic API · anthropic\n",
+          "Local backends\n", "\nSafeTensors\n", "\nGGUF\n", "\nMLX\n", "\nOllama CLI\n",
+          "\nOther\n"}) {
+        INFO(heading << "\n" << table);
+        const std::size_t found = table.find(heading, at);
+        REQUIRE(found != std::string::npos);
+        at = found;
+    }
+    // Nothing for a provider with no entry; TYPE nowhere, its heading says it.
+    CHECK(table.find("Codex CLI") == std::string::npos);
+    CHECK(table.find("TYPE") == std::string::npos);
+    // ARCH only on the local side, and only where a row has one; a column no
+    // row of a table fills is left out of it.
+    const auto header_after = [&table](const std::string& heading) {
+        const std::size_t start = table.find(heading) + heading.size();
+        return table.substr(start, table.find('\n', start) - start);
+    };
+    CHECK(header_after("\nClaude CLI · claude-cli\n") ==
+          "BACKEND               MODEL          ROLES  SOURCE");
+    CHECK(header_after("\nAnthropic API · anthropic\n") == "BACKEND  MODEL            STATE");
+    CHECK(header_after("\nGGUF\n") == "BACKEND  MODEL   ARCH");
+    // A provider's models stay under their entry.
+    CHECK(table.find("\nclaude ") < table.find("\nclaude:claude-opus-5 "));
+
+    // The JSON says where each row is tabled, the rows in their order.
+    CHECK(apogee::commands::model_row_json(rows.at(1))["section"] == "cloud");
+    CHECK(apogee::commands::model_row_json(rows.at(1))["group"] == "claude-cli");
+    CHECK(apogee::commands::model_row_json(rows.at(3))["group"] == "gguf");
+    CHECK(apogee::commands::model_row_json(rows.at(5))["group"] == "safetensors");
+    CHECK(apogee::commands::model_row_json(rows.at(6))["section"] == "local");
+    CHECK(apogee::commands::model_row_json(rows.at(6))["group"] == "ollama-cli");
+    CHECK(apogee::commands::model_row_json(rows.at(7))["group"] == "other");
 }

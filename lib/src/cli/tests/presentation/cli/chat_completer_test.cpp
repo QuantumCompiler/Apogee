@@ -589,8 +589,9 @@ backends:
     type: codex-cli
   work:
     type: codex-cli
-  claude:
-    type: claude-cli
+  local-ollama:
+    type: ollama-cli
+    model: llama3
 )",
                                                                          "test");
     apogee::backends::RosterCache cache;
@@ -602,5 +603,5 @@ backends:
     REQUIRE(sources.backend_rosters.size() == 2);
     CHECK(sources.backend_rosters.at("codex").front().name == "gpt-5.5");
     CHECK(sources.backend_rosters.at("work").front().name == "gpt-5.5");
-    CHECK_FALSE(sources.backend_rosters.contains("claude"));
+    CHECK_FALSE(sources.backend_rosters.contains("local-ollama"));
 }

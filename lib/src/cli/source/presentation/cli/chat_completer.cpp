@@ -602,7 +602,7 @@ ChatCompletionSources chat_completion_sources(const harness::Config& config,
     }
     // The cached rosters of the configured provider types (M13): what
     // `/model` can switch to beside the backends (33).
-    for (const auto& [type, roster] : backends::load_roster_cache().rosters) {
+    for (const auto& [type, roster] : backends::known_rosters().rosters) {
         if (std::ranges::none_of(config.backends, [&wanted = type](const auto& entry) {
                 return harness::to_string(entry.second.type) == wanted;
             })) {

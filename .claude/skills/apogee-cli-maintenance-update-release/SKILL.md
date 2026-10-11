@@ -17,6 +17,12 @@ Apogee's live version is stated in more than one place, and the pipeline trusts 
 
 At a boundary roll, the shipping version's **backlog table must be empty** — every row shipped (deleted, in MILESTONES) or deliberately moved. Rows still standing mean the roll waits, or the user moves them (`/apogee-cli-backlog-swap-item` to another table, or the whole-queue slide via `/apogee-cli-backlog-swap-version`) — ask, never relocate items on your own initiative. Likewise the shipped version's MILESTONES record and ROADMAP board should exist and read complete; gaps are reported, not papered over.
 
+**The carried model lists are checked against their vendors** ([ADR 0009](../../../lib/documentation/adrs/cli/built-in-model-lists.md)). Apogee carries a model list for each vendor CLI that prints none, in `lib/src/cli/source/data/backends/model_roster.cpp`:
+- Claude Code's is Anthropic's published model ids;
+- the Gemini CLI's is its own aliases.
+
+Before a boundary roll, read each list's source, named in the [DEVELOPER.md recipe](../../../lib/documentation/assistant/DEVELOPER.md#updating-a-carried-model-list), against the table and its `…Reviewed` date. A model the vendor has added or retired is a gate finding. Report it with the rows that would change. The update is a code change made by that recipe, in its own commit, before the roll and on the user's word; this skill doesn't make it. A list that is current is reported current, with its reviewed date.
+
 ## 3. The sweep — every carrier of the live number
 
 In one pass, oldest-truth first:

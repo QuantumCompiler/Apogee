@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <future>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -161,22 +162,24 @@ namespace {
     return {};
 }
 
-/// Each configured provider type's cached roster, folded to one line as
-/// `models list` folds it (M13) -- what `/models` says beside the backends.
-[[nodiscard]] std::vector<std::string> roster_folds(const harness::Config& config) {
-    std::vector<std::string> lines;
-    for (const auto& [type, roster] : backends::load_roster_cache().rosters) {
-        if (roster.models.empty() ||
-            std::ranges::none_of(config.backends, [&wanted = type](const auto& entry) {
+/// The models each owning entry runs from its type's roster (M13, 35), by
+/// the entry's key -- what `/models` lists under it.
+[[nodiscard]] std::map<std::string, std::vector<std::string>, std::less<>> roster_models(
+    const harness::Config& config) {
+    std::map<std::string, std::vector<std::string>, std::less<>> owned;
+    for (const auto& [type, roster] : backends::known_rosters().rosters) {
+        const auto owner =
+            std::ranges::find_if(config.backends, [&wanted = type](const auto& entry) {
                 return harness::to_string(entry.second.type) == wanted;
-            })) {
+            });
+        if (owner == config.backends.end()) {
             continue;
         }
-        lines.push_back(type + "'s roster: " + std::to_string(roster.models.size()) +
-                        " models (fetched " + roster.fetched_at +
-                        ") -- /model <id> runs one; Tab lists them");
+        for (const backends::RosterModel& model : roster.models) {
+            owned[owner->first].push_back(model.id);
+        }
     }
-    return lines;
+    return owned;
 }
 
 /// `text` without the double quotes a path with spaces is typed in.
@@ -1617,17 +1620,22 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         out.print_line(row);
                     }
                     break;
-                case ChatVerb::Models:
+                case ChatVerb::Models: {
+                    // Each backend, and under it what else it runs (35): the
+                    // models `/model <backend>:<model>` -- or the bare id --
+                    // switches to.
+                    const auto owned = roster_models(config);
                     for (const std::string& backend : config.backend_names()) {
                         out.print_line(backend == session.backend ? "* " + model_label(session)
                                                                   : "  " + backend);
-                    }
-                    // What else `/model` takes (33): each configured
-                    // provider's roster, folded.
-                    for (const std::string& fold : roster_folds(config)) {
-                        out.print_line(style.dim("  " + fold));
+                        if (const auto listed = owned.find(backend); listed != owned.end()) {
+                            for (const std::string& model : listed->second) {
+                                out.print_line(style.dim("      " + backend + ":" + model));
+                            }
+                        }
                     }
                     break;
+                }
                 case ChatVerb::Model: {
                     if (argument.empty()) {
                         out.print_line(model_label(session));

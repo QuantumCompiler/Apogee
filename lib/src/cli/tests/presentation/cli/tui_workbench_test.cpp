@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "backends/model_roster.h"
 #include "cli/models.h"
 #include "logger/session.h"
 #include "support/cli_home.h"
@@ -109,6 +110,11 @@ struct Bench {
     return text.find(part) != std::string::npos;
 }
 
+/// The Models view with no session beside it: Enter has nowhere to go.
+[[nodiscard]] apogee::tui::ListOptions models_view(const apogee::commands::RootContext& context) {
+    return apogee::commands::models_view_options(context, {});
+}
+
 void save_chat(const std::string& id, const std::string& title) {
     apogee::logger::Session session;
     session.chat_id = id;
@@ -123,7 +129,7 @@ void save_chat(const std::string& id, const std::string& title) {
 
 TEST_CASE("the models view draws exactly the rows models list reads", "[cli][tui][workbench]") {
     const apogee::testing::CliHome home{kConfig};
-    Bench bench{home, apogee::commands::models_view_options};
+    Bench bench{home, models_view};
     const std::string drawn = bench.frame();
     // `models list --output-format json`, read the same way, row for row.
     std::string out;
@@ -131,7 +137,7 @@ TEST_CASE("the models view draws exactly the rows models list reads", "[cli][tui
     REQUIRE(home.run({"models", "list", "--output-format", "json"}, &out, &err) == 0);
     const nlohmann::json document = nlohmann::json::parse(out);
     REQUIRE(document["data"].size() >= 2);
-    const apogee::tui::ListOptions options = apogee::commands::models_view_options(bench.context);
+    const apogee::tui::ListOptions options = models_view(bench.context);
     const auto [heading, rows] = options.load();
     REQUIRE(rows.size() == document["data"].size());
     for (std::size_t i = 0; i < rows.size(); ++i) {
@@ -142,21 +148,53 @@ TEST_CASE("the models view draws exactly the rows models list reads", "[cli][tui
         CHECK(has(drawn, row["backend"].get<std::string>()));
     }
     CHECK(has(drawn, "models.default = local"));
-    CHECK(has(drawn, "Enter info · d make default · r read again"));
-    // Enter reads `models info` for the row.
+    CHECK(has(drawn, "Enter use in the session · i info · d make default · r read again"));
+    // i reads `models info` for the row.
     bench.select("spare");
-    bench.press(Key::named(Key::Name::Return));
+    bench.press(Key::character("i"));
     CHECK(has(bench.frame(), "backend:"));
     bench.press(Key::named(Key::Name::Escape));
     CHECK_FALSE(has(bench.frame(), "Esc closes"));
+}
+
+TEST_CASE("Enter moves the conversation onto a row's model, i reads its info",
+          "[cli][tui][workbench][aliases]") {
+    // 35: what an entry runs is a row under it; Enter is `/model <row>` in
+    // the session beside the view, as the Suites view's Enter is `/suite`.
+    const apogee::testing::CliHome home{kConfig};
+    apogee::backends::RosterCache cache;
+    cache.rosters["mock"] = apogee::backends::ProviderRoster{{{"mock-pro", "Pro"}}, "2026-10-10"};
+    REQUIRE(apogee::backends::save_roster_cache(cache).empty());
+    std::vector<std::string> used;
+    int shown = 0;
+    const apogee::commands::WorkbenchHooks hooks{.use_model =
+                                                     [&used](const std::string& model) {
+                                                         used.push_back(model);
+                                                         return std::string{"/model "} + model +
+                                                                " sent to the conversation";
+                                                     },
+                                                 .show_session = [&shown]() { ++shown; }};
+    Bench bench{home, [&hooks](const apogee::commands::RootContext& context) {
+                    return apogee::commands::models_view_options(context, hooks);
+                }};
+    CHECK(has(bench.frame(), "local:mock-pro"));
+    bench.select("local:mock-pro");
+    bench.press(Key::character("i"));
+    CHECK(has(bench.frame(), "runs with:    /model local:mock-pro"));
+    bench.press(Key::named(Key::Name::Escape));
+    bench.press(Key::named(Key::Name::Return));
+    CHECK(used == std::vector<std::string>{"local:mock-pro"});
+    CHECK(shown == 1);
+    bench.select("spare");
+    bench.press(Key::named(Key::Name::Return));
+    CHECK(used == std::vector<std::string>{"local:mock-pro", "spare"});
 }
 
 TEST_CASE("make default leaves the file config set-default leaves", "[cli][tui][workbench]") {
     const apogee::testing::CliHome twin{kConfig};
     std::string said;
     REQUIRE(twin.run({"config", "set-default", "spare"}, &said) == 0);
-    for (auto make :
-         {apogee::commands::models_view_options, apogee::commands::config_view_options}) {
+    for (auto make : {models_view, apogee::commands::config_view_options}) {
         const apogee::testing::CliHome home{kConfig};
         Bench bench{home, make};
         bench.select("spare");

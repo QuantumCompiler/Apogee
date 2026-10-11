@@ -99,10 +99,8 @@ TEST_CASE(
     CHECK(has(ran.out, "M[main-own]<hello>\nM[mock-pro]<again>\nM[main-own]<third>\n"));
     CHECK(has(ran.err, "[apogee] switched to mock-pro -- mock's roster, on backend 'main'\n"));
     CHECK(has_line(ran.err, "main (mock-pro)"));  // /model names the pin
-    CHECK(has(ran.err, "* main (mock-pro)\n  other\n"));
-    CHECK(has(ran.err,
-              "  mock's roster: 2 models (fetched 2026-10-09) -- /model <id> runs one; Tab lists "
-              "them\n"));
+    // Each backend, and under it the models it runs (35).
+    CHECK(has(ran.err, "* main (mock-pro)\n      main:mock-pro\n      main:mock-mini\n  other\n"));
     CHECK(has(ran.err, "[apogee] switched to main\n"));
     CHECK(home.home.config_text() == home.config);
 }

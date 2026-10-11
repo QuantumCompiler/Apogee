@@ -34,6 +34,7 @@
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
+#include "operations/backend_names.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
 #include "views/download_progress.h"
@@ -695,33 +696,32 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
                         std::ranges::find(mlx_sources, row.model) != mlx_sources.end());
     }
 
-    // The cloud rosters (M13): each configured vendor type's catalogue as
-    // the vendor last listed it, ids verbatim from the disposable cache --
-    // folded behind one dim line each unless --all asks. Zero network here:
-    // fetching is registration's and --refresh's, never a listing's.
-    {
-        const backends::RosterCache roster_cache = backends::load_roster_cache();
-        for (const auto& [type, roster] : roster_cache.rosters) {
-            const bool configured_type =
-                std::ranges::any_of(config.backends, [&type = type](const auto& entry) {
-                    return harness::to_string(entry.second.type) == type;
-                });
-            if (!configured_type) {
-                continue;
-            }
-            for (const backends::RosterModel& model : roster.models) {
-                ModelRow row;
-                row.backend = "(" + type + " roster)";
-                row.type = type;
-                row.model = model.id;
-                row.provenance = "roster";
-                row.architecture = "-";
-                row.profile = "-";
-                row.state = "-";
-                row.verified = "fetched " + roster.fetched_at;
-                row.roster = true;
-                rows.push_back(std::move(row));
-            }
+    // Every model a configured entry runs beyond its own (M13, 35): each
+    // configured type's roster -- fetched, or carried for a CLI that prints
+    // none -- as a row under its owner, named as it is selected
+    // (`<owner>:<id>`), so it sorts beside the entry. The owner is the type's
+    // first entry by key, as a bare id resolves. Zero network here: fetching
+    // is registration's and --refresh's, never a listing's.
+    for (const auto& [type, roster] : backends::known_rosters().rosters) {
+        const auto owner =
+            std::ranges::find_if(config.backends, [&wanted = type](const auto& entry) {
+                return harness::to_string(entry.second.type) == wanted;
+            });
+        if (owner == config.backends.end()) {
+            continue;
+        }
+        for (const backends::RosterModel& model : roster.models) {
+            ModelRow row;
+            row.backend = owner->first + ":" + model.id;
+            row.type = type;
+            row.model = model.id;
+            row.provenance = roster.built_in ? "built in" : "roster";
+            row.architecture = "-";
+            row.profile = "-";
+            row.state = "-";
+            row.verified = (roster.built_in ? "reviewed " : "fetched ") + roster.fetched_at;
+            row.roster = true;
+            rows.push_back(std::move(row));
         }
     }
 
@@ -730,52 +730,97 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
     return rows;
 }
 
+ModelGroup model_group(const ModelRow& row) {
+    const std::optional<harness::BackendType> type = harness::backend_type_from_string(row.type);
+    const auto local = [](std::string id, std::string title, std::size_t order) {
+        return ModelGroup{
+            .section = "local", .id = std::move(id), .title = std::move(title), .order = order};
+    };
+    // A local model by what it is stored as, else by what runs it.
+    constexpr std::size_t kLocal = 1000;
+    if (row.format == models::kSafetensorsFormat) {
+        return local("safetensors", "SafeTensors", kLocal);
+    }
+    if (row.format == models::kGgufFormat || type == harness::BackendType::LlamaCpp) {
+        return local("gguf", "GGUF", kLocal + 1);
+    }
+    if (row.format == models::kMlxFormat || type == harness::BackendType::Mlx) {
+        return local("mlx", "MLX", kLocal + 2);
+    }
+    // A provider by its row in the providers' table -- any number of them,
+    // in that table's order. The Ollama CLI runs models on this machine.
+    if (type.has_value()) {
+        if (const backends::ProviderFacts* facts = backends::provider_for_type(*type);
+            facts != nullptr) {
+            std::string id{harness::to_string(*type)};
+            std::string title{facts->label};
+            if (*type == harness::BackendType::OllamaCli) {
+                return local(std::move(id), std::move(title), kLocal + 3);
+            }
+            return ModelGroup{
+                .section = "cloud",
+                .id = std::move(id),
+                .title = std::move(title),
+                .order = static_cast<std::size_t>(facts - backends::provider_table().data())};
+        }
+    }
+    return local("other", "Other", kLocal + 4);
+}
+
 std::string render_model_table(const std::vector<ModelRow>& all_rows, const ansi::Style& style,
                                bool all) {
     if (all_rows.empty()) {
         return "no backends configured -- run 'apogee config init' to write a starter config\n";
     }
-    // Consumed snapshots fold out unless asked for, and the fold is said (M4).
-    std::vector<ModelRow> rows;
+
+    // The tables, in their order, each with its rows in the listing's order
+    // (a provider's models under their entry). Consumed snapshots fold out
+    // unless asked for, said under the SafeTensors table (M4).
+    struct Table {
+        ModelGroup group;
+        std::vector<ModelRow> rows;
+    };
+
+    std::vector<Table> tables;
     std::size_t folded = 0;
-    // Roster rows fold per vendor (M13), each behind its own dim line.
-    std::map<std::string, std::pair<std::size_t, std::string>> roster_folds;
+    const auto table_for = [&tables](const ModelGroup& group) -> Table& {
+        for (Table& table : tables) {
+            if (table.group.id == group.id) {
+                return table;
+            }
+        }
+        tables.push_back(Table{.group = group, .rows = {}});
+        return tables.back();
+    };
     for (const ModelRow& row : all_rows) {
+        Table& table = table_for(model_group(row));
         if (row.consumed && !all) {
             ++folded;
-        } else if (row.roster && !all) {
-            auto& fold = roster_folds[row.type];
-            ++fold.first;
-            fold.second = row.verified;
         } else {
-            rows.push_back(row);
+            table.rows.push_back(row);
         }
     }
+    std::ranges::stable_sort(
+        tables, [](const Table& a, const Table& b) { return a.group.order < b.group.order; });
 
     using Get = std::function<const std::string&(const ModelRow&)>;
-    const std::vector<std::pair<std::string, Get>> columns{
+
+    struct Column {
+        std::string header;
+        Get get;
+        bool local_only = false;
+    };
+
+    const std::vector<Column> columns{
         {"BACKEND", [](const ModelRow& r) -> const std::string& { return r.backend; }},
-        {"TYPE", [](const ModelRow& r) -> const std::string& { return r.type; }},
         {"MODEL", [](const ModelRow& r) -> const std::string& { return r.model; }},
         {"ROLES", [](const ModelRow& r) -> const std::string& { return r.roles; }},
         {"SOURCE", [](const ModelRow& r) -> const std::string& { return r.provenance; }},
-        {"ARCH", [](const ModelRow& r) -> const std::string& { return r.architecture; }},
-        {"PROFILE", [](const ModelRow& r) -> const std::string& { return r.profile; }},
+        {"ARCH", [](const ModelRow& r) -> const std::string& { return r.architecture; }, true},
+        {"PROFILE", [](const ModelRow& r) -> const std::string& { return r.profile; }, true},
         {"STATE", [](const ModelRow& r) -> const std::string& { return r.state; }},
         {"VERIFIED", [](const ModelRow& r) -> const std::string& { return r.verified; }},
     };
-
-    std::vector<std::size_t> widths;
-    widths.reserve(columns.size());
-    for (const auto& [header, get] : columns) {
-        widths.push_back(width_of(rows, header, get));
-    }
-
-    std::ostringstream out;
-    for (std::size_t i = 0; i < columns.size(); ++i) {
-        pad(out, columns[i].first, widths[i], i + 1 == columns.size());
-    }
-    out << "\n";
 
     // Each line is laid out plain and coloured whole, so escape codes never
     // count toward a column's width.
@@ -785,32 +830,66 @@ std::string render_model_table(const std::vector<ModelRow>& all_rows, const ansi
         }
         return row.configured ? style.colorize(line, ansi::Color::Cyan) : style.dim(line);
     };
-    for (const ModelRow& row : rows) {
-        std::ostringstream line;
-        for (std::size_t i = 0; i < columns.size(); ++i) {
-            pad(line, columns[i].second(row), widths[i], i + 1 == columns.size());
-        }
-        out << paint(row, line.str()) << "\n";
-        if (!row.note.empty()) {
-            out << paint(row, "    " + row.note) << "\n";
-        }
-    }
-    if (folded > 0) {
-        out << "\n"
-            << style.dim(folded == 1 ? "1 snapshot consumed by a conversion is folded -- --all "
+    const auto fold_line = [&style, folded]() {
+        return style.dim(folded == 1 ? "1 snapshot consumed by a conversion is folded -- --all "
                                        "lists it"
                                      : std::to_string(folded) +
                                            " snapshots consumed by conversions are folded -- "
-                                           "--all lists them")
+                                           "--all lists them") +
+               "\n";
+    };
+
+    std::ostringstream out;
+    std::string section;
+    for (const Table& table : tables) {
+        const bool safetensors = table.group.id == models::kSafetensorsFormat;
+        if (table.rows.empty() && !(safetensors && folded > 0)) {
+            continue;
+        }
+        if (table.group.section != section) {
+            section = table.group.section;
+            out << (out.tellp() > 0 ? "\n" : "")
+                << style.bold(section == "cloud" ? "Cloud backends" : "Local backends") << "\n";
+        }
+        out << "\n"
+            << style.bold(table.group.title)
+            << (table.group.title == table.group.id || table.group.section == "local"
+                    ? std::string{}
+                    : style.dim(" · " + table.group.id))
             << "\n";
-    }
-    if (!roster_folds.empty()) {
-        out << (folded > 0 ? "" : "\n");
-        for (const auto& [type, fold] : roster_folds) {
-            out << style.dim(type + "'s roster: " + std::to_string(fold.first) + " models (" +
-                             fold.second +
-                             ") -- --all lists them; any runs with 'apogee chat -m <id>'")
-                << "\n";
+        // What this table says: its heading names the type, and a column
+        // empty in every row says nothing.
+        std::vector<std::pair<const Column*, std::size_t>> shown;
+        for (const Column& column : columns) {
+            if (column.local_only && table.group.section != "local") {
+                continue;
+            }
+            const bool says = std::ranges::any_of(table.rows, [&column](const ModelRow& row) {
+                const std::string& value = column.get(row);
+                return !value.empty() && value != "-";
+            });
+            if (says || column.header == "BACKEND") {
+                shown.emplace_back(&column, width_of(table.rows, column.header, column.get));
+            }
+        }
+        if (!table.rows.empty()) {
+            for (std::size_t i = 0; i < shown.size(); ++i) {
+                pad(out, shown[i].first->header, shown[i].second, i + 1 == shown.size());
+            }
+            out << "\n";
+        }
+        for (const ModelRow& row : table.rows) {
+            std::ostringstream line;
+            for (std::size_t i = 0; i < shown.size(); ++i) {
+                pad(line, shown[i].first->get(row), shown[i].second, i + 1 == shown.size());
+            }
+            out << paint(row, line.str()) << "\n";
+            if (!row.note.empty()) {
+                out << paint(row, "    " + row.note) << "\n";
+            }
+        }
+        if (safetensors && folded > 0) {
+            out << fold_line();
         }
     }
     return out.str();
@@ -828,6 +907,10 @@ nlohmann::json model_row_json(const ModelRow& row) {
     object["profile"] = row.profile;
     object["state"] = row.state;
     object["verified"] = row.verified;
+    // Where `models list` tables it (36): additive, the rows' order unchanged.
+    const ModelGroup group = model_group(row);
+    object["section"] = group.section;
+    object["group"] = group.id;
     if (!row.note.empty()) {
         object["note"] = row.note;
     }
@@ -1235,11 +1318,49 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
 
 }  // namespace
 
+namespace {
+
+/// `models info` for a model an entry runs by name (35): the entry, the list
+/// that names the model -- or none, when it is handed to the vendor as given
+/// -- and the spelling that selects it.
+[[nodiscard]] std::string render_pinned_model(const harness::Config& config,
+                                              const SessionModel& pin) {
+    const harness::BackendConfig* entry = config.find_backend(pin.backend);
+    const std::string type =
+        entry != nullptr ? std::string{harness::to_string(entry->type)} : std::string{};
+    std::string listed = "no list names it -- handed to " + pin.backend + " as given";
+    if (const backends::RosterCache rosters = backends::known_rosters();
+        const backends::ProviderRoster* roster = rosters.roster_for(type)) {
+        for (const backends::RosterModel& model : roster->models) {
+            if (model.id == pin.pinned) {
+                listed = roster->built_in ? "built into apogee (" + model.name + "), reviewed " +
+                                                roster->fetched_at
+                                          : type + "'s roster, fetched " + roster->fetched_at;
+                break;
+            }
+        }
+    }
+    const std::string selected = pin.backend + ":" + pin.pinned;
+    std::ostringstream out;
+    out << "model:        " << pin.pinned << "\n";
+    out << "backend:      " << pin.backend << " (" << type << ")\n";
+    out << "listed:       " << listed << "\n";
+    out << "runs with:    /model " << selected << " -- or 'apogee chat -m " << selected << "'\n";
+    return out.str();
+}
+
+}  // namespace
+
 std::string render_model_info(const harness::Config& config, std::string_view name,
                               const BusyProgress& progress, const std::filesystem::path& models_dir,
                               const ProviderLens& providers) {
     const auto entry = config.backends.find(std::string{name});
     if (entry == config.backends.end()) {
+        // A model an entry runs by name (33-35): a roster's, or
+        // `<backend>:<model>` -- which entry, from which list, how to pick it.
+        if (const SessionModel pin = resolve_session_model(config, name); !pin.pinned.empty()) {
+            return render_pinned_model(config, pin);
+        }
         // Not a backend: one set of weights in the store (M4).
         return models_dir.empty() ? std::string{}
                                   : render_stored_weights(config, name, progress, models_dir);
@@ -1622,27 +1743,6 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
                     }
                 }
                 fail("'" + *info_name + "' is a model -- name one set of its weights:" + sets);
-            }
-            // A cached vendor roster may know it (M13): say whose, and how
-            // it runs -- an answer, not a refusal.
-            {
-                const backends::RosterCache rosters = backends::load_roster_cache();
-                std::string owners;
-                std::string fetched;
-                for (const auto& [type, roster] : rosters.rosters) {
-                    for (const backends::RosterModel& model : roster.models) {
-                        if (model.id == *info_name) {
-                            owners += (owners.empty() ? std::string{} : ", ") + type;
-                            fetched = roster.fetched_at;
-                            break;
-                        }
-                    }
-                }
-                if (!owners.empty()) {
-                    std::cout << *info_name << "  on " << owners << "'s roster (fetched " << fetched
-                              << ") -- runs with 'apogee chat -m " << *info_name << "'\n";
-                    return;
-                }
             }
             fail("no backend or stored weights named '" + *info_name + "'");
         }

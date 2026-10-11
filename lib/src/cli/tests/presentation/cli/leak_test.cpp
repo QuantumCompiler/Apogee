@@ -237,7 +237,7 @@ TEST_CASE("the shell's workbench views draw no key, wherever it was stored",
     apogee::commands::RootContext context;
     context.config_path = world.config_path.string();
     for (const apogee::tui::ListOptions& options :
-         {apogee::commands::models_view_options(context),
+         {apogee::commands::models_view_options(context, {}),
           apogee::commands::config_view_options(context),
           apogee::commands::suites_view_options(context, {}),
           apogee::commands::chats_view_options({})}) {

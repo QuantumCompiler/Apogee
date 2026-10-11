@@ -205,8 +205,9 @@ TEST_CASE("after -m, <backend>: completes that entry's roster, once the colon is
 backends:
   codex:
     type: codex-cli
-  claude:
-    type: claude-cli
+  local-ollama:
+    type: ollama-cli
+    model: llama3
 )",
                                                                          "test");
     CompletionRequest request;
@@ -218,7 +219,8 @@ backends:
     const std::vector<std::string> bare = completion_candidates(request, config, commands());
     CHECK(contains(bare, "gpt-5.5"));
     CHECK_FALSE(contains(bare, "codex:gpt-5.5"));
-    request.current = "claude:";
+    // An entry whose type has no roster offers nothing after its colon.
+    request.current = "local-ollama:";
     CHECK(completion_candidates(request, config, commands()).empty());
 }
 

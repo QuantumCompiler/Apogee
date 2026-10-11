@@ -186,7 +186,8 @@ void TuiOutput::end_turn() {
 }
 
 std::shared_ptr<SessionFlags> shell_session_flags(CLI::App& app, const std::string& chat_id,
-                                                  const std::string& suite) {
+                                                  const std::string& suite,
+                                                  const std::string& model) {
     auto flags = std::make_shared<SessionFlags>();
     bind_session_flags(app, flags, SessionMode::Chat);
     std::vector<std::string> args{"chat", "--tools"};
@@ -197,6 +198,10 @@ std::shared_ptr<SessionFlags> shell_session_flags(CLI::App& app, const std::stri
     if (!suite.empty()) {
         args.emplace_back("--suite");
         args.push_back(suite);
+    }
+    if (!model.empty()) {
+        args.emplace_back("--model");
+        args.push_back(model);
     }
     std::vector<const char*> argv;
     argv.reserve(args.size());
@@ -247,7 +252,7 @@ void TuiSessionDriver::show_picker() {
     view_.show_picker(saved_chats(), [this](std::string chat_id) { open(std::move(chat_id)); });
 }
 
-void TuiSessionDriver::open(std::string chat_id, std::string suite) {
+void TuiSessionDriver::open(std::string chat_id, std::string suite, std::string model) {
     if (worker_.joinable()) {
         worker_.join();  // the last conversation, ended: its thread is done
     }
@@ -255,8 +260,8 @@ void TuiSessionDriver::open(std::string chat_id, std::string suite) {
         return;
     }
     open_ = true;
-    worker_ = std::thread{
-        [this, id = std::move(chat_id), suite = std::move(suite)]() { run(id, suite); }};
+    worker_ = std::thread{[this, id = std::move(chat_id), suite = std::move(suite),
+                           model = std::move(model)]() { run(id, suite, model); }};
 }
 
 std::string TuiSessionDriver::open_chat(const std::string& chat_id) {
@@ -285,12 +290,24 @@ std::string TuiSessionDriver::use_suite(const std::string& suite) {
     return "/suite " + suite + " sent to the conversation";
 }
 
-void TuiSessionDriver::run(const std::string& chat_id, const std::string& suite) {
+std::string TuiSessionDriver::use_model(const std::string& model) {
+    if (!open_) {
+        open({}, {}, model);
+        return "a new chat on " + model;
+    }
+    if (!view_.enter("/model " + model)) {
+        return "not now: the conversation is busy -- Ctrl-C there stops a turn";
+    }
+    return "/model " + model + " sent to the conversation";
+}
+
+void TuiSessionDriver::run(const std::string& chat_id, const std::string& suite,
+                           const std::string& model) {
     view_.begin_session();
     TuiOutput output{view_, held_};
     try {
         CLI::App app{"the shell's conversation", "chat"};
-        const std::shared_ptr<SessionFlags> flags = shell_session_flags(app, chat_id, suite);
+        const std::shared_ptr<SessionFlags> flags = shell_session_flags(app, chat_id, suite, model);
         run_session(context_, *flags, machine_, SessionMode::Chat, &output);
     } catch (const CLI::RuntimeError&) {
         // The session said why it could not go on, on stderr -- the shell's

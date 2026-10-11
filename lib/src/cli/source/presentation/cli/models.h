@@ -96,8 +96,9 @@ struct ModelRow {
     /// from this -- with no backend on it and nothing needing attention. The
     /// table folds it unless asked for everything (M4); nothing else changes.
     bool consumed = false;
-    /// A cloud roster's model (M13): a row `models list` folds behind one
-    /// dim per-vendor line unless --all asks, like a consumed snapshot's.
+    /// A model an entry runs from its type's roster (M13) -- fetched, or
+    /// built in for a CLI that prints none (35): a row named `<owner>:<id>`,
+    /// shown under its entry.
     bool roster = false;
 };
 
@@ -157,13 +158,37 @@ struct ProviderLens {
 /// Renders rows as an aligned table. Empty input yields a single explanatory
 /// line, never a bare header with nothing under it.
 ///
+/// Where a row sits in `models list` (36): its section and its table, read
+/// from the row alone -- a cloud provider's backend type, or what a local
+/// model is stored as -- so the text table and the JSON group one way.
+struct ModelGroup {
+    /// `cloud` or `local`.
+    std::string section;
+    /// The table's stable id: a provider's backend type (`claude-cli`,
+    /// `anthropic`), or `safetensors`, `gguf`, `mlx`, `ollama-cli`, `other`.
+    std::string id;
+    /// Its heading: the provider's label (`Claude CLI`), or the format's.
+    std::string title;
+    /// Its place: cloud before local, providers in the provider table's
+    /// order, then SafeTensors, GGUF, MLX, the Ollama CLI, anything else.
+    std::size_t order = 0;
+};
+
+[[nodiscard]] ModelGroup model_group(const ModelRow& row);
+
+/// The listing in sections (36): "Cloud backends", one table per provider
+/// present, and "Local backends", one per format -- each table sizing its
+/// own columns, leaving out TYPE (its heading names it), ARCH and PROFILE on
+/// the cloud side, and any column empty in every one of its rows.
+///
 /// Each row is coloured by what it is, with its note beneath in the same
 /// colour: a configured backend in Apogee's cyan, anything needing attention
 /// in the warning yellow, and what no backend points at dimmed. Alignment is
 /// measured on the plain text, so a colourless `style` gives the same table.
 ///
 /// A `consumed` snapshot is folded out unless `all`, and one line under the
-/// table counts what was folded, so the fold is never silent (M4).
+/// SafeTensors table counts what was folded, so the fold is never silent
+/// (M4).
 [[nodiscard]] std::string render_model_table(const std::vector<ModelRow>& rows,
                                              const ansi::Style& style = {}, bool all = false);
 
