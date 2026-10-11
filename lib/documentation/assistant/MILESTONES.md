@@ -6662,3 +6662,43 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,101 
 - **Stale is two and a half cadences**, so one slow sample is not a failure; a sample that read nothing marks the bar stale at once, its last values kept.
 
 **Notes.** The bar is the TUI's alone: `apogee system` keeps its one-shot scope (no `--watch`), and the bar keeps no history -- a reading, not a chart. Like the rest of the shell, the Windows bar is unverified on a real console.
+
+### 2026-10-10 — `tui-parity-law` (backlog item 37a): the shell is a mode
+
+**Why.** The shell shipped with seven views. The same day's parity spike counted 25 root subcommands, 7 with a shell surface and 18 with none, and nothing held the gap honest:
+- [ADR 0002](../adrs/cli/mode-parity.md) named three doors, not four;
+- the per-change checklist had no line for the shell;
+- which commands deliberately get no view lived in chat history.
+
+Track 37 (37a–37h, the user's placement, from that spike and a second one) draws the rest. Its law ships first, so coverage drift is a failing test from the first day rather than after the views exist.
+
+- [x] **[ADR 0010](../adrs/cli/the-shell-is-a-mode.md), the shell is a mode.** Every root subcommand's place in the shell is one of four classes:
+  - drawn by a named view;
+  - backfilled by a named pending item;
+  - covered by the exec line (37h), with no curated view;
+  - carved out, with the reason the exec line refuses it by.
+
+  A view computes nothing: it draws the command's carved rows and calls its carved core. The exec line is the parity floor, and classification is at the root subcommand. ADR 0002 gained one dated line pointing forward (ADRs are append-only), and the ADR index its row.
+- [x] **The table, in source** (`cli/tui_parity.h/.cpp`): `shell_surfaces()`, one row per root subcommand, seeded with today's truth:
+  - **views:** `chat` (Session), `chats`, `models`, `config` (and Suites), `version` (Home), `tui` (the door itself), `system` (the monitor bar, its page 37b's);
+  - **backfills:** `check`/`providers` (37b), `knowledge`/`embed`/`graph` (37c), `execute`/`symphonies` (37d), `task` (37e), `train`/`datasets` (37f), `agents`/`mcp`/`auth` (37g);
+  - **runner-covered:** `complete` and `analyze`, plus the hidden plumbing (`__complete`, `__mcp-tools`, `__machine-schema`), which the spike's help sweep never saw and the registry walk found;
+  - **carved out:** `serve`, `uninstall`, `reset`.
+
+  `shell_refusals()` is the exec line's one source of refusals, with the reason each says:
+  - the doors the shell already is (`chat`, `execute`, `tui`);
+  - the `$EDITOR` verbs (`agents edit`, `symphonies edit`), since the editor needs the terminal the shell holds;
+  - `reset`, `uninstall` and `serve` (the user's call, 2026-10-10).
+
+  `shell_law_violations(root)` names whatever breaks the law over a registered command tree: an unclassified subcommand, a row for a missing one, a refusal for words nothing answers to, a carve-out with no recorded refusal. It never passes an empty tree.
+- [x] **The test** (`tui_parity_test.cpp`): the real registry clean; a planted unclassified `frobnicate` named, alone; an empty registry a violation; the seeded classes and refusals as recorded.
+- [x] **The process**:
+  - a per-change checklist line in CLAUDE.md (a user-facing read or mutation places itself in the shell in the same change);
+  - DEVELOPER.md's "Adding a TUI view" recipe: carve the read and its document, carve the core, compose over `ListView`, ask before anything irreversible, byte-parity and leak-test rows, flip the row;
+  - the presentation layer card's pointer.
+
+Decisions taken while building, for veto:
+- **The table lives in source rather than in the test**, because 37h's runner must read its refusals from "one source" and a test file cannot be that source. The test holds the source table to the registry.
+- **The hidden plumbing verbs are classified, not exempted.** A rule of "every subcommand, the visible ones" would leave a loophole a new hidden command could slip through.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) ran 3,104 cases. 3,103 passed and the pdftotext case was skipped as before. The one failure was `harness.layer_context`: the presentation card's new pointer took it past its 3,000-byte limit. The pointer was shortened and that check rerun green. No command, view or help text changed. `make lint` was not run.

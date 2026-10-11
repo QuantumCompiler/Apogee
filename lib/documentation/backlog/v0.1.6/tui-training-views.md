@@ -25,4 +25,4 @@
 - [ ] A mock run launched from the view narrates in the widget and lands byte-identically to the command's; promote/rollback/cycle hold their parity and refusals.
 - [ ] 37a's classification rows for `train` and `datasets` flip; the full suite is green.
 
-**Scope note.** Earmarked for v0.1.6; gated on [37e](tui-progress-seam.md) (and through it [37a](tui-parity-law.md)). Out of scope: any trainer, promote or cycle behavior change, real-weights runs (the mock trainer is the test vehicle; the families stay optional per the standing rules).
+**Scope note.** Earmarked for v0.1.6; gated on [37e](tui-progress-seam.md) (and through it 37a (shipped, [Milestone AH](../../assistant/MILESTONES.md#milestone-ah--the-full-screen-tui))). Out of scope: any trainer, promote or cycle behavior change, real-weights runs (the mock trainer is the test vehicle; the families stay optional per the standing rules).

@@ -234,6 +234,8 @@ apogee_add_module(cli
     cli/session_output.h
     cli/session_output.cpp
     cli/tui_session.h
+    cli/tui_parity.h
+    cli/tui_parity.cpp
     cli/tui_session.cpp
     cli/tui_workbench.h
     cli/tui_workbench.cpp

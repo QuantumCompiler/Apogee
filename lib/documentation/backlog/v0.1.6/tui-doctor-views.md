@@ -27,4 +27,4 @@
 - [ ] The System page matches `apogee system`'s table; the bar's behavior is unchanged.
 - [ ] 37a's classification rows for `check`, `providers`, `system` flip to views; the full suite is green.
 
-**Scope note.** Earmarked for v0.1.6; gated on [37a](tui-parity-law.md). Out of scope: any new probe, any bar change, any `check` semantics change.
+**Scope note.** Earmarked for v0.1.6; gated on 37a (shipped, [Milestone AH](../../assistant/MILESTONES.md#milestone-ah--the-full-screen-tui)). Out of scope: any new probe, any bar change, any `check` semantics change.

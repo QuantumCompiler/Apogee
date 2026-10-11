@@ -2,6 +2,8 @@
 
 **Status:** Accepted · **Date:** 2026-10-03
 
+*2026-10-10: the full-screen shell is a fourth door. Its place for every subcommand is [ADR 0010](the-shell-is-a-mode.md)'s.*
+
 ## Context
 
 The CLI is driven three ways: interactively at a terminal, over the HTTP admin plane (`serve`), and over machine mode (JSONL on the child's pipes — the front-end contract). When two surfaces grow separate implementations of the same resolution logic, the copies disagree — a request runs on one backend from the terminal and another over HTTP. Apogee's `roles.h` exists to make that impossible, and the repo already carries the rule in fragments: config edits over HTTP are byte-identical to the CLI's, machine mode's schema is conformance-pinned to the code, served reads mirror CLI reads.

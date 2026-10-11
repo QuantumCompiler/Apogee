@@ -27,4 +27,4 @@
 - [ ] Graph navigation cards match the existing documents byte for byte.
 - [ ] 37a's classification rows flip; the full suite is green.
 
-**Scope note.** Earmarked for v0.1.6; gated on [37a](tui-parity-law.md). Out of scope: ingest/build surfaces (see Open calls), any retrieval behavior change, any graph write.
+**Scope note.** Earmarked for v0.1.6; gated on 37a (shipped, [Milestone AH](../../assistant/MILESTONES.md#milestone-ah--the-full-screen-tui)). Out of scope: ingest/build surfaces (see Open calls), any retrieval behavior change, any graph write.

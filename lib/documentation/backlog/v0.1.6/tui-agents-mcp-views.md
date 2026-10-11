@@ -28,4 +28,4 @@
 - [ ] The `$EDITOR` and secret-input carve-outs are recorded in 37a's classification with their reasons.
 - [ ] 37a's classification rows for `agents`, `mcp` and `auth` flip; the full suite is green.
 
-**Scope note.** Earmarked for v0.1.6; gated on [37a](tui-parity-law.md). Out of scope: a suspend-the-shell `$EDITOR` seam, any secret input in the shell, `analyze` (per the Open call), any MCP client behavior change.
+**Scope note.** Earmarked for v0.1.6; gated on 37a (shipped, [Milestone AH](../../assistant/MILESTONES.md#milestone-ah--the-full-screen-tui)). Out of scope: a suspend-the-shell `$EDITOR` seam, any secret input in the shell, `analyze` (per the Open call), any MCP client behavior change.

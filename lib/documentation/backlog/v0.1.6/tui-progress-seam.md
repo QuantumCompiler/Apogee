@@ -27,4 +27,4 @@
 - [ ] The unattended gate's behavior is unchanged — a view-started run denies `ask` exactly as a pipe-started one.
 - [ ] 37a's classification row for `task` flips; the full suite is green.
 
-**Scope note.** Earmarked for v0.1.6; gated on [37a](tui-parity-law.md). The seam is the deliverable; `train`/`datasets` consume it in [37f](tui-training-views.md). Out of scope: curated `embed ingest`, `graph build` and `models pull` surfaces — each runs in the shell through [37h](tui-command-runner.md)'s exec line, and a curated surface over this widget is a later call — and any ledger or policy change.
+**Scope note.** Earmarked for v0.1.6; gated on 37a (shipped, [Milestone AH](../../assistant/MILESTONES.md#milestone-ah--the-full-screen-tui)). The seam is the deliverable; `train`/`datasets` consume it in [37f](tui-training-views.md). Out of scope: curated `embed ingest`, `graph build` and `models pull` surfaces — each runs in the shell through [37h](tui-command-runner.md)'s exec line, and a curated surface over this widget is a later call — and any ledger or policy change.

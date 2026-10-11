@@ -26,4 +26,4 @@
 - [ ] `apogee execute` off a terminal and machine mode's execute are byte-identical to before.
 - [ ] 37a's classification rows for `execute` and `symphonies` flip; the full suite is green.
 
-**Scope note.** Earmarked for v0.1.6; gated on [37a](tui-parity-law.md). Out of scope: any wire or machine-mode change, symphony create/edit surfaces, any change to the walk or its caps.
+**Scope note.** Earmarked for v0.1.6; gated on 37a (shipped, [Milestone AH](../../assistant/MILESTONES.md#milestone-ah--the-full-screen-tui)). Out of scope: any wire or machine-mode change, symphony create/edit surfaces, any change to the walk or its caps.
