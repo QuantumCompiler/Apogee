@@ -15,10 +15,8 @@
 
 **Decisions made** (dated):
 - 2026-10-10 — The monitor bar is untouched: the System view is the one-shot page beside it, read on show, no tick of its own (32e's scope stands; the user's placement of the set in v0.1.6 on the spike report).
-
-**Open calls:**
-- [default: `f` (fix) asks `[y/N]` naming what a fix pass may do before running — a single key is not a typed command (32d's removal idiom); the pass's output is the command's own lines.]
-- [default: `r` (register) asks per selected provider row with 28b's offer wording; a provider already registered is refused in the command's words.]
+- 2026-10-10 — `f` (fix) asks `[y/N]` naming what a fix pass may do before running — a single key is not a typed command (32d's removal idiom); the pass's output is the command's own lines (the default, confirmed 2026-10-10).
+- 2026-10-10 — `r` (register) asks per selected provider row with 28b's offer wording; a provider already registered is refused in the command's words (the default, confirmed 2026-10-10).
 
 **Guardrail(s).** Byte-parity, the 32d way: the Check view's rows against `check --output-format json`; a register from the view leaving a config byte-identical to `providers scan --register`'s on a twin install (the M12 pin style); the System page's text against `apogee system`'s table for the same faked `SystemSource`. The leak test's planted key searched in all three views' rows. A stale row (the provider gone between read and act) refused as the command refuses.
 

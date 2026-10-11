@@ -15,10 +15,8 @@
 
 **Decisions made** (dated):
 - 2026-10-10 — Query interaction is an input row above the results list in the view (the Session view's input idiom), the result lines the command's own — no new result renderer (the user's placement of the set in v0.1.6 on the spike report; the design the spike proposed, accepted).
-
-**Open calls:**
-- [default: `ingest`, `build`, `update`, `reindex` and `dedupe` stay commands in the shell's first cut — they are long-running and belong to the progress seam's consumers; whether a later item takes them over [37e](tui-progress-seam.md)'s widget is a call made then, recorded on 37a's classification as the reason.]
-- [default: `knowledge capture`, `link` and `export`, and `graph export`, stay commands — capture is a model call with a source conversation, export writes files; neither is a view's keystroke.]
+- 2026-10-10 — `ingest`, `build`, `update`, `reindex` and `dedupe` get no curated key in the shell's first cut — long-running, they run through [37h](tui-command-runner.md)'s exec line as captured children, streamed; a curated surface over [37e](tui-progress-seam.md)'s widget is a later call (the default, confirmed 2026-10-10, after the runner-spike revision of its original "stay commands").
+- 2026-10-10 — `knowledge capture`, `link` and `export`, and `graph export`, get no curated key — capture is a model call with a source conversation, export writes files; each runs through the exec line (the default, confirmed 2026-10-10).
 
 **Guardrail(s).** Each view's rows golden against its own new JSON document; the query line's retriever/score wording against the command's for the same store (a fixture collection with and without vectors — the demotion said identically); graph cards byte-equal to `graph explain`'s document; deletes ask, a `no` writes nothing; the leak test's planted key searched in all three views.
 
