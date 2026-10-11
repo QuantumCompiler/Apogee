@@ -66,11 +66,11 @@ TEST_CASE("the table is today's truth: the views, the backfills, the exec line's
     };
     for (const char* view :
          {"chat", "chats", "models", "config", "version", "tui", "system", "check", "providers",
-          "knowledge", "embed", "graph", "execute", "symphonies"}) {
+          "knowledge", "embed", "graph", "execute", "symphonies", "task"}) {
         INFO(view);
         CHECK(kind(view) == ShellSurfaceKind::View);
     }
-    for (const char* pending : {"task", "train", "datasets", "agents", "mcp", "auth"}) {
+    for (const char* pending : {"train", "datasets", "agents", "mcp", "auth"}) {
         INFO(pending);
         CHECK(kind(pending) == ShellSurfaceKind::Backfill);
         CHECK(apogee::commands::find_shell_surface(pending)->detail.starts_with("37"));

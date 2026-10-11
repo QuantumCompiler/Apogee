@@ -6800,3 +6800,37 @@ Decisions taken while building, for veto:
 - **The Symphonies view sits after the workbench's four**, before the doctor's.
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,122 of 3,122, the pdftotext case skipped as before. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+### 2026-10-10 — `tui-progress-seam` (backlog item 37e): the progress seam, and the Task view
+
+**Why.** The shell had no surface for work that runs long. `task run`, the training runs, `datasets prepare|synth`, `embed ingest`, `models pull|convert|quantize` and `graph build|update` all narrate on the terminal through `views/` and the status line, while the shell offered only the notice row and a list view's one-line outcomes. This was the split's one root-cause wall (W3): one progress widget closes it for every consumer at once, and the Task view is its first.
+
+- [x] **`tui/progress`, the seam**: `Progress::start` runs a run's work on a thread of its own, from any thread. Each line the work says is posted to the pump in order and never waited for, so a stalled producer holds back lines, never a frame (the monitor bar's sampler idiom, 32e). The lines sit in a bounded scrollback. `cancel` reaches the run's own channel at most once, and the widget owns no protocol. Destroying it stops a run still going and joins it, so the shell quitting leaves no run behind.
+- [x] **`ListView` draws a run** (`ListOptions::progress`): its heading, running or ended, and its newest lines under the table. Ctrl-C there stops the run through its channel and the shell stays, as in the session view. The table is read again on a slow tick (two seconds) while the run is live, and once after it ends. The ask row can now put a question first (`ask_confirm`), and a row's own action keyed as the ask takes the key on the rows it applies to.
+- [x] **The task cores carved** (`cli/task_cmd`):
+  - `run_task_events` runs `task run "<goal>" --tools`, or `task resume <id>`, exactly as machine mode runs it, its events written to a stream the caller hands `drive`;
+  - `task_status_text` is the status card, its printers writing to a stream;
+  - `request_task_stop` is `task halt`/`task cancel`'s core, the command's line returned;
+  - `find_task` is the throwing read `resolve_task` now wraps.
+
+  The commands print what these return, so their output is unchanged.
+- [x] **The Task view** (`cli/tui_task`): the tasks as `task list --all --output-format json` states them, and Enter `task status`'s card.
+  - `r` runs a new task with the goal typed in the input row, asked first with the policy it runs under. On a row `task resume` takes, `r` resumes that task instead, asked first.
+  - `h` and `c` halt and cancel through the commands' own core, asked first.
+  - A run's narration is its machine-mode events worded in their own vocabulary (`task_event_lines`): the transition's event and status, a round's checks, a grant, the finish's reason, and a turn's tool narration, answer and error. Ctrl-C cancels a live run as `task cancel` does, through the request file its watcher reads.
+- [x] **The law**: `task` flipped to a view in `tui_parity.cpp`.
+- [x] **Tests**:
+  - `progress_test`: lines in order and the end told once they are in; a stalled producer, with draining returning at once, the frame drawn with what had arrived, and a second run refused; cancel reaching the channel exactly once; the bounded scrollback and a throw said; a list view drawing a run and Ctrl-C cancelling it;
+  - `tui_task_test`: the rows against `task list --all --output-format json` and the card against `task status`; a run from `r` (a no starting nothing) leaving the ledger `apogee task run --tools` leaves for the same turns, ids and clock aside, its asking tool denied by nobody, narrated in the events' words; `h` and `c` asked, a no writing nothing, a yes the commands' own line and ledger state; Ctrl-C cancelling a live run;
+  - the leak test's rows for the Task view. The widget's lines are the task events machine mode streams, which carry no key.
+
+Decisions taken while building, for veto:
+- **A run from the view is machine mode's run, in process**, on the widget's thread: `task run "<goal>" --tools --output-format stream-json`. Tools are on because the unattended gate is what makes a run safe with nobody present (a tool that asks is denied, a question with no declared answer ends the task), and nothing is granted beyond the config's permissions.
+- **The view takes the goal alone.** Checks (`--require`), the round budget, grants, a suite or an agent run through the exec line (37h).
+- **The `[task]` lines and a refusal go to stderr**, which the shell says on its notice row. A run that never started says so in the widget, with its exit code.
+- **The view lists every task** (`--all`), not the newest fifty `task list` shows by default.
+- **Ctrl-C in the Task view cancels the live run**, the session view's precedent, through `task cancel`'s request on the run's own task. `c` cancels any task that can be stopped.
+- **`Progress::start` is safe from any thread**: a resume starts from the view's worker as a new run starts from its key.
+- **Tasks sits after Symphonies**, before the doctor's views.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,131 of 3,131, the pdftotext case skipped as before. `clang-format` is clean on every touched file, and `make lint` was not run.

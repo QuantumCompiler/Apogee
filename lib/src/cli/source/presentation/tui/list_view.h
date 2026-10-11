@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "tui/progress.h"
 #include "tui/pump.h"
 #include "tui/theme.h"
 #include "tui/view.h"
@@ -96,6 +97,17 @@ struct ListOptions {
     /// worker (37d: a play handed to the session): asked there, its answer's
     /// first line said on the notice row.
     bool ask_here = false;
+    /// The question put before an ask runs, answered `y` or anything else,
+    /// no (37e: a task's goal and its policy, before the run spends model
+    /// turns); null asks at once. A row's own action keyed as the ask is
+    /// takes the key on the rows it applies to (37e: `r` resumes a resumable
+    /// task, and runs a new one elsewhere).
+    std::function<std::string(const ListRow& row, const std::string& text)> ask_confirm;
+    /// A long run the view started (37e: a task run): its narration drawn
+    /// under the table from the progress seam, Ctrl-C stopping it through its
+    /// own channel, and the table read again on a slow tick while it runs and
+    /// once when it ends.
+    std::shared_ptr<Progress> progress;
 };
 
 class ListView {

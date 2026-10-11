@@ -161,6 +161,8 @@ apogee_add_module(tui
     tui/session_view.cpp
     tui/list_view.h
     tui/list_view.cpp
+    tui/progress.h
+    tui/progress.cpp
     tui/monitor_bar.h
     tui/monitor_bar.cpp
 )
@@ -245,6 +247,8 @@ apogee_add_module(cli
     cli/tui_session.cpp
     cli/tui_symphonies.h
     cli/tui_symphonies.cpp
+    cli/tui_task.h
+    cli/tui_task.cpp
     cli/tui_workbench.h
     cli/tui_workbench.cpp
     cli/graph.h

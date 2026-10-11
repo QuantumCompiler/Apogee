@@ -1,6 +1,7 @@
 #include "tui/list_view.h"
 
 #include <algorithm>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <exception>
@@ -19,6 +20,12 @@
 namespace apogee::tui {
 
 namespace {
+
+/// How many of a run's newest lines the region under the table shows.
+constexpr std::size_t kProgressRows = 12;
+
+/// How often the table is read again while a run is live (32e's slow tick).
+constexpr std::chrono::milliseconds kRunTick{2000};
 
 /// A column's widest cell, at most this many cells: a long note runs on in
 /// the last column instead of pushing every other column off the screen.
@@ -76,7 +83,11 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
     /// The input row's text while it is open (37c).
     std::optional<std::string> typing;
     std::string last_asked;
+    /// The ask whose question is open (37e): its row and text.
+    std::optional<std::pair<ListRow, std::string>> confirming_ask;
     bool loading = true;
+    /// The run was live at the last tick: one more read once it has ended.
+    bool run_was_live = false;
     ftxui::Component component;
 
     void start() {
@@ -211,14 +222,38 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
         });
     }
 
+    /// Whether an action keyed `key` applies to the selected row: it takes
+    /// the key from the ask there.
+    [[nodiscard]] bool row_action_for(const std::string& key) const {
+        if (selected >= rows.size()) {
+            return false;
+        }
+        return std::ranges::any_of(options.actions, [this, &key](const ListAction& action) {
+            return action.key == key && !action.whole_view &&
+                   (!action.applies || action.applies(rows.at(selected)));
+        });
+    }
+
     /// Whether the question can be asked now.
     [[nodiscard]] bool askable() const {
         return options.ask && (!options.ask_needs_row || selected < rows.size());
     }
 
-    /// Whether a view's own action takes `r` from "read again".
+    /// The slow tick: the table read again while a run is live, and once
+    /// after it ends -- the run's own record, never a second source.
+    void tick() {
+        const bool live = options.progress && options.progress->running();
+        if (live || run_was_live) {
+            reload();
+        }
+        run_was_live = live;
+    }
+
+    /// Whether a view's own action, or its ask (37e), takes `r` from "read
+    /// again".
     [[nodiscard]] bool r_taken() const {
-        return std::ranges::any_of(options.actions,
+        return (options.ask && options.ask_key == "r") ||
+               std::ranges::any_of(options.actions,
                                    [](const ListAction& action) { return action.key == "r"; });
     }
 
@@ -302,9 +337,22 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
             }
             frame.push_back(vbox(std::move(shown)));
         }
+        if (options.progress && options.progress->started()) {
+            // The run's narration, its newest lines, under the table.
+            const Progress& run = *options.progress;
+            frame.push_back(separator());
+            frame.push_back(text(" " + run.heading() +
+                                 (run.running() ? " -- running · Ctrl-C stops it" : " -- ended")) |
+                            bold);
+            const std::vector<std::string>& said = run.lines();
+            const std::size_t from = said.size() > kProgressRows ? said.size() - kProgressRows : 0;
+            for (std::size_t i = from; i < said.size(); ++i) {
+                frame.push_back(text(" " + said.at(i)));
+            }
+        }
         if (typing.has_value()) {
             frame.push_back(text(" " + options.ask_label + ": " + *typing + "▏") | bold);
-        } else if (confirming.has_value()) {
+        } else if (confirming.has_value() || confirming_ask.has_value()) {
             frame.push_back(text(" " + question + " [y/N]") | bold);
         } else if (!notice.empty()) {
             frame.push_back(text(" " + notice) | dim);
@@ -326,7 +374,7 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
         } else if (!options.enter_label.empty()) {
             add("Enter " + options.enter_label);
         }
-        if (askable()) {
+        if (askable() && !row_action_for(options.ask_key)) {
             add(options.ask_key + " " + options.ask_label);
         }
         if (!options.detail_key.empty() && !detail.has_value()) {
@@ -357,7 +405,13 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
             if (!typing->empty() || options.ask_may_be_empty) {
                 last_asked = *typing;
                 typing.reset();
-                ask(selected < rows.size() ? rows.at(selected) : ListRow{}, last_asked);
+                ListRow row = selected < rows.size() ? rows.at(selected) : ListRow{};
+                if (options.ask_confirm) {
+                    question = options.ask_confirm(row, last_asked);
+                    confirming_ask = std::pair{std::move(row), last_asked};
+                } else {
+                    ask(std::move(row), last_asked);
+                }
             }
             return true;
         }
@@ -382,6 +436,23 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
     [[nodiscard]] bool on_key(const ftxui::Event& event) {
         if (typing.has_value()) {
             return on_typing(event);
+        }
+        if (event == ftxui::Event::CtrlC && options.progress && options.progress->running()) {
+            // The run stops through its own channel; the shell stays.
+            if (options.progress->cancel()) {
+                notice = "asked the run to stop";
+            }
+            return true;
+        }
+        if (confirming_ask.has_value()) {
+            auto [row, text] = std::move(*confirming_ask);
+            confirming_ask.reset();
+            if (event == ftxui::Event::Character('y')) {
+                ask(std::move(row), std::move(text));
+            } else {
+                notice = "not done";
+            }
+            return true;
         }
         if (confirming.has_value()) {
             const std::size_t action = *confirming;
@@ -410,7 +481,8 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
             detail.reset();
             return true;
         }
-        if (event == ftxui::Event::Character(options.ask_key) && askable()) {
+        if (event == ftxui::Event::Character(options.ask_key) && askable() &&
+            !row_action_for(options.ask_key)) {
             typing = last_asked;
             return true;
         }
@@ -494,6 +566,14 @@ ListView::ListView(Pump& pump, Theme theme, ListOptions options)
         ftxui::CatchEvent(ftxui::Renderer([state](bool /*focused*/) { return state->draw(); }),
                           [state](const ftxui::Event& event) { return state->on_key(event); });
     state_->start();
+    if (state_->options.progress) {
+        const std::weak_ptr<State> weak = state_;
+        pump.every(kRunTick, [weak]() {
+            if (const std::shared_ptr<State> held = weak.lock(); held != nullptr) {
+                held->tick();
+            }
+        });
+    }
 }
 
 ListView::~ListView() {

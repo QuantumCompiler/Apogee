@@ -245,6 +245,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/tui_knowledge_test.cpp
     presentation/cli/tui_parity_test.cpp
     presentation/cli/tui_session_test.cpp
+    presentation/cli/tui_task_test.cpp
     presentation/cli/tui_workbench_test.cpp
     presentation/cli/root_test.cpp
     presentation/cli/models_pull_test.cpp
@@ -265,6 +266,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/tui/shell_test.cpp
     presentation/tui/session_view_test.cpp
     presentation/tui/list_view_test.cpp
+    presentation/tui/progress_test.cpp
     presentation/tui/monitor_bar_test.cpp
     presentation/cli/helpers_test.cpp
     presentation/cli/tool_vectors_test.cpp

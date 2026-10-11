@@ -16,6 +16,7 @@
 #include "cli/tui_knowledge.h"
 #include "cli/tui_session.h"
 #include "cli/tui_symphonies.h"
+#include "cli/tui_task.h"
 #include "cli/tui_workbench.h"
 #include "cli/version_command.h"
 #include "platform/platform.h"
@@ -94,6 +95,11 @@ namespace {
     // The symphonies beside them (37d), played through the session.
     tui::ListView symphonies{pump, theme, symphonies_view_options(context, hooks)};
     (void)shell.add(symphonies.view());
+    // The tasks (37e): a run's narration through the progress seam, which
+    // stops a run still going before the shell's own end.
+    const auto task_run = std::make_shared<tui::Progress>(pump);
+    tui::ListView tasks{pump, theme, task_view_options(context, task_run, machine_budget)};
+    (void)shell.add(tasks.view());
     // The doctor beside it (37b): the report, the providers, the machine.
     const std::vector<std::unique_ptr<tui::ListView>> doctor =
         make_doctor_views(pump, theme, context);

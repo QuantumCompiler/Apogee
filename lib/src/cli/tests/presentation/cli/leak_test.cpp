@@ -17,6 +17,7 @@
 #include "cli/tui_doctor.h"
 #include "cli/tui_knowledge.h"
 #include "cli/tui_symphonies.h"
+#include "cli/tui_task.h"
 #include "cli/tui_workbench.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
@@ -250,7 +251,8 @@ TEST_CASE("the shell's workbench views draw no key, wherever it was stored",
           apogee::commands::knowledge_view_options(context),
           apogee::commands::collections_view_options(context),
           apogee::commands::graph_view_options(context),
-          apogee::commands::symphonies_view_options(context, {})}) {
+          apogee::commands::symphonies_view_options(context, {}),
+          apogee::commands::task_view_options(context, nullptr)}) {
         const auto [heading, rows] = options.load();
         std::string drawn;
         for (const std::string& line : heading) {

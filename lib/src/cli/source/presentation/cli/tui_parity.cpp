@@ -27,8 +27,8 @@ constexpr std::array kSurfaces{
     ShellSurface{"graph", View, "Graph"},
     ShellSurface{"execute", View, "Session (the picker's execute door)"},
     ShellSurface{"symphonies", View, "Symphonies"},
+    ShellSurface{"task", View, "Tasks (a run narrated through the progress seam)"},
     // --- backfills: track 37 draws them ---------------------------------------
-    ShellSurface{"task", Backfill, "37e"},
     ShellSurface{"train", Backfill, "37f"},
     ShellSurface{"datasets", Backfill, "37f"},
     ShellSurface{"agents", Backfill, "37g"},
