@@ -95,26 +95,107 @@ constexpr std::size_t kNumberedViews = 9;
     return ftxui::text(std::move(text)) | ftxui::dim;
 }
 
+/// The tab strip's labels at `width` (37b): every view named while they fit;
+/// past that, the views not shown as their numbers alone, the shown one named
+/// still; past even that, a window of numbers around the shown one, an
+/// ellipsis where the strip goes on. The view shown is always named.
+[[nodiscard]] std::vector<std::string> tab_labels(const Shell::State& state, int width) {
+    const auto measure = [](const std::vector<std::string>& labels) {
+        int cells = 0;
+        for (const std::string& label : labels) {
+            cells += ftxui::string_width(label);
+        }
+        return cells;
+    };
+    const std::size_t count = state.views.size();
+    const auto selected = static_cast<std::size_t>(state.selected);
+    std::vector<std::string> full;
+    std::vector<std::string> compact;
+    for (std::size_t i = 0; i < count; ++i) {
+        const std::string number = std::to_string(i + 1);
+        const std::string named = number + " " + state.views.at(i).title();
+        full.push_back(i == selected ? "[" + named + "]" : " " + named + " ");
+        compact.push_back(i == selected ? "[" + named + "]" : " " + number + " ");
+    }
+    const int room = width - 1;  // the strip's right margin
+    if (measure(full) <= room) {
+        return full;
+    }
+    if (measure(compact) <= room) {
+        return compact;
+    }
+    // A window around the shown view, widened while it fits.
+    std::size_t first = selected;
+    std::size_t last = selected;
+    const auto window = [&compact, &first, &last, count]() {
+        std::vector<std::string> shown;
+        if (first > 0) {
+            shown.emplace_back(" … ");
+        }
+        for (std::size_t i = first; i <= last; ++i) {
+            shown.push_back(compact.at(i));
+        }
+        if (last + 1 < count) {
+            shown.emplace_back(" … ");
+        }
+        return shown;
+    };
+    for (bool grew = true; grew;) {
+        grew = false;
+        if (last + 1 < count) {
+            ++last;
+            if (measure(window()) <= room) {
+                grew = true;
+            } else {
+                --last;
+            }
+        }
+        if (first > 0) {
+            --first;
+            if (measure(window()) <= room) {
+                grew = true;
+            } else {
+                ++first;
+            }
+        }
+    }
+    return window();
+}
+
+/// Whether the title fits beside the tabs at `width`.
+[[nodiscard]] bool shows_title(const Shell::State& state, int width) {
+    int cells = ftxui::string_width(" " + state.options.title + " ") + 1;
+    for (const std::string& label : tab_labels(state, width)) {
+        cells += ftxui::string_width(label);
+    }
+    return cells <= width;
+}
+
 [[nodiscard]] ftxui::Element draw_frame(Shell::State& state) {
     using namespace ftxui;  // NOLINT(google-build-using-namespace): the DOM's vocabulary
     // What the views wrap to, before any of them draws.
-    set_frame_width(state.fixed_width > 0 ? state.fixed_width : Terminal::Size().dimx);
+    const int width = state.fixed_width > 0 ? state.fixed_width : Terminal::Size().dimx;
+    set_frame_width(width);
+    const std::vector<std::string> labels = tab_labels(state, width);
     Elements tabs;
-    for (std::size_t i = 0; i < state.views.size(); ++i) {
-        const std::string label = std::to_string(i + 1) + " " + state.views.at(i).title();
-        if (static_cast<int>(i) == state.selected) {
-            Element tab = text("[" + label + "]") | bold;
+    for (std::size_t i = 0; i < labels.size(); ++i) {
+        if (labels.at(i).starts_with("[")) {
+            Element tab = text(labels.at(i)) | bold;
             tabs.push_back(state.options.theme.color ? tab | color(Color::Cyan) : tab);
         } else {
-            tabs.push_back(text(" " + label + " ") | dim);
+            tabs.push_back(text(labels.at(i)) | dim);
         }
     }
-    Element title = text(" " + state.options.title + " ") | bold;
-    if (state.options.theme.color) {
-        title = title | color(Color::Cyan);
-    }
     Elements rows;
-    rows.push_back(hbox({title, filler(), hbox(std::move(tabs)), text(" ")}));
+    if (shows_title(state, width)) {
+        Element title = text(" " + state.options.title + " ") | bold;
+        if (state.options.theme.color) {
+            title = title | color(Color::Cyan);
+        }
+        rows.push_back(hbox({title, filler(), hbox(std::move(tabs)), text(" ")}));
+    } else {
+        rows.push_back(hbox({filler(), hbox(std::move(tabs)), text(" ")}));
+    }
     rows.push_back(separator());
     rows.push_back(state.views.empty() ? text(" nothing to show yet") | dim | flex
                                        : clip(state.stage->Render()));

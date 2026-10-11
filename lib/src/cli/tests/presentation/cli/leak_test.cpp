@@ -14,6 +14,7 @@
 #include "cli/auth_cmd.h"
 #include "cli/check.h"
 #include "cli/models.h"
+#include "cli/tui_doctor.h"
 #include "cli/tui_workbench.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
@@ -240,7 +241,10 @@ TEST_CASE("the shell's workbench views draw no key, wherever it was stored",
          {apogee::commands::models_view_options(context, {}),
           apogee::commands::config_view_options(context),
           apogee::commands::suites_view_options(context, {}),
-          apogee::commands::chats_view_options({})}) {
+          apogee::commands::chats_view_options({}), apogee::commands::check_view_options(context),
+          apogee::commands::providers_view_options(context),
+          apogee::commands::system_view_options(
+              apogee::commands::SystemSeams{.wait = [](std::chrono::milliseconds) {}})}) {
         const auto [heading, rows] = options.load();
         std::string drawn;
         for (const std::string& line : heading) {

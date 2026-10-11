@@ -19,10 +19,10 @@ constexpr std::array kSurfaces{
     ShellSurface{"config", View, "Config (and Suites)"},
     ShellSurface{"version", View, "Home"},
     ShellSurface{"tui", View, "the shell itself -- the door it is opened by"},
-    ShellSurface{"system", View, "the monitor bar; its one-shot page is 37b's"},
+    ShellSurface{"system", View, "System (and the monitor bar)"},
     // --- backfills: track 37 draws them ---------------------------------------
-    ShellSurface{"check", Backfill, "37b"},
-    ShellSurface{"providers", Backfill, "37b"},
+    ShellSurface{"check", View, "Check"},
+    ShellSurface{"providers", View, "Providers"},
     ShellSurface{"knowledge", Backfill, "37c"},
     ShellSurface{"embed", Backfill, "37c"},
     ShellSurface{"graph", Backfill, "37c"},

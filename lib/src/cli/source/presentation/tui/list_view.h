@@ -40,10 +40,14 @@ struct ListAction {
     /// The question asked first, answered `y` or anything else, no; null
     /// runs it at once.
     std::function<std::string(const ListRow&)> confirm;
-    /// Runs it, on the view's worker thread, and returns what to say; a
-    /// throw is said as the reason it was not done. The table is read again
-    /// after.
+    /// Runs it, on the view's worker thread, and returns what to say -- a
+    /// line on the notice row, or several, drawn whole under the table until
+    /// Esc (37b: a fix pass's report); a throw is said as the reason it was
+    /// not done. The table is read again after.
     std::function<std::string(const ListRow&)> run;
+    /// A pass over the whole view rather than its selected row (37b: a fix,
+    /// a scan): offered with no row at all, and run with an empty one.
+    bool whole_view = false;
 };
 
 struct ListOptions {
@@ -64,7 +68,13 @@ struct ListOptions {
     /// The key that shows `detail` when Enter opens instead (the chats
     /// view's `i`); empty when Enter shows it.
     std::string detail_key;
+    /// The actions, by key. An action keyed `r` takes the key from "read
+    /// again" (37b) -- the view still reads afresh each time it is shown and
+    /// after every action.
     std::vector<ListAction> actions;
+    /// The read is a page, not a table (37b: the System view): its lines
+    /// are the content, drawn plain, with no column header and no rows.
+    bool page = false;
 };
 
 class ListView {

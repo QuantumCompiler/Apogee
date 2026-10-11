@@ -193,3 +193,33 @@ TEST_CASE("a manual pump runs what was posted, in order, when drained", "[tui][p
     pump.exit();
     CHECK(pump.exited());
 }
+
+TEST_CASE("the tab strip fits any width, the shown view always named", "[tui][shell]") {
+    // 37b: track 37's views outgrow an 80-column strip. Past the width the
+    // views not shown become their numbers; past that, a window around the
+    // shown one, an ellipsis where the strip goes on.
+    Shell shell{{.title = "apogee test", .theme = {.color = false}}};
+    for (const char* title : {"Session", "Models", "Chats", "Suites", "Config", "Check",
+                              "Providers", "System", "Home", "Keys"}) {
+        shell.add(apogee::tui::text_view(title, {std::string{title} + " page"}));
+    }
+    const auto strip = [&shell](int width) {
+        const std::string frame = shell.render_text(width, 6);
+        return frame.substr(0, frame.find('\n'));
+    };
+    const std::string wide = strip(160);
+    CHECK(wide.find("apogee test") != std::string::npos);
+    CHECK(wide.find("[1 Session]") != std::string::npos);
+    CHECK(wide.find(" 7 Providers ") != std::string::npos);
+
+    const std::string narrow = strip(80);
+    CHECK(narrow.find("[1 Session]") != std::string::npos);
+    CHECK(narrow.find(" 7 ") != std::string::npos);
+    CHECK(narrow.find("Providers") == std::string::npos);
+
+    shell.activate(6);
+    const std::string tight = strip(30);
+    CHECK(tight.find("[7 Providers]") != std::string::npos);
+    CHECK(tight.find("…") != std::string::npos);
+    CHECK(tight.find("apogee test") == std::string::npos);
+}

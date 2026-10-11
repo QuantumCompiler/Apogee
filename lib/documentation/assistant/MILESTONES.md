@@ -6702,3 +6702,44 @@ Decisions taken while building, for veto:
 - **The hidden plumbing verbs are classified, not exempted.** A rule of "every subcommand, the visible ones" would leave a loophole a new hidden command could slip through.
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) ran 3,104 cases. 3,103 passed and the pdftotext case was skipped as before. The one failure was `harness.layer_context`: the presentation card's new pointer took it past its 3,000-byte limit. The pointer was shortened and that check rerun green. No command, view or help text changed. `make lint` was not run.
+
+### 2026-10-10 — `tui-doctor-views` (backlog item 37b): Check, Providers, System
+
+**Why.** Three read surfaces the shell could not show. `check` had its rows and a JSON document but no view. `providers scan` printed its rows with no machine read at all. `apogee system`'s full reading was off the shell, which shows only the monitor bar's live half by 32e's design. This closes the doctor's slice of the uncovered subcommands and the reads with no row function.
+
+- [x] **The Check view** (`cli/tui_doctor`).
+  - `check`'s rows, drawn from its own JSON document, with the verdict above them. Enter shows a row's detail and its remedy.
+  - `f` runs the fix pass after an ask that names what it may do. Its lines are the command's (`fixed: …`, `nothing to fix`), shown whole.
+  - The command's pieces are carved so both run the same ones: `check_inputs`, `read_check_report`, `fix_install`, and `check_verdict` for the verdict line. `run_check_pass` and the command now run through them, and `check`'s own tests are unchanged.
+- [x] **The Providers view**: what the last explicit scan found, read from the provider cache. The view starts no probe of its own (`cli.no_provider_probes`: it reaches the prober only through `providers_cmd`, an allowed file).
+  - `s` runs the command's own scan, on that key.
+  - `r` registers the selected provider through the registration core over the last scan, after the offer's own question (`Found claude -- register it as a backend?`). Its words are the command's, a refusal included.
+  - The rows are one function, `provider_rows`, drawn by the human scan, the new document and the view.
+- [x] **`providers scan --output-format json`**: the rows, plus `registration` and `rosters` when `--register` or `--refresh` did something, each beside them rather than printed around them. The roster fetch now returns its lines for the caller to say. machine-mode.md gained the document's row.
+- [x] **The System page**: `apogee system`'s table, read each time the view is shown and off the shell's thread, because the read waits out a 500 ms CPU window. The bar keeps the ticking, with no second watcher.
+- [x] **`ListView`'s track-37 additions**:
+  - an action over the whole view (`whole_view`: a fix pass, a scan), offered and run with no row;
+  - a view's own `r` taking the key from "read again";
+  - an answer of several lines drawn whole under the table;
+  - a read drawn as a page (`page`).
+
+  The workbench's shared helpers moved to `cli/tui_common`. The shell gains the three views after the workbench's.
+- [x] **The tab strip fits any width.** Track 37's views outgrew an 80-column strip; `cli.tui_shell` caught it on a real terminal, never seeing `[1 Session]`. Past the width:
+  - the views not shown become their numbers (` 7 `), and the shown one stays named;
+  - past that, the title gives way;
+  - past even that, the strip becomes a window of numbers around the shown view, an ellipsis where it goes on.
+
+  `shell_test` holds the strip at three widths.
+- [x] **The law**: `check`, `providers` and `system` flipped to views in `tui_parity.cpp`.
+- [x] **Tests**:
+  - `tui_doctor_test`: the Check rows equal the command's document; the fix pass says `check --fix`'s lines for the same hole; the Providers rows, never scanned and then over a cached scan, equal the document over the same statuses; `r` writes the registration core's config byte for byte and refuses a second time in the command's words; the System page equals `apogee system`'s output over the same fake machine;
+  - `list_view_test` for the additions;
+  - the leak test's rows for the three views;
+  - `cli.provider_surfacing` reading `providers scan --output-format json` off the real binary with fake CLIs on PATH.
+
+Decisions taken while building, for veto:
+- **`s` (scan) on the Providers view** is a key the document didn't name. The view draws the last scan without probing, so the scan the command runs needed a way in, on the user's key.
+- **An action keyed `r` takes the key from "read again"** rather than moving it. The Providers view's `r` is the document's, and 37e/37f use `r` too. Every view still reads on show and after each action.
+- **The Check view draws the JSON document's fields**, so its status words are the document's (`skipped`) rather than the report's (`skip`), parity by construction.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,111 of 3,111, the pdftotext case skipped as before. The run before the strip fix had two failures: `cli.tui_shell`, which was the strip, and a one-off in `tui_cmd_test`'s help comparison that passed on every rerun and in the run after. `clang-format` is clean on every touched file, and `make lint` was not run.

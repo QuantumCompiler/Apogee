@@ -10,6 +10,7 @@
 #include "cli/config_cmd.h"
 #include "cli/config_suites.h"
 #include "cli/models.h"
+#include "cli/tui_common.h"
 #include "contracts/config.h"
 #include "contracts/paths.h"
 #include "httpserver/admin_config.h"
@@ -19,33 +20,6 @@
 namespace apogee::commands {
 
 namespace {
-
-[[nodiscard]] std::filesystem::path config_file(const RootContext& context) {
-    return harness::resolve_config_path(context.config_path);
-}
-
-[[nodiscard]] std::string field(const nlohmann::json& object, const char* key) {
-    const auto found = object.find(key);
-    if (found == object.end() || found->is_null()) {
-        return {};
-    }
-    return found->is_string() ? found->get<std::string>() : found->dump();
-}
-
-[[nodiscard]] std::vector<std::string> lines_of(const std::string& text) {
-    std::vector<std::string> lines;
-    std::size_t start = 0;
-    while (start < text.size()) {
-        const std::size_t end = text.find('\n', start);
-        lines.push_back(
-            text.substr(start, end == std::string::npos ? std::string::npos : end - start));
-        if (end == std::string::npos) {
-            break;
-        }
-        start = end + 1;
-    }
-    return lines;
-}
 
 /// The pointers every view shows above its table: where the config is, and
 /// what the default backend and suite are.

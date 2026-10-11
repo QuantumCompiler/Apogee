@@ -82,6 +82,19 @@ grep -q '^  ok   backend: claude  claude-cli -- credentials found (~/.claude.jso
 grep -q 'backend: codex  codex-cli -- credentials found (`codex login status` reports a login); codex-cli 9.9.9' \
     "$WORK_DIR/scan.txt" || fail "codex's tier was wrong"
 grep -q '^  ok   scan  last scanned ' "$WORK_DIR/scan.txt" || fail "the scan's time was not said"
+# The scan as one document (37b): the rows `providers scan` prints, nothing
+# else on stdout.
+"$APOGEE_BIN" providers scan --output-format json </dev/null >"$WORK_DIR/scan.json" 2>/dev/null \
+    || fail "providers scan --output-format json failed"
+python3 -c 'import json,sys
+doc = json.load(open(sys.argv[1]))
+rows = {row["provider"]: row for row in doc["data"]}
+assert doc["object"] == "list", doc
+assert rows["claude"]["type"] == "claude-cli", rows["claude"]
+assert rows["claude"]["tier"] == "credentials found", rows["claude"]
+assert rows["claude"]["backend"] == "backend: claude", rows["claude"]
+assert "9.9.9 (Claude Code)" in rows["claude"]["evidence"][0], rows["claude"]' "$WORK_DIR/scan.json" \
+    || fail "the scan's document was wrong: $(cat "$WORK_DIR/scan.json")"
 grep -qi 'authenticated' "$WORK_DIR/scan.txt" && fail "check claimed authentication"
 
 "$APOGEE_BIN" models list </dev/null >"$WORK_DIR/list.txt" 2>&1

@@ -2191,6 +2191,20 @@ std::vector<std::string> apply_fixes(const CheckInputs& inputs) {
     return done;
 }
 
+std::string check_verdict(const CheckReport& report) {
+    const std::size_t failures = report.count(Status::Fail);
+    const std::size_t warnings = report.count(Status::Warn);
+    if (failures > 0) {
+        return std::to_string(failures) + " failure(s), " + std::to_string(warnings) +
+               " warning(s)";
+    }
+    // Warnings are not failures, and the exit code says so. A keyless,
+    // modelless install is a VALID install -- the acceptance criterion for
+    // this command is that it passes on exactly that.
+    return warnings > 0 ? "no failures, " + std::to_string(warnings) + " warning(s)"
+                        : "everything checks out";
+}
+
 std::string render_report(const CheckReport& report, bool use_color) {
     const ansi::Style style{use_color};
     std::ostringstream out;
@@ -2229,24 +2243,11 @@ std::string render_report(const CheckReport& report, bool use_color) {
         }
     }
 
-    const std::size_t failures = report.count(Status::Fail);
-    const std::size_t warnings = report.count(Status::Warn);
     out << "\n";
-    if (failures > 0) {
-        out << style.colorize(std::to_string(failures) + " failure(s), " +
-                                  std::to_string(warnings) + " warning(s)",
-                              ansi::Color::Red)
-            << "\n";
-    } else if (warnings > 0) {
-        // Warnings are not failures, and the exit code says so. A keyless,
-        // modelless install is a VALID install -- the acceptance criterion for
-        // this command is that it passes on exactly that.
-        out << style.colorize("no failures, " + std::to_string(warnings) + " warning(s)",
-                              ansi::Color::Yellow)
-            << "\n";
-    } else {
-        out << style.colorize("everything checks out", ansi::Color::Green) << "\n";
-    }
+    const ansi::Color verdict_color = report.count(Status::Fail) > 0   ? ansi::Color::Red
+                                      : report.count(Status::Warn) > 0 ? ansi::Color::Yellow
+                                                                       : ansi::Color::Green;
+    out << style.colorize(check_verdict(report), verdict_color) << "\n";
     return out.str();
 }
 
@@ -2309,26 +2310,11 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->callback([&context, flags, format]() {
         CheckInputs inputs;
         try {
-            inputs.config_path = harness::resolve_config_path(context.config_path);
-        } catch (const std::exception& e) {
-            // Both formats side by side (28i): the Config row says so; the
-            // rest of the install is still worth a look.
-            try {
-                inputs.config_path = harness::config_dir() / harness::kConfigFileName;
-            } catch (const std::exception&) {
-                std::cerr << "apogee check: " << e.what() << "\n";
-                throw CLI::RuntimeError(1);
-            }
-            inputs.config_error = e.what();
-        }
-
-        try {
-            inputs.home = harness::apogee_home();
+            inputs = check_inputs(context);
         } catch (const std::exception& e) {
             std::cerr << "apogee check: " << e.what() << "\n";
             throw CLI::RuntimeError(1);
         }
-        inputs.root = harness::current_root();  // which rung chose it (M10)
 
         // Non-zero on failure so a script can gate on it -- the reason this is
         // a command rather than a page of documentation.
@@ -2343,7 +2329,11 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
     });
 }
 
-bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options) {
+namespace {
+
+/// The environment and the running binary, defaulted where a caller left
+/// them unset.
+void default_seams(CheckInputs& inputs) {
     if (!inputs.env) {
         inputs.env = [](std::string_view name) {
             const char* value = std::getenv(std::string{name}.c_str());
@@ -2353,27 +2343,88 @@ bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options) {
     if (inputs.executable.empty()) {
         inputs.executable = platform::executable_path();
     }
+}
 
-    const auto read_config_state = [](CheckInputs& state) {
-        std::error_code exists_code;
-        if (!state.config_error.empty()) {
-            // Refused before it was read: nothing to load.
-            return;
+/// The config as it stands: loaded, broken, or not there yet.
+void read_config_state(CheckInputs& state) {
+    std::error_code exists_code;
+    if (!state.config_error.empty()) {
+        // Refused before it was read: nothing to load.
+        return;
+    }
+    if (!std::filesystem::exists(state.config_path, exists_code)) {
+        state.config_missing = true;
+        return;
+    }
+    state.config_missing = false;
+    try {
+        const std::string content = harness::read_config_file(state.config_path);
+        state.config = harness::parse_config(content, state.config_path.string());
+        state.config_legacy = !harness::jsonc::looks_like_jsonc(content);
+        state.config_missing_options = harness::missing_template_options(content);
+    } catch (const harness::ConfigError& e) {
+        state.config_error = e.what();
+    }
+}
+
+/// `apply_fixes`' repairs as the command says them.
+[[nodiscard]] std::vector<std::string> said_fixes(const std::vector<std::string>& done,
+                                                  bool fold_created) {
+    std::vector<std::string> lines;
+    std::size_t created = 0;
+    for (const std::string& line : done) {
+        if (fold_created && line.starts_with("created ")) {
+            ++created;
+            continue;
         }
-        if (!std::filesystem::exists(state.config_path, exists_code)) {
-            state.config_missing = true;
-            return;
-        }
-        state.config_missing = false;
+        lines.push_back("fixed: " + line);
+    }
+    if (created > 0) {
+        lines.push_back("fixed: created " + std::to_string(created) +
+                        " directories and files, the layout as a fresh install has it");
+    }
+    if (done.empty()) {
+        lines.emplace_back("nothing to fix");
+    }
+    return lines;
+}
+
+}  // namespace
+
+CheckInputs check_inputs(const RootContext& context) {
+    CheckInputs inputs;
+    try {
+        inputs.config_path = harness::resolve_config_path(context.config_path);
+    } catch (const std::exception& e) {
+        // Both formats side by side (28i): the Config row says so; the rest
+        // of the install is still worth a look.
         try {
-            const std::string content = harness::read_config_file(state.config_path);
-            state.config = harness::parse_config(content, state.config_path.string());
-            state.config_legacy = !harness::jsonc::looks_like_jsonc(content);
-            state.config_missing_options = harness::missing_template_options(content);
-        } catch (const harness::ConfigError& e) {
-            state.config_error = e.what();
+            inputs.config_path = harness::config_dir() / harness::kConfigFileName;
+        } catch (const std::exception&) {
+            throw std::runtime_error{e.what()};
         }
-    };
+        inputs.config_error = e.what();
+    }
+    inputs.home = harness::apogee_home();
+    inputs.root = harness::current_root();  // which rung chose it (M10)
+    return inputs;
+}
+
+CheckReport read_check_report(CheckInputs inputs, const BusyProgress& progress) {
+    default_seams(inputs);
+    read_config_state(inputs);
+    inputs.progress = progress;
+    return run_checks(inputs);
+}
+
+std::vector<std::string> fix_install(CheckInputs inputs, bool fold_created) {
+    default_seams(inputs);
+    read_config_state(inputs);
+    return said_fixes(apply_fixes(inputs), fold_created);
+}
+
+bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options) {
+    default_seams(inputs);
     read_config_state(inputs);
 
     std::optional<std::vector<std::string>> fixed;
@@ -2381,21 +2432,8 @@ bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options) {
         // In the document, never on stdout beside it (28h).
         fixed = apply_fixes(inputs);
     } else if (options.fix) {
-        const std::vector<std::string> done = apply_fixes(inputs);
-        std::size_t created = 0;
-        for (const std::string& line : done) {
-            if (options.fold_created && line.starts_with("created ")) {
-                ++created;
-                continue;
-            }
-            std::cout << "fixed: " << line << "\n";
-        }
-        if (created > 0) {
-            std::cout << "fixed: created " << created
-                      << " directories and files, the layout as a fresh install has it\n";
-        }
-        if (done.empty()) {
-            std::cout << "nothing to fix\n";
+        for (const std::string& line : said_fixes(apply_fixes(inputs), options.fold_created)) {
+            std::cout << line << "\n";
         }
     }
     if (options.fix && inputs.config_missing) {

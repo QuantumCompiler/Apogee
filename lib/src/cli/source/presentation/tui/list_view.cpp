@@ -148,9 +148,35 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
             } catch (const std::exception& e) {
                 said = std::string{"not done: "} + e.what();
             }
-            post([said = std::move(said)](State& state) { state.notice = said; });
+            post([said = std::move(said)](State& state) {
+                // One line is a notice; several -- a fix pass's report -- are
+                // drawn whole under the table, the first on the notice row.
+                std::vector<std::string> lines;
+                std::size_t at = 0;
+                while (at <= said.size()) {
+                    const std::size_t end = said.find('\n', at);
+                    lines.push_back(said.substr(at, end == std::string::npos ? end : end - at));
+                    if (end == std::string::npos) {
+                        break;
+                    }
+                    at = end + 1;
+                }
+                while (!lines.empty() && lines.back().empty()) {
+                    lines.pop_back();
+                }
+                state.notice = lines.empty() ? std::string{} : lines.front();
+                if (lines.size() > 1) {
+                    state.detail = std::move(lines);
+                }
+            });
         });
         reload();
+    }
+
+    /// Whether a view's own action takes `r` from "read again".
+    [[nodiscard]] bool r_taken() const {
+        return std::ranges::any_of(options.actions,
+                                   [](const ListAction& action) { return action.key == "r"; });
     }
 
     // --- drawing --------------------------------------------------------------------
@@ -158,6 +184,21 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
     [[nodiscard]] ftxui::Element draw() const {
         using namespace ftxui;  // NOLINT(google-build-using-namespace): the DOM's vocabulary
         Elements lines;
+        if (options.page) {
+            // A page: its lines are the content.
+            for (const std::string& line : heading) {
+                lines.push_back(text(" " + line));
+            }
+            if (loading && heading.empty()) {
+                lines.push_back(text(" reading…") | dim);
+            }
+            Elements frame{vbox(std::move(lines)) | yframe | flex};
+            if (!notice.empty()) {
+                frame.push_back(text(" " + notice) | dim);
+            }
+            frame.push_back(text(" " + hints()) | dim);
+            return vbox(std::move(frame));
+        }
         for (const std::string& line : heading) {
             lines.push_back(text(" " + line) | dim);
         }
@@ -242,11 +283,14 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
         }
         const ListRow* row = selected < rows.size() ? &rows.at(selected) : nullptr;
         for (const ListAction& action : options.actions) {
-            if (row != nullptr && (!action.applies || action.applies(*row))) {
+            if (action.whole_view ||
+                (row != nullptr && (!action.applies || action.applies(*row)))) {
                 add(action.key + " " + action.label);
             }
         }
-        add("r read again");
+        if (!r_taken()) {
+            add("r read again");
+        }
         return said;
     }
 
@@ -256,8 +300,9 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
         if (confirming.has_value()) {
             const std::size_t action = *confirming;
             confirming.reset();
-            if (event == ftxui::Event::Character('y') && selected < rows.size()) {
-                run(action, rows.at(selected));
+            if (event == ftxui::Event::Character('y') &&
+                (selected < rows.size() || options.actions.at(action).whole_view)) {
+                run(action, selected < rows.size() ? rows.at(selected) : ListRow{});
             } else {
                 notice = "not done";
             }
@@ -279,10 +324,27 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
             detail.reset();
             return true;
         }
-        if (event == ftxui::Event::Character('r')) {
+        if (event == ftxui::Event::Character('r') && !r_taken()) {
             notice.clear();
             reload();
             return true;
+        }
+        // A pass over the whole view runs with or without a row.
+        if (event.is_character()) {
+            for (std::size_t i = 0; i < options.actions.size(); ++i) {
+                const ListAction& action = options.actions.at(i);
+                if (!action.whole_view || event.character() != action.key) {
+                    continue;
+                }
+                const ListRow row = selected < rows.size() ? rows.at(selected) : ListRow{};
+                if (action.confirm) {
+                    question = action.confirm(row);
+                    confirming = i;
+                } else {
+                    run(i, row);
+                }
+                return true;
+            }
         }
         if (selected >= rows.size()) {
             return false;
