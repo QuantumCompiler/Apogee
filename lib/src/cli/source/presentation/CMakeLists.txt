@@ -79,6 +79,8 @@ apogee_add_module(operations
     operations/suites.cpp
     operations/system_view.h
     operations/system_view.cpp
+    operations/training_reads.h
+    operations/training_reads.cpp
 )
 target_link_libraries(apogee_presentation_operations PUBLIC nlohmann_json::nlohmann_json)
 
@@ -236,6 +238,10 @@ apogee_add_module(cli
     cli/session_output.h
     cli/session_output.cpp
     cli/tui_session.h
+    cli/line_tokens.h
+    cli/line_tokens.cpp
+    cli/tui_child.h
+    cli/tui_child.cpp
     cli/tui_common.h
     cli/tui_common.cpp
     cli/tui_doctor.h
@@ -249,6 +255,8 @@ apogee_add_module(cli
     cli/tui_symphonies.cpp
     cli/tui_task.h
     cli/tui_task.cpp
+    cli/tui_training.h
+    cli/tui_training.cpp
     cli/tui_workbench.h
     cli/tui_workbench.cpp
     cli/graph.h

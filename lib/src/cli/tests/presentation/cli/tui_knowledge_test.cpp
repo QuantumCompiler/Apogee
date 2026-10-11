@@ -171,9 +171,9 @@ TEST_CASE("the Knowledge view draws knowledge list's document, info's card and q
     // `/`: the query as `knowledge query` answers it, retriever and scores.
     REQUIRE(home.run({"knowledge", "query", "cancel button"}, &out, &err) == 0);
     CHECK(has(out, "[lexical]"));
-    CHECK(options.ask(apogee::tui::ListRow{}, "cancel button") == out);
+    CHECK(options.asks.front().ask(apogee::tui::ListRow{}, "cancel button") == out);
     REQUIRE(home.run({"knowledge", "query", "sqlite"}, &out, &err) == 0);
-    CHECK(options.ask(apogee::tui::ListRow{}, "sqlite") == out);
+    CHECK(options.asks.front().ask(apogee::tui::ListRow{}, "sqlite") == out);
 
     // The input row on the shell: typing, then Enter asks.
     Stage stage{apogee::commands::knowledge_view_options(context)};
@@ -244,13 +244,13 @@ TEST_CASE("the Collections view draws embed list's document, info's text and que
     // names, said the same.
     REQUIRE(home.run({"embed", "query", "notes", "Heron billing"}, &out, &err) == 0);
     const std::string with_embedder = out;
-    CHECK(options.ask(notes, "Heron billing") == with_embedder);
+    CHECK(options.asks.front().ask(notes, "Heron billing") == with_embedder);
     // Without it: the demotion to lexical, said the same.
     write(home.config_path(), kConfig);
     REQUIRE(home.run({"embed", "query", "notes", "Heron billing"}, &out, &err) == 0);
     CHECK(has(out, "lexical"));
     CHECK(out != with_embedder);
-    CHECK(options.ask(notes, "Heron billing") == out);
+    CHECK(options.asks.front().ask(notes, "Heron billing") == out);
 }
 
 TEST_CASE("deleting a collection from the view asks, and a no keeps it", "[cli][tui][knowledge]") {
@@ -319,7 +319,7 @@ TEST_CASE("the Graph view draws graph stats' documents, and its card is graph ex
     // `/`: a node's card, the command's own bytes, for either kind of graph.
     for (const std::string& graph : {std::string{"work"}, std::string{"docs"}}) {
         REQUIRE(home.run({"graph", "explain", "Vault", "--graph", graph}, &out, &err) == 0);
-        CHECK(options.ask(apogee::tui::ListRow{.key = graph}, "Vault") == out);
+        CHECK(options.asks.front().ask(apogee::tui::ListRow{.key = graph}, "Vault") == out);
     }
     // A node that is not there: refused in the command's words.
     CHECK(home.run({"graph", "explain", "Nowhere", "--graph", "work"}, &out, &err) != 0);

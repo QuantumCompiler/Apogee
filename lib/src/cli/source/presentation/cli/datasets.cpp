@@ -21,8 +21,10 @@
 #include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "logger/session.h"
+#include "machine/json_reporter.h"
 #include "models/acquire.h"
 #include "models/source_hf.h"
+#include "operations/dataset_core.h"
 #include "platform/platform.h"
 #include "training/python_env.h"
 #include "training/script_runner.h"
@@ -60,19 +62,6 @@ namespace {
     }
 }
 
-std::string human_size(std::int64_t bytes) {
-    if (bytes < 1024) {
-        return std::to_string(bytes) + " B";
-    }
-    if (bytes < 1024LL * 1024) {
-        return std::to_string(bytes / 1024) + " KiB";
-    }
-    if (bytes < 1024LL * 1024 * 1024) {
-        return std::to_string(bytes / (1024LL * 1024)) + " MiB";
-    }
-    return std::to_string(bytes / (1024LL * 1024 * 1024)) + " GiB";
-}
-
 /// Every configured provider, built so the teacher is a real object.
 struct Providers {
     harness::Harness harness;
@@ -101,6 +90,50 @@ std::string pad(std::string value, std::size_t width) {
 }
 
 }  // namespace
+
+std::string human_size(std::int64_t bytes) {
+    if (bytes < 1024) {
+        return std::to_string(bytes) + " B";
+    }
+    if (bytes < 1024LL * 1024) {
+        return std::to_string(bytes / 1024) + " KiB";
+    }
+    if (bytes < 1024LL * 1024 * 1024) {
+        return std::to_string(bytes / (1024LL * 1024)) + " MiB";
+    }
+    return std::to_string(bytes / (1024LL * 1024 * 1024)) + " GiB";
+}
+
+std::string dataset_info_text(const training::DatasetInfo& info) {
+    std::ostringstream out;
+    out << "name:   " << info.name << "\n"
+        << "path:   " << info.path.string() << "\n"
+        << "lines:  " << info.lines << "\n"
+        << "shape:  " << info.shape << "\n"
+        << "size:   " << human_size(info.bytes) << "\n";
+    return out.str();
+}
+
+std::string dataset_kits_text() {
+    const std::vector<training::KitSummary> installed =
+        training::list_kits(harness::training_kits_dir());
+    std::ostringstream out;
+    if (installed.empty()) {
+        out << "no kits under " << harness::training_kits_dir().string()
+            << " -- run 'apogee check --fix' to seed the bundled ones\n";
+        return out.str();
+    }
+    std::size_t width = 4;
+    for (const training::KitSummary& kit : installed) {
+        width = std::max(width, kit.name.size());
+    }
+    out << pad("NAME", width) << "  EVAL  DESCRIPTION\n";
+    for (const training::KitSummary& kit : installed) {
+        out << pad(kit.name, width) << "  " << pad(std::to_string(kit.eval_items), 4) << "  "
+            << (kit.error.empty() ? kit.description : "ERROR: " + kit.error) << "\n";
+    }
+    return out.str();
+}
 
 std::string_view DatasetsCommand::name() const noexcept {
     return "datasets";
@@ -389,32 +422,39 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
     });
 
     // ---- kits --------------------------------------------------------------
+    auto kits_format = std::make_shared<ReadFormat>(ReadFormat::Text);
     CLI::App* kits = cmd->add_subcommand("kits", "List the installed training kits");
-    kits->callback([]() {
-        const std::vector<training::KitSummary> installed =
-            training::list_kits(harness::training_kits_dir());
-        if (installed.empty()) {
-            std::cout << "no kits under " << harness::training_kits_dir().string()
-                      << " -- run 'apogee check --fix' to seed the bundled ones\n";
+    add_read_format(kits, kits_format);
+    kits->callback([kits_format]() {
+        if (*kits_format == ReadFormat::Json) {
+            // The body `GET /v1/admin/datasets/kits` serves (37f).
+            nlohmann::json data = nlohmann::json::array();
+            for (const training::KitSummary& kit :
+                 training::list_kits(harness::training_kits_dir())) {
+                data.push_back(kit_json(kit));
+            }
+            write_document(std::cout, nlohmann::json{{"object", "list"}, {"data", data}});
             return;
         }
-        std::size_t width = 4;
-        for (const training::KitSummary& kit : installed) {
-            width = std::max(width, kit.name.size());
-        }
-        std::cout << pad("NAME", width) << "  EVAL  DESCRIPTION\n";
-        for (const training::KitSummary& kit : installed) {
-            std::cout << pad(kit.name, width) << "  " << pad(std::to_string(kit.eval_items), 4)
-                      << "  " << (kit.error.empty() ? kit.description : "ERROR: " + kit.error)
-                      << "\n";
-        }
+        std::cout << dataset_kits_text();
     });
 
     // ---- list / info / delete ---------------------------------------------
+    auto list_format = std::make_shared<ReadFormat>(ReadFormat::Text);
     CLI::App* list = cmd->add_subcommand("list", "List the datasets");
-    list->callback([]() {
+    add_read_format(list, list_format);
+    list->callback([list_format]() {
         const training::DatasetStore store{harness::training_datasets_dir()};
         const std::vector<training::DatasetInfo> datasets = store.list();
+        if (*list_format == ReadFormat::Json) {
+            // The body `GET /v1/admin/datasets` serves (37f).
+            nlohmann::json data = nlohmann::json::array();
+            for (const training::DatasetInfo& info : datasets) {
+                data.push_back(dataset_json(info));
+            }
+            write_document(std::cout, nlohmann::json{{"object", "list"}, {"data", data}});
+            return;
+        }
         if (datasets.empty()) {
             std::cout << "no datasets under " << store.dir().string() << "\n";
             return;
@@ -431,19 +471,22 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
     });
 
     auto info_name = std::make_shared<std::string>();
+    auto info_format = std::make_shared<ReadFormat>(ReadFormat::Text);
     CLI::App* info = cmd->add_subcommand("info", "Show one dataset");
     info->add_option("name", *info_name, "Dataset name")->type_name(kDatasetValue)->required();
-    info->callback([info_name]() {
+    add_read_format(info, info_format);
+    info->callback([info_name, info_format]() {
         const training::DatasetStore store{harness::training_datasets_dir()};
         const std::optional<training::DatasetInfo> found = store.info(*info_name);
         if (!found.has_value()) {
             fail_user("no dataset named '" + *info_name + "' in " + store.dir().string());
         }
-        std::cout << "name:   " << found->name << "\n"
-                  << "path:   " << found->path.string() << "\n"
-                  << "lines:  " << found->lines << "\n"
-                  << "shape:  " << found->shape << "\n"
-                  << "size:   " << human_size(found->bytes) << "\n";
+        if (*info_format == ReadFormat::Json) {
+            // The body `GET /v1/admin/datasets/{name}` serves (37f).
+            write_document(std::cout, dataset_json(*found));
+            return;
+        }
+        std::cout << dataset_info_text(*found);
     });
 
     auto del_name = std::make_shared<std::string>();

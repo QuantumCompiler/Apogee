@@ -1135,13 +1135,21 @@ plane, not routes yet.
 ### `GET /v1/admin/training/status`
 
 The training track's state, read off the filesystem the CLI writes:
-`200 {"runs": N, "running": [run ids], "versions": [{backend,
-active_version, kept, total}], "pipelines": N, "active_pipeline": <id> |
-null, "cycle_active": bool, "cycle": {backend, halted, consecutive_fails,
-anchor_version, total_runs} | null}`. `active_pipeline` is the newest
-pipeline run whose manifest says `running`; `cycle_active` is whether a
-`train cycle run` holds the lock right now; `cycle` is the history's
-headline, `null` until the first cycle has run.
+`200 {"runs": N, "running": [run ids], "recent_runs": [run summaries],
+"versions": [{backend, active_version, kept, total}], "pipelines": N,
+"active_pipeline": <id> | null, "latest_pipeline": <pipeline summary> |
+null, "cycle_active": bool, "cycle": {backend, halted, halt_reason,
+consecutive_fails, anchor_version, anchor_score, total_runs} | null}`.
+`recent_runs` is the newest five, each as `GET /v1/admin/training/runs`
+lists a run; `active_pipeline` is the newest pipeline run whose manifest
+says `running`, and `latest_pipeline` the newest whatever its status;
+`cycle_active` is whether a `train cycle run` holds the lock right now;
+`cycle` is the history's headline, `null` until the first cycle has run.
+Since 37f `apogee train status --output-format json` prints this body byte
+for byte, and `recent_runs`, `latest_pipeline`, `halt_reason` and
+`anchor_score` joined it then -- the facts the human status lists of the
+runs, the pipelines and the cycle's history (whether a cycle is configured
+at all is the config's to say).
 
 **Training control is CLI-only, forever.** `apogee train run|eval|promote|
 rollback|setup`, `train pipeline run|resume`, `train regime run` and

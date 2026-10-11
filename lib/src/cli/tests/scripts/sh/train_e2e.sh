@@ -195,6 +195,21 @@ grep -q "pruned" "$WORK_DIR/rollback3.err" || fail "pruned rollback wording: $(c
 "$APOGEE_BIN" train status >"$WORK_DIR/status.out" || fail "train status"
 grep -q "Runs: 3 (0 running)" "$WORK_DIR/status.out" || fail "status runs: $(cat "$WORK_DIR/status.out")"
 grep -q "tuned .*active v3" "$WORK_DIR/status.out" || fail "status versions: $(cat "$WORK_DIR/status.out")"
+# The reads as documents (37f): the admin plane's bodies, the same facts.
+"$APOGEE_BIN" train status --output-format json >"$WORK_DIR/status.json" 2>/dev/null \
+    || fail "train status --output-format json failed"
+"$APOGEE_BIN" train versions tuned --output-format json >"$WORK_DIR/versions.json" 2>/dev/null \
+    || fail "train versions --output-format json failed"
+python3 -c 'import json,sys
+status, ledger = (json.load(open(path)) for path in sys.argv[1:3])
+assert status["runs"] == 3 and status["running"] == [], status
+assert len(status["recent_runs"]) == 3, status
+assert [v["backend"] for v in status["versions"]] == ["tuned"], status
+assert status["versions"][0]["active_version"] == 3, status
+assert ledger["backend_name"] == "tuned" and ledger["active_version"] == 3, ledger
+assert [v["version"] for v in ledger["versions"]] == [1, 2, 3], ledger
+assert "pruned_at" in ledger["versions"][0], ledger' "$WORK_DIR/status.json" "$WORK_DIR/versions.json" \
+    || fail "a training read's document was wrong: $(cat "$WORK_DIR/status.json")"
 "$APOGEE_BIN" check >"$WORK_DIR/check.out" 2>&1 || fail "check: $(cat "$WORK_DIR/check.out")"
 grep -q "ok   versions: tuned" "$WORK_DIR/check.out" || fail "check ledger row: $(grep 'versions' "$WORK_DIR/check.out")"
 grep -q "ok   converter" "$WORK_DIR/check.out" || fail "check converter row: $(grep converter "$WORK_DIR/check.out")"

@@ -57,17 +57,19 @@ tui::ListOptions symphonies_view_options(const RootContext& context, const Workb
         return lines_of(symphony_show_text(context, row.key));
     };
     // `p`: the session's own `/play`, its input typed or none.
-    options.ask_key = "p";
-    options.ask_label = "play";
-    options.ask_needs_row = true;
-    options.ask_may_be_empty = true;
-    options.ask_here = true;
-    options.ask = [hooks](const tui::ListRow& row, const std::string& input) {
-        if (!hooks.play_symphony) {
-            return std::string{"not played: no session to play it in"};
-        }
-        return hooks.play_symphony(row.key, input);
-    };
+    options.asks = {tui::ListAsk{.key = "p",
+                                 .label = "play",
+                                 .ask =
+                                     [hooks](const tui::ListRow& row, const std::string& input) {
+                                         if (!hooks.play_symphony) {
+                                             return std::string{
+                                                 "not played: no session to play it in"};
+                                         }
+                                         return hooks.play_symphony(row.key, input);
+                                     },
+                                 .needs_row = true,
+                                 .may_be_empty = true,
+                                 .here = true}};
     return options;
 }
 

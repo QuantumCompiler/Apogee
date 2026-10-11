@@ -561,6 +561,11 @@ apogee embed list --output-format json      # {"object":"list","data":[{"name","
 apogee embed info <name> --output-format json        # {"collection","path","schema","chunks","vectors":{…}|null,"index","sources":[…]}
 apogee graph stats <name> --output-format json       # {"object":"graph.stats","graph","kind","built",…}
 apogee graph show <name> <entity> --output-format json   # {"object":"graph.show","match",…,"data":[entities]}
+apogee train status --output-format json    # byte for byte GET /v1/admin/training/status
+apogee train versions [backend] --output-format json   # byte for byte GET /v1/admin/training/versions
+apogee datasets list --output-format json   # byte for byte GET /v1/admin/datasets
+apogee datasets info <name> --output-format json       # byte for byte GET /v1/admin/datasets/{name}
+apogee datasets kits --output-format json   # byte for byte GET /v1/admin/datasets/kits
 ```
 
 - **`models list`**: one object per row the table shows — `backend`,
@@ -611,6 +616,17 @@ apogee graph show <name> <entity> --output-format json   # {"object":"graph.show
   (`relation`, `direction`, `peer`, `peer_type`, `weight`, `origin`,
   `description`, an extracted edge's first `sites`) and its supporting
   `chunks`, their text whole.
+- **`train status`** and **`train versions`** (since 37f): the bodies the
+  control plane serves for the same reads (`operations/training_reads`, one
+  builder for both) -- the status's run count, the runs `running`, the newest
+  five as `recent_runs`, each backend's `versions` headline, the pipelines,
+  the `active_pipeline` and `latest_pipeline`, whether a cycle holds the lock
+  (`cycle_active`) and the cycle's headline; a version ledger, or every one in
+  a list. A backend with no history is refused as the text refuses it.
+- **`datasets list`**, **`datasets info`** and **`datasets kits`** (since
+  37f): the control plane's bodies -- each dataset's `name`, `path`, `lines`,
+  `bytes` and `shape`; each kit's `name`, `path`, `description`,
+  `eval_items` and `error` when it cannot be read.
 - **`system`** (since 32a): the machine as one reading — `cpu` (`model`,
   `architecture`, the core counts, `load`, `utilization` with its `window_ms`),
   `memory` (`total_bytes`, `used_bytes`, `available_bytes`), `apogee`

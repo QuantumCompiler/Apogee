@@ -86,6 +86,21 @@ grep -q '"role": "assistant", "content": "hello"' "$DATASETS/raw.jsonl" || fail 
 grep -q "^maths " "$WORK_DIR/list.txt" || fail "maths not listed"
 grep -q "^raw " "$WORK_DIR/list.txt" || fail "raw not listed"
 "$APOGEE_BIN" datasets info maths | grep -q "lines:  2" || fail "datasets info"
+# The reads as documents (37f): the admin plane's bodies.
+"$APOGEE_BIN" datasets list --output-format json >"$WORK_DIR/list.json" 2>/dev/null \
+    || fail "datasets list --output-format json failed"
+"$APOGEE_BIN" datasets info maths --output-format json >"$WORK_DIR/info.json" 2>/dev/null \
+    || fail "datasets info --output-format json failed"
+"$APOGEE_BIN" datasets kits --output-format json >"$WORK_DIR/kits.json" 2>/dev/null \
+    || fail "datasets kits --output-format json failed"
+python3 -c 'import json,sys
+listed, info, kits = (json.load(open(path)) for path in sys.argv[1:4])
+assert listed["object"] == "list", listed
+names = [row["name"] for row in listed["data"]]
+assert "maths" in names and "raw" in names, listed
+assert info["name"] == "maths" and info["lines"] == 2, info
+assert kits["object"] == "list" and kits["data"], kits' "$WORK_DIR/list.json" "$WORK_DIR/info.json" "$WORK_DIR/kits.json" \
+    || fail "a dataset read's document was wrong: $(cat "$WORK_DIR/list.json")"
 "$APOGEE_BIN" datasets delete maths -y >/dev/null || fail "datasets delete"
 [ ! -f "$DATASETS/maths.jsonl" ] || fail "delete left the file"
 

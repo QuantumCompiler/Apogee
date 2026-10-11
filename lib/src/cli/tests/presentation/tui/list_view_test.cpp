@@ -104,15 +104,17 @@ TEST_CASE("the ask row takes typing until Enter asks or Esc closes it, the last 
         return std::pair{std::vector<std::string>{},
                          std::vector<apogee::tui::ListRow>{{.key = "alpha", .cells = {"alpha"}}}};
     };
-    options.ask_label = "query";
-    options.ask_needs_row = true;
-    options.ask = [&asked](const apogee::tui::ListRow& row, const std::string& text) {
-        asked.emplace_back(row.key, text);
-        if (text == "boom") {
-            throw std::runtime_error{"no such thing"};
-        }
-        return "answered " + text + "\nsecond line\n";
-    };
+    options.asks = {apogee::tui::ListAsk{
+        .label = "query",
+        .ask =
+            [&asked](const apogee::tui::ListRow& row, const std::string& text) {
+                asked.emplace_back(row.key, text);
+                if (text == "boom") {
+                    throw std::runtime_error{"no such thing"};
+                }
+                return "answered " + text + "\nsecond line\n";
+            },
+        .needs_row = true}};
     apogee::tui::ManualPump pump;
     apogee::tui::Shell shell{{.title = "apogee test", .theme = {.color = false}}};
     apogee::tui::ListView view{pump, apogee::tui::Theme{.color = false}, std::move(options)};

@@ -51,6 +51,38 @@ struct ListAction {
     bool whole_view = false;
 };
 
+/// A question asked of the view (37c: a knowledge query, a node's card): its
+/// key opens an input row under the table -- the view takes its keys as
+/// typing until Enter asks or Esc closes it, the last question kept to
+/// refine. The answer, on the worker, with the selected row or an empty one,
+/// is drawn under the table as a detail is; a throw is said as the reason it
+/// could not be asked.
+struct ListAsk {
+    /// The key that opens the input row: `/` by default, the Symphonies
+    /// view's `p` (37d), the Train view's `r`, `p` and `P` (37f).
+    std::string key = "/";
+    /// What the hint bar and the input row call it: `query`, `explain`.
+    std::string label;
+    std::function<std::string(const ListRow& row, const std::string& text)> ask;
+    /// What the input row opens with when nothing was asked on this key yet
+    /// (37f: a command's own words, `run `, for its arguments); null, empty.
+    std::function<std::string(const ListRow& row)> prefill;
+    /// The question put before it is asked, answered `y` or anything else,
+    /// no (37e: a task's goal and its policy, before the run spends model
+    /// turns); null asks at once.
+    std::function<std::string(const ListRow& row, const std::string& text)> confirm;
+    /// The question is about the selected row (the collection searched, the
+    /// graph a node is in): offered only with one.
+    bool needs_row = false;
+    /// Enter asks with nothing typed too (37d: a play whose input is
+    /// optional).
+    bool may_be_empty = false;
+    /// An act on the shell's thread rather than a read on the worker (37d: a
+    /// play handed to the session): asked there, its answer's first line said
+    /// on the notice row.
+    bool here = false;
+};
+
 struct ListOptions {
     /// The tab strip's name: `Models`.
     std::string title;
@@ -76,33 +108,9 @@ struct ListOptions {
     /// The read is a page, not a table (37b: the System view): its lines
     /// are the content, drawn plain, with no column header and no rows.
     bool page = false;
-    /// A question asked of the view (37c: a knowledge query, a node's card):
-    /// `/` opens an input row under the table -- the view takes its keys as
-    /// typing until Enter asks or Esc closes it, the last question kept to
-    /// refine. The answer, on the worker, with the selected row or an empty
-    /// one, is drawn under the table as a detail is; a throw is said as the
-    /// reason it could not be asked.
-    std::function<std::string(const ListRow& row, const std::string& text)> ask;
-    /// What the hint bar and the input row call it: `query`, `explain`.
-    std::string ask_label;
-    /// The question is about the selected row (the collection searched, the
-    /// graph a node is in): offered only with one.
-    bool ask_needs_row = false;
-    /// The key that opens the input row (37d: the Symphonies view's `p`).
-    std::string ask_key = "/";
-    /// Enter asks with nothing typed too (37d: a play whose input is
-    /// optional).
-    bool ask_may_be_empty = false;
-    /// The question is an act on the shell's thread rather than a read on the
-    /// worker (37d: a play handed to the session): asked there, its answer's
-    /// first line said on the notice row.
-    bool ask_here = false;
-    /// The question put before an ask runs, answered `y` or anything else,
-    /// no (37e: a task's goal and its policy, before the run spends model
-    /// turns); null asks at once. A row's own action keyed as the ask is
-    /// takes the key on the rows it applies to (37e: `r` resumes a resumable
-    /// task, and runs a new one elsewhere).
-    std::function<std::string(const ListRow& row, const std::string& text)> ask_confirm;
+    /// The questions asked of the view, each on its own key (37c, 37d, 37e,
+    /// 37f).
+    std::vector<ListAsk> asks;
     /// A long run the view started (37e: a task run): its narration drawn
     /// under the table from the progress seam, Ctrl-C stopping it through its
     /// own channel, and the table read again on a slow tick while it runs and

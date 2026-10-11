@@ -263,22 +263,24 @@ tui::ListOptions task_view_options(const RootContext& context,
     options.detail = [](const tui::ListRow& row) { return lines_of(task_status_text(row.key)); };
 
     // `r`: a new task, its goal typed, asked first with what it runs under.
-    options.ask_key = "r";
-    options.ask_label = "run";
-    options.ask_here = true;
-    options.ask_confirm = [](const tui::ListRow& /*row*/, const std::string& goal) {
-        return "Run a task with tools: \"" + goal +
-               "\"? grants: none -- with nobody present, a tool that asks is denied; on "
-               "question: fail -- a question nobody answers ends the task";
-    };
-    options.ask = [&context, progress, machine](const tui::ListRow& /*row*/,
-                                                const std::string& goal) {
-        if (!start_run(*progress, context, machine, TaskRunRequest{.goal = goal},
-                       "task run: " + first_line(goal, 60))) {
-            return std::string{"not now: a run is going -- Ctrl-C stops it"};
-        }
-        return std::string{"running the task -- its narration is below"};
-    };
+    options.asks = {tui::ListAsk{
+        .key = "r",
+        .label = "run",
+        .ask =
+            [&context, progress, machine](const tui::ListRow& /*row*/, const std::string& goal) {
+                if (!start_run(*progress, context, machine, TaskRunRequest{.goal = goal},
+                               "task run: " + first_line(goal, 60))) {
+                    return std::string{"not now: a run is going -- Ctrl-C stops it"};
+                }
+                return std::string{"running the task -- its narration is below"};
+            },
+        .confirm =
+            [](const tui::ListRow& /*row*/, const std::string& goal) {
+                return "Run a task with tools: \"" + goal +
+                       "\"? grants: none -- with nobody present, a tool that asks is denied; "
+                       "on question: fail -- a question nobody answers ends the task";
+            },
+        .here = true}};
 
     const auto stoppable = [last](tasks::Request request) {
         return [last, request](const tui::ListRow& row) {

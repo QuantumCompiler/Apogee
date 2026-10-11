@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "contracts/layout.h"
+#include "operations/training_reads.h"
 #include "training/cycle.h"
 #include "training/manifest.h"
 #include "training/store.h"
@@ -24,49 +25,8 @@ namespace {
 }  // namespace
 
 HttpResponse admin_training_status(const AdminConfigContext& /*context*/) {
-    const training::TrainingStore reads = store();
-    nlohmann::json running = nlohmann::json::array();
-    const std::vector<training::RunSummary> runs = reads.list_runs();
-    for (const training::RunSummary& run : runs) {
-        if (run.status == training::kStatusRunning) {
-            running.push_back(run.id);
-        }
-    }
-    nlohmann::json versions = nlohmann::json::array();
-    for (const training::VersionLedger& ledger : reads.all_versions()) {
-        versions.push_back({{"backend", ledger.backend},
-                            {"active_version", ledger.active_version},
-                            {"kept", ledger.kept()},
-                            {"total", ledger.versions.size()}});
-    }
-    const std::vector<training::PipelineSummary> pipelines = reads.list_pipelines();
-    nlohmann::json active_pipeline = nullptr;
-    for (const training::PipelineSummary& pipeline : pipelines) {
-        if (pipeline.status == training::kPipelineRunning) {
-            active_pipeline = pipeline.id;
-            break;
-        }
-    }
-    const std::filesystem::path cycle_dir = harness::training_cycle_dir();
-    nlohmann::json cycle = nullptr;
-    if (training::history_exists(cycle_dir)) {
-        std::string error;
-        const training::CycleHistory history = training::load_history(cycle_dir, {}, error);
-        if (error.empty()) {
-            cycle = nlohmann::json{{"backend", history.backend},
-                                   {"halted", history.halted},
-                                   {"consecutive_fails", history.consecutive_fails},
-                                   {"anchor_version", history.anchor_version},
-                                   {"total_runs", history.total_runs}};
-        }
-    }
-    return json_response(200, nlohmann::json{{"runs", runs.size()},
-                                             {"running", std::move(running)},
-                                             {"versions", std::move(versions)},
-                                             {"pipelines", pipelines.size()},
-                                             {"active_pipeline", std::move(active_pipeline)},
-                                             {"cycle_active", training::cycle_lock_held(cycle_dir)},
-                                             {"cycle", std::move(cycle)}});
+    // The CLI's `train status --output-format json`, byte for byte (37f).
+    return json_response(200, operations::training_status_document());
 }
 
 HttpResponse admin_list_training_runs(const AdminConfigContext& /*context*/,
@@ -135,19 +95,13 @@ HttpResponse admin_training_cycle(const AdminConfigContext& /*context*/) {
 
 HttpResponse admin_list_training_versions(const AdminConfigContext& /*context*/,
                                           const HttpRequest& request) {
+    // The CLI's `train versions --output-format json`, byte for byte (37f).
     const std::string backend = request.query_value("backend");
-    if (!backend.empty()) {
-        const std::optional<training::VersionLedger> ledger = store().list_versions(backend);
-        if (!ledger.has_value()) {
-            return error_response(404, "no version history for backend '" + backend + "'");
-        }
-        return json_response(200, training::ledger_to_json(*ledger));
+    std::optional<nlohmann::json> document = operations::training_versions_document(backend);
+    if (!document.has_value()) {
+        return error_response(404, "no version history for backend '" + backend + "'");
     }
-    nlohmann::json data = nlohmann::json::array();
-    for (const training::VersionLedger& ledger : store().all_versions()) {
-        data.push_back(training::ledger_to_json(ledger));
-    }
-    return json_response(200, nlohmann::json{{"object", "list"}, {"data", std::move(data)}});
+    return json_response(200, std::move(*document));
 }
 
 }  // namespace apogee::httpserver

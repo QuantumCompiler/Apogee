@@ -17,6 +17,7 @@
 #include "cli/tui_session.h"
 #include "cli/tui_symphonies.h"
 #include "cli/tui_task.h"
+#include "cli/tui_training.h"
 #include "cli/tui_workbench.h"
 #include "cli/version_command.h"
 #include "platform/platform.h"
@@ -100,6 +101,15 @@ namespace {
     const auto task_run = std::make_shared<tui::Progress>(pump);
     tui::ListView tasks{pump, theme, task_view_options(context, task_run, machine_budget)};
     (void)shell.add(tasks.view());
+    // Training (37f): each run the command itself, a child of this binary,
+    // narrated through the seam.
+    const std::filesystem::path self = platform::executable_path();
+    const auto training_run = std::make_shared<tui::Progress>(pump);
+    tui::ListView train{pump, theme, train_view_options(context, training_run, self)};
+    (void)shell.add(train.view());
+    const auto datasets_run = std::make_shared<tui::Progress>(pump);
+    tui::ListView datasets{pump, theme, datasets_view_options(context, datasets_run, self)};
+    (void)shell.add(datasets.view());
     // The doctor beside it (37b): the report, the providers, the machine.
     const std::vector<std::unique_ptr<tui::ListView>> doctor =
         make_doctor_views(pump, theme, context);

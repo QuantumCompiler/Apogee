@@ -98,6 +98,14 @@ public:
 
     /// Terminates the child. Last resort — see close_stdin.
     virtual void terminate() = 0;
+
+    /// Interrupts the child as Ctrl-C at its terminal would (SIGINT): a child
+    /// that handles it ends on its own terms -- Apogee's own commands record a
+    /// run as cancelled (37f). A child that cannot be interrupted is
+    /// terminated.
+    virtual void interrupt() {
+        terminate();
+    }
 };
 
 /// Starts `command`, or returns nullptr with `error` filled.

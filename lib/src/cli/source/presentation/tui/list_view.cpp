@@ -8,6 +8,7 @@
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -82,9 +83,19 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
     std::string question;
     /// The input row's text while it is open (37c).
     std::optional<std::string> typing;
-    std::string last_asked;
-    /// The ask whose question is open (37e): its row and text.
-    std::optional<std::pair<ListRow, std::string>> confirming_ask;
+    /// The ask whose input row is open.
+    std::size_t typing_for = 0;
+    /// The last question asked on each ask's key.
+    std::map<std::string, std::string> last_asked;
+
+    /// The ask whose question is open (37e): which, its row and its text.
+    struct PendingAsk {
+        std::size_t index = 0;
+        ListRow row;
+        std::string text;
+    };
+
+    std::optional<PendingAsk> confirming_ask;
     bool loading = true;
     /// The run was live at the last tick: one more read once it has ended.
     bool run_was_live = false;
@@ -193,12 +204,13 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
         reload();
     }
 
-    /// Asks the view's question, the answer drawn as a detail.
-    void ask(ListRow row, std::string text) {
-        if (options.ask_here) {
+    /// Asks question `index`, the answer drawn as a detail.
+    void ask(std::size_t index, ListRow row, std::string text) {
+        const ListAsk& asked = options.asks.at(index);
+        if (asked.here) {
             std::string said;
             try {
-                said = options.ask(row, text);
+                said = asked.ask(row, text);
             } catch (const std::exception& e) {
                 said = std::string{"could not ask: "} + e.what();
             }
@@ -206,12 +218,12 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
             notice = lines.empty() ? std::string{} : lines.front();
             return;
         }
-        notice = options.ask_label + "…";
+        notice = asked.label + "…";
         detail.reset();
-        submit([this, row = std::move(row), text = std::move(text)]() {
+        submit([this, index, row = std::move(row), text = std::move(text)]() {
             std::string said;
             try {
-                said = options.ask(row, text);
+                said = options.asks.at(index).ask(row, text);
             } catch (const std::exception& e) {
                 said = std::string{"could not ask: "} + e.what();
             }
@@ -234,9 +246,12 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
         });
     }
 
-    /// Whether the question can be asked now.
-    [[nodiscard]] bool askable() const {
-        return options.ask && (!options.ask_needs_row || selected < rows.size());
+    /// Whether question `index` can be asked now: it needs no row or has one,
+    /// and no row action takes its key.
+    [[nodiscard]] bool askable(std::size_t index) const {
+        const ListAsk& asked = options.asks.at(index);
+        return asked.ask && (!asked.needs_row || selected < rows.size()) &&
+               !row_action_for(asked.key);
     }
 
     /// The slow tick: the table read again while a run is live, and once
@@ -252,7 +267,8 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
     /// Whether a view's own action, or its ask (37e), takes `r` from "read
     /// again".
     [[nodiscard]] bool r_taken() const {
-        return (options.ask && options.ask_key == "r") ||
+        return std::ranges::any_of(options.asks,
+                                   [](const ListAsk& asked) { return asked.key == "r"; }) ||
                std::ranges::any_of(options.actions,
                                    [](const ListAction& action) { return action.key == "r"; });
     }
@@ -351,7 +367,8 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
             }
         }
         if (typing.has_value()) {
-            frame.push_back(text(" " + options.ask_label + ": " + *typing + "▏") | bold);
+            frame.push_back(text(" " + options.asks.at(typing_for).label + ": " + *typing + "▏") |
+                            bold);
         } else if (confirming.has_value() || confirming_ask.has_value()) {
             frame.push_back(text(" " + question + " [y/N]") | bold);
         } else if (!notice.empty()) {
@@ -374,8 +391,10 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
         } else if (!options.enter_label.empty()) {
             add("Enter " + options.enter_label);
         }
-        if (askable() && !row_action_for(options.ask_key)) {
-            add(options.ask_key + " " + options.ask_label);
+        for (std::size_t i = 0; i < options.asks.size(); ++i) {
+            if (askable(i)) {
+                add(options.asks.at(i).key + " " + options.asks.at(i).label);
+            }
         }
         if (!options.detail_key.empty() && !detail.has_value()) {
             add(options.detail_key + " info");
@@ -402,15 +421,18 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
             return true;
         }
         if (event == ftxui::Event::Return) {
-            if (!typing->empty() || options.ask_may_be_empty) {
-                last_asked = *typing;
+            const ListAsk& asked = options.asks.at(typing_for);
+            if (!typing->empty() || asked.may_be_empty) {
+                std::string text = *typing;
+                last_asked[asked.key] = text;
                 typing.reset();
                 ListRow row = selected < rows.size() ? rows.at(selected) : ListRow{};
-                if (options.ask_confirm) {
-                    question = options.ask_confirm(row, last_asked);
-                    confirming_ask = std::pair{std::move(row), last_asked};
+                if (asked.confirm) {
+                    question = asked.confirm(row, text);
+                    confirming_ask = PendingAsk{
+                        .index = typing_for, .row = std::move(row), .text = std::move(text)};
                 } else {
-                    ask(std::move(row), last_asked);
+                    ask(typing_for, std::move(row), std::move(text));
                 }
             }
             return true;
@@ -445,10 +467,10 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
             return true;
         }
         if (confirming_ask.has_value()) {
-            auto [row, text] = std::move(*confirming_ask);
+            PendingAsk pending = std::move(*confirming_ask);
             confirming_ask.reset();
             if (event == ftxui::Event::Character('y')) {
-                ask(std::move(row), std::move(text));
+                ask(pending.index, std::move(pending.row), std::move(pending.text));
             } else {
                 notice = "not done";
             }
@@ -481,9 +503,20 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
             detail.reset();
             return true;
         }
-        if (event == ftxui::Event::Character(options.ask_key) && askable() &&
-            !row_action_for(options.ask_key)) {
-            typing = last_asked;
+        for (std::size_t i = 0; i < options.asks.size(); ++i) {
+            const ListAsk& asked = options.asks.at(i);
+            if (event != ftxui::Event::Character(asked.key) || !askable(i)) {
+                continue;
+            }
+            typing_for = i;
+            const auto last = last_asked.find(asked.key);
+            if (last != last_asked.end()) {
+                typing = last->second;
+            } else {
+                typing = asked.prefill
+                             ? asked.prefill(selected < rows.size() ? rows.at(selected) : ListRow{})
+                             : std::string{};
+            }
             return true;
         }
         if (event == ftxui::Event::Character('r') && !r_taken()) {

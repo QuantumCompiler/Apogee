@@ -6834,3 +6834,46 @@ Decisions taken while building, for veto:
 - **Tasks sits after Symphonies**, before the doctor's views.
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,131 of 3,131, the pdftotext case skipped as before. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+### 2026-10-10 — `tui-training-views` (backlog item 37f): Train and Datasets
+
+**Why.** The training track was the shell's deepest uncovered surface and the least machine-readable: none of `train`'s ten verbs or `datasets`' eight carried a JSON read. The progress seam (37e) is the shared surface for a long run; these two views are its remaining consumers, and they close the training slice of the uncovered subcommands.
+
+- [x] **The reads as documents**, each the control plane's body for the same read:
+  - `train status --output-format json` and `train versions [backend] --output-format json` are built in one place now, `operations/training_reads`, which `GET /v1/admin/training/status` and `GET /v1/admin/training/versions` call too. The status gained `recent_runs`, `latest_pipeline`, `halt_reason` and `anchor_score`, additively, so it holds what the human status lists.
+  - `datasets list|info|kits --output-format json` reuse the control plane's `dataset_json` and `kit_json`.
+  - `train_status_text`, `dataset_info_text` and `dataset_kits_text` are the human texts the views draw. `eval_glyph` and `human_size` are shared so a cell reads as the command words it.
+- [x] **A command as the shell's child** (`cli/tui_child`). Every run and act from these views is the command itself, run as a child of the shell's own binary:
+  - the shell's root is carried (`--config` when it was given one, the resolved root as `APOGEE_HOME`), stdin is closed at once, and the child's lines are streamed;
+  - stderr is waited on and stdout only peeked at while stderr is open, since a command narrates on stderr and states its outcome on stdout, and two pipes keep no order between them;
+  - stopping it sends SIGINT (`ChildProcess::interrupt`, new; a child that cannot be interrupted is terminated), so a command records its own cancellation.
+
+  This is the design 37h records for its exec line, brought forward: 37h reuses the seam and the splitter, `cli/line_tokens` (POSIX quoting with no expansion, one function for running and completing).
+- [x] **The Train view** (`cli/tui_training`): one row per promoted version as `train versions --output-format json` states it, under `train status`'s text.
+  - Enter evaluates the version's run (`train eval`) in the widget.
+  - `r`, `p` and `P` open the input row on `run `, `pipeline run --pipeline ` and `promote ` (the command's own words, its arguments typed), and run `apogee train <line>` after an ask naming the line and its cost.
+  - `c` runs the cycle once, asked. `R` rolls the row's backend back, asked, its answer the command's own lines.
+- [x] **The Datasets view**: `datasets list`'s document. Enter shows `datasets info`'s card and `k` shows `datasets kits`'s. `p` and `s` open the input row on `prepare ` and `synth `, asked. `x` deletes through `datasets delete --yes` after the view's own ask.
+- [x] **`ListView` takes several asks** (`ListOptions::asks`, each a `ListAsk` with its key, label, `prefill`, confirm and switches). The Knowledge, Collections, Graph, Symphonies and Tasks views moved onto it unchanged.
+- [x] **The law**: `train` and `datasets` flipped to views in `tui_parity.cpp`.
+- [x] **Tests**:
+  - `tui_training_test` checks the reads against the commands' documents and texts. As children of the built binary (`APOGEE_EXECUTABLE`, skipped where the build made none, as in CI's unit-test job), it checks:
+    - a mock run from `r`, narrated in the command's order and leaving the manifest `apogee train run` leaves (ids, clock and home aside);
+    - a rollback leaving `train rollback`'s config and ledger;
+    - the cycle refused on a held lock in the command's words;
+    - a dataset deleted as `datasets delete --yes` deletes it, with a no keeping it.
+  - `line_tokens_test` holds the quoting table.
+  - The leak test has rows for both views.
+  - `cli.train_lifecycle` and `cli.datasets_lifecycle` read the five documents off the real binary.
+
+Decisions taken while building, for veto:
+- **Runs and acts are the command run as a child**, not in-process cores with a narration sink. A run's manifest, a promoted version and a rolled-back config are then the command's by construction, which the document's parity checks only promise. It is also the design 37h records as the way the shell runs a command, and in-process capture of stdout is off the table. The reads stay carved and drawn in process.
+- **The launch keys take the command's own arguments**, not a form: the input row opens on the verb's words and the arguments are typed, split by the one splitter. An argument the view would have to guess (a student, a dataset, a spec, a backend) is the user's to type.
+- **Train's rows are the promoted versions**, the document's "backends with versions"; the runs are in the status lines above them.
+- **Enter's `train eval` is not asked first**: the confirmed default calls it a bounded act, and an eval that already ran says so without running again.
+- **A child's stdin is closed**: `datasets delete` is passed `--yes` only after the view's own ask, and a command that would prompt declines.
+- **A child's lines are read stderr first.** The order across the two pipes is otherwise lost; a command narrating on stdout mid-run is still streamed, a moment behind its stderr.
+- **Ctrl-C on a launched run is wired but not driven by a test**: the child is interrupted and the command's own interrupt records the run as cancelled, but the mock trainer finishes too fast to catch mid-run, and a pacing knob on the trainer was not added for it.
+- **Train and Datasets sit after Tasks.**
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,139 of 3,139, the pdftotext case skipped as before, the child-process cases run against the built binary. `clang-format` is clean on every touched file, and `make lint` was not run.

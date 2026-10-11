@@ -80,12 +80,12 @@ tui::ListOptions knowledge_view_options(const RootContext& context) {
         return std::vector<std::string>{"read again -- the records have changed"};
     };
     // `knowledge query`'s own search: its defaults, its retriever said.
-    options.ask_label = "query";
-    options.ask = [&context](const tui::ListRow& /*row*/, const std::string& text) {
-        KnowledgeQuery query;
-        query.question = text;
-        return knowledge_query_text(context, query);
-    };
+    options.asks = {tui::ListAsk{
+        .label = "query", .ask = [&context](const tui::ListRow& /*row*/, const std::string& text) {
+            KnowledgeQuery query;
+            query.question = text;
+            return knowledge_query_text(context, query);
+        }}};
     options.actions = {tui::ListAction{.key = "x",
                                        .label = "delete",
                                        .confirm =
@@ -131,14 +131,15 @@ tui::ListOptions collections_view_options(const RootContext& context) {
         return lines_of(collection_info_text(row.key));
     };
     // `embed query`'s own search over the selected collection.
-    options.ask_label = "query";
-    options.ask_needs_row = true;
-    options.ask = [&context](const tui::ListRow& row, const std::string& text) {
-        CollectionQuery query;
-        query.collection = row.key;
-        query.text = text;
-        return collection_query_text(context, query);
-    };
+    options.asks = {tui::ListAsk{.label = "query",
+                                 .ask =
+                                     [&context](const tui::ListRow& row, const std::string& text) {
+                                         CollectionQuery query;
+                                         query.collection = row.key;
+                                         query.text = text;
+                                         return collection_query_text(context, query);
+                                     },
+                                 .needs_row = true}};
     options.actions = {tui::ListAction{
         .key = "x",
         .label = "delete",
@@ -198,11 +199,12 @@ tui::ListOptions graph_view_options(const RootContext& context) {
         return lines_of(graph_stats_text(context, row.key));
     };
     // `graph explain`'s own card, for a node of the selected graph.
-    options.ask_label = "explain";
-    options.ask_needs_row = true;
-    options.ask = [&context](const tui::ListRow& row, const std::string& text) {
-        return graph_explain_text(context, row.key, text);
-    };
+    options.asks = {tui::ListAsk{.label = "explain",
+                                 .ask =
+                                     [&context](const tui::ListRow& row, const std::string& text) {
+                                         return graph_explain_text(context, row.key, text);
+                                     },
+                                 .needs_row = true}};
     return options;
 }
 

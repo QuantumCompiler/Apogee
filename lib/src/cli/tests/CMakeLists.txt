@@ -241,11 +241,13 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/read_documents_test.cpp
     presentation/cli/system_cmd_test.cpp
     presentation/cli/tui_cmd_test.cpp
+    presentation/cli/line_tokens_test.cpp
     presentation/cli/tui_doctor_test.cpp
     presentation/cli/tui_knowledge_test.cpp
     presentation/cli/tui_parity_test.cpp
     presentation/cli/tui_session_test.cpp
     presentation/cli/tui_task_test.cpp
+    presentation/cli/tui_training_test.cpp
     presentation/cli/tui_workbench_test.cpp
     presentation/cli/root_test.cpp
     presentation/cli/models_pull_test.cpp
@@ -377,6 +379,12 @@ endforeach()
 target_link_libraries(apogee_tests PRIVATE
     apogee_tests_infrastructure apogee_tests_data apogee_tests_business apogee_tests_presentation
     apogee_core Catch2::Catch2WithMain)
+
+# The shell runs a command as a child of its own binary (37f): a test of
+# that runs the built `apogee`, found here -- and skips where this build made
+# none (CI's unit-test job builds the test binary alone).
+target_compile_definitions(apogee_tests_presentation PRIVATE
+    APOGEE_EXECUTABLE="$<TARGET_FILE:apogee>")
 
 catch_discover_tests(apogee_tests)
 
