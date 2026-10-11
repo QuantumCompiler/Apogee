@@ -24,6 +24,8 @@ struct Shell::State {
     /// The frame, with the shell's keys caught before the stage's.
     ftxui::Component root;
     std::optional<View> bottom;
+    /// The Go-to menu, open on the view it has highlighted (38).
+    std::optional<std::size_t> menu;
     /// The exec line, when the shell has one (37h).
     std::optional<ExecLineState> exec_line;
     std::string notice;

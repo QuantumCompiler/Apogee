@@ -179,8 +179,9 @@ def main():
                     128 + signal.SIGABRT)
 
         def switch_views(session):
+            # Tab stays in the shown view's category (38): Modes' second.
             session.send(b"\t")
-            session.wait_for(b"[2 Models]", 5, "views")
+            session.wait_for(b"[2 Chats]", 5, "views")
             mark = len(session.output)
             session.send(b"\x1bOP")  # F1
             deadline = time.time() + 5
@@ -197,7 +198,7 @@ def main():
             # typing, run as the shell's own child, its output and exit line
             # on the stage -- then the line closed and the shell quit as ever.
             session.send(b"\t")
-            session.wait_for(b"[2 Models]", 5, "exec-line")
+            session.wait_for(b"[2 Chats]", 5, "exec-line")
             session.send(b"!")
             session.wait_for(b" :", 5, "exec-line")
             session.send(b"version\r")
@@ -207,6 +208,20 @@ def main():
             session.send(b"q")
 
         screen_case(binary, env, "exec-line", exec_line, 0)
+
+        def go_to(session):
+            # The Go-to menu (38): Ctrl-G from the session, a letter to a
+            # view in another category, Enter there.
+            session.send(b"\x07")
+            session.wait_for(b"Go to", 5, "go-to")
+            session.send(b"s")  # the next view named with an s: Suites
+            session.read_for(0.3)
+            session.send(b"\r")
+            session.wait_for(b"Studio", 5, "go-to")
+            session.wait_for(b"[1 Suites]", 5, "go-to")
+            session.send(b"q")
+
+        screen_case(binary, env, "go-to", go_to, 0)
 
     with tempfile.TemporaryDirectory(prefix="apogee-tui-session-") as home:
         work = os.path.join(home, "work")

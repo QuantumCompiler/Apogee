@@ -48,7 +48,7 @@ struct ShellEntry {
 
 /// The shell's views, built over the cores: Home -- `apogee version`'s
 /// report, which Apogee this is and where its data lives -- and Keys, the
-/// shell's own keys.
+/// shell's own keys; both under Setup (38).
 void add_shell_views(tui::Shell& shell, const RootContext& context);
 
 /// Bare `apogee`: the shell when `entry` says this is an interactive terminal

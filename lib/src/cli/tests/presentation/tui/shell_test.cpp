@@ -72,12 +72,13 @@ TEST_CASE("focus moves through the views with Tab and back with Shift+Tab, wrapp
     add_views(shell);
     CHECK(shell.press(Key::named(Key::Name::Tab)));
     CHECK(shell.active() == 1);
-    CHECK(shell.render_text(72, 14) ==
+    CHECK(shell.render_text(72, 15) ==
           " apogee test                                            1 Home [2 Keys]\n"
           "────────────────────────────────────────────────────────────────────────\n"
-          " F1–F9, Alt+1–9     show a view by its number\n"
+          " Ctrl-G             go to any view: categories and their views\n"
+          " F1–F9, Alt+1–9     a view of this category by its number\n"
           " 1–9                the same, while the view is not taking typing\n"
-          " Tab, Shift+Tab     the next view, the previous one\n"
+          " Tab, Shift+Tab     the next view of this category, the previous one\n"
           " ↑ ↓ Page Up/Down   scroll the view\n"
           " q                  quit, while the view is not taking typing\n"
           " Ctrl-D             quit\n"
@@ -224,4 +225,104 @@ TEST_CASE("the tab strip fits any width, the shown view always named", "[tui][sh
     CHECK(tight.find("[7 Providers]") != std::string::npos);
     CHECK(tight.find("…") != std::string::npos);
     CHECK(tight.find("apogee test") == std::string::npos);
+}
+
+namespace {
+
+/// Views in three categories, a typing one first: what the shell's own
+/// registration (38) looks like, smaller.
+void add_categorized(Shell& shell) {
+    apogee::tui::View session = typing_view();
+    session.set_category("Modes");
+    shell.add(std::move(session));
+    for (const auto& [title, category] :
+         std::vector<std::pair<std::string, std::string>>{{"Chats", "Modes"},
+                                                          {"Suites", "Studio"},
+                                                          {"Agents", "Studio"},
+                                                          {"Config", "Setup"},
+                                                          {"Keys", "Setup"}}) {
+        apogee::tui::View view = apogee::tui::text_view(title, {title + " page"});
+        view.set_category(category);
+        shell.add(std::move(view));
+    }
+}
+
+}  // namespace
+
+TEST_CASE("the strip shows the shown view's category and its views, numbered within it",
+          "[tui][shell][categories]") {
+    Shell shell{plain()};
+    add_categorized(shell);
+    shell.activate(2);  // Suites
+    const std::string studio = shell.render_text(80, 8);
+    INFO(studio);
+    CHECK(studio.starts_with(" apogee test"));
+    CHECK(studio.find(" Studio ▾  [1 Suites] 2 Agents\n") != std::string::npos);
+    CHECK(studio.find("Chats") == std::string::npos);
+    CHECK(studio.find("Config") == std::string::npos);
+    CHECK(studio.find("Ctrl-G go to") != std::string::npos);
+    // A digit and Tab stay inside the category.
+    CHECK(shell.press(Key::character("2")));
+    CHECK(shell.active() == 3);
+    CHECK(shell.press(Key::named(Key::Name::Tab)));
+    CHECK(shell.active() == 2);
+    CHECK(shell.press(Key::named(Key::Name::BackTab)));
+    CHECK(shell.active() == 3);
+    CHECK(shell.press(Key::character("3")));  // no third in Studio
+    CHECK(shell.active() == 3);
+    CHECK(shell.press(Key::function(1)));
+    CHECK(shell.active() == 2);
+}
+
+TEST_CASE("Ctrl-G opens the Go-to menu from any view, a typing one too",
+          "[tui][shell][categories]") {
+    Shell shell{plain()};
+    add_categorized(shell);
+    CHECK(shell.active() == 0);  // the typing view
+    CHECK(shell.press(Key::named(Key::Name::CtrlG)));
+    const std::string menu = shell.render_text(80, 24);
+    INFO(menu);
+    CHECK(menu.find(" Go to ") != std::string::npos);
+    CHECK(menu.find(" Modes   › Typing ") != std::string::npos);
+    CHECK(menu.find(" Studio    Suites ") != std::string::npos);
+    CHECK(menu.find(" Setup     Config ") != std::string::npos);
+    CHECK(menu.find("Enter go · Esc close") != std::string::npos);
+    // ↓ moves, → jumps a category, ← back, a letter finds a view.
+    CHECK(shell.press(Key::named(Key::Name::Down)));
+    CHECK(shell.render_text(80, 24).find("› Chats") != std::string::npos);
+    CHECK(shell.press(Key::named(Key::Name::Right)));
+    CHECK(shell.render_text(80, 24).find("› Suites") != std::string::npos);
+    CHECK(shell.press(Key::named(Key::Name::Right)));
+    CHECK(shell.render_text(80, 24).find("› Config") != std::string::npos);
+    CHECK(shell.press(Key::named(Key::Name::Left)));
+    CHECK(shell.render_text(80, 24).find("› Suites") != std::string::npos);
+    CHECK(shell.press(Key::character("k")));
+    CHECK(shell.render_text(80, 24).find("› Keys") != std::string::npos);
+    // q is the menu's while it is open, never a quit.
+    CHECK(shell.press(Key::character("q")));
+    CHECK_FALSE(shell.quit_requested());
+    CHECK(shell.press(Key::named(Key::Name::Return)));
+    CHECK(shell.active() == 5);
+    CHECK(shell.render_text(80, 24).find(" Go to ") == std::string::npos);
+    const std::string setup = shell.render_text(80, 8);
+    INFO(setup);
+    CHECK(setup.find(" Setup ▾   1 Config [2 Keys]\n") != std::string::npos);
+    // Esc closes it where it was.
+    CHECK(shell.press(Key::named(Key::Name::CtrlG)));
+    CHECK(shell.press(Key::named(Key::Name::Up)));
+    CHECK(shell.press(Key::named(Key::Name::Escape)));
+    CHECK(shell.active() == 5);
+    CHECK(shell.render_text(80, 24).find(" Go to ") == std::string::npos);
+}
+
+TEST_CASE("a shell whose views name no category draws as it always has",
+          "[tui][shell][categories]") {
+    Shell shell{plain()};
+    add_views(shell);
+    const std::string frame = shell.render_text(48, 8);
+    CHECK(frame.find("▾") == std::string::npos);
+    CHECK(frame.find("Ctrl-G") == std::string::npos);
+    // The menu still lists them.
+    CHECK(shell.press(Key::named(Key::Name::CtrlG)));
+    CHECK(shell.render_text(48, 12).find("› Home") != std::string::npos);
 }

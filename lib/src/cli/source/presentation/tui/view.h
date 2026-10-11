@@ -60,12 +60,25 @@ public:
         group_ = std::move(group);
     }
 
+    /// The category the shell lists the view under (38): `Modes`, `Studio`,
+    /// `Setup`. The strip shows the shown view's category and its views; the
+    /// Go-to menu lists every category in the order its first view was added.
+    /// Empty: the view is in the shell's one unnamed category.
+    [[nodiscard]] const std::string& category() const noexcept {
+        return category_;
+    }
+
+    void set_category(std::string category) {
+        category_ = std::move(category);
+    }
+
 private:
     std::string title_;
     std::shared_ptr<Body> body_;
     std::function<bool()> takes_text_;
     std::function<void()> shown_;
     std::string group_;
+    std::string category_;
 };
 
 /// A page of text: the lines it is given, top to bottom, scrolled with the

@@ -6933,3 +6933,27 @@ Decisions taken while building, for veto:
 - **The output shows while the line is open**, its newest twelve lines; history lives for the shell's run, not across runs.
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,150 of 3,150, the pdftotext case skipped as before, the child-process and PTY cases run against the built binary. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+### 2026-10-11 — `tui-view-categories` (backlog item 38): the views in categories, and a switcher
+
+**Why.** Track 37 left the shell with twenty views on one tab strip: at any width it collapsed into numbers, and the number keys reached only the first nine.
+
+- [x] **Five categories** (the user's calls), each a view's own (`View::category`, set by its registration in `cli/tui_cmd` as its exec-line group is):
+  - **Modes**: Session, Chats, Tasks.
+  - **Studio** (the user's name): Suites, Symphonies, Agents, MCP.
+  - **Knowledge**: Knowledge, Collections, Graph.
+  - **Training**: Models, Train, Datasets.
+  - **Setup**: Config, Auth, Providers, Check, System, Home, Keys.
+- [x] **The strip shows one category**: its name (`Modes ▾`) and only its views, numbered within it. The digits, F-keys, Alt+digits and Tab act within the category, so every view is one key away inside it, and each category has room for the views still to come.
+- [x] **Ctrl-G, the Go-to menu** (the user's choice over F-keys per category and Tab between categories): every category and its views in a box over the stage, opened from any view, the Session view's conversation included, since Ctrl-G is never a character.
+  - ↑/↓ move a view, ←/→ a category, and a letter jumps to the next view named with it.
+  - Enter goes; Esc, Ctrl-G or Ctrl-C closes; `q` is the menu's while it is open.
+
+  The hint line, the bar beside the monitor, the Keys view and Home name Ctrl-G. A shell whose views name no category draws exactly as before.
+- [x] **Tests**: `shell_test` holds the strip, the keys inside a category, the menu's every key from a typing view, and a shell with no categories. `cli.tui_shell` goes to Studio through the menu on a real terminal with the modes restored, and its view-switch cases now stay in Modes.
+
+Decisions taken while building, for veto:
+- **Within a category, the number keys and Tab keep their old meaning**; the menu is the one way between categories. Tab no longer walks every view, so a view in another category is two keys away: Ctrl-G, then a letter or the arrows, then Enter.
+- **Setup's order follows the grouping you accepted**: Config, Auth, Providers, Check, System, Home, Keys. A bare `apogee` still lands on Session.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,153 of 3,153, the pdftotext case skipped as before, the PTY cases run on a real terminal. `clang-format` is clean on every touched file, and `make lint` was not run.

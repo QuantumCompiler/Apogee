@@ -2,7 +2,6 @@
 
 #include <CLI/CLI.hpp>
 
-#include <array>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -70,7 +69,9 @@ namespace {
     shell.set_bottom_bar(monitor.view());
     // The conversation first: where a bare `apogee` lands (32c).
     tui::SessionView session{pump, theme};
-    const std::size_t session_view = shell.add(session.view());
+    tui::View session_tab = session.view();
+    session_tab.set_category("Modes");
+    const std::size_t session_view = shell.add(std::move(session_tab));
     TuiSessionDriver driver{session, pump, context, machine_budget,
                             [held](std::vector<std::string> backends) {
                                 const std::lock_guard lock{held->mutex};
@@ -91,56 +92,62 @@ namespace {
                 }
                 return handed.said;
             }};
-    // Each view with the command group its exec line is scoped to (37h).
-    const auto add = [&shell](tui::View view, std::string group) {
+    // Each view under its category (38), with the command group its exec line
+    // is scoped to (37h) -- added in the categories' order, so the strip and
+    // the Go-to menu list them as Modes, Studio, Knowledge, Training, Setup.
+    const auto add = [&shell](tui::View view, std::string category, std::string group) {
+        view.set_category(std::move(category));
         view.set_group(std::move(group));
         return shell.add(std::move(view));
     };
+    // The workbench (32d): Models, Chats, Suites, Config.
     const std::vector<std::unique_ptr<tui::ListView>> workbench =
         make_workbench(pump, theme, context, hooks);
-    for (std::size_t i = 0; i < workbench.size(); ++i) {
-        // Models, Chats, Suites, Config -- the suites are the config's.
-        static constexpr std::array<const char*, 4> kGroups{"models", "chats", "config", "config"};
-        (void)add(workbench.at(i)->view(), i < kGroups.size() ? kGroups.at(i) : "");
-    }
-    // The symphonies beside them (37d), played through the session.
     tui::ListView symphonies{pump, theme, symphonies_view_options(context, hooks)};
-    (void)add(symphonies.view(), "symphonies");
     // The tasks (37e): a run's narration through the progress seam, which
     // stops a run still going before the shell's own end.
     const auto task_run = std::make_shared<tui::Progress>(pump);
     tui::ListView tasks{pump, theme, task_view_options(context, task_run, machine_budget)};
-    (void)add(tasks.view(), "task");
-    // Training (37f): each run the command itself, a child of this binary,
-    // narrated through the seam.
+    // Training (37f), the tooling (37g): each run and act the command itself,
+    // a child of this binary.
     const std::filesystem::path self = platform::executable_path();
     const auto training_run = std::make_shared<tui::Progress>(pump);
     tui::ListView train{pump, theme, train_view_options(context, training_run, self)};
-    (void)add(train.view(), "train");
     const auto datasets_run = std::make_shared<tui::Progress>(pump);
     tui::ListView datasets{pump, theme, datasets_view_options(context, datasets_run, self)};
-    (void)add(datasets.view(), "datasets");
-    // The tooling (37g): agents, MCP servers, and the keys as metadata only.
     tui::ListView agents{pump, theme, agents_view_options(context, self)};
-    (void)add(agents.view(), "agents");
     tui::ListView mcp_servers{pump, theme, mcp_view_options(context, self)};
-    (void)add(mcp_servers.view(), "mcp");
     tui::ListView auth{pump, theme, auth_view_options(context)};
-    (void)add(auth.view(), "auth");
-    // The doctor beside it (37b): the report, the providers, the machine.
+    // The doctor (37b): Check, Providers, System; the knowledge (37c):
+    // records, collections, graphs.
     const std::vector<std::unique_ptr<tui::ListView>> doctor =
         make_doctor_views(pump, theme, context);
-    for (std::size_t i = 0; i < doctor.size(); ++i) {
-        static constexpr std::array<const char*, 3> kGroups{"check", "providers", "system"};
-        (void)add(doctor.at(i)->view(), i < kGroups.size() ? kGroups.at(i) : "");
-    }
-    // The knowledge beside them (37c): records, collections, graphs.
     const std::vector<std::unique_ptr<tui::ListView>> knowledge =
         make_knowledge_views(pump, theme, context);
-    for (std::size_t i = 0; i < knowledge.size(); ++i) {
-        static constexpr std::array<const char*, 3> kGroups{"knowledge", "embed", "graph"};
-        (void)add(knowledge.at(i)->view(), i < kGroups.size() ? kGroups.at(i) : "");
-    }
+
+    // Modes: the session, beside the saved chats and the tasks.
+    (void)add(workbench.at(1)->view(), "Modes", "chats");
+    (void)add(tasks.view(), "Modes", "task");
+    // Studio: what a session is composed of.
+    (void)add(workbench.at(2)->view(), "Studio", "config");
+    (void)add(symphonies.view(), "Studio", "symphonies");
+    (void)add(agents.view(), "Studio", "agents");
+    (void)add(mcp_servers.view(), "Studio", "mcp");
+    // Knowledge.
+    (void)add(knowledge.at(0)->view(), "Knowledge", "knowledge");
+    (void)add(knowledge.at(1)->view(), "Knowledge", "embed");
+    (void)add(knowledge.at(2)->view(), "Knowledge", "graph");
+    // Training: the models, and what makes new ones.
+    (void)add(workbench.at(0)->view(), "Training", "models");
+    (void)add(train.view(), "Training", "train");
+    (void)add(datasets.view(), "Training", "datasets");
+    // Setup: the config, the keys, the doctor, the machine -- Home and Keys
+    // after them (`add_shell_views`).
+    (void)add(workbench.at(3)->view(), "Setup", "config");
+    (void)add(auth.view(), "Setup", "auth");
+    (void)add(doctor.at(1)->view(), "Setup", "providers");
+    (void)add(doctor.at(0)->view(), "Setup", "check");
+    (void)add(doctor.at(2)->view(), "Setup", "system");
     // The command runner (37h): every verb and flag, a child of this binary.
     const auto command_run = std::make_shared<tui::Progress>(pump);
     shell.set_exec_line(exec_line_options(context, command_run, self));
@@ -168,15 +175,20 @@ void add_shell_views(tui::Shell& shell, const RootContext& context) {
     std::vector<std::string> home = lines_of(version_report(context));
     home.emplace_back();
     home.emplace_back("Every command runs as it always has -- `apogee <command>` at a prompt, and");
-    home.emplace_back("`apogee --help` lists them. Tab moves between the views; q quits.");
-    shell.add(tui::text_view("Home", std::move(home)));
+    home.emplace_back("`apogee --help` lists them. Ctrl-G goes to any view; Tab moves within a");
+    home.emplace_back("category; : runs a command; q quits.");
+    tui::View home_view = tui::text_view("Home", std::move(home));
+    home_view.set_category("Setup");
+    shell.add(std::move(home_view));
     std::vector<std::string> keys = tui::Shell::key_lines();
     keys.emplace_back();
     keys.emplace_back("In the session:");
     for (const std::string& line : tui::SessionView::key_lines()) {
         keys.push_back(line);
     }
-    shell.add(tui::text_view("Keys", std::move(keys)));
+    tui::View keys_view = tui::text_view("Keys", std::move(keys));
+    keys_view.set_category("Setup");
+    shell.add(std::move(keys_view));
 }
 
 int open_bare(const ShellEntry& entry, const RootContext& context, CLI::App& app) {

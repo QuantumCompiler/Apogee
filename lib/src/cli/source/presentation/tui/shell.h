@@ -47,6 +47,8 @@ struct Key {
         Delete,
         CtrlC,
         CtrlD,
+        /// The Go-to menu's key (38).
+        CtrlG,
         /// F1-F12, `number` saying which.
         Function,
         /// Alt held with `text`'s key.

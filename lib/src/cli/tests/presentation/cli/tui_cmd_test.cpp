@@ -149,7 +149,8 @@ TEST_CASE("the shell's first views render the version report and the keys", "[cl
     CHECK(home.find("\n channel: ") != std::string::npos);
     CHECK(home.find("\n root: ") != std::string::npos);
     (void)shell.press(apogee::tui::Key::function(2));
-    CHECK(shell.render_text(90, 14).find("show a view by its number") != std::string::npos);
+    CHECK(shell.render_text(90, 16).find("a view of this category by its number") !=
+          std::string::npos);
 }
 
 TEST_CASE("tui completes, and its help says what it opens", "[cli][tui][completion]") {
