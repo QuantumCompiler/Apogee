@@ -13,6 +13,8 @@
 #include "agentloop/rerank.h"
 #include "agentloop/retriever.h"
 #include "ansi/text_width.h"
+#include "backends/model_roster.h"
+#include "cli/permissions.h"
 #include "knowledge/record.h"
 
 namespace apogee::commands {
@@ -33,8 +35,10 @@ constexpr std::array kSuiteFlags{
 
 constexpr std::array kCommands{
     ChatCommandSpec{"help", ChatVerb::Help, "", "List these commands"},
-    ChatCommandSpec{"model", ChatVerb::Model, "[backend]",
-                    "Show the backend answering, or switch to another", ArgumentValues::Backends},
+    ChatCommandSpec{"model", ChatVerb::Model, "[backend|model]",
+                    "Show the backend answering, or switch: a backend, a roster model, or "
+                    "backend:model",
+                    ArgumentValues::Models},
     ChatCommandSpec{"models", ChatVerb::Models, "", "List the configured backends"},
     ChatCommandSpec{"suite", ChatVerb::Suite, "[name|off]",
                     "Show the suite and what its members hold, or switch to another (then "
@@ -67,6 +71,13 @@ constexpr std::array kCommands{
     ChatCommandSpec{"think", ChatVerb::Think, "[on|off|auto]",
                     "Show or set whether the model thinks first: on, off, or auto per question",
                     ArgumentValues::ThinkingModes},
+    ChatCommandSpec{"effort", ChatVerb::Effort, "[level|auto]",
+                    "Show or set how hard the model thinks: low, medium, high, xhigh or max; "
+                    "auto leaves it to the model",
+                    ArgumentValues::EffortLevels},
+    ChatCommandSpec{"thinking-display", ChatVerb::ThinkingDisplay, "[summary|raw]",
+                    "Show or set how reasoning is drawn while it streams: a summary line, or raw",
+                    ArgumentValues::ThinkingDisplays},
     ChatCommandSpec{"max-tokens", ChatVerb::MaxTokens, "<number>",
                     "Cap each answer's length in tokens"},
     ChatCommandSpec{"compact", ChatVerb::Compact, "",
@@ -106,9 +117,30 @@ constexpr std::array kCommands{
                     ArgumentValues::SessionPermissions},
     ChatCommandSpec{"permissions", ChatVerb::Permissions, "",
                     "List each tool's answer and where it comes from"},
+    ChatCommandSpec{"permission-mode", ChatVerb::PermissionMode, "[mode]",
+                    "Show or set how much runs without asking: manual, accept-edits, plan, "
+                    "dont-ask or bypass (Shift+Tab cycles)",
+                    ArgumentValues::PermissionModes},
     ChatCommandSpec{"exit", ChatVerb::Exit, "", "Save and leave"},
     ChatCommandSpec{"quit", ChatVerb::Exit, "", "Save and leave"},
 };
+
+/// What each effort level means, for the rows (39a).
+std::string_view effort_description(harness::Effort effort) {
+    switch (effort) {
+        case harness::Effort::Low:
+            return "Think briefly: quick answers";
+        case harness::Effort::Medium:
+            return "Think a moderate amount";
+        case harness::Effort::High:
+            return "Think hard: harder questions";
+        case harness::Effort::XHigh:
+            return "Think harder still";
+        case harness::Effort::Max:
+            return "Think as long as the model can";
+    }
+    return {};
+}
 
 /// What each retriever value means, for the rows. A value agentloop adds
 /// without a line here still completes, just undescribed.
@@ -186,6 +218,97 @@ std::size_t current_word(std::string_view text) {
 
 char lower(char c) {
     return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+}
+
+/// Where a word starts in a name: after a `-`, `_`, `:` or `.`.
+bool separator(char c) {
+    return c == '-' || c == '_' || c == ':' || c == '.';
+}
+
+/// `text` cut at its separators: `permission-mode` is `permission`, `mode`;
+/// `perm-` is `perm` and an empty word.
+std::vector<std::string_view> name_words(std::string_view text) {
+    std::vector<std::string_view> words;
+    std::size_t start = 0;
+    for (std::size_t at = 0; at <= text.size(); ++at) {
+        if (at == text.size() || separator(text[at])) {
+            words.push_back(text.substr(start, at - start));
+            start = at + 1;
+        }
+    }
+    return words;
+}
+
+bool starts_with_folded(std::string_view text, std::string_view prefix) {
+    if (prefix.size() > text.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < prefix.size(); ++i) {
+        if (lower(text[i]) != lower(prefix[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// How well `typed` names `name`, best first, or unset for not at all: 0 a
+/// prefix; loosely, 1 its words begun by the typed words from the first, 2
+/// from a later one, 3 the typed text anywhere in it, 4 its letters in
+/// order. Loose tiers ignore case.
+std::optional<int> match_tier(std::string_view name, std::string_view typed, bool loose) {
+    if (name.starts_with(typed)) {
+        return 0;
+    }
+    if (!loose) {
+        return std::nullopt;
+    }
+    const std::vector<std::string_view> words = name_words(name);
+    const std::vector<std::string_view> wanted = name_words(typed);
+    for (std::size_t first = 0; first + wanted.size() <= words.size(); ++first) {
+        bool begun = true;
+        for (std::size_t i = 0; i < wanted.size() && begun; ++i) {
+            begun = starts_with_folded(words.at(first + i), wanted.at(i));
+        }
+        if (begun) {
+            return first == 0 ? 1 : 2;
+        }
+    }
+    const auto folded = [](std::string_view text) {
+        std::string out;
+        out.reserve(text.size());
+        for (const char c : text) {
+            out += lower(c);
+        }
+        return out;
+    };
+    const std::string haystack = folded(name);
+    const std::string needle = folded(typed);
+    if (haystack.find(needle) != std::string::npos) {
+        return 3;
+    }
+    // Letters in order, only once two are typed: one letter is in most names.
+    if (needle.size() < 2) {
+        return std::nullopt;
+    }
+    std::size_t at = 0;
+    for (const char c : haystack) {
+        if (at < needle.size() && c == needle[at]) {
+            ++at;
+        }
+    }
+    return at == needle.size() ? std::optional<int>{4} : std::nullopt;
+}
+
+/// `ranked` in tier order, the order they were found in within one.
+std::vector<Suggestion> by_tier(std::vector<std::pair<int, Suggestion>> ranked) {
+    std::stable_sort(ranked.begin(), ranked.end(),
+                     [](const auto& a, const auto& b) { return a.first < b.first; });
+    std::vector<Suggestion> out;
+    out.reserve(ranked.size());
+    for (auto& [tier, suggestion] : ranked) {
+        out.push_back(std::move(suggestion));
+    }
+    return out;
 }
 
 /// Smart case: a prefix with a capital in it must match exactly; one without
@@ -273,6 +396,16 @@ std::vector<NamedChoice> argument_choices(ArgumentValues values,
         case ArgumentValues::Backends:
             choices = sources.backends;
             break;
+        case ArgumentValues::Models:
+            choices = sources.backends;
+            for (const NamedChoice& model : sources.roster_models) {
+                if (std::ranges::none_of(choices, [&model](const NamedChoice& named) {
+                        return named.name == model.name;
+                    })) {
+                    choices.push_back(model);
+                }
+            }
+            break;
         case ArgumentValues::Retrievers:
             for (const std::string_view name : agentloop::retriever_names()) {
                 choices.push_back({std::string{name}, std::string{retriever_description(name)}});
@@ -301,6 +434,17 @@ std::vector<NamedChoice> argument_choices(ArgumentValues values,
             choices.push_back({"off", "Answer without thinking first"});
             choices.push_back({"auto", "Think when the question needs it"});
             break;
+        case ArgumentValues::ThinkingDisplays:
+            choices.push_back({"summary", "One line of what the model is doing"});
+            choices.push_back({"raw", "The reasoning itself, as it streams"});
+            break;
+        case ArgumentValues::EffortLevels:
+            for (const harness::Effort effort : harness::kEfforts) {
+                choices.push_back({std::string{harness::to_string(effort)},
+                                   std::string{effort_description(effort)}});
+            }
+            choices.push_back({"auto", "Leave it to the model, or the backend's budget"});
+            break;
         case ArgumentValues::AttachmentNames:
             if (sources.attachment_names) {
                 for (std::string& name : sources.attachment_names()) {
@@ -320,6 +464,12 @@ std::vector<NamedChoice> argument_choices(ArgumentValues values,
                 for (std::string& name : sources.session_permissions()) {
                     choices.push_back({std::move(name), {}});
                 }
+            }
+            break;
+        case ArgumentValues::PermissionModes:
+            for (const PermissionMode mode : kPermissionModes) {
+                choices.push_back(
+                    {std::string{to_string(mode)}, std::string{permission_mode_description(mode)}});
             }
             break;
         case ArgumentValues::Suites:
@@ -587,6 +737,28 @@ ChatCompletionSources chat_completion_sources(const harness::Config& config,
         }
         sources.backends.push_back({name, std::move(description)});
     }
+    // The cached rosters of the configured provider types (M13): what
+    // `/model` can switch to beside the backends (33).
+    for (const auto& [type, roster] : backends::known_rosters().rosters) {
+        if (std::ranges::none_of(config.backends, [&wanted = type](const auto& entry) {
+                return harness::to_string(entry.second.type) == wanted;
+            })) {
+            continue;
+        }
+        for (const backends::RosterModel& model : roster.models) {
+            sources.roster_models.push_back({model.id, type + "'s roster"});
+        }
+        // Each entry of the type, for `<backend>:` (34).
+        for (const auto& [name, entry] : config.backends) {
+            if (harness::to_string(entry.type) != type) {
+                continue;
+            }
+            std::vector<NamedChoice>& models = sources.backend_rosters[name];
+            for (const backends::RosterModel& model : roster.models) {
+                models.push_back({model.id, type + "'s roster"});
+            }
+        }
+    }
     for (const std::string& name : config.suite_names()) {
         const harness::SuiteConfig* suite = config.find_suite(name);
         sources.suites.push_back({name, suite != nullptr ? suite->description : std::string{}});
@@ -609,15 +781,18 @@ Suggestions suggest_chat_input(std::string_view before_cursor,
         if (typed.find('/') != std::string_view::npos) {
             return out;
         }
+        std::vector<std::pair<int, Suggestion>> ranked;
         for (const ChatCommandSpec& spec : chat_commands(sources.mode)) {
-            if (spec.verb.starts_with(typed)) {
+            if (const std::optional<int> tier = match_tier(spec.verb, typed, sources.loose);
+                tier.has_value()) {
                 const std::string name = "/" + std::string{spec.verb};
                 // A trailing space when it takes an argument, so the next
                 // rows are already that argument's values.
-                out.candidates.push_back({spec.argument.empty() ? name : name + " ", name,
-                                          std::string{spec.description}});
+                ranked.emplace_back(*tier, Suggestion{spec.argument.empty() ? name : name + " ",
+                                                      name, std::string{spec.description}});
             }
         }
+        out.candidates = by_tier(std::move(ranked));
         return out;
     }
 
@@ -675,11 +850,31 @@ Suggestions suggest_chat_input(std::string_view before_cursor,
         return out;
     }
     out.from = from;
-    for (NamedChoice& choice : argument_choices(spec->values, sources)) {
-        if (choice.name.starts_with(typed)) {
-            out.candidates.push_back({choice.name, {}, std::move(choice.description)});
+    // Past a backend's colon, its roster's models as `<backend>:<model>`
+    // (34). A colon after anything else is the name's own: a roster id may
+    // hold one.
+    if (spec->values == ArgumentValues::Models) {
+        if (const std::size_t colon = typed.find(':'); colon != std::string_view::npos) {
+            if (const auto listed = sources.backend_rosters.find(typed.substr(0, colon));
+                listed != sources.backend_rosters.end()) {
+                for (const NamedChoice& model : listed->second) {
+                    std::string pinned = listed->first + ":" + model.name;
+                    if (pinned.starts_with(typed)) {
+                        out.candidates.push_back({std::move(pinned), {}, model.description});
+                    }
+                }
+                return out;
+            }
         }
     }
+    std::vector<std::pair<int, Suggestion>> ranked;
+    for (NamedChoice& choice : argument_choices(spec->values, sources)) {
+        if (const std::optional<int> tier = match_tier(choice.name, typed, sources.loose);
+            tier.has_value()) {
+            ranked.emplace_back(*tier, Suggestion{choice.name, {}, std::move(choice.description)});
+        }
+    }
+    out.candidates = by_tier(std::move(ranked));
     return out;
 }
 

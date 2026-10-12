@@ -1119,6 +1119,24 @@ bool is_vendor_cli(BackendType type) noexcept {
     return false;
 }
 
+bool names_its_model(BackendType type) noexcept {
+    switch (type) {
+        case BackendType::Anthropic:
+        case BackendType::OpenAI:
+        case BackendType::Google:
+        case BackendType::ClaudeCli:
+        case BackendType::CodexCli:
+        case BackendType::GeminiCli:
+        case BackendType::OllamaCli:
+        case BackendType::Mock:
+            return true;
+        case BackendType::LlamaCpp:
+        case BackendType::Mlx:
+            return false;
+    }
+    return false;
+}
+
 std::string_view to_string(AgentToolPolicy policy) noexcept {
     for (const auto& [name, candidate] : kAgentToolPolicyNames) {
         if (candidate == policy) {
@@ -1406,6 +1424,20 @@ std::optional<PermissionLevel> permission_level_from_string(std::string_view nam
     }
     if (name == "deny") {
         return PermissionLevel::Deny;
+    }
+    return std::nullopt;
+}
+
+std::string_view to_string(ThinkingDisplay display) noexcept {
+    return display == ThinkingDisplay::Raw ? "raw" : "summary";
+}
+
+std::optional<ThinkingDisplay> thinking_display_from_string(std::string_view text) noexcept {
+    if (text == "summary") {
+        return ThinkingDisplay::Summary;
+    }
+    if (text == "raw") {
+        return ThinkingDisplay::Raw;
     }
     return std::nullopt;
 }
@@ -2000,6 +2032,18 @@ Config parse_config(std::string_view content, std::string_view origin) {
             fail(origin, "ui: expected a mapping");
         }
         config.ui.markdown = boolean(ui["markdown"], origin, "ui.markdown", true);
+        // A word outside the two is refused naming them -- never read as the
+        // default (43).
+        if (const std::string display =
+                scalar(ui["thinking_display"], origin, "ui.thinking_display");
+            !display.empty()) {
+            const std::optional<ThinkingDisplay> parsed = thinking_display_from_string(display);
+            if (!parsed.has_value()) {
+                fail(origin, "ui.thinking_display: unknown value '" + display +
+                                 "' (accepted: summary, raw)");
+            }
+            config.ui.thinking_display = *parsed;
+        }
     }
 
     if (const YAML::Node knowledge = root["knowledge"];

@@ -55,6 +55,15 @@
 #                                  compiled as plain C there: FETCHED NEVER
 #                                  FOUND, since the graph's goldens pin the
 #                                  tree a grammar of one version produces.
+#   Full-screen TUI FTXUI      -- wired below (arrived with the TUI shell,
+#                                  32b). The shell's compositor, linked by the
+#                                  `tui` module alone (the link policy holds
+#                                  it). FETCHED NEVER FOUND, at an exact commit
+#                                  with its hash, as tree-sitter is: the
+#                                  shell's headless frame goldens pin what one
+#                                  version renders, and a system copy of another
+#                                  -- v6 named its loop's class differently --
+#                                  would build a different screen.
 
 include(FetchContent)
 
@@ -198,6 +207,24 @@ set(REPLXX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(REPLXX_BUILD_PACKAGE OFF CACHE BOOL "" FORCE)
 
 apogee_make_available(nlohmann_json CLI11 replxx)
+
+# FTXUI v7.0.3 (MIT): the archive of that tag's commit, its hash checked.
+# Everything optional off -- no docs, examples, tests, C++ modules, install
+# rules or ccache launcher of its own -- so it adds three static libraries
+# (screen, dom, component) and nothing else.
+FetchContent_Declare(ftxui
+    URL      https://github.com/ArthurSonzogni/FTXUI/archive/f921fad208912747c17d129a8ef75ec7624b6eec.tar.gz
+    URL_HASH SHA256=00e1426f5b13d7748af44925768cca3bc4f64aa3b02e4c82567fd85716911a5b
+    SYSTEM
+)
+set(FTXUI_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(FTXUI_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(FTXUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(FTXUI_BUILD_MODULES OFF CACHE BOOL "" FORCE)
+set(FTXUI_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(FTXUI_ENABLE_CCACHE OFF CACHE BOOL "" FORCE)
+set(FTXUI_QUIET ON CACHE BOOL "" FORCE)
+apogee_make_available(ftxui)
 
 # JSON Schema validation (draft-07), for structured agent output: a report is
 # validated client-side on EVERY provider, whatever native mode the wire also

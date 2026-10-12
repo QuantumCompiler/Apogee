@@ -232,6 +232,12 @@ public:
         }
     }
 
+    void interrupt() override {
+        if (!reaped_) {
+            ::kill(pid_, SIGINT);
+        }
+    }
+
 private:
     pid_t pid_ = -1;
     Fd stdin_;

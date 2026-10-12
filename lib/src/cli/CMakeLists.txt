@@ -32,7 +32,7 @@ endif()
 # is stamped into version.h via configure_file. Bump it here when cutting a
 # release (see CLAUDE.md -> Versioning).
 project(Apogee
-    VERSION 0.1.5
+    VERSION 0.1.6
     DESCRIPTION "A self-contained C++ AI harness for local and cloud LLMs"
     # C is enabled for one reason: SQLite ships as a C amalgamation, and the
     # chunk store compiles it. No Apogee source is C -- "primarily C++" is
@@ -97,6 +97,7 @@ include(GNUInstallDirs)
 include(ApogeeWarnings)
 include(ApogeeDependencies)
 include(ApogeeLinkPolicy)
+include(ApogeeImageSize)
 include(modules)
 
 add_subdirectory(third_party)

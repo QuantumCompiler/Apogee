@@ -96,6 +96,10 @@ struct ModelRow {
     /// from this -- with no backend on it and nothing needing attention. The
     /// table folds it unless asked for everything (M4); nothing else changes.
     bool consumed = false;
+    /// A model an entry runs from its type's roster (M13) -- fetched, or
+    /// built in for a CLI that prints none (35): a row named `<owner>:<id>`,
+    /// shown under its entry.
+    bool roster = false;
 };
 
 /// What the listing knows about provider backends (28c): the cheap checks'
@@ -134,8 +138,48 @@ struct ProviderLens {
                                                      const BusyProgress& progress = {},
                                                      const ProviderLens& providers = {});
 
+/// The rows `models list` reads -- the config's backends and the store's
+/// models, each provider row through this machine's lens (28c) -- what the
+/// listing and the full-screen shell's Models view (32d) both draw.
+/// `config_path` locates the credential store and the provider cache's
+/// verified records.
+[[nodiscard]] std::vector<ModelRow> read_model_rows(const harness::Config& config,
+                                                    const std::filesystem::path& config_path,
+                                                    const BusyProgress& progress = {});
+
+/// `models info`'s body for `name`, read as the command reads it -- the
+/// provider lens and the credential store beside `config_path` -- for the
+/// command and the shell's Models view alike. Empty when `name` is a whole
+/// stored model rather than one thing to show.
+[[nodiscard]] std::string read_model_info(const harness::Config& config, std::string_view name,
+                                          const std::filesystem::path& config_path,
+                                          const BusyProgress& progress = {});
+
 /// Renders rows as an aligned table. Empty input yields a single explanatory
 /// line, never a bare header with nothing under it.
+///
+/// Where a row sits in `models list` (36): its section and its table, read
+/// from the row alone -- a cloud provider's backend type, or what a local
+/// model is stored as -- so the text table and the JSON group one way.
+struct ModelGroup {
+    /// `cloud` or `local`.
+    std::string section;
+    /// The table's stable id: a provider's backend type (`claude-cli`,
+    /// `anthropic`), or `safetensors`, `gguf`, `mlx`, `ollama-cli`, `other`.
+    std::string id;
+    /// Its heading: the provider's label (`Claude CLI`), or the format's.
+    std::string title;
+    /// Its place: cloud before local, providers in the provider table's
+    /// order, then SafeTensors, GGUF, MLX, the Ollama CLI, anything else.
+    std::size_t order = 0;
+};
+
+[[nodiscard]] ModelGroup model_group(const ModelRow& row);
+
+/// The listing in sections (36): "Cloud backends", one table per provider
+/// present, and "Local backends", one per format -- each table sizing its
+/// own columns, leaving out TYPE (its heading names it), ARCH and PROFILE on
+/// the cloud side, and any column empty in every one of its rows.
 ///
 /// Each row is coloured by what it is, with its note beneath in the same
 /// colour: a configured backend in Apogee's cyan, anything needing attention
@@ -143,7 +187,8 @@ struct ProviderLens {
 /// measured on the plain text, so a colourless `style` gives the same table.
 ///
 /// A `consumed` snapshot is folded out unless `all`, and one line under the
-/// table counts what was folded, so the fold is never silent (M4).
+/// SafeTensors table counts what was folded, so the fold is never silent
+/// (M4).
 [[nodiscard]] std::string render_model_table(const std::vector<ModelRow>& rows,
                                              const ansi::Style& style = {}, bool all = false);
 

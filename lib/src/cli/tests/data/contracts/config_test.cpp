@@ -612,6 +612,22 @@ TEST_CASE("is_vendor_cli names exactly the four CLI types", "[config][vendor]") 
     CHECK_FALSE(is_vendor_cli(BackendType::Mock));
 }
 
+TEST_CASE("a model is pinned by name only where the entry picks its model by name",
+          "[config][vendor]") {
+    // 34: an API or vendor-CLI entry names its model; a llamacpp or mlx one
+    // runs the weights at its model_path, and has none to pin by name.
+    using apogee::harness::BackendType;
+    using apogee::harness::names_its_model;
+    for (const BackendType type :
+         {BackendType::Anthropic, BackendType::OpenAI, BackendType::Google, BackendType::ClaudeCli,
+          BackendType::CodexCli, BackendType::GeminiCli, BackendType::OllamaCli,
+          BackendType::Mock}) {
+        CHECK(names_its_model(type));
+    }
+    CHECK_FALSE(names_its_model(BackendType::LlamaCpp));
+    CHECK_FALSE(names_its_model(BackendType::Mlx));
+}
+
 TEST_CASE("knowledge: parses auto_capture and db, defaults the collection, and refuses a path",
           "[config][knowledge]") {
     const apogee::harness::Config empty = apogee::harness::parse_config("", "<test>");

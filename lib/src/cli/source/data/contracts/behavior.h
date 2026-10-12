@@ -43,6 +43,15 @@ struct ModelBehavior {
     /// its own defaults. `known()` is what distinguishes the two.
     std::vector<std::pair<std::string, std::string>> reasoning_tags;
 
+    /// The reasoning this backend streams is already the vendor's own summary
+    /// of it, not the chain of thought (43): Anthropic's thinking blocks,
+    /// OpenAI's reasoning summary, Gemini's thought summaries, and the
+    /// vendor CLIs that pass them on. Shown as it is, never summarised again.
+    /// False -- the zero value -- for a local model's raw reasoning, and for
+    /// a backend that does not say, whose reasoning a summary costs nothing to
+    /// gist: the summary runs only on an unmetered member.
+    bool reasoning_summarized = false;
+
     /// Whether a profile was resolved at all.
     ///
     /// **The zero value means unknown, and every consumer must treat unknown as

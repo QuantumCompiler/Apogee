@@ -2,6 +2,7 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -168,6 +169,25 @@ enum class ThinkingMode : std::uint8_t { On, Off, Auto };
 /// The mode a word names, or unset for anything else.
 [[nodiscard]] std::optional<ThinkingMode> thinking_mode_from_string(std::string_view text) noexcept;
 
+/// How hard a reasoning model works before it answers (39a): Claude Code's
+/// five levels, named here once and spelled by each backend at its boundary.
+enum class Effort : std::uint8_t { Low, Medium, High, XHigh, Max };
+
+/// Every level, lowest first: the order `/effort` offers them in.
+inline constexpr std::array kEfforts{Effort::Low, Effort::Medium, Effort::High, Effort::XHigh,
+                                     Effort::Max};
+
+/// "low", "medium", "high", "xhigh", "max".
+[[nodiscard]] std::string_view to_string(Effort effort) noexcept;
+/// The level a word names, or unset for anything else.
+[[nodiscard]] std::optional<Effort> effort_from_string(std::string_view text) noexcept;
+/// The thinking budget a level spends on a backend that thinks by tokens --
+/// low 1,024, medium 4,096, high 16,384, xhigh 24,576, max 32,768: Anthropic's
+/// minimum at the bottom, Gemini Pro's ceiling at the top, and OpenAI's budget
+/// thresholds between the first three, so a level and its budget name one
+/// effort everywhere.
+[[nodiscard]] std::int64_t effort_budget(Effort effort) noexcept;
+
 /// What a request asks of a reasoning model's thinking (26i): whether, and
 /// for how long. Each backend maps it to its own control -- a local
 /// template's switch and a budget sampler, Anthropic's thinking budget,
@@ -178,6 +198,21 @@ struct Thinking {
     /// The most tokens it may spend reasoning before it must answer. Unset
     /// for none: a budget changes answers, so it is chosen, never implied.
     std::optional<std::int64_t> budget;
+    /// The level chosen instead of a budget (39a): a backend with an effort
+    /// control of its own spends it there, any other as `effort_budget`. The
+    /// session holds one of the two, never both.
+    std::optional<Effort> effort;
+
+    /// The budget to spend: the one chosen, else the level's, else none.
+    [[nodiscard]] std::optional<std::int64_t> tokens() const noexcept {
+        if (budget.has_value()) {
+            return budget;
+        }
+        if (effort.has_value()) {
+            return effort_budget(*effort);
+        }
+        return std::nullopt;
+    }
 
     [[nodiscard]] bool off() const noexcept {
         return mode == ThinkingMode::Off;

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <span>
 #include <string>
 #include <string_view>
@@ -59,6 +60,8 @@ enum class ChatVerb : std::uint8_t {
     System,
     Temperature,
     Think,
+    Effort,
+    ThinkingDisplay,
     MaxTokens,
     Compact,
     Title,
@@ -76,6 +79,7 @@ enum class ChatVerb : std::uint8_t {
     Deny,
     Revoke,
     Permissions,
+    PermissionMode,
     Exit,
     // Execute's (27s), after `Exit`: chat's rows hold every verb up to it.
     Symphonies,
@@ -86,6 +90,9 @@ enum class ChatVerb : std::uint8_t {
 enum class ArgumentValues : std::uint8_t {
     None,
     Backends,
+    /// The backends, then each configured provider's roster models (33):
+    /// what `/model` takes, as `-m` takes it.
+    Models,
     Retrievers,
     /// `off`, `auto`, and the backends.
     RerankTargets,
@@ -96,12 +103,18 @@ enum class ArgumentValues : std::uint8_t {
     AttachmentNames,
     /// `on`, `off`, `auto` (26i).
     ThinkingModes,
+    /// The five effort levels, lowest first, then `auto` (39a).
+    EffortLevels,
+    /// `summary`, `raw` (43).
+    ThinkingDisplays,
     /// `on`, `off` (26l).
     OnOff,
     /// The tools this chat asks permission for (26o).
     GatedTools,
     /// The tools and websites this chat has answered for itself (26o).
     SessionPermissions,
+    /// The permission modes, described (39b).
+    PermissionModes,
     /// The configured suites, and `off` (27d).
     Suites,
     /// An attach's graph methods: `code`, `off` (27p).
@@ -182,6 +195,12 @@ struct NamedChoice {
 struct ChatCompletionSources {
     /// Each configured backend, in config order, described by type and model.
     std::vector<NamedChoice> backends;
+    /// Each configured provider type's roster models (M13), described by
+    /// whose roster they are on -- read from the cache, never fetched (33).
+    std::vector<NamedChoice> roster_models;
+    /// Each configured entry whose type has a cached roster, by its key, with
+    /// that roster's models (34): what `/model <backend>:` completes.
+    std::map<std::string, std::vector<NamedChoice>, std::less<>> backend_rosters;
     /// Each configured suite, described by what it is for (27d).
     std::vector<NamedChoice> suites;
     /// What `@` paths are relative to.
@@ -195,6 +214,15 @@ struct ChatCompletionSources {
     DirectoryLister list;
     /// Which session the line is typed into (27s): the rows it offers.
     SessionMode mode = SessionMode::Chat;
+    /// Match a command's name and its values loosely (the shell's menu,
+    /// 2026-10-11): after the prefixes, a name whose words the typed words
+    /// begin (`/perm-` finds `/permission-mode`), then one with a later word
+    /// so begun (`sonnet` finds `claude-sonnet-5-5`), then one holding the
+    /// typed text, then one holding its letters in order -- each tier after
+    /// the last, the table's order within one. The terminal keeps prefixes:
+    /// replxx draws a row as the typed span and then the rest of its label,
+    /// which only a prefix keeps whole.
+    bool loose = false;
     /// The symphonies `/play` takes, described (27s). Empty offers none.
     std::function<std::vector<NamedChoice>()> symphonies;
 };

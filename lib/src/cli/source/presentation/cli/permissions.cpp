@@ -105,6 +105,121 @@ bool apply_answer(Answer answer, const agent::GateRequest& request,
 
 }  // namespace
 
+std::string_view to_string(PermissionMode mode) noexcept {
+    switch (mode) {
+        case PermissionMode::Manual:
+            return "manual";
+        case PermissionMode::AcceptEdits:
+            return "accept-edits";
+        case PermissionMode::Plan:
+            return "plan";
+        case PermissionMode::DontAsk:
+            return "dont-ask";
+        case PermissionMode::Bypass:
+            return "bypass";
+    }
+    return "manual";
+}
+
+std::optional<PermissionMode> permission_mode_from_string(std::string_view text) noexcept {
+    for (const PermissionMode mode : kPermissionModes) {
+        if (text == to_string(mode)) {
+            return mode;
+        }
+    }
+    return std::nullopt;
+}
+
+std::vector<std::string> permission_mode_words() {
+    std::vector<std::string> words;
+    for (const PermissionMode mode : kPermissionModes) {
+        words.emplace_back(to_string(mode));
+    }
+    return words;
+}
+
+std::string_view permission_mode_description(PermissionMode mode) noexcept {
+    switch (mode) {
+        case PermissionMode::Manual:
+            return "each gated tool asks, as configured";
+        case PermissionMode::AcceptEdits:
+            return "file and note edits run without asking; commands and websites still ask";
+        case PermissionMode::Plan:
+            return "nothing that writes runs; the model plans";
+        case PermissionMode::DontAsk:
+            return "whatever would ask is refused";
+        case PermissionMode::Bypass:
+            return "nothing asks; a deny still refuses";
+    }
+    return {};
+}
+
+std::string permission_mode_label(PermissionMode mode, const ansi::Style& style) {
+    // Claude Code's status bar words (39b), each in its own colour.
+    switch (mode) {
+        case PermissionMode::Manual:
+            return {};
+        case PermissionMode::AcceptEdits:
+            return style.colorize("⏵⏵ accept edits on", ansi::Color::Magenta);
+        case PermissionMode::Plan:
+            return style.colorize("⏸ plan mode on", ansi::Color::Cyan);
+        case PermissionMode::DontAsk:
+            return style.colorize("⏵⏵ don't ask on", ansi::Color::Yellow);
+        case PermissionMode::Bypass:
+            return style.colorize("⏵⏵ bypass permissions on", ansi::Color::Red);
+    }
+    return {};
+}
+
+PermissionMode next_permission_mode(PermissionMode mode, bool bypass_allowed) noexcept {
+    switch (mode) {
+        case PermissionMode::Manual:
+            return PermissionMode::AcceptEdits;
+        case PermissionMode::AcceptEdits:
+            return PermissionMode::Plan;
+        case PermissionMode::Plan:
+            return bypass_allowed ? PermissionMode::Bypass : PermissionMode::Manual;
+        case PermissionMode::DontAsk:
+        case PermissionMode::Bypass:
+            return PermissionMode::Manual;
+    }
+    return PermissionMode::Manual;
+}
+
+std::string plan_note(const SessionApprovals& approvals) {
+    if (approvals.mode.load() != PermissionMode::Plan) {
+        return {};
+    }
+    return "Plan mode is on. Research the request and propose a plan: read what you need, then "
+           "say what you would change and how. Do not change files, write notes or run "
+           "commands -- tools that would change anything are refused until the person leaves "
+           "plan mode.";
+}
+
+agent::RefusalNote mode_refusal(std::shared_ptr<const SessionApprovals> approvals) {
+    if (approvals == nullptr) {
+        return {};
+    }
+    return [approvals = std::move(approvals)](const agent::GateRequest& request) -> std::string {
+        switch (approvals->mode.load()) {
+            case PermissionMode::Plan:
+                if (!request.outbound) {
+                    return "plan mode is on, and nothing that changes files or runs commands "
+                           "runs until the person leaves it; propose the change instead.";
+                }
+                return {};
+            case PermissionMode::DontAsk:
+                return "this session refuses whatever it would ask permission for (dont-ask "
+                       "mode).";
+            case PermissionMode::Manual:
+            case PermissionMode::AcceptEdits:
+            case PermissionMode::Bypass:
+                return {};
+        }
+        return {};
+    };
+}
+
 agent::PermissionChecker make_permission_checker(const harness::Config& config,
                                                  std::shared_ptr<SessionApprovals> approvals) {
     // The levels and hosts are copied: the checker outlives any one config
@@ -124,6 +239,25 @@ agent::PermissionChecker make_permission_checker(const harness::Config& config,
     return
         [levels = config.permissions, hosts = std::move(hosts),
          approvals = std::move(approvals)](const agent::GateRequest& request) -> agent::Permission {
+            // The session's mode (39b), read at each call: the shell's
+            // Shift+Tab may have moved it since the last.
+            const PermissionMode mode =
+                approvals != nullptr ? approvals->mode.load() : PermissionMode::Manual;
+            // What would ask, in the mode: bypass allows it, dont-ask refuses
+            // it -- only after every deny has had its say.
+            const auto by_mode = [mode](agent::Permission ask) {
+                switch (mode) {
+                    case PermissionMode::Bypass:
+                        return agent::Permission::Allow;
+                    case PermissionMode::DontAsk:
+                        return agent::Permission::Deny;
+                    case PermissionMode::Manual:
+                    case PermissionMode::AcceptEdits:
+                    case PermissionMode::Plan:
+                        break;
+                }
+                return ask;
+            };
             if (request.outbound) {
                 // By host, never by tool: `permissions.fetch_url` is not a key.
                 const std::optional<std::string> host = harness::canonical_host(request.target);
@@ -140,7 +274,7 @@ agent::PermissionChecker make_permission_checker(const harness::Config& config,
                 if (approvals != nullptr && approvals->hosts.contains(*host)) {
                     return agent::Permission::Allow;
                 }
-                return agent::Permission::Ask;
+                return by_mode(agent::Permission::Ask);
             }
             const std::string_view tool = request.tool;
             const harness::PermissionLevel level = levels.level(tool);
@@ -152,14 +286,27 @@ agent::PermissionChecker make_permission_checker(const harness::Config& config,
             if (approvals != nullptr && approvals->denied_tools.contains(tool)) {
                 return agent::Permission::Deny;
             }
+            // Plan mode refuses every writer, over any allow (39b).
+            if (mode == PermissionMode::Plan) {
+                return agent::Permission::Deny;
+            }
             if (level == harness::PermissionLevel::Allow) {
                 return agent::Permission::Allow;
             }
             if (approvals != nullptr && approvals->tools.contains(tool)) {
                 return agent::Permission::Allow;
             }
-            return agent::Permission::Ask;
+            if (mode == PermissionMode::AcceptEdits && request.edits) {
+                return agent::Permission::Allow;
+            }
+            return by_mode(agent::Permission::Ask);
         };
+}
+
+bool answer_permission(std::string_view text, const agent::GateRequest& request,
+                       const std::filesystem::path& config_path,
+                       const std::shared_ptr<SessionApprovals>& approvals, std::string& note) {
+    return apply_answer(parse_answer(text), request, config_path, approvals, note);
 }
 
 agent::ConfirmFn terminal_confirm_fn(StatusLine& status, ansi::Style style,
@@ -195,8 +342,7 @@ agent::ConfirmFn terminal_confirm_fn(StatusLine& status, ansi::Style style,
             }
         }
         std::string note;
-        const bool allowed =
-            apply_answer(parse_answer(line), request, config_path, approvals, note);
+        const bool allowed = answer_permission(line, request, config_path, approvals, note);
         if (!note.empty()) {
             status.print_line(style.dim("  " + note));
         }
@@ -229,7 +375,7 @@ agent::ConfirmFn make_driver_confirm_fn(JsonReporter& reporter, DriverInput& inp
                 continue;  // the same tolerance the question path keeps
             }
             std::string note;
-            return apply_answer(parse_answer(message.text), request, config_path, approvals, note);
+            return answer_permission(message.text, request, config_path, approvals, note);
         }
         throw std::runtime_error("the driver closed stdin with a permission prompt unanswered");
     };
@@ -239,6 +385,17 @@ std::vector<std::string> gated_tools(const agent::ToolRegistry& registry) {
     std::vector<std::string> out;
     for (const std::string& name : registry.names()) {
         if (const agent::Tool* tool = registry.find(name); tool != nullptr && tool->writes) {
+            out.push_back(name);
+        }
+    }
+    std::ranges::sort(out);
+    return out;
+}
+
+std::vector<std::string> edit_tools(const agent::ToolRegistry& registry) {
+    std::vector<std::string> out;
+    for (const std::string& name : registry.names()) {
+        if (const agent::Tool* tool = registry.find(name); tool != nullptr && tool->edits) {
             out.push_back(name);
         }
     }
@@ -329,8 +486,14 @@ std::string seed_approvals(SessionApprovals& approvals, const PermissionPresets&
 
 std::vector<std::string> describe_permissions(const harness::Config& config,
                                               const SessionApprovals& approvals,
-                                              const std::vector<std::string>& gated) {
+                                              const std::vector<std::string>& gated,
+                                              const std::vector<std::string>& edits) {
     std::vector<std::string> lines;
+    const PermissionMode mode = approvals.mode.load();
+    if (mode != PermissionMode::Manual) {
+        lines.push_back("mode: " + std::string{to_string(mode)} + " -- " +
+                        std::string{permission_mode_description(mode)});
+    }
     std::size_t width = 0;
     for (const std::string& tool : gated) {
         width = std::max(width, tool.size());
@@ -343,10 +506,19 @@ std::vector<std::string> describe_permissions(const harness::Config& config,
             answer = "deny   (config)";
         } else if (approvals.denied_tools.contains(tool)) {
             answer = "deny   (this session)";
+        } else if (mode == PermissionMode::Plan) {
+            answer = "deny   (plan mode)";
         } else if (level == harness::PermissionLevel::Allow) {
             answer = "allow  (config)";
         } else if (approvals.tools.contains(tool)) {
             answer = "allow  (this session)";
+        } else if (mode == PermissionMode::Bypass) {
+            answer = "allow  (bypass mode)";
+        } else if (mode == PermissionMode::AcceptEdits &&
+                   std::ranges::find(edits, tool) != edits.end()) {
+            answer = "allow  (accept-edits mode)";
+        } else if (mode == PermissionMode::DontAsk) {
+            answer = "deny   (dont-ask mode)";
         } else {
             answer = std::string{"ask    "} + (configured ? "(config)" : "(default)");
         }
@@ -363,7 +535,7 @@ std::vector<std::string> describe_permissions(const harness::Config& config,
     for (const std::string& host : config.tools.allowed_hosts) {
         lines.push_back("website " + host + ": allow (config)");
     }
-    if (lines.empty()) {
+    if (lines.size() == (mode == PermissionMode::Manual ? 0U : 1U)) {
         lines.emplace_back("no tool in this chat asks permission (--tools)");
     }
     return lines;

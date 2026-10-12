@@ -3,6 +3,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -280,6 +282,34 @@ TEST_CASE("listing is newest first and skips corrupt files", "[chat][session]") 
     CHECK(apogee::logger::most_recent()->chat_id == "newer");
 }
 
+TEST_CASE("sessions saved in the same second list by id, newest started first", "[chat][session]") {
+    // save() stamps whole seconds, so a tie is ordinary; it falls to the ids,
+    // never to the directory's order, which differs by filesystem. Enough of
+    // them, written out of order, that no directory lists them right by luck.
+    const TempDir dir{"session-tie"};
+    const EnvGuard home{"APOGEE_HOME", dir.path().string()};
+    std::vector<std::string> ids;
+    for (int i = 0; i < 24; ++i) {
+        const int minute = (i * 7) % 24;  // every minute once, out of order
+        ids.push_back("20261009-09" + std::string{minute < 10 ? "0" : ""} + std::to_string(minute) +
+                      "00-" + std::string(4, static_cast<char>('a' + i)));
+    }
+    for (const std::string& id : ids) {
+        Session session = sample();
+        session.chat_id = id;
+        session.updated_at = "2026-10-12T03:37:36Z";
+        apogee::harness::write_file_atomically(apogee::logger::session_path(id),
+                                               apogee::logger::serialize(session));
+    }
+    std::ranges::sort(ids, std::greater<>{});
+    std::vector<std::string> listed;
+    for (const Session& session : apogee::logger::list_sessions()) {
+        listed.push_back(session.chat_id);
+    }
+    CHECK(listed == ids);
+    CHECK(apogee::logger::most_recent()->chat_id == ids.front());
+}
+
 TEST_CASE("most_recent is empty when nothing is saved", "[chat][session]") {
     const TempDir dir{"session-empty"};
     const EnvGuard home{"APOGEE_HOME", dir.path().string()};
@@ -535,6 +565,30 @@ TEST_CASE("a chat's suite is saved as left, and a chat with none saves as before
         CHECK(loaded.warnings.empty());
         CHECK(loaded.session.suite == suite);
     }
+}
+
+TEST_CASE("a chat's roster pin is saved with it, and a chat with none saves as before",
+          "[logger][session][roster]") {
+    // 33: no pin, no new key -- the file is the one an older Apogee wrote.
+    const Session plain = sample();
+    const std::string plain_text = apogee::logger::serialize(plain);
+    CHECK_FALSE(nlohmann::json::parse(plain_text).contains("model"));
+    CHECK(deserialize(plain_text, {}).session.model.empty());
+
+    Session pinned = sample();
+    pinned.model = "claude-sonnet-5-5";
+    const std::string text = apogee::logger::serialize(pinned);
+    CHECK(nlohmann::json::parse(text).at("model") == "claude-sonnet-5-5");
+    const auto loaded = deserialize(text, {});
+    CHECK(loaded.warnings.empty());
+    CHECK(loaded.session.model == "claude-sonnet-5-5");
+    CHECK(loaded.session.backend == pinned.backend);
+
+    // A shape it cannot read is dropped with a warning, the chat resumed.
+    const auto odd = deserialize(R"({"schema_version": 2, "chat_id": "c", "model": 7})", {});
+    CHECK(odd.session.model.empty());
+    REQUIRE(odd.warnings.size() == 1);
+    CHECK(odd.warnings.front().kind == WarningKind::FieldDropped);
 }
 
 TEST_CASE("a suite since deleted is dropped with a warning, never fatal",

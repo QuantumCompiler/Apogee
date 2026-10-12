@@ -23,6 +23,12 @@ namespace apogee::commands {
 /// The body of `apogee chats info <name>`.
 [[nodiscard]] std::string format_session_info(const logger::Session& session);
 
+/// Deletes the conversation `name` names (its id or its name) -- its file, its
+/// attachments' index, its recall summary -- what `chats delete` runs, and
+/// the full-screen shell's (32d). Refused while a live task writes it.
+/// Returns what was done: `deleted <id>`.
+[[nodiscard]] std::string delete_chat(const std::string& name);
+
 /// The auto-title prompt sent after the first exchange.
 [[nodiscard]] std::string title_prompt();
 

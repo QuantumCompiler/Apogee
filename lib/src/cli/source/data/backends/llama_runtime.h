@@ -603,6 +603,12 @@ public:
 /// admission is measured against it. Nullopt in a build without llama.cpp,
 /// or where no GPU device reports any: a model there runs on the CPU, and
 /// what fits is not known here.
+///
+/// **The one reader of this memory** (32a): the window sizing measures a load
+/// against the same devices' read, and `apogee system` shows this number --
+/// through `commands::machine_budget`, the source the suite admission
+/// defaults to -- so what a person is shown is what sizing uses, never a
+/// second estimate. The system's own memory is `platform/system_info`'s.
 [[nodiscard]] std::optional<std::int64_t> offload_memory_total();
 
 }  // namespace apogee::backends

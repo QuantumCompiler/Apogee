@@ -51,7 +51,11 @@ set(hot_paths
     "presentation/cli/symphonies_cmd.cpp"
     "presentation/machine/json_reporter.cpp"
 )
-set(entry_points "scan_host_providers" "scan_providers" "host_probe_runner")
+# The vendor catalogues too (M13, 34): a roster is fetched by `providers scan`
+# alone -- over the network for an API, by running `codex debug models` for
+# the Codex CLI -- never on a path a person is waiting on.
+set(entry_points "scan_host_providers" "scan_providers" "host_probe_runner" "list_catalog"
+                 "catalog_for")
 
 # Passive only (28c): nothing that detects, records or reports a provider ever
 # issues a turn -- no token is spent to verify on Apogee's initiative. These

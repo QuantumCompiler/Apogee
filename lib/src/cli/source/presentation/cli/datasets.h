@@ -2,6 +2,7 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -29,6 +30,17 @@
 /// The cores below are shared with the admin twins, which is what makes a
 /// dataset created over HTTP byte-identical to one created here.
 namespace apogee::commands {
+
+/// A dataset's size as `datasets list` words it: `812 B`, `14 KiB`.
+[[nodiscard]] std::string human_size(std::int64_t bytes);
+
+/// `datasets info <name>` as a person reads it (37f): the Datasets view's
+/// card.
+[[nodiscard]] std::string dataset_info_text(const training::DatasetInfo& info);
+
+/// `datasets kits` as a person reads it (37f): the installed training kits,
+/// or where none were found.
+[[nodiscard]] std::string dataset_kits_text();
 
 class DatasetsCommand final : public Command {
 public:

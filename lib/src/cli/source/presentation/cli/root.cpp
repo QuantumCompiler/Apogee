@@ -2,10 +2,13 @@
 
 #include <CLI/CLI.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -40,10 +43,53 @@ constexpr auto kConfigEnvVar = "APOGEE_CONFIG";
     throw CLI::RuntimeError(1);
 }
 
+/// CLI11's help, with an option's `Needs:` and `Excludes:` named in
+/// alphabetical order. CLI11 keeps both as sets of pointers and prints them in
+/// address order, so the same help read differently from one platform to the
+/// next (the root flags' lists, on Linux and Windows).
+class StableHelpFormatter final : public CLI::Formatter {
+public:
+    [[nodiscard]] std::string make_option_opts(const CLI::Option* opt) const override {
+        std::string text = CLI::Formatter::make_option_opts(opt);
+        const std::set<CLI::Option*> needs = opt->get_needs();
+        const std::set<CLI::Option*> excludes = opt->get_excludes();
+        // Both lists close CLI11's text, the needs first: cut from the first
+        // and say them again, sorted.
+        const std::string first = " " + get_label(needs.empty() ? "Excludes" : "Needs") + ":";
+        const std::size_t cut = text.rfind(first);
+        if ((needs.empty() && excludes.empty()) || cut == std::string::npos) {
+            return text;
+        }
+        text.erase(cut);
+        const auto say = [&text, this](const char* label, const std::set<CLI::Option*>& options) {
+            if (options.empty()) {
+                return;
+            }
+            std::vector<std::string> names;
+            for (const CLI::Option* option : options) {
+                names.push_back(option->get_name());
+            }
+            std::ranges::sort(names);
+            text += " " + get_label(label) + ":";
+            for (const std::string& name : names) {
+                text += " " + name;
+            }
+        };
+        say("Needs", needs);
+        say("Excludes", excludes);
+        return text;
+    }
+};
+
 }  // namespace
 
-RootCommand::RootCommand(CommandRegistry registry)
-    : registry_{std::move(registry)}, app_{std::make_unique<CLI::App>(kDescription, "apogee")} {
+RootCommand::RootCommand(CommandRegistry registry, ShellEntry shell)
+    : registry_{std::move(registry)},
+      shell_{std::move(shell)},
+      app_{std::make_unique<CLI::App>(kDescription, "apogee")} {
+    // Set before any subcommand exists: each takes its parent's formatter.
+    app_->formatter(std::make_shared<StableHelpFormatter>());
+
     // A plain flag, answered in apply_root_flags(), rather than CLI11's
     // set_version_flag: that one is answered while the flags are still being
     // read, before a root flag is in force -- and `--dev --version` must name
@@ -240,8 +286,9 @@ std::string json_readers(const CLI::App& app) {
 
 int RootCommand::run(int argc, const char* const* argv) {
     if (argc <= 1) {
-        std::cout << app_->help();
-        return 0;
+        // The shell at an interactive terminal (32b); the help, unchanged,
+        // everywhere else.
+        return open_bare(shell_, context_, *app_);
     }
 
     try {

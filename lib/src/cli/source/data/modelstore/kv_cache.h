@@ -33,7 +33,9 @@ inline constexpr harness::KvCacheType kDefaultCacheType = harness::KvCacheType::
 
 /// The unset window: `kDefaultLocalWindow`, or the trained window when that is
 /// smaller, or what free memory holds when that is smaller still. A zero in
-/// `trained` or `fits` means unknown and limits nothing.
+/// `trained` or `fits` means unknown and limits nothing. `fits` comes from
+/// the free memory of the devices a model offloads to, the one read
+/// `backends::offload_memory_total` and `apogee system` share (32a).
 [[nodiscard]] std::int64_t default_local_window(std::int64_t trained, std::int64_t fits) noexcept;
 
 /// The positions llama.cpp allocates for a window: rounded up to 256.

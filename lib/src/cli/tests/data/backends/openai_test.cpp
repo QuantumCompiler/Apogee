@@ -274,6 +274,22 @@ TEST_CASE("a turn's thinking becomes OpenAI's effort", "[backends][openai][think
     CHECK(effort_for(Thinking{.budget = 4096}, "gpt-4.1", 4096).empty());
 }
 
+TEST_CASE("an effort level is OpenAI's own word, the highest it takes at or below",
+          "[backends][openai][thinking][effort]") {
+    using apogee::backends::openai::effort_for;
+    using apogee::harness::Effort;
+    using apogee::harness::Thinking;
+    CHECK(effort_for(Thinking{.effort = Effort::Low}, "gpt-5", 32000) == "low");
+    CHECK(effort_for(Thinking{.effort = Effort::Medium}, "gpt-5", 0) == "medium");
+    CHECK(effort_for(Thinking{.effort = Effort::High}, "gpt-5", 0) == "high");
+    CHECK(effort_for(Thinking{.effort = Effort::XHigh}, "o3", 0) == "high");
+    CHECK(effort_for(Thinking{.effort = Effort::Max}, "gpt-5.1", 0) == "high");
+    // Off is still off, and a model that does not reason still gets nothing.
+    CHECK(effort_for(Thinking{.mode = apogee::harness::ThinkingMode::Off, .effort = Effort::Max},
+                     "gpt-5", 0) == "minimal");
+    CHECK(effort_for(Thinking{.effort = Effort::High}, "gpt-4.1", 0).empty());
+}
+
 TEST_CASE("thinking asked off sends the lowest effort", "[backends][openai][thinking]") {
     OpenAIProvider::Options options;
     options.thinking_budget_tokens = 4096;
@@ -427,4 +443,19 @@ TEST_CASE("a response schema becomes text.format json_schema, beside the tools",
     Fixture plain = make_provider({sse(kTextStream)});
     (void)plain.provider->stream_chat(chat_request(), {});
     CHECK_FALSE(json::parse(plain.transport->requests()[0].body).contains("text"));
+}
+
+TEST_CASE("list_catalog reads the vendor's one-page models document",
+          "[backends][openai][catalog]") {
+    Fixture f = make_provider({FakeTransport::Reply{
+        200, R"({"object":"list","data":[{"id":"gpt-5.2"},{"id":"gpt-5.2-mini"}]})"}});
+    const std::vector<apogee::harness::ModelInfo> models =
+        f.provider->list_catalog(apogee::harness::CancellationToken{});
+    REQUIRE(models.size() == 2);
+    CHECK(models[0].id == "gpt-5.2");
+    CHECK(models[1].id == "gpt-5.2-mini");
+    const auto& requests = f.transport->requests();
+    REQUIRE(requests.size() == 1);
+    CHECK(requests[0].method == "GET");
+    CHECK(requests[0].url.find("/v1/models") != std::string::npos);
 }

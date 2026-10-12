@@ -10,6 +10,8 @@
 #include <string>
 #include <string_view>
 
+#include "support/env_guard.h"
+
 namespace {
 
 // The exact six names shared by `cicd.sh --platform`, the CMake presets, the
@@ -107,4 +109,27 @@ TEST_CASE("a standard stream given another buffer is not a terminal", "[platform
     CHECK_FALSE(in_terminal);
     CHECK_FALSE(out_terminal);
     CHECK_FALSE(err_terminal);
+}
+
+TEST_CASE("a terminal that cannot place the cursor is refused a full screen, with why",
+          "[platform][terminal]") {
+    if (apogee::platform::host_os() == apogee::platform::OperatingSystem::Windows) {
+        // The console is asked, not TERM: under ctest stdout is no console,
+        // and that is said rather than drawn into.
+        CHECK_FALSE(apogee::platform::full_screen_refusal().empty());
+        return;
+    }
+    {
+        const apogee::testing::EnvGuard term{"TERM", "dumb"};
+        CHECK(apogee::platform::full_screen_refusal() ==
+              "this terminal (TERM=dumb) cannot place the cursor");
+    }
+    {
+        const apogee::testing::EnvUnsetGuard term{"TERM"};
+        CHECK(apogee::platform::full_screen_refusal().find("TERM is not set") == 0);
+    }
+    {
+        const apogee::testing::EnvGuard term{"TERM", "xterm-256color"};
+        CHECK(apogee::platform::full_screen_refusal().empty());
+    }
 }

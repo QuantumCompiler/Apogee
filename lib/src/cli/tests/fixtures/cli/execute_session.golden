@@ -34,34 +34,37 @@ ROOT<Two: HELPER<One: hello>>
 HELPER<Two: HELPER<One: again>>
 --- stderr
 [apogee] suite duo: no member holds memory on this machine
-  /help                     List these commands
-  /model [backend]          Show the backend answering, or switch to another
-  /models                   List the configured backends
-  /suite [name]             Show the suite and what its members hold, or switch to another (then --force, --warm)
-  /symphonies               List the symphonies /play can play
-  /play <symphony> [input]  Play a symphony on the input: its stages on the suite's members, its output this session's answer
-  /system <text>            Replace the system prompt
-  /temperature <number>     Set the sampling temperature
-  /think [on|off|auto]      Show or set whether the model thinks first: on, off, or auto per question
-  /max-tokens <number>      Cap each answer's length in tokens
-  /compact                  Summarise the conversation so far, to free context
-  /title <name>             Rename this chat
-  /retriever [mode]         Show or set how documents are searched: auto, lexical, vector or hybrid
-  /rerank [backend]         Show or set the model that reranks search results, or off, or auto
-  /branch [ref]             Show or set the branch under review: head, base..head, or off
-  /capture [status|link]    Save this conversation as a knowledge record
-  /check                    Have the suite's verifier check the last answer, once
-  /attach <path>            Attach a file, folder or glob: inlined when it fits, retrieved when not (then --graph=code|off)
-  /attachments              List what is attached
-  /detach <name>            Detach an attachment
-  /recall [on|off]          Show or set whether turns recall earlier chats
-  /private                  Never summarise this chat for recall
-  /allow [tool|website]     Allow a tool or website for this chat; alone, list each answer
-  /deny <tool|website>      Refuse a tool or website for this chat, without asking
-  /revoke <tool|website>    Forget this chat's answer for a tool or website
-  /permissions              List each tool's answer and where it comes from
-  /exit                     Save and leave
-  /quit                     Save and leave
+  /help                            List these commands
+  /model [backend|model]           Show the backend answering, or switch: a backend, a roster model, or backend:model
+  /models                          List the configured backends
+  /suite [name]                    Show the suite and what its members hold, or switch to another (then --force, --warm)
+  /symphonies                      List the symphonies /play can play
+  /play <symphony> [input]         Play a symphony on the input: its stages on the suite's members, its output this session's answer
+  /system <text>                   Replace the system prompt
+  /temperature <number>            Set the sampling temperature
+  /think [on|off|auto]             Show or set whether the model thinks first: on, off, or auto per question
+  /effort [level|auto]             Show or set how hard the model thinks: low, medium, high, xhigh or max; auto leaves it to the model
+  /thinking-display [summary|raw]  Show or set how reasoning is drawn while it streams: a summary line, or raw
+  /max-tokens <number>             Cap each answer's length in tokens
+  /compact                         Summarise the conversation so far, to free context
+  /title <name>                    Rename this chat
+  /retriever [mode]                Show or set how documents are searched: auto, lexical, vector or hybrid
+  /rerank [backend]                Show or set the model that reranks search results, or off, or auto
+  /branch [ref]                    Show or set the branch under review: head, base..head, or off
+  /capture [status|link]           Save this conversation as a knowledge record
+  /check                           Have the suite's verifier check the last answer, once
+  /attach <path>                   Attach a file, folder or glob: inlined when it fits, retrieved when not (then --graph=code|off)
+  /attachments                     List what is attached
+  /detach <name>                   Detach an attachment
+  /recall [on|off]                 Show or set whether turns recall earlier chats
+  /private                         Never summarise this chat for recall
+  /allow [tool|website]            Allow a tool or website for this chat; alone, list each answer
+  /deny <tool|website>             Refuse a tool or website for this chat, without asking
+  /revoke <tool|website>           Forget this chat's answer for a tool or website
+  /permissions                     List each tool's answer and where it comes from
+  /permission-mode [mode]          Show or set how much runs without asking: manual, accept-edits, plan, dont-ask or bypass (Shift+Tab cycles)
+  /exit                            Save and leave
+  /quit                            Save and leave
   NAME                  STAGES                        SOURCE                      DESCRIPTION
   describe-answer       vision → chat                 shipped                     Describe an image with the vision member, then answer a question about it from the description.
   extract-facts         extraction                    shipped                     Pull the key facts out of a text as one JSON document, held to its schema.
@@ -152,8 +155,13 @@ Options:
   --allow TOOL                Allow a tool for this chat without asking (repeatable, with --tools)
   --deny TOOL                 Refuse a tool or website for this chat without asking (repeatable)
   --allow-host TEXT           Allow fetching from a website for this chat without asking (repeatable)
-  --think-budget INT:INT in [0 - 1000000]
+  --permission-mode TEXT:{manual,accept-edits,plan,dont-ask,bypass}
+                              How much runs without asking: manual, accept-edits, plan, dont-ask or bypass
+  --allow-bypass              Let /permission-mode and Shift+Tab choose bypass, where nothing asks
+  --think-budget INT:INT in [0 - 1000000] Excludes: --effort
                               The most tokens a reasoning model may think for before it answers
+  --effort TEXT:{low,medium,high,xhigh,max} Excludes: --think-budget
+                              How hard a reasoning model thinks: low, medium, high, xhigh or max
   --tools                     Let the model call tools
   --search                    Enable the provider's server-side web search
   --no-color                  Disable ANSI colour output
@@ -181,12 +189,14 @@ Options:
 --- exit 0
 --- stdout
 --allow
+--allow-bypass
 --allow-host
 --attach
 --base
 --branch
 --continue
 --deny
+--effort
 --fetch
 --force
 --graph
@@ -200,6 +210,7 @@ Options:
 --no-recall
 --orchestrate
 --output-format
+--permission-mode
 --quiet
 --rag
 --rag-limit

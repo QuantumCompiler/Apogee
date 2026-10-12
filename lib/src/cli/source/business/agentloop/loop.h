@@ -11,6 +11,7 @@
 #include "agentloop/content.h"
 #include "agentloop/member_call.h"
 #include "agentloop/question.h"
+#include "agentloop/reasoning_summary.h"
 #include "agentloop/reporter.h"
 #include "agentloop/tool_selection.h"
 #include "agentloop/validate.h"
@@ -45,6 +46,19 @@ struct Options {
     /// Whether the model reasons before answering, and for how long (26i).
     /// `auto` is decided once per turn, for its question.
     harness::Thinking thinking;
+
+    /// Show the reasoning as one line, kept current while it streams (43):
+    /// the surface draws `on_thinking_summary` in the raw reasoning's place,
+    /// and `reasoning_summary_model` -- the utility model -- writes it. The
+    /// loop runs it only for raw reasoning, on an unmetered member that is
+    /// not the chat model itself; anything else is said once through
+    /// `on_thinking_raw`. Off: the reasoning reaches the surface raw, as
+    /// before, and nothing new is said.
+    bool summarize_reasoning = false;
+    std::string reasoning_summary_model;
+    /// The summary's cadence is measured on this clock -- a test's; unset is
+    /// the steady clock.
+    ReasoningSummarizer::Clock summary_clock;
     /// The backend `auto` asks -- the utility model, when the config names
     /// one. Empty decides by rule.
     std::string thinking_judge;
@@ -75,6 +89,8 @@ struct Options {
     /// function resolves to deny.
     agent::PermissionChecker permission;
     agent::ConfirmFn confirm;
+    /// Why the gate refused, said to the model with the refusal (39b).
+    agent::RefusalNote refusal;
 
     /// Injected into each outgoing request at `transient_at`, never appended to
     /// history. The seam RAG will ride; see splice_transient. The tools'

@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -214,44 +215,44 @@ struct TaskFlags {
 /// handed -- the view's, and the declared answer, which the view never
 /// carries, from the ledger: a person at this machine reads it here, and no
 /// served view or event does.
-void print_policy(const tasks::TaskView& view, const tasks::Task& task) {
+void print_policy(std::ostream& out, const tasks::TaskView& view, const tasks::Task& task) {
     if (!view.policy.has_value()) {
         return;
     }
     const tasks::PolicyView& policy = *view.policy;
     if (!policy.agent.empty()) {
-        std::cout << "agent:         " << policy.agent << " -- the task runs under its policy\n";
+        out << "agent:         " << policy.agent << " -- the task runs under its policy\n";
     }
     std::string grants;
     for (const std::string& tool : policy.grants) {
         grants += (grants.empty() ? "" : ", ") + tool;
     }
-    std::cout << "grants:        "
-              << (grants.empty() ? std::string{"none -- with nobody present, a tool that asks is "
-                                               "denied"}
-                                 : grants)
-              << "\n";
-    std::cout << "on question:   "
-              << (policy.on_question == tasks::to_string(tasks::OnQuestion::Answer)
-                      ? "answer \"" + task.policy.answer +
-                            "\" -- every question gets this declared answer"
-                      : std::string{"fail -- a question nobody answers ends the task"})
-              << "\n";
+    out << "grants:        "
+        << (grants.empty() ? std::string{"none -- with nobody present, a tool that asks is "
+                                         "denied"}
+                           : grants)
+        << "\n";
+    out << "on question:   "
+        << (policy.on_question == tasks::to_string(tasks::OnQuestion::Answer)
+                ? "answer \"" + task.policy.answer +
+                      "\" -- every question gets this declared answer"
+                : std::string{"fail -- a question nobody answers ends the task"})
+        << "\n";
 }
 
 /// One section of `task status`: `heading`, then a row per record across
 /// the turns -- nothing at all when there is none.
 template <typename Record, typename Row>
-void print_section(const tasks::TaskView& view, std::string_view heading,
+void print_section(std::ostream& out, const tasks::TaskView& view, std::string_view heading,
                    std::vector<Record> tasks::TurnView::* records, const Row& row) {
     bool any = false;
     for (const tasks::TurnView& turn : view.turns) {
         for (const Record& record : turn.*records) {
             if (!any) {
-                std::cout << heading << ":\n";
+                out << heading << ":\n";
                 any = true;
             }
-            std::cout << "  " << round_name(turn) << ": " << row(record) << "\n";
+            out << "  " << round_name(turn) << ": " << row(record) << "\n";
         }
     }
 }
@@ -261,11 +262,11 @@ void print_section(const tasks::TaskView& view, std::string_view heading,
 }
 
 /// Every gated call let through, every refusal, every question answered.
-void print_uses(const tasks::TaskView& view, const tasks::Task& task) {
-    print_section(view, "allowed", &tasks::TurnView::allowed, [](const tasks::UseView& use) {
+void print_uses(std::ostream& out, const tasks::TaskView& view, const tasks::Task& task) {
+    print_section(out, view, "allowed", &tasks::TurnView::allowed, [](const tasks::UseView& use) {
         return on_target(use.tool, use.target) + " -- " + authority_words(use.by);
     });
-    print_section(view, "denied", &tasks::TurnView::denied, [](const tasks::UseView& use) {
+    print_section(out, view, "denied", &tasks::TurnView::denied, [](const tasks::UseView& use) {
         const std::string why = refusal_words(use.by);
         return on_target(use.tool, use.target) + (why.empty() ? std::string{} : " -- " + why);
     });
@@ -278,7 +279,7 @@ void print_uses(const tasks::TaskView& view, const tasks::Task& task) {
         }
     }
     std::size_t next = 0;
-    print_section(view, "answered", &tasks::TurnView::answered,
+    print_section(out, view, "answered", &tasks::TurnView::answered,
                   [&answers, &next](const tasks::QuestionView& question) {
                       const std::string answer = next < answers.size() ? answers[next] : "";
                       ++next;
@@ -290,48 +291,48 @@ void print_uses(const tasks::TaskView& view, const tasks::Task& task) {
 
 /// `task status`, for a person: the task's view -- what every surface shows
 /// -- and the declared answer beside it, which only this one does.
-void print_status(const tasks::Task& task, const tasks::TaskView& view) {
-    std::cout << "task " << view.id << "  " << status_words(view) << "\n"
-              << "goal:          " << view.goal << "\n"
-              << "conversation:  " << view.conversation << "\n"
-              << "folder:        " << view.folder << "\n"
-              << "tools:         " << (view.tools ? "on" : "off") << "\n";
-    print_policy(view, task);
-    std::cout << "rounds:        " << view.rounds_used << " of " << view.rounds_budget << " used\n"
-              << "started:       " << view.created_at << "\n"
-              << "updated:       " << view.updated_at << "\n";
+void print_status(std::ostream& out, const tasks::Task& task, const tasks::TaskView& view) {
+    out << "task " << view.id << "  " << status_words(view) << "\n"
+        << "goal:          " << view.goal << "\n"
+        << "conversation:  " << view.conversation << "\n"
+        << "folder:        " << view.folder << "\n"
+        << "tools:         " << (view.tools ? "on" : "off") << "\n";
+    print_policy(out, view, task);
+    out << "rounds:        " << view.rounds_used << " of " << view.rounds_budget << " used\n"
+        << "started:       " << view.created_at << "\n"
+        << "updated:       " << view.updated_at << "\n";
     if (!view.reason.empty()) {
-        std::cout << "reason:        " << view.reason << "\n";
+        out << "reason:        " << view.reason << "\n";
     }
     // Each check's state as the newest completed round left it.
-    std::cout << "checks:\n";
+    out << "checks:\n";
     for (const tasks::CheckView& check : view.checks) {
-        std::cout << "  [" << (check.passed ? "x" : " ") << "] " << check.description
-                  << (check.ran ? " -- " + check.detail : std::string{" -- not run yet"}) << "\n";
+        out << "  [" << (check.passed ? "x" : " ") << "] " << check.description
+            << (check.ran ? " -- " + check.detail : std::string{" -- not run yet"}) << "\n";
     }
-    std::cout << "  ["
-              << (view.self_report == tasks::to_string(tasks::SelfReport::Done) ? "x" : " ")
-              << "] the model reports the task done\n";
-    std::cout << "plan:" << (view.plan.empty() ? " (not recorded yet)\n" : "\n");
+    out << "  [" << (view.self_report == tasks::to_string(tasks::SelfReport::Done) ? "x" : " ")
+        << "] the model reports the task done\n";
+    out << "plan:" << (view.plan.empty() ? " (not recorded yet)\n" : "\n");
     if (!view.plan.empty()) {
         std::istringstream lines{view.plan};
         std::string line;
         while (std::getline(lines, line)) {
-            std::cout << "  " << line << "\n";
+            out << "  " << line << "\n";
         }
     }
     if (!view.turns.empty()) {
-        std::cout << "turns:\n";
+        out << "turns:\n";
         for (const tasks::TurnView& turn : view.turns) {
-            std::cout << round_row(view, turn) << "\n";
+            out << round_row(view, turn) << "\n";
         }
     }
-    print_uses(view, task);
+    print_uses(out, view, task);
 }
 
-/// The task a command names, or the running one, or the newest one.
-[[nodiscard]] tasks::Task resolve_task(const fs::path& root, const std::string& id,
-                                       bool prefer_running) {
+/// The task a command names, or the running one, or the newest one; the
+/// reason there is none thrown in the command's words (37e).
+[[nodiscard]] tasks::Task find_task(const fs::path& root, const std::string& id,
+                                    bool prefer_running) {
     std::string chosen = id;
     if (chosen.empty() && prefer_running) {
         chosen = tasks::running_task(root).value_or(std::string{});
@@ -339,16 +340,26 @@ void print_status(const tasks::Task& task, const tasks::TaskView& view) {
     if (chosen.empty()) {
         const std::vector<tasks::Task> all = tasks::list_tasks(root);
         if (all.empty()) {
-            fail_user("no tasks yet -- 'apogee task run \"<goal>\"' starts one");
+            throw std::runtime_error{"no tasks yet -- 'apogee task run \"<goal>\"' starts one"};
         }
         return all.front();
     }
     std::string error;
     std::optional<tasks::Task> task = tasks::load_task(root, chosen, error);
     if (!task.has_value()) {
-        fail_user(error);
+        throw std::runtime_error{error};
     }
     return std::move(*task);
+}
+
+/// The same, a refusal the command's user error.
+[[nodiscard]] tasks::Task resolve_task(const fs::path& root, const std::string& id,
+                                       bool prefer_running) {
+    try {
+        return find_task(root, id, prefer_running);
+    } catch (const std::runtime_error& e) {
+        fail_user(e.what());
+    }
 }
 
 /// A new task's autonomy policy from its flags (27i), each refused before
@@ -420,8 +431,10 @@ struct Drive {
 
 /// `task run` and `task resume`: the session assembled as `chat` assembles
 /// one, with nobody to ask, and the runner driven over its turns.
+/// In machine mode the events go to `events` -- stdout for the command, a
+/// stream of the shell's own for a run it started (37e).
 void drive(const RootContext& context, const MachineBudgetSource& machine, const TaskFlags& flags,
-           const Drive& what) {
+           const Drive& what, std::ostream& events = std::cout) {
     // Machine mode (27j): stdout carries the event stream and nothing else --
     // the turns' events and the task's lifecycle around them -- and nobody is
     // asked anything: the run reads no input, so there is no one to answer.
@@ -754,7 +767,7 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     // The task's events and the turns' events on stdout, in machine mode; a
     // person's rendering otherwise.
     const std::unique_ptr<JsonReporter> machine_reporter =
-        machine_mode ? std::make_unique<JsonReporter>(std::cout) : nullptr;
+        machine_mode ? std::make_unique<JsonReporter>(events) : nullptr;
     agentloop::Reporter& turn_reporter =
         machine_mode ? static_cast<agentloop::Reporter&>(*machine_reporter) : reporter;
     const auto notice = [&reporter, &style, machine_mode](const std::string& message) {
@@ -918,62 +931,11 @@ std::string stop_refusal(const tasks::Task& task, const std::string& verb) {
 /// `task halt` and `task cancel`: asked of the running process, or -- for a
 /// task no process runs -- written to its ledger under the lock.
 void stop_task(const TaskFlags& flags, tasks::Request request) {
-    const fs::path root = harness::tasks_dir();
-    const std::string verb{tasks::to_string(request)};
-    tasks::Task task = resolve_task(root, flags.id, /*prefer_running=*/true);
-    if (!task_stoppable(task, request)) {
-        fail_user(stop_refusal(task, verb));
+    try {
+        std::cout << request_task_stop(flags.id, request) << "\n";
+    } catch (const std::runtime_error& e) {
+        fail_user(e.what());
     }
-    if (tasks::running_task(root) == task.id) {
-        if (const std::string failure = tasks::write_request(root, task.id, request);
-            !failure.empty()) {
-            fail_user("could not ask task " + task.id + " to " + verb + ": " + failure);
-        }
-        std::cout << (request == tasks::Request::Halt
-                          ? "asked task " + task.id + " to halt: it stops when its round ends"
-                          : "asked task " + task.id +
-                                " to cancel: its turn ends now, through the loop's own "
-                                "cancellation")
-                  << "\n";
-        return;
-    }
-    // Nothing runs it. Under the lock when it is free, so a resume cannot
-    // start between the read and the write; when another task holds it, this
-    // one cannot be resumed meanwhile anyway.
-    std::string lock_error;
-    const std::optional<tasks::TaskLock> lock = tasks::TaskLock::acquire(root, task.id, lock_error);
-    if (lock.has_value()) {
-        std::string error;
-        std::optional<tasks::Task> fresh = tasks::load_task(root, task.id, error);
-        if (!fresh.has_value()) {
-            fail_user(error);
-        }
-        task = std::move(*fresh);
-    }
-    // Read again under the lock: what it holds now is what is stopped.
-    if (!task_stoppable(task, request)) {
-        fail_user(stop_refusal(task, verb));
-    }
-    if (request == tasks::Request::Halt) {
-        if (task.status == tasks::kHalted) {
-            std::cout << "task " << task.id << " is already halted\n";
-            return;
-        }
-        task.status = std::string{tasks::kHalted};
-        task.reason = "halted by 'apogee task halt' while no process ran it";
-    } else {
-        if (task.status == tasks::kCancelled) {
-            std::cout << "task " << task.id << " is already cancelled\n";
-            return;
-        }
-        task.status = std::string{tasks::kCancelled};
-        task.reason = "cancelled by 'apogee task cancel' while no process ran it";
-    }
-    tasks::record_transition(task, tasks::kFinishedEvent, tasks::now_timestamp(), 0, task.reason);
-    if (const std::string failure = tasks::save_task(root, task); !failure.empty()) {
-        fail_user("the task's ledger could not be written: " + failure);
-    }
-    std::cout << "task " << task.id << " " << task.status << "\n";
 }
 
 /// `--output-format` on `run` and `resume`: the terminal's rendering, or
@@ -1132,7 +1094,7 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
             write_document(std::cout, tasks::to_json(view));
             return;
         }
-        print_status(task, view);
+        print_status(std::cout, task, view);
     });
 
     // ---- list --------------------------------------------------------------------
@@ -1185,6 +1147,94 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
         "resume' may still continue it (default: the running one)");
     cancel->add_option("task", cancel_flags->id, "The task")->type_name(kCancellableTaskValue);
     cancel->callback([cancel_flags]() { stop_task(*cancel_flags, tasks::Request::Cancel); });
+}
+
+int run_task_events(const RootContext& context, const MachineBudgetSource& machine,
+                    const TaskRunRequest& request, std::ostream& events) {
+    // `task run "<goal>" --tools --output-format stream-json`, or `task resume
+    // <id> --output-format stream-json`: machine mode's run, nobody asked.
+    TaskFlags flags;
+    flags.output_format = OutputFormat::StreamJson;
+    Drive what;
+    try {
+        if (!request.resume.empty()) {
+            what.existing = find_task(harness::tasks_dir(), request.resume, false);
+        } else {
+            flags.goal = request.goal;
+            flags.tools = true;
+        }
+        drive(context, machine, flags, what, events);
+    } catch (const CLI::RuntimeError& e) {
+        // Said on stderr already, as the command says it.
+        return e.get_exit_code();
+    } catch (const std::exception& e) {
+        std::cerr << "apogee task: " << e.what() << "\n";
+        return kUserError;
+    }
+    return kSuccess;
+}
+
+std::string task_status_text(const std::string& id) {
+    const fs::path root = harness::tasks_dir();
+    const tasks::Task task = find_task(root, id, /*prefer_running=*/true);
+    std::ostringstream out;
+    print_status(out, task, tasks::make_task_view(task, tasks::lock_holder(root)));
+    return out.str();
+}
+
+std::string request_task_stop(const std::string& id, tasks::Request request) {
+    const fs::path root = harness::tasks_dir();
+    const std::string verb{tasks::to_string(request)};
+    tasks::Task task = find_task(root, id, /*prefer_running=*/true);
+    if (!task_stoppable(task, request)) {
+        throw std::runtime_error(stop_refusal(task, verb));
+    }
+    if (tasks::running_task(root) == task.id) {
+        if (const std::string failure = tasks::write_request(root, task.id, request);
+            !failure.empty()) {
+            throw std::runtime_error("could not ask task " + task.id + " to " + verb + ": " +
+                                     failure);
+        }
+        return request == tasks::Request::Halt
+                   ? "asked task " + task.id + " to halt: it stops when its round ends"
+                   : "asked task " + task.id +
+                         " to cancel: its turn ends now, through the loop's own cancellation";
+    }
+    // Nothing runs it. Under the lock when it is free, so a resume cannot
+    // start between the read and the write; when another task holds it, this
+    // one cannot be resumed meanwhile anyway.
+    std::string lock_error;
+    const std::optional<tasks::TaskLock> lock = tasks::TaskLock::acquire(root, task.id, lock_error);
+    if (lock.has_value()) {
+        std::string error;
+        std::optional<tasks::Task> fresh = tasks::load_task(root, task.id, error);
+        if (!fresh.has_value()) {
+            throw std::runtime_error(error);
+        }
+        task = std::move(*fresh);
+    }
+    // Read again under the lock: what it holds now is what is stopped.
+    if (!task_stoppable(task, request)) {
+        throw std::runtime_error(stop_refusal(task, verb));
+    }
+    if (request == tasks::Request::Halt) {
+        if (task.status == tasks::kHalted) {
+            return "task " + task.id + " is already halted";
+        }
+        task.status = std::string{tasks::kHalted};
+        task.reason = "halted by 'apogee task halt' while no process ran it";
+    } else {
+        if (task.status == tasks::kCancelled) {
+            return "task " + task.id + " is already cancelled";
+        }
+        task.status = std::string{tasks::kCancelled};
+        task.reason = "cancelled by 'apogee task cancel' while no process ran it";
+    }
+    tasks::record_transition(task, tasks::kFinishedEvent, tasks::now_timestamp(), 0, task.reason);
+    if (const std::string failure = tasks::save_task(root, task); !failure.empty()) {
+        throw std::runtime_error("the task's ledger could not be written: " + failure);
+    }
+    return "task " + task.id + " " + task.status;
 }
 
 TaskGate compose_task_gate(const harness::Config& config, const agent::ToolRegistry& available,

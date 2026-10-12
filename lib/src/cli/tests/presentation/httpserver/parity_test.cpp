@@ -76,6 +76,10 @@ const std::map<std::string, Classification>& table() {
     static const std::map<std::string, Classification> rows{
         // --- twins: the first CRUD slices -----------------------------------
         {"config add-backend", twin("POST", "/v1/admin/backends")},
+        {"config scan",
+         carve_out("reads the host's own model store; host-local by nature, and what --register "
+                   "writes a remote client writes through the add-backend twin (M12, the "
+                   "providers-scan precedent)")},
         {"config delete-backend", twin("DELETE", "/v1/admin/backends/{id}")},
         {"config set-default", twin("POST", "/v1/admin/backends/default")},
         {"config set-default-embedding", twin("POST", "/v1/admin/backends/default-embedding")},
@@ -215,6 +219,10 @@ const std::map<std::string, Classification>& table() {
         {"graph export graphml", read_only()},
         {"graph export mermaid", read_only()},
         {"version", read_only()},
+        // The machine as this process reads it (32a): one-shot, and the host's own.
+        {"system", read_only()},
+        // The full-screen shell (32b): an interactive surface, as chat is.
+        {"tui", read_only()},
         {"__complete", read_only()},
         {"__machine-schema", read_only()},
         {"config get", read_only()},

@@ -20,7 +20,10 @@ namespace apogee::backends {
 /// It also embeds, through `batchEmbedContents` -- the same key, a different
 /// model. See `openai.h` for why this is a per-provider capability rather than
 /// an entry in a type list.
-class GoogleProvider final : public harness::LLMProvider, public harness::EmbeddingCapable {
+class GoogleProvider final : public harness::LLMProvider,
+                             public harness::EmbeddingCapable,
+                             public harness::CatalogListing,
+                             public harness::ModelBehaviorReporting {
 public:
     struct Options {
         std::string backend_name = "google";
@@ -44,6 +47,8 @@ public:
         bool web_search = false);
 
     [[nodiscard]] std::string_view backend_name() const noexcept override;
+    /// Its reasoning is the vendor's own summary (43): shown as it is.
+    [[nodiscard]] harness::ModelBehavior model_behavior() const override;
 
     /// Every call is billed. Said explicitly rather than inherited.
     [[nodiscard]] bool generation_is_metered() const noexcept override {
@@ -58,6 +63,10 @@ public:
                                                     const harness::StreamOptions& options) override;
 
     [[nodiscard]] std::vector<harness::ModelInfo> list_models(
+        const harness::CancellationToken& cancellation) override;
+    /// The vendor's live model catalogue (M13): ids verbatim from the models
+    /// endpoint, paging followed; authenticated with this entry's key.
+    [[nodiscard]] std::vector<harness::ModelInfo> list_catalog(
         const harness::CancellationToken& cancellation) override;
 
     // --- EmbeddingCapable ---------------------------------------------------

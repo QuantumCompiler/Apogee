@@ -157,7 +157,8 @@ harness::Thinking resolve_turn_thinking(const harness::Harness& harness,
     }
     return harness::Thinking{
         .mode = decided.think ? harness::ThinkingMode::On : harness::ThinkingMode::Off,
-        .budget = asked.budget};
+        .budget = asked.budget,
+        .effort = asked.effort};
 }
 
 }  // namespace apogee::agentloop

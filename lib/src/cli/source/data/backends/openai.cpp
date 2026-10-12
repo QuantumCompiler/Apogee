@@ -175,6 +175,14 @@ std::unique_ptr<OpenAIProvider> OpenAIProvider::from_config(const std::string& b
         std::move(options), std::make_unique<HttpClient>(std::make_unique<CurlTransport>()));
 }
 
+harness::ModelBehavior OpenAIProvider::model_behavior() const {
+    // What streams as reasoning is the reasoning summary asked for (`summary:
+    // auto`), never the chain of thought itself.
+    harness::ModelBehavior behavior;
+    behavior.reasoning_summarized = true;
+    return behavior;
+}
+
 std::string_view OpenAIProvider::backend_name() const noexcept {
     return options_.backend_name;
 }
@@ -319,6 +327,43 @@ std::vector<harness::ModelInfo> OpenAIProvider::list_models(
     const harness::CancellationToken& cancellation) {
     cancellation.throw_if_cancelled();
     return {harness::ModelInfo{options_.model, options_.model, "openai", options_.backend_name}};
+}
+
+std::vector<harness::ModelInfo> OpenAIProvider::list_catalog(
+    const harness::CancellationToken& cancellation) {
+    // The vendor's catalogue (M13): one GET, ids verbatim -- the endpoint
+    // returns the whole list in one document.
+    cancellation.throw_if_cancelled();
+    HttpRequest request;
+    request.method = "GET";
+    request.url = options_.base_url + "/v1/models";
+    request.headers = {{"authorization", "Bearer " + options_.api_key}};
+    request.timeout = std::chrono::seconds{120};
+    const HttpResponse response = client_->send(request, {}, cancellation);
+    if (!response.ok()) {
+        fail(response.status, response.body);
+    }
+    const nlohmann::json parsed = nlohmann::json::parse(response.body, nullptr, false);
+    if (parsed.is_discarded() || !parsed.is_object() || !parsed.contains("data") ||
+        !parsed["data"].is_array()) {
+        throw harness::ProviderError(options_.backend_name,
+                                     "the models endpoint did not return its documented shape");
+    }
+    std::vector<harness::ModelInfo> out;
+    for (const nlohmann::json& row : parsed["data"]) {
+        if (!row.is_object()) {
+            continue;
+        }
+        harness::ModelInfo info;
+        info.id = row.value("id", std::string{});
+        info.name = info.id;
+        info.provider = "openai";
+        info.backend = options_.backend_name;
+        if (!info.id.empty()) {
+            out.push_back(std::move(info));
+        }
+    }
+    return out;
 }
 
 }  // namespace apogee::backends

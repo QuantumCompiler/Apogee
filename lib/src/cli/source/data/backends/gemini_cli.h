@@ -64,7 +64,9 @@
 /// the right one.
 namespace apogee::backends {
 
-class GeminiCliProvider final : public harness::LLMProvider, public harness::StatusReporting {
+class GeminiCliProvider final : public harness::LLMProvider,
+                                public harness::StatusReporting,
+                                public harness::ModelBehaviorReporting {
 public:
     using Spawner = std::function<std::unique_ptr<platform::ChildProcess>(
         const platform::ChildCommand&, std::string&)>;
@@ -104,6 +106,8 @@ public:
         const std::string& backend_name, const harness::BackendConfig& config);
 
     [[nodiscard]] std::string_view backend_name() const noexcept override;
+    /// Its reasoning is the vendor's own summary (43): shown as it is.
+    [[nodiscard]] harness::ModelBehavior model_behavior() const override;
 
     [[nodiscard]] harness::ChatResponse chat(
         const harness::ChatRequest& request,

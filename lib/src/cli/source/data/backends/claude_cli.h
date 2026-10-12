@@ -71,11 +71,19 @@ struct ClaudeCliInvocation {
     /// A one-shot invocation carries its prompt in argv and does not read
     /// stdin as a stream.
     bool streaming_stdin = true;
+    /// A level's word (39a), as `--effort` takes it; empty for the model's own.
+    std::string effort;
 };
+
+/// A level (39a) as the Claude Code CLI's `--effort` takes it: all five, by
+/// name. Empty for none, and for thinking off, which the CLI has no flag for.
+[[nodiscard]] std::string claude_effort(const harness::Thinking& thinking);
 
 [[nodiscard]] std::vector<std::string> build_arguments(const ClaudeCliInvocation& invocation);
 
-class ClaudeCliProvider final : public harness::LLMProvider, public harness::StatusReporting {
+class ClaudeCliProvider final : public harness::LLMProvider,
+                                public harness::StatusReporting,
+                                public harness::ModelBehaviorReporting {
 public:
     /// Starts a child. Injected so the whole provider is testable without the
     /// real CLI — no subscription spend, and failure modes (a child that dies
@@ -116,6 +124,8 @@ public:
     ~ClaudeCliProvider() override;
 
     [[nodiscard]] std::string_view backend_name() const noexcept override;
+    /// Its reasoning is the vendor's own summary (43): shown as it is.
+    [[nodiscard]] harness::ModelBehavior model_behavior() const override;
 
     [[nodiscard]] harness::ChatResponse chat(
         const harness::ChatRequest& request,
@@ -196,6 +206,8 @@ private:
     /// The CLI's own session id, captured from every terminal event and used
     /// to resume. Stored by Apogee; never read from the CLI's files.
     std::string session_id_;
+    /// The level the running child was launched with (39a): a change restarts it.
+    std::string effort_;
 
     /// How many IR messages have already been delivered to the live child.
     ///

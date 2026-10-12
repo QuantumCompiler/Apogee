@@ -115,6 +115,40 @@ TEST_CASE("the permission prompt is given the operation's target", "[agent][tool
     CHECK(seen_target == R"(parsed:{"path":"/tmp/x"})");
 }
 
+TEST_CASE("the gate hears whether a tool edits, and a refusal says the surface's reason",
+          "[agent][tool][permission][modes]") {
+    // 39b: accept-edits keys on what the tool says of itself, and a mode's
+    // refusal is said to the model so it does not retry against it.
+    ToolRegistry registry;
+    Tool editor = simple_tool("write_file", true);
+    editor.edits = true;
+    registry.add(editor);
+    registry.add(simple_tool("run_command", true));
+
+    std::vector<bool> edits;
+    DispatchContext context;
+    context.permission = [&edits](const GateRequest& request) {
+        edits.push_back(request.edits);
+        return Permission::Deny;
+    };
+    const ToolOutcome plain = dispatch(registry, ToolCall{"c", "run_command", "{}"}, context);
+    CHECK(plain.is_error);
+    CHECK(plain.content.find("the user denied permission to run 'run_command'") !=
+          std::string::npos);
+
+    context.refusal = [](const GateRequest& request) {
+        return request.edits ? std::string{"plan mode is on."} : std::string{};
+    };
+    const ToolOutcome planned = dispatch(registry, ToolCall{"c", "write_file", "{}"}, context);
+    CHECK(planned.content ==
+          "Error: 'write_file' was not run: plan mode is on. Do not retry it; "
+          "continue without it or ask what to do instead.");
+    // A surface with no reason for this call keeps the plain words.
+    const ToolOutcome again = dispatch(registry, ToolCall{"c", "run_command", "{}"}, context);
+    CHECK(again.content.find("the user denied permission") != std::string::npos);
+    CHECK(edits == std::vector<bool>{false, true, false});
+}
+
 TEST_CASE("dispatch reports progress and clears it", "[agent][tool]") {
     ToolRegistry registry;
     registry.add(simple_tool("thing"));

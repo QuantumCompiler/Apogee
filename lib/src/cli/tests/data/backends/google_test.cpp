@@ -234,6 +234,13 @@ TEST_CASE("a turn's thinking becomes Gemini's budget", "[backends][google][think
     CHECK_FALSE(thinking_off_budget("gemini-2.0-flash").has_value());
     CHECK(thinking_budget_for("gemini-2.5-pro", 64) == kProMinThinkingBudget);
     CHECK(thinking_budget_for("gemini-2.5-flash", 64) == 64);
+    // Each model's ceiling holds: `max` (39a) on Flash runs at Flash's.
+    using apogee::harness::Effort;
+    using apogee::harness::effort_budget;
+    CHECK(thinking_budget_for("gemini-2.5-pro", effort_budget(Effort::Max)) == 32'768);
+    CHECK(thinking_budget_for("gemini-2.5-flash", effort_budget(Effort::Max)) == 24'576);
+    CHECK(thinking_budget_for("gemini-2.5-flash", effort_budget(Effort::High)) == 16'384);
+    CHECK(thinking_budget_for("gemini-2.5-pro", 1'000'000) == 32'768);
 }
 
 TEST_CASE("thinking asked off sends the least budget, and asks for no thoughts",
@@ -416,4 +423,23 @@ TEST_CASE("a response schema becomes responseSchema only when no tools are in pl
     const json cleaned = apogee::backends::google::gemini_response_schema(json::parse(schema));
     CHECK(cleaned.contains("type"));
     CHECK_FALSE(cleaned.contains("$schema"));
+}
+
+TEST_CASE("list_catalog pages by nextPageToken and keeps ids past the models/ prefix",
+          "[backends][google][catalog]") {
+    Fixture f = make_provider(
+        {FakeTransport::Reply{
+             200, R"({"models":[{"name":"models/gemini-3-pro","displayName":"Gemini 3 Pro"}],)"
+                  R"("nextPageToken":"page2"})"},
+         FakeTransport::Reply{200, R"({"models":[{"name":"models/gemini-3-flash"}]})"}});
+    const std::vector<apogee::harness::ModelInfo> models =
+        f.provider->list_catalog(apogee::harness::CancellationToken{});
+    REQUIRE(models.size() == 2);
+    CHECK(models[0].id == "gemini-3-pro");
+    CHECK(models[0].name == "Gemini 3 Pro");
+    CHECK(models[1].id == "gemini-3-flash");
+    const auto& requests = f.transport->requests();
+    REQUIRE(requests.size() == 2);
+    CHECK(requests[0].method == "GET");
+    CHECK(requests[1].url.find("pageToken=page2") != std::string::npos);
 }

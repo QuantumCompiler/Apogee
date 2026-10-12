@@ -77,7 +77,9 @@ struct ChatTurnResult {
 /// A cancelled or failed turn is said through `notice` and the session saved
 /// as it stands, as before; a question `ask` throws on goes on up, unsaved.
 /// `cancellation` ends the turn through the loop's own cancellation; the
-/// default never does.
+/// default never does. `summarize_reasoning` asks for the reasoning as its
+/// one-line summary, written by the utility model (43) -- for a surface that
+/// draws it; machine mode and a task's rounds never ask.
 ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& session,
                              const std::string& input, const agent::ToolRegistry* tools,
                              agentloop::ToolSelection* selection,
@@ -86,6 +88,7 @@ ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& s
                              const std::function<void(const std::string&)>& notice,
                              const RagSettings& rag, const std::string& review_note,
                              ChatAttachments* attached, ChatRecall* recall,
-                             const harness::CancellationToken& cancellation = {});
+                             const harness::CancellationToken& cancellation = {},
+                             bool summarize_reasoning = false);
 
 }  // namespace apogee::commands

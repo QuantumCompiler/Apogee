@@ -91,6 +91,13 @@ enum class KvCacheType : std::uint8_t { F16, Q8_0, Q4_0 };
 /// tools outside Apogee's gate, so an agent's tool policy cannot hold there.
 [[nodiscard]] bool is_vendor_cli(BackendType type) noexcept;
 
+/// Whether an entry of `type` picks its model by name -- its `model:`, which
+/// the vendor's API or CLI resolves -- rather than running the weights at its
+/// `model_path` (34). Where it does, a model can be pinned on the entry by
+/// name (`/model <backend>:<model>`); where it does not, there is nothing to
+/// pin.
+[[nodiscard]] bool names_its_model(BackendType type) noexcept;
+
 /// The largest `top_k` and `seed` a backend may name (26h). A vocabulary runs
 /// to a few hundred thousand tokens, and llama.cpp reads the 32-bit maximum as
 /// "draw a seed", so a fixed one stops just short of it.
@@ -695,6 +702,17 @@ struct AgentConfig {
     std::string save_subdir;
 };
 
+/// How the terminal and the shell draw a turn's reasoning while it streams
+/// (43): `summary`, one line of what it is doing, kept current by the utility
+/// model; `raw`, the reasoning itself.
+enum class ThinkingDisplay : std::uint8_t { Summary, Raw };
+
+/// "summary", "raw".
+[[nodiscard]] std::string_view to_string(ThinkingDisplay display) noexcept;
+/// The display a word names, or unset.
+[[nodiscard]] std::optional<ThinkingDisplay> thinking_display_from_string(
+    std::string_view text) noexcept;
+
 /// The `ui:` section -- how a terminal shows what Apogee prints.
 struct UiConfig {
     /// Render answers' Markdown on a terminal (bold, lists, tables, code
@@ -702,6 +720,10 @@ struct UiConfig {
     /// model's text as written; this only chooses what a terminal shows.
     /// `--raw` turns it off for one run.
     bool markdown = true;
+    /// How a turn's reasoning is drawn while it streams (43). The summary is
+    /// the default; `/thinking-display` flips it for a session. Machine mode
+    /// and `serve` carry the reasoning as it streams, whatever this says.
+    ThinkingDisplay thinking_display = ThinkingDisplay::Summary;
 };
 
 /// The `knowledge:` section -- the organizational knowledge layer's two

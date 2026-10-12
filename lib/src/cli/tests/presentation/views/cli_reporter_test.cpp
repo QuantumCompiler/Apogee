@@ -405,3 +405,27 @@ TEST_CASE("a load with nothing on the line, or on a pipe, paints nothing",
     pipe.on_clear_status();
     CHECK(piped.progress.str().empty());
 }
+
+TEST_CASE("summarised, the terminal draws the reasoning's line in its place, raw when told",
+          "[ux][reporter][thinking][summary]") {
+    // 43: the terminal's painter of the one-line summary, reached through the
+    // Reporter as the loop reaches it.
+    Harness h;
+    CliReporter reporter = h.make();
+    reporter.set_thinking_summarized(true);
+    reporter.on_thinking();
+    reporter.on_thinking_token("the private chain of thought");
+    reporter.on_thinking_summary("weighing the two paths");
+    reporter.on_clear_status();
+    CHECK(h.progress.str().find("weighing the two paths") != std::string::npos);
+    CHECK(h.progress.str().find("chain of thought") == std::string::npos);
+    CHECK(h.answer.str().empty());
+
+    // Told it is raw: the reasoning streams, the reason said once.
+    reporter.on_thinking();
+    reporter.on_thinking_raw("no utility model is set to summarise it");
+    reporter.on_thinking_token("the reasoning itself");
+    reporter.on_clear_status();
+    CHECK(h.progress.str().find("the reasoning itself") != std::string::npos);
+    CHECK(count_of(h.progress.str(), "reasoning shown in full") >= 1);
+}

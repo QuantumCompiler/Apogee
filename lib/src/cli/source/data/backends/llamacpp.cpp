@@ -234,9 +234,27 @@ void notice(const harness::StreamOptions& options, std::string text) {
 }
 
 /// The template variable gpt-oss switches its reasoning with (26i): it has
-/// no off, only `low`, which is what off asks for. Other templates ignore it.
+/// no off, only `low`, which is what off asks for, and a level (39a) is its
+/// own word -- low, medium or high, so xhigh and max run as high. Other
+/// templates ignore it.
 [[nodiscard]] std::string thinking_effort(const harness::Thinking& thinking) {
-    return thinking.off() ? "low" : std::string{};
+    if (thinking.off()) {
+        return "low";
+    }
+    if (!thinking.effort.has_value()) {
+        return {};
+    }
+    switch (*thinking.effort) {
+        case harness::Effort::Low:
+            return "low";
+        case harness::Effort::Medium:
+            return "medium";
+        case harness::Effort::High:
+        case harness::Effort::XHigh:
+        case harness::Effort::Max:
+            return "high";
+    }
+    return {};
 }
 
 /// Tells the turn its reasoning hit the budget (26i), while the reasoning is
@@ -1243,10 +1261,12 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
     // constrain this one, nor its temperature draw this one's tokens. No
     // grammar on the fallback path.
     SamplingSettings sampling = sampling_for(request).settings();
-    // A thinking budget (26i), counted between the format's own reasoning
-    // tags; a format that names none has nothing to count, and is said so.
+    // A thinking budget (26i), or a level's (39a), counted between the
+    // format's own reasoning tags; a format that names none has nothing to
+    // count, and a budget chosen is said so -- a level has already reached
+    // the template's own switch where it has one (gpt-oss's).
     const std::optional<std::int64_t> budget =
-        request.thinking.off() ? std::nullopt : request.thinking.budget;
+        request.thinking.off() ? std::nullopt : request.thinking.tokens();
     if (budget.has_value()) {
         if (chat != nullptr && !chat->thinking_start.empty() && !chat->thinking_ends.empty()) {
             sampling.reasoning_budget =
@@ -1254,7 +1274,8 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
                                                   .start = chat->thinking_start,
                                                   .ends = chat->thinking_ends,
                                                   .prefill = chat->generation_prompt};
-        } else if (!request.transient.side_request && !budget_noticed_) {
+        } else if (!request.transient.side_request && !budget_noticed_ &&
+                   request.thinking.budget.has_value()) {
             // Once a conversation: every step of every turn would say it.
             budget_noticed_ = true;
             notice(options, "the thinking budget is not applied on " + options_.model +

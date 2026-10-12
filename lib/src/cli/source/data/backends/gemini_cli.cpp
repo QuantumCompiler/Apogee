@@ -175,6 +175,13 @@ std::vector<std::string> GeminiCliProvider::build_arguments(const Options& optio
     return arguments;
 }
 
+harness::ModelBehavior GeminiCliProvider::model_behavior() const {
+    // The CLI's thoughts are Gemini's thought summaries.
+    harness::ModelBehavior behavior;
+    behavior.reasoning_summarized = true;
+    return behavior;
+}
+
 std::string_view GeminiCliProvider::backend_name() const noexcept {
     return options_.backend_name;
 }

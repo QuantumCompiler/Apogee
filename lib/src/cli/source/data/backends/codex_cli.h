@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "contracts/config.h"
@@ -45,7 +46,10 @@
 /// local execution, which is not a trade a chat backend gets to offer.
 namespace apogee::backends {
 
-class CodexCliProvider final : public harness::LLMProvider, public harness::StatusReporting {
+class CodexCliProvider final : public harness::LLMProvider,
+                               public harness::StatusReporting,
+                               public harness::CatalogListing,
+                               public harness::ModelBehaviorReporting {
 public:
     using Spawner = std::function<std::unique_ptr<platform::ChildProcess>(
         const platform::ChildCommand&, std::string&)>;
@@ -64,6 +68,8 @@ public:
         std::string binary = "codex";
         std::string model;
         std::chrono::milliseconds turn_timeout{600000};
+        /// How long `codex debug models` may take to print its catalog.
+        std::chrono::milliseconds catalog_timeout{30000};
     };
 
     CodexCliProvider(Options options, Spawner spawner);
@@ -81,6 +87,8 @@ public:
         const std::string& backend_name, const harness::BackendConfig& config);
 
     [[nodiscard]] std::string_view backend_name() const noexcept override;
+    /// Its reasoning is the vendor's own summary (43): shown as it is.
+    [[nodiscard]] harness::ModelBehavior model_behavior() const override;
 
     [[nodiscard]] harness::ChatResponse chat(
         const harness::ChatRequest& request,
@@ -94,15 +102,42 @@ public:
 
     [[nodiscard]] harness::StatusEvent model_status() const override;
 
+    /// The CLI's own model catalog (34): `codex debug models`, run over the
+    /// spawner like a turn -- stdin closed, its stderr captured, bounded by
+    /// `catalog_timeout` -- and read by `parse_catalog`. Run only when the
+    /// user asks for rosters (`providers scan --register`, `--refresh`).
+    /// Throws harness::ProviderError when the CLI cannot be run, fails, or
+    /// prints nothing readable: never a partial roster.
+    [[nodiscard]] std::vector<harness::ModelInfo> list_catalog(
+        const harness::CancellationToken& cancellation) override;
+
+    /// The catalog `codex debug models` prints: `{"models": [{"slug": ...,
+    /// "display_name": ..., "visibility": "list"|"hide", ...}]}`. Each entry
+    /// the CLI lists -- `visibility` "list", or none given -- as its slug,
+    /// verbatim; one the CLI hides is left out, as the CLI leaves it out.
+    /// It is a debug subcommand, so any other shape is refused, naming the
+    /// backend, rather than read in part.
+    [[nodiscard]] static std::vector<harness::ModelInfo> parse_catalog(
+        std::string_view backend_name, std::string_view document);
+
     /// The argv for one turn.
     ///
     /// Public because two of its rules are load-bearing enough to deserve their
     /// own assertions: the sandbox is always `read-only`, and the `resume`
     /// form omits the flags that subcommand rejects.
+    ///
+    /// `effort` is a level's word as Codex takes it (`codex_effort`), or empty
+    /// for the model's own.
     [[nodiscard]] static std::vector<std::string> build_arguments(const Options& options,
                                                                   Invocation invocation,
                                                                   const std::string& thread_id,
-                                                                  const std::string& schema_path);
+                                                                  const std::string& schema_path,
+                                                                  std::string_view effort = {});
+
+    /// A level (39a) as Codex's `model_reasoning_effort` spells it: low,
+    /// medium, high and xhigh, so max runs as xhigh. Empty for none, and
+    /// for thinking off, which Codex has no word for.
+    [[nodiscard]] static std::string codex_effort(const harness::Thinking& thinking);
 
     /// The thread id captured from the last run, if any.
     [[nodiscard]] const std::string& thread_id() const noexcept;
@@ -124,7 +159,8 @@ private:
     };
 
     [[nodiscard]] Outcome run_turn(const std::string& prompt, const std::string& schema_path,
-                                   const harness::StreamOptions& options);
+                                   const harness::StreamOptions& options,
+                                   std::string_view effort = {});
 
     Options options_;
     Spawner spawner_;

@@ -26,8 +26,10 @@
 #include "cli/reset.h"
 #include "cli/serve_cmd.h"
 #include "cli/symphonies_cmd.h"
+#include "cli/system_cmd.h"
 #include "cli/task_cmd.h"
 #include "cli/train.h"
+#include "cli/tui_cmd.h"
 #include "cli/uninstall.h"
 #include "cli/version_command.h"
 
@@ -73,7 +75,7 @@ void CommandRegistry::bind_all(CLI::App& root, const RootContext& context) {
     }
 }
 
-CommandRegistry default_registry() {
+CommandRegistry default_registry(ShellEntry shell) {
     CommandRegistry registry;
     registry.add(std::make_unique<AgentsCommand>());
     registry.add(std::make_unique<AnalyzeCommand>());
@@ -94,7 +96,9 @@ CommandRegistry default_registry() {
     registry.add(std::make_unique<ResetCommand>());
     registry.add(std::make_unique<ServeCommand>());
     registry.add(std::make_unique<SymphoniesCommand>());
+    registry.add(std::make_unique<SystemCommand>());
     registry.add(std::make_unique<TaskCommand>());
+    registry.add(std::make_unique<TuiCommand>(std::move(shell)));
     registry.add(std::make_unique<UninstallCommand>());
     registry.add(std::make_unique<VersionCommand>());
     // Hidden: the shell-completion protocol, not a user-facing command.

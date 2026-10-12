@@ -24,6 +24,7 @@ add_library(apogee_tests_infrastructure OBJECT
     infrastructure/platform/pid_lock_test.cpp
     infrastructure/platform/child_process_test.cpp
     infrastructure/platform/ffmpeg_test.cpp
+    infrastructure/platform/system_info_test.cpp
     infrastructure/ansi/ansi_test.cpp
     infrastructure/events/bus_test.cpp
     support/env_guard.h
@@ -40,6 +41,7 @@ add_library(apogee_tests_infrastructure OBJECT
     support/embedding_fixtures.h
     support/text_edits.h
     support/hermetic_stdin.cpp
+    support/hermetic_home.cpp
 )
 target_link_libraries(apogee_tests_infrastructure PRIVATE apogee_infrastructure Catch2::Catch2)
 
@@ -61,6 +63,7 @@ add_library(apogee_tests_data OBJECT
     data/transport/sse_parser_test.cpp
     data/transport/http_client_test.cpp
     data/backends/anthropic_test.cpp
+    data/backends/model_roster_test.cpp
     data/backends/factory_test.cpp
     data/backends/openai_test.cpp
     data/backends/google_test.cpp
@@ -141,6 +144,7 @@ add_library(apogee_tests_business OBJECT
     business/agentloop/query_rewrite_test.cpp
     business/agentloop/tool_selection_test.cpp
     business/agentloop/tool_summary_test.cpp
+    business/agentloop/reasoning_summary_test.cpp
     business/agentloop/conformance_test.cpp
     business/agent/tool_test.cpp
     business/agent/fetch_url_test.cpp
@@ -236,6 +240,18 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/registry_test.cpp
     presentation/cli/provider_offer_test.cpp
     presentation/cli/read_documents_test.cpp
+    presentation/cli/system_cmd_test.cpp
+    presentation/cli/tui_cmd_test.cpp
+    presentation/cli/line_tokens_test.cpp
+    presentation/cli/tui_agents_test.cpp
+    presentation/cli/tui_doctor_test.cpp
+    presentation/cli/tui_knowledge_test.cpp
+    presentation/cli/tui_parity_test.cpp
+    presentation/cli/tui_runner_test.cpp
+    presentation/cli/tui_session_test.cpp
+    presentation/cli/tui_task_test.cpp
+    presentation/cli/tui_training_test.cpp
+    presentation/cli/tui_workbench_test.cpp
     presentation/cli/root_test.cpp
     presentation/cli/models_pull_test.cpp
     presentation/cli/models_migrate_test.cpp
@@ -249,7 +265,14 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/config_lifecycle_test.cpp
     presentation/cli/attachment_guard_test.cpp
     presentation/operations/retrieval_test.cpp
+    presentation/operations/backend_names_test.cpp
     presentation/operations/suites_test.cpp
+    presentation/operations/system_view_test.cpp
+    presentation/tui/shell_test.cpp
+    presentation/tui/session_view_test.cpp
+    presentation/tui/list_view_test.cpp
+    presentation/tui/progress_test.cpp
+    presentation/tui/monitor_bar_test.cpp
     presentation/cli/helpers_test.cpp
     presentation/cli/tool_vectors_test.cpp
     presentation/views/thinking_view_test.cpp
@@ -270,6 +293,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/attachment_graph_test.cpp
     presentation/operations/graph_sources_test.cpp
     presentation/cli/chat_completer_test.cpp
+    presentation/cli/chat_roster_test.cpp
     presentation/cli/chat_session_test.cpp
     presentation/cli/execute_test.cpp
     presentation/httpserver/handler_test.cpp
@@ -359,7 +383,22 @@ target_link_libraries(apogee_tests PRIVATE
     apogee_tests_infrastructure apogee_tests_data apogee_tests_business apogee_tests_presentation
     apogee_core Catch2::Catch2WithMain)
 
-catch_discover_tests(apogee_tests)
+# The shell runs a command as a child of its own binary (37f): a test of
+# that runs the built `apogee`, found here -- and skips where this build made
+# none (CI's unit-test job builds the test binary alone).
+target_compile_definitions(apogee_tests_presentation PRIVATE
+    APOGEE_EXECUTABLE="$<TARGET_FILE:apogee>")
+
+# Before the discovery, which runs the binary: an image Windows will not load
+# fails here by its size rather than there as a bad format.
+apogee_guard_image_size(apogee_tests)
+if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+    # A cross-built binary cannot run where it was built (pr-ci.sh's Windows
+    # build on a Mac): it lists its tests when ctest runs, on its own platform.
+    catch_discover_tests(apogee_tests DISCOVERY_MODE PRE_TEST)
+else()
+    catch_discover_tests(apogee_tests)
+endif()
 
 # The binary's own contract, exercised the way a user meets it. These run the
 # built executable as a subprocess; running a target is not linking it, so the
@@ -487,11 +526,28 @@ set(APOGEE_LINKED_VISITED "")
 set(APOGEE_LINKED_ARCHIVES "")
 apogee_collect_static_archives(apogee APOGEE_LINKED_VISITED APOGEE_LINKED_ARCHIVES)
 string(JOIN "|" APOGEE_LINKED_ARCHIVE_LIST ${APOGEE_LINKED_ARCHIVES})
+# FTXUI (32b) reaches the executable through `tui/` and is scanned by the walk
+# like any static dependency -- said once, explicitly, so a shell that stopped
+# reaching the binary could not leave a compositor's code unscanned.
+if(NOT "$<TARGET_FILE:component>" IN_LIST APOGEE_LINKED_ARCHIVES)
+    message(FATAL_ERROR "cli.no_listen_symbols would not scan FTXUI's component library: "
+                        "the link walk no longer reaches it through apogee_presentation_tui")
+endif()
 add_test(NAME cli.no_listen_symbols
     COMMAND "${CMAKE_COMMAND}"
         "-DAPOGEE_ARCHIVES=${APOGEE_LINKED_ARCHIVE_LIST}"
         -DAPOGEE_LISTENER_OBJECT=serve.cpp${CMAKE_CXX_OUTPUT_EXTENSION}
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/no_listen_symbols.cmake"
+)
+
+# A bare `apogee` off a terminal is the help, byte for byte (32b): the full-screen
+# shell is strictly additive, and the root help is pinned beside the suite.
+add_test(NAME cli.bare_help
+    COMMAND "${CMAKE_COMMAND}"
+        -DAPOGEE=$<TARGET_FILE:apogee>
+        -DGOLDEN=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/cli/root_help.txt
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/bare-help
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/bare_help.cmake"
 )
 
 # `apogee serve` exists, and its help must say what a server deployment needs
@@ -943,6 +999,17 @@ if(UNIX)
                 $<TARGET_FILE:apogee_tests>
         )
         set_tests_properties(cli.unit_suite_under_a_tty PROPERTIES TIMEOUT 300)
+
+        # The full-screen shell (32b) on a real terminal: entered and left on the
+        # alternate screen, the terminal's modes exactly as they were after a
+        # quit, Ctrl-C, SIGINT, SIGTERM and a planted crash's SIGABRT; views
+        # switched by Tab and F1; a pipe and TERM=dumb given the help instead.
+        add_test(NAME cli.tui_shell
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_tui_check.py"
+                $<TARGET_FILE:apogee>
+        )
+        set_tests_properties(cli.tui_shell PROPERTIES TIMEOUT 180)
 
         add_test(NAME cli.chat_typeahead_and_crash_safety
             COMMAND "${Python3_EXECUTABLE}"

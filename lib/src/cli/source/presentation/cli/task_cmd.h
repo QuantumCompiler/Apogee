@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <iosfwd>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -49,6 +50,33 @@ public:
 private:
     MachineBudgetSource machine_;
 };
+
+/// What a run from the shell asks for (37e): a new task's goal, or the task
+/// to resume.
+struct TaskRunRequest {
+    std::string goal;
+    std::string resume;
+};
+
+/// A task run as machine mode runs it (37e): `apogee task run "<goal>"
+/// --tools --output-format stream-json`, or `task resume <id>` -- the
+/// config's permissions and nothing granted besides, nobody asked anything
+/// (a tool that asks is denied, a question with no declared answer ends the
+/// task, exactly as on any pipe), its events written to `events` one line
+/// each, the `[task]` lines and refusals on stderr. The ledger is the
+/// command's own. Returns the command's exit code.
+[[nodiscard]] int run_task_events(const RootContext& context, const MachineBudgetSource& machine,
+                                  const TaskRunRequest& request, std::ostream& events);
+
+/// `task status <id>` as the command prints it (37e): the Task view's card.
+/// Throws std::runtime_error in the command's words for a task not found.
+[[nodiscard]] std::string task_status_text(const std::string& id);
+
+/// `task halt <id>` (`request` Halt) or `task cancel <id>` (37e): the request
+/// file a running task's watcher reads, or the transition written under the
+/// lock for one no process runs -- what the command does, its line returned.
+/// Throws std::runtime_error in the command's words for a task it refuses.
+[[nodiscard]] std::string request_task_stop(const std::string& id, tasks::Request request);
 
 /// Whether `task halt` (`request` Halt) or `task cancel` takes `task`:
 /// never a finished one, and a halt only one still holding its session --

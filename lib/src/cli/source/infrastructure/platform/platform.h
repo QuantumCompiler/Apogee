@@ -151,6 +151,15 @@ enum class StandardStream : std::uint8_t { In, Out, Err };
 /// reach a row that has scrolled away, so what it repaints must fit.
 [[nodiscard]] std::optional<int> terminal_height() noexcept;
 
+/// Why this process's terminal cannot host a full-screen view (32b), or empty
+/// when it can. On POSIX a terminal is asked nothing: `TERM` unset or `dumb`
+/// names one that cannot place the cursor. On Windows the console is asked
+/// whether it takes virtual-terminal sequences -- what the shell draws with --
+/// by turning them on and back off; a console that refuses, or an output that
+/// is no console, cannot host it. A refusal is said and the caller falls back
+/// to plain output: never a garbled screen.
+[[nodiscard]] std::string full_screen_refusal();
+
 /// Discards anything already typed at the terminal but not yet read.
 ///
 /// Chat startup is not instant — every backend is constructed before the first

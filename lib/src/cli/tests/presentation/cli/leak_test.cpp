@@ -9,11 +9,21 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 
+#include "agentloop/reasoning_summary.h"
 #include "backends/factory.h"
 #include "cli/auth_cmd.h"
 #include "cli/check.h"
 #include "cli/models.h"
+#include "cli/tui_agents.h"
+#include "cli/tui_doctor.h"
+#include "cli/tui_knowledge.h"
+#include "cli/tui_runner.h"
+#include "cli/tui_symphonies.h"
+#include "cli/tui_task.h"
+#include "cli/tui_training.h"
+#include "cli/tui_workbench.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
 #include "events/bus.h"
@@ -28,6 +38,9 @@
 #include "support/cli_home.h"
 #include "support/env_guard.h"
 #include "tasks/ledger.h"
+#include "tui/progress.h"
+#include "tui/pump.h"
+#include "tui/runner_view.h"
 
 /// The leak test: one distinctive key, stored every way a key can be stored,
 /// then every surface that reports on keys is rendered and searched for it.
@@ -204,6 +217,16 @@ TEST_CASE("a stored key reaches no listing, report, response, event or log", "[s
     for (const auto& status : built.statuses) {
         expect_clean("build status", status.reason);
     }
+    // The reasoning summary's route, as `/thinking-display` says it (43):
+    // a backend's name and why, never its key -- with every entry the chat
+    // model, and each the utility model too.
+    for (const auto& [chat, unused] : world.config.backends) {
+        for (const auto& [utility, also_unused] : world.config.backends) {
+            const apogee::agentloop::SummaryRoute route =
+                apogee::agentloop::route_summary(harness, chat, utility);
+            expect_clean("summary route " + chat + " by " + utility, route.model + route.why_not);
+        }
+    }
 
     // Whatever any of that published or logged.
     expect_clean("event bus", drain(subscription));
@@ -228,6 +251,86 @@ TEST_CASE("a stored key reaches no listing, report, response, event or log", "[s
 /// as JSON, the admin plane's task routes, and machine mode's stream of a
 /// task's run, each of which says an answer existed and never what it said.
 /// Nor does any of those name the ledger's path.
+TEST_CASE("the shell's workbench views draw no key, wherever it was stored",
+          "[secrets][leak][tui]") {
+    // The full-screen shell's views (32d) report on backends too: every row,
+    // heading and detail each draws, searched for the key in every rung.
+    const World world;
+    apogee::commands::RootContext context;
+    context.config_path = world.config_path.string();
+    for (const apogee::tui::ListOptions& options :
+         {apogee::commands::models_view_options(context, {}),
+          apogee::commands::config_view_options(context),
+          apogee::commands::suites_view_options(context, {}),
+          apogee::commands::chats_view_options({}), apogee::commands::check_view_options(context),
+          apogee::commands::providers_view_options(context),
+          apogee::commands::system_view_options(
+              apogee::commands::SystemSeams{.wait = [](std::chrono::milliseconds) {}}),
+          apogee::commands::knowledge_view_options(context),
+          apogee::commands::collections_view_options(context),
+          apogee::commands::graph_view_options(context),
+          apogee::commands::symphonies_view_options(context, {}),
+          apogee::commands::task_view_options(context, nullptr),
+          apogee::commands::train_view_options(context, nullptr, {}),
+          apogee::commands::datasets_view_options(context, nullptr, {}),
+          apogee::commands::agents_view_options(context, {}),
+          apogee::commands::mcp_view_options(context, {}),
+          apogee::commands::auth_view_options(context)}) {
+        const auto [heading, rows] = options.load();
+        std::string drawn;
+        for (const std::string& line : heading) {
+            drawn += line + "\n";
+        }
+        for (const apogee::tui::ListRow& row : rows) {
+            drawn += row.key + ":";
+            for (const std::string& cell : row.cells) {
+                drawn += " " + cell;
+            }
+            drawn += "\n";
+            if (options.detail) {
+                for (const std::string& line : options.detail(row)) {
+                    drawn += "  " + line + "\n";
+                }
+            }
+        }
+        expect_clean("the shell's " + options.title + " view", drawn);
+    }
+}
+
+TEST_CASE("the exec line's output region draws no key, wherever it was stored",
+          "[secrets][leak][tui][child]") {
+    // The runner (37h) shows a command's own output: the reads that report on
+    // backends and servers, run as the shell's child in the world with the
+    // key in every rung, searched whole.
+    const std::filesystem::path binary{APOGEE_EXECUTABLE};
+    std::error_code missing;
+    if (!std::filesystem::is_regular_file(binary, missing)) {
+        SKIP("this build made no apogee binary to run as the shell's child");
+    }
+    const World world;
+    apogee::commands::RootContext context;
+    context.config_path = world.config_path.string();
+    apogee::tui::ManualPump pump;
+    const auto output = std::make_shared<apogee::tui::Progress>(pump);
+    const apogee::tui::ExecLineOptions options =
+        apogee::commands::exec_line_options(context, output, binary);
+    for (const char* line : {"models list", "config get backends.cfg", "auth list", "mcp list",
+                             "check", "providers"}) {
+        REQUIRE(options.run("", line).empty());
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{60};
+        while (output->running()) {
+            REQUIRE(std::chrono::steady_clock::now() < deadline);
+            (void)pump.drain();
+            std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        }
+        std::string drawn = output->heading() + "\n";
+        for (const std::string& said : output->lines()) {
+            drawn += said + "\n";
+        }
+        expect_clean(std::string{"the exec line's output of "} + line, drawn);
+    }
+}
+
 TEST_CASE("a task's declared answer is found only where it belongs", "[tasks][leak][policy]") {
     apogee::testing::CliHome home{""};
     const std::filesystem::path script = home.home() / "script.json";

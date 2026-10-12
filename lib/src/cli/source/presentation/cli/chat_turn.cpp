@@ -27,15 +27,13 @@ harness::StatusSink progress_sink(agentloop::Reporter& reporter) {
     };
 }
 
-ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& session,
-                             const std::string& input, const agent::ToolRegistry* tools,
-                             agentloop::ToolSelection* selection,
-                             agentloop::MemberCalls* member_calls, const agentloop::AskFn& ask,
-                             const ToolGate& gate, agentloop::Reporter& reporter,
-                             const std::function<void(const std::string&)>& notice,
-                             const RagSettings& rag, const std::string& review_note,
-                             ChatAttachments* attached, ChatRecall* recall,
-                             const harness::CancellationToken& cancellation) {
+ChatTurnResult run_chat_turn(
+    const harness::Harness& harness, logger::Session& session, const std::string& input,
+    const agent::ToolRegistry* tools, agentloop::ToolSelection* selection,
+    agentloop::MemberCalls* member_calls, const agentloop::AskFn& ask, const ToolGate& gate,
+    agentloop::Reporter& reporter, const std::function<void(const std::string&)>& notice,
+    const RagSettings& rag, const std::string& review_note, ChatAttachments* attached,
+    ChatRecall* recall, const harness::CancellationToken& cancellation, bool summarize_reasoning) {
     ChatTurnResult outcome;
     const std::vector<harness::ChatMessage> incoming = build_messages({}, {}, input, {});
     // The turn's model calls besides the chat model's own, said where the
@@ -88,9 +86,14 @@ ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& s
     loop_options.max_tokens = session.params.max_tokens;
     // Whether the model thinks first (26i): `/think` or the flag, else the
     // backend's; `auto` asks the utility model, when one is set.
-    loop_options.thinking = resolve_thinking(
-        session.params.thinking, session.params.thinking_budget, harness.config(), session.backend);
+    loop_options.thinking =
+        resolve_thinking(session.params.thinking, session.params.thinking_budget, harness.config(),
+                         session.backend, session.params.effort);
     loop_options.thinking_judge = named_utility(harness.config());
+    // The reasoning as one line, by the utility model, for a surface that
+    // draws it (43); the loop decides whether it can.
+    loop_options.summarize_reasoning = summarize_reasoning;
+    loop_options.reasoning_summary_model = named_utility(harness.config());
     loop_options.stream_answer = true;
     // A large tool result is summarised by the utility model, when one is
     // set, before the chat model reads it (26b).
@@ -107,6 +110,8 @@ ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& s
         loop_options.ask = ask;
         loop_options.permission = gate.permission;
         loop_options.confirm = gate.confirm;
+        // A mode's refusal is said as the mode's (39b): plan and dont-ask.
+        loop_options.refusal = mode_refusal(gate.approvals);
     }
 
     // Retrieval runs PER TURN, against what the user just asked -- which is the
@@ -222,6 +227,15 @@ ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& s
             loop_options.transient_prefix.insert(loop_options.transient_prefix.end(),
                                                  recalled.prefix.begin(), recalled.prefix.end());
             reporter.on_recall(recalled.chats, recalled.decisions);
+        }
+    }
+    if (tools != nullptr && gate.approvals != nullptr) {
+        // Plan mode's note (39b) rides the turn as the review note does:
+        // Shift+Tab can leave plan mode between turns, and the transcript
+        // must not keep telling the model it is in it.
+        if (const std::string note = plan_note(*gate.approvals); !note.empty()) {
+            loop_options.transient_prefix.insert(loop_options.transient_prefix.begin(),
+                                                 harness::ChatMessage::system(note));
         }
     }
     if (!review_note.empty()) {

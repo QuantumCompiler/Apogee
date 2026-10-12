@@ -128,6 +128,63 @@ TEST_CASE("a schema invocation passes the schema inline", "[backends][claude_cli
     CHECK(has_flag(arguments, R"({"type":"object"})"));
 }
 
+TEST_CASE("an effort level is the CLI's own --effort, by name", "[backends][claude_cli][effort]") {
+    using apogee::harness::Effort;
+    using apogee::harness::Thinking;
+    CHECK(apogee::backends::claude_effort(Thinking{.effort = Effort::XHigh}) == "xhigh");
+    CHECK(apogee::backends::claude_effort(Thinking{.effort = Effort::Max}) == "max");
+    CHECK(apogee::backends::claude_effort(Thinking{}).empty());
+    CHECK(apogee::backends::claude_effort(
+              Thinking{.mode = apogee::harness::ThinkingMode::Off, .effort = Effort::Low})
+              .empty());
+
+    apogee::backends::ClaudeCliInvocation invocation;
+    CHECK_FALSE(has_flag(apogee::backends::build_arguments(invocation), "--effort"));
+    invocation.effort = "high";
+    const std::vector<std::string> arguments = apogee::backends::build_arguments(invocation);
+    const auto at = std::find(arguments.begin(), arguments.end(), "--effort");
+    REQUIRE(at != arguments.end());
+    REQUIRE(std::next(at) != arguments.end());
+    CHECK(*std::next(at) == "high");
+}
+
+TEST_CASE("a changed effort level restarts the child on its session, told only what is new",
+          "[backends][claude_cli][session][effort]") {
+    // The CLI reads --effort at launch alone (39a): a new level is a new
+    // child, resumed on the same session so its history is its own.
+    Fixture fixture{{turn_script("First.", "sess-e"), turn_script("Second.", "sess-e")}};
+
+    (void)fixture.provider->chat(turn({ChatMessage::user("alpha")}), {});
+    CHECK_FALSE(has_flag(fixture.spawner->commands.front(), "--effort"));
+
+    ChatRequest harder = turn(
+        {ChatMessage::user("alpha"), ChatMessage::assistant("First."), ChatMessage::user("beta")});
+    harder.thinking.effort = apogee::harness::Effort::High;
+    const auto second = fixture.provider->chat(harder, {});
+    CHECK(second.message.content.plain_text() == "Second.");
+
+    REQUIRE(fixture.spawner->commands.size() == 2);
+    const std::vector<std::string>& respawn = fixture.spawner->commands.back();
+    CHECK(has_flag(respawn, "--effort"));
+    CHECK(has_flag(respawn, "high"));
+    CHECK(has_flag(respawn, "--resume"));
+    CHECK(has_flag(respawn, "sess-e"));
+    // The first child was closed, not killed; the second heard only "beta".
+    CHECK(fixture.spawner->children.front()->stdin_closed);
+    const auto& writes = fixture.spawner->children.back()->writes;
+    REQUIRE(writes.size() == 1);
+    CHECK(writes.front().find("beta") != std::string::npos);
+    CHECK(writes.front().find("alpha") == std::string::npos);
+
+    // The same level again is the same child.
+    ChatRequest same = turn({ChatMessage::user("alpha"), ChatMessage::assistant("First."),
+                             ChatMessage::user("beta"), ChatMessage::assistant("Second."),
+                             ChatMessage::user("gamma")});
+    same.thinking.effort = apogee::harness::Effort::High;
+    (void)fixture.provider->stream_chat(same, {});
+    CHECK(fixture.spawner->commands.size() == 2);
+}
+
 TEST_CASE("a multi-turn conversation reuses one child", "[backends][claude_cli][session]") {
     // THE acceptance criterion. A per-turn spawn pays process startup and MCP
     // discovery on every message; the persistent child is the entire reason

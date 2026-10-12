@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -112,6 +113,15 @@ struct SuiteResolution {
 
 [[nodiscard]] SuiteResolution resolve_suite(const std::filesystem::path& training_dir,
                                             std::string_view name_or_path);
+
+/// A run's or a version's eval as `train status` and `train versions` word
+/// it: `pass 92%`, `FAIL 40%`, or `-` when it was never evaluated.
+[[nodiscard]] std::string eval_glyph(const std::optional<bool>& passed,
+                                     const std::optional<double>& score);
+
+/// `train status` as a person reads it (37f): the cycle, the pipeline, the
+/// newest runs and the active versions -- the Train view's heading.
+[[nodiscard]] std::string train_status_text(const RootContext& context);
 
 /// One status-line rendering of an iteration: `iter n/N · loss L · lr R ·
 /// T it/s`.

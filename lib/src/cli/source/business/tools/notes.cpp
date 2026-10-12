@@ -57,6 +57,7 @@ void register_notes_tools(agent::ToolRegistry& registry, const std::filesystem::
     write.parameters_schema =
         R"({"type":"object","properties":{"key":{"type":"string","description":"The note's name: letters, digits, hyphens, underscores"},"content":{"type":"string","description":"The note's text"}},"required":["key","content"]})";
     write.writes = true;
+    write.edits = true;
     write.describe_target = describe_key;
     write.run = [notes_dir](std::string_view arguments) -> agent::ToolOutcome {
         agent::ToolOutcome failure;
@@ -152,6 +153,7 @@ void register_notes_tools(agent::ToolRegistry& registry, const std::filesystem::
         "Delete a saved note by key. This operation requires the user's permission.";
     remove.parameters_schema = key_schema;
     remove.writes = true;
+    remove.edits = true;
     remove.describe_target = describe_key;
     remove.run = [notes_dir](std::string_view arguments) -> agent::ToolOutcome {
         agent::ToolOutcome failure;

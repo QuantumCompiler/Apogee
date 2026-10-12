@@ -59,6 +59,8 @@ struct CompleteFlags {
     /// Whether the model thinks first, and for how long (26i).
     std::string think;
     std::int64_t think_budget = 0;
+    /// How hard it thinks, as a level (39a); never with `--think-budget`.
+    std::string effort;
     /// The run's answers, given at invocation (26o): with nobody to ask, the
     /// only way a one-shot uses a destructive tool on purpose.
     std::vector<std::string> allow;
@@ -257,7 +259,8 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         flags.think.empty() ? std::nullopt : harness::thinking_mode_from_string(flags.think),
         flags.think_budget_option->count() > 0 ? std::optional<std::int64_t>{flags.think_budget}
                                                : std::nullopt,
-        config, model);
+        config, model,
+        flags.effort.empty() ? std::nullopt : harness::effort_from_string(flags.effort));
 
     // Machine mode: the SAME loop, a different Reporter. Nothing below this
     // point knows which one is in use, which is the Reporter seam's whole
@@ -622,6 +625,10 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
         cmd->add_option("--think-budget", flags->think_budget,
                         "The most tokens a reasoning model may think for before it answers")
             ->check(CLI::Range(std::int64_t{0}, harness::kMaxThinkingBudget));
+    cmd->add_option("--effort", flags->effort,
+                    "How hard a reasoning model thinks: low, medium, high, xhigh or max")
+        ->check(CLI::IsMember(effort_words()))
+        ->excludes(flags->think_budget_option);
     cmd->add_flag("-q,--quiet", flags->quiet, "Suppress all output except the answer");
     cmd->add_flag("-v,--verbose", flags->verbose, "Print progress notes to stderr");
     cmd->add_flag("--all-backends", flags->all_backends,
@@ -677,6 +684,19 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
             fail_user(e.what());
         }
 
+        // A model that is neither a backend key nor an entry's `model:` may be a
+        // vendor roster's (M13), resolved as chat's `-m` and `/model` resolve it
+        // (33): a sole configured owner pins that entry's model for this run, in
+        // memory only -- the config file never changes; two owners refuse
+        // naming both; none falls through to the existing refusal.
+        if (const SessionModel named = resolve_session_model(config, flags->model);
+            !named.refusal.empty()) {
+            fail_user(named.refusal);
+        } else if (!named.pinned.empty()) {
+            config.backends.at(named.backend).model = named.pinned;
+            std::cerr << "model '" << named.pinned << "' -- " << roster_pin_note(named) << "\n";
+            flags->model = named.backend;
+        }
         harness::Harness harness{config};
         backends::BuildOptions build_options;
         build_options.web_search = flags->search;

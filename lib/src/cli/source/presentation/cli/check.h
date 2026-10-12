@@ -134,6 +134,11 @@ struct CheckInputs {
 /// corrects private modes. Returns what it did. **Never touches config.**
 [[nodiscard]] std::vector<std::string> apply_fixes(const CheckInputs& inputs);
 
+/// The report's verdict in words, the line under the human report (37b: the
+/// Check view's heading too): `2 failure(s), 1 warning(s)`, `no failures, 1
+/// warning(s)`, or `everything checks out`.
+[[nodiscard]] std::string check_verdict(const CheckReport& report);
+
 /// Renders a report for a terminal. `color` gates ANSI.
 [[nodiscard]] std::string render_report(const CheckReport& report, bool use_color);
 
@@ -143,6 +148,26 @@ struct CheckInputs {
 /// and `fixed`, what `--fix` repaired, when `fixed` is given.
 [[nodiscard]] nlohmann::json render_report_document(
     const CheckReport& report, const std::optional<std::vector<std::string>>& fixed);
+
+/// The inputs `apogee check` reads for `context`'s root and config (37b):
+/// the config path as the chain resolves it -- both formats side by side is
+/// the Config row's to say, the rest of the install still worth a look --
+/// the data directory and the rung that chose it. What the command and the
+/// shell's Check view both check. Throws std::runtime_error naming why when
+/// no root or config directory resolves at all.
+[[nodiscard]] CheckInputs check_inputs(const RootContext& context);
+
+/// The report `apogee check` prints for `inputs` (37b): the environment and
+/// the running binary defaulted, the config read as it stands, every check
+/// run -- the rows the command, its JSON document and the Check view draw.
+/// `progress` hears each section, as the command's busy line does.
+[[nodiscard]] CheckReport read_check_report(CheckInputs inputs, const BusyProgress& progress = {});
+
+/// `--fix`, said as the command says it (37b): a `fixed: <what>` line per
+/// repair -- the created ones one count under `fold_created` -- or `nothing
+/// to fix`. The same pass, the same honesty: an existing config is never
+/// touched.
+[[nodiscard]] std::vector<std::string> fix_install(CheckInputs inputs, bool fold_created = false);
 
 /// How `run_check_pass` runs.
 struct CheckPassOptions {

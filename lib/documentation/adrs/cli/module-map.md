@@ -12,7 +12,7 @@ ADR [0001](layer-enforcement.md) fixed the four layers and the rule between them
 
 | Layer | Modules | May depend on |
 |---|---|---|
-| Presentation | `markdown`, `render`, `views`, `machine`, `operations`, `httpserver`, `cli` | Presentation, Business, Data, Infrastructure |
+| Presentation | `markdown`, `render`, `views`, `machine`, `operations`, `httpserver`, `tui`, `cli` | Presentation, Business, Data, Infrastructure |
 | Business | `harness`, `agent`, `agentloop`, `knowledge`, `graph`, `tools`, `mcp`, `models`, `training`, `tasks`, `symphony`, `scaffold` | Business, Data, Infrastructure |
 | Data | `contracts`, `transport`, `modelstore`, `logger`, `secrets`, `embedstore`, `backends` | Data, Infrastructure |
 | Infrastructure | `platform`, `events`, `ansi`, `version` | Infrastructure |

@@ -1,0 +1,235 @@
+#include "cli/tui_cmd.h"
+
+#include <CLI/CLI.hpp>
+
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "cli/helpers.h"
+#include "cli/suite_residency.h"
+#include "cli/tui_agents.h"
+#include "cli/tui_doctor.h"
+#include "cli/tui_knowledge.h"
+#include "cli/tui_runner.h"
+#include "cli/tui_session.h"
+#include "cli/tui_symphonies.h"
+#include "cli/tui_task.h"
+#include "cli/tui_training.h"
+#include "cli/tui_workbench.h"
+#include "cli/version_command.h"
+#include "platform/platform.h"
+#include "platform/system_info.h"
+#include "tui/list_view.h"
+#include "tui/monitor_bar.h"
+#include "tui/pump.h"
+#include "tui/session_view.h"
+#include "tui/shell.h"
+#include "tui/theme.h"
+#include "tui/view.h"
+#include "version/version.h"
+
+namespace apogee::commands {
+
+namespace {
+
+[[nodiscard]] std::vector<std::string> lines_of(const std::string& text) {
+    std::vector<std::string> lines;
+    std::istringstream in{text};
+    std::string line;
+    while (std::getline(in, line)) {
+        lines.push_back(line);
+    }
+    return lines;
+}
+
+[[nodiscard]] int run_full_screen(const RootContext& context) {
+    const tui::Theme theme = tui::detect_theme();
+    tui::Shell shell{
+        tui::ShellOptions{.title = "apogee " + std::string{version::semantic()}, .theme = theme}};
+    tui::TerminalPump pump;
+
+    // The machine on the bottom bar (32e): 32a's probe, on the pump's tick,
+    // the models the conversation holds beside it.
+    struct Held {
+        std::mutex mutex;
+        std::vector<std::string> backends;
+    };
+
+    const auto held = std::make_shared<Held>();
+    tui::MonitorBar monitor{pump, theme, platform::host_system(),
+                            tui::MonitorOptions{.held = [held]() {
+                                const std::lock_guard lock{held->mutex};
+                                return held->backends;
+                            }}};
+    shell.set_bottom_bar(monitor.view());
+    // The conversation first: where a bare `apogee` lands (32c).
+    tui::SessionView session{pump, theme};
+    tui::View session_tab = session.view();
+    session_tab.set_category("Modes");
+    const std::size_t session_view = shell.add(std::move(session_tab));
+    TuiSessionDriver driver{session, pump, context, machine_budget,
+                            [held](std::vector<std::string> backends) {
+                                const std::lock_guard lock{held->mutex};
+                                held->backends = std::move(backends);
+                            }};
+    // The workbench beside it (32d): reads drawn, cores called.
+    const WorkbenchHooks hooks{
+        .open_chat = [&driver](const std::string& chat_id) { return driver.open_chat(chat_id); },
+        .use_suite = [&driver](const std::string& suite) { return driver.use_suite(suite); },
+        .use_model = [&driver](const std::string& model) { return driver.use_model(model); },
+        .show_session = [&shell, session_view]() { shell.activate(session_view); },
+        // A play is the session's own /play (37d), shown where it narrates.
+        .play_symphony =
+            [&driver, &shell, session_view](const std::string& symphony, const std::string& input) {
+                const TuiSessionDriver::Handed handed = driver.play(symphony, input);
+                if (handed.sent) {
+                    shell.activate(session_view);
+                }
+                return handed.said;
+            }};
+    // Each view under its category (38), with the command group its exec line
+    // is scoped to (37h) -- added in the categories' order, so the strip and
+    // the Go-to menu list them as Modes, Studio, Knowledge, Training, Setup.
+    const auto add = [&shell](tui::View view, std::string category, std::string group) {
+        view.set_category(std::move(category));
+        view.set_group(std::move(group));
+        return shell.add(std::move(view));
+    };
+    // The workbench (32d): Models, Chats, Suites, Config.
+    const std::vector<std::unique_ptr<tui::ListView>> workbench =
+        make_workbench(pump, theme, context, hooks);
+    tui::ListView symphonies{pump, theme, symphonies_view_options(context, hooks)};
+    // The tasks (37e): a run's narration through the progress seam, which
+    // stops a run still going before the shell's own end.
+    const auto task_run = std::make_shared<tui::Progress>(pump);
+    tui::ListView tasks{pump, theme, task_view_options(context, task_run, machine_budget)};
+    // Training (37f), the tooling (37g): each run and act the command itself,
+    // a child of this binary.
+    const std::filesystem::path self = platform::executable_path();
+    const auto training_run = std::make_shared<tui::Progress>(pump);
+    tui::ListView train{pump, theme, train_view_options(context, training_run, self)};
+    const auto datasets_run = std::make_shared<tui::Progress>(pump);
+    tui::ListView datasets{pump, theme, datasets_view_options(context, datasets_run, self)};
+    tui::ListView agents{pump, theme, agents_view_options(context, self)};
+    tui::ListView mcp_servers{pump, theme, mcp_view_options(context, self)};
+    tui::ListView auth{pump, theme, auth_view_options(context)};
+    // The doctor (37b): Check, Providers, System; the knowledge (37c):
+    // records, collections, graphs.
+    const std::vector<std::unique_ptr<tui::ListView>> doctor =
+        make_doctor_views(pump, theme, context);
+    const std::vector<std::unique_ptr<tui::ListView>> knowledge =
+        make_knowledge_views(pump, theme, context);
+
+    // Modes: the session, beside the saved chats and the tasks.
+    (void)add(workbench.at(1)->view(), "Modes", "chats");
+    (void)add(tasks.view(), "Modes", "task");
+    // Studio: what a session is composed of.
+    (void)add(workbench.at(2)->view(), "Studio", "config");
+    (void)add(symphonies.view(), "Studio", "symphonies");
+    (void)add(agents.view(), "Studio", "agents");
+    (void)add(mcp_servers.view(), "Studio", "mcp");
+    // Knowledge.
+    (void)add(knowledge.at(0)->view(), "Knowledge", "knowledge");
+    (void)add(knowledge.at(1)->view(), "Knowledge", "embed");
+    (void)add(knowledge.at(2)->view(), "Knowledge", "graph");
+    // Training: the models, and what makes new ones.
+    (void)add(workbench.at(0)->view(), "Training", "models");
+    (void)add(train.view(), "Training", "train");
+    (void)add(datasets.view(), "Training", "datasets");
+    // Setup: the config, the keys, the doctor, the machine -- Home and Keys
+    // after them (`add_shell_views`).
+    (void)add(workbench.at(3)->view(), "Setup", "config");
+    (void)add(auth.view(), "Setup", "auth");
+    (void)add(doctor.at(1)->view(), "Setup", "providers");
+    (void)add(doctor.at(0)->view(), "Setup", "check");
+    (void)add(doctor.at(2)->view(), "Setup", "system");
+    // The command runner (37h): every verb and flag, a child of this binary.
+    const auto command_run = std::make_shared<tui::Progress>(pump);
+    shell.set_exec_line(exec_line_options(context, command_run, self));
+    add_shell_views(shell, context);
+    driver.start();
+    monitor.start();
+    const int code = pump.run(shell);
+    driver.stop();
+    return code;
+}
+
+}  // namespace
+
+ShellEntry default_shell_entry() {
+    return ShellEntry{.interactive =
+                          []() {
+                              return platform::is_terminal(platform::StandardStream::In) &&
+                                     platform::is_terminal(platform::StandardStream::Out);
+                          },
+                      .refusal = []() { return platform::full_screen_refusal(); },
+                      .run = [](const RootContext& context) { return run_full_screen(context); }};
+}
+
+void add_shell_views(tui::Shell& shell, const RootContext& context) {
+    std::vector<std::string> home = lines_of(version_report(context));
+    home.emplace_back();
+    home.emplace_back("Every command runs as it always has -- `apogee <command>` at a prompt, and");
+    home.emplace_back("`apogee --help` lists them. Ctrl-G goes to any view; Tab moves within a");
+    home.emplace_back("category; : runs a command; q quits.");
+    tui::View home_view = tui::text_view("Home", std::move(home));
+    home_view.set_category("Setup");
+    shell.add(std::move(home_view));
+    std::vector<std::string> keys = tui::Shell::key_lines();
+    keys.emplace_back();
+    keys.emplace_back("In the session:");
+    for (const std::string& line : tui::SessionView::key_lines()) {
+        keys.push_back(line);
+    }
+    tui::View keys_view = tui::text_view("Keys", std::move(keys));
+    keys_view.set_category("Setup");
+    shell.add(std::move(keys_view));
+}
+
+int open_bare(const ShellEntry& entry, const RootContext& context, CLI::App& app) {
+    if (entry.interactive && entry.interactive()) {
+        const std::string refused = entry.refusal ? entry.refusal() : std::string{};
+        if (refused.empty()) {
+            return entry.run(context);
+        }
+        std::cerr << "apogee: no full screen here -- " << refused << "\n";
+    }
+    std::cout << app.help();
+    return 0;
+}
+
+TuiCommand::TuiCommand(ShellEntry entry) : entry_{std::move(entry)} {}
+
+std::string_view TuiCommand::name() const noexcept {
+    return "tui";
+}
+
+std::string_view TuiCommand::summary() const noexcept {
+    return "Open the full-screen shell -- what a bare `apogee` opens at a terminal";
+}
+
+void TuiCommand::bind(CLI::App& root, const RootContext& context) {
+    CLI::App* cmd = root.add_subcommand(std::string{name()}, std::string{summary()});
+    cmd->callback([this, &context]() {
+        if (!entry_.interactive || !entry_.interactive()) {
+            std::cerr << "apogee tui: the shell needs an interactive terminal -- stdin and stdout "
+                         "both one; every command runs without it\n";
+            throw CLI::RuntimeError(kUserError);
+        }
+        if (const std::string refused = entry_.refusal ? entry_.refusal() : std::string{};
+            !refused.empty()) {
+            std::cerr << "apogee tui: no full screen here -- " << refused << "\n";
+            throw CLI::RuntimeError(kUserError);
+        }
+        if (const int code = entry_.run(context); code != 0) {
+            throw CLI::RuntimeError(code);
+        }
+    });
+}
+
+}  // namespace apogee::commands

@@ -43,6 +43,8 @@ class Option;
 /// was before the core was shared (`chat_session_test`'s golden).
 namespace apogee::commands {
 
+class SessionOutput;
+
 /// The command a `mode` session is: `chat` or `execute`.
 [[nodiscard]] std::string_view session_command(SessionMode mode) noexcept;
 
@@ -91,12 +93,19 @@ struct SessionFlags {
     std::int64_t max_tokens = 0;
     /// Whether the model thinks first, and for how long (26i).
     std::string think;
+    /// How hard it thinks, as a level (39a): `low` to `max`, never with
+    /// `--think-budget`.
+    std::string effort;
     /// Recall no earlier chats in this run (26l).
     bool no_recall = false;
     /// The session's answers, given at launch (26o).
     std::vector<std::string> allow;
     std::vector<std::string> deny;
     std::vector<std::string> allow_hosts;
+    /// The mode the session starts in (39b), and whether bypass may be
+    /// chosen in it.
+    std::string permission_mode;
+    bool allow_bypass = false;
     std::int64_t think_budget = 0;
     bool tools = false;
     bool search = false;
@@ -142,8 +151,13 @@ void bind_session_flags(CLI::App& command, const std::shared_ptr<SessionFlags>& 
 /// `apogee execute`. `machine` is where a suite's admission reads the
 /// machine's budget (27e). Fails by throwing `CLI::RuntimeError` with the
 /// exit code, the reason said on stderr first.
+///
+/// `front`, when given, is where the session's REPL writes and reads instead
+/// of the terminal -- the full-screen shell's session view (32c): its lines,
+/// its prompts, its turns' Ctrl-C. Everything else is the same session.
 void run_session(const RootContext& context, const SessionFlags& flags,
-                 const MachineBudgetSource& machine, SessionMode mode);
+                 const MachineBudgetSource& machine, SessionMode mode,
+                 SessionOutput* front = nullptr);
 
 /// Why an execute session cannot open under `config` as it stands (27s):
 /// no suite was named, the session had none and the config has no default --

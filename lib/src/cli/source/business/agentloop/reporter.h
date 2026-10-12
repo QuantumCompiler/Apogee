@@ -45,6 +45,25 @@ public:
     /// history.** A surface that does not render reasoning discards it.
     virtual void on_thinking_token(std::string_view) {}
 
+    /// The reasoning so far, as one short line (43): what the model is doing
+    /// now, replacing the last line. Fires only for a run that asked for it
+    /// (`Options::summarize_reasoning`), between reasoning chunks; a surface
+    /// that draws it shows it in the raw reasoning's place. Never persisted,
+    /// and never on the wire.
+    virtual void on_thinking_summary(std::string_view line) {
+        (void)line;
+    }
+
+    /// The reasoning is shown as it streams after all (43), for a run that
+    /// asked for its summary: `why` is empty when it is already the vendor's
+    /// own summary, and otherwise says why no line can be had -- no unmetered
+    /// utility model, or a call that failed -- the first time in a run, and
+    /// is empty after. Fires before the chunk it is about, at most once a
+    /// model call: each opens its own block on a surface.
+    virtual void on_thinking_raw(std::string_view why) {
+        (void)why;
+    }
+
     /// Tool-call progress, as a short human-readable line. Never called with an
     /// empty string -- the return to rest is signalled by the next
     /// on_thinking.

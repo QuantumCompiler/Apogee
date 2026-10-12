@@ -1,5 +1,7 @@
 #include "backends/codex_cli.h"
 
+#include <nlohmann/json.hpp>
+
 #include <utility>
 
 #include "backends/codex_cli_events.h"
@@ -100,7 +102,8 @@ std::unique_ptr<CodexCliProvider> CodexCliProvider::from_config(
 std::vector<std::string> CodexCliProvider::build_arguments(const Options& options,
                                                            Invocation invocation,
                                                            const std::string& thread_id,
-                                                           const std::string& schema_path) {
+                                                           const std::string& schema_path,
+                                                           std::string_view effort) {
     std::vector<std::string> arguments{"exec"};
 
     if (invocation == Invocation::Resume) {
@@ -113,6 +116,13 @@ std::vector<std::string> CodexCliProvider::build_arguments(const Options& option
     // The CLI expects a git repository and refuses outside one; a chat backend
     // has no business caring where the user's shell happens to be.
     arguments.emplace_back("--skip-git-repo-check");
+
+    if (!effort.empty()) {
+        // A level (39a), as a config override: `exec` and `exec resume` both
+        // take `-c`, so each turn can carry the session's current one.
+        arguments.emplace_back("-c");
+        arguments.push_back("model_reasoning_effort=\"" + std::string{effort} + "\"");
+    }
 
     if (invocation == Invocation::Fresh) {
         // `resume` REJECTS both of these. Verified on 0.153.4: passing --color
@@ -142,6 +152,31 @@ std::vector<std::string> CodexCliProvider::build_arguments(const Options& option
     return arguments;
 }
 
+std::string CodexCliProvider::codex_effort(const harness::Thinking& thinking) {
+    if (thinking.off() || !thinking.effort.has_value()) {
+        return {};
+    }
+    switch (*thinking.effort) {
+        case harness::Effort::Low:
+            return "low";
+        case harness::Effort::Medium:
+            return "medium";
+        case harness::Effort::High:
+            return "high";
+        case harness::Effort::XHigh:
+        case harness::Effort::Max:
+            return "xhigh";
+    }
+    return {};
+}
+
+harness::ModelBehavior CodexCliProvider::model_behavior() const {
+    // Codex's reasoning items are its summaries of the reasoning.
+    harness::ModelBehavior behavior;
+    behavior.reasoning_summarized = true;
+    return behavior;
+}
+
 std::string_view CodexCliProvider::backend_name() const noexcept {
     return options_.backend_name;
 }
@@ -168,12 +203,13 @@ harness::StatusEvent CodexCliProvider::model_status() const {
 
 CodexCliProvider::Outcome CodexCliProvider::run_turn(const std::string& prompt,
                                                      const std::string& schema_path,
-                                                     const harness::StreamOptions& options) {
+                                                     const harness::StreamOptions& options,
+                                                     std::string_view effort) {
     const Invocation invocation = thread_id_.empty() ? Invocation::Fresh : Invocation::Resume;
 
     platform::ChildCommand command;
     command.program = options_.binary;
-    command.arguments = build_arguments(options_, invocation, thread_id_, schema_path);
+    command.arguments = build_arguments(options_, invocation, thread_id_, schema_path, effort);
     command.arguments.push_back(prompt);
 
     ++spawns_;
@@ -274,6 +310,104 @@ CodexCliProvider::Outcome CodexCliProvider::run_turn(const std::string& prompt,
     return outcome;
 }
 
+std::vector<harness::ModelInfo> CodexCliProvider::list_catalog(
+    const harness::CancellationToken& cancellation) {
+    platform::ChildCommand command;
+    command.program = options_.binary;
+    command.arguments = {"debug", "models"};
+
+    ++spawns_;
+    std::string error;
+    std::unique_ptr<platform::ChildProcess> child = spawner_(command, error);
+    if (child == nullptr) {
+        throw harness::ProviderError(options_.backend_name,
+                                     error.empty() ? "could not start the Codex CLI" : error);
+    }
+    child->close_stdin();
+
+    std::string document;
+    std::string chunk;
+    const auto deadline = std::chrono::steady_clock::now() + options_.catalog_timeout;
+    for (;;) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+            child->terminate();
+            throw harness::ProviderError(options_.backend_name,
+                                         "the Codex CLI did not list its models in time");
+        }
+        cancellation.throw_if_cancelled();
+        const platform::ReadStatus status =
+            child->read_stdout(chunk, std::chrono::milliseconds{200});
+        if (status == platform::ReadStatus::Data) {
+            document += chunk;
+            continue;
+        }
+        if (status == platform::ReadStatus::Timeout) {
+            continue;
+        }
+        break;
+    }
+
+    std::string diagnostics;
+    std::string piece;
+    while (child->read_stderr(piece, std::chrono::milliseconds{0}) == platform::ReadStatus::Data) {
+        diagnostics += piece;
+        if (diagnostics.size() > 8192) {
+            diagnostics.erase(0, diagnostics.size() - 8192);
+        }
+    }
+    const std::optional<int> status = child->wait_for_exit(std::chrono::seconds{5});
+    if (status.has_value() && *status != 0) {
+        throw harness::ProviderError(options_.backend_name,
+                                     "'codex debug models' exited with status " +
+                                         std::to_string(*status) +
+                                         (diagnostics.empty() ? "" : ": " + diagnostics));
+    }
+    return parse_catalog(options_.backend_name, document);
+}
+
+std::vector<harness::ModelInfo> CodexCliProvider::parse_catalog(std::string_view backend_name,
+                                                                std::string_view document) {
+    const std::string backend{backend_name};
+    const auto refuse = [&backend]() {
+        return harness::ProviderError(
+            backend,
+            "'codex debug models' printed no catalog Apogee can read -- the CLI's "
+            "debug output may have changed shape");
+    };
+    const nlohmann::json parsed = nlohmann::json::parse(document, nullptr, false);
+    if (parsed.is_discarded() || !parsed.is_object()) {
+        throw refuse();
+    }
+    const auto models = parsed.find("models");
+    if (models == parsed.end() || !models->is_array()) {
+        throw refuse();
+    }
+    std::vector<harness::ModelInfo> out;
+    for (const nlohmann::json& entry : *models) {
+        if (!entry.is_object()) {
+            throw refuse();
+        }
+        const auto slug = entry.find("slug");
+        if (slug == entry.end() || !slug->is_string() || slug->get<std::string>().empty()) {
+            throw refuse();
+        }
+        if (const auto visibility = entry.find("visibility");
+            visibility != entry.end() && visibility->is_string() &&
+            visibility->get<std::string>() != "list") {
+            continue;
+        }
+        harness::ModelInfo info;
+        info.id = slug->get<std::string>();
+        const auto display = entry.find("display_name");
+        info.name =
+            display != entry.end() && display->is_string() ? display->get<std::string>() : info.id;
+        info.provider = "codex-cli";
+        info.backend = backend;
+        out.push_back(std::move(info));
+    }
+    return out;
+}
+
 harness::ChatResponse CodexCliProvider::chat(const harness::ChatRequest& request,
                                              const harness::CancellationToken& cancellation) {
     harness::StreamOptions options;
@@ -297,7 +431,8 @@ harness::ChatResponse CodexCliProvider::stream_chat(const harness::ChatRequest& 
     }
 
     const std::string prompt = prompt_for(request.messages, !thread_id_.empty());
-    Outcome outcome = run_turn(prompt, {}, options);
+    Outcome outcome = run_turn(prompt, {}, options,
+                               side_request ? std::string{} : codex_effort(request.thinking));
 
     if (side_request) {
         // Whatever thread the side request created is discarded; the

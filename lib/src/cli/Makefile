@@ -53,7 +53,7 @@ LINT_CXX     ?= $(dir $(CLANG_TIDY))clang++
 # formatted or linted.
 SOURCES := $(shell find source tests \( -name '*.cpp' -o -name '*.h' \) 2>/dev/null)
 
-.PHONY: help build install reinstall install-completions install-zsh-completion test clean fresh format format-check lint no-llama all release release-check pr-ci pr-ci-clean
+.PHONY: help build install reinstall install-completions install-zsh-completion test clean fresh format format-check lint no-llama all release release-check linux-tests cross-windows pr-ci pr-ci-clean
 
 help:
 	@echo "Apogee CLI — build wrapper (repo-wide entry point: lib/scripts/cicd.sh)"
@@ -86,10 +86,13 @@ help:
 	@echo "  no-llama      The fast developer build: everything except llama.cpp (ON by default)"
 	@echo "  clean         Remove this preset's build directory"
 	@echo "  fresh         Clean-room clone-and-build of the current branch"
-	@echo "  pr-ci         Rehearse the CI run a pull request into stable starts, on this host:"
-	@echo "                  the test merge, version bump, clone, unit tests, build + package"
+	@echo "  pr-ci         Rehearse the CI run a pull request into stable starts, on this machine:"
+	@echo "                  the test merge, version bump, clone, unit tests, build + package,"
+	@echo "                  then Linux's unit tests in a container and the Windows x64 cross-build"
 	@echo "                  (UNCOMMITTED=1 includes the working tree; BASE=<ref> to merge elsewhere)"
 	@echo "  pr-ci-clean   Remove pr-ci's worktrees, builds and logs"
+	@echo "  linux-tests   CI's Linux unit-test job alone, in a container (needs Docker)"
+	@echo "  cross-windows CI's Windows x64 build alone, cross-compiled (needs mingw-w64)"
 	@echo ""
 	@echo "Cutting a release (DEVELOPER.md -> Cutting a release):"
 	@echo "  release-check Preflight a re-cut -- checks only, dispatches nothing"
@@ -237,7 +240,8 @@ test:
 # Rehearse the CI run a pull request into `stable` starts: GitHub's test merge
 # of this branch into stable, then ci.yml's pull-request jobs on it -- version
 # bump, clone llama.cpp, unit tests, build and package -- for this host's
-# target, through the same scripts the workflow calls. Thin by the rule above:
+# target, through the same scripts the workflow calls, and then Linux's unit
+# tests in a container and the Windows x64 build cross-compiled (2026-10-12). Thin by the rule above:
 # the rehearsal is lib/scripts/pr-ci.sh. BASE=<ref> merges into another base;
 # UNCOMMITTED=1 includes the working tree's changes, which a PR would not.
 #
@@ -251,6 +255,15 @@ pr-ci:
 
 pr-ci-clean:
 	@$(PR_CI) --clean
+
+# The two other platforms' jobs pr-ci runs, each alone on this checkout as it
+# stands: CI's Linux unit tests in a container of the runner's Ubuntu, and
+# CI's Windows x64 build cross-compiled with MinGW-w64.
+linux-tests:
+	@../../scripts/linux-unit-tests.sh
+
+cross-windows:
+	@../../scripts/cross-windows.sh --jobs $(JOBS)
 
 # The fast developer build: everything except llama.cpp, which is ON by
 # default and is most of the compile time. The llamacpp backend then answers

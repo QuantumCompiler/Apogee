@@ -118,71 +118,72 @@ void print_block(std::ostream& out, std::string_view text, std::string_view inde
 }
 
 /// A stage that plays a symphony (27r): what it plays, and what it gives it.
-void print_play_stage(const harness::SymphonyStage& stage, std::size_t index) {
-    std::cout << "  ·  plays " << stage.play;
+void print_play_stage(std::ostream& out, const harness::SymphonyStage& stage, std::size_t index) {
+    out << "  ·  plays " << stage.play;
     if (stage.image) {
-        std::cout << "  ·  passes the image on";
+        out << "  ·  passes the image on";
     }
     if (stage.input.empty()) {
-        std::cout << "  ·  given "
-                  << (index == 0 ? "the symphony's input" : "the previous stage's answer") << "\n";
+        out << "  ·  given "
+            << (index == 0 ? "the symphony's input" : "the previous stage's answer") << "\n";
         return;
     }
-    std::cout << "  ·  given:\n";
-    print_block(std::cout, stage.input, "    ");
+    out << "  ·  given:\n";
+    print_block(out, stage.input, "    ");
 }
 
-void print_definition(const symphony::Definition& definition, const symphony::Catalog& catalog) {
+void print_definition(std::ostream& out, const symphony::Definition& definition,
+                      const symphony::Catalog& catalog) {
     const harness::SymphonySpec& spec = definition.spec;
-    std::cout << spec.name << "  ·  " << source_label(definition);
+    out << spec.name << "  ·  " << source_label(definition);
     if (!definition.path.empty()) {
-        std::cout << "  ·  " << definition.path.string();
+        out << "  ·  " << definition.path.string();
     }
-    std::cout << "\n";
+    out << "\n";
     if (!spec.description.empty()) {
-        std::cout << spec.description << "\n";
+        out << spec.description << "\n";
     }
-    std::cout << "\ninput: "
-              << (spec.input.description.empty() ? std::string{"(not described)"}
-                                                 : spec.input.description)
-              << "\n";
+    out << "\ninput: "
+        << (spec.input.description.empty() ? std::string{"(not described)"}
+                                           : spec.input.description)
+        << "\n";
     if (spec.input.image) {
-        std::cout << "       and an image, given with --image\n";
+        out << "       and an image, given with --image\n";
     }
     const std::size_t count = spec.stages.size();
     for (std::size_t index = 0; index < count; ++index) {
         const harness::SymphonyStage& stage = spec.stages[index];
-        std::cout << "\nstage " << index + 1 << "/" << count << "  " << stage.name;
+        out << "\nstage " << index + 1 << "/" << count << "  " << stage.name;
         if (stage.plays()) {
-            print_play_stage(stage, index);
+            print_play_stage(out, stage, index);
             continue;
         }
-        std::cout << "  ·  role " << stage.role;
+        out << "  ·  role " << stage.role;
         if (stage.image) {
-            std::cout << "  ·  given the image";
+            out << "  ·  given the image";
         }
-        std::cout << "  ·  brief up to " << stage.brief_tokens.value_or(symphony::kStageBriefTokens)
-                  << " tokens, answer up to "
-                  << stage.answer_tokens.value_or(symphony::kStageAnswerTokens) << " tokens\n";
-        print_block(std::cout, stage.prompt, "    ");
+        out << "  ·  brief up to " << stage.brief_tokens.value_or(symphony::kStageBriefTokens)
+            << " tokens, answer up to "
+            << stage.answer_tokens.value_or(symphony::kStageAnswerTokens) << " tokens\n";
+        print_block(out, stage.prompt, "    ");
         if (!stage.schema.empty()) {
-            std::cout << "  answer held to its schema:\n";
-            print_block(std::cout, stage.schema, "    ");
+            out << "  answer held to its schema:\n";
+            print_block(out, stage.schema, "    ");
         }
     }
     const std::vector<std::string> problems = symphony::validate(spec, catalog);
     if (!problems.empty()) {
-        std::cout << "\ncannot be played:\n";
+        out << "\ncannot be played:\n";
         for (const std::string& problem : problems) {
-            std::cout << "  - " << problem << "\n";
+            out << "  - " << problem << "\n";
         }
         return;
     }
     // A chain says what one play of it costs, every symphony it reaches
     // counted (27r).
     if (const harness::SymphonyWalk walked = symphony::walk(spec, catalog); walked.depth > 1) {
-        std::cout << "\none play: " << walked.stage_calls << " member calls, one after another, "
-                  << walked.depth << " symphonies deep (the cap is " << catalog.max_depth << ")\n";
+        out << "\none play: " << walked.stage_calls << " member calls, one after another, "
+            << walked.depth << " symphonies deep (the cap is " << catalog.max_depth << ")\n";
     }
 }
 
@@ -199,10 +200,12 @@ void bind_list(CLI::App& parent, const RootContext& context) {
         "list", "List the symphonies -- the shipped starters, the config's, your spec files");
     add_read_format(cmd, format);
     cmd->callback([&context, format]() {
-        const std::filesystem::path config_path = config_path_for(context);
-        const harness::Config config = load(config_path);
-        const symphony::Catalog catalog =
-            symphony::catalog(config, symphonies_dir_for(config_path));
+        symphony::Catalog catalog;
+        try {
+            catalog = read_symphony_catalog(context);
+        } catch (const harness::ConfigError& e) {
+            fail_user(e.what());
+        }
         if (*format == ReadFormat::Json) {
             write_document(std::cout, symphony::list_document(catalog));
             return;
@@ -236,7 +239,7 @@ void bind_show(CLI::App& parent, const RootContext& context) {
                            symphony::definition_document(found.definition, found.catalog));
             return;
         }
-        print_definition(found.definition, found.catalog);
+        print_definition(std::cout, found.definition, found.catalog);
     });
 }
 
@@ -718,6 +721,25 @@ void bind_play(CLI::App& parent, const RootContext& context) {
 }
 
 }  // namespace
+
+symphony::Catalog read_symphony_catalog(const RootContext& context) {
+    const std::filesystem::path config_path = config_path_for(context);
+    const harness::Config config = harness::load_config(config_path);
+    return symphony::catalog(config, symphonies_dir_for(config_path));
+}
+
+std::string symphony_show_text(const RootContext& context, const std::string& name) {
+    const std::filesystem::path config_path = config_path_for(context);
+    const harness::Config config = harness::load_config(config_path);
+    symphony::Found found =
+        symphony::find_definition(config, symphonies_dir_for(config_path), name);
+    if (!found.definition.has_value()) {
+        throw std::runtime_error{found.error};
+    }
+    std::ostringstream out;
+    print_definition(out, *found.definition, found.catalog);
+    return out.str();
+}
 
 std::vector<std::string> symphony_list_lines(const symphony::Catalog& catalog) {
     std::vector<std::string> lines{padded("NAME", kNameColumn) + padded("STAGES", kStagesColumn) +

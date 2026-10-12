@@ -1,5 +1,8 @@
 #pragma once
 
+#include <string>
+#include <string_view>
+
 #include "agentloop/question.h"
 #include "ansi/ansi.h"
 #include "views/status_line.h"
@@ -27,5 +30,12 @@ namespace apogee::commands {
 /// the same single-line discipline as every other interactive output and cannot
 /// land on top of a spinner frame.
 [[nodiscard]] agentloop::AskFn terminal_ask_fn(StatusLine& status, ansi::Style style);
+
+/// What `typed` answers `question` with: a bare number naming one of its
+/// options is that option's label; anything else, free text, as typed --
+/// trimmed. Empty is no answer. The terminal's prompt and the full-screen
+/// shell's (32c) both read an answer through it.
+[[nodiscard]] std::string chosen_answer(const agentloop::Question& question,
+                                        std::string_view typed);
 
 }  // namespace apogee::commands

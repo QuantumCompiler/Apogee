@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "cli/command.h"
+#include "cli/tui_cmd.h"
 
 namespace apogee::commands {
 
@@ -45,7 +46,9 @@ private:
 ///
 /// This is the one place a new subcommand is wired in. Later backlog items add
 /// their command here (`complete`, `chat`, `config`, `check`, ...) and it
-/// appears in `apogee --help` with no other edit anywhere.
-[[nodiscard]] CommandRegistry default_registry();
+/// appears in `apogee --help` with no other edit anywhere. `shell` is how
+/// `apogee tui` reaches the full-screen shell (32b) -- the same entry a bare
+/// `apogee` takes, replaceable in a test.
+[[nodiscard]] CommandRegistry default_registry(ShellEntry shell = default_shell_entry());
 
 }  // namespace apogee::commands

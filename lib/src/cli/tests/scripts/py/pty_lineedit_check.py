@@ -18,6 +18,9 @@ this locks:
   * attachment options (27p): Tab after `/attach <path> ` takes `--graph=`
     from the one command table, its values follow, and the line sent attaches
     the folder with the method it names.
+  * the permission mode (39b): Shift+Tab cycles it, the prompt redrawn with
+    its words and the line typed so far kept; `/permission-mode bypass`
+    asks once and a yes chooses it.
 
 POSIX only -- `pty` has no Windows equivalent.
 """
@@ -339,6 +342,55 @@ def check_attach_flags(binary, env, home, failures):
         shutil.rmtree(work, ignore_errors=True)
 
 
+def check_permission_mode(binary, env, home, failures):
+    """39b: Shift+Tab (ESC [ Z) moves the session's permission mode on, the
+    prompt redrawn in place with Claude Code's words for it -- the line typed
+    so far kept -- and back to the bare prompt in manual."""
+    width = 80
+    before = len(user_messages(home))
+    screens = []
+    run_chat(binary, env, [
+        b"hel",
+        b"\x1b[Z",   # accept-edits
+        b"\x1b[Z",   # plan
+        b"\x1b[Z",   # manual again: no bypass without the allowance
+        b"lo\r",     # the line typed across the switches, sent whole
+        b"\x1b[Z",   # accept-edits, at the next prompt
+        b"/permission-mode\r",
+        b"/permission-mode bypass\r",  # not allowed at launch: asked
+        b"y\r",
+        b"/exit\r",
+    ], width=width, snapshots=screens)
+
+    def prompt_row(screen):
+        rows = [line for line in screen.lines() if "You:" in line]
+        return rows[-1] if rows else ""
+
+    expected = [
+        (1, "⏵⏵ accept edits on · You: hel"),
+        (2, "⏸ plan mode on · You: hel"),
+        (3, "You: hel"),
+    ]
+    for step, row in expected:
+        if prompt_row(screens[step]) != row:
+            failures.append(f"Shift+Tab step {step}: the prompt read "
+                            f"{prompt_row(screens[step])!r}, not {row!r}")
+    if not any("permission mode: accept-edits" in line for line in screens[6].lines()):
+        failures.append("/permission-mode did not say the mode Shift+Tab chose: "
+                        f"{screens[6].lines()[-4:]!r}")
+    if not any("Run every tool without asking" in line for line in screens[7].lines()):
+        failures.append(f"/permission-mode bypass asked nothing: {screens[7].lines()[-4:]!r}")
+    if not (any("permission mode: bypass" in line for line in screens[8].lines())
+            and prompt_row(screens[8]).startswith("⏵⏵ bypass permissions on · You:")):
+        failures.append(f"a yes did not choose bypass: {screens[8].lines()[-4:]!r}")
+    if "hello" not in user_messages(home)[before:]:
+        failures.append(f"the line typed across Shift+Tab was not sent whole: "
+                        f"{user_messages(home)[before:]!r}")
+    for screen in screens:
+        if screen.unhandled:
+            failures.append(f"unmodelled sequences {screen.unhandled!r}: extend the model")
+
+
 def check_pipe(binary, env, failures):
     """A pipe is a first-class way to drive chat: it must get bytes and nothing else."""
     work = tempfile.mkdtemp(prefix="apogee-lineedit-pipe-")
@@ -404,6 +456,7 @@ def main():
 
         check_suggestions(binary, env, home, failures)
         check_attach_flags(binary, env, home, failures)
+        check_permission_mode(binary, env, home, failures)
         check_pipe(binary, env, failures)
 
         if failures:

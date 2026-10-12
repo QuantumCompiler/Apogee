@@ -553,8 +553,16 @@
   // mode and the saved transcript always keep the model's text as written.
   // "markdown": false shows the text as written on the terminal too; `--raw`
   // does the same for one run.
+  //
+  // A model's reasoning, while it streams, is shown as one line of what it is
+  // doing, written every few seconds by the utility model
+  // (models.default_utility) when that model is local and is not the chat
+  // model itself; the chat model pauses while each line is written. "raw"
+  // shows the reasoning itself instead. `/thinking-display` flips it for one
+  // chat. Machine mode and `serve` always carry the reasoning as it streams.
   // "ui": {
-  //   "markdown": true
+  //   "markdown": true,
+  //   "thinking_display": "summary"
   // },
 
   // ── Knowledge (captured decisions) ───────────────────────────────────────────

@@ -9,6 +9,7 @@
 #include <sstream>
 #include <string_view>
 
+#include "backends/model_roster.h"
 #include "cli/complete_sources.h"
 #include "contracts/paths.h"
 
@@ -146,10 +147,38 @@ namespace {
         case ValueKind::Names:
             return offer_names(value, sources, context, current);
         case ValueKind::Backend: {
-            const std::vector<std::string> names = config.backend_names();
+            std::vector<std::string> names = config.backend_names();
             if (names.empty()) {
                 completion.hint =
                     value.hint + " -- no backends configured yet ('apogee config add-backend')";
+            }
+            // The cached vendor rosters (M13): every model a configured
+            // provider type's roster lists completes beside the backend
+            // keys -- read from the disposable cache, never fetched here.
+            const backends::RosterCache rosters = backends::known_rosters();
+            for (const auto& [type, roster] : rosters.rosters) {
+                const bool configured_type =
+                    std::any_of(config.backends.begin(), config.backends.end(),
+                                [&type = type](const auto& entry) {
+                                    return harness::to_string(entry.second.type) == type;
+                                });
+                if (!configured_type) {
+                    continue;
+                }
+                for (const backends::RosterModel& model : roster.models) {
+                    names.push_back(model.id);
+                }
+                // Past an entry's colon, its roster as `<backend>:<model>`
+                // (34) -- offered only once the colon is typed.
+                if (const std::size_t colon = current.find(':'); colon != std::string_view::npos) {
+                    if (const auto entry = config.backends.find(current.substr(0, colon));
+                        entry != config.backends.end() &&
+                        harness::to_string(entry->second.type) == type) {
+                        for (const backends::RosterModel& model : roster.models) {
+                            names.push_back(entry->first + ":" + model.id);
+                        }
+                    }
+                }
             }
             completion.candidates = filter_prefix(names, current);
             break;

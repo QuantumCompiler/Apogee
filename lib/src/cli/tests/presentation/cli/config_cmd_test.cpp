@@ -574,3 +574,110 @@ TEST_CASE("every word the suite member flags complete to, the suite verbs take",
         }
     }
 }
+
+// --- config scan (M12) -------------------------------------------------------
+
+namespace {
+
+/// A stored GGUF at any model/id, for the scan's multi-model cases.
+std::filesystem::path scan_gguf(const apogee::testing::CliHome& home, const std::string& model,
+                                const std::string& id, const std::string& name,
+                                bool projector = false) {
+    const std::filesystem::path file = home.models() / model / "gguf" / id / name;
+    write_file(file, apogee::testing::minimal_gguf("llama"));
+    if (projector) {
+        write_file(file.parent_path() / (file.stem().string() + "-mmproj.gguf"), "projector");
+    }
+    return file;
+}
+
+}  // namespace
+
+TEST_CASE("config scan: the store's rows, and --register as the batch add-backend, byte for byte",
+          "[commands][config][scan][store]") {
+    const CliHome home{kConfig};
+    const std::filesystem::path f16 = scan_gguf(home, "org--a", "111111111111", "a-F16.gguf",
+                                                /*projector=*/true);
+    const std::filesystem::path projector = f16.parent_path() / "a-F16-mmproj.gguf";
+    const std::filesystem::path q4 = scan_gguf(home, "org--a", "222222222222", "a-Q4_K_M.gguf");
+    write_file(home.models() / "org--a" / "safetensors" / "333333333333" / "model.safetensors",
+               "weights");
+    write_file(home.models() / "org--a" / "safetensors" / "333333333333" / "config.json", "{}");
+
+    std::string out;
+    REQUIRE(home.run({"config", "scan"}, &out) == 0);
+    INFO(out);
+    // Default names in the chain's spelling (M3): the level's underscores gone.
+    CHECK(out.find("a-F16") != std::string::npos);
+    CHECK(out.find("a-Q4KM") != std::string::npos);
+    CHECK(out.find("not registered") != std::string::npos);
+    CHECK(out.find("(projector beside it)") != std::string::npos);
+    CHECK(out.find("1 SafeTensors snapshot(s) not listed") != std::string::npos);
+    CHECK(out.find("apogee config scan --register") != std::string::npos);
+    // A report is not a write.
+    CHECK(home.config_text() == kConfig);
+
+    // The composition pin: --register equals the hand-typed add-backends.
+    const CliHome typed{kConfig};
+    REQUIRE(home.run({"config", "scan", "--register"}, &out) == 0);
+    INFO(out);
+    CHECK(out.find("added backend 'a-F16'") != std::string::npos);
+    CHECK(out.find("added backend 'a-Q4KM'") != std::string::npos);
+    CHECK(out.find("registered 2 backend(s)") != std::string::npos);
+    REQUIRE(typed.run({"config", "add-backend", "a-F16", "--type", "llamacpp", "--model-path",
+                       f16.lexically_normal().string(), "--mmproj-path", projector.string()},
+                      &out) == 0);
+    REQUIRE(typed.run({"config", "add-backend", "a-Q4KM", "--type", "llamacpp", "--model-path",
+                       q4.lexically_normal().string()},
+                      &out) == 0);
+    CHECK(home.config_text() == typed.config_text());
+    CHECK(home.config_text().starts_with("# my models\nbackends:\n  # the cloud one\n"));
+
+    // Idempotent: the registered rows say their backend, nothing is written.
+    const std::string before = home.config_text();
+    REQUIRE(home.run({"config", "scan", "--register"}, &out) == 0);
+    INFO(out);
+    CHECK(out.find("backend: a-F16") != std::string::npos);
+    CHECK(out.find("backend: a-Q4KM") != std::string::npos);
+    CHECK(out.find("nothing to register") != std::string::npos);
+    CHECK(home.config_text() == before);
+}
+
+TEST_CASE("config scan: a taken name and a shared default name are skipped and said",
+          "[commands][config][scan][store]") {
+    constexpr const char* kTaken = R"(backends:
+  b-F16:
+    type: anthropic
+    model: x
+)";
+    const CliHome home{kTaken};
+    (void)scan_gguf(home, "org--b", "111111111111", "b-F16.gguf");
+    (void)scan_gguf(home, "org--c", "222222222222", "c-F16.gguf");
+    (void)scan_gguf(home, "org--c", "333333333333", "c-F16.gguf");
+
+    std::string out;
+    REQUIRE(home.run({"config", "scan", "--register"}, &out) == 0);
+    INFO(out);
+    CHECK(out.find("its default name belongs to a backend on another model") != std::string::npos);
+    CHECK(out.find("2 stored models share this default name") != std::string::npos);
+    CHECK(out.find("added backend") == std::string::npos);
+    CHECK(home.config_text() == kTaken);
+}
+
+TEST_CASE("config scan without a config: the rows still render, init is named, --register refuses",
+          "[commands][config][scan]") {
+    const CliHome home{kConfig};
+    (void)scan_gguf(home, "org--d", "111111111111", "d-F16.gguf");
+    std::filesystem::remove(home.config_path());
+
+    std::string out;
+    std::string err;
+    REQUIRE(home.run_default({"config", "scan"}, &out, &err) == 0);
+    INFO(out);
+    CHECK(out.find("d-F16") != std::string::npos);
+    CHECK(out.find("no config file yet -- 'apogee config init' writes one") != std::string::npos);
+
+    REQUIRE(home.run_default({"config", "scan", "--register"}, &out, &err) != 0);
+    INFO(err);
+    CHECK(err.find("run 'apogee config init' first") != std::string::npos);
+}

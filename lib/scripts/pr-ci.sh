@@ -22,15 +22,32 @@
 #                       ships, and the proof that its binary runs
 #
 # As in the workflow, `build` needs `clone llama.cpp` and `unit tests` to pass,
-# and `version bump` gates nothing but the verdict. Only this host's target can
-# be built here; the other four are CI's runners', and the summary says so.
+# and `version bump` gates nothing but the verdict.
 #
-# One check CI does not have, because this host needs it: `gcc compile`
+# Then two of the other platforms' jobs, on this machine (2026-10-12: every
+# release pull request until then had failed on Linux or Windows after passing
+# on the Mac):
+#
+#   unit tests linux    lib/scripts/linux-unit-tests.sh -- CI's Linux unit-test
+#     (docker)          job in a container of the runner's Ubuntu: GCC,
+#                       libstdc++, glibc and ext4, where a Mac has clang,
+#                       libc++ and APFS
+#   build windows-x64   lib/scripts/cross-windows.sh -- CI's Windows x64 build,
+#     (cross)           cross-compiled with MinGW-w64 GCC: every file compiled
+#                       and linked, and each image's size checked against the
+#                       2 GiB Windows refuses to load
+#
+# Each needs a tool this machine may not have (Docker with room for a GCC
+# build; brew install mingw-w64) and is reported as skipped, saying which,
+# never as passed. Left to CI's runners, and said in the summary: the Windows
+# test runs and the windows-arm64 build (no Windows here), and the Linux
+# architecture the container is not.
+#
+# When the Windows cross-build cannot run, `gcc compile`
 # (lib/scripts/gcc-check.py) compiles every first-party file with GCC's
-# standard library -- a stand-in for the Linux and Windows x64 compiles, which
-# a Mac's libc++ cannot vouch for (a missing #include lost four platforms on
-# 2026-09-25). It needs a GCC (`brew install mingw-w64`) and is reported as
-# skipped, never failed, without one.
+# standard library instead -- a stand-in for the Linux and Windows x64
+# compiles, which a Mac's libc++ cannot vouch for (a missing #include lost four
+# platforms on 2026-09-25). It needs a GCC too, and is skipped without one.
 #
 # What it does NOT rehearse, on purpose: uncommitted changes -- a pull request
 # carries commits, and a note says when some are left out; --uncommitted
@@ -228,6 +245,23 @@ run_job() {
     return "$status"
 }
 
+# run_local <name> <worktree> <command...>: a job CI does not have, run as
+# run_job runs one -- except that its exit status 3 means this machine lacks
+# what it needs, recorded as a skip with the reason the job printed.
+run_local() {
+    local name="$1" status why
+    set +e
+    run_job "$@"
+    status=$?
+    set -e
+    if [ "$status" -eq 3 ]; then
+        why="$(grep -m1 'cannot \(run\|cross-build\) here' "$logs/$(printf '%s' "$name" | tr ' ' '-').log" |
+            sed 's/^\[[a-z-]*\] //')"
+        results[${#results[@]} - 1]="skipped (${why:-this machine lacks what it needs})"
+    fi
+    return "$status"
+}
+
 if [ "$cli" = false ]; then
     record "what changed" "the CLI is unchanged since $latest"
 fi
@@ -272,12 +306,38 @@ if [ "$cli" = true ]; then
         record "build $host" "skipped (needs clone llama.cpp and unit tests $host)"
     fi
 
-    # Not a CI job: this host's stand-in for the Linux and Windows x64 compiles.
-    # The build's compile commands when it configured (llama.cpp on, as CI's
-    # builds), else the unit tests' (off).
+    # Not CI jobs: two of the other platforms' jobs, on this machine
+    # (2026-10-12). Every release pull request until then had failed on Linux
+    # or Windows after passing here. Each needs a tool this machine may not
+    # have, and says so as a skip with what to install or start, never as a
+    # pass. Run whatever the host's own jobs said, so one rehearsal finds all.
+    linux_ran=0
+    if [ ! -x "$unit_wt/lib/scripts/linux-unit-tests.sh" ]; then
+        record "unit tests linux (docker)" "skipped (the branch has no lib/scripts/linux-unit-tests.sh)"
+    else
+        run_local "unit tests linux (docker)" "$unit_wt" lib/scripts/linux-unit-tests.sh || true
+    fi
+    case "${results[${#results[@]} - 1]}" in skipped*) ;; *) linux_ran=1 ;; esac
+    windows_ran=0
+    if [ ! -x "$build_wt/lib/scripts/cross-windows.sh" ]; then
+        record "build windows-x64 (cross)" "skipped (the branch has no lib/scripts/cross-windows.sh)"
+    elif [ $clone_ok -ne 1 ]; then
+        record "build windows-x64 (cross)" "skipped (needs clone llama.cpp)"
+    else
+        run_local "build windows-x64 (cross)" "$build_wt" \
+            env -u APOGEE_CMAKE_ARGS lib/scripts/cross-windows.sh ${jobs_args[@]+"${jobs_args[@]}"} || true
+    fi
+    case "${results[${#results[@]} - 1]}" in skipped*) ;; *) windows_ran=1 ;; esac
+
+    # Not a CI job: this host's stand-in for the Linux and Windows x64 compiles,
+    # when the Windows cross-build -- every file through GCC and libstdc++, and
+    # linked -- could not run. The build's compile commands when it configured
+    # (llama.cpp on, as CI's builds), else the unit tests' (off).
     database="$build_wt/lib/src/cli/build/$host"
     [ -f "$database/compile_commands.json" ] || database="$unit_wt/lib/src/cli/build/$host"
-    if [ ! -x "$unit_wt/lib/scripts/gcc-check.py" ]; then
+    if [ $windows_ran -eq 1 ]; then
+        record "gcc compile (local)" "covered by build windows-x64 (cross)"
+    elif [ ! -x "$unit_wt/lib/scripts/gcc-check.py" ]; then
         record "gcc compile (local)" "skipped (the branch has no lib/scripts/gcc-check.py)"
     elif [ ! -f "$database/compile_commands.json" ]; then
         record "gcc compile (local)" "skipped (nothing configured to take compile commands from)"
@@ -300,18 +360,24 @@ printf '\n[pr-ci] rehearsed the pull request %s -> %s\n' "$branch" "$BASE"
 printf '[pr-ci]   source: %s, tree %s\n' "$(git -C "$root" rev-parse --short "$merged")" "$(git -C "$root" rev-parse --short "$tree")"
 i=0
 while [ $i -lt ${#names[@]} ]; do
-    printf '[pr-ci]   %-22s %s\n' "${names[$i]}" "${results[$i]}"
+    printf '[pr-ci]   %-26s %s\n' "${names[$i]}" "${results[$i]}"
     # Only a job that ran and failed fails the verdict: a skip says why it
     # was skipped, and the only one that follows a failure is the build's.
     case "${results[$i]}" in FAILED*) failed=1 ;; esac
     i=$((i + 1))
 done
-others=""
-for target in linux-x64 linux-arm64 macos-arm64 windows-x64 windows-arm64; do
-    [ "$target" = "$host" ] || others="$others${others:+, }$target"
-done
-printf '[pr-ci]   not rehearsed: unit tests and build for %s -- each needs its own CI runner\n' "$others"
-[ "$cli" = false ] || printf '[pr-ci]   (their compiles are what `gcc compile` stands in for; their tests are not)\n'
+if [ "$cli" = true ]; then
+    # What only CI's runners can say, given what ran here.
+    printf '[pr-ci]   left to CI: the Windows test runs and the windows-arm64 build (no Windows here)'
+    if [ "${linux_ran:-0}" -eq 1 ]; then
+        printf ', and linux-x64 (the container stands in, on its own architecture)\n'
+    else
+        printf ', and every Linux job -- start Docker and run again to rehearse them\n'
+    fi
+    if [ "${windows_ran:-0}" -ne 1 ]; then
+        printf '[pr-ci]   the windows-x64 build was not rehearsed -- install mingw-w64 and run again\n'
+    fi
+fi
 if ls "$artifacts"/apogee-"$host".* >/dev/null 2>&1; then
     printf '[pr-ci]   archive: %s\n' "$(ls "$artifacts"/apogee-"$host".tar.gz "$artifacts"/apogee-"$host".zip 2>/dev/null | head -1)"
 fi

@@ -6,6 +6,7 @@
 
 #include "cli/command.h"
 #include "cli/registry.h"
+#include "cli/tui_cmd.h"
 
 namespace CLI {
 class Option;
@@ -30,8 +31,10 @@ namespace apogee::commands {
 /// executable (see cmake/ApogeeLinkPolicy.cmake for why that matters).
 class RootCommand {
 public:
-    /// Builds the root over `registry`, binding every command in it.
-    explicit RootCommand(CommandRegistry registry = default_registry());
+    /// Builds the root over `registry`, binding every command in it. `shell`
+    /// is how a bare `apogee` reaches the full-screen shell (32b).
+    explicit RootCommand(CommandRegistry registry = default_registry(),
+                         ShellEntry shell = default_shell_entry());
     ~RootCommand();
 
     RootCommand(const RootCommand&) = delete;
@@ -47,8 +50,9 @@ public:
     [[nodiscard]] const RootContext& context() const noexcept;
 
     /// Parses `argv` and runs the selected command.
-    /// Returns the process exit code. A bare `apogee` prints help and
-    /// returns 0.
+    /// Returns the process exit code. A bare `apogee` opens the full-screen
+    /// shell at an interactive terminal (32b); anywhere else it prints help
+    /// and returns 0, exactly as it always has.
     [[nodiscard]] int run(int argc, const char* const* argv);
 
 private:
@@ -74,6 +78,7 @@ private:
     /// The root flag this run put in force, until the root is destroyed.
     std::unique_ptr<harness::RootFlagScope> root_scope_;
     CommandRegistry registry_;
+    ShellEntry shell_;
     std::unique_ptr<CLI::App> app_;
     /// Owned by `app_`, and read for what THIS parse was given: a bound value
     /// keeps an earlier parse's answer when a later one omits the flag.

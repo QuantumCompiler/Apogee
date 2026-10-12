@@ -242,6 +242,15 @@ struct EditingLineReader::Impl {
     /// Set as a line is sent or abandoned, so the redraw replxx makes then
     /// draws no suggestions.
     bool finishing = false;
+    /// The prompt `read` was handed, before the tag: what Shift+Tab redraws
+    /// with the tag it now reads (39b).
+    std::string base_prompt;
+
+    /// `base` with the tag ahead of it, when there is one.
+    [[nodiscard]] std::string prompt_for(std::string_view base) const {
+        const std::string tag = options.prompt_tag ? options.prompt_tag() : std::string{};
+        return tag.empty() ? std::string{base} : tag + " · " + std::string{base};
+    }
 };
 
 EditingLineReader::EditingLineReader(Options options) : impl_{std::make_unique<Impl>()} {
@@ -256,6 +265,20 @@ EditingLineReader::EditingLineReader(Options options) : impl_{std::make_unique<I
         // none, and a session must never fail to start over recall.
         impl_->editor.history_load(impl_->options.history_path.string());
         impl_->history_loaded = true;
+    }
+
+    if (impl_->options.on_shift_tab) {
+        // Shift+Tab (39b): the session's mode moves on and the prompt is
+        // redrawn in place with its words -- the line typed so far kept.
+        Impl& state = *impl_;
+        state.editor.bind_key(replxx::Replxx::KEY::shift(replxx::Replxx::KEY::TAB),
+                              [&state](char32_t code) {
+                                  state.options.on_shift_tab();
+                                  const std::string prompt = state.prompt_for(state.base_prompt);
+                                  state.prompt_cells = prompt_cells(prompt);
+                                  state.editor.set_prompt(prompt);
+                                  return state.editor.invoke(replxx::Replxx::ACTION::REPAINT, code);
+                              });
     }
 
     if (!impl_->options.suggest) {
@@ -353,10 +376,12 @@ EditingLineReader::~EditingLineReader() {
 std::optional<std::string> EditingLineReader::read(std::string_view prompt) {
     // replxx reports an aborted line (Ctrl-C) by setting errno to EAGAIN
     // before returning null; a plain end of input (Ctrl-D) leaves it alone.
-    impl_->prompt_cells = prompt_cells(prompt);
+    impl_->base_prompt = std::string{prompt};
+    const std::string shown = impl_->prompt_for(prompt);
+    impl_->prompt_cells = prompt_cells(shown);
     impl_->finishing = false;
     errno = 0;
-    const char* line = impl_->editor.input(std::string{prompt});
+    const char* line = impl_->editor.input(shown);
     const int error = errno;
     if (impl_->options.live && impl_->options.suggest) {
         // And whatever a cached repaint still drew below the sent line: the

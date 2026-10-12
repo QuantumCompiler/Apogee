@@ -1,6 +1,7 @@
 #include "agent/tool.h"
 
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 #include "contracts/sha256.h"
@@ -93,7 +94,7 @@ bool permitted_target(const Tool& tool, std::string_view target, std::string_vie
         return false;
     }
 
-    const GateRequest request{tool.name, target, detail, tool.outbound};
+    const GateRequest request{tool.name, target, detail, tool.outbound, tool.edits};
     const Permission decision = context.permission ? context.permission(request) : Permission::Ask;
 
     switch (decision) {
@@ -113,6 +114,22 @@ bool permitted_target(const Tool& tool, std::string_view target, std::string_vie
     }
     return context.confirm(request);
 }
+
+namespace {
+
+/// The surface's reason for a refusal, as a sentence ending in a space, or
+/// empty (39b).
+std::string refusal_reason(const Tool& tool, std::string_view target, std::string_view detail,
+                           const DispatchContext& context) {
+    if (!context.refusal) {
+        return {};
+    }
+    std::string reason =
+        context.refusal(GateRequest{tool.name, target, detail, tool.outbound, tool.edits});
+    return reason.empty() ? reason : reason + " ";
+}
+
+}  // namespace
 
 bool permitted(const Tool& tool, std::string_view arguments, const DispatchContext& context) {
     // A read-only tool never prompts. Asking about every read trains the user
@@ -156,15 +173,22 @@ ToolOutcome dispatch(const ToolRegistry& registry, const harness::ToolCall& call
             tool->describe_detail ? tool->describe_detail(call.arguments) : std::string{};
         if (!permitted_target(*tool, target, detail, context)) {
             return ToolOutcome{"Error: permission to reach " + target +
-                                   " was not given, so nothing was sent to it. Do not retry "
-                                   "it; continue without it or ask what to do instead.",
+                                   " was not given, so nothing was sent to it. " +
+                                   refusal_reason(*tool, target, detail, context) +
+                                   "Do not retry it; continue without it or ask what to do "
+                                   "instead.",
                                true};
         }
     } else if (!permitted(*tool, call.arguments, context)) {
-        return ToolOutcome{"Error: the user denied permission to run '" + call.name +
-                               "'. Do not retry it; continue without it or ask what to do "
-                               "instead.",
-                           true};
+        const std::string target =
+            tool->describe_target ? tool->describe_target(call.arguments) : std::string{};
+        const std::string reason = refusal_reason(*tool, target, {}, context);
+        return ToolOutcome{
+            (reason.empty() ? "Error: the user denied permission to run '" + call.name + "'. "
+                            : "Error: '" + call.name + "' was not run: " + reason) +
+                "Do not retry it; continue without it or ask what to do "
+                "instead.",
+            true};
     }
 
     if (context.on_status) {

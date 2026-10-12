@@ -18,6 +18,12 @@
 #    module compiles only its own directory's sources, and a layer's test
 #    library (tests/CMakeLists.txt) links its own layer and below, never above
 #    (ADR 0004).
+#
+# 3. Third-party code one module owns is linked by that module alone (32b).
+#    FTXUI is the TUI's compositor: it reaches the rest of the project only
+#    through `tui/`'s own headers, which name none of its types, so a module,
+#    a test library or a helper linking it directly would be a second TUI --
+#    or a way around the first.
 
 set(APOGEE_CLI_TARGET "apogee" CACHE INTERNAL "The CLI executable target name")
 
@@ -202,6 +208,65 @@ function(_apogee_assert_module_graph)
                    "layered, acyclic)")
 endfunction()
 
+# Each owned dependency's targets, and the module that alone may link them.
+set(APOGEE_SCOPED_DEPENDENCIES ftxui)
+set(APOGEE_SCOPED_TARGETS_ftxui screen dom component ftxui)
+set(APOGEE_SCOPED_OWNER_ftxui apogee_presentation_tui)
+
+function(_apogee_assert_scoped_dependencies)
+    _apogee_collect_targets(all_targets "${CMAKE_SOURCE_DIR}")
+    set(violations "")
+    foreach(dependency IN LISTS APOGEE_SCOPED_DEPENDENCIES)
+        set(owned ${APOGEE_SCOPED_TARGETS_${dependency}})
+        set(owner ${APOGEE_SCOPED_OWNER_${dependency}})
+        if(NOT TARGET ${owner})
+            _apogee_violation("${dependency}'s owner '${owner}' is not a target")
+            continue()
+        endif()
+        foreach(target IN LISTS all_targets)
+            # The owner, and the dependency's own targets linking one another.
+            if(target STREQUAL owner OR target IN_LIST owned)
+                continue()
+            endif()
+            get_target_property(type ${target} TYPE)
+            set(properties INTERFACE_LINK_LIBRARIES)
+            if(NOT type STREQUAL "INTERFACE_LIBRARY")
+                list(APPEND properties LINK_LIBRARIES)
+            endif()
+            foreach(property IN LISTS properties)
+                get_target_property(libs ${target} ${property})
+                if(NOT libs)
+                    continue()
+                endif()
+                foreach(lib IN LISTS libs)
+                    if(lib MATCHES "^\\$<LINK_ONLY:(.+)>$")
+                        set(lib "${CMAKE_MATCH_1}")
+                    endif()
+                    if(TARGET "${lib}")
+                        get_target_property(aliased "${lib}" ALIASED_TARGET)
+                        if(aliased)
+                            set(lib "${aliased}")
+                        endif()
+                    endif()
+                    if(lib IN_LIST owned)
+                        _apogee_violation("${target} links ${dependency} ('${lib}'); only "
+                                          "${owner} may")
+                    endif()
+                endforeach()
+            endforeach()
+        endforeach()
+    endforeach()
+    if(violations)
+        list(JOIN violations "\n  " pretty)
+        message(FATAL_ERROR
+            "Link policy violation: third-party code linked outside its owner:\n  ${pretty}\n"
+            "Reach it through its owner's own headers (for FTXUI, `tui/`), which name none "
+            "of its types.")
+    endif()
+    message(STATUS "Apogee: owned dependencies OK (${APOGEE_SCOPED_DEPENDENCIES} linked by "
+                   "their owners alone)")
+endfunction()
+
 function(apogee_assert_link_policy)
     _apogee_collect_targets(all_targets "${CMAKE_SOURCE_DIR}")
 
@@ -231,4 +296,5 @@ function(apogee_assert_link_policy)
     message(STATUS "Apogee: link policy OK (no target links '${APOGEE_CLI_TARGET}')")
 
     _apogee_assert_module_graph()
+    _apogee_assert_scoped_dependencies()
 endfunction()

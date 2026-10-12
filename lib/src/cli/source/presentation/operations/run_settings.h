@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "contracts/config.h"
 
@@ -18,10 +19,16 @@ namespace apogee::commands {
 /// The flag always wins -- it is the most specific thing the user said.
 /// A turn's thinking (26i): the mode and the budget each from the flag or
 /// the session when set, else the backend's config, else on with no budget.
-[[nodiscard]] harness::Thinking resolve_thinking(const std::optional<harness::ThinkingMode>& mode,
-                                                 const std::optional<std::int64_t>& budget,
-                                                 const harness::Config& config,
-                                                 std::string_view backend_name);
+/// A level chosen (`effort`, 39a) stands in for the budget: it is spent as
+/// the level, and the config's budget is not taken under it.
+[[nodiscard]] harness::Thinking resolve_thinking(
+    const std::optional<harness::ThinkingMode>& mode, const std::optional<std::int64_t>& budget,
+    const harness::Config& config, std::string_view backend_name,
+    const std::optional<harness::Effort>& effort = std::nullopt);
+
+/// The five effort levels' words, lowest first (39a): what `--effort` and
+/// `/effort` accept.
+[[nodiscard]] std::vector<std::string> effort_words();
 
 [[nodiscard]] std::optional<double> resolve_temperature(const std::optional<double>& flag_value,
                                                         const harness::Config& config,

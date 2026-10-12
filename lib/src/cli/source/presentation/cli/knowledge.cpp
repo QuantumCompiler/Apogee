@@ -131,19 +131,19 @@ void require_plain_name(std::string_view name) {
     return value.empty() ? "-" : value;
 }
 
-void print_fields(const knowledge::Record& record) {
-    std::cout << "Intent:      " << record.intent << "\n";
-    std::cout << "Decision:    " << or_dash(record.decision) << "\n";
-    std::cout << "Status:      " << record.status << "\n";
-    std::cout << "Discipline:  " << or_dash(record.discipline) << "\n";
-    std::cout << "Link:        " << or_dash(record.downstream_link) << "\n";
-    std::cout << "Source:      " << or_dash(record.provenance.source) << "\n";
-    std::cout << "Attribution: " << or_dash(record.provenance.attribution) << "\n";
+void print_fields(std::ostream& out, const knowledge::Record& record) {
+    out << "Intent:      " << record.intent << "\n";
+    out << "Decision:    " << or_dash(record.decision) << "\n";
+    out << "Status:      " << record.status << "\n";
+    out << "Discipline:  " << or_dash(record.discipline) << "\n";
+    out << "Link:        " << or_dash(record.downstream_link) << "\n";
+    out << "Source:      " << or_dash(record.provenance.source) << "\n";
+    out << "Attribution: " << or_dash(record.provenance.attribution) << "\n";
     if (!record.supersedes.empty()) {
-        std::cout << "Supersedes:  " << record.supersedes << "\n";
+        out << "Supersedes:  " << record.supersedes << "\n";
     }
     if (!record.raw_ref.empty()) {
-        std::cout << "Raw:         " << record.raw_ref << "\n";
+        out << "Raw:         " << record.raw_ref << "\n";
     }
 }
 
@@ -206,14 +206,37 @@ void print_validation(const CaptureResult& result) {
 
 /// Opens a collection that must already exist: a read never creates an
 /// empty database out of a typo.
-[[nodiscard]] knowledge::Store open_existing(const std::string& db) {
+[[nodiscard]] knowledge::Store open_collection(const std::string& db) {
     const std::filesystem::path path = collection_path(db);
     std::error_code code;
     if (!std::filesystem::exists(path, code)) {
-        fail_user("no knowledge collection named '" + db +
-                  "' -- capture a record first with 'apogee knowledge capture'");
+        throw KnowledgeRefusal{"no knowledge collection named '" + db +
+                                   "' -- capture a record first with 'apogee knowledge capture'",
+                               false};
     }
     return knowledge::Store{path, harness::knowledge_raw_dir()};
+}
+
+[[nodiscard]] knowledge::Store open_existing(const std::string& db) {
+    try {
+        return open_collection(db);
+    } catch (const KnowledgeRefusal& e) {
+        fail_user(e.what());
+    }
+}
+
+/// Runs a carved knowledge act for a command, its refusal the command's own
+/// failure with its own exit code.
+template <typename Act>
+void or_fail(Act act) {
+    try {
+        act();
+    } catch (const KnowledgeRefusal& e) {
+        if (e.backend()) {
+            fail_backend(e.what());
+        }
+        fail_user(e.what());
+    }
 }
 
 /// Every configured provider, built so the embedder and the judge can be
@@ -238,14 +261,14 @@ struct Providers {
 
 /// One record as a listing shows it: the id and its markers, the intent,
 /// the link.
-void print_summary(const knowledge::Record& record, std::string_view indent) {
-    std::cout << indent << record.id << "  [" << record.status << " · "
-              << or_dash(record.discipline) << "]\n";
-    std::cout << indent << "  Intent:   " << record.intent << "\n";
+void print_summary(std::ostream& out, const knowledge::Record& record, std::string_view indent) {
+    out << indent << record.id << "  [" << record.status << " · " << or_dash(record.discipline)
+        << "]\n";
+    out << indent << "  Intent:   " << record.intent << "\n";
     if (!record.decision.empty()) {
-        std::cout << indent << "  Decision: " << record.decision << "\n";
+        out << indent << "  Decision: " << record.decision << "\n";
     }
-    std::cout << indent << "  Link:     " << or_dash(record.downstream_link) << "\n";
+    out << indent << "  Link:     " << or_dash(record.downstream_link) << "\n";
 }
 
 [[nodiscard]] std::vector<knowledge::Record> filtered(std::vector<knowledge::Record> records,
@@ -485,7 +508,7 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
                 return;
             }
             std::cout << "Draft (not stored)\n";
-            print_fields(result.record);
+            print_fields(std::cout, result.record);
             print_validation(result);
             std::cout << "\nWould store in \"" << result.decision.db
                       << "\" (retriever: " << agentloop::to_string(result.decision.retriever)
@@ -513,7 +536,7 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
             return;
         }
         std::cout << "Captured " << result.record.id << "\n";
-        print_fields(result.record);
+        print_fields(std::cout, result.record);
         print_validation(result);
         std::cout << "\nStored in \"" << result.decision.db
                   << "\" (retriever: " << agentloop::to_string(result.decision.retriever) << ")";
@@ -568,114 +591,76 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
                     "Also walk the knowledge graph from the matched records: the entities their "
                     "reasoning concerns, other decisions about the same things, supersedes chains");
     query->callback([&context, q]() {
-        std::filesystem::path config_path;
-        const harness::Config config = load_config_lenient(context, config_path);
-        const std::string db = resolve_db(config, q->db);
-        const knowledge::Store store = open_existing(db);
-        if (!agentloop::valid_rerank(q->rerank, config)) {
-            fail_user("--rerank: no backend named '" + q->rerank + "'");
-        }
-
-        knowledge::QueryOptions options;
-        options.question = q->text;
-        options.status = q->status;
-        options.discipline = q->discipline;
-        options.top_k = q->top_k;
-        options.retriever_flag = q->retriever == "auto" ? std::string{} : q->retriever;
-        options.rerank_flag = q->rerank;
-
-        // Providers only when the decision might need an embedder or a judge:
-        // the lexical floor asks for neither, and building them for nothing
-        // would spawn what a text search never needs.
-        const harness::EmbeddingConfig* entry = config.find_embedding(db);
-        const std::string pin = entry != nullptr ? entry->retriever : std::string{};
-        const std::string rerank_pin = entry != nullptr ? entry->rerank : std::string{};
-        const bool judge =
-            !agentloop::resolve_turn_rerank(q->rerank, rerank_pin, config).backend.empty();
-        std::optional<Providers> providers;
-        if ((options.retriever_flag != "lexical" && pin != "lexical") || judge) {
-            providers.emplace(config, config_path);
-        }
-        const harness::Harness bare{config};
-        const knowledge::QueryResult result = knowledge::query(
-            store, providers.has_value() ? providers->harness : bare, config, db, options);
-        if (!result.ok()) {
-            if (result.backend_error) {
-                fail_backend(result.error);
+        or_fail([&]() {
+            const KnowledgeQuery request{.question = q->text,
+                                         .status = q->status,
+                                         .discipline = q->discipline,
+                                         .top_k = q->top_k,
+                                         .retriever = q->retriever,
+                                         .rerank = q->rerank,
+                                         .db = q->db};
+            const KnowledgeAnswer answer = run_knowledge_query(context, request);
+            const knowledge::QueryResult& result = answer.result;
+            // The walk from the matched records, through the same core the
+            // HTTP twin calls; a note only when no graph covers the collection.
+            std::optional<knowledge::RecordGraph> graph;
+            if (q->graph) {
+                std::filesystem::path config_path;
+                const harness::Config config = load_config_lenient(context, config_path);
+                const knowledge::Store store = open_collection(answer.db);
+                graph = knowledge::graph_for_records(store, config, answer.db, result, q->text);
             }
-            fail_user(result.error);
-        }
-        // The walk from the matched records, through the same core the HTTP
-        // twin calls; a note only when no graph covers the collection.
-        std::optional<knowledge::RecordGraph> graph;
-        if (q->graph) {
-            graph = knowledge::graph_for_records(store, config, db, result, q->text);
-        }
-        if (q->json) {
-            nlohmann::json records = nlohmann::json::array();
-            for (const knowledge::ScoredRecord& scored : result.records) {
-                records.push_back({{"record", scored.record}, {"score", scored.score}});
+            if (q->json) {
+                nlohmann::json records = nlohmann::json::array();
+                for (const knowledge::ScoredRecord& scored : result.records) {
+                    records.push_back({{"record", scored.record}, {"score", scored.score}});
+                }
+                nlohmann::json out{
+                    {"records", std::move(records)},
+                    {"retriever", std::string{agentloop::to_string(result.retriever)}},
+                    {"reranked", result.reranked}};
+                if (!result.notes.empty()) {
+                    out["notes"] = result.notes;
+                }
+                if (graph.has_value()) {
+                    nlohmann::json section{{"context", graph->context},
+                                           {"entities", graph->entities}};
+                    if (!graph->note.empty()) {
+                        section["note"] = graph->note;
+                    }
+                    out["graph"] = std::move(section);
+                }
+                std::cout << out.dump(2) << "\n";
+                return;
             }
-            nlohmann::json out{{"records", std::move(records)},
-                               {"retriever", std::string{agentloop::to_string(result.retriever)}},
-                               {"reranked", result.reranked}};
-            if (!result.notes.empty()) {
-                out["notes"] = result.notes;
+            print_knowledge_answer(std::cout, request, answer);
+            if (result.excluded || result.records.empty()) {
+                return;
             }
             if (graph.has_value()) {
-                nlohmann::json section{{"context", graph->context}, {"entities", graph->entities}};
                 if (!graph->note.empty()) {
-                    section["note"] = graph->note;
-                }
-                out["graph"] = std::move(section);
-            }
-            std::cout << out.dump(2) << "\n";
-            return;
-        }
-        for (const std::string& note : result.notes) {
-            std::cout << note << "\n";
-        }
-        if (result.excluded) {
-            return;
-        }
-        if (result.records.empty()) {
-            std::cout << "No matching records in \"" << db << "\" ["
-                      << agentloop::to_string(result.retriever) << "].\n";
-            if (!q->status.empty()) {
-                std::cout << "(filtering status=\"" << q->status
-                          << "\" -- pass --status \"\" to search all branches)\n";
-            }
-            return;
-        }
-        std::cout << "Top " << result.records.size() << " result(s) for \"" << q->text << "\" in \""
-                  << db << "\" [" << agentloop::to_string(result.retriever)
-                  << (result.reranked ? ", reranked" : "") << "]:\n";
-        for (const knowledge::ScoredRecord& scored : result.records) {
-            std::cout << "\n[score " << four_places(scored.score) << "] ";
-            print_summary(scored.record, "");
-        }
-        if (graph.has_value()) {
-            if (!graph->note.empty()) {
-                std::cout << "\n" << graph->note << "\n";
-            } else if (graph->context.empty()) {
-                std::cout << "\nNothing related in the knowledge graph.\n";
-            } else {
-                std::cout << "\nRelated (knowledge graph, " << graph->entities << " entities):\n";
-                std::size_t start = 0;
-                while (start <= graph->context.size()) {
-                    const std::size_t newline = graph->context.find('\n', start);
-                    std::cout << "  "
-                              << graph->context.substr(start, newline == std::string::npos
-                                                                  ? std::string::npos
-                                                                  : newline - start)
-                              << "\n";
-                    if (newline == std::string::npos) {
-                        break;
+                    std::cout << "\n" << graph->note << "\n";
+                } else if (graph->context.empty()) {
+                    std::cout << "\nNothing related in the knowledge graph.\n";
+                } else {
+                    std::cout << "\nRelated (knowledge graph, " << graph->entities
+                              << " entities):\n";
+                    std::size_t start = 0;
+                    while (start <= graph->context.size()) {
+                        const std::size_t newline = graph->context.find('\n', start);
+                        std::cout << "  "
+                                  << graph->context.substr(start, newline == std::string::npos
+                                                                      ? std::string::npos
+                                                                      : newline - start)
+                                  << "\n";
+                        if (newline == std::string::npos) {
+                            break;
+                        }
+                        start = newline + 1;
                     }
-                    start = newline + 1;
                 }
             }
-        }
+        });
     });
 
     // ---- list ---------------------------------------------------------------
@@ -688,28 +673,25 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
     list->add_option("--db", l->db, "The collection (default: knowledge.db, then 'knowledge')")
         ->type_name(kCollectionValue);
     list->add_flag("--json", l->json, "Print the records as JSON");
-    list->callback([&context, l]() {
-        std::filesystem::path config_path;
-        const harness::Config config = load_config_lenient(context, config_path);
-        const std::string db = resolve_db(config, l->db);
-        const knowledge::Store store = open_existing(db);
-        const std::vector<knowledge::Record> records =
-            filtered(store.list(), l->status, l->discipline);
-        if (l->json) {
-            std::cout << nlohmann::json(records).dump(2) << "\n";
-            return;
+    auto list_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    add_read_format(list, list_format);
+    list->callback([&context, l, list_format]() {
+        if (!l->db.empty()) {
+            require_plain_name(l->db);
         }
-        if (records.empty()) {
-            std::cout << "No records in \"" << db << "\".\n";
-            return;
-        }
-        std::cout << records.size() << " record(s) in \"" << db << "\":\n";
-        for (const knowledge::Record& record : records) {
-            std::cout << "\n  " << record.id << "  [" << record.status << " · "
-                      << or_dash(record.discipline) << "]\n";
-            std::cout << "    " << preview_text(record.intent, 100) << "\n";
-            std::cout << "    -> " << or_dash(record.downstream_link) << "\n";
-        }
+        or_fail([&]() {
+            const KnowledgeRecords read =
+                read_knowledge_records(context, l->db, l->status, l->discipline);
+            if (l->json) {
+                std::cout << nlohmann::json(read.records).dump(2) << "\n";
+                return;
+            }
+            if (*list_format == ReadFormat::Json) {
+                write_document(std::cout, knowledge_list_document(read));
+                return;
+            }
+            std::cout << knowledge_list_text(read);
+        });
     });
 
     // ---- info ---------------------------------------------------------------
@@ -720,7 +702,9 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
     info->add_option("--db", i->db, "The collection (default: knowledge.db, then 'knowledge')")
         ->type_name(kCollectionValue);
     info->add_flag("--json", i->json, "Print the record as JSON");
-    info->callback([&context, i]() {
+    auto info_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    add_read_format(info, info_format);
+    info->callback([&context, i, info_format]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_lenient(context, config_path);
         const std::string db = resolve_db(config, i->db);
@@ -733,9 +717,11 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
             std::cout << nlohmann::json(*record).dump(2) << "\n";
             return;
         }
-        std::cout << "ID:          " << record->id << "\n";
-        print_fields(*record);
-        std::cout << "Captured:    " << record->timestamp << "\n";
+        if (*info_format == ReadFormat::Json) {
+            write_document(std::cout, nlohmann::json(*record));
+            return;
+        }
+        std::cout << knowledge_record_text(*record);
         if (i->raw) {
             const std::optional<std::string> raw = store.read_raw(*record);
             if (raw.has_value()) {
@@ -800,14 +786,10 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
     remove->add_option("--db", del->db, "The collection (default: knowledge.db, then 'knowledge')")
         ->type_name(kCollectionValue);
     remove->callback([&context, del]() {
-        std::filesystem::path config_path;
-        const harness::Config config = load_config_lenient(context, config_path);
-        const std::string db = resolve_db(config, del->db);
-        knowledge::Store store = open_existing(db);
-        if (!store.remove(del->id)) {
-            fail_user("no record '" + del->id + "' in '" + db + "'");
+        if (!del->db.empty()) {
+            require_plain_name(del->db);
         }
-        std::cout << "Deleted " << del->id << "\n";
+        or_fail([&]() { std::cout << delete_knowledge_record(context, del->db, del->id); });
     });
 
     // ---- export -------------------------------------------------------------
@@ -944,6 +926,128 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
         std::cout << "Reindexed " << outcome.reindexed << " record(s) in \"" << db << "\" ["
                   << embedder->model << "]\n";
     });
+}
+
+KnowledgeRecords read_knowledge_records(const RootContext& context, const std::string& db,
+                                        const std::string& status, const std::string& discipline) {
+    std::filesystem::path config_path;
+    const harness::Config config = load_config_lenient(context, config_path);
+    KnowledgeRecords read;
+    read.db = knowledge_collection(config, db);
+    const knowledge::Store store = open_collection(read.db);
+    read.records = filtered(store.list(), status, discipline);
+    return read;
+}
+
+std::string knowledge_list_text(const KnowledgeRecords& read) {
+    if (read.records.empty()) {
+        return "No records in \"" + read.db + "\".\n";
+    }
+    std::ostringstream out;
+    out << read.records.size() << " record(s) in \"" << read.db << "\":\n";
+    for (const knowledge::Record& record : read.records) {
+        out << "\n  " << record.id << "  [" << record.status << " · " << or_dash(record.discipline)
+            << "]\n";
+        out << "    " << preview_text(record.intent, 100) << "\n";
+        out << "    -> " << or_dash(record.downstream_link) << "\n";
+    }
+    return out.str();
+}
+
+nlohmann::json knowledge_list_document(const KnowledgeRecords& read) {
+    return nlohmann::json{{"object", "list"}, {"db", read.db}, {"data", read.records}};
+}
+
+std::string knowledge_record_text(const knowledge::Record& record) {
+    std::ostringstream out;
+    out << "ID:          " << record.id << "\n";
+    print_fields(out, record);
+    out << "Captured:    " << record.timestamp << "\n";
+    return out.str();
+}
+
+KnowledgeAnswer run_knowledge_query(const RootContext& context, const KnowledgeQuery& query) {
+    std::filesystem::path config_path;
+    const harness::Config config = load_config_lenient(context, config_path);
+    KnowledgeAnswer answer;
+    answer.db = knowledge_collection(config, query.db);
+    const knowledge::Store store = open_collection(answer.db);
+    if (!agentloop::valid_rerank(query.rerank, config)) {
+        throw KnowledgeRefusal{"--rerank: no backend named '" + query.rerank + "'", false};
+    }
+
+    knowledge::QueryOptions options;
+    options.question = query.question;
+    options.status = query.status;
+    options.discipline = query.discipline;
+    options.top_k = query.top_k;
+    options.retriever_flag = query.retriever == "auto" ? std::string{} : query.retriever;
+    options.rerank_flag = query.rerank;
+
+    // Providers only when the decision might need an embedder or a judge:
+    // the lexical floor asks for neither, and building them for nothing
+    // would spawn what a text search never needs.
+    const harness::EmbeddingConfig* entry = config.find_embedding(answer.db);
+    const std::string pin = entry != nullptr ? entry->retriever : std::string{};
+    const std::string rerank_pin = entry != nullptr ? entry->rerank : std::string{};
+    const bool judge =
+        !agentloop::resolve_turn_rerank(query.rerank, rerank_pin, config).backend.empty();
+    std::optional<Providers> providers;
+    if ((options.retriever_flag != "lexical" && pin != "lexical") || judge) {
+        providers.emplace(config, config_path);
+    }
+    const harness::Harness bare{config};
+    answer.result = knowledge::query(store, providers.has_value() ? providers->harness : bare,
+                                     config, answer.db, options);
+    if (!answer.result.ok()) {
+        throw KnowledgeRefusal{answer.result.error, answer.result.backend_error};
+    }
+    return answer;
+}
+
+void print_knowledge_answer(std::ostream& out, const KnowledgeQuery& query,
+                            const KnowledgeAnswer& answer) {
+    const knowledge::QueryResult& result = answer.result;
+    for (const std::string& note : result.notes) {
+        out << note << "\n";
+    }
+    if (result.excluded) {
+        return;
+    }
+    if (result.records.empty()) {
+        out << "No matching records in \"" << answer.db << "\" ["
+            << agentloop::to_string(result.retriever) << "].\n";
+        if (!query.status.empty()) {
+            out << "(filtering status=\"" << query.status
+                << "\" -- pass --status \"\" to search all branches)\n";
+        }
+        return;
+    }
+    out << "Top " << result.records.size() << " result(s) for \"" << query.question << "\" in \""
+        << answer.db << "\" [" << agentloop::to_string(result.retriever)
+        << (result.reranked ? ", reranked" : "") << "]:\n";
+    for (const knowledge::ScoredRecord& scored : result.records) {
+        out << "\n[score " << four_places(scored.score) << "] ";
+        print_summary(out, scored.record, "");
+    }
+}
+
+std::string knowledge_query_text(const RootContext& context, const KnowledgeQuery& query) {
+    std::ostringstream out;
+    print_knowledge_answer(out, query, run_knowledge_query(context, query));
+    return out.str();
+}
+
+std::string delete_knowledge_record(const RootContext& context, const std::string& db,
+                                    const std::string& id) {
+    std::filesystem::path config_path;
+    const harness::Config config = load_config_lenient(context, config_path);
+    const std::string resolved = knowledge_collection(config, db);
+    knowledge::Store store = open_collection(resolved);
+    if (!store.remove(id)) {
+        throw KnowledgeRefusal{"no record '" + id + "' in '" + resolved + "'", false};
+    }
+    return "Deleted " + id + "\n";
 }
 
 }  // namespace apogee::commands

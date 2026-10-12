@@ -42,6 +42,9 @@ struct InferenceParams {
     /// and named so a file holding any reasoning still stands out.
     std::optional<harness::ThinkingMode> thinking;
     std::optional<std::int64_t> thinking_budget;
+    /// The level `--effort` or `/effort` chose (39a), saved as `effort`; held
+    /// instead of a budget, never with one. Absent from an older file.
+    std::optional<harness::Effort> effort;
 };
 
 /// Why a resume was imperfect.
@@ -142,6 +145,11 @@ struct Session {
     std::string title;
 
     std::string backend;
+    /// The vendor roster model the chat runs on `backend` in place of the
+    /// model its entry names (33), as `-m` or `/model` pinned it -- re-pinned
+    /// when the chat resumes. Empty for a chat on its backend's own model,
+    /// which writes nothing, so it saves exactly as before.
+    std::string model;
     InferenceParams params;
 
     /// The conversation, in neutral IR.
@@ -245,7 +253,8 @@ void save(const Session& session);
 /// all -- every recoverable problem is a warning.
 [[nodiscard]] LoadedSession load(const std::string& name, const KnownDependencies& known);
 
-/// Every saved session, newest first.
+/// Every saved session, newest first; a tie in `updated_at` by `chat_id`,
+/// descending.
 [[nodiscard]] std::vector<Session> list_sessions();
 
 /// The most recently updated session, or nullopt when there are none.

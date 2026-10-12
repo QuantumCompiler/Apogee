@@ -64,7 +64,10 @@ grep -q '^  ok   scan  not scanned yet' "$WORK_DIR/strip.txt" || fail "an unscan
 grep -q 'check --refresh-providers' "$WORK_DIR/strip.txt" || fail "no way to scan named"
 [ -e "$APOGEE_HOME/cache/providers.json" ] && fail "a plain check wrote the provider cache"
 PATH="$WORK_DIR/empty:/usr/bin:/bin" "$APOGEE_BIN" models list </dev/null >"$WORK_DIR/strip-list.txt" 2>&1
-grep -E '^claude +claude-cli .* no binary +no turn yet' "$WORK_DIR/strip-list.txt" >/dev/null \
+# Since 36 each provider is its own table, headed by its label and type.
+grep -q '^Claude CLI · claude-cli$' "$WORK_DIR/strip-list.txt" \
+    || fail "models list had no Claude CLI table: $(cat "$WORK_DIR/strip-list.txt")"
+grep -E '^claude +.* no binary +no turn yet' "$WORK_DIR/strip-list.txt" >/dev/null \
     || fail "models list did not say no binary: $(cat "$WORK_DIR/strip-list.txt")"
 
 export PATH="$WORK_DIR/bin:/usr/bin:/bin"
@@ -79,10 +82,23 @@ grep -q '^  ok   backend: claude  claude-cli -- credentials found (~/.claude.jso
 grep -q 'backend: codex  codex-cli -- credentials found (`codex login status` reports a login); codex-cli 9.9.9' \
     "$WORK_DIR/scan.txt" || fail "codex's tier was wrong"
 grep -q '^  ok   scan  last scanned ' "$WORK_DIR/scan.txt" || fail "the scan's time was not said"
+# The scan as one document (37b): the rows `providers scan` prints, nothing
+# else on stdout.
+"$APOGEE_BIN" providers scan --output-format json </dev/null >"$WORK_DIR/scan.json" 2>/dev/null \
+    || fail "providers scan --output-format json failed"
+python3 -c 'import json,sys
+doc = json.load(open(sys.argv[1]))
+rows = {row["provider"]: row for row in doc["data"]}
+assert doc["object"] == "list", doc
+assert rows["claude"]["type"] == "claude-cli", rows["claude"]
+assert rows["claude"]["tier"] == "credentials found", rows["claude"]
+assert rows["claude"]["backend"] == "backend: claude", rows["claude"]
+assert "9.9.9 (Claude Code)" in rows["claude"]["evidence"][0], rows["claude"]' "$WORK_DIR/scan.json" \
+    || fail "the scan's document was wrong: $(cat "$WORK_DIR/scan.json")"
 grep -qi 'authenticated' "$WORK_DIR/scan.txt" && fail "check claimed authentication"
 
 "$APOGEE_BIN" models list </dev/null >"$WORK_DIR/list.txt" 2>&1
-grep -E '^codex +codex-cli .* credentials found +no turn yet' "$WORK_DIR/list.txt" >/dev/null \
+grep -E '^codex +.* credentials found +no turn yet' "$WORK_DIR/list.txt" >/dev/null \
     || fail "codex's row lacked its tier: $(cat "$WORK_DIR/list.txt")"
 [ -s "$LOG" ] && fail "check or models list ran a turn: $(cat "$LOG")"
 
@@ -93,9 +109,9 @@ grep -q hello "$WORK_DIR/turn.txt" || fail "the turn did not answer"
 [ "$(grep -c exec "$LOG")" -eq 1 ] || fail "expected exactly one exec: $(cat "$LOG")"
 TODAY=$(date +%Y-%m-%d)
 "$APOGEE_BIN" models list </dev/null >"$WORK_DIR/after.txt" 2>&1
-grep -E "^codex +codex-cli .* credentials found +$TODAY" "$WORK_DIR/after.txt" >/dev/null \
+grep -E "^codex +.* credentials found +$TODAY" "$WORK_DIR/after.txt" >/dev/null \
     || fail "VERIFIED did not carry today: $(cat "$WORK_DIR/after.txt")"
-grep -E '^claude +claude-cli .* no turn yet' "$WORK_DIR/after.txt" >/dev/null \
+grep -E '^claude +.* no turn yet' "$WORK_DIR/after.txt" >/dev/null \
     || fail "claude was marked verified without a turn"
 "$APOGEE_BIN" check --no-color </dev/null >"$WORK_DIR/verified.txt" 2>&1
 grep -q "backend: codex  codex-cli -- verified -- answered a turn on $TODAY" "$WORK_DIR/verified.txt" \

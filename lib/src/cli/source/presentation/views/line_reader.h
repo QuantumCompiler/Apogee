@@ -159,6 +159,14 @@ public:
         bool color = true;
         /// Suggestion rows at most, not counting the "N more" row.
         std::size_t max_rows = 5;
+        /// Shift+Tab, handed to the session (39b: its permission mode moved
+        /// on), the prompt then redrawn with `prompt_tag`. Unset leaves the
+        /// key alone.
+        std::function<void()> on_shift_tab;
+        /// What the prompt carries ahead of itself -- the permission mode's
+        /// words -- read at each prompt and after each Shift+Tab; empty for
+        /// nothing.
+        std::function<std::string()> prompt_tag;
     };
 
     explicit EditingLineReader(Options options);

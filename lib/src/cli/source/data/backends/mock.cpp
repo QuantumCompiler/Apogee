@@ -69,12 +69,16 @@ std::string expand_mock_text(std::string_view text, const harness::ChatRequest& 
     replace_all(out, "{{last_tool_result}}", last_tool_result);
     replace_all(out, "{{system}}", system);
     // Whether the model was asked to think, and for how long (26i):
-    // `on`, `off` or `auto`, with `:N` for a budget.
+    // `on`, `off` or `auto`, with `:N` for a budget and `@level` for a
+    // level (39a).
     replace_all(
         out, "{{thinking}}",
         std::string{harness::to_string(request.thinking.mode)} +
             (request.thinking.budget.has_value() ? ":" + std::to_string(*request.thinking.budget)
-                                                 : std::string{}));
+                                                 : std::string{}) +
+            (request.thinking.effort.has_value()
+                 ? "@" + std::string{harness::to_string(*request.thinking.effort)}
+                 : std::string{}));
     return out;
 }
 
@@ -99,6 +103,7 @@ std::vector<MockTurn> parse_mock_script(const nlohmann::json& script) {
         MockTurn turn;
         turn.text = entry.value("text", std::string{});
         turn.delay = std::chrono::milliseconds{entry.value("delay_ms", 0)};
+        turn.reasoning = entry.value("reasoning", std::string{});
         if (const auto calls = entry.find("tool_calls"); calls != entry.end()) {
             if (!calls->is_array()) {
                 throw std::runtime_error("mock script: tool_calls must be a list");
@@ -213,6 +218,7 @@ harness::ChatResponse MockProvider::chat(const harness::ChatRequest& request,
     const MockTurn& turn = next_turn();
     std::string text = expand_mock_text(turn.text, request);
     replace_all(text, "{{conversation}}", conversation_id_);
+    replace_all(text, "{{model}}", options_.model);
     return build_response(turn, text);
 }
 
@@ -233,8 +239,21 @@ harness::ChatResponse MockProvider::stream_chat(const harness::ChatRequest& requ
     // Chunked deliberately, and checked for cancellation between chunks: this
     // is the contract every real provider must honour, so the mock has to hold
     // itself to it or tests of cancellation prove nothing.
+    // The reasoning first, on its own channel (43).
+    for (std::size_t offset = 0; offset < turn.reasoning.size(); offset += options_.chunk_size) {
+        options.cancellation.throw_if_cancelled();
+        if (turn.delay.count() > 0) {
+            std::this_thread::sleep_for(turn.delay);
+            options.cancellation.throw_if_cancelled();
+        }
+        if (options.on_thinking) {
+            options.on_thinking(std::string_view{turn.reasoning}.substr(
+                offset, std::min(options_.chunk_size, turn.reasoning.size() - offset)));
+        }
+    }
     std::string text = expand_mock_text(turn.text, request);
     replace_all(text, "{{conversation}}", conversation_id_);
+    replace_all(text, "{{model}}", options_.model);
     for (std::size_t offset = 0; offset < text.size(); offset += options_.chunk_size) {
         options.cancellation.throw_if_cancelled();
         if (turn.delay.count() > 0) {

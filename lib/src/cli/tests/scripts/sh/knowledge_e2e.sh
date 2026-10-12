@@ -152,6 +152,17 @@ grep -q "lexical" "$WORK_DIR/qv.err" || fail "the refusal did not name lexical: 
 # --- list, info --raw, link, status: the lifecycle on the real binary ---------
 "$APOGEE_BIN" knowledge list </dev/null >"$WORK_DIR/list.txt" 2>&1 || fail "list"
 grep -q '^5 record(s) in "knowledge":' "$WORK_DIR/list.txt" || fail "list count: $(cat "$WORK_DIR/list.txt")"
+# The reads as documents (37c): the records the list counts, one by its id.
+"$APOGEE_BIN" knowledge list --output-format json </dev/null >"$WORK_DIR/list.json" 2>/dev/null \
+    || fail "list --output-format json failed"
+"$APOGEE_BIN" knowledge info --output-format json "$from_id" </dev/null >"$WORK_DIR/info0.json" 2>/dev/null \
+    || fail "info --output-format json failed"
+python3 -c 'import json,sys
+listed, info = (json.load(open(path)) for path in sys.argv[1:3])
+assert listed["object"] == "list" and listed["db"] == "knowledge", listed
+assert len(listed["data"]) == 5, listed
+assert info["id"] == sys.argv[3], info' "$WORK_DIR/list.json" "$WORK_DIR/info0.json" "$from_id" \
+    || fail "a read's document was wrong: $(cat "$WORK_DIR/list.json")"
 "$APOGEE_BIN" knowledge info --raw "$from_id" </dev/null >"$WORK_DIR/info.txt" 2>&1 || fail "info --raw"
 grep -q "^ID:          $from_id" "$WORK_DIR/info.txt" || fail "info lacks the id: $(cat "$WORK_DIR/info.txt")"
 grep -q "^-- Raw conversation --" "$WORK_DIR/info.txt" || fail "info --raw did not print the archive"

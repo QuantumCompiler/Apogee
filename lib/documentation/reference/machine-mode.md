@@ -59,7 +59,7 @@ One JSON object per line on stdout. Every object has a `type`.
 | Event | Meaning |
 |---|---|
 | `session` | Once, first, unprompted. Names the protocol version, the model and the session's `capabilities` (below). |
-| `thinking` | The model began reasoning. No text. Sent again with `"budget_reached": true` when the reasoning reached its thinking budget and was ended there (`--think-budget`, or the backend's `thinking_budget`). |
+| `thinking` | The model began reasoning. No text. Sent again with `"budget_reached": true` when the reasoning reached its thinking budget and was ended there (`--think-budget`, an `--effort` level's budget, or the backend's `thinking_budget`). Machine mode carries the reasoning as it streams whatever `ui.thinking_display` says: the terminal's and the shell's one-line summary (43) is theirs alone, and is never asked for here. |
 | `thinking_delta` | A chunk of reasoning. **Droppable** — see below. |
 | `memory` | `chat` only: what a turn was handed from earlier conversations -- `chats`, past chats' summaries, and `decisions`, recorded knowledge records -- injected for this turn and never into the transcript (26l). Sent before the turn, only when it recalled something. |
 | `tool_status` | A tool is running, described in `text` for display -- or another model call the turn makes besides the chat model's own (the embedder, the utility model, the rerank judge, the knowledge clerk, a suite member the model consults), as `<role> — <what it is doing>` (26n). A `consult` (27f) is an ordinary tool call: `[tool] consult`, then `consult — asking utility (<backend>): <the question's first words>` while the member answers, and the answer reaches the model as the tool's result. A suite's verifier checking a tool call or an answer (27g) is said the same way: `validate — asking utility (<backend>): Check …`. A symphony the root model plays on its own (27t, an orchestrating `execute` session) is an ordinary tool call too: `[tool] play_<symphony>`, then `play — the model chose <symphony>: <n> member calls, <roles>`, then a line per stage. |
@@ -451,6 +451,23 @@ The answers are the same words: `session` allows that host for the rest of the
 run, and `always` adds it to `tools.allowed_hosts`. With no driver, only the
 listed hosts are reached.
 
+**The session's permission mode** decides what is asked at all. It is set at
+launch with `--permission-mode manual|accept-edits|plan|dont-ask|bypass`, the
+same modes a terminal session moves between with `/permission-mode` and
+Shift+Tab. The protocol carries no settings verbs, so a driver chooses the mode
+when it starts the child.
+
+- `manual`, the default, asks as above.
+- `accept-edits` runs the file and note edits unasked.
+- `plan` refuses every tool that writes, saying so in the tool result.
+- `dont-ask` refuses whatever would have been a `question`. It is the mode for
+  a driver that must never be asked.
+- `bypass` asks nothing.
+
+A config `deny` refuses in every mode. A driver chooses the mode at launch,
+`bypass` included: in the terminal and the shell `/permission-mode bypass`
+asks the person once, and a machine-mode child has nobody to ask that of.
+
 ## Everything else is a CLI command
 
 There is no second protocol for mutations. A driving GUI shells out to the same
@@ -553,6 +570,20 @@ apogee chats list --output-format json      # {"object":"list","data":[{"id","up
 apogee agents list --output-format json     # byte for byte GET /v1/admin/agents
 apogee mcp list --output-format json        # GET /v1/admin/mcp-servers's entries, with what connecting found
 apogee check --output-format json           # {"rows":[{"section","name","status","detail","remedy"?}],"ok":…,"failures":N,"warnings":N}
+apogee providers scan --output-format json  # {"object":"list","data":[{"provider","type","label","tier","backend","evidence":[…]}]}
+apogee system --output-format json          # {"cpu":{…},"memory":{…},"apogee":{…},"gpu":{…},"disk":{…}}
+apogee knowledge list --output-format json  # {"object":"list","db":…,"data":[records]}
+apogee knowledge info <id> --output-format json      # the record, as --json prints it
+apogee embed list --output-format json      # {"object":"list","data":[{"name","chunks","sources","error"?}]}
+apogee embed info <name> --output-format json        # {"collection","path","schema","chunks","vectors":{…}|null,"index","sources":[…]}
+apogee graph stats <name> --output-format json       # {"object":"graph.stats","graph","kind","built",…}
+apogee graph show <name> <entity> --output-format json   # {"object":"graph.show","match",…,"data":[entities]}
+apogee train status --output-format json    # byte for byte GET /v1/admin/training/status
+apogee train versions [backend] --output-format json   # byte for byte GET /v1/admin/training/versions
+apogee datasets list --output-format json   # byte for byte GET /v1/admin/datasets
+apogee datasets info <name> --output-format json       # byte for byte GET /v1/admin/datasets/{name}
+apogee datasets kits --output-format json   # byte for byte GET /v1/admin/datasets/kits
+apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: metadata only
 ```
 
 - **`models list`**: one object per row the table shows — `backend`,
@@ -576,6 +607,60 @@ apogee check --output-format json           # {"rows":[{"section","name","status
   and `skipped` — never folded into a pass — `ok` the verdict and the exit code
   the human run's (non-zero on a failure). With `--fix`, what it repaired is the
   document's `fixed`, never a line beside it.
+- **`providers scan`** (since 37b): a row per provider in the knowledge table, as the human scan prints them -- `provider` (`claude`), `type` (`claude-cli`), `label` (`Claude CLI`), `tier` (`credentials found`, `verified 2026-10-06`, `not found`), `backend` (which configured backends reach it, `not registered` when it could be, else empty) and `evidence`, a line each. It is the explicit scan, so it may start a vendor's binary for its version as the human scan does. With `--register`, what registering did is the document's `registration` and the rosters it fetched its `rosters`, a line each; with `--refresh`, the rosters re-fetched are `rosters` too.
+- **`knowledge list`** and **`knowledge info`** (since 37c): the records the
+  human list counts, newest first and kept to `--status`/`--discipline` as it
+  is, each record the object `--json` prints (which stays, a bare array for
+  `list`); `db` names the collection read.
+- **`embed list`** and **`embed info`** (since 37c): each collection's `name`,
+  `chunks` and `sources` count, or the `error` that kept it from being read;
+  one collection's `path`, `schema`, `chunks`, `vectors` (`chunks`,
+  `dimension`, `model` when one is pinned, `widths`) or `null` when it has
+  none, its lexical `index`, and its `sources`.
+- **`graph stats`** (since 37c): the counts the text prints, whole --
+  `kind` (`named` or `collection`), `built`, `nodes` with `nodes_by_type`,
+  `edges` with their `edges_extracted`/`edges_inferred` origin, `mentions`,
+  coverage (`total_chunks`, `chunks_with_mentions`), `nodes_with_vectors`,
+  the code layer (`code_files`, `code_files_by_language`, `code_mentions`,
+  `unresolved_names`), `extract_model`, `stale_files`, `failed_chunks` and
+  the communities; a named graph adds its entry's `collections` and
+  `sources`, its `embed_model`, each member's share in `members`, and
+  `membership_changed_from` when the entry moved since the build. A graph not
+  built yet is `"built": false`, not a refusal.
+- **`graph show`** (since 37c): `match` (`exact`, or `closest` with
+  `also_matched` as the text's lines say) and each entity in `data` -- `name`,
+  `type`, the whole `description`, `mentions`, `vector_dim`, a decision node's
+  `status` and `discipline`, a code node's `stated_at`, its `relations`
+  (`relation`, `direction`, `peer`, `peer_type`, `weight`, `origin`,
+  `description`, an extracted edge's first `sites`) and its supporting
+  `chunks`, their text whole.
+- **`train status`** and **`train versions`** (since 37f): the bodies the
+  control plane serves for the same reads (`operations/training_reads`, one
+  builder for both) -- the status's run count, the runs `running`, the newest
+  five as `recent_runs`, each backend's `versions` headline, the pipelines,
+  the `active_pipeline` and `latest_pipeline`, whether a cycle holds the lock
+  (`cycle_active`) and the cycle's headline; a version ledger, or every one in
+  a list. A backend with no history is refused as the text refuses it.
+- **`datasets list`**, **`datasets info`** and **`datasets kits`** (since
+  37f): the control plane's bodies -- each dataset's `name`, `path`, `lines`,
+  `bytes` and `shape`; each kit's `name`, `path`, `description`,
+  `eval_items` and `error` when it cannot be read.
+- **`auth list`** (since 37g): the control plane's body -- each stored slot's
+  `provider` and `stored_at`, which rung answers for each configured backend
+  that takes a key (`backends`: `name`, `type`, `source`, and the `variable`
+  when it is one), and the store's `warning` when it could not be read. A
+  stored credential is metadata by type: there is no field a key could be
+  written to.
+- **`system`** (since 32a): the machine as one reading — `cpu` (`model`,
+  `architecture`, the core counts, `load`, `utilization` with its `window_ms`),
+  `memory` (`total_bytes`, `used_bytes`, `available_bytes`), `apogee`
+  (`process_bytes`, `models_held`), `gpu` (`name`, `unified_memory`,
+  `model_budget_bytes` — the memory a model may offload to, the number window
+  sizing reads) and `disk` (the model store's `store_bytes` and its volume).
+  Every field is always there; one the platform cannot read is `null`, with
+  the reason beside it where there is one (`load_unknown`, `gpu.unknown`,
+  `model_budget_unknown`). The read takes about half a second: the CPU's
+  utilization is measured over a 500 ms window.
 
 No document carries a key or a token. A command that has no JSON face refuses
 `--output-format json` and names the commands that have one.

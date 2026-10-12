@@ -1,6 +1,7 @@
 #include "cli/graph.h"
 
 #include <CLI/CLI.hpp>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -9,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -32,6 +34,7 @@
 #include "graph/extract.h"
 #include "harness/harness.h"
 #include "harness/roles.h"
+#include "machine/json_reporter.h"
 #include "operations/graph_sources.h"
 #include "operations/knowledge_core.h"
 #include "views/status_line.h"
@@ -49,10 +52,19 @@ namespace {
     throw CLI::RuntimeError(kBackendError);
 }
 
-void require_plain_name(std::string_view name) {
+/// Why `name` cannot name a graph or collection, in the command's words;
+/// empty when it can.
+[[nodiscard]] std::string name_problem(std::string_view name) {
     if (name.empty() || name.find("..") != std::string_view::npos ||
         name.find('/') != std::string_view::npos || name.find('\\') != std::string_view::npos) {
-        fail_user("'" + std::string{name} + "' is not a plain graph or collection name");
+        return "'" + std::string{name} + "' is not a plain graph or collection name";
+    }
+    return {};
+}
+
+void require_plain_name(std::string_view name) {
+    if (const std::string problem = name_problem(name); !problem.empty()) {
+        fail_user(problem);
     }
 }
 
@@ -71,15 +83,19 @@ void require_plain_name(std::string_view name) {
     return std::filesystem::exists(path, code);
 }
 
+[[nodiscard]] std::string missing_problem(const std::string& name) {
+    return "no graph or collection named '" + name +
+           "' -- ingest documents first with 'apogee embed ingest', or add a graph with "
+           "'apogee config add-graph'";
+}
+
 /// A collection that must already exist: a read never creates an empty
 /// database out of a typo.
 [[nodiscard]] embedstore::Store open_existing(const std::string& name) {
     require_plain_name(name);
     const std::filesystem::path path = collection_path(name);
     if (!file_exists(path)) {
-        fail_user("no graph or collection named '" + name +
-                  "' -- ingest documents first with 'apogee embed ingest', or add a graph with "
-                  "'apogee config add-graph'");
+        fail_user(missing_problem(name));
     }
     return embedstore::Store{path};
 }
@@ -353,61 +369,60 @@ void print_build_summary(const std::string& name, const graph::BuildResult& resu
 }
 
 /// The counts every graph form shares.
-void print_stats_body(const std::string& name, const embedstore::GraphStats& st) {
+void print_stats_body(std::ostream& out, const std::string& name,
+                      const embedstore::GraphStats& st) {
     const std::int64_t code_nodes = code_node_count(st);
     const bool code_only = code_nodes == st.nodes && st.total_chunks == 0;
-    std::cout << "  Nodes:     " << st.nodes << " (" << type_summary(st) << ")\n";
-    std::cout << "  Edges:     " << st.edges << "\n";
+    out << "  Nodes:     " << st.nodes << " (" << type_summary(st) << ")\n";
+    out << "  Edges:     " << st.edges << "\n";
     // Origin is schema (27k): what a parse stated, and what a model asserted.
-    std::cout << "  Origin:    " << st.edges_extracted << " extracted (parsed from source), "
-              << st.edges_inferred << " inferred (asserted by a model)\n";
-    std::cout << "  Mentions:  " << st.mentions;
+    out << "  Origin:    " << st.edges_extracted << " extracted (parsed from source), "
+        << st.edges_inferred << " inferred (asserted by a model)\n";
+    out << "  Mentions:  " << st.mentions;
     if (st.code_mentions > 0) {
-        std::cout << " in chunks, " << st.code_mentions << " at a file:line";
+        out << " in chunks, " << st.code_mentions << " at a file:line";
     }
-    std::cout << "\n";
+    out << "\n";
     if (!code_only) {
         const std::int64_t coverage =
             st.total_chunks > 0 ? 100 * st.chunks_with_mentions / st.total_chunks : 0;
-        std::cout << "  Coverage:  " << coverage << "% of " << st.total_chunks
-                  << " chunks carry at least one entity\n";
+        out << "  Coverage:  " << coverage << "% of " << st.total_chunks
+            << " chunks carry at least one entity\n";
     }
     if (code_nodes > 0) {
-        std::cout << "  Vectors:   " << st.nodes_with_vectors << "/" << st.nodes - code_nodes
-                  << " prose entities embedded (code entities never are)\n";
+        out << "  Vectors:   " << st.nodes_with_vectors << "/" << st.nodes - code_nodes
+            << " prose entities embedded (code entities never are)\n";
     } else {
-        std::cout << "  Vectors:   " << st.nodes_with_vectors << "/" << st.nodes
-                  << " entities embedded\n";
+        out << "  Vectors:   " << st.nodes_with_vectors << "/" << st.nodes
+            << " entities embedded\n";
     }
     if (st.code_files > 0) {
         std::string languages;
         for (const auto& [language, count] : st.code_files_by_language) {
             languages += (languages.empty() ? "" : ", ") + language + " " + std::to_string(count);
         }
-        std::cout << "  Code:      " << st.code_files << " file(s) parsed (" << languages << "), "
-                  << st.unresolved_names << " unresolved name(s) -- `apogee graph update " << name
-                  << "` re-parses what changed\n";
+        out << "  Code:      " << st.code_files << " file(s) parsed (" << languages << "), "
+            << st.unresolved_names << " unresolved name(s) -- `apogee graph update " << name
+            << "` re-parses what changed\n";
     }
     if (!code_only || !st.extract_model.empty()) {
-        std::cout << "  Extractor: "
-                  << (st.extract_model.empty() ? "(unrecorded)" : st.extract_model) << "\n";
+        out << "  Extractor: " << (st.extract_model.empty() ? "(unrecorded)" : st.extract_model)
+            << "\n";
     }
     if (st.stale_files > 0) {
-        std::cout << "  Stale:     " << st.stale_files
-                  << " source file(s) need re-extraction -- run `apogee graph build " << name
-                  << "`\n";
+        out << "  Stale:     " << st.stale_files
+            << " source file(s) need re-extraction -- run `apogee graph build " << name << "`\n";
     }
     if (st.failed_chunks > 0) {
-        std::cout << "  Failed:    " << st.failed_chunks
-                  << " chunk(s) failed extraction in the last build\n";
+        out << "  Failed:    " << st.failed_chunks
+            << " chunk(s) failed extraction in the last build\n";
     }
     if (st.communities > 0) {
-        std::cout << "  Communities: " << st.communities - st.communities_unsummarised
-                  << " summarised";
+        out << "  Communities: " << st.communities - st.communities_unsummarised << " summarised";
         if (st.communities_unsummarised > 0) {
-            std::cout << ", " << st.communities_unsummarised << " clustered without a summary";
+            out << ", " << st.communities_unsummarised << " clustered without a summary";
         }
-        std::cout << " (`apogee graph communities " << name << " --list`)\n";
+        out << " (`apogee graph communities " << name << " --list`)\n";
     }
 }
 
@@ -1083,67 +1098,253 @@ void run_graph_update(const RootContext& context, const UpdateFlags& flags) {
     }
 }
 
-void print_named_stats(const Target& target) {
-    const harness::NamedGraphConfig& named = *target.named;
-    if (!file_exists(target.db_path)) {
-        std::cout << "No graph built for \"" << target.name << "\". Run: apogee graph build "
-                  << target.name << "\n";
+/// What `graph stats NAME` reads (37c): its text and its document are drawn
+/// from the one read.
+struct StatsRead {
+    std::string name;
+    /// The `graphs:` entry, for a named graph.
+    std::optional<harness::NamedGraphConfig> named;
+    bool built = false;
+    embedstore::GraphStats totals;
+    std::vector<embedstore::MemberStats> members;
+    std::string embed_model;
+    /// The membership the last build recorded, when the entry's has moved.
+    std::vector<std::string> as_built;
+};
+
+/// The read, graphs-first; a refusal throws `GraphRefusal` in the command's
+/// words.
+[[nodiscard]] StatsRead read_stats(const RootContext& context, const std::string& name) {
+    harness::Config config;
+    try {
+        config = harness::load_config(harness::resolve_config_path(context.config_path));
+    } catch (const harness::ConfigError& e) {
+        throw GraphRefusal{e.what()};
+    }
+    if (const std::string problem = name_problem(name); !problem.empty()) {
+        throw GraphRefusal{problem};
+    }
+    StatsRead read;
+    read.name = name;
+    if (const harness::NamedGraphConfig* named = config.find_graph(name); named != nullptr) {
+        read.named = *named;
+        const std::filesystem::path db = agentloop::graph_db_path(name);
+        if (!file_exists(db)) {
+            return read;
+        }
+        const embedstore::Store store{db};
+        const GraphMembers members = open_graph_members(*named);
+        embedstore::GraphStatsMulti stats = store.graph_stats_multi(members.views());
+        if (!stats.totals.built()) {
+            return read;
+        }
+        read.built = true;
+        read.totals = std::move(stats.totals);
+        read.members = std::move(stats.members);
+        read.embed_model = store.graph_meta(embedstore::kGraphMetaEmbedModel);
+        std::vector<std::string> current = named->collections;
+        std::ranges::sort(current);
+        if (std::vector<std::string> as_built = store.graph_members();
+            !as_built.empty() && !current.empty() && as_built != current) {
+            read.as_built = std::move(as_built);
+        }
+        return read;
+    }
+    const std::filesystem::path path = collection_path(name);
+    if (!file_exists(path)) {
+        throw GraphRefusal{missing_problem(name)};
+    }
+    const embedstore::Store store{path};
+    read.totals = store.graph_stats();
+    read.built = read.totals.built();
+    return read;
+}
+
+void print_stats(std::ostream& out, const StatsRead& read) {
+    if (!read.built) {
+        out << "No graph built for \"" << read.name << "\". Run: apogee graph build " << read.name
+            << "\n";
         return;
     }
-    const embedstore::Store store{target.db_path};
-    const GraphMembers members = open_graph_members(named);
-    const embedstore::GraphStatsMulti stats = store.graph_stats_multi(members.views());
-    if (!stats.totals.built()) {
-        std::cout << "No graph built for \"" << target.name << "\". Run: apogee graph build "
-                  << target.name << "\n";
+    if (!read.named.has_value()) {
+        out << "Knowledge graph for \"" << read.name << "\":\n";
+        print_stats_body(out, read.name, read.totals);
         return;
     }
-    std::cout << "Knowledge graph \"" << target.name << "\"";
+    const harness::NamedGraphConfig& named = *read.named;
+    out << "Knowledge graph \"" << read.name << "\"";
     if (!named.collections.empty()) {
-        std::cout << " over [" << join(named.collections) << "]";
+        out << " over [" << join(named.collections) << "]";
     }
     if (!named.sources.empty()) {
         std::vector<std::string> labels;
         for (const std::string& source : named.sources) {
             labels.push_back(source_member_label(source));
         }
-        std::cout << (named.collections.empty() ? " from" : " and") << " source tree(s) ["
-                  << join(labels) << "]";
+        out << (named.collections.empty() ? " from" : " and") << " source tree(s) [" << join(labels)
+            << "]";
     }
-    std::cout << ":\n";
-    print_stats_body(target.name, stats.totals);
-    if (const std::string embed_model = store.graph_meta(embedstore::kGraphMetaEmbedModel);
-        !embed_model.empty()) {
-        std::cout << "  Embedder:  " << embed_model << " (the graph's own entity-vector model)\n";
+    out << ":\n";
+    print_stats_body(out, read.name, read.totals);
+    if (!read.embed_model.empty()) {
+        out << "  Embedder:  " << read.embed_model << " (the graph's own entity-vector model)\n";
     }
-    if (!stats.members.empty()) {
-        std::cout << "  Members:\n";
+    if (!read.members.empty()) {
+        out << "  Members:\n";
     }
-    for (const embedstore::MemberStats& member : stats.members) {
-        std::cout << "    " << member.collection << ": " << member.mentions << " mention(s), "
-                  << member.chunks_with_mentions << "/" << member.total_chunks
-                  << " chunk(s) covered";
+    for (const embedstore::MemberStats& member : read.members) {
+        out << "    " << member.collection << ": " << member.mentions << " mention(s), "
+            << member.chunks_with_mentions << "/" << member.total_chunks << " chunk(s) covered";
         if (member.stale_files > 0) {
-            std::cout << ", " << member.stale_files << " stale file(s)";
+            out << ", " << member.stale_files << " stale file(s)";
         }
         if (member.missing) {
-            std::cout << " -- database missing";
+            out << " -- database missing";
         }
-        std::cout << "\n";
+        out << "\n";
     }
-    std::vector<std::string> current = named.collections;
-    std::ranges::sort(current);
-    if (const std::vector<std::string> as_built = store.graph_members();
-        !as_built.empty() && !current.empty() && as_built != current) {
-        std::cout << "  Note: membership changed since the last build (was [" << join(as_built)
-                  << "]) -- run `apogee graph build " << target.name << "` to converge.\n";
+    if (!read.as_built.empty()) {
+        out << "  Note: membership changed since the last build (was [" << join(read.as_built)
+            << "]) -- run `apogee graph build " << read.name << "` to converge.\n";
     }
+}
+
+/// `graph stats --output-format json`: the counts the text prints, whole.
+[[nodiscard]] nlohmann::json stats_document(const StatsRead& read) {
+    nlohmann::json out{{"object", "graph.stats"},
+                       {"graph", read.name},
+                       {"kind", read.named.has_value() ? "named" : "collection"},
+                       {"built", read.built}};
+    if (read.named.has_value()) {
+        out["collections"] = read.named->collections;
+        out["sources"] = read.named->sources;
+    }
+    if (!read.built) {
+        return out;
+    }
+    const embedstore::GraphStats& st = read.totals;
+    out["nodes"] = st.nodes;
+    out["nodes_by_type"] = st.nodes_by_type;
+    out["edges"] = st.edges;
+    out["edges_extracted"] = st.edges_extracted;
+    out["edges_inferred"] = st.edges_inferred;
+    out["mentions"] = st.mentions;
+    out["code_mentions"] = st.code_mentions;
+    out["total_chunks"] = st.total_chunks;
+    out["chunks_with_mentions"] = st.chunks_with_mentions;
+    out["nodes_with_vectors"] = st.nodes_with_vectors;
+    out["code_files"] = st.code_files;
+    out["code_files_by_language"] = st.code_files_by_language;
+    out["unresolved_names"] = st.unresolved_names;
+    out["extract_model"] = st.extract_model;
+    out["stale_files"] = st.stale_files;
+    out["failed_chunks"] = st.failed_chunks;
+    out["communities"] = st.communities;
+    out["communities_unsummarised"] = st.communities_unsummarised;
+    if (read.named.has_value()) {
+        out["embed_model"] = read.embed_model;
+        nlohmann::json members = nlohmann::json::array();
+        for (const embedstore::MemberStats& member : read.members) {
+            members.push_back({{"collection", member.collection},
+                               {"mentions", member.mentions},
+                               {"total_chunks", member.total_chunks},
+                               {"chunks_with_mentions", member.chunks_with_mentions},
+                               {"stale_files", member.stale_files},
+                               {"missing", member.missing}});
+        }
+        out["members"] = std::move(members);
+        out["membership_changed_from"] = read.as_built;
+    }
+    return out;
+}
+
+/// One entity as `graph show --output-format json` states it: what the text
+/// prints, its description and chunk text whole rather than previewed.
+[[nodiscard]] nlohmann::json node_document(const embedstore::Store& store,
+                                           const embedstore::GraphNode& node,
+                                           const GraphMembers* members, int chunks) {
+    nlohmann::json out{{"name", node.name},
+                       {"type", node.type},
+                       {"description", node.description},
+                       {"mentions", node.mention_count},
+                       {"vector_dim", node.dim}};
+    if (node.type == embedstore::kNodeTypeDecision) {
+        const embedstore::DecisionNodeMetadata meta =
+            embedstore::parse_decision_node_metadata(node.metadata);
+        out["status"] = meta.status;
+        out["discipline"] = meta.discipline;
+    }
+    if (embedstore::is_code_node_type(node.type)) {
+        nlohmann::json stated = nlohmann::json::array();
+        for (const embedstore::CodeMention& at : store.node_code_mentions(node.id, 0)) {
+            stated.push_back({{"role", at.role},
+                              {"collection", at.collection},
+                              {"file", at.file},
+                              {"line", at.line},
+                              {"end_line", at.end_line}});
+        }
+        out["stated_at"] = std::move(stated);
+    }
+    nlohmann::json relations = nlohmann::json::array();
+    for (const embedstore::Neighbor& neighbor : store.node_neighbors(node.id)) {
+        nlohmann::json relation{
+            {"relation", neighbor.relation},      {"direction", neighbor.outgoing ? "out" : "in"},
+            {"peer", neighbor.peer_name},         {"peer_type", neighbor.peer_type},
+            {"weight", neighbor.weight},          {"origin", neighbor.origin},
+            {"description", neighbor.description}};
+        if (neighbor.origin == embedstore::kOriginExtracted) {
+            constexpr int kSites = 3;
+            nlohmann::json sites = nlohmann::json::array();
+            for (const embedstore::EdgeSite& site : store.edge_sites(neighbor.edge_id, kSites)) {
+                sites.push_back({{"file", site.file}, {"line", site.line}});
+            }
+            relation["sites"] = std::move(sites);
+        }
+        relations.push_back(std::move(relation));
+    }
+    out["relations"] = std::move(relations);
+    nlohmann::json supporting = nlohmann::json::array();
+    if (members == nullptr) {
+        for (const embedstore::Chunk& chunk : store.node_chunks(node.id, chunks)) {
+            supporting.push_back(
+                {{"source", chunk.source}, {"chunk", chunk.ordinal}, {"text", chunk.text}});
+        }
+    } else {
+        for (const embedstore::ChunkRef& ref : store.node_mention_refs(node.id, chunks)) {
+            nlohmann::json row{{"collection", ref.collection}, {"chunk_id", ref.chunk_id}};
+            const auto it = members->stores.find(ref.collection);
+            if (it == members->stores.end() || it->second == nullptr) {
+                row["missing"] = "collection database missing";
+            } else if (const std::optional<embedstore::Chunk> chunk =
+                           it->second->chunk_by_id(ref.chunk_id);
+                       !chunk.has_value()) {
+                row["missing"] = "no longer present";
+            } else {
+                row["source"] = chunk->source;
+                row["chunk"] = chunk->ordinal;
+                row["text"] = chunk->text;
+            }
+            supporting.push_back(std::move(row));
+        }
+    }
+    out["chunks"] = std::move(supporting);
+    return out;
 }
 
 }  // namespace
 
 bool graph_updatable(const harness::NamedGraphConfig& graph) noexcept {
     return !graph.sources.empty();
+}
+
+std::string graph_stats_text(const RootContext& context, const std::string& name) {
+    std::ostringstream out;
+    print_stats(out, read_stats(context, name));
+    return out.str();
+}
+
+nlohmann::json graph_stats_document(const RootContext& context, const std::string& name) {
+    return stats_document(read_stats(context, name));
 }
 
 void run_graph_build(const RootContext& context, const GraphBuildRequest& request) {
@@ -1259,34 +1460,32 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
 
     // ---- stats ---------------------------------------------------------------
     auto s_name = std::make_shared<std::string>();
+    auto s_format = std::make_shared<ReadFormat>(ReadFormat::Text);
     CLI::App* stats =
         cmd->add_subcommand("stats", "Show a graph's counts, coverage, and build state");
     stats->add_option("NAME", *s_name, "A named graph or a collection")
         ->type_name(kGraphValue)
         ->required();
-    stats->callback([&context, s_name]() {
-        std::filesystem::path config_path;
-        const harness::Config config = load_config_strict(context, config_path);
-        const Target target = resolve_target(config, *s_name);
-        if (target.named != nullptr) {
-            print_named_stats(target);
+    add_read_format(stats, s_format);
+    stats->callback([&context, s_name, s_format]() {
+        StatsRead read;
+        try {
+            read = read_stats(context, *s_name);
+        } catch (const GraphRefusal& e) {
+            fail_user(e.what());
+        }
+        if (*s_format == ReadFormat::Json) {
+            write_document(std::cout, stats_document(read));
             return;
         }
-        const embedstore::Store store = open_existing(target.name);
-        const embedstore::GraphStats st = store.graph_stats();
-        if (!st.built()) {
-            std::cout << "No graph built for \"" << target.name << "\". Run: apogee graph build "
-                      << target.name << "\n";
-            return;
-        }
-        std::cout << "Knowledge graph for \"" << target.name << "\":\n";
-        print_stats_body(target.name, st);
+        print_stats(std::cout, read);
     });
 
     // ---- show ----------------------------------------------------------------
     auto sh_name = std::make_shared<std::string>();
     auto sh_entity = std::make_shared<std::string>();
     auto sh_chunks = std::make_shared<int>(3);
+    auto sh_format = std::make_shared<ReadFormat>(ReadFormat::Text);
     CLI::App* show =
         cmd->add_subcommand("show", "One entity: its relations and the chunks that support it");
     show->add_option("NAME", *sh_name, "A named graph or a collection")
@@ -1295,7 +1494,8 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
     show->add_option("ENTITY", *sh_entity, "The entity's name (case-insensitive), or a record id")
         ->required();
     show->add_option("--chunks", *sh_chunks, "Supporting chunks to print (default 3; 0 = all)");
-    show->callback([&context, sh_name, sh_entity, sh_chunks]() {
+    add_read_format(show, sh_format);
+    show->callback([&context, sh_name, sh_entity, sh_chunks, sh_format]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_strict(context, config_path);
         const Target target = resolve_target(config, *sh_name);
@@ -1304,6 +1504,12 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
             fail_user("no graph built for '" + target.name + "' -- run: apogee graph build " +
                       target.name);
         }
+        // The document says the match the text says in its lines (37c).
+        const bool json = *sh_format == ReadFormat::Json;
+        nlohmann::json document{{"object", "graph.show"},
+                                {"graph", target.name},
+                                {"entity", *sh_entity},
+                                {"match", "exact"}};
         std::vector<embedstore::GraphNode> nodes = store.find_nodes(*sh_entity);
         if (nodes.empty()) {
             // Exact by normalised name, then the entity index for a partial.
@@ -1311,22 +1517,47 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
             if (hits.empty()) {
                 fail_user("no entity matching '" + *sh_entity + "' in '" + target.name + "'");
             }
-            std::cout << "No exact match for \"" << *sh_entity
-                      << "\"; closest: " << hits.front().node.name << "\n";
-            if (hits.size() > 1) {
-                std::cout << "Also matched:";
+            if (json) {
+                document["match"] = "closest";
+                nlohmann::json also = nlohmann::json::array();
                 for (std::size_t i = 1; i < hits.size(); ++i) {
-                    std::cout << (i == 1 ? " " : ", ") << hits[i].node.name;
+                    also.push_back(hits[i].node.name);
                 }
-                std::cout << "\n";
+                document["also_matched"] = std::move(also);
+            } else {
+                std::cout << "No exact match for \"" << *sh_entity
+                          << "\"; closest: " << hits.front().node.name << "\n";
+                if (hits.size() > 1) {
+                    std::cout << "Also matched:";
+                    for (std::size_t i = 1; i < hits.size(); ++i) {
+                        std::cout << (i == 1 ? " " : ", ") << hits[i].node.name;
+                    }
+                    std::cout << "\n";
+                }
             }
             nodes.push_back(hits.front().node);
         }
         if (target.named != nullptr) {
             const GraphMembers members = open_graph_members(*target.named);
+            if (json) {
+                document["data"] = nlohmann::json::array();
+                for (const embedstore::GraphNode& node : nodes) {
+                    document["data"].push_back(node_document(store, node, &members, *sh_chunks));
+                }
+                write_document(std::cout, document);
+                return;
+            }
             for (const embedstore::GraphNode& node : nodes) {
                 print_named_node(store, node, members, *sh_chunks);
             }
+            return;
+        }
+        if (json) {
+            document["data"] = nlohmann::json::array();
+            for (const embedstore::GraphNode& node : nodes) {
+                document["data"].push_back(node_document(store, node, nullptr, *sh_chunks));
+            }
+            write_document(std::cout, document);
             return;
         }
         for (const embedstore::GraphNode& node : nodes) {

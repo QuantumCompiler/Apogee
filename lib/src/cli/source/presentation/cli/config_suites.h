@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -50,5 +51,12 @@ void append_suite_keys(const harness::Config& config, std::vector<std::string>& 
 
 /// Adds the suite verbs to `config`.
 void bind_suite_verbs(CLI::App& parent, const RootContext& context);
+
+/// Sets `models.default_suite` in the config at `path` to suite `name`, or
+/// to none for `off`, through the one editor -- `config set-default-suite`,
+/// and the full-screen shell's (32d). Refused, naming the suites there are,
+/// when none is called `name`. Returns what was set.
+[[nodiscard]] std::string point_default_suite(const std::filesystem::path& path,
+                                              const std::string& name);
 
 }  // namespace apogee::commands

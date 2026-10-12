@@ -79,6 +79,47 @@ std::optional<ThinkingMode> thinking_mode_from_string(std::string_view text) noe
     return std::nullopt;
 }
 
+std::string_view to_string(Effort effort) noexcept {
+    switch (effort) {
+        case Effort::Low:
+            return "low";
+        case Effort::Medium:
+            return "medium";
+        case Effort::High:
+            return "high";
+        case Effort::XHigh:
+            return "xhigh";
+        case Effort::Max:
+            return "max";
+    }
+    return "high";
+}
+
+std::optional<Effort> effort_from_string(std::string_view text) noexcept {
+    for (const Effort effort : kEfforts) {
+        if (text == to_string(effort)) {
+            return effort;
+        }
+    }
+    return std::nullopt;
+}
+
+std::int64_t effort_budget(Effort effort) noexcept {
+    switch (effort) {
+        case Effort::Low:
+            return 1'024;
+        case Effort::Medium:
+            return 4'096;
+        case Effort::High:
+            return 16'384;
+        case Effort::XHigh:
+            return 24'576;
+        case Effort::Max:
+            return 32'768;
+    }
+    return 16'384;
+}
+
 std::string_view to_string(Role role) noexcept {
     for (const auto& [name, value] : kRoleNames) {
         if (value == role) {

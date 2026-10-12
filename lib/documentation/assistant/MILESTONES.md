@@ -2204,6 +2204,17 @@ Asked for directly (Taylor), in three reports: "Not all subcommands have tab aut
 **Verified.** The full suite on macOS, 2912/2912; `format-check`; the GCC check, all 537 files with the MinGW-w64 compiler the x64 job uses. Nothing local compiles the arm64 job's libc++ side; the next pull-request run is the proof for both Windows jobs.
 
 
+### 2026-10-08 — `install-ends-green` (maintenance item M11): a fresh install reports zero warnings
+
+**Why.** A real fresh-install `check` ended `no failures, 2 warning(s)` -- the missing config and the training venv -- and the user's call was that installing should resolve its own warnings. The two needed different fixes, because one is offline and deterministic while the other is pip over the network, which the SPEC's *installers download nothing unasked* forbids.
+
+- [x] **`check --fix` seeds the starter config where no config file exists at all** (`check.cpp`: the seed in `apply_fixes`, right after the one seeding path runs): the JSONC template, byte-identical to `config init`'s output, written only at the install's own `config/config.json` -- never at a path a `--config` flag named elsewhere -- and said as `seeded <path> -- the starter config (no config file existed)`. The same pass's report then reads the seeded file (`read_config_state`, the one loader hoisted and re-run after fixes), so `--fix` ends green rather than reporting the warning it just repaired. An existing config of either format is never touched under any flag; the invariant's letter in CLAUDE.md now says so beside the new power.
+- [x] **The opt-in rows are skips, not warnings.** The training venv row joins the MLX rows' idiom (`not set up -- only 'datasets prepare' and the trainers need it (never the system Python)`): created on request, its command kept. And the tightened gate found a third warning the user's transcript could never show -- `backends: none configured` renders only once a config parses, which the seed made true on every fresh install -- reclassified the same way, its detail now naming `providers scan --register` as the found-for-you path. A fresh install has no keys and no models by design; the models row already reads "bundles none" as ok.
+- [x] **`cli.install_parity` enforces it**: a freshly seeded install must report `"warnings":0` (the compact JSON document), on the release path and on every channel's own root -- so a future feature that quietly re-warns on fresh installs fails the suite rather than shipping. The gate caught the backends row in this very build, which is the point.
+- [x] **Tests**: the seed-if-absent table in `check_test.cpp` (absent -> created, said, byte-equal to the template; present YAML and JSONC -> untouched byte-for-byte; a path named elsewhere -> never seeded; a second pass -> a no-op), the venv skip's wording, the existing `--fix`-never-touches-config case unchanged and green. Full suite: 2,996 ctest cases, 100% passed.
+
+Trade-off, recorded: `warn` is now reserved for real defects -- a fresh install shows only `ok` and `skip` rows, and every skip carries the command that changes it.
+
 ## Milestone L — The vendor-CLI family
 
 **Goal.** A fifth backend and, more importantly, the machinery the rest of the vendor-CLI family will be built on: Claude driven through the official `claude` CLI as a **long-lived child process** — the subscription-auth path beside the API-key path from Milestone D. It reuses that backend's IR mapping and typed sinks and none of its HTTP: this one speaks JSONL over pipes.
@@ -3432,6 +3443,17 @@ So, **by the user's call**, the item builds on what is installed: no `apogee com
 | `--help` | **Shows the narrower type names** (`MODEL_SUITE_OR_OFF`, `SOURCED_GRAPH`, `PRECISION:{…}`, the `--validate` and `--toolset` word sets) *(2026-10-06)* | A type name names what completes. |
 
 **Verified.** The full suite, 2887/2887 (2877 before: ten new tests); `format-check`; the GCC check, every file; clang-tidy on the touched files, nothing on the error list. Each kind has a test running the verb on every candidate it offers, and on what it leaves out where that is refused; `suites_e2e.sh`, `symphonies_e2e.sh` and `task_e2e.sh` check the real binary's offers.
+
+### 2026-10-08 — `config-scan-register` (maintenance item M12): the store registered in one pass
+
+**Why.** The user's ask, with the spelling given: `apogee config scan --register`, the local-store twin of `providers scan --register` -- every runnable stored model registered under its default name in one pass, instead of one `add-backend` per file.
+
+- [x] **`config scan`** (`config_cmd.cpp`, `bind_scan`): a row per runnable stored model -- GGUF files and MLX directories -- with its default name, its standing (`backend: <names>` for a path a backend already holds, `not registered`, or `not registered -- <why --register leaves it alone>`), its path and projector beneath, the SafeTensors snapshots counted and said (weights, not runnable), and the `--register` pointer when anything is registerable. The default names are the chain's own spelling (M3): a GGUF's file stem with the final dash-token's underscores removed (`a-Q4_K_M.gguf` -> `a-Q4KM`), and `stored_mlx_name` for an MLX set -- no new derivation anywhere.
+- [x] **`--register` is the batch add-backend, byte for byte**: each registerable row becomes a `BackendConfig` (type from `backend_type_for_format`, the path, the projector) through the same `append_backend` the hand-typed verb writes -- proven by the twin-install test, whose scan-registered config equals N hand-typed `add-backend` calls exactly, comments kept. A taken default name, or one two stored models share, is skipped with its reason on the row (the fill's own refusal, M7, as a row); a second run writes nothing and says so.
+- [x] **The providers verb's contract, mirrored**: with no config file the scan still runs and names `config init`; `--register` refuses there, naming it, and never creates one. A carve-out row joins the CLI<->HTTP parity table beside `providers scan`'s: host-local by nature, its write already twinned by the add-backend route. The subcommand and flag complete from the live parser.
+- [x] **Tests** (`config_cmd_test.cpp`, three cases, 31 assertions): the rows and the spelling, the composition pin, idempotence, the taken-name and shared-name skips with the file untouched, the no-config split. Full suite: 2,999 ctest cases, 100% passed.
+
+One deliberate non-feature, recorded: no per-model confirmation -- `config scan` without `--register` is the preview, exactly the providers verb's split.
 
 ## Milestone O — Local multimodal
 
@@ -6359,3 +6381,835 @@ Three of four families walked the attached tree through the scoped tools, and **
 **Not verified.** Windows (the e2e is POSIX); a real vendor CLI's turn recording itself (the fake codex speaks the recorded protocol through the real backend, which is the seam); the admin plane, which does not serve provider status (out of scope by the item).
 
 **Left for the owner.** The readings in the table, each a one-place change if vetoed — above all the record written through one Harness observer rather than per provider, and `no turn yet` as the VERIFIED word.
+
+### 2026-10-08 — `provider-model-rosters` (maintenance item M13): registration brings the models
+
+**Why.** Registering a provider gave one backend entry and no models: Opus 5.5, Sonnet 5.5 and kin had to be known and typed by hand, and nothing in the binary could say what a vendor offers today. The user's ask: all the granular models at their precise versions, live from the provider at registration, nothing hardwired. The architecture was ready -- `LLMProvider` has carried `list_models` since 2026-08-25 -- but that method is deliberately entry-scoped (its in-code reason: the catalogue would report models the entry cannot serve), so the catalogue landed as a capability.
+
+- [x] **`CatalogListing`** (`contracts/provider.h`): the vendor's live catalogue as a capability interface, discovered by the Harness (`catalog_for`/`can_list_catalog`, the `can_embed` idiom -- the one cast stays in the Harness). Implemented by the three API providers over their own models endpoints, each through the injected HTTP client: Anthropic paged by `has_more`/`after_id`, Google by `nextPageToken` with the `models/` prefix stripped, OpenAI one page -- ids **verbatim**, no model id anywhere in source, a malformed response a `ProviderError`, never a partial roster. A broken paging contract ends the list, never loops.
+- [x] **The roster cache** (`backends/model_roster.h/.cpp`, `cache/model-rosters.json` via `harness::roster_cache_path()`): the provider cache's disposable idiom verbatim -- schema 1, absent/truncated/corrupt/other-schema read as empty, atomic writes, a failed write costing the record and said -- keyed by backend *type*, because the catalogue is the vendor's. Fetched **on the user's word only**: after `providers scan --register` registers (the missing types), and on `--refresh` (all types), each fetch one narrated line, a failure keeping the cached roster with its date. A plain scan, a listing, a completion: zero network, by construction.
+- [x] **Surfaced everywhere a model name is wanted**: `models list` folds each configured vendor's roster behind one dim line (`anthropic's roster: N models (fetched <date>) -- --all lists them`), `--all` showing every id as a dim `(anthropic roster)` row (M4's folding mechanics); `models info <roster id>` answers whose roster holds it; `-m` tab-completes the roster ids beside the backend keys (the cache, never a fetch) -- `/model`'s in-session completion, claimed here at the time, arrived only with item 33.
+- [x] **A bare roster model runs** (`operations/backend_names`' `resolve_roster_model`, called by `complete` and the session core before the Harness is built): a name that is neither a backend key nor an entry's `model:` with exactly **one** configured owner pins that entry's model **in memory for the run** -- the config file never changes, the pin said on stderr (`model 'claude-opus-5-5' -- anthropic's roster, on backend 'claude'`); two owners refuse naming both; zero falls to the existing refusal. The mode named as skipped per the parity ADR: `serve`'s per-request override is a wire-shape change deserving its own item.
+- [x] **The layering test earned its keep**: `operations` reading the roster cache was an undeclared module edge, refused by `harness.layering` and then declared in `cmake/modules.cmake` (`operations` -> `backends`, the lawful direction). The map stays the one truth.
+- [x] **Tests**: the three vendors' wire fixtures (paging followed, GET with each entry's own auth, ids verbatim, the malformed-shape refusal), the cache's disposability table, the resolution table (sole owner / unconfigured type owns nothing / two owners named / unknown empty), and the scan/list/info/completion surfaces. Full suite: 3,005 ctest cases, 100% passed.
+
+Trade-off, recorded: the roster lives in cache, not the config -- one provider entry, every model addressable; `config add-backend --model <id>` still pins one as its own entry when a user wants a name for it.
+
+### 2026-10-10 — `roster-model-switching` (backlog item 33): `/model` takes what `-m` takes
+
+**Why.** With one Anthropic entry registered and its roster fetched, a conversation could not move onto another of the vendor's models once it had started. `-m claude-opus-5-5` ran a roster model at launch, but `/model` took backend keys only, and the full-screen shell has no launch flag at all, so from the TUI only the entry's own model could be reached. The user asked how to register every Anthropic model as its own backend. Offered that or switching in session, they chose switching: M13's one-entry design kept, the config untouched. M13's own spec had promised that `/model` accepts and completes roster models; the session's completer never offered them.
+
+- [x] **One reading of a model name** (`operations/backend_names`' `resolve_session_model`): a key or an entry's `model:` first, then a roster model with exactly one configured owner, two owners refused in one set of words, nothing for an unknown name. Launch `-m`, `/model` and `complete -m` all call it, so they can't disagree. M13's two copies of the launch logic (the session core's and `complete`'s) are gone into it. It reads the config as the file has it, so a pin is never mistaken for its entry's own model.
+- [x] **The pin is the Harness's view, never the file** (`Harness::pin_model`, beside 27d's `set_active_suite`): one entry runs a roster model in the Harness's config, and `""` restores exactly the model it replaced. The caller rebuilds the entry through `rebuild_providers`, the path a suite switch already takes. The launch pin moved here too: the session's own config view no longer changes.
+- [x] **`/model` switches onto it, and back** (`chat_session`'s `move_pin`): one pin at a time, only on the conversation's backend. Leaving it, by `/model` anywhere else (the entry's bare key included) or by a `/suite` that moves the conversation, restores the entry and rebuilds it. A rebuild that fails puts every pin back and says why, and the conversation stays where it was. Attachments settle before a rebuild, as `/suite` settles them. The switch is said as the launch pin is (`switched to claude-sonnet-5-5 -- anthropic's roster, on backend 'claude'`), and `/model`, the banner and the TUI header read `claude (claude-sonnet-5-5)` while it holds. `/models` marks the pinned entry and folds each configured roster to one line. As a side effect, `/model Claude` now lands on the file's spelling, so `/models` stars it.
+- [x] **Saved with the chat** (`Session::model`, written only when set): launch `-m` and `/model` record the pin. A resume pins it again when the chat lands back on its backend, said on stderr as `-m` says it, so a chat reopened from the TUI's picker never quietly answers from a different model. `-m` on a resume replaces it, and an older binary ignores the field and resumes on the entry's own model.
+- [x] **Completed where it is typed** (`ArgumentValues::Models`): `/model ` offers the backends, then every configured type's cached roster ids, described `<type>'s roster`, read from the cache and never fetched. That covers the REPL and the TUI's input alike, one completer. `/rerank` keeps the backends alone.
+- [x] **Parity, named** ([ADR 0002](../adrs/cli/mode-parity.md)): the REPL and the shell share `run_session`, so they are one change. Machine mode has no `/model` (a `/`-line other than `/play` is a prompt there); its `-m` already resolved, and the resume re-pin reaches it through the same core. `serve`'s per-request roster override stays skipped, M13's consumed decision, and machine mode's `result.model` still names the backend key (a recorded default).
+- [x] **The mock says what it runs**: `{{model}}` expands to the model the provider was built to run, so a script proves which model a pin put it on.
+- [x] **Tests**:
+  - the resolution table: a key in any case, an entry's own model, a key that is also a roster id, a sole owner, two owners, unknown and empty;
+  - the Harness pin rebuilt, routed, replaced and restored;
+  - the record's round trip;
+  - the completer's rows, the sources reading only configured types, and a cold cache;
+  - `apogee chat` in process on mocks that answer with their model: a switch and back, a leave that restores, a resume that pins again, `-m` saved, both refusals, a `/suite` that restores, the config byte-identical throughout;
+  - the TUI session view: the roster offered in its input, the switch, the header following, and the chat saved with its pin.
+
+  Chat's and execute's surface goldens changed in one row, `/model [backend|model]`.
+
+**Verified on the real binary**, in a scratch `APOGEE_HOME` holding a mock entry and a hand-written roster cache:
+- a piped chat ran on the entry's own model, switched with `/model mock-pro`, answered from it, and `/models` folded the roster;
+- `chat -c` pinned it again with the launch's line and answered from it;
+- `complete -m mock-mini` ran on its owner;
+- `__complete chat -m mock-` offered both ids.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,085 of 3,085, the pdftotext case skipped as before. `clang-format` is clean on every file this item touched. The violations `make format-check` still reports are all in M13's files, which this item doesn't touch. `make lint` was not run.
+
+Trade-off, recorded: helper roles that resolve to the pinned entry run the pinned model while it holds, the same as M13's launch pin did for a whole run. A roster model for one role alone is still `config add-backend --model <id>`'s job.
+
+### 2026-10-10 — `backend-model-pins` (backlog item 34): `/model <backend>:<model>`
+
+**Why.** Item 33 shipped, and the user's next run of it failed: "it isn't working." Reproduced in a scratch home:
+- The user's cloud backends are the vendor CLIs (Claude Code, Codex, Gemini), and no API key resolves for any provider.
+- Registration adds the three CLIs and fetches no roster for them, since M13 left CLIs out for having no models endpoint, so a roster id had nothing to resolve against.
+
+The CLIs were asked directly. Claude Code's `--model` takes an alias (`fable`, `opus`, `sonnet`) or a full name, and it lists nothing. Codex prints its own catalog (`codex debug models`). Gemini takes `-m` and lists nothing. Each backend already handed an entry's `model:` to its CLI as `--model`.
+
+- [x] **`<backend>:<model>`**, the third rung of `resolve_session_model`. It splits at the first colon whose left side is a configured key, so `ollama:gemma4:31b:cloud` keeps its model's own colons, and a key holding a colon still works.
+  - The model is the user's words, handed to the vendor verbatim. Nothing is hardwired, and a bad name is the vendor's to refuse, said as any turn's error is.
+  - It sits after the first two rungs, so an entry's own colon-holding model (`llama3:8b`) and a roster id holding a colon (`kimi-k3:cloud`) mean what they meant.
+  - Launch `-m`, `/model`, `complete -m` and the resume all reach it through the one function. The pin is item 33's: the Harness's view, one per conversation, saved with the chat, the config byte-identical.
+- [x] **Only where a name picks the model**: `names_its_model(type)`, beside `is_vendor_cli` in `contracts/config`, an exhaustive switch.
+  - An entry that runs the weights at its `model_path` (llamacpp, mlx) is refused, naming why.
+  - `<backend>:` alone, or `<backend>:<its own model>`, is the entry itself.
+- [x] **Said as what it is**: `switched to opus -- on backend 'claude'`. Launch and resume say `model 'opus' -- on backend 'claude'`, and the resume reads the saved pin back through the one resolution, so a roster pin is still said as the roster's.
+- [x] **Codex's catalog as its roster**: `CodexCliProvider` is a `CatalogListing`, so M13's `fetch_rosters` picks it up with no change.
+  - `codex debug models` runs over the provider's own spawner, with stdin closed, the stderr tail kept and a 30-second bound.
+  - Each entry the CLI lists becomes its slug, verbatim, and the ones its own `visibility` hides are left out.
+  - Any other shape is refused, naming the backend, rather than read in part. It is a debug subcommand, a recorded risk, and the cached roster stands when it fails.
+  - `cli.no_provider_probes` now bans `list_catalog` and `catalog_for` from every hot path, so a turn can never start the run. M13's spec had asked for that guard, and it was never written.
+- [x] **Completion past the colon**: `/model codex:` (REPL and TUI, one completer) and `-m codex:` (`__complete`) offer that entry's cached roster as `codex:<id>`, only once the colon is typed. An entry with no roster offers nothing after its colon. The bash stub already kept `:` inside a word.
+- [x] **Tests**:
+  - the type fact;
+  - the rung's table (CLI, API, Gemini, case, colon-holding models and keys, the entry's own model, a file-run refusal, an unknown key);
+  - Codex's catalog over a fake child (argv, the visibility rule, seven malformed documents, a failed run, a hang cut off and terminated), with the fake spawner gaining an exit status and a hang;
+  - the Harness finding the capability;
+  - the completer and the protocol after a colon;
+  - a chat on mocks pinning `other:custom-x`, the refusal, a resume and a launch `-m`.
+
+  Chat's and execute's surface goldens changed in `/model`'s description.
+
+**Verified on the user's own three CLIs**, in a scratch `APOGEE_HOME`:
+- `providers scan --register` registered `claude`, `codex` and `gemini` and fetched Codex's catalog: 8 listed models, 2 hidden ones left out.
+- A piped chat switched to `claude:opus`, Codex's `gpt-5.5` (bare, from its roster), `gemini:gemini-2.5-pro`, and back to `claude`, each said, with `/models` folding the roster.
+- `__complete chat -m codex:gpt` offered the three `codex:gpt-*` ids.
+- One real turn, `complete -m claude:sonnet`, answered `OK`. A pass-through wrapper recorded `--model sonnet` in Claude Code's argv.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,095 of 3,095, the pdftotext case skipped as before. `clang-format` is clean on every file this item touched, and `make lint` was not run.
+
+**Fixed alongside (2026-10-10): the suite's own home.** Building this item showed that completion and listing tests read the developer's real roster cache: they called the completer or `build_model_rows` without a home of their own. Codex's catalog now fills that cache for anyone with the CLI, so the suite's results would have depended on the machine it ran on.
+- Found by running the unit suite twice, under an empty `APOGEE_HOME` and under one whose roster cache lists a decoy model for every backend type. Five cases changed outcome only with the decoys: two in `models_test`, three in `lifecycle_test`.
+- Fixed structurally rather than case by case: `tests/support/hermetic_home.cpp`, a Catch2 listener beside `hermetic_stdin.cpp`, gives the whole run an empty `APOGEE_HOME` of its own. A test's own guard still wins for its scope, and the root-resolution tests already unset the variable explicitly.
+- Rerun with the decoy cache in the environment, all five pass and nothing else changes. The only failures left are the mlx-driver tests colliding when run in parallel, which pass serially.
+- The full suite through `cicd.sh --test` (llama.cpp on) passes 3,095 of 3,095 with the hook, the pdftotext case skipped as before.
+
+Trade-off, recorded: Claude Code and Gemini still complete nothing after their colon. Neither prints its models, and an alias table in source would be the hardwiring M13 refused. The name is the user's to type, and the vendor's to accept or refuse. *(Superseded the same day by item 35, at the user's call: built-in lists for both.)*
+
+### 2026-10-10 — `cli-model-aliases` (backlog item 35): every CLI's models in the table
+
+**Why.** After item 34, the user's `models list` still showed `claude`, `codex` and `gemini` as one row each: "the sub models for each cli are not registering under the models table." Two causes:
+- Codex's catalog *was* fetched, but `models list` folded every roster behind one line at the bottom of the table.
+- Claude Code and the Gemini CLI print no model list, so items 33 and 34 had nothing to show for them.
+
+The user asked whether `claude model list` could be reused. No such command exists (Claude Code 2.1.289, and its `--help` names none). The user's calls:
+- **a built-in list** for the two CLIs, relaxing M13's "nothing hardwired" for them alone, with Claude Code's list being "the sub models for each anthropic e.g. Opus5.5, Opus5, Fable5.1, Fable5";
+- **every roster row shown in the plain table.**
+
+- [x] **The built-in lists** (`backends/model_roster`'s `built_in_rosters()`), with their source and date in the code beside the table:
+  - **Claude Code** gets Anthropic's published model ids, everything its models overview listed on 2026-10-10 as current or still available: `claude-fable-5-1`, `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`, `claude-fable-5`, `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6`, plus `claude-opus-4-5` and `claude-haiku-4-5` by the API's aliases for the dated snapshots. Each id was checked against Anthropic's model-id page (the dateless `claude-{name}-{major}[-{minor}]` form). Claude Code 2.1.289 carries the 5.x ids itself, and it passes any id to the API.
+  - **Gemini CLI** gets its own aliases, `pro`, `flash` and `flash-lite`, the `GEMINI_MODEL_ALIAS_*` constants of Gemini CLI 0.46.0. No Google id list was verified to stand beside them.
+  - Each roster is `built_in`, never written to the cache (`save_roster_cache` skips it). `known_rosters()` reads it beside the cache, so an upgrade's list is live on its first run, and a roster fetched for the same type always wins.
+- [x] **One read for every reader**: completion (REPL, TUI and `__complete`), resolution, `models list`/`info`, `/models` and the workbench read `known_rosters()`. Only `providers scan`'s fetch reads and writes the cache itself. A built-in id resolves bare on its sole owner (`/model claude-opus-5`), and completes after `claude:`.
+- [x] **Rows, unfolded and named as they are selected** (`build_model_rows`):
+  - `claude:claude-opus-5-5`, `codex:gpt-5.5`, `gemini:flash`, under their entry, with no `--all`;
+  - `SOURCE` reads `built in` or `roster`, and `VERIFIED` reads `reviewed <date>` or `fetched <date>`;
+  - the JSON listing carries the same rows. M13's `(<type> roster)` spelling never shipped in a release.
+- [x] **`models info` for those names** (`render_pinned_model`): the entry, the list naming the model (built in, a fetched roster, or none, handed to the CLI as given), and how to select it. It replaces M13's one-line roster answer.
+- [x] **`/models`** lists each backend's models under it, in place of the folded line.
+- [x] **The TUI's Models view**: Enter moves the conversation onto the selected row, a backend or a model one runs (`WorkbenchHooks::use_model`, `TuiSessionDriver::use_model`: `/model <name>` into an open conversation, or a new chat on it, as Suites' Enter is `/suite`). `i` reads `models info`. A row `/model` cannot take (stored weights no entry runs) stays put.
+- [x] **Tests**: the built-in lists (read beside an empty cache, never saved, a fetch winning); the table's rows, order, provenance and JSON; `models info` for a listed, a bare and an unlisted model; resolution of a built-in id and a Gemini alias; the workbench's Enter and `i`. Three earlier tests moved to an Ollama entry for "a type with no list", since Claude Code now has one.
+
+**Verified on the user's own CLIs**, in a scratch `APOGEE_HOME`:
+- `models list` showed the 13 Anthropic ids under `claude`, Codex's 8 fetched models under `codex`, and the three aliases under `gemini`, with no `--all`.
+- `models info claude:claude-opus-5` named the entry and the list.
+- A piped chat switched to `claude-opus-5` and `flash` bare, each said.
+- One real turn, `complete -m claude-haiku-5-5` (an id the installed Claude Code binary does not itself carry), answered `OK`, with `--model claude-haiku-5-5` in Claude Code's recorded argv.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,100 of 3,100, the pdftotext case skipped as before. `clang-format` is clean on every file this item touched, and the violations left are all in M13's API-backend files, which this item doesn't touch. `make lint` was not run.
+
+Trade-off, recorded: Claude Code's list is Apogee's to keep current. A new Anthropic model is a row in `model_roster.cpp`, and a retired one a deletion, until Claude Code prints a list of its own. Then the fetched roster wins at once, with no change here.
+
+**Made a standing rule the same day (the user's word): [ADR 0009](../adrs/cli/built-in-model-lists.md), model lists Apogee carries are kept current with their vendors.** The lists are updated during development whenever relevant, by the change that finds them stale:
+- a vendor shipping, renaming or retiring a model;
+- a change touching a backend, the rosters, completion or model selection;
+- every release roll.
+
+A CLI that learns to list its models gets `CatalogListing` and loses its carried list. It is carried in four places:
+- each table now has its `...Reviewed` date (`kClaudeCodeReviewed`, `kGeminiCliReviewed`), shown to users as `reviewed <date>` in `models list` and `models info`, the way a fetched roster shows `fetched <date>`;
+- CLAUDE.md's per-change checklist;
+- a DEVELOPER.md recipe (Updating a carried model list: each list's source, the steps, the one-turn proof);
+- an audit step in the pre-MR docs skill, and a gate check in the release-roll skill, which reports and never edits.
+
+The roster test now holds that each reviewed date is a real date.
+
+### 2026-10-10 — `models-list-sections` (backlog item 36): cloud by provider, local by format
+
+**Why.** With item 35's rows in place, the user's `models list` was one table of 50 rows: local GGUFs, three vendor CLIs and their sub-models, sorted together by name. Their ask was cloud backends tabled by provider, adaptable to any number of providers and backends, and local backends split by format: SafeTensors, GGUF, then MLX.
+
+- [x] **Each row placed from the row alone** (`model_group`).
+  - A cloud row goes by its provider's backend type, ordered and labelled by the providers' table (28a): `Claude CLI · claude-cli`, `Codex CLI · codex-cli`, `Anthropic API · anthropic`, and so on. A provider with no entry has no table, and a new provider is a new table with no change here.
+  - A local row goes by what it is stored as: SafeTensors, GGUF, MLX, in the user's order. The Ollama CLI follows them, since it runs models on this machine, and Other comes last (a mock entry, anything with no format).
+- [x] **Sections of tables** (`render_model_table`): "Cloud backends", then "Local backends". Each table is headed and sizes its own columns, and leaves out:
+  - TYPE, which its heading names;
+  - ARCH and PROFILE on the cloud side;
+  - any column empty or `-` in every one of its rows.
+
+  A provider's sub-models stay under their entry. M4's consumed-snapshot fold is said under the SafeTensors table, with `--all` listing them as before.
+- [x] **The same placement in the JSON**: `section` (`cloud`/`local`) and `group` (the provider's type, or `safetensors`/`gguf`/`mlx`/`ollama-cli`/`other`), additive, with the rows and their order unchanged. The TUI's Models view, which mirrors the JSON row for row, is untouched, and the fields make grouping it a small later change.
+- [x] **Tests**:
+  - the sections over hand-built rows of every kind: headings in order, a missing provider absent, TYPE nowhere, each table's exact header line, a sub-model under its entry, the JSON fields;
+  - the fold under SafeTensors, and `--all` swapping it for the row;
+  - the colour test's header check made position-free;
+  - `cli.provider_surfacing`'s greps now finding the Claude CLI table by its heading, and rows by name with no TYPE column.
+
+**Verified on the user's install, read-only** (`models list` writes nothing):
+- the Claude CLI, Codex CLI and Gemini CLI tables under "Cloud backends", each entry's models under it, with no ARCH or PROFILE;
+- under "Local backends", the SafeTensors heading with its 13 folded snapshots said, then the GGUF table with no TYPE and no ROLES (no row has one).
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,101 of 3,101, the pdftotext case skipped as before. `clang-format` is clean on every file this item touched, and `make lint` was not run.
+
+## Milestone AG — System insight
+
+**Goal.** The machine had been read in exactly one place for exactly one purpose: 26a's window sizing asked llama.cpp what the devices a model offloads to hold, and 27e's suite admission composed over that number. Nothing *showed* the machine to a person, and nothing read more of it than that one figure. This milestone gives Apogee a resource surface, the first half of v0.1.6's track: CPU, memory, GPU and disk in one honest snapshot, with the full-screen TUI's system monitor (32e) as its second reader.
+
+### 2026-10-10 — `system-resources` (backlog item 32a): the machine, read honestly
+
+**What was built**
+
+- [x] **The probe** (`platform/system_info.h/.cpp`): `SystemSource`, one OS read per function -- the CPU (model, physical and logical cores, and Apple silicon's performance/efficiency split from `hw.perflevel*`), its time counters, the load average, the system's memory, this process's footprint, the GPU's story, a volume's space -- with `host_system()` the real one and a test's fake the other. `sysctl`, `host_statistics` and `task_info` on macOS; `/proc/cpuinfo`, `/proc/stat`, `/proc/meminfo` and `/proc/self/status` on Linux; the registry, `GetSystemTimes`, `GlobalMemoryStatusEx` and kernel32's `K32GetProcessMemoryInfo` on Windows. `read_machine` takes the CPU's utilization over a named window (`kUtilizationWindow`, 500 ms, waited through an injectable `Wait`) and everything else once. Every reading is optional: an OS that cannot answer leaves it empty and every surface says `unknown` -- Windows's missing load average with its reason, a Linux ARM kernel's unnamed CPU, the GPU everywhere but Apple silicon (`not read on this platform yet`). No child (`system_profiler`, `nvidia-smi`), no model load, no network.
+- [x] **One machine truth.** The memory a model may offload to is not read twice: `apogee system` takes it from `commands::machine_budget` -- the source chat, execute, task and the suite admission default to -- which reads `backends::offload_memory_total`, the same devices' read 26a's `fit_default_window` measures a load against. The default seam targets that very function (asserted by `std::function::target`), and a counted fake proves one read per run. What the platform probe adds is what nothing else read: the system's own memory, the CPU, the volume, the process.
+- [x] **The view** (`operations/system_view.h/.cpp`): the snapshot, the model budget handed in, the models this process holds and the store's disk (`read_store_disk`: the layout's `models/` summed file by file, a symlink not followed, no store yet reading as empty on the volume it would be on) composed once, with the units every surface shares -- `format_bytes` (`42 MiB`, `61.2 GiB`, `2.0 TiB`), `format_percent`, `format_load` -- so the table, the document and the TUI's bar can never print the same machine two ways. `system_table`: a row per reading, every row on every platform. `system_document`: every field present, an unknown one `null` with its reason beside it where there is one (`load_unknown`, `gpu.unknown`, `model_budget_unknown`).
+- [x] **`apogee system [--output-format text|json]`** (`cli/system_cmd.h/.cpp`): one reading per run, about 0.9 s on this machine with the window, no busy line. Registered in the one command table, so `--help` lists it, `__complete` offers it and its flag, and the readers' refusal (`json_readers`, read from the live parser) names it among the commands with a JSON face. On this M3 Max: `cpu: Apple M3 Max · arm64 · 16 cores (12 performance + 4 efficiency)`, load and a sampled usage, `memory: 128.0 GiB total · 32.9 GiB used · 95.1 GiB available`, the process's own footprint, the GPU as the chip's with Metal's working set for models in a llama.cpp build, and the store with its volume's space.
+- [x] **Tests**: `platform/system_info_test.cpp` (the utilization arithmetic and its refusals; a snapshot over a fake OS with every reading known -- the window waited once, two counter reads -- and over one answering nothing, its reasons carried; a zero window measuring nothing; a smoke row on this host: memory total positive and used within it, logical cores, counters, footprint, a volume, a load average or its reason), `operations/system_view_test.cpp` (the units; the whole table over a full view and an all-unknown one, every row present; the document's keys identical either way with unknowns `null` beside their reasons; the store's walk with a link not counted and a missing store empty), `cli/system_cmd_test.cpp` (one document on one line, the budget read once and printed in the same units by the table, the table plain and byte-stable, the default seam targeting `machine_budget`, an unknown budget said with its reason, `stream-json` refused, completion and help). The Windows branch compiles under MinGW-w64 GCC and the Linux branch under this host's clang, with `__APPLE__` hidden from the file's own `#if` chain; CI's unit-test jobs run them on their platforms. Full suite (`cicd.sh --test`, llama build): 3,022 ctest cases, one failing on the first run -- the CLI↔HTTP parity table, which requires every subcommand classified, did not yet know `system` (now read-only, the host's own) -- and green once it did.
+
+**Decisions** (2026-10-10, recorded in the item before it shipped)
+
+- The command is `apogee system` (the recorded default).
+- **The 26a read is not re-homed in `platform/`.** It is llama.cpp's device memory -- Metal's recommended working set on Apple silicon -- read in `backends/` where llama.cpp is linked; Infrastructure cannot reach it. "One read" is kept by composition instead: the platform probe holds what nothing else read, and the model budget arrives from the one function sizing and admission already share.
+- **`available`, not `free`**: the system's memory is reported as total, used and *available* (what can be had without swapping: Linux's `MemAvailable`, Windows's available physical memory, macOS's free and inactive pages), used being total less available -- "free" means a narrower thing on every one of the three OSes.
+- **Residency is the holder's to say** (27e's rule): a one-shot `apogee system` loads nothing and holds no model, says so, and points at `/suite` in a session; it reads no config, so it shows no suite footprint -- `models status` keeps that. The TUI's in-process monitor (32e) is a holder and names its own.
+- **The table's text lives in `operations/`, not `views/`**: it is a plain read printed like every 28h read, and the TUI's bar must share its units; `views/` is the terminal's painting.
+- **The process footprint** is what the OS charges the process: `phys_footprint` on macOS (Activity Monitor's figure), `VmRSS` on Linux, the working set on Windows.
+
+**Notes.** Out of scope as specced: no watch mode (the TUI's monitor ticks; the command stays one-shot), no per-process breakdowns, no vendor GPU tooling, and no admission decisions from these numbers.
+
+## Milestone AH — The full-screen TUI
+
+**Goal.** Running `apogee` with nothing after it printed the help and exited, and the terminal machinery under `views/` painted lines -- a status line, a repainted busy line, a streamed answer, a line editor -- composing no screen. The user's direction (2026-10-04, from that day's spike): bare `apogee` at a terminal opens a full-screen terminal UI, the way `claude` opens into its session, with the raw CLI left exactly as it is. The SPEC's 2026-08-24 "no TUI" non-goal was removed the same day, unconditioned; what stays policy is that the TUI is **strictly additive** and that its views render the existing cores and call them -- the hand-built-views anti-pattern (a TUI of eight views shipped across two releases and then removed whole under its per-view parity burden) carried as the design rule, not a ban.
+
+### 2026-10-10 — `tui-shell` (backlog item 32b): bare `apogee` opens a screen
+
+**What was built**
+
+- [x] **FTXUI, pinned and owned** (`cmake/ApogeeDependencies.cmake`): v7.0.3 (MIT) as the archive of that tag's commit, `f921fad2`, its SHA-256 checked -- **fetched never found**, as tree-sitter is, since the headless goldens pin what one version renders (v6 even named the loop's class differently) -- with docs, examples, tests, C++ modules, install rules and its own ccache launcher off: three static libraries, `screen`, `dom`, `component`, holding 0.72 MB of code between them on macOS arm64 (0.41 + 0.25 + 0.06; the link keeps only what the shell reaches). Linked **privately** by the new `tui` module alone, whose headers name none of its types, and held there by a third rule in `cmake/ApogeeLinkPolicy.cmake`: any other target linking FTXUI fails the configure step, naming it. `cli.no_listen_symbols` scans FTXUI's archives through the existing link walk, and `tests/CMakeLists.txt` now refuses to configure if the walk ever stops reaching FTXUI's component library -- asserted once, explicitly.
+- [x] **The `tui` module** (`source/presentation/tui/`, its row in `cmake/modules.cmake` linking `ansi`; the presentation card and ADR 0008's table naming it): `shell` -- the frame (title, the numbered tab strip with the active view bracketed, the stage, a notice row, the bottom bar's key hints or a component given it, 32e's slot), the view registry, and the shell's own keys: F1–F9 and Alt+1–9 show a view by number, a bare digit and `q` do too where the view is not taking typing, Tab/Shift+Tab move focus to the next or previous view after the view has declined the key, and Ctrl-C (offered to the view first, so a session can stop a turn with it) and Ctrl-D quit; `view` -- a view's title, whether it takes typing, and its body, an FTXUI component behind an opaque type only `tui/` defines, plus `text_view`, a scrolled page of lines; `pump` -- the loop behind one seam: `TerminalPump` (FTXUI on the alternate screen, Ctrl-C handed to the view before FTXUI's own handling, the mouse left to the terminal so selecting text still works, stderr routed to the shell's notice row for the life of the loop) and `ManualPump` (a test's: posted work runs when drained); `theme` -- `ansi/`'s colour decision, NO_COLOR honoured.
+- [x] **The doors** (`cli/tui_cmd.h/.cpp`, `cli/root.cpp`): bare `apogee` with stdin **and** stdout both terminals opens the shell; with a pipe on either side it prints exactly the help it always printed. A terminal that cannot host a screen is asked, not guessed at (`platform::full_screen_refusal`: `TERM` unset or `dumb` on POSIX; on Windows a console that refuses virtual-terminal sequences, or an output that is no console) -- its reason said on stderr, then the help. `apogee tui` is the spelled way in (the recorded default), refusing with the reason, exit 1, where it cannot open. `ShellEntry` -- interactive, refusal, run -- is the seam both doors take, so the tests fake the terminal rather than need one. The shell's first views are built over cores in `cli/`: **Home**, `apogee version`'s own report (`version_report`: the build, the channel, the root and how it was chosen), and **Keys**, the shell's key table.
+- [x] **Restore on every way out**: a quit key, Ctrl-C, SIGINT, SIGTERM and a crash's SIGABRT all leave the terminal's modes exactly as they were, the primary screen back and the cursor shown -- FTXUI's handlers, its crash path async-signal-safe. SIGINT and SIGTERM end the process by the signal after the restore (exit 130 and 143 from the shell that ran it), as an interrupted program should.
+- [x] **Tests**: `tui/shell_test.cpp` (10 cases, headless: FTXUI renders to text through the shell's own API -- the empty frame, the frame with two views, Tab/Shift+Tab wrapping, F-keys, Alt and bare digits with a number naming no view swallowed, `q`/Ctrl-C/Ctrl-D quitting through the pump exactly once, a view taking typing keeping its digits and `q` while F-keys still switch and the hints change, the notice row, scrolling, colour changing no word of the frame, and the manual pump's order), `cli/tui_cmd_test.cpp` (bare off a terminal: the help byte for byte and nothing on stderr; at one: the shell, nothing printed; a refused terminal: the reason, then the help; a named command and `--help` never open it; `apogee tui`'s three outcomes; the Home and Keys views; completion and help), `platform_test` (`TERM=dumb` and an unset `TERM` refused with why, an xterm accepted; on Windows the redirected console refused), **`cli.tui_shell`** (`pty_tui_check.py`, POSIX, on a real pseudo-terminal from a shell recording `stty -g` before and after: `q`, Ctrl-C, SIGINT, SIGTERM and SIGABRT each leave the alternate screen, show the cursor and restore the modes; Tab and F1 move the bracket; `apogee | cat` and `TERM=dumb` draw no screen and print the help) and **`cli.bare_help`** (a bare run with stdin from a file equals `--help`, says nothing on stderr, and equals the root help committed at `tests/fixtures/cli/root_help.txt`). The parity table classifies `tui` as an interactive surface, as `chat` is. A one-time sweep of every subcommand's `--help` -- 145 screens, this build against 32a's -- differed in exactly two: the root's, gaining the `tui` line, and `tui`'s own. Full suite (`cicd.sh --test`, llama build): 3,042 ctest cases, all passed.
+
+**Decisions** (2026-10-10, recorded in the item before it shipped)
+
+- `apogee tui` exists beside the bare entry, completable (the recorded default); FTXUI is pinned at its latest stable tag, v7.0.3, by commit and hash (the recorded default, applied the tree-sitter way).
+- **Fetched never found**, against the house's find-first default: a system FTXUI of another version would build a different screen than the one the goldens pin.
+- **FTXUI stays inside `tui/`**: linked privately, its types behind an opaque `View::Body` and `Shell::State` only `tui/`'s sources define, so the tests drive the shell through `press` and `render_text` and nothing else needs FTXUI's headers -- the link policy's third rule makes that structural.
+- **Number keys need a free hand**: a view that takes typing (32c's session) keeps its digits and `q`; F1–F9 and Alt+1–9 switch from anywhere. Tab is the view's first and the shell's after.
+- **The mouse is the terminal's**: FTXUI's mouse tracking off, so selecting and copying text works as everywhere else; mouse support is out of scope as specced.
+- **stderr while the shell owns the screen is its notice row** (the latest line), so nothing in the process can paint over the frame; a C library writing to descriptor 2 directly is not caught, and none on the shell's path does.
+- **SIGINT and SIGTERM end the process by the signal** once the terminal is restored (FTXUI's behaviour, kept): the shell that started it learns it was interrupted. `PENDIN`, a state bit the kernel sets itself on the way back to canonical mode, is the one difference the PTY check masks.
+
+**Notes.** Windows is stated, not assumed: FTXUI draws a Windows console with virtual-terminal sequences, the refusal path is pinned in-process through the fake probe and the `platform` case, and the PTY checks are POSIX-only like the rest of the suite's -- the Windows shell itself is unverified on a real console.
+
+### 2026-10-10 — `tui-session-view` (backlog item 32c): the conversation on the shell's stage
+
+**What was built**
+
+- [x] **The session core, given a front-end** (`cli/session_output.h/.cpp`, `cli/chat_session.cpp`): everything chat's REPL writes and reads -- the lines it keeps, the status it sets, the line reader, the `ask_user` and permission prompts, the large-folder confirmation, the model-load line, the MCP startup lines, and each turn's cancellation -- now crosses `SessionOutput`. `TerminalOutput` builds exactly what the core built for itself before (the `CliReporter` over a status line on stderr and the answer on stdout); `run_session` takes an optional front-end, and with none it is byte for byte the chat it was -- `chat_session_test`'s whole-surface golden, the chat, execute, permission, machine-mode and task suites all green, unchanged. The REPL's 88 `reporter.status()` calls became `out.print_line`/`set_status`/`clear_status` mechanically, and a `TurnScope` brackets each turn and each `/play` with the front-end's token.
+- [x] **The view** (`tui/session_view.h/.cpp`): the conversation as the shell's first view, the one a bare `apogee` lands in. **The fourth Reporter adapter** beside the terminal's, machine mode's and the served stream's: the turn's thinking block (`✻ Thinking…` with the reasoning's last rows, each tool's `[tool]` line and **each side call** -- `utility — rewriting the follow-up · 1.2 s`, the terminal's own words, which machine mode's wire leaves out) folding to `✻ Thought for Ns`/`✻ Worked for Ns` when the answer starts; the answer fed to `markdown/`'s `StreamRenderer` and its render operations painted (`tui/paint`) -- one renderer, its rows identical to the terminal's for the same text; the header (the banner's facts, kept as `/model` and `/suite` move them); a status row; an input with its own editing keys, history and the completions chat's completer offers (`suggest_chat_input`, the one command table -- Tab takes the first); the transcript scrolled by Page Up/Down; and **the prompt** in the input's place: a permission's `[y]es / [n]o / [a]lways / [s]ession` answered by one key (Esc a no), a question's numbered options or free text. What the core styled for a terminal is read back into spans (`tui/styled_text`: the SGR codes `ansi::Style` emits, OSC 8 links kept, any other control dropped, never drawn), so each line is said once and both painters show it in the same looks.
+- [x] **The composition** (`cli/tui_session.h/.cpp`): `TuiOutput`, the view as the core's front-end -- its confirm function the terminal's prompt behind a widget, answered through `answer_permission` (now the one entry `cli/permissions` gives the terminal, machine mode and the shell alike), so `always` writes `permissions.<tool>: allow` or the host through the one editor, and `session` writes nothing; its ask function reads what was typed through `chosen_answer` (`views/ask_prompt`, shared with the terminal: a number picks an option, anything else is the answer as written). `TuiSessionDriver`: the picker over the saved conversations (`logger::list_sessions`: a new chat first, then each by its name, update time and turns) -- straight into a new chat when none is saved -- and the chosen one run as chat's session on a thread of its own, `chat --tools` parsed through chat's own flag table, back to the picker when it ends. Quitting the shell stops it as an interrupt does: a running turn cancelled, the transcript already saved, no summary or capture asked of a model once the screen is gone.
+- [x] **Ctrl-C stops the turn, and the session goes on**: each turn gets a token the view's Ctrl-C cancels -- an open prompt with it, `harness::CancelledError` to the loop -- exactly as a machine-mode driver's `cancel` ends one (28f): `[warn] cancelled`, what had streamed kept, the next line taken. With nothing running, Ctrl-C is the shell's quit.
+- [x] **Tests**: `tui/session_view_test.cpp` (11 cases: the SGR read-back; a scripted turn through every Reporter callback -- thinking, a side call started and finished, reasoning, a tool -- then the fold and an answer rendered with no `**` left and bullets drawn; the answer row for row against `StreamRenderer`'s own output; the picker's order, its choice and a new chat, its keys the shell's; a line handed to the session's thread only while it waits; a permission answered by its key and by Esc, a stray key swallowed; a question's free text; Ctrl-C stopping a turn with a prompt open and, with none, quitting; an answer cut off keeping what came; closing ending a waiting read and a waiting prompt; completion and Tab), `cli/tui_session_test.cpp` (4 cases on chat's real core over a scripted mock, driven by key presses on a manual pump: a tool-using, permission-prompted turn answered `always`, the file written and the config **byte-identical** to the same `always` given machine mode's way on the same starting file; `session` writing nothing; Ctrl-C stopping a slow stream and the next line answered; a conversation started in the shell, continued by `apogee chat --resume` on a pipe and then again in the shell, every message saved in order and three turns counted -- and the input completing from chat's own completer), and **`cli.tui_shell`** grows a `session` case on a real terminal: a configured mock model, a line sent, the permission prompt answered `a`, the answer rendered, Ctrl-D, the terminal's modes restored, the config holding the one edit and the file written. Its other cases now land on the session view and wait on its picker. Full suite (`cicd.sh --test`, llama build): 3,057 ctest cases, all passed; the shell's threaded cases ran six times over without a failure once the test's own wait for the session to read was made exact.
+
+**Decisions** (2026-10-10, recorded in the item before it shipped)
+
+- The view opens on a session picker when saved chats exist and a fresh session otherwise, a new chat one keypress away (the recorded default).
+- **The shell's conversation is `chat --tools`**: tools on, because a person is at the screen to answer every gated call -- the condition `--tools` exists to require. `apogee tui` takes no session flags of its own (out of scope).
+- **Ctrl-C stops the turn, not the process**, under the shell: the terminal REPL's Ctrl-C still ends the process as it always has; the shell takes machine mode's cancel semantics instead, since its screen outlives a turn.
+- **The first-launch registration offer is not asked in the shell**: it reads the terminal's stdin, which the shell owns. `apogee providers scan --register` and the offer in `apogee chat` are unchanged.
+- **A line entered while the session is busy stays in the input** until it is read, rather than queueing unseen -- the shell's answer to the terminal's typeahead guard.
+- **The core styles each line once**: the shell reads the terminal's SGR back into spans rather than growing a second styling path; the resting label (`Thinking… · base model`) is the terminal spinner's and not repeated -- the header and banner say `base model`.
+
+**Fixed after shipping (2026-10-10).** In a conversation longer than the screen the input row vanished: the shell wrapped its stage in an FTXUI `yframe`, which hands the view its whole natural height and scrolls to whatever the view has focused -- the transcript's last row -- so the input below it fell off the bottom. The stage is now `tui/paint`'s `clip`: the view is laid out at exactly the stage's size, drawn clipped and never scrolled, so the transcript region shrinks and scrolls inside it and the input stays on screen; a new `session_view_test` case (sixty lines on a twenty-row screen) holds it, and a seventy-line answer on a real terminal left the input drawn.
+
+**Notes.** Out of scope as specced: the workbench views (32d), any machine-mode or wire change (none), and execute mode's suite surfaces inside the shell -- an execute session is not offered there yet. On a resize, an answer already rendered keeps the width it was wrapped at.
+
+### 2026-10-10 — `tui-workbench-views` (backlog item 32d): the rest of the product on screen
+
+**What was built**
+
+- [x] **One list view, not four hand-built ones** (`tui/list_view.h/.cpp`): a read drawn as a table -- the lines above it, its columns sized to their cells (capped, so a long note runs on in the last), the row selected -- and keyed actions, each a core called on the selected row: Enter shows the row's detail (a read) or opens it (an act), each action key runs on the view's own worker thread and says what was done or why not, a removal asks `[y/N]` first and anything but `y` is `not done`, `r` reads again, and the view reads afresh each time it is shown (`View::when_shown`, 32b's shell calling it on every switch). It is not typing: digits switch views and `q` quits from it. The view computes nothing: what it shows and what its keys do are handed to it.
+- [x] **The four views** (`cli/tui_workbench.h/.cpp`), numbered after the session: **Models** draws `models list`'s own rows -- `read_model_rows`, carved out of the command so the listing and the view read alike, folded as its JSON document folds them -- the default backend marked, a row needing attention flagged, one no backend uses dimmed; Enter shows `models info` (`read_model_info`, carved the same way); `d` makes a backend the default. **Chats** draws `chats list`'s rows (`session_row_view`); Enter opens the chat in the session view, `i` shows `chats info`, `x` deletes it. **Suites** draws the config's suites, their members and descriptions, the default marked; Enter moves the conversation to the suite through its own `/suite` (a new chat under it, `chat --suite`, when none is open); `d` makes it the default suite. **Config** draws each backend **as the admin plane serves it** (`httpserver::backend_view`: a key is only ever `api_key_set`, said `set in config` -- the view's data has no field to carry one), with the config's path and its default pointers above; `d` makes one the default, `x` removes it.
+- [x] **Every key is its command's core** (`cli/config_cmd`, `cli/config_suites`, `cli/chat_history`): `point_role`, `remove_backend`, `point_default_suite` and `delete_chat` were carved out of the `config set-default`, `config delete-backend`, `config set-default-suite` and `chats delete` callbacks, which now print what they return -- so a key in the shell and the command at a prompt run one function, edit through the one editor, refuse the same cases in the same words, and say the same thing (`models.default = spare`, `removed backend 'spare' from <path>`, `deleted <id>`).
+- [x] **The session's half** (`cli/tui_session`, `tui/session_view`): `TuiSessionDriver::open_chat` -- with a conversation open and reading, it is ended as `/exit` ends it (saved, summarised when due) and the chosen one opens after it; a busy one is never cut off -- and `use_suite`, the session's own `/suite` entered as if typed (`SessionView::enter`). The views reach them through `WorkbenchHooks`, the composition root's wiring.
+- [x] **Pinned**: `harness.layering` now holds `tui/` to its seams by name -- itself, `ansi/`, `markdown/`, the Reporter's headers, a turn's token, the line reader, the machine read -- never a business package where a core exists, never `cli/`; a planted `agentloop/loop.h` include fails it, naming the file. The leak test's surfaces gain the four views: one distinctive key in every rung, every heading, row and detail they draw searched, none carrying it.
+- [x] **Tests**: `cli/tui_workbench_test.cpp` (8 cases on the real cores in throwaway installs: the Models view row for row against `models list --output-format json`, and its Enter reading `models info`; make default from the Models and Config views leaving exactly `config set-default`'s file; remove asking, a no writing nothing, a yes leaving exactly `config delete-backend`'s file; a stale row refused as the command refuses it, the file untouched; a suite made default leaving `config set-default-suite`'s file; the chats view's rows against `chats list --output-format json`, Enter opening the chat through the hook, `i` its info, `x` deleting as `chats delete` does; the suites view handing the session its choice; a workbench view not typing), a fifth `cli/tui_session_test.cpp` case on chat's real core (a suite chosen with no chat open starting one under it, then sent as `/suite` to the open one; a saved chat chosen ending the open one and opening, its next answer saved to it), the leak test's new case, and `cli.tui_shell`'s views case now tabbing from the session to Models. Full suite (`cicd.sh --test`, llama build): 3,067 ctest cases, one failing on the first run -- `cli.one_role_resolver`, which refuses any file outside its allow-list that reads `models.default` raw, caught the views marking the default with the raw pointer -- and green once the views read the pointers as written through `config_cmd`'s `written_defaults`, the file `config get` already prints them from.
+
+**Decisions** (2026-10-10, recorded in the item before it shipped)
+
+- The first cut is the four views, models, chats, suites and config (as specced); **view switching** is the recorded default's number keys -- the shell's F1-F9, Alt+1-9 and bare digits -- with 32b's tab strip already showing every view, so no separate palette was built.
+- **The shared cores are `cli/` functions**: the shell's views are composed in `cli/`, the composition root, so a core both the command and the view reach lives there, carved out of the command; `operations/` stays what the command line and the HTTP server both run.
+- **A removal asks in the shell**, though the command does not: a typed command is its own confirmation, a single key is not. The question names exactly what the command would remove; the refusal and the words after are the command's.
+- **The Models view draws the 28h document's rows** -- a consumed snapshot folded as the document folds it, a vendor roster's rows kept as it keeps them.
+- **The views show the default pointers as written** -- `models.default = local`, the default marked -- read through `written_defaults` in `cli/config_cmd`, where `config get` already prints them raw, rather than resolved: after `d` a person sees the pointer they set, whatever a suite's chat member resolves to.
+- **A chosen chat or suite reaches the session through its own commands** (`/exit`, `/suite`), never a second path into the session core; a conversation mid-turn is not interrupted for it.
+
+**Notes.** Out of scope as specced: views beyond the four, training, graph and knowledge screens, and forms that create things (adding a backend or a suite stays `apogee config add-backend`/`add-suite`). A view's actions report the command's refusal on the shell's notice row -- the command says it on stderr -- and `not done` on the view's own line.
+
+### 2026-10-10 — `tui-system-monitor` (backlog item 32e): the machine on the bottom bar
+
+**What was built**
+
+- [x] **One probe, a cheaper entry** (`platform/system_info`): `sample_machine`, 32a's partial read over the same `SystemSource` -- the CPU's counters and its utilization since the last reading, the load, the memory, this process's footprint; the CPU's model, the GPU and a volume left out as too still to watch -- and `MachineSample::empty`, a failed reading told from a quiet one. No second reader of the machine exists: `harness.layering` refuses any `/proc/`, `sysctl`, `host_statistics`, `GlobalMemoryStatus`, `GetSystemTimes` or `getloadavg` in `tui/` (a planted `sysctl` fails it by name).
+- [x] **The pump's tick** (`tui/pump`): `every(period, task)` and the loop's own clock, `now()`. The terminal's ticks run on a ticker thread that posts each one as it comes due and is joined before `run` returns -- nothing outlives the loop; a test's (`ManualPump::advance`) move a scripted clock. A tick overdue fires **once** and is next due a period later: never a burst to catch up.
+- [x] **The bar** (`tui/monitor_bar.h/.cpp`): the shell's bottom row across every view, beside the one quit key the view needs -- `cpu 17% · load 3.88 3.96 4.21 · mem 35.1 GiB / 128.0 GiB · apogee 4 MiB · gpu Apple M3 Max, unified` on this machine, each part worded by `operations/system_view`'s own `format_percent`, `format_load` and `format_bytes`, so the bar and `apogee system` cannot disagree about the same machine. A reading not known is left out, never guessed: no GPU where no story is told, no utilization until a second reading has a first to measure from. **Sampling is off the shell's thread**: each tick hands one sample to the bar's own sampler thread, and while one is out the next tick takes none -- a probe that stalls holds back the bar, never a frame, and the bar keeps its last values with `stale Ns` once they are older than two and a half cadences or a sample failed; when the probe recovers, the next tick takes one sample. The cadence is two seconds (the recorded default, a named constant in `MonitorOptions`).
+- [x] **What Apogee holds** (`cli/session_output`, `cli/chat_session`, `cli/tui_session`): `SessionOutput::set_held`, the backends whose models the session holds -- 27e's residency, read by the process that holds them, which the shell is -- said by the session core before each line it reads and emptied when it ends; the driver hands it to the bar (`apogee 4 MiB · 2 held`). A one-shot `apogee system` still says it holds none.
+- [x] **Tests**: `tui/monitor_bar_test.cpp` (6 cases on a manual pump and a fake machine: the strip's parts in `apogee system`'s units, checked against the table's own words for the same numbers, with a partial and an empty reading leaving parts out; a sample a tick -- seven reads for the first and six ticks -- with the shell busy each tick; a probe stalled on a gate: the shell draws on, no sample piles up across four more ticks, the last values stand marked `stale 10s`, and on release one sample arrives and then one a tick; a failed sample keeping its values, `stale 2s`, and the next good one clearing it; a machine that cannot be read said so; the manual pump's tick firing once after fifteen periods away), the session's held reports in `cli/tui_session_test` (said before each line, empty at the end), and **`cli.tui_shell`**: the bar sampled and drawn on a real terminal in the quit and session cases, and the shell gone within three seconds of `q` -- its ticker and sampler joined. Full suite (`cicd.sh --test`, llama build): 3,073 ctest cases, all passed; the monitor's cases ran five times over without a failure.
+
+**Decisions** (2026-10-10, recorded in the item before it shipped)
+
+- The cadence is two seconds, a named constant, with no config knob (the recorded default); the strip shows the CPU's use and load, memory used of the total, Apogee's footprint and the models it holds, and the GPU only where 32a has a story -- Apple silicon's chip and its unified memory; the disk stays off the bar (the recorded default).
+- **The load is all three averages**, as `apogee system` prints it, through the same formatter -- one set of units over brevity.
+- **The bar takes the key-hint bar's place**, keeping only the quit key beside it; every view's keys stay on the Keys view.
+- **Held models are said by the session**, before each line it reads: residency is the holding process's to say (27e), and the session core is the one holding them.
+- **Stale is two and a half cadences**, so one slow sample is not a failure; a sample that read nothing marks the bar stale at once, its last values kept.
+
+**Notes.** The bar is the TUI's alone: `apogee system` keeps its one-shot scope (no `--watch`), and the bar keeps no history -- a reading, not a chart. Like the rest of the shell, the Windows bar is unverified on a real console.
+
+### 2026-10-10 — `tui-parity-law` (backlog item 37a): the shell is a mode
+
+**Why.** The shell shipped with seven views. The same day's parity spike counted 25 root subcommands, 7 with a shell surface and 18 with none, and nothing held the gap honest:
+- [ADR 0002](../adrs/cli/mode-parity.md) named three doors, not four;
+- the per-change checklist had no line for the shell;
+- which commands deliberately get no view lived in chat history.
+
+Track 37 (37a–37h, the user's placement, from that spike and a second one) draws the rest. Its law ships first, so coverage drift is a failing test from the first day rather than after the views exist.
+
+- [x] **[ADR 0010](../adrs/cli/the-shell-is-a-mode.md), the shell is a mode.** Every root subcommand's place in the shell is one of four classes:
+  - drawn by a named view;
+  - backfilled by a named pending item;
+  - covered by the exec line (37h), with no curated view;
+  - carved out, with the reason the exec line refuses it by.
+
+  A view computes nothing: it draws the command's carved rows and calls its carved core. The exec line is the parity floor, and classification is at the root subcommand. ADR 0002 gained one dated line pointing forward (ADRs are append-only), and the ADR index its row.
+- [x] **The table, in source** (`cli/tui_parity.h/.cpp`): `shell_surfaces()`, one row per root subcommand, seeded with today's truth:
+  - **views:** `chat` (Session), `chats`, `models`, `config` (and Suites), `version` (Home), `tui` (the door itself), `system` (the monitor bar, its page 37b's);
+  - **backfills:** `check`/`providers` (37b), `knowledge`/`embed`/`graph` (37c), `execute`/`symphonies` (37d), `task` (37e), `train`/`datasets` (37f), `agents`/`mcp`/`auth` (37g);
+  - **runner-covered:** `complete` and `analyze`, plus the hidden plumbing (`__complete`, `__mcp-tools`, `__machine-schema`), which the spike's help sweep never saw and the registry walk found;
+  - **carved out:** `serve`, `uninstall`, `reset`.
+
+  `shell_refusals()` is the exec line's one source of refusals, with the reason each says:
+  - the doors the shell already is (`chat`, `execute`, `tui`);
+  - the `$EDITOR` verbs (`agents edit`, `symphonies edit`), since the editor needs the terminal the shell holds;
+  - `reset`, `uninstall` and `serve` (the user's call, 2026-10-10).
+
+  `shell_law_violations(root)` names whatever breaks the law over a registered command tree: an unclassified subcommand, a row for a missing one, a refusal for words nothing answers to, a carve-out with no recorded refusal. It never passes an empty tree.
+- [x] **The test** (`tui_parity_test.cpp`): the real registry clean; a planted unclassified `frobnicate` named, alone; an empty registry a violation; the seeded classes and refusals as recorded.
+- [x] **The process**:
+  - a per-change checklist line in CLAUDE.md (a user-facing read or mutation places itself in the shell in the same change);
+  - DEVELOPER.md's "Adding a TUI view" recipe: carve the read and its document, carve the core, compose over `ListView`, ask before anything irreversible, byte-parity and leak-test rows, flip the row;
+  - the presentation layer card's pointer.
+
+Decisions taken while building, for veto:
+- **The table lives in source rather than in the test**, because 37h's runner must read its refusals from "one source" and a test file cannot be that source. The test holds the source table to the registry.
+- **The hidden plumbing verbs are classified, not exempted.** A rule of "every subcommand, the visible ones" would leave a loophole a new hidden command could slip through.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) ran 3,104 cases. 3,103 passed and the pdftotext case was skipped as before. The one failure was `harness.layer_context`: the presentation card's new pointer took it past its 3,000-byte limit. The pointer was shortened and that check rerun green. No command, view or help text changed. `make lint` was not run.
+
+### 2026-10-10 — `tui-doctor-views` (backlog item 37b): Check, Providers, System
+
+**Why.** Three read surfaces the shell could not show. `check` had its rows and a JSON document but no view. `providers scan` printed its rows with no machine read at all. `apogee system`'s full reading was off the shell, which shows only the monitor bar's live half by 32e's design. This closes the doctor's slice of the uncovered subcommands and the reads with no row function.
+
+- [x] **The Check view** (`cli/tui_doctor`).
+  - `check`'s rows, drawn from its own JSON document, with the verdict above them. Enter shows a row's detail and its remedy.
+  - `f` runs the fix pass after an ask that names what it may do. Its lines are the command's (`fixed: …`, `nothing to fix`), shown whole.
+  - The command's pieces are carved so both run the same ones: `check_inputs`, `read_check_report`, `fix_install`, and `check_verdict` for the verdict line. `run_check_pass` and the command now run through them, and `check`'s own tests are unchanged.
+- [x] **The Providers view**: what the last explicit scan found, read from the provider cache. The view starts no probe of its own (`cli.no_provider_probes`: it reaches the prober only through `providers_cmd`, an allowed file).
+  - `s` runs the command's own scan, on that key.
+  - `r` registers the selected provider through the registration core over the last scan, after the offer's own question (`Found claude -- register it as a backend?`). Its words are the command's, a refusal included.
+  - The rows are one function, `provider_rows`, drawn by the human scan, the new document and the view.
+- [x] **`providers scan --output-format json`**: the rows, plus `registration` and `rosters` when `--register` or `--refresh` did something, each beside them rather than printed around them. The roster fetch now returns its lines for the caller to say. machine-mode.md gained the document's row.
+- [x] **The System page**: `apogee system`'s table, read each time the view is shown and off the shell's thread, because the read waits out a 500 ms CPU window. The bar keeps the ticking, with no second watcher.
+- [x] **`ListView`'s track-37 additions**:
+  - an action over the whole view (`whole_view`: a fix pass, a scan), offered and run with no row;
+  - a view's own `r` taking the key from "read again";
+  - an answer of several lines drawn whole under the table;
+  - a read drawn as a page (`page`).
+
+  The workbench's shared helpers moved to `cli/tui_common`. The shell gains the three views after the workbench's.
+- [x] **The tab strip fits any width.** Track 37's views outgrew an 80-column strip; `cli.tui_shell` caught it on a real terminal, never seeing `[1 Session]`. Past the width:
+  - the views not shown become their numbers (` 7 `), and the shown one stays named;
+  - past that, the title gives way;
+  - past even that, the strip becomes a window of numbers around the shown view, an ellipsis where it goes on.
+
+  `shell_test` holds the strip at three widths.
+- [x] **The law**: `check`, `providers` and `system` flipped to views in `tui_parity.cpp`.
+- [x] **Tests**:
+  - `tui_doctor_test`: the Check rows equal the command's document; the fix pass says `check --fix`'s lines for the same hole; the Providers rows, never scanned and then over a cached scan, equal the document over the same statuses; `r` writes the registration core's config byte for byte and refuses a second time in the command's words; the System page equals `apogee system`'s output over the same fake machine;
+  - `list_view_test` for the additions;
+  - the leak test's rows for the three views;
+  - `cli.provider_surfacing` reading `providers scan --output-format json` off the real binary with fake CLIs on PATH.
+
+Decisions taken while building, for veto:
+- **`s` (scan) on the Providers view** is a key the document didn't name. The view draws the last scan without probing, so the scan the command runs needed a way in, on the user's key.
+- **An action keyed `r` takes the key from "read again"** rather than moving it. The Providers view's `r` is the document's, and 37e/37f use `r` too. Every view still reads on show and after each action.
+- **The Check view draws the JSON document's fields**, so its status words are the document's (`skipped`) rather than the report's (`skip`), parity by construction.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,111 of 3,111, the pdftotext case skipped as before. The run before the strip fix had two failures: `cli.tui_shell`, which was the strip, and a one-off in `tui_cmd_test`'s help comparison that passed on every rerun and in the run after. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+### 2026-10-10 — `tui-knowledge-views` (backlog item 37c): Knowledge, Collections, Graph
+
+**Why.** The knowledge layer was the shell's largest uncovered surface: `knowledge` (9 verbs), `embed` (5) and `graph` (13) had no view, and the reads of `knowledge` and `embed` had no machine document at all. This closes the knowledge slice of the uncovered subcommands and the reads with no row function.
+
+- [x] **The reads carved, and given their documents** (the 28h idiom: the row function the command, its JSON document and the view all draw).
+  - `knowledge`: `read_knowledge_records` (with `knowledge_list_text` and `knowledge_list_document`), `knowledge_record_text` (the info card), `run_knowledge_query`/`print_knowledge_answer`/`knowledge_query_text` (the one retriever and its words) and `delete_knowledge_record`, each refusing with `KnowledgeRefusal` in the command's words (`backend()` the exit code it maps to). `knowledge list|info --output-format json`; `--json` kept byte for byte.
+  - `embed`: `collection_rows` (with `render_collection_rows` and `collection_list_document`), `collection_info_text`/`collection_info_document`, `collection_query_text`/`print_collection_query` and `delete_collection`. `embed list|info --output-format json`.
+  - `graph`: `graph stats` is one read (`StatsRead`) printed by the text and stated whole by `graph_stats_document`, a refusal a `GraphRefusal`; `graph show --output-format json` states each entity -- its relations, its sites, its supporting chunks, descriptions and text whole where the text previews them -- and the match (`exact`, or `closest` with what else matched) the text says in its lines. `graph_explain_text` is `graph explain`'s card as the command prints it.
+  - The command output is unchanged: every carved function returns its text or writes to a stream handed to it, and the command prints it. machine-mode.md gained the six documents' rows, and `cli.graph_lifecycle` and `cli.knowledge_lifecycle` read them off the real binary.
+- [x] **The Knowledge view** (`cli/tui_knowledge`): `knowledge list`'s records as its document words them (id, status, discipline, when captured, the intent's first line), the list's own heading above them, a branch other than shipped dimmed. Enter shows the record as `knowledge info` prints it; `/` asks `knowledge query` with its defaults and draws its answer -- the retriever that ran, each score on that retriever's scale, the "nothing on this branch" hint -- byte for byte; `x` deletes the record and its archive after an ask.
+- [x] **The Collections view**: `embed list`'s rows; Enter `embed info`; `/` `embed query` over the selected collection, a demotion to lexical said exactly as the command says it; `x` deletes the whole collection after an ask.
+- [x] **The Graph view**: every graph `graph stats` reads -- the named graphs as configured, then each collection holding a graph of its own -- with the kind, nodes and edges its document states, a named graph not yet built dimmed and said. Enter shows `graph stats`; `/` shows a node's card as `graph explain --graph <it>` prints it, a node that is not there refused in the command's words.
+- [x] **`ListView`'s ask row** (`ListOptions::ask`, `ask_label`, `ask_needs_row`): `/` opens an input row under the table and the view takes its keys as typing (a digit and `q` the question's, asked of the view per key through `View`'s `takes_text`) until Enter asks on the worker -- the answer drawn as a detail, a throw said as why it could not be asked -- or Esc closes it; Backspace takes a whole character, and the last question comes back on `/` to refine. `config_if_any` moved to `cli/tui_common` beside the other shared helpers. The shell gains the three views after the doctor's.
+- [x] **The law**: `knowledge`, `embed` and `graph` flipped to views in `tui_parity.cpp`.
+- [x] **Tests**:
+  - `tui_knowledge_test`: the Knowledge rows equal to `knowledge list --output-format json`'s, its heading and card the list's and `knowledge info`'s output, its query `knowledge query`'s bytes, and the input row typed through the shell; the delete asked, a no keeping the record and a yes taking it and its archive; the Collections rows against `embed list --output-format json`, Enter `embed info`'s output, the query `embed query`'s bytes with the embedder and again, demoted to lexical, without it; a collection's delete asked; the Graph rows against `graph stats --output-format json` -- a collection without a graph left out -- Enter `graph stats`'s text and `/` `graph explain`'s card byte for byte for a named graph and a collection's own, a missing node refused in the command's words;
+  - `list_view_test` for the ask row;
+  - the leak test's rows for the three views;
+  - `cli.graph_lifecycle` and `cli.knowledge_lifecycle` reading the new documents off the real binary.
+
+Decisions taken while building, for veto:
+- **`knowledge status` has no JSON document.** It sets a record's status -- a mutation, not a read; the item's list of reads named it by mistake.
+- **`--json` stays as it was** on `knowledge list|info`: a bare array and the record. `--output-format json` is the reads' envelope beside it, so nothing a script reads moved.
+- **The ask row sits under the table**, where a question and a notice already go, rather than above the results; the answer is the command's own lines, no new renderer.
+- **A view's `/` asks with the command's defaults** (`knowledge query`'s shipped branch and top five; `embed query`'s five): the flags beyond the question run through the exec line (37h).
+- **The Graph view lists what `graph stats` can read**, since no `graph list` exists: the named graphs as configured, then the collections holding a graph -- a collection with none is not a graph, and is left out.
+- **The Graph view's `/` is `explain` alone**; `path`, `neighbors` and `query` run through the exec line. The card is the human text byte for byte; the JSON documents 27l shipped are untouched.
+- **The Collections view draws `embed list`'s columns** (chunks, sources): the item's "model binding" is not in that read, and is in Enter's `embed info`.
+- **The delete questions are the view's own**, since `knowledge delete` asks nothing and `embed delete` wants `--yes` instead of a question; each names what goes (`Delete <id> and its archived conversation?`, `Delete the whole collection <name>, every chunk in it?`).
+- **Views past the ninth are reached by Tab**: with these three the shell holds thirteen, and the digits and F-keys reach 1-9. Collections and Graph are the first views past them.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,117 of 3,117, the pdftotext case skipped as before. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+### 2026-10-10 — `tui-execute-session` (backlog item 37d): execute in the shell, and the Symphonies view
+
+**Why.** The shell's conversation was chat's alone. 32c shipped the session view with execute out of scope, so `/play` and `/symphonies`, execute's rows in the one command table, never lit up on the stage, and `symphonies` had no view although `list` and `show` print documents. This closes wall W4.
+
+- [x] **The picker's execute door** (`cli/tui_session`): one door per configured suite between the new chat and the saved ones, the default suite first and marked `(default)`, none at all with no suite. Choosing one opens execute's session exactly as `apogee execute --suite <it>` opens one: `shell_session_flags` now takes the mode and parses `execute --tools` through execute's own flag table, so the banner, the rows (`/play`, `/symphonies`), the completions and the suite's `orchestrate: true` are execute's by construction. `open_execute` does the same from a view, ending the open conversation first as `/exit` ends it.
+- [x] **A play reaches the session through its own `/play`** (`TuiSessionDriver::play`): the line entered in the execute session open; with nothing open, the first line of a new execute session under the default suite (`SessionView::queue_line`, shown as typed). It is refused, saying why, when the conversation open is a chat (`/play` is not in its table), when it is busy, or when no suite is the default. The walk, its caps and its refusals stay the runner's: a play missing its input is refused in the session in `/play`'s own words.
+- [x] **The Symphonies view** (`cli/tui_symphonies`): the definitions as `symphonies list --output-format json` states them -- the name, the stages' roles chained as `list` chains them, the source, the description or `cannot be played` -- with the spec files that could not be read above. Enter shows `symphonies show`'s card (`symphony_show_text`); `p` opens the input row for the play's input, typed or none, and hands `/play` to the session (`WorkbenchHooks::play_symphony`), which the shell then shows. `list` now reads through the same `read_symphony_catalog`.
+- [x] **`ListView`'s ask row grows three switches**: its key (`ask_key`), an answer with nothing typed (`ask_may_be_empty`), and an act on the shell's thread whose answer is said on the notice row (`ask_here`). **The session view's picker takes doors** (`PickerDoor`), and `begin_session` drops a line queued for a conversation that never read it.
+- [x] **The law**: `execute` (the picker's execute door) and `symphonies` flipped to views in `tui_parity.cpp`.
+- [x] **Tests**:
+  - `tui_session_test`: no door without a suite; the execute door opening execute's session with its banner and `/play` completing; the play's output the answer, and the saved session equal to the same play driven through machine mode's `execute` on a twin home; the Symphonies rows against `symphonies list --output-format json`, Enter `symphonies show`'s card, `p` with nothing open playing in a new execute session under the default suite, and a play missing its input refused in the session's words with nothing kept; a play refused with a chat open or no default suite, and `open_execute` ending the chat to play in execute;
+  - `session_view_test`: the doors' place and picking, a saved chat below them picked by its id; a queued line taken next and dropped by a new conversation;
+  - the leak test's row for the Symphonies view.
+
+Decisions taken while building, for veto:
+- **A door per suite**, rather than one door and then a choice of suite: the default suite "preselected" is the first door, marked. The picker's cursor still starts on New chat, so a bare `apogee` lands where it always has.
+- **`p` asks for the play's input** in the input row, with none allowed, since `/play` takes `<symphony> [input]`.
+- **A play with a chat open is refused**, naming the way to execute, rather than ending the chat from the Symphonies view: ending a conversation is the picker's door's and `open_execute`'s to do.
+- **A saved conversation reopens from the picker as chat**: a saved session records its suite, not the mode it ran in, so an execute session is resumed in execute with `apogee execute --resume`, or opened afresh from the door.
+- **The stages' narration is the thinking block's, as on the terminal**: drawn as side calls while the play runs, folded into the block's summary once it ends. The scripted members answer at once (a member call never takes the mock's streaming delay), so the shell's test holds the summary above the answer and the saved session's parity with machine mode, whose stage-by-stage events `execute_test` already pins.
+- **The Symphonies view sits after the workbench's four**, before the doctor's.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,122 of 3,122, the pdftotext case skipped as before. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+### 2026-10-10 — `tui-progress-seam` (backlog item 37e): the progress seam, and the Task view
+
+**Why.** The shell had no surface for work that runs long. `task run`, the training runs, `datasets prepare|synth`, `embed ingest`, `models pull|convert|quantize` and `graph build|update` all narrate on the terminal through `views/` and the status line, while the shell offered only the notice row and a list view's one-line outcomes. This was the split's one root-cause wall (W3): one progress widget closes it for every consumer at once, and the Task view is its first.
+
+- [x] **`tui/progress`, the seam**: `Progress::start` runs a run's work on a thread of its own, from any thread. Each line the work says is posted to the pump in order and never waited for, so a stalled producer holds back lines, never a frame (the monitor bar's sampler idiom, 32e). The lines sit in a bounded scrollback. `cancel` reaches the run's own channel at most once, and the widget owns no protocol. Destroying it stops a run still going and joins it, so the shell quitting leaves no run behind.
+- [x] **`ListView` draws a run** (`ListOptions::progress`): its heading, running or ended, and its newest lines under the table. Ctrl-C there stops the run through its channel and the shell stays, as in the session view. The table is read again on a slow tick (two seconds) while the run is live, and once after it ends. The ask row can now put a question first (`ask_confirm`), and a row's own action keyed as the ask takes the key on the rows it applies to.
+- [x] **The task cores carved** (`cli/task_cmd`):
+  - `run_task_events` runs `task run "<goal>" --tools`, or `task resume <id>`, exactly as machine mode runs it, its events written to a stream the caller hands `drive`;
+  - `task_status_text` is the status card, its printers writing to a stream;
+  - `request_task_stop` is `task halt`/`task cancel`'s core, the command's line returned;
+  - `find_task` is the throwing read `resolve_task` now wraps.
+
+  The commands print what these return, so their output is unchanged.
+- [x] **The Task view** (`cli/tui_task`): the tasks as `task list --all --output-format json` states them, and Enter `task status`'s card.
+  - `r` runs a new task with the goal typed in the input row, asked first with the policy it runs under. On a row `task resume` takes, `r` resumes that task instead, asked first.
+  - `h` and `c` halt and cancel through the commands' own core, asked first.
+  - A run's narration is its machine-mode events worded in their own vocabulary (`task_event_lines`): the transition's event and status, a round's checks, a grant, the finish's reason, and a turn's tool narration, answer and error. Ctrl-C cancels a live run as `task cancel` does, through the request file its watcher reads.
+- [x] **The law**: `task` flipped to a view in `tui_parity.cpp`.
+- [x] **Tests**:
+  - `progress_test`: lines in order and the end told once they are in; a stalled producer, with draining returning at once, the frame drawn with what had arrived, and a second run refused; cancel reaching the channel exactly once; the bounded scrollback and a throw said; a list view drawing a run and Ctrl-C cancelling it;
+  - `tui_task_test`: the rows against `task list --all --output-format json` and the card against `task status`; a run from `r` (a no starting nothing) leaving the ledger `apogee task run --tools` leaves for the same turns, ids and clock aside, its asking tool denied by nobody, narrated in the events' words; `h` and `c` asked, a no writing nothing, a yes the commands' own line and ledger state; Ctrl-C cancelling a live run;
+  - the leak test's rows for the Task view. The widget's lines are the task events machine mode streams, which carry no key.
+
+Decisions taken while building, for veto:
+- **A run from the view is machine mode's run, in process**, on the widget's thread: `task run "<goal>" --tools --output-format stream-json`. Tools are on because the unattended gate is what makes a run safe with nobody present (a tool that asks is denied, a question with no declared answer ends the task), and nothing is granted beyond the config's permissions.
+- **The view takes the goal alone.** Checks (`--require`), the round budget, grants, a suite or an agent run through the exec line (37h).
+- **The `[task]` lines and a refusal go to stderr**, which the shell says on its notice row. A run that never started says so in the widget, with its exit code.
+- **The view lists every task** (`--all`), not the newest fifty `task list` shows by default.
+- **Ctrl-C in the Task view cancels the live run**, the session view's precedent, through `task cancel`'s request on the run's own task. `c` cancels any task that can be stopped.
+- **`Progress::start` is safe from any thread**: a resume starts from the view's worker as a new run starts from its key.
+- **Tasks sits after Symphonies**, before the doctor's views.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,131 of 3,131, the pdftotext case skipped as before. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+### 2026-10-10 — `tui-training-views` (backlog item 37f): Train and Datasets
+
+**Why.** The training track was the shell's deepest uncovered surface and the least machine-readable: none of `train`'s ten verbs or `datasets`' eight carried a JSON read. The progress seam (37e) is the shared surface for a long run; these two views are its remaining consumers, and they close the training slice of the uncovered subcommands.
+
+- [x] **The reads as documents**, each the control plane's body for the same read:
+  - `train status --output-format json` and `train versions [backend] --output-format json` are built in one place now, `operations/training_reads`, which `GET /v1/admin/training/status` and `GET /v1/admin/training/versions` call too. The status gained `recent_runs`, `latest_pipeline`, `halt_reason` and `anchor_score`, additively, so it holds what the human status lists.
+  - `datasets list|info|kits --output-format json` reuse the control plane's `dataset_json` and `kit_json`.
+  - `train_status_text`, `dataset_info_text` and `dataset_kits_text` are the human texts the views draw. `eval_glyph` and `human_size` are shared so a cell reads as the command words it.
+- [x] **A command as the shell's child** (`cli/tui_child`). Every run and act from these views is the command itself, run as a child of the shell's own binary:
+  - the shell's root is carried (`--config` when it was given one, the resolved root as `APOGEE_HOME`), stdin is closed at once, and the child's lines are streamed;
+  - stderr is waited on and stdout only peeked at while stderr is open, since a command narrates on stderr and states its outcome on stdout, and two pipes keep no order between them;
+  - stopping it sends SIGINT (`ChildProcess::interrupt`, new; a child that cannot be interrupted is terminated), so a command records its own cancellation.
+
+  This is the design 37h records for its exec line, brought forward: 37h reuses the seam and the splitter, `cli/line_tokens` (POSIX quoting with no expansion, one function for running and completing).
+- [x] **The Train view** (`cli/tui_training`): one row per promoted version as `train versions --output-format json` states it, under `train status`'s text.
+  - Enter evaluates the version's run (`train eval`) in the widget.
+  - `r`, `p` and `P` open the input row on `run `, `pipeline run --pipeline ` and `promote ` (the command's own words, its arguments typed), and run `apogee train <line>` after an ask naming the line and its cost.
+  - `c` runs the cycle once, asked. `R` rolls the row's backend back, asked, its answer the command's own lines.
+- [x] **The Datasets view**: `datasets list`'s document. Enter shows `datasets info`'s card and `k` shows `datasets kits`'s. `p` and `s` open the input row on `prepare ` and `synth `, asked. `x` deletes through `datasets delete --yes` after the view's own ask.
+- [x] **`ListView` takes several asks** (`ListOptions::asks`, each a `ListAsk` with its key, label, `prefill`, confirm and switches). The Knowledge, Collections, Graph, Symphonies and Tasks views moved onto it unchanged.
+- [x] **The law**: `train` and `datasets` flipped to views in `tui_parity.cpp`.
+- [x] **Tests**:
+  - `tui_training_test` checks the reads against the commands' documents and texts. As children of the built binary (`APOGEE_EXECUTABLE`, skipped where the build made none, as in CI's unit-test job), it checks:
+    - a mock run from `r`, narrated in the command's order and leaving the manifest `apogee train run` leaves (ids, clock and home aside);
+    - a rollback leaving `train rollback`'s config and ledger;
+    - the cycle refused on a held lock in the command's words;
+    - a dataset deleted as `datasets delete --yes` deletes it, with a no keeping it.
+  - `line_tokens_test` holds the quoting table.
+  - The leak test has rows for both views.
+  - `cli.train_lifecycle` and `cli.datasets_lifecycle` read the five documents off the real binary.
+
+Decisions taken while building, for veto:
+- **Runs and acts are the command run as a child**, not in-process cores with a narration sink. A run's manifest, a promoted version and a rolled-back config are then the command's by construction, which the document's parity checks only promise. It is also the design 37h records as the way the shell runs a command, and in-process capture of stdout is off the table. The reads stay carved and drawn in process.
+- **The launch keys take the command's own arguments**, not a form: the input row opens on the verb's words and the arguments are typed, split by the one splitter. An argument the view would have to guess (a student, a dataset, a spec, a backend) is the user's to type.
+- **Train's rows are the promoted versions**, the document's "backends with versions"; the runs are in the status lines above them.
+- **Enter's `train eval` is not asked first**: the confirmed default calls it a bounded act, and an eval that already ran says so without running again.
+- **A child's stdin is closed**: `datasets delete` is passed `--yes` only after the view's own ask, and a command that would prompt declines.
+- **A child's lines are read stderr first.** The order across the two pipes is otherwise lost; a command narrating on stdout mid-run is still streamed, a moment behind its stderr.
+- **Ctrl-C on a launched run is wired but not driven by a test**: the child is interrupted and the command's own interrupt records the run as cancelled, but the mock trainer finishes too fast to catch mid-run, and a pacing knob on the trainer was not added for it.
+- **Train and Datasets sit after Tasks.**
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,139 of 3,139, the pdftotext case skipped as before, the child-process cases run against the built binary. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+### 2026-10-10 — `tui-agents-mcp-views` (backlog item 37g): Agents, MCP, Auth
+
+**Why.** The last uncovered slice. `agents list` and `mcp list` had view-ready documents and no view, and `auth` had neither. Two walls are settled here by recorded carve-out rather than by capability: the `$EDITOR` wall (`agents edit`, `symphonies edit`) and the secret-input wall (`auth add`). With this item the classification table holds no backfill.
+
+- [x] **`auth list --output-format json`**: the body `GET /v1/admin/auth` serves, byte for byte. The builder moved to `operations/credential_views` (`credentials_document`, which the control plane calls too), and `operations` now links `secrets` for it. A stored credential is metadata by type, so there is no field a key could reach.
+- [x] **`mcp list`'s document split out** (`mcp_list_document`): every server connected to as the command connects, bounded, its stderr kept off the screen. The command's JSON path calls it.
+- [x] **The Agents view** (`cli/tui_agents`): `agents list --output-format json`'s rows, Enter the agent's definition as its document states it. `x` deletes the entry after an ask, through `agents delete` run as the shell's child, so its prompt and schema files are kept exactly as the command keeps them with nobody at a terminal to ask. A bundled agent with no entry is not offered `x`.
+- [x] **The MCP view**: `mcp list --output-format json`'s rows (state, protocol, tools), Enter the server's entry. `t` opens the input row on `<server> `, the tool and its JSON arguments typed, and runs `mcp test`, its answer the command's narration then its result. `e`/`d` run `mcp enable|disable`, asked nothing (the confirmed default: a reversible edit whose answer names it).
+- [x] **The Auth view**: the stored credentials as `auth list --output-format json` states them, with which rung answers for each backend above them, and the way a key is stored -- at a real prompt, `apogee auth add <provider>`, never in the shell.
+- [x] **The child seam's helpers shared** (`child_answer`, `start_child_run`, `run_typed`, moved into `cli/tui_child` from the training views).
+- [x] **The law**: `agents`, `mcp` and `auth` flipped to views. Auth's row records the secret-input carve-out; the `$EDITOR` refusals were recorded in 37a. The table holds no backfill now, and `tui_parity_test` holds that.
+- [x] **Tests**:
+  - `tui_agents_test`: the three views' rows against their documents, a stored key in no heading, row or frame of the Auth view. As children of the built binary (skipped where the build made none): `e`/`d` leaving `mcp enable|disable`'s config byte for byte; `t` over Apogee's own `__mcp-tools` server answering as `mcp test` does; `x` leaving `agents delete`'s config, a no keeping the entry and the prompt file kept.
+  - The leak test's rows for all three views (the planted key searched in the Auth view's every heading and row).
+  - `cli.serve_lifecycle` comparing `auth list --output-format json` with `GET /v1/admin/auth` off the real binary, with a key stored and in neither.
+
+Decisions taken while building, for veto:
+- **Every act is the command run as the shell's child**, as in 37f: `agents delete`, `mcp test`, `mcp enable|disable`. The config each writes is the command's by construction.
+- **`t` takes the tool and its arguments typed**: `mcp test` invokes one tool, and the "bounded handshake" the document named is that call's connect, which the command bounds. The answer includes the command's own `[mcp]` narration from stderr, as a script reading both streams sees it.
+- **The MCP view connects to each server on every read**, as `mcp list` does. That is bounded per server and done on the view's worker, and a disabled server is not connected to.
+- **The Auth view has no keys of its own**: `auth clear` runs through the exec line (37h), and `auth add` stays the real prompt's.
+- **Agents, MCP and Auth sit after Datasets.**
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,144 of 3,144, the pdftotext case skipped as before, the child-process cases run against the built binary. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+### 2026-10-10 — `tui-command-runner` (backlog item 37h): the command runner
+
+**Why.** Track 37's views give the shell curated surfaces; this gives it the whole command language. The second parity spike counted 119 leaf command surfaces carrying 434 flags, which rules out a form per verb. One exec line that speaks the CLI's own grammar, and runs each typed command as a captured child of the shell's own binary, makes every verb and flag work in the shell by construction.
+
+- [x] **The exec line** (`tui/runner_view`): `:` on any view that is not taking typing opens it scoped to the view's group (`View::group`; `:pull …` in Models runs `models pull …`), and `!` opens it unscoped. What is typed is the command minus the leading `apogee`.
+  - Tab offers the completion core's candidates for the word under the cursor. One is taken whole and ends the word; several are extended to what they share and listed.
+  - Enter runs the line, or says why the shell refuses it. ↑ and ↓ recall earlier lines.
+  - The output streams through the progress seam above the line, its exit line last.
+  - Esc closes the line with a run going on behind it, and `:` shows it again.
+  - Ctrl-C stops the running command and nothing else; with nothing running it closes the line, and it never quits the shell.
+
+  The shell holds the line (`Shell::set_exec_line`) and gives it keys before the view, and its hints and Keys view name it.
+- [x] **The runner** (`cli/tui_runner`):
+  - `exec_words` splits a line once with `cli/line_tokens` (shipped with 37f as this item's splitter), prefixes the scope, and refuses a line that cannot be split, is empty, or names a refusal of the law's table. `exec_refusal` reads `shell_refusals()` after any root flag: one source, each refusal naming its recorded reason.
+  - `exec_candidates` is Tab's answer: the completion core's for those words over the live command tree, the config and the data directory, as `__complete` gives them.
+  - `exec_line_options` runs a line as the shell's child (`start_child_run`): the shell's root carried, stdin closed, stderr and stdout streamed. `cli/tui_cmd` gives every view its group.
+- [x] **The law, live**: ADR 0010 gains a dated note that the exec line reads its refusals from the table, and that the table now holds views, runner-covered rows and carve-outs only.
+- [x] **Tests**:
+  - `tui_runner_test`: the words a line runs, scoped and split; every refused verb refused with its reason, its neighbours running; Tab equal to `__complete` across a verb, a flag and a value; the shell's keys (`:` scoped, `!` unscoped, a `q` and a digit typed, Tab, Enter, ↑, Esc, Ctrl-C closing and never quitting). As children of the built binary (skipped where the build made none): a read's bytes and a mutation's file the command's on a pipe, a refusal running nothing, a slow command's frames never held back, and Ctrl-C stopping it with the shell going on.
+  - The leak test runs `models list`, `config get`, `auth list`, `mcp list`, `check` and `providers` through the exec line in the world with the key in every rung, and finds it in no output.
+  - `cli.tui_shell` gains a case on a real terminal: `!version` typed on the Models view, its exit line on the stage, Esc, `q`, the terminal's modes restored.
+
+Decisions taken while building, for veto:
+- **`:` and `!` open the line only on a view that is not taking typing.** In the Session view they are characters of the conversation; Tab to another view first.
+- **Completion answers from the shell's own root.** A typed root flag (`--dev`) does not re-root the completion as `__complete` does, because the process is shared with a conversation and a run that read their root as they go. The child is given the shell's root, and a typed root flag that disagrees with it is the child's to refuse.
+- **Ctrl-C interrupts the child** (SIGINT), as Ctrl-C at a terminal would, rather than killing it, so a command that handles it records its own cancellation; the exit line says how it ended (`exit 130`, or `stopped by a signal`).
+- **The output is the plain pipe rendering, stderr waited on before stdout** (the 37f reader), so the line shows what a script sees: a command's narration, then its outcome, then `exit N`. The exit line is drawn as the output's last line, not dimmed.
+- **The output shows while the line is open**, its newest twelve lines; history lives for the shell's run, not across runs.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,150 of 3,150, the pdftotext case skipped as before, the child-process and PTY cases run against the built binary. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+### 2026-10-11 — `tui-view-categories` (backlog item 38): the views in categories, and a switcher
+
+**Why.** Track 37 left the shell with twenty views on one tab strip: at any width it collapsed into numbers, and the number keys reached only the first nine.
+
+- [x] **Five categories** (the user's calls), each a view's own (`View::category`, set by its registration in `cli/tui_cmd` as its exec-line group is):
+  - **Modes**: Session, Chats, Tasks.
+  - **Studio** (the user's name): Suites, Symphonies, Agents, MCP.
+  - **Knowledge**: Knowledge, Collections, Graph.
+  - **Training**: Models, Train, Datasets.
+  - **Setup**: Config, Auth, Providers, Check, System, Home, Keys.
+- [x] **The strip shows one category**: its name (`Modes ▾`) and only its views, numbered within it. The digits, F-keys, Alt+digits and Tab act within the category, so every view is one key away inside it, and each category has room for the views still to come.
+- [x] **Ctrl-G, the Go-to menu** (the user's choice over F-keys per category and Tab between categories): every category and its views in a box over the stage, opened from any view, the Session view's conversation included, since Ctrl-G is never a character.
+  - ↑/↓ move a view, ←/→ a category, and a letter jumps to the next view named with it.
+  - Enter goes; Esc, Ctrl-G or Ctrl-C closes; `q` is the menu's while it is open.
+
+  The hint line, the bar beside the monitor, the Keys view and Home name Ctrl-G. A shell whose views name no category draws exactly as before.
+- [x] **Tests**: `shell_test` holds the strip, the keys inside a category, the menu's every key from a typing view, and a shell with no categories. `cli.tui_shell` goes to Studio through the menu on a real terminal with the modes restored, and its view-switch cases now stay in Modes.
+
+Decisions taken while building, for veto:
+- **Within a category, the number keys and Tab keep their old meaning**; the menu is the one way between categories. Tab no longer walks every view, so a view in another category is two keys away: Ctrl-G, then a letter or the arrows, then Enter.
+- **Setup's order follows the grouping you accepted**: Config, Auth, Providers, Check, System, Home, Keys. A bare `apogee` still lands on Session.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,153 of 3,153, the pdftotext case skipped as before, the PTY cases run on a real terminal. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+### 2026-10-11 — the session view as a chat (the user's request)
+
+**Why.** The shell's conversation read as one column of text: the person's lines and Apogee's answers looked alike, and a permission block ran straight into the turn that followed it.
+
+- [x] **The person's lines sit at the right.** Each is wrapped to two-thirds of the width and set against the right edge as one block, so a wrapped line still reads from the left, continuing under its text rather than under `You:`.
+- [x] **Apogee's answers are named.** Each answer's first row of text opens with `Apogee:` in bold cyan, the colour of the `[apogee]` tag, and its other rows are indented under it. The answer is rendered eight columns narrower to make room, still by `markdown/`'s one renderer.
+- [x] **A permission block ends with a blank row** after its `allowed` or `denied` line, and so does an answered question, so the next turn's thinking summary stands apart.
+- [x] **Tests**: `session_view_test` holds a person's line ending at the right margin, a long one wrapped within its share as one block, and the answer's label with its next row under its text; the answer's row-for-row golden is rendered at the narrower width; `tui_session_test` holds the blank row after `allowed`.
+
+Only the shell changed: the terminal's `apogee chat` prints as before. Done on the user's direct request, with no backlog item.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,154 of 3,155. The one failure was this entry's own new test, which streamed an answer before drawing its first frame; in its own process that answer wrapped at the default width. The test now draws first, as the shell always does, and ctest's 76 session cases pass in that tree. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+**Later the same day: boxes in place of the labels.** Seen in use, `You:` and `Apogee:` read as clutter, and the user asked for the look of Claude Code's prompt box instead.
+
+- [x] **Each side is boxed, the labels gone.** The person's line and Apogee's answer are each drawn in a rounded box (`╭─╮ │ │ ╰─╯`) with a column of padding inside each edge, as wide as its widest row. The person's box keeps its place at the right, wrapped to two-thirds of the width, edges dim. The answer's box sits at the left margin, edges cyan. The blank rows at either end of an answer stay outside its box, and nothing is boxed until the answer has text.
+- [x] **The answer is rendered four columns narrower** than the transcript, room for its box's edges and padding, still by `markdown/`'s one renderer.
+- [x] **Tests**: `session_view_test`'s row-for-row golden is now the whole box, rule to rule, around `StreamRenderer`'s own rows; the layout cases hold the person's box ending at the right margin with its rules above and below, a long line's box at one column top to bottom and within its share, and the answer's edges in one column on every row; the cases that found a sent line by `You:` find it by the box's edge.
+
+The permission block's blank row is unchanged. The full suite through `lib/scripts/cicd.sh --test` passed, 3,155 of 3,155 with one test skipped: the PDF case that needs `pdftotext`, which this machine does not have. The shell's PTY check (`cli.tui_shell`) passed against the fast build too.
+
+### 2026-10-11 — the session's completion menu (the user's request)
+
+**Why.** In the shell, completing a slash command was a list of dim rows with Tab always taking the first. A row further down could be reached only by typing more of it, and typing more often reached nothing: `/perm-` found neither `/permissions` nor `/permission-mode`, because a completion had to be a prefix.
+
+- [x] **A menu with a choice.** The rows under the input are a menu (`tui/session_view`):
+  - **What it shows:** the chosen row marked `›` (bold, cyan in colour), the descriptions in one column, up to eight rows in a window that scrolls with the choice, and `↑ N more` / `↓ N more` above and below it.
+  - **The arrows and Esc:** ↑ and ↓ move the choice, wrapping at the ends. Esc closes the menu until the line changes. A line recalled from history opens none, so the arrows go on through history.
+  - **Tab** takes the chosen row.
+  - **Enter on a slash command** takes the chosen row, unless it is what the line already says (`/model` typed whole runs as typed) or nothing was typed for it and the choice never moved. A command taking no argument then runs, a command taking one is filled in with its argument's rows next, and a chosen value runs with its command. A prompt's `@` path is sent as typed.
+- [x] **Loose matching in the shell** (`cli/chat_completer`, `ChatCompletionSources::loose`), for a command's name and its values:
+  1. the prefixes, as before;
+  2. then a name whose words the typed words begin (`/perm-`, `/p-m` → `/permission-mode`; `/max-t` → `/max-tokens`);
+  3. then one with a later word so begun (`/tokens` → `/max-tokens`; `sonnet` → `claude-sonnet-5-5`);
+  4. then one holding the typed text (`/permission-mode edits` → `accept-edits`);
+  5. then one holding its letters in order, once two are typed.
+
+  Each tier comes after the last, in the table's order within one, and the loose tiers ignore case. The terminal keeps prefixes alone: replxx draws a suggestion row as the typed span followed by the rest of its label, which only a prefix keeps whole. So the session turns `loose` on for any front end that is not the terminal.
+- [x] **Tests**:
+  - `chat_completer_test`: every tier, values included, and the terminal's prefixes unchanged.
+  - `session_view_test`: the marked choice and its column, the arrows wrapping, Tab taking the choice, and Esc closing the menu until an edit; a twelve-row list scrolling its window with both counts; Enter stopping at a command that takes an argument with the session still waiting, running one typed whole, taking one without an argument, and taking the arrows' choice; and a recalled line opening no menu.
+  - `tui_session_test`: `/perm-` found loosely through chat's real completer, then Tab, ↓ ↓ and Enter setting plan mode.
+
+Only the shell's menu and the completer's matching changed: the terminal's completion is as it was. Done on the user's direct request, with no backlog item.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3,182 tests ran with none failing, one skipped for want of `pdftotext`. That includes `cli.tui_shell` and `cli.chat_line_editing`, which shows the terminal's completion unchanged. `clang-format` is clean on every touched file.
+
+### 2026-10-12 — two orders macOS hid (the user's request)
+
+**Why.** The v0.1.6 pull request's CI run failed the same four unit tests on all four Linux and Windows jobs, and passed on macOS. Three were 32b's door tests, which compare a bare `apogee`'s help with a second root's. The fourth was 32d's Chats view test, which walks down to a row it expects below another. Both came from an order that macOS happened to keep and the other platforms did not.
+
+- [x] **Help names an option's `Excludes:` and `Needs:` alphabetically** (`cli/root`'s `StableHelpFormatter`, set on the root before any subcommand exists, so every subcommand inherits it). CLI11 keeps both lists as sets of pointers and prints them in address order. On macOS both roots printed the root flags' lists in declaration order. On Linux and Windows they did not, and the two helps compared did not agree with each other. The root's committed help (`tests/fixtures/cli/root_help.txt`, which `cli.bare_help` compares with) changed in those four lines alone. An option's text is otherwise CLI11's own.
+- [x] **Sessions saved in the same second list by id, newest started first** (`logger::list_sessions`). `save()` stamps whole seconds, so a tie is ordinary, and the order of a tie was the directory's. The same cause had been fixed in one test on 2026-09-22 rather than at its source. `chats list`, the Chats view, the shell's picker and `--continue` now read the same everywhere.
+- [x] **Tests**:
+  - `root_test`: the four root flags' lists, alphabetical, and four more roots in the same process giving the same help byte for byte. The check fails on macOS without the formatter.
+  - `session_test`: twenty-four sessions tied to the second and written out of order, listed by id. It fails on macOS without the tie-break; with three sessions it passed there by luck, so it was widened.
+
+No test was loosened, and both fixes change what a person sees only where it was arbitrary.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3,201 tests ran with none failing, one skipped for want of `pdftotext`. That includes `cli.bare_help` against the updated root help. No Linux or Windows host ran it here, so the CI run on the pushed branch is the check on those platforms. `clang-format` is clean on every touched file.
+
+### 2026-10-12 — the Windows image limit, and Linux and Windows rehearsed here (the user's request)
+
+**Why.** The next CI run passed every unit-test job, then failed `build windows-x64`: the test binary it linked could not be run to list its tests (`inappropriate file type or format`). Every release pull request so far had failed on Linux or Windows after passing on the Mac, fixed blind from CI's logs each time. The user asked that a pass on one platform mean a pass on the others, and chose to rehearse Linux and Windows on this machine before a push, over CI on every push or gating on macOS alone.
+
+- [x] **The cause, measured.** A MinGW linker puts DWARF inside a Windows executable's image, unlike ELF or Mach-O. Windows refuses to load an image of 2 GiB or more: MSVC's linker refuses to write one (LNK1248), and GNU ld writes it anyway. September's local cross-build had a 981 MiB test image, 97% of it `.debug_*`. v0.1.6's, cross-built here with the runner's flags (`-O2 -g`, llama.cpp on), is 2,056 MiB, 8 over the limit. The shipped `apogee.exe` was 1,210 MiB. The unit-test job's binary, with llama.cpp off, still fit.
+- [x] **The Windows presets build without `-g`** (`CMakePresets.json`'s `windows-mingw`: RelWithDebInfo's flags as `-O2 -DNDEBUG`). `-g` changes no code, and no Windows debugger reads DWARF. Cross-built, the test image is 89 MiB and `apogee.exe` 62 MiB. The Windows download shrinks with it: v0.1.5's `apogee-windows-x64.zip` was 261 MiB.
+- [x] **The limit is guarded** (`cmake/ApogeeImageSize.cmake`, `apogee_guard_image_size`). On Windows targets it reads each executable's `SizeOfImage` from its PE header after the link. Past three quarters of 2 GiB it warns, and at 2 GiB it fails the link, naming the size and the limit. It runs before the test discovery, which would otherwise fail as a bad format. The `-g` build above failed on it by name.
+- [x] **Test discovery waits for ctest when cross-compiling** (`tests/CMakeLists.txt`: `DISCOVERY_MODE PRE_TEST` when `CMAKE_CROSSCOMPILING` with no emulator), since a cross-built binary cannot run where it was built.
+- [x] **`make pr-ci` rehearses two of the other platforms' jobs**, after the host's own:
+  - **`unit tests linux (docker)`** (`lib/scripts/linux-unit-tests.sh`, alone as `make linux-tests`): CI's Linux unit-test job, `cicd.sh --unit-tests` with llama.cpp off, in a container of the runner's Ubuntu 24.04 (`lib/scripts/linux-ci.Dockerfile`). That gives GCC, libstdc++, glibc, and ext4 under the suite's temporary files. It runs as this user, on the Docker host's architecture, with the checkout mounted at its own path so a worktree resolves, and git told to trust the VM's mount. It needs Docker with 4 CPUs and 8 GiB. This machine's colima VM had 1 and 1, so it uses a profile of its own (`colima start --profile apogee-ci --cpu 8 --memory 16 --disk 60`), found by its context, leaving the default VM and its containers alone. A build directory an earlier container configured at another path is built afresh.
+  - **`build windows-x64 (cross)`** (`lib/scripts/cross-windows.sh`, alone as `make cross-windows`): CI's Windows x64 build through the same preset, cross-compiled with MinGW-w64 GCC. Every file is compiled and linked, llama.cpp on, and each image size is checked. A static Schannel libcurl is built once from curl's source into `~/.cache/apogee/cross/windows-x64`.
+  - Each needs a tool a machine may not have. Without it, the job is reported as skipped, with the line saying what to install or start, never as passed. `gcc compile` stands in for the cross-build when that cannot run.
+  - The summary names what only CI's runners can say: the Windows test runs, the windows-arm64 build (no Windows here), and the Linux architecture the container is not.
+- [x] **The process**: CLAUDE.md's checklist runs `make pr-ci` before opening a pull request and before every push to one, setting up a skipped job rather than pushing past it. DEVELOPER.md's `make pr-ci` row has the one-time setup, and its release steps run the rehearsal before each push.
+
+Decisions taken while building, for veto:
+- **No `-g` on Windows, rather than stripping at the link**: the objects and the link shrink too, and a CI Windows build did nothing with the DWARF it made.
+- **The guard fails at the limit itself**, and only warns before it, so a build that would load is never refused.
+- **The container is the Docker host's architecture**, linux-arm64 here: linux-x64 under emulation would take hours, and the classes found so far (GCC, libstdc++, glibc, ext4) are the same on both.
+
+**Verified.**
+- `make pr-ci` with these changes, from fresh worktrees, passed every job in 21 minutes: version bump, clone, macOS unit tests, the macOS build and package, the Linux container's 3,145 test cases (16 skipped, as CI's Linux jobs skip them), and the Windows cross-build (`apogee.exe` 72 MiB, the test binary 102 MiB on disk).
+- With the two ordering fixes above undone, the container failed five test cases: three of the four CI had failed (the bare door's help comparisons), and both new guards. The fourth, the Chats view's walk, happened to pass in the container's directory order, which is why the session guard writes 24 tied sessions.
+- Each new job's skip path reports a skip, never a pass: a VM too small, no Docker daemon, no MinGW.
+- The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,201 tests, one skipped for want of `pdftotext`.
+- Nothing here can run a Windows binary, so the Windows test runs stay CI's.
+
+## Milestone AI — Effort and permission modes
+
+**Goal.** Claude Code gives a session two controls the person reaches for constantly: how hard the model thinks (five effort levels) and how much it may do without asking (a permission mode, cycled with Shift+Tab). Apogee had the pieces of both -- `/think on|off|auto` with a raw token budget, and per-tool answers over one permission gate -- but not the controls. Track 39 (the user's call, 2026-10-11) gives `apogee chat`, `apogee execute` and the full-screen shell Claude Code's two, set mid-session in either front end and Tab-completed in both.
+
+### 2026-10-11 — `session-effort-levels` (backlog item 39a): `/effort` and `--effort`
+
+**What was built**
+
+- [x] **The level in the IR** (`contracts/types.h/.cpp`): `Effort` -- `low`, `medium`, `high`, `xhigh`, `max`, Claude Code's five -- with its words, and `Thinking::effort`, held instead of a budget. `effort_budget` is the one table a budget-driven backend spends a level as: 1,024 · 4,096 · 16,384 · 24,576 · 32,768 tokens, from Anthropic's minimum to Gemini Pro's ceiling, with OpenAI's existing budget thresholds separating the first three. `Thinking::tokens()` is the budget to spend either way.
+- [x] **Each backend spends it its own way**:
+  - the Claude Code CLI gets its own `--effort <level>`, all five by name; it reads the flag at launch alone, so a changed level ends the child and resumes the same session with the new flag, telling it only what is new;
+  - Codex gets `-c model_reasoning_effort="<word>"` on every turn (`exec` and `exec resume` both take it), with `max` running as `xhigh`;
+  - OpenAI's API and gpt-oss's template get `low`, `medium` or `high`, with `xhigh` and `max` running as `high` -- the highest each takes at or below, Claude Code's own rule;
+  - Anthropic's API, Gemini (held to its model's ceiling: Flash 24,576, Pro 32,768) and llama.cpp's budget sampler get the level's budget;
+  - MLX says its budget is not applied, as it does for a budget.
+- [x] **One control at a time**: `resolve_thinking` takes the session's level, which stands in for a budget -- the config's `thinking_budget` is not taken under it. `/effort high` clears a session budget; `--effort` with `--think-budget` is a usage error from the parser, naming both.
+- [x] **`/effort [low|medium|high|xhigh|max|auto]`**: one row in chat's command table, so the terminal REPL, execute and the shell's session all take it.
+  - Alone, it says `effort: high (thinking on) -- low, medium, high, xhigh, max, or auto`.
+  - A level asked for turns thinking on when it was off, since a level with thinking off would do nothing.
+  - `auto` hands the choice back to the model or the backend's budget.
+  - An unknown word is refused, naming the five.
+  - `/think` alone names the level.
+- [x] **`--effort`** on `chat`, `execute` and `complete`, completed by `__complete` from its `CLI::IsMember`; `/effort ` completes the levels lowest first, each described, then `auto`, in both front ends.
+- [x] **Saved with the chat** as an additive `effort` beside `think` and `think_budget`; a chat saved before it resumes unchanged.
+- [x] **Tests**:
+  - contracts: the words round-trip, the table is pinned, and `tokens()` holds;
+  - each backend's mapping (OpenAI, Anthropic, Gemini's ceilings, Codex's override on both forms, the Claude CLI's flag, and its restart on a changed level with only the new message sent);
+  - the mock's `{{thinking}}` naming the level after `@`;
+  - the completer's values;
+  - the REPL: `/effort` alone, set, refused and handed back, each request's level read off the mock; and `--effort` saved, resumed, refused beside a budget, and on `complete`;
+  - the shell's session, where the levels are offered, `/effort high` is said, a turn carries it, and it is saved;
+  - chat's and execute's goldens, which gain the `/effort` row, the flag, and `__complete chat --effort`'s five.
+
+**Decisions** (2026-10-11, recorded in the item before it shipped)
+
+- The user's calls: `/effort` with Claude Code's level names and `--effort`; `/think on|off|auto` kept as the switch; each backend spending the level its own way.
+- The budget table and the native spellings above. Gemini's budget is now held to each model's ceiling for any budget, which also stops an over-large `--think-budget` from being refused by the API.
+- The banner is unchanged, and there is no config default (a follow-up). HTTP is named skipped: a request carries no thinking override today, and a `reasoning_effort` field is a follow-up. Machine mode takes `--effort` at launch.
+- On llama.cpp, the level reaches both gpt-oss's template switch and the budget sampler where the format names its reasoning. Only a budget chosen outright is said to be unapplied on a format that names none, since a level has already reached the template's own switch where it has one.
+
+**Notes.** Out of scope as specced: Claude Code's slider and `ultrathink` keyword, and the Anthropic API's own effort parameter, which needs a live check against the API before its budget path is replaced.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) ran 3,164 tests, with one skipped for want of `pdftotext`. 3,162 passed. The two failures had one cause: the new launch-flag test's name began with `--effort`, which ctest hands Catch2 as an option, and which `cli.test_names` exists to refuse. The test was renamed, and both pass under ctest. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+### 2026-10-11 — `permission-modes` (backlog item 39b): five modes over the one gate, and Shift+Tab
+
+**What was built**
+
+- [x] **The modes** (`cli/permissions.h/.cpp`), Claude Code's, one layer over the existing gate:
+  - `manual`: the gate as configured;
+  - `accept-edits`: the file and note edits run unasked;
+  - `plan`: every tool that writes is refused, over any allow, and websites still ask;
+  - `dont-ask`: whatever would ask is refused;
+  - `bypass`: nothing asks.
+
+  `SessionApprovals::mode` is atomic, so the shell's Shift+Tab can move it from its own thread while a turn runs; the checker reads it at each call, **after every deny has spoken**, so a config `deny` and a session `/deny` refuse in all five, as Claude Code's deny rules do. Bypass is reachable only when the session was started with `--allow-bypass` or `--permission-mode bypass`.
+- [x] **A tool says it edits** (`agent::Tool::edits`, carried to the checker on `GateRequest::edits`): `write_file`, `edit_file`, `delete_file`, `write_note` and `delete_note`, and no other built-in. `run_command`, MCP tools that write and websites keep asking in accept-edits.
+- [x] **A refusal says why** (`DispatchContext::refusal`, passed by the loop): in plan mode the model reads `'write_file' was not run: plan mode is on, and nothing that changes files or runs commands runs until the person leaves it; propose the change instead.`, and in dont-ask that the session refuses what it would ask. Plan mode's note -- research the request and propose a plan, change nothing -- rides each turn's system prompt in the transient prefix, as the branch-review note does, so leaving plan mode leaves no trace in the transcript.
+- [x] **`/permission-mode [manual|accept-edits|plan|dont-ask|bypass]`**: one row in chat's table.
+  - Alone, it says the mode, what it does and the choices: bypass is listed only when allowed, and `Shift+Tab cycles`.
+  - An unknown word is refused, and so is bypass without the allowance, naming `--allow-bypass`.
+  - `/permissions` leads with the mode outside manual and words each answer it changes (`write_file   deny   (plan mode)`).
+  - Tab completes the modes, described, bypass only where it can be chosen.
+- [x] **`--permission-mode` and `--allow-bypass`** on chat and execute, machine mode included -- the mode a driver chooses at launch (`dont-ask` for one that must never be asked), said in the machine-mode reference. `__complete` offers the five.
+- [x] **Shift+Tab in both front ends**, cycling manual → accept-edits → plan → (bypass, when allowed) → manual, dont-ask leaving to manual, through two hooks the session hands its line reader. The hooks read only the shared approvals, so the shell can call them safely.
+  - **The terminal** (`views/line_reader`): replxx's Shift+Tab redraws the prompt in place with the mode's words ahead of it -- `⏵⏵ accept edits on · You: ` -- the line typed so far kept. Manual's prompt is `You: ` as before.
+  - **The shell** (`tui/session_view`): the conversation takes Shift+Tab whenever a session's hooks are set, never the shell's previous view there, and draws the mode's row under the input in Claude Code's status words (`⏸ plan mode on (shift+tab to cycle)`), read as each frame is drawn. There is no row in manual.
+- [x] **Tests**:
+  - the checker: every mode against an edit, a config-allowed edit, a config-denied command, a session-denied edit, an MCP writer, a website and a denied website;
+  - the cycle and the words;
+  - plan's note and the modes' refusals;
+  - `/permissions` under each mode;
+  - the gate hearing `edits` and saying a surface's reason;
+  - exactly the five writers declaring edits;
+  - the completer, with and without bypass;
+  - the REPL: accept-edits writing unasked on a pipe, plan refusing over an allow with the refusal and note read off the mock and the note never saved, `/permission-mode` shown, set and refused, and bypass with the allowance;
+  - machine mode taking accept-edits and dont-ask with no `question`;
+  - the session view's Shift+Tab and row, and the picker leaving the key to the shell;
+  - the shell's conversation cycled end to end, `/permission-mode` moving the same row;
+  - the terminal under a PTY (`cli.chat_line_editing`), with the prompt redrawn through accept-edits and plan and bare again, and the line typed across the switches sent whole;
+  - chat's and execute's goldens, gaining the row, the two flags and `__complete chat --permission-mode`'s five. Chat's `/help` column widened by one space for the new longest command.
+
+**Decisions** (2026-10-11, recorded in the item before it shipped)
+
+- The user's calls: five modes with auto left out; bypass only when allowed at launch; a deny winning in every mode; Shift+Tab cycling in both front ends with the mode shown under the input.
+- Manual draws no row and keeps the bare prompt, so a session that never changes mode looks exactly as before.
+- Plan mode keeps the tools offered and refuses at the gate, rather than dropping them as the read-only agent policy does: a local model's prompt and its cache stay the same across a switch.
+- Accept-edits approves only the edit tools, not Claude Code's in-scope shell commands.
+- The mode is not saved with the chat, as session answers are not; there is no config default (a follow-up); and there is no plan-approval prompt -- plan mode is left by switching.
+- Named skipped (ADR 0002): `apogee serve`, whose gate has no one to ask and already refuses what would ask, and `task run` and `analyze`, which keep their declared policies.
+
+**Notes.** A Shift+Tab pressed in the moment before a newly opened conversation's line reader exists still reaches the shell's previous view; the hooks are in place from the first time the session reads a line.
+
+**Later the same day: bypass asked for, not only allowed at launch.** In use, the shell had no way to reach bypass: it opens its conversations itself, and nothing in it could pass `--allow-bypass`. The user chose to ask once rather than add a flag or a config key.
+
+- [x] **`/permission-mode bypass` in a session not allowed it at launch asks one yes/no question**: "Run every tool without asking for the rest of this session? A config deny or /deny still refuses."
+  - A yes chooses bypass and puts it in that session's Shift+Tab cycle.
+  - A no says `bypass not chosen` and leaves the mode as it was.
+  - With nobody to ask (a pipe), it is refused, naming `--allow-bypass`.
+  - `SessionApprovals::bypass_allowed` became atomic, since the session's thread now sets it while the shell's Shift+Tab reads it.
+  - The completer offers bypass in every session.
+- [x] **The front end's yes/no question**, which asked before attaching a folder over the size guard (26d), is now `SessionOutput::ask_yes_no`, one question for both uses.
+- [x] **Tests**:
+  - the shell's session, where a no leaves manual, a yes shows bypass's row, and Shift+Tab then cycles back round to bypass;
+  - the terminal under a PTY, where the question is asked, a `y` chooses bypass, and the prompt carries its words;
+  - the pipe's refusal;
+  - the completer offering bypass.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3,177 tests ran with none failing, one skipped for want of `pdftotext`. That includes `cli.chat_line_editing` with the bypass question answered in a real terminal. `clang-format` is clean on every touched file.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3,176 tests ran with none failing, one skipped for want of `pdftotext`. That includes `cli.chat_line_editing` (the terminal's Shift+Tab under a PTY), `cli.tui_shell` and `cli.test_names`. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+## Milestone AJ — The thinking summary
+
+**Goal.** A turn's thinking block showed the model's raw reasoning as it streamed: the terminal painted its last two wrapped lines, and the shell drew its last rows. That is verbose text where a reader wants the gist. This milestone makes one short line of what the model is doing the default, in both front ends, and makes it honest: written only by a model that costs nothing, and the vendor's own summary shown as it is.
+
+### 2026-10-11 — `thinking-summary` (backlog item 43): the gist, not the stream
+
+**What was built**
+
+- [x] **The fourth chore** (`agentloop/reasoning_summary.h/.cpp`), beside the query rewrite, the tool summary and the thinking judge.
+  - **What it asks:** the utility model gets the reasoning's last 3,000 bytes and is asked for one short present-tense phrase of what it is doing now. The reply is a side request with no thinking of its own, at most 40 tokens.
+  - **How the reply is shaped** (`summary_line`): the first line with words in it, without a list mark, quotes, a closing full stop or a leading subject ("It is parsing the problem" becomes "Parsing the problem"). It opens with a capital and is cut at 80 characters, never inside one.
+  - **The cadence** (`ReasoningSummarizer`): the first line once the reasoning has run 1.5 s, each next one 4 s after the last arrived, and only with 120 new bytes since.
+  - **When it fails:** a failed call ends the summaries for that model call. A cancelled one ends them quietly, so the cancel never crosses a backend's callback; the chat model's own stream ends the turn.
+- [x] **One model call at a time** (the user's call, asked when the item was taken): the line is written inside the reasoning stream's own callback, so the chat model's stream waits while it is written. A local provider is never driven from two threads, the rule the background title keeps. The cadence bounds what the pause costs.
+- [x] **The route, decided once** (`route_summary`, read by the loop and by `/thinking-display`):
+  - Reasoning that is already the vendor's own summary is shown as it is. That is `ModelBehavior::reasoning_summarized`, reported by the Anthropic, OpenAI and Google APIs and the Claude Code, Codex and Gemini CLIs, with Anthropic's Claude 3.7, which streams its reasoning whole, the exception.
+  - Raw reasoning is summarised by the utility model only when one is set, it is not the chat model itself, and it is unmetered. A summary is never worth a charge.
+  - Anything else shows the reasoning as it streams, with one dim reason.
+- [x] **Two Reporter events, no wire change.**
+  - `on_thinking_summary(line)` draws the latest line.
+  - `on_thinking_raw(why)` says a model call's reasoning is shown as it streams after all. It fires once a model call, before the chunk, since each call opens its own block, and the reason is said only the first time in a turn.
+  - Both fire only for a run that asked for summaries (`Options::summarize_reasoning`). The session asks only where the front end draws the reasoning: the terminal on a terminal, but not on a pipe or under `--verbose`, which keeps every word; and the shell. Machine mode, `serve`, a task's rounds and a pipe never ask, so they never pay, and their wire is unchanged (ADR 0002, the 26n precedent, skipped and said).
+- [x] **Both painters.**
+  - The terminal's thinking view draws the line as its window's last row, with a side call's row above it, and never draws the reasoning's text. The header shows alone until the first line arrives. A block shown raw streams as before, the reason a dim `· reasoning shown in full -- …` row.
+  - The shell's thinking block draws the same, in the reasoning's place.
+  - The `✻ Thought for Ns` fold is unchanged in both.
+- [x] **The display, and flipping it.**
+  - `ui.thinking_display: summary|raw` sits in the existing `ui:` section beside `ui.markdown`. The summary is the default. A word outside the two is refused, naming both. `config get` reads it, and the starter config documents it.
+  - `/thinking-display [summary|raw]` flips it for the chat in both front ends, from the next turn. Alone, it says who writes the line, or why none can be had: "a line of what it is doing, written by helper", or "the reasoning shows as it streams: no utility model is set to summarise it". Tab completes it in both.
+- [x] **The mock streams reasoning**: a scripted turn's `reasoning`, in chunks with its `delay_ms`, on the thinking channel, never in the answer.
+- [x] **Tests**:
+  - the chore: the request's shape, the line table, the cadence on a hand-moved clock, a failure, a cancel;
+  - the routing table, in a loop over fake providers: a summary on an unmetered member, the vendor's as it is, no utility model, the chat model as its own utility, a metered utility never asked, a failed call, not asked for, no reasoning, and raw said per model call with the reason once;
+  - the built providers' facts;
+  - both painters, summary and raw;
+  - the terminal reporter;
+  - `/thinking-display`'s words, the config's default, a refused word and `config get`;
+  - the completer;
+  - the leak sweep's new surface, the route's words;
+  - the shell end to end: a mock reasoning for two seconds, the helper's line drawn, never the reasoning, then the fold.
+
+**Decisions** (2026-10-11, recorded in the item before it shipped)
+
+- The user's call: the summary is written while the chat model waits -- one model call at a time -- rather than beside it on a second thread.
+- **`ui.thinking_display`, not the item's `cli.thinking_display`**: the `ui:` section is where the terminal's display already lives, and a second section would split one concern. It is hand-edited like `ui.markdown`, with no `config` verb, since no `ui:` setting has one, so no admin twin is owed. `/thinking-display` is the chat's own and is not saved.
+- The chore is not narrated as a side call: the line it writes is what is shown.
+- **The prompt carries no example.** On real weights the first draft's example, "comparing the two config paths", came back verbatim from a 1B utility model. Without it, the same model wrote "It is parsing the problem" and "It is checking the CMake files", whose subject the line drops.
+- The open calls' defaults, taken: vendor summaries are shown as they are, never compressed; the cadence, slice and length are the named constants above; the fallback reason is one dim row, not one per chunk.
+- **On real weights** (optional, one family): the OpenAI family's gpt-oss-20b, from its full weights since no Q4_K_M build is installed, with Meta's Llama 3.2 1B (Q4_K_M) as the utility model, under a PTY.
+  - The prompt was the farmer's-sheep puzzle.
+  - Over 8 s of reasoning, two lines were drawn: "The farmer buys twice as many sheep as remain", then "He buys twice as many as remain".
+  - The answer was unchanged (22), and the turn took 11.6 s.
+  - The other families were skipped, as the guardrail allows.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3,199 tests ran with none failing, one skipped for want of `pdftotext`. That includes `cli.machine_schema_conformance` (the wire byte-stable), `harness.layering`, `cli.tui_shell` and `cli.chat_line_editing`. `clang-format` is clean on every touched file, and `make lint` was not run.

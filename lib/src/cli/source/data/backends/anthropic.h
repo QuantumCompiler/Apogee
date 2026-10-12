@@ -23,7 +23,9 @@
 /// server-side `web_search` tool instead of a shelled-out search.
 namespace apogee::backends {
 
-class AnthropicProvider final : public harness::LLMProvider {
+class AnthropicProvider final : public harness::LLMProvider,
+                                public harness::CatalogListing,
+                                public harness::ModelBehaviorReporting {
 public:
     struct Options {
         std::string backend_name = "anthropic";
@@ -65,6 +67,8 @@ public:
         bool web_search = false);
 
     [[nodiscard]] std::string_view backend_name() const noexcept override;
+    /// Its reasoning is the vendor's own summary (43): shown as it is.
+    [[nodiscard]] harness::ModelBehavior model_behavior() const override;
 
     /// Every call is billed. Said explicitly rather than inherited.
     [[nodiscard]] bool generation_is_metered() const noexcept override {
@@ -79,6 +83,10 @@ public:
                                                     const harness::StreamOptions& options) override;
 
     [[nodiscard]] std::vector<harness::ModelInfo> list_models(
+        const harness::CancellationToken& cancellation) override;
+    /// The vendor's live model catalogue (M13): ids verbatim from the models
+    /// endpoint, paging followed; authenticated with this entry's key.
+    [[nodiscard]] std::vector<harness::ModelInfo> list_catalog(
         const harness::CancellationToken& cancellation) override;
 
     /// Exact input-token count for `request`, via /v1/messages/count_tokens.

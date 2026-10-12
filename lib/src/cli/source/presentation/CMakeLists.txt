@@ -60,6 +60,8 @@ apogee_add_module(operations
     operations/backend_names.h
     operations/backend_names.cpp
     operations/collections.h
+    operations/credential_views.h
+    operations/credential_views.cpp
     operations/collections.cpp
     operations/dataset_core.h
     operations/dataset_core.cpp
@@ -77,6 +79,10 @@ apogee_add_module(operations
     operations/run_settings.cpp
     operations/suites.h
     operations/suites.cpp
+    operations/system_view.h
+    operations/system_view.cpp
+    operations/training_reads.h
+    operations/training_reads.cpp
 )
 target_link_libraries(apogee_presentation_operations PUBLIC nlohmann_json::nlohmann_json)
 
@@ -137,6 +143,37 @@ apogee_add_module(httpserver
 )
 target_link_libraries(apogee_presentation_httpserver PUBLIC nlohmann_json::nlohmann_json
                       PRIVATE httplib::httplib)
+
+# The full-screen shell (32b): the only module that links FTXUI -- PRIVATE,
+# its headers naming none of FTXUI's types -- and the link policy holds it so.
+apogee_add_module(tui
+    tui/theme.h
+    tui/theme.cpp
+    tui/view.h
+    tui/view.cpp
+    tui/view_body.h
+    tui/shell.h
+    tui/shell.cpp
+    tui/shell_state.h
+    tui/pump.h
+    tui/pump.cpp
+    tui/paint.h
+    tui/paint.cpp
+    tui/styled_text.h
+    tui/styled_text.cpp
+    tui/session_view.h
+    tui/session_view.cpp
+    tui/list_view.h
+    tui/list_view.cpp
+    tui/progress.h
+    tui/progress.cpp
+    tui/runner_view.h
+    tui/runner_view_state.h
+    tui/runner_view.cpp
+    tui/monitor_bar.h
+    tui/monitor_bar.cpp
+)
+target_link_libraries(apogee_presentation_tui PRIVATE ftxui::component)
 
 apogee_add_module(cli
     cli/command.h
@@ -199,6 +236,38 @@ apogee_add_module(cli
     cli/agents_cmd.cpp
     cli/symphonies_cmd.h
     cli/symphonies_cmd.cpp
+    cli/system_cmd.h
+    cli/system_cmd.cpp
+    cli/tui_cmd.h
+    cli/tui_cmd.cpp
+    cli/session_output.h
+    cli/session_output.cpp
+    cli/tui_session.h
+    cli/line_tokens.h
+    cli/line_tokens.cpp
+    cli/tui_agents.h
+    cli/tui_agents.cpp
+    cli/tui_child.h
+    cli/tui_child.cpp
+    cli/tui_common.h
+    cli/tui_common.cpp
+    cli/tui_doctor.h
+    cli/tui_doctor.cpp
+    cli/tui_knowledge.h
+    cli/tui_knowledge.cpp
+    cli/tui_parity.h
+    cli/tui_parity.cpp
+    cli/tui_runner.h
+    cli/tui_runner.cpp
+    cli/tui_session.cpp
+    cli/tui_symphonies.h
+    cli/tui_symphonies.cpp
+    cli/tui_task.h
+    cli/tui_task.cpp
+    cli/tui_training.h
+    cli/tui_training.cpp
+    cli/tui_workbench.h
+    cli/tui_workbench.cpp
     cli/graph.h
     cli/graph.cpp
     cli/graph_navigate.h

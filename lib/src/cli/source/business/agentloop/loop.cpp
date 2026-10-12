@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "agentloop/budget.h"
+#include "agentloop/reasoning_summary.h"
 #include "agentloop/structured.h"
 #include "agentloop/thinking.h"
 #include "agentloop/tool_summary.h"
@@ -354,6 +355,7 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
     agent::DispatchContext dispatch_context;
     dispatch_context.permission = options.permission;
     dispatch_context.confirm = options.confirm;
+    dispatch_context.refusal = options.refusal;
     dispatch_context.on_status = [&reporter](std::string_view detail) {
         // An empty status means "back to rest" -- reported as thinking rather
         // than as an empty tool status, which the Reporter contract forbids.
@@ -363,6 +365,17 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
             reporter.on_tool_status(detail);
         }
     };
+
+    // Whether this run's reasoning is summarised, and by whom (43) -- or, when
+    // a surface asked and none can be had, why, said once.
+    std::string summary_model;
+    std::string why_raw;
+    bool why_said = false;
+    if (options.summarize_reasoning) {
+        SummaryRoute route = route_summary(harness, options.model, options.reasoning_summary_model);
+        summary_model = std::move(route.model);
+        why_raw = std::move(route.why_not);
+    }
 
     for (int iteration = 0;; ++iteration) {
         options.cancellation.throw_if_cancelled();
@@ -430,9 +443,36 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
 
         harness::StreamOptions stream;
         stream.cancellation = options.cancellation;
-        stream.on_thinking = [&reporter](std::string_view chunk) {
+        // This model call's reasoning, summarised as it streams (43): the
+        // line is written here, on the stream's own thread, so the chat
+        // model waits for it -- one model call at a time.
+        std::optional<ReasoningSummarizer> summarizer;
+        if (!summary_model.empty()) {
+            summarizer.emplace(harness, summary_model, options.cancellation, options.summary_clock);
+        }
+        // Raw after all is said once a model call -- each opens its own block
+        // on a surface -- and why only the first time in the run.
+        bool raw_said = false;
+        const auto say_raw = [&reporter, &raw_said, &why_said](const std::string& why) {
+            reporter.on_thinking_raw(why_said ? std::string{} : why);
+            why_said = why_said || !why.empty();
+            raw_said = true;
+        };
+        stream.on_thinking = [&reporter, &summarizer, &raw_said, &why_raw, &say_raw,
+                              summarizing = options.summarize_reasoning](std::string_view chunk) {
+            if (summarizing && !summarizer.has_value() && !raw_said && !chunk.empty()) {
+                say_raw(why_raw);
+            }
             // Thinking goes to its own channel and never into the answer.
             reporter.on_thinking_token(chunk);
+            if (!summarizer.has_value()) {
+                return;
+            }
+            if (const std::optional<std::string> line = summarizer->feed(chunk); line.has_value()) {
+                reporter.on_thinking_summary(*line);
+            } else if (summarizer->failed() && !raw_said) {
+                say_raw("the utility model could not summarise it");
+            }
         };
         stream.on_status = [&reporter](const harness::StatusEvent& event) {
             // Only notices and progress notes cross here: a model's load

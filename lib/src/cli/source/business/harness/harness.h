@@ -168,6 +168,14 @@ public:
     /// (`SessionHold`), the hold moves with it (27e).
     void set_active_suite(std::string suite);
 
+    /// Runs backend `name` on `model` in place of the model its entry names
+    /// (33): this harness's view of the config, as `-m` or `/model` pins a
+    /// vendor roster's model on its owner's entry -- never the file. An empty
+    /// `model` restores the entry's own. As after `set_active_suite`, the
+    /// caller, who can build providers, rebuilds `name` for the pin to run
+    /// (`backends::rebuild_providers`). False when no entry is named `name`.
+    bool pin_model(std::string_view name, std::string model);
+
     // --- Request paths -----------------------------------------------------
     //
     // Thin: route, then delegate. They exist so a surface holds one object
@@ -216,6 +224,14 @@ public:
     /// The embedding interface for `model`, or nullptr when it cannot embed.
     /// Non-owning; valid as long as the provider stays registered.
     [[nodiscard]] EmbeddingCapable* embedder_for(std::string_view model) const noexcept;
+
+    /// Whether the backend serving `model` can list its vendor's live model
+    /// catalogue (M13). False for an unroutable model.
+    [[nodiscard]] bool can_list_catalog(std::string_view model) const noexcept;
+
+    /// The catalogue interface for `model`, or nullptr when it cannot list.
+    /// Non-owning; valid as long as the provider stays registered.
+    [[nodiscard]] CatalogListing* catalog_for(std::string_view model) const noexcept;
 
     /// Whether the backend serving `model` puts tool calls in the text stream.
     [[nodiscard]] bool uses_in_text_tool_calls(std::string_view model) const noexcept;
@@ -349,6 +365,9 @@ private:
     void hold_suite_members();
 
     Config config_;
+    /// The model each pinned entry names in the file, by its key (33), so a
+    /// pin restores exactly what it replaced.
+    std::map<std::string, std::string, std::less<>> unpinned_;
     /// The turn observer (28c), when one is installed.
     TurnObserver turn_observer_;
     /// Tells the observer `provider`'s turn succeeded, by its registered

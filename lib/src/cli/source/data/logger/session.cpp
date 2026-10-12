@@ -118,6 +118,9 @@ std::string serialize(const Session& session) {
         {"compactions", session.compactions},
         {"messages", session.messages},
     };
+    if (!session.model.empty()) {
+        out["model"] = session.model;
+    }
     if (session.private_chat) {
         out["private"] = true;
     }
@@ -192,6 +195,9 @@ std::string serialize(const Session& session) {
     if (session.params.thinking_budget.has_value()) {
         params["think_budget"] = *session.params.thinking_budget;
     }
+    if (session.params.effort.has_value()) {
+        params["effort"] = harness::to_string(*session.params.effort);
+    }
     if (!session.params.system_prompt.empty()) {
         params["system_prompt"] = session.params.system_prompt;
     }
@@ -218,6 +224,7 @@ LoadedSession deserialize(std::string_view text, const KnownDependencies& known)
     session.custom_name = string_field(parsed, "custom_name", loaded.warnings);
     session.title = string_field(parsed, "title", loaded.warnings);
     session.backend = string_field(parsed, "backend", loaded.warnings);
+    session.model = string_field(parsed, "model", loaded.warnings);
     session.retriever = string_field(parsed, "retriever", loaded.warnings);
     session.rerank = string_field(parsed, "rerank", loaded.warnings);
     // A judge that has since been deleted: resume without reranking, and say
@@ -279,6 +286,9 @@ LoadedSession deserialize(std::string_view text, const KnownDependencies& known)
         if (const auto it = params->find("think_budget");
             it != params->end() && it->is_number_integer()) {
             session.params.thinking_budget = it->get<std::int64_t>();
+        }
+        if (const auto it = params->find("effort"); it != params->end() && it->is_string()) {
+            session.params.effort = harness::effort_from_string(it->get<std::string>());
         }
         session.params.system_prompt = string_field(*params, "system_prompt", loaded.warnings);
     }
@@ -441,8 +451,14 @@ std::vector<Session> list_sessions() {
         }
     }
 
+    // Newest first. Two saved in the same second fall to their ids, newest
+    // started first, never to the directory's order, which differs by
+    // filesystem: the listing reads the same everywhere.
     std::ranges::sort(sessions, [](const Session& a, const Session& b) {
-        return a.updated_at > b.updated_at;  // newest first
+        if (a.updated_at != b.updated_at) {
+            return a.updated_at > b.updated_at;
+        }
+        return a.chat_id > b.chat_id;
     });
     return sessions;
 }

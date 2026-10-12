@@ -29,6 +29,16 @@ namespace apogee::commands {
 /// too (27s), so the two read alike.
 [[nodiscard]] std::vector<std::string> symphony_list_lines(const symphony::Catalog& catalog);
 
+/// The symphonies `symphonies list` reads (37d): every source, the catalog
+/// its table, its document and the shell's Symphonies view are drawn from.
+/// Throws `harness::ConfigError` for a config that will not load.
+[[nodiscard]] symphony::Catalog read_symphony_catalog(const RootContext& context);
+
+/// `symphonies show <name>` as the command prints it (37d): the Symphonies
+/// view's card. Throws std::runtime_error in the command's words for a name
+/// that finds nothing or a config that will not load.
+[[nodiscard]] std::string symphony_show_text(const RootContext& context, const std::string& name);
+
 class SymphoniesCommand final : public Command {
 public:
     [[nodiscard]] std::string_view name() const noexcept override;

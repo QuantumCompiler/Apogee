@@ -165,6 +165,27 @@ TEST_CASE("every role and finish reason round-trips through its name", "[harness
     }
 }
 
+TEST_CASE("each effort level round-trips through its word, and spends its budget",
+          "[harness][ir][effort]") {
+    using apogee::harness::Effort;
+    for (const Effort effort : apogee::harness::kEfforts) {
+        CHECK(apogee::harness::effort_from_string(apogee::harness::to_string(effort)) == effort);
+    }
+    CHECK_FALSE(apogee::harness::effort_from_string("auto").has_value());
+    CHECK_FALSE(apogee::harness::effort_from_string("High").has_value());
+    // The one table (39a): Anthropic's minimum to Gemini Pro's ceiling.
+    CHECK(apogee::harness::effort_budget(Effort::Low) == 1'024);
+    CHECK(apogee::harness::effort_budget(Effort::Medium) == 4'096);
+    CHECK(apogee::harness::effort_budget(Effort::High) == 16'384);
+    CHECK(apogee::harness::effort_budget(Effort::XHigh) == 24'576);
+    CHECK(apogee::harness::effort_budget(Effort::Max) == 32'768);
+    // A budget chosen is spent as chosen; a level as its budget; else none.
+    using apogee::harness::Thinking;
+    CHECK(Thinking{.budget = 2'000}.tokens() == 2'000);
+    CHECK(Thinking{.effort = Effort::High}.tokens() == 16'384);
+    CHECK_FALSE(Thinking{}.tokens().has_value());
+}
+
 // ---------------------------------------------------------------------------
 // The transient region -- the contract this item exists to make unbreakable
 // ---------------------------------------------------------------------------

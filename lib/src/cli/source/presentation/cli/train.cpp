@@ -1,6 +1,7 @@
 #include "cli/train.h"
 
 #include <CLI/CLI.hpp>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -29,12 +30,14 @@
 #include "contracts/errors.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "machine/json_reporter.h"
 #include "models/quantize.h"
 #include "modelstore/gguf_inspect.h"
 #include "modelstore/mlx_info.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
+#include "operations/training_reads.h"
 #include "platform/child_process.h"
 #include "platform/platform.h"
 #include "training/convert.h"
@@ -258,13 +261,6 @@ std::string pad(std::string value, std::size_t width) {
         value.append(width - value.size(), ' ');
     }
     return value;
-}
-
-std::string eval_glyph(const std::optional<bool>& passed, const std::optional<double>& score) {
-    if (!passed.has_value()) {
-        return "-";
-    }
-    return std::string{*passed ? "pass " : "FAIL "} + percent(score.value_or(0.0));
 }
 
 /// The judge `name` (the flag, else `training.judge_backend`) resolves to;
@@ -1085,6 +1081,89 @@ SuiteResolution resolve_suite(const std::filesystem::path& training_dir,
     return resolution;
 }
 
+std::string eval_glyph(const std::optional<bool>& passed, const std::optional<double>& score) {
+    if (!passed.has_value()) {
+        return "-";
+    }
+    return std::string{*passed ? "pass " : "FAIL "} + percent(score.value_or(0.0));
+}
+
+std::string train_status_text(const RootContext& context) {
+    std::ostringstream out;
+    const harness::Config config = load_config_or_default(context);
+    const training::TrainingStore store{harness::training_dir()};
+    const std::filesystem::path cycle_dir = harness::training_cycle_dir();
+    if (training::history_exists(cycle_dir)) {
+        std::string error;
+        const training::CycleHistory history =
+            training::load_history(cycle_dir, config.training.cycle.backend, error);
+        if (!error.empty()) {
+            out << "Cycle: history unreadable -- " << error << "\n";
+        } else {
+            out << "Cycle: "
+                << (history.halted                         ? "HALTED -- " + history.halt_reason
+                    : training::cycle_lock_held(cycle_dir) ? std::string{"running now"}
+                                                           : std::string{"idle"})
+                << "; backend " << history.backend << "; " << history.total_runs << " run(s), "
+                << history.consecutive_fails << " consecutive failure(s)"
+                << (history.anchor_version > 0
+                        ? "; anchor v" + std::to_string(history.anchor_version) + " (" +
+                              percent(history.anchor_score) + ")"
+                        : std::string{})
+                << "\n";
+        }
+    } else if (config.training.cycle.configured()) {
+        out << "Cycle: configured (pipeline '" << config.training.cycle.pipeline << "' -> "
+            << config.training.cycle.backend << "), no runs yet ('apogee train cycle run')\n";
+    } else {
+        out << "Cycle: not configured (training.cycle)\n";
+    }
+    const std::vector<training::PipelineSummary> pipelines = store.list_pipelines();
+    const std::optional<training::PipelineSummary> active = store.active_pipeline();
+    if (active.has_value()) {
+        out << "Pipeline: " << active->id << " RUNNING (" << active->passed << "/" << active->stages
+            << " stage(s) passed)\n";
+    } else if (pipelines.empty()) {
+        out << "Pipeline: none yet ('apogee train pipeline run --pipeline <spec>')\n";
+    } else {
+        out << "Pipeline: none in progress; " << pipelines.size() << " run(s), latest "
+            << pipelines.front().id << " " << pipelines.front().status << " ("
+            << pipelines.front().passed << "/" << pipelines.front().stages << " passed)\n";
+    }
+    const std::vector<training::RunSummary> runs = store.list_runs();
+    int running = 0;
+    for (const training::RunSummary& run : runs) {
+        if (run.status == training::kStatusRunning) {
+            ++running;
+        }
+    }
+    if (runs.empty()) {
+        out << "Runs: none yet ('apogee train run <snapshot> --dataset <name>')\n";
+    } else {
+        const std::size_t shown = std::min<std::size_t>(runs.size(), 5);
+        out << "Runs: " << runs.size() << " (" << running << " running); recent " << shown << ":\n";
+        for (std::size_t i = 0; i < shown; ++i) {
+            const training::RunSummary& run = runs[i];
+            std::ostringstream loss;
+            loss << std::fixed << std::setprecision(4) << run.final_loss;
+            out << "  " << pad(run.id, 20) << pad(run.trainer, 6) << pad(run.status, 11) << "loss "
+                << pad(loss.str(), 9) << "eval " << eval_glyph(run.eval_passed, run.eval_score)
+                << "\n";
+        }
+    }
+    const std::vector<training::VersionLedger> ledgers = store.all_versions();
+    if (ledgers.empty()) {
+        out << "Versions: none promoted yet\n";
+    } else {
+        out << "Versions:\n";
+        for (const training::VersionLedger& ledger : ledgers) {
+            out << "  " << pad(ledger.backend, 20) << "active v" << ledger.active_version << "  ("
+                << ledger.kept() << " kept of " << ledger.versions.size() << ")\n";
+        }
+    }
+    return out.str();
+}
+
 std::string render_iteration(const training::ProgressEvent& event) {
     std::ostringstream out;
     out << "iter " << event.iteration;
@@ -1745,11 +1824,28 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
 
     // ---- versions ----------------------------------------------------------
     auto versions_backend = std::make_shared<std::string>();
+    auto versions_format = std::make_shared<ReadFormat>(ReadFormat::Text);
     CLI::App* versions = cmd->add_subcommand("versions", "List a backend's promoted versions");
     versions->add_option("backend", *versions_backend, "The backend name (default: every ledger)")
         ->type_name(kBackendValue);
-    versions->callback([versions_backend]() {
+    add_read_format(versions, versions_format);
+    versions->callback([versions_backend, versions_format]() {
         const training::TrainingStore store{harness::training_dir()};
+        if (*versions_format == ReadFormat::Json) {
+            // The body `GET /v1/admin/training/versions` serves (37f).
+            std::string error;
+            (void)training::load_ledger(store.versions_dir(), *versions_backend, error);
+            if (!versions_backend->empty() && !error.empty()) {
+                fail_user("the version ledger is unreadable: " + error);
+            }
+            const std::optional<nlohmann::json> document =
+                operations::training_versions_document(*versions_backend);
+            if (!document.has_value()) {
+                fail_user("no version history for backend '" + *versions_backend + "'");
+            }
+            write_document(std::cout, *document);
+            return;
+        }
         std::vector<training::VersionLedger> ledgers;
         if (versions_backend->empty()) {
             ledgers = store.all_versions();
@@ -1798,84 +1894,17 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     });
 
     // ---- status ------------------------------------------------------------
+    auto status_format = std::make_shared<ReadFormat>(ReadFormat::Text);
     CLI::App* status = cmd->add_subcommand(
         "status", "The cycle, the active pipeline, the runs and the active versions");
-    status->callback([&context]() {
-        const harness::Config config = load_config_or_default(context);
-        const training::TrainingStore store{harness::training_dir()};
-        const std::filesystem::path cycle_dir = harness::training_cycle_dir();
-        if (training::history_exists(cycle_dir)) {
-            std::string error;
-            const training::CycleHistory history =
-                training::load_history(cycle_dir, config.training.cycle.backend, error);
-            if (!error.empty()) {
-                std::cout << "Cycle: history unreadable -- " << error << "\n";
-            } else {
-                std::cout << "Cycle: "
-                          << (history.halted ? "HALTED -- " + history.halt_reason
-                              : training::cycle_lock_held(cycle_dir) ? std::string{"running now"}
-                                                                     : std::string{"idle"})
-                          << "; backend " << history.backend << "; " << history.total_runs
-                          << " run(s), " << history.consecutive_fails << " consecutive failure(s)"
-                          << (history.anchor_version > 0
-                                  ? "; anchor v" + std::to_string(history.anchor_version) + " (" +
-                                        percent(history.anchor_score) + ")"
-                                  : std::string{})
-                          << "\n";
-            }
-        } else if (config.training.cycle.configured()) {
-            std::cout << "Cycle: configured (pipeline '" << config.training.cycle.pipeline
-                      << "' -> " << config.training.cycle.backend
-                      << "), no runs yet ('apogee train cycle run')\n";
-        } else {
-            std::cout << "Cycle: not configured (training.cycle)\n";
+    add_read_format(status, status_format);
+    status->callback([&context, status_format]() {
+        if (*status_format == ReadFormat::Json) {
+            // The body `GET /v1/admin/training/status` serves (37f).
+            write_document(std::cout, operations::training_status_document());
+            return;
         }
-        const std::vector<training::PipelineSummary> pipelines = store.list_pipelines();
-        const std::optional<training::PipelineSummary> active = store.active_pipeline();
-        if (active.has_value()) {
-            std::cout << "Pipeline: " << active->id << " RUNNING (" << active->passed << "/"
-                      << active->stages << " stage(s) passed)\n";
-        } else if (pipelines.empty()) {
-            std::cout << "Pipeline: none yet ('apogee train pipeline run --pipeline <spec>')\n";
-        } else {
-            std::cout << "Pipeline: none in progress; " << pipelines.size() << " run(s), latest "
-                      << pipelines.front().id << " " << pipelines.front().status << " ("
-                      << pipelines.front().passed << "/" << pipelines.front().stages
-                      << " passed)\n";
-        }
-        const std::vector<training::RunSummary> runs = store.list_runs();
-        int running = 0;
-        for (const training::RunSummary& run : runs) {
-            if (run.status == training::kStatusRunning) {
-                ++running;
-            }
-        }
-        if (runs.empty()) {
-            std::cout << "Runs: none yet ('apogee train run <snapshot> --dataset <name>')\n";
-        } else {
-            const std::size_t shown = std::min<std::size_t>(runs.size(), 5);
-            std::cout << "Runs: " << runs.size() << " (" << running << " running); recent " << shown
-                      << ":\n";
-            for (std::size_t i = 0; i < shown; ++i) {
-                const training::RunSummary& run = runs[i];
-                std::ostringstream loss;
-                loss << std::fixed << std::setprecision(4) << run.final_loss;
-                std::cout << "  " << pad(run.id, 20) << pad(run.trainer, 6) << pad(run.status, 11)
-                          << "loss " << pad(loss.str(), 9) << "eval "
-                          << eval_glyph(run.eval_passed, run.eval_score) << "\n";
-            }
-        }
-        const std::vector<training::VersionLedger> ledgers = store.all_versions();
-        if (ledgers.empty()) {
-            std::cout << "Versions: none promoted yet\n";
-        } else {
-            std::cout << "Versions:\n";
-            for (const training::VersionLedger& ledger : ledgers) {
-                std::cout << "  " << pad(ledger.backend, 20) << "active v" << ledger.active_version
-                          << "  (" << ledger.kept() << " kept of " << ledger.versions.size()
-                          << ")\n";
-            }
-        }
+        std::cout << train_status_text(context);
     });
 
     // ---- pipeline ----------------------------------------------------------

@@ -503,3 +503,80 @@ TEST_CASE("wide characters count two cells, combining marks none", "[ux][wrap]")
         CHECK(display_width(row) <= 3);
     }
 }
+
+// ---------------------------------------------------------------------------
+// The summary display (43)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// What the last paint left: the bytes after the last erase.
+[[nodiscard]] std::string last_paint(const std::string& all) {
+    constexpr std::string_view kEraseCsi = "\033[2K";
+    const std::size_t at = all.rfind(kEraseCsi);
+    return at == std::string::npos ? all : all.substr(at + kEraseCsi.size());
+}
+
+}  // namespace
+
+TEST_CASE("summarised, the window draws the latest line and never the reasoning",
+          "[ux][thinking][summary]") {
+    Harness h;
+    ThinkingView view = h.make();
+    view.set_summarized(true);
+
+    view.write("the private chain of thought, word for word");
+    // The header alone until the first line arrives.
+    CHECK(last_paint(h.bytes()) == "✻ Thinking…");
+    view.summary("comparing the two config paths");
+    CHECK(last_paint(h.bytes()) == "✻ Thinking…\n  comparing the two config paths");
+    view.write("more of it");
+    view.summary("testing the fix");
+    CHECK(last_paint(h.bytes()) == "✻ Thinking…\n  testing the fix");
+    CHECK(view.painted_rows() == 2);
+    CHECK(h.bytes().find("chain of thought") == std::string::npos);
+    // The fold is as ever: it thought.
+    view.finish();
+    CHECK(last_paint(h.bytes()) == "✻ Thought for 1s\n\n");
+}
+
+TEST_CASE("summarised, a side call keeps its row above the line", "[ux][thinking][summary]") {
+    Harness h;
+    ThinkingView view = h.make();
+    view.set_summarized(true);
+    view.side_call("utility — rewriting the follow-up");
+    view.write("reasoning");
+    view.summary("weighing the answer");
+    CHECK(last_paint(h.bytes()) ==
+          "✻ Thinking…\n  · utility — rewriting the follow-up\n  weighing the answer");
+}
+
+TEST_CASE("shown raw after all, the reasoning streams as before, the reason said once",
+          "[ux][thinking][summary]") {
+    Harness h;
+    ThinkingView view = h.make({.width = 80});
+    view.set_summarized(true);
+    view.show_raw("no utility model is set to summarise it");
+    view.write("the reasoning itself");
+    CHECK(last_paint(h.bytes()) ==
+          "✻ Thinking…\n  · reasoning shown in full -- no utility model is set to summarise "
+          "it\n  the reasoning itself");
+    view.finish();
+
+    // The next block starts summarised again; the vendor's own summary says
+    // nothing.
+    view.show_raw("");
+    view.write("the vendor's summary of its thinking");
+    CHECK(h.bytes().ends_with("✻ Thinking…\n  the vendor's summary of its thinking"));
+    view.finish();
+    view.write("hidden again");
+    CHECK(h.bytes().find("hidden again") == std::string::npos);
+}
+
+TEST_CASE("off, a summary line changes nothing the raw window draws", "[ux][thinking][summary]") {
+    Harness h;
+    ThinkingView view = h.make();
+    view.write("raw reasoning");
+    const std::string before = last_paint(h.bytes());
+    CHECK(before == "✻ Thinking…\n  raw reasoning");
+}

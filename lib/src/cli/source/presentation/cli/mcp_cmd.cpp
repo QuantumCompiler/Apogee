@@ -104,6 +104,32 @@ void bind_create(CLI::App& parent, const RootContext& context) {
     });
 }
 
+/// Every configured server connected to, each as the control plane serves
+/// its entry, with what connecting found (28h; the MCP view's rows, 37g).
+[[nodiscard]] nlohmann::json connected_servers_document(const harness::Config& config) {
+    if (config.mcp_servers.empty()) {
+        return operations::mcp_servers_document(config);
+    }
+    mcp::Registry registry;
+    registry.connect_all(specs_of(config), quiet_registry_options());
+    nlohmann::json data = nlohmann::json::array();
+    for (const mcp::ServerStatus& status : registry.status()) {
+        const harness::McpServerConfig* entry = config.find_mcp_server(status.name);
+        nlohmann::json row = entry != nullptr ? operations::mcp_server_view(status.name, *entry)
+                                              : nlohmann::json{{"name", status.name}};
+        row["state"] = !status.enabled    ? "disabled"
+                       : status.connected ? "connected"
+                                          : "not connected";
+        row["protocol_version"] = status.protocol_version;
+        row["tools"] = status.tools;
+        if (!status.connected && status.enabled && !status.error.empty()) {
+            row["error"] = status.error;
+        }
+        data.push_back(std::move(row));
+    }
+    return nlohmann::json{{"object", "list"}, {"data", std::move(data)}};
+}
+
 void bind_list(CLI::App& parent, const RootContext& context) {
     CLI::App* cmd =
         parent.add_subcommand("list", "List configured MCP servers and connect to each");
@@ -120,31 +146,14 @@ void bind_list(CLI::App& parent, const RootContext& context) {
             std::cout << "No MCP servers configured. Create one with: apogee mcp create <name>\n";
             return;
         }
-        mcp::Registry registry;
-        registry.connect_all(specs_of(config), quiet_registry_options());
         if (json) {
             // Each entry as `GET /v1/admin/mcp-servers` serves it, and what
             // connecting found -- the table's facts (28h).
-            nlohmann::json data = nlohmann::json::array();
-            for (const mcp::ServerStatus& status : registry.status()) {
-                const harness::McpServerConfig* entry = config.find_mcp_server(status.name);
-                nlohmann::json row = entry != nullptr
-                                         ? operations::mcp_server_view(status.name, *entry)
-                                         : nlohmann::json{{"name", status.name}};
-                row["state"] = !status.enabled    ? "disabled"
-                               : status.connected ? "connected"
-                                                  : "not connected";
-                row["protocol_version"] = status.protocol_version;
-                row["tools"] = status.tools;
-                if (!status.connected && status.enabled && !status.error.empty()) {
-                    row["error"] = status.error;
-                }
-                data.push_back(std::move(row));
-            }
-            write_document(std::cout,
-                           nlohmann::json{{"object", "list"}, {"data", std::move(data)}});
+            write_document(std::cout, connected_servers_document(config));
             return;
         }
+        mcp::Registry registry;
+        registry.connect_all(specs_of(config), quiet_registry_options());
         std::cout << pad("NAME", 20) << pad("STATE", 16) << pad("PROTOCOL", 12) << "TOOLS\n";
         for (const mcp::ServerStatus& status : registry.status()) {
             std::string state = !status.enabled    ? "disabled"
@@ -227,6 +236,10 @@ void bind_enable(CLI::App& parent, const RootContext& context, bool enabled) {
 }
 
 }  // namespace
+
+nlohmann::json mcp_list_document(const RootContext& context) {
+    return connected_servers_document(harness::load_config(config_path_for(context)));
+}
 
 std::string_view McpCommand::name() const noexcept {
     return "mcp";
