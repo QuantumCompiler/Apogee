@@ -266,6 +266,25 @@ TEST_CASE("the root flags are offered, and help says how they relate to the conf
     CHECK(says(help, "--custom names both"));
 }
 
+TEST_CASE("help names what an option excludes in alphabetical order, whatever the platform",
+          "[commands][root][channels]") {
+    // CLI11 prints the list in address order, which differs between two roots
+    // in one process and between platforms; this help is compared byte for
+    // byte (the bare door, the root's committed help).
+    const RootCommand root;
+    const std::string help = root.app().help();
+    CHECK(says(help, "--release Excludes: --custom --dev --test\n"));
+    CHECK(says(help, "--dev Excludes: --custom --release --test\n"));
+    CHECK(says(help, "--test Excludes: --custom --dev --release\n"));
+    CHECK(says(help, "--custom PATH Excludes: --dev --release --test\n"));
+    // A second root reads the same, whatever its options' addresses.
+    std::vector<std::unique_ptr<RootCommand>> others;
+    for (int i = 0; i < 4; ++i) {
+        others.push_back(std::make_unique<RootCommand>());
+        CHECK(others.back()->app().help() == help);
+    }
+}
+
 TEST_CASE("the root flags exclude one another", "[commands][root][channels]") {
     const Sandbox sandbox;
     const std::string custom = (sandbox.elsewhere.path() / "config" / "config.yaml").string();

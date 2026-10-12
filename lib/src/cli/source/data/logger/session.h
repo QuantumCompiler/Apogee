@@ -253,7 +253,8 @@ void save(const Session& session);
 /// all -- every recoverable problem is a warning.
 [[nodiscard]] LoadedSession load(const std::string& name, const KnownDependencies& known);
 
-/// Every saved session, newest first.
+/// Every saved session, newest first; a tie in `updated_at` by `chat_id`,
+/// descending.
 [[nodiscard]] std::vector<Session> list_sessions();
 
 /// The most recently updated session, or nullopt when there are none.

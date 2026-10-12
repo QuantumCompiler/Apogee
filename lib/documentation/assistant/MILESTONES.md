@@ -7005,6 +7005,20 @@ Only the shell's menu and the completer's matching changed: the terminal's compl
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3,182 tests ran with none failing, one skipped for want of `pdftotext`. That includes `cli.tui_shell` and `cli.chat_line_editing`, which shows the terminal's completion unchanged. `clang-format` is clean on every touched file.
 
+### 2026-10-12 — two orders macOS hid (the user's request)
+
+**Why.** The v0.1.6 pull request's CI run failed the same four unit tests on all four Linux and Windows jobs, and passed on macOS. Three were 32b's door tests, which compare a bare `apogee`'s help with a second root's. The fourth was 32d's Chats view test, which walks down to a row it expects below another. Both came from an order that macOS happened to keep and the other platforms did not.
+
+- [x] **Help names an option's `Excludes:` and `Needs:` alphabetically** (`cli/root`'s `StableHelpFormatter`, set on the root before any subcommand exists, so every subcommand inherits it). CLI11 keeps both lists as sets of pointers and prints them in address order. On macOS both roots printed the root flags' lists in declaration order. On Linux and Windows they did not, and the two helps compared did not agree with each other. The root's committed help (`tests/fixtures/cli/root_help.txt`, which `cli.bare_help` compares with) changed in those four lines alone. An option's text is otherwise CLI11's own.
+- [x] **Sessions saved in the same second list by id, newest started first** (`logger::list_sessions`). `save()` stamps whole seconds, so a tie is ordinary, and the order of a tie was the directory's. The same cause had been fixed in one test on 2026-09-22 rather than at its source. `chats list`, the Chats view, the shell's picker and `--continue` now read the same everywhere.
+- [x] **Tests**:
+  - `root_test`: the four root flags' lists, alphabetical, and four more roots in the same process giving the same help byte for byte. The check fails on macOS without the formatter.
+  - `session_test`: twenty-four sessions tied to the second and written out of order, listed by id. It fails on macOS without the tie-break; with three sessions it passed there by luck, so it was widened.
+
+No test was loosened, and both fixes change what a person sees only where it was arbitrary.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3,201 tests ran with none failing, one skipped for want of `pdftotext`. That includes `cli.bare_help` against the updated root help. No Linux or Windows host ran it here, so the CI run on the pushed branch is the check on those platforms. `clang-format` is clean on every touched file.
+
 ## Milestone AI — Effort and permission modes
 
 **Goal.** Claude Code gives a session two controls the person reaches for constantly: how hard the model thinks (five effort levels) and how much it may do without asking (a permission mode, cycled with Shift+Tab). Apogee had the pieces of both -- `/think on|off|auto` with a raw token budget, and per-tool answers over one permission gate -- but not the controls. Track 39 (the user's call, 2026-10-11) gives `apogee chat`, `apogee execute` and the full-screen shell Claude Code's two, set mid-session in either front end and Tab-completed in both.

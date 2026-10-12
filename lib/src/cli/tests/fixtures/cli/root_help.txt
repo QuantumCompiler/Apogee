@@ -10,13 +10,13 @@ Options:
   -V,--version                Print version information and exit
   --config PATH (Env:APOGEE_CONFIG)
                               Path to the config file (default: config/config.json in the data directory). Names a file only -- the data directory stays put; --custom names both
-  --release Excludes: --dev --test --custom
+  --release Excludes: --custom --dev --test
                               Use the release channel's data directory, ~/.apogee, for this run only: the whole layout, never saved (uninstall ignores it)
-  --dev Excludes: --release --test --custom
+  --dev Excludes: --custom --release --test
                               Use the dev channel's data directory, ~/.apogee-dev, for this run only: the whole layout, never saved (uninstall ignores it)
-  --test Excludes: --release --dev --custom
+  --test Excludes: --custom --dev --release
                               Use the test channel's data directory, ~/.apogee-test, for this run only: the whole layout, never saved (uninstall ignores it)
-  --custom PATH Excludes: --release --dev --test
+  --custom PATH Excludes: --dev --release --test
                               Use the install a config file sits in, for this run only: <root>/config/<file> roots the whole layout at <root> and reads that file (uninstall ignores it)
 
 Subcommands:

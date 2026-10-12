@@ -3,6 +3,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -278,6 +280,34 @@ TEST_CASE("listing is newest first and skips corrupt files", "[chat][session]") 
     REQUIRE(sessions.size() == 2);
     CHECK(sessions.front().chat_id == "newer");
     CHECK(apogee::logger::most_recent()->chat_id == "newer");
+}
+
+TEST_CASE("sessions saved in the same second list by id, newest started first", "[chat][session]") {
+    // save() stamps whole seconds, so a tie is ordinary; it falls to the ids,
+    // never to the directory's order, which differs by filesystem. Enough of
+    // them, written out of order, that no directory lists them right by luck.
+    const TempDir dir{"session-tie"};
+    const EnvGuard home{"APOGEE_HOME", dir.path().string()};
+    std::vector<std::string> ids;
+    for (int i = 0; i < 24; ++i) {
+        const int minute = (i * 7) % 24;  // every minute once, out of order
+        ids.push_back("20261009-09" + std::string{minute < 10 ? "0" : ""} + std::to_string(minute) +
+                      "00-" + std::string(4, static_cast<char>('a' + i)));
+    }
+    for (const std::string& id : ids) {
+        Session session = sample();
+        session.chat_id = id;
+        session.updated_at = "2026-10-12T03:37:36Z";
+        apogee::harness::write_file_atomically(apogee::logger::session_path(id),
+                                               apogee::logger::serialize(session));
+    }
+    std::ranges::sort(ids, std::greater<>{});
+    std::vector<std::string> listed;
+    for (const Session& session : apogee::logger::list_sessions()) {
+        listed.push_back(session.chat_id);
+    }
+    CHECK(listed == ids);
+    CHECK(apogee::logger::most_recent()->chat_id == ids.front());
 }
 
 TEST_CASE("most_recent is empty when nothing is saved", "[chat][session]") {

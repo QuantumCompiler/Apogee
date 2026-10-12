@@ -451,8 +451,14 @@ std::vector<Session> list_sessions() {
         }
     }
 
+    // Newest first. Two saved in the same second fall to their ids, newest
+    // started first, never to the directory's order, which differs by
+    // filesystem: the listing reads the same everywhere.
     std::ranges::sort(sessions, [](const Session& a, const Session& b) {
-        return a.updated_at > b.updated_at;  // newest first
+        if (a.updated_at != b.updated_at) {
+            return a.updated_at > b.updated_at;
+        }
+        return a.chat_id > b.chat_id;
     });
     return sessions;
 }
