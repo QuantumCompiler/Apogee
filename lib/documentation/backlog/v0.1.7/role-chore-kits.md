@@ -1,0 +1,31 @@
+# Role-chore kits: training the helpers for Apogee's own jobs
+
+**What / why.** The four bundled kits train generic capabilities; none trains the chores Apogee actually hands its small local members (the training-suites spike's W3, 2026-10-11): the utility role's `query_rewrite` and `tool_summary` formats (26b), the extraction role's schema fidelity (the shapes symphonies, `extract-facts` and the structured-output contract demand of it), the local **tool-calling** dialect (each model's own template rendering calls, 25b — the single biggest gap between a stock small model and a useful suite member), and the knowledge-capture rubric (the clerk's, compiled in since Milestone Y). This item ships **four role-chore kits** — `utility-chores`, `extraction-fidelity`, `tool-calling`, `knowledge-capture` — each a full kit: teacher synth prompts, a judge rubric, and an eval set at the floor [`shipped-regimes.md`](shipped-regimes.md) establishes — and **two shipped suites bundling them**: **`harness-helpers`** (utility-chores → extraction-fidelity → tool-calling: the regime that makes a user's model suite better at being a suite) and **`knowledge`** (knowledge-capture, for installs that lean on `kn`). Distil any strong configured teacher into the small member a suite runs for those roles; promote through the existing plan.
+
+**Core constraint(s).** A kit's training data teaches **the product's real formats, taken from the product**: the synth prompts and eval items use the exact output contracts the code enforces — the 26b chore formats, the structured-output shapes (26f), the tool-call dialect the templates parse (25b), the capture clerk's schema — and a format change in the product is a kit change in the same commit (the parity rule at the training boundary; each kit's doc-block names the source files it mirrors). Everything else is [`shipped-regimes.md`](shipped-regimes.md)'s law, consumed: the source ladder, no backends in shipped specs, the eval floor, the asset pipeline, the spend rules. Eval honesty: items with a checkable `expected` wherever the format allows (JSON shapes, call syntax), the judge only where prose quality is the question. The kits are model-agnostic: nothing in a prompt names a vendor or a family; the trainer and template differences stay the trainers' and templates' business.
+
+**Seam + files.**
+- `lib/src/cli/assets/training/kits/{utility-chores,extraction-fidelity,tool-calling,knowledge-capture}.yaml` — the four kits (synth prompts, rubrics, eval sets ≥ the floor), beside the bundled four; the generators regenerate compiled-in copies; seeding picks them up through the existing kit row.
+- `lib/src/cli/assets/training/regimes/{harness-helpers,knowledge}.yaml` — the two suites, on 42a's ladder.
+- Tests: each kit parses, seeds and lists (`datasets kits` shows eight); a synth round over a scripted teacher (FakeTransport) produces items in the product's formats — asserted against the same constants/goldens the product's own tests use, so drift fails both sides; each suite runs end-to-end on the mock trainer, gated; byte-identity.
+
+**Reference.** 26b (the chore formats — `query_rewrite`, `tool_summary`), 26f (structured output's grammar-held shapes), 25b (the tool-call dialect the local templates render and parse), Milestone Y (the capture clerk's compiled-in schema — the rubric's source), Milestone Z (the kit shape, the synth core, the judge); [`shipped-regimes.md`](shipped-regimes.md) — the mechanism this rides, `(consumed decision)` throughout; the training-suites spike (2026-10-11) for W3.
+
+**Decisions made** (dated):
+- 2026-10-11 — The set lands in v0.1.7 as track 42 (the user's placement call on the spike report).
+- 2026-10-11 — **The coder kit/suite stays out of this wave** (the spike's recommendation, standing — the user executed without a trim): a research-grade bet best made after track 41's execute mode lands and a real local-coder eval exists; recorded here so revisiting it is a deliberate act.
+- 2026-10-11 — The suites are two, as specced: `harness-helpers` (the three harness-chore kits) and `knowledge` (capture alone) — a kit may appear in both worlds later, but no suite ships padded.
+
+**Open calls:**
+- [default: `utility-chores` trains both chores in one kit (rewrite and tool-summary are one role's voice); splitting is a later call if evals disagree.]
+- [default: eval set sizes at the 42a floor (24), higher where `expected`-checkable items are cheap to write (tool-calling especially).]
+
+**Guardrail(s).** The format-mirror tests (a synth'd item and the product's own golden share the assertion — a drifted chore format fails the kit's test and the product's in the same run); the two suites green end-to-end on the mock trainer with a planted failing stage caught; `datasets kits` lists eight with descriptions; byte-identity; no vendor name in any prompt (a grep case); optional real-weights pass per the model families — one family, `harness-helpers` once, the before/after eval delta recorded, never a promotion on Apogee's initiative.
+
+**Acceptance criteria:**
+- [ ] A seeded install lists eight kits; the four new ones synth product-format items from a scripted teacher.
+- [ ] `train regime run harness-helpers` and `… knowledge` run gated on the mock trainer; `list`/`show` include them.
+- [ ] The format-mirror tests tie each kit to the code it trains toward; a planted format drift fails.
+- [ ] Nothing shipped names a backend or vendor; the full suite green.
+
+**Scope note.** Earmarked for v0.1.7; gated on [42a](shipped-regimes.md) (the ladder, the discovery, the eval floor). Out of scope: the coder kit (the recorded default-out), new trainer or pipeline behavior, any auto-run or auto-promote.
