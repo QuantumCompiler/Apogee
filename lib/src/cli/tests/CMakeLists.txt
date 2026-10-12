@@ -389,7 +389,16 @@ target_link_libraries(apogee_tests PRIVATE
 target_compile_definitions(apogee_tests_presentation PRIVATE
     APOGEE_EXECUTABLE="$<TARGET_FILE:apogee>")
 
-catch_discover_tests(apogee_tests)
+# Before the discovery, which runs the binary: an image Windows will not load
+# fails here by its size rather than there as a bad format.
+apogee_guard_image_size(apogee_tests)
+if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+    # A cross-built binary cannot run where it was built (pr-ci.sh's Windows
+    # build on a Mac): it lists its tests when ctest runs, on its own platform.
+    catch_discover_tests(apogee_tests DISCOVERY_MODE PRE_TEST)
+else()
+    catch_discover_tests(apogee_tests)
+endif()
 
 # The binary's own contract, exercised the way a user meets it. These run the
 # built executable as a subprocess; running a target is not linking it, so the

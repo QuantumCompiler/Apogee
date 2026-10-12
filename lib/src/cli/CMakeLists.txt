@@ -97,6 +97,7 @@ include(GNUInstallDirs)
 include(ApogeeWarnings)
 include(ApogeeDependencies)
 include(ApogeeLinkPolicy)
+include(ApogeeImageSize)
 include(modules)
 
 add_subdirectory(third_party)

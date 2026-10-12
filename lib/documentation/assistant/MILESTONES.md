@@ -7019,6 +7019,33 @@ No test was loosened, and both fixes change what a person sees only where it was
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3,201 tests ran with none failing, one skipped for want of `pdftotext`. That includes `cli.bare_help` against the updated root help. No Linux or Windows host ran it here, so the CI run on the pushed branch is the check on those platforms. `clang-format` is clean on every touched file.
 
+### 2026-10-12 — the Windows image limit, and Linux and Windows rehearsed here (the user's request)
+
+**Why.** The next CI run passed every unit-test job, then failed `build windows-x64`: the test binary it linked could not be run to list its tests (`inappropriate file type or format`). Every release pull request so far had failed on Linux or Windows after passing on the Mac, fixed blind from CI's logs each time. The user asked that a pass on one platform mean a pass on the others, and chose to rehearse Linux and Windows on this machine before a push, over CI on every push or gating on macOS alone.
+
+- [x] **The cause, measured.** A MinGW linker puts DWARF inside a Windows executable's image, unlike ELF or Mach-O. Windows refuses to load an image of 2 GiB or more: MSVC's linker refuses to write one (LNK1248), and GNU ld writes it anyway. September's local cross-build had a 981 MiB test image, 97% of it `.debug_*`. v0.1.6's, cross-built here with the runner's flags (`-O2 -g`, llama.cpp on), is 2,056 MiB, 8 over the limit. The shipped `apogee.exe` was 1,210 MiB. The unit-test job's binary, with llama.cpp off, still fit.
+- [x] **The Windows presets build without `-g`** (`CMakePresets.json`'s `windows-mingw`: RelWithDebInfo's flags as `-O2 -DNDEBUG`). `-g` changes no code, and no Windows debugger reads DWARF. Cross-built, the test image is 89 MiB and `apogee.exe` 62 MiB. The Windows download shrinks with it: v0.1.5's `apogee-windows-x64.zip` was 261 MiB.
+- [x] **The limit is guarded** (`cmake/ApogeeImageSize.cmake`, `apogee_guard_image_size`). On Windows targets it reads each executable's `SizeOfImage` from its PE header after the link. Past three quarters of 2 GiB it warns, and at 2 GiB it fails the link, naming the size and the limit. It runs before the test discovery, which would otherwise fail as a bad format. The `-g` build above failed on it by name.
+- [x] **Test discovery waits for ctest when cross-compiling** (`tests/CMakeLists.txt`: `DISCOVERY_MODE PRE_TEST` when `CMAKE_CROSSCOMPILING` with no emulator), since a cross-built binary cannot run where it was built.
+- [x] **`make pr-ci` rehearses two of the other platforms' jobs**, after the host's own:
+  - **`unit tests linux (docker)`** (`lib/scripts/linux-unit-tests.sh`, alone as `make linux-tests`): CI's Linux unit-test job, `cicd.sh --unit-tests` with llama.cpp off, in a container of the runner's Ubuntu 24.04 (`lib/scripts/linux-ci.Dockerfile`). That gives GCC, libstdc++, glibc, and ext4 under the suite's temporary files. It runs as this user, on the Docker host's architecture, with the checkout mounted at its own path so a worktree resolves, and git told to trust the VM's mount. It needs Docker with 4 CPUs and 8 GiB. This machine's colima VM had 1 and 1, so it uses a profile of its own (`colima start --profile apogee-ci --cpu 8 --memory 16 --disk 60`), found by its context, leaving the default VM and its containers alone. A build directory an earlier container configured at another path is built afresh.
+  - **`build windows-x64 (cross)`** (`lib/scripts/cross-windows.sh`, alone as `make cross-windows`): CI's Windows x64 build through the same preset, cross-compiled with MinGW-w64 GCC. Every file is compiled and linked, llama.cpp on, and each image size is checked. A static Schannel libcurl is built once from curl's source into `~/.cache/apogee/cross/windows-x64`.
+  - Each needs a tool a machine may not have. Without it, the job is reported as skipped, with the line saying what to install or start, never as passed. `gcc compile` stands in for the cross-build when that cannot run.
+  - The summary names what only CI's runners can say: the Windows test runs, the windows-arm64 build (no Windows here), and the Linux architecture the container is not.
+- [x] **The process**: CLAUDE.md's checklist runs `make pr-ci` before opening a pull request and before every push to one, setting up a skipped job rather than pushing past it. DEVELOPER.md's `make pr-ci` row has the one-time setup, and its release steps run the rehearsal before each push.
+
+Decisions taken while building, for veto:
+- **No `-g` on Windows, rather than stripping at the link**: the objects and the link shrink too, and a CI Windows build did nothing with the DWARF it made.
+- **The guard fails at the limit itself**, and only warns before it, so a build that would load is never refused.
+- **The container is the Docker host's architecture**, linux-arm64 here: linux-x64 under emulation would take hours, and the classes found so far (GCC, libstdc++, glibc, ext4) are the same on both.
+
+**Verified.**
+- `make pr-ci` with these changes, from fresh worktrees, passed every job in 21 minutes: version bump, clone, macOS unit tests, the macOS build and package, the Linux container's 3,145 test cases (16 skipped, as CI's Linux jobs skip them), and the Windows cross-build (`apogee.exe` 72 MiB, the test binary 102 MiB on disk).
+- With the two ordering fixes above undone, the container failed five test cases: three of the four CI had failed (the bare door's help comparisons), and both new guards. The fourth, the Chats view's walk, happened to pass in the container's directory order, which is why the session guard writes 24 tied sessions.
+- Each new job's skip path reports a skip, never a pass: a VM too small, no Docker daemon, no MinGW.
+- The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,201 tests, one skipped for want of `pdftotext`.
+- Nothing here can run a Windows binary, so the Windows test runs stay CI's.
+
 ## Milestone AI — Effort and permission modes
 
 **Goal.** Claude Code gives a session two controls the person reaches for constantly: how hard the model thinks (five effort levels) and how much it may do without asking (a permission mode, cycled with Shift+Tab). Apogee had the pieces of both -- `/think on|off|auto` with a raw token budget, and per-tool answers over one permission gate -- but not the controls. Track 39 (the user's call, 2026-10-11) gives `apogee chat`, `apogee execute` and the full-screen shell Claude Code's two, set mid-session in either front end and Tab-completed in both.

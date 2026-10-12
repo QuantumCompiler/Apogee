@@ -111,6 +111,7 @@ endfunction()
 add_executable(apogee main.cpp)
 target_link_libraries(apogee PRIVATE apogee_core)
 apogee_set_target_options(apogee)
+apogee_guard_image_size(apogee)
 apogee_channel_executable(apogee "${APOGEE_CHANNEL}")
 
 # The install path: the binary, and nothing else -- under its channel's name
