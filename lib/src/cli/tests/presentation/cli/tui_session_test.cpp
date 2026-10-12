@@ -380,6 +380,43 @@ TEST_CASE("Shift+Tab cycles the shell's conversation's permission mode, the row 
     CHECK(chat.failure.empty());
 }
 
+TEST_CASE("/permission-mode bypass in the shell asks once, then joins the Shift+Tab cycle",
+          "[cli][tui][session][modes]") {
+    // The shell opens its conversations with no --allow-bypass: bypass is
+    // asked for (the user's call), and a yes holds for the session.
+    Conversation chat{nlohmann::json{{"turns", {{{"text", "fine"}}}}}};
+    chat.open();
+    chat.until([&chat]() { return chat.view.waiting_for_line(); }, "the session reading");
+    chat.send("/permission-mode bypass");
+    chat.until([&chat]() { return has(chat.frame(), "[y]es / [n]o"); }, "the question");
+    CHECK(has(chat.frame(), "Run every tool without asking for the rest of this session?"));
+    (void)chat.shell.press(Key::character("n"));
+    chat.until(
+        [&chat]() { return has(chat.frame(), "bypass not chosen -- permission mode: manual"); },
+        "the no said");
+    CHECK_FALSE(has(chat.frame(), "shift+tab to cycle"));
+
+    chat.until([&chat]() { return chat.view.waiting_for_line(); }, "reading again");
+    chat.send("/permission-mode bypass");
+    chat.until([&chat]() { return has(chat.frame(), "[y]es / [n]o"); }, "asked again");
+    (void)chat.shell.press(Key::character("y"));
+    chat.until(
+        [&chat]() { return has(chat.frame(), "⏵⏵ bypass permissions on (shift+tab to cycle)"); },
+        "bypass shown");
+    // Now in the cycle: bypass, manual, accept-edits, plan, bypass.
+    chat.until([&chat]() { return chat.view.waiting_for_line(); }, "reading after the yes");
+    (void)chat.shell.press(Key::named(Key::Name::BackTab));
+    chat.until([&chat]() { return !has(chat.frame(), "shift+tab to cycle"); }, "manual again");
+    for (int i = 0; i < 3; ++i) {
+        (void)chat.shell.press(Key::named(Key::Name::BackTab));
+    }
+    chat.until(
+        [&chat]() { return has(chat.frame(), "⏵⏵ bypass permissions on (shift+tab to cycle)"); },
+        "bypass reached by Shift+Tab");
+    chat.finish();
+    CHECK(chat.failure.empty());
+}
+
 TEST_CASE("a session grant writes nothing and dies with the session", "[cli][tui][session]") {
     Conversation chat{kWriteThenAnswer};
     const std::string before = slurp(chat.home.config_path());

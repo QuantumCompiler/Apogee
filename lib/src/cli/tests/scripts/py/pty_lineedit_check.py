@@ -19,7 +19,8 @@ this locks:
     from the one command table, its values follow, and the line sent attaches
     the folder with the method it names.
   * the permission mode (39b): Shift+Tab cycles it, the prompt redrawn with
-    its words and the line typed so far kept.
+    its words and the line typed so far kept; `/permission-mode bypass`
+    asks once and a yes chooses it.
 
 POSIX only -- `pty` has no Windows equivalent.
 """
@@ -356,11 +357,13 @@ def check_permission_mode(binary, env, home, failures):
         b"lo\r",     # the line typed across the switches, sent whole
         b"\x1b[Z",   # accept-edits, at the next prompt
         b"/permission-mode\r",
+        b"/permission-mode bypass\r",  # not allowed at launch: asked
+        b"y\r",
         b"/exit\r",
     ], width=width, snapshots=screens)
 
     def prompt_row(screen):
-        rows = [line for line in screen.lines() if "You: " in line]
+        rows = [line for line in screen.lines() if "You:" in line]
         return rows[-1] if rows else ""
 
     expected = [
@@ -375,6 +378,11 @@ def check_permission_mode(binary, env, home, failures):
     if not any("permission mode: accept-edits" in line for line in screens[6].lines()):
         failures.append("/permission-mode did not say the mode Shift+Tab chose: "
                         f"{screens[6].lines()[-4:]!r}")
+    if not any("Run every tool without asking" in line for line in screens[7].lines()):
+        failures.append(f"/permission-mode bypass asked nothing: {screens[7].lines()[-4:]!r}")
+    if not (any("permission mode: bypass" in line for line in screens[8].lines())
+            and prompt_row(screens[8]).startswith("⏵⏵ bypass permissions on · You:")):
+        failures.append(f"a yes did not choose bypass: {screens[8].lines()[-4:]!r}")
     if "hello" not in user_messages(home)[before:]:
         failures.append(f"the line typed across Shift+Tab was not sent whole: "
                         f"{user_messages(home)[before:]!r}")

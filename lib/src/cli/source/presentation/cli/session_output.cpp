@@ -69,8 +69,8 @@ agent::ConfirmFn TerminalOutput::confirm_fn(std::filesystem::path config_path,
                                std::move(approvals));
 }
 
-std::function<bool(const std::string&)> TerminalOutput::confirm_large() {
-    // A pipe cannot be asked, so a folder over the size guard is refused there.
+std::function<bool(const std::string&)> TerminalOutput::ask_yes_no() {
+    // A pipe cannot be asked, so what needs a yes is refused there.
     if (!platform::is_terminal(platform::StandardStream::In)) {
         return {};
     }

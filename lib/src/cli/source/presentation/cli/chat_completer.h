@@ -110,7 +110,7 @@ enum class ArgumentValues : std::uint8_t {
     GatedTools,
     /// The tools and websites this chat has answered for itself (26o).
     SessionPermissions,
-    /// The permission modes, described; bypass only when allowed (39b).
+    /// The permission modes, described (39b).
     PermissionModes,
     /// The configured suites, and `off` (27d).
     Suites,
@@ -208,9 +208,6 @@ struct ChatCompletionSources {
     /// for itself, for `/allow`, `/deny` and `/revoke` (26o).
     std::function<std::vector<std::string>()> gated_tools;
     std::function<std::vector<std::string>()> session_permissions;
-    /// Whether `/permission-mode` offers bypass: the session was started
-    /// allowing it (39b).
-    bool bypass_allowed = false;
     DirectoryLister list;
     /// Which session the line is typed into (27s): the rows it offers.
     SessionMode mode = SessionMode::Chat;

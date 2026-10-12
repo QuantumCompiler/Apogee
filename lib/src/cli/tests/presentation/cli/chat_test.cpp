@@ -1415,7 +1415,7 @@ TEST_CASE("a permission mode at launch: accept-edits writes unasked, plan refuse
     CHECK(chat.run({"chat", "--permission-mode", "sideways"}, "") != 0);
 }
 
-TEST_CASE("/permission-mode shows and sets the mode, bypass only when allowed at launch",
+TEST_CASE("/permission-mode shows and sets the mode, bypass asked for unless allowed at launch",
           "[chat][cli][permissions][modes]") {
     HelperChat chat{writes_a_file(), {"Title"}};
     sandboxed(chat);
@@ -1427,14 +1427,17 @@ TEST_CASE("/permission-mode shows and sets the mode, bypass only when allowed at
     const std::string said = chat.out + chat.err;
     INFO(said);
     CHECK(said.find("permission mode: manual -- each gated tool asks, as configured (manual, "
-                    "accept-edits, plan or dont-ask; Shift+Tab cycles)") != std::string::npos);
+                    "accept-edits, plan, dont-ask or bypass; Shift+Tab cycles)") !=
+          std::string::npos);
     CHECK(said.find("permission mode: plan -- nothing that writes runs; the model plans") !=
           std::string::npos);
     CHECK(said.find("mode: plan -- nothing that writes runs; the model plans\n") !=
           std::string::npos);
     CHECK(said.find("write_file   deny   (plan mode)") != std::string::npos);
-    CHECK(said.find("bypass is chosen only in a session started with --allow-bypass") !=
-          std::string::npos);
+    // Bypass not allowed at launch is asked for -- and a pipe has nobody to
+    // say yes, so it is refused.
+    CHECK(said.find("bypass needs a yes from someone at the keyboard, or --allow-bypass at "
+                    "launch") != std::string::npos);
     CHECK(said.find("not a permission mode: 'sideways'") != std::string::npos);
     // Accept-edits holds from the next call: the write ran unasked.
     CHECK(std::filesystem::exists(written));

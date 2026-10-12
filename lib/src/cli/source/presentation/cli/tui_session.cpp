@@ -162,7 +162,7 @@ agent::ConfirmFn TuiOutput::confirm_fn(std::filesystem::path config_path,
     };
 }
 
-std::function<bool(const std::string&)> TuiOutput::confirm_large() {
+std::function<bool(const std::string&)> TuiOutput::ask_yes_no() {
     return [this](const std::string& question) {
         const std::string line = style_.tag(ansi::Role::Warning) + " " + question;
         view_.say(line);

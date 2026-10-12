@@ -1369,7 +1369,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 },
             // A pipe cannot be asked, so a folder over the size guard is
             // refused there.
-            .confirm_large = out.confirm_large(),
+            .confirm_large = out.ask_yes_no(),
             .save = true,
             // A folder of code builds its graph (27n), unless the config
             // or the attach says otherwise (27p).
@@ -1395,7 +1395,6 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     ChatCompletionSources completion = chat_completion_sources(config, working_directory);
     completion.attachment_names = [&attached] { return attached.names(); };
     completion.gated_tools = [&gated] { return gated; };
-    completion.bypass_allowed = approvals->bypass_allowed;
     completion.session_permissions = [approvals] {
         std::vector<std::string> names;
         for (const auto* set : {&approvals->tools, &approvals->denied_tools, &approvals->hosts,
@@ -1421,7 +1420,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // and the prompt carries the mode's words. Both read the shared
     // approvals alone, so the shell may call them from its own thread.
     reader_options.on_shift_tab = [approvals] {
-        approvals->mode = next_permission_mode(approvals->mode.load(), approvals->bypass_allowed);
+        approvals->mode =
+            next_permission_mode(approvals->mode.load(), approvals->bypass_allowed.load());
     };
     reader_options.prompt_tag = [approvals, style] {
         return permission_mode_label(approvals->mode.load(), style);
@@ -1639,25 +1639,36 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                             break;
                         }
                         if (*chosen == PermissionMode::Bypass && !approvals->bypass_allowed) {
-                            out.print_line(style.tag(ansi::Role::Error) +
-                                           " bypass is chosen only in a session started with "
-                                           "--allow-bypass (or --permission-mode bypass)");
-                            break;
+                            // Not allowed at launch: asked once (39b, the
+                            // user's call), and a yes puts bypass in this
+                            // session's Shift+Tab cycle too. Nobody to ask
+                            // -- a pipe -- is a no.
+                            const std::function<bool(const std::string&)> ask = out.ask_yes_no();
+                            if (!ask) {
+                                out.print_line(style.tag(ansi::Role::Error) +
+                                               " bypass needs a yes from someone at the "
+                                               "keyboard, or --allow-bypass at launch");
+                                break;
+                            }
+                            if (!ask("Run every tool without asking for the rest of this "
+                                     "session? A config deny or /deny still refuses.")) {
+                                out.print_line(style.tag(ansi::Role::Permission) +
+                                               " bypass not chosen -- permission mode: " +
+                                               std::string{to_string(approvals->mode.load())});
+                                break;
+                            }
+                            approvals->bypass_allowed = true;
                         }
                         approvals->mode = *chosen;
                     }
                     const PermissionMode now = approvals->mode.load();
-                    out.print_line(
-                        style.tag(ansi::Role::Permission) +
-                        " permission mode: " + std::string{to_string(now)} + " -- " +
-                        std::string{permission_mode_description(now)} +
-                        (argument.empty()
-                             ? std::string{approvals->bypass_allowed
-                                               ? " (manual, accept-edits, plan, dont-ask or "
-                                                 "bypass; Shift+Tab cycles)"
-                                               : " (manual, accept-edits, plan or dont-ask; "
-                                                 "Shift+Tab cycles)"}
-                             : std::string{}));
+                    out.print_line(style.tag(ansi::Role::Permission) +
+                                   " permission mode: " + std::string{to_string(now)} + " -- " +
+                                   std::string{permission_mode_description(now)} +
+                                   (argument.empty()
+                                        ? std::string{" (manual, accept-edits, plan, dont-ask "
+                                                      "or bypass; Shift+Tab cycles)"}
+                                        : std::string{}));
                     break;
                 }
                 case ChatVerb::Allow:

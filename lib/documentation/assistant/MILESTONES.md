@@ -7072,4 +7072,21 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) ran 3,164 tes
 
 **Notes.** A Shift+Tab pressed in the moment before a newly opened conversation's line reader exists still reaches the shell's previous view; the hooks are in place from the first time the session reads a line.
 
+**Later the same day: bypass asked for, not only allowed at launch.** In use, the shell had no way to reach bypass: it opens its conversations itself, and nothing in it could pass `--allow-bypass`. The user chose to ask once rather than add a flag or a config key.
+
+- [x] **`/permission-mode bypass` in a session not allowed it at launch asks one yes/no question**: "Run every tool without asking for the rest of this session? A config deny or /deny still refuses."
+  - A yes chooses bypass and puts it in that session's Shift+Tab cycle.
+  - A no says `bypass not chosen` and leaves the mode as it was.
+  - With nobody to ask (a pipe), it is refused, naming `--allow-bypass`.
+  - `SessionApprovals::bypass_allowed` became atomic, since the session's thread now sets it while the shell's Shift+Tab reads it.
+  - The completer offers bypass in every session.
+- [x] **The front end's yes/no question**, which asked before attaching a folder over the size guard (26d), is now `SessionOutput::ask_yes_no`, one question for both uses.
+- [x] **Tests**:
+  - the shell's session, where a no leaves manual, a yes shows bypass's row, and Shift+Tab then cycles back round to bypass;
+  - the terminal under a PTY, where the question is asked, a `y` chooses bypass, and the prompt carries its words;
+  - the pipe's refusal;
+  - the completer offering bypass.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3,177 tests ran with none failing, one skipped for want of `pdftotext`. That includes `cli.chat_line_editing` with the bypass question answered in a real terminal. `clang-format` is clean on every touched file.
+
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3,176 tests ran with none failing, one skipped for want of `pdftotext`. That includes `cli.chat_line_editing` (the terminal's Shift+Tab under a PTY), `cli.tui_shell` and `cli.test_names`. `clang-format` is clean on every touched file, and `make lint` was not run.

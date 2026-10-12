@@ -370,9 +370,6 @@ std::vector<NamedChoice> argument_choices(ArgumentValues values,
             break;
         case ArgumentValues::PermissionModes:
             for (const PermissionMode mode : kPermissionModes) {
-                if (mode == PermissionMode::Bypass && !sources.bypass_allowed) {
-                    continue;  // refused unless allowed at launch: never offered
-                }
                 choices.push_back(
                     {std::string{to_string(mode)}, std::string{permission_mode_description(mode)}});
             }

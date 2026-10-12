@@ -81,9 +81,10 @@ public:
     /// and `session` applied through `answer_permission`, the one path.
     [[nodiscard]] virtual agent::ConfirmFn confirm_fn(
         std::filesystem::path config_path, std::shared_ptr<SessionApprovals> approvals) = 0;
-    /// Asks whether a folder over the size guard should be attached (26d);
-    /// null where nobody can answer, and it is refused.
-    [[nodiscard]] virtual std::function<bool(const std::string&)> confirm_large() = 0;
+    /// A yes/no question put to the person: whether a folder over the size
+    /// guard is attached (26d), whether a session goes to bypass (39b). Null
+    /// where nobody can answer, and the answer is no.
+    [[nodiscard]] virtual std::function<bool(const std::string&)> ask_yes_no() = 0;
     /// The REPL's line reader, completing through `options.suggest`.
     [[nodiscard]] virtual std::unique_ptr<LineReader> line_reader(
         EditingLineReader::Options options) = 0;
@@ -141,7 +142,7 @@ public:
     [[nodiscard]] agentloop::AskFn ask_fn() override;
     [[nodiscard]] agent::ConfirmFn confirm_fn(std::filesystem::path config_path,
                                               std::shared_ptr<SessionApprovals> approvals) override;
-    [[nodiscard]] std::function<bool(const std::string&)> confirm_large() override;
+    [[nodiscard]] std::function<bool(const std::string&)> ask_yes_no() override;
     [[nodiscard]] std::unique_ptr<LineReader> line_reader(
         EditingLineReader::Options options) override;
 

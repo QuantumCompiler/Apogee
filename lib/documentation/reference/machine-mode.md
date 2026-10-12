@@ -464,8 +464,9 @@ when it starts the child.
   a driver that must never be asked.
 - `bypass` asks nothing.
 
-A config `deny` refuses in every mode. `bypass` can be chosen mid-session only
-when the child was started with `--allow-bypass` or `--permission-mode bypass`.
+A config `deny` refuses in every mode. A driver chooses the mode at launch,
+`bypass` included: in the terminal and the shell `/permission-mode bypass`
+asks the person once, and a machine-mode child has nobody to ask that of.
 
 ## Everything else is a CLI command
 

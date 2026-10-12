@@ -88,9 +88,11 @@ struct SessionApprovals {
     /// moves it from its own thread while a turn may be running, and the
     /// checker reads it at each call.
     std::atomic<PermissionMode> mode{PermissionMode::Manual};
-    /// Whether bypass may be chosen: set at launch by `--allow-bypass` or
-    /// `--permission-mode bypass`, never mid-session.
-    bool bypass_allowed = false;
+    /// Whether bypass is in the session's Shift+Tab cycle: set at launch by
+    /// `--allow-bypass` or `--permission-mode bypass`, or by a yes to
+    /// `/permission-mode bypass`'s question. Atomic for the same reason as
+    /// the mode: the shell's Shift+Tab reads it on its own thread.
+    std::atomic<bool> bypass_allowed{false};
 };
 
 /// What a run was started with (26o): `--allow` and `--deny` take a gated
