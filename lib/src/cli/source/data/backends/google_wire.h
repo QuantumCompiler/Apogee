@@ -65,6 +65,9 @@ struct RequestOptions {
 
 /// The least a Pro model may think for: it cannot switch thinking off (26i).
 inline constexpr std::int64_t kProMinThinkingBudget = 128;
+/// The most each takes: past it the API refuses the request.
+inline constexpr std::int64_t kProMaxThinkingBudget = 32'768;
+inline constexpr std::int64_t kFlashMaxThinkingBudget = 24'576;
 
 /// Whether `model` thinks at all -- every Gemini after the 2.0 generation
 /// (26i). One that does not refuses a thinking setting.

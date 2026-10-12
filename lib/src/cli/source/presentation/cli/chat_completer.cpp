@@ -14,6 +14,7 @@
 #include "agentloop/retriever.h"
 #include "ansi/text_width.h"
 #include "backends/model_roster.h"
+#include "cli/permissions.h"
 #include "knowledge/record.h"
 
 namespace apogee::commands {
@@ -70,6 +71,10 @@ constexpr std::array kCommands{
     ChatCommandSpec{"think", ChatVerb::Think, "[on|off|auto]",
                     "Show or set whether the model thinks first: on, off, or auto per question",
                     ArgumentValues::ThinkingModes},
+    ChatCommandSpec{"effort", ChatVerb::Effort, "[level|auto]",
+                    "Show or set how hard the model thinks: low, medium, high, xhigh or max; "
+                    "auto leaves it to the model",
+                    ArgumentValues::EffortLevels},
     ChatCommandSpec{"max-tokens", ChatVerb::MaxTokens, "<number>",
                     "Cap each answer's length in tokens"},
     ChatCommandSpec{"compact", ChatVerb::Compact, "",
@@ -109,9 +114,30 @@ constexpr std::array kCommands{
                     ArgumentValues::SessionPermissions},
     ChatCommandSpec{"permissions", ChatVerb::Permissions, "",
                     "List each tool's answer and where it comes from"},
+    ChatCommandSpec{"permission-mode", ChatVerb::PermissionMode, "[mode]",
+                    "Show or set how much runs without asking: manual, accept-edits, plan, "
+                    "dont-ask or bypass (Shift+Tab cycles)",
+                    ArgumentValues::PermissionModes},
     ChatCommandSpec{"exit", ChatVerb::Exit, "", "Save and leave"},
     ChatCommandSpec{"quit", ChatVerb::Exit, "", "Save and leave"},
 };
+
+/// What each effort level means, for the rows (39a).
+std::string_view effort_description(harness::Effort effort) {
+    switch (effort) {
+        case harness::Effort::Low:
+            return "Think briefly: quick answers";
+        case harness::Effort::Medium:
+            return "Think a moderate amount";
+        case harness::Effort::High:
+            return "Think hard: harder questions";
+        case harness::Effort::XHigh:
+            return "Think harder still";
+        case harness::Effort::Max:
+            return "Think as long as the model can";
+    }
+    return {};
+}
 
 /// What each retriever value means, for the rows. A value agentloop adds
 /// without a line here still completes, just undescribed.
@@ -314,6 +340,13 @@ std::vector<NamedChoice> argument_choices(ArgumentValues values,
             choices.push_back({"off", "Answer without thinking first"});
             choices.push_back({"auto", "Think when the question needs it"});
             break;
+        case ArgumentValues::EffortLevels:
+            for (const harness::Effort effort : harness::kEfforts) {
+                choices.push_back({std::string{harness::to_string(effort)},
+                                   std::string{effort_description(effort)}});
+            }
+            choices.push_back({"auto", "Leave it to the model, or the backend's budget"});
+            break;
         case ArgumentValues::AttachmentNames:
             if (sources.attachment_names) {
                 for (std::string& name : sources.attachment_names()) {
@@ -333,6 +366,15 @@ std::vector<NamedChoice> argument_choices(ArgumentValues values,
                 for (std::string& name : sources.session_permissions()) {
                     choices.push_back({std::move(name), {}});
                 }
+            }
+            break;
+        case ArgumentValues::PermissionModes:
+            for (const PermissionMode mode : kPermissionModes) {
+                if (mode == PermissionMode::Bypass && !sources.bypass_allowed) {
+                    continue;  // refused unless allowed at launch: never offered
+                }
+                choices.push_back(
+                    {std::string{to_string(mode)}, std::string{permission_mode_description(mode)}});
             }
             break;
         case ArgumentValues::Suites:

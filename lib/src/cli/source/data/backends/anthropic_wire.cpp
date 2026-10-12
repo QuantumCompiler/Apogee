@@ -133,8 +133,8 @@ std::int64_t thinking_budget_for(const harness::Thinking& thinking, std::int64_t
     if (thinking.off()) {
         return 0;
     }
-    if (thinking.budget.has_value()) {
-        return std::max(*thinking.budget, kMinThinkingBudget);
+    if (const std::optional<std::int64_t> tokens = thinking.tokens(); tokens.has_value()) {
+        return std::max(*tokens, kMinThinkingBudget);
     }
     return configured;
 }

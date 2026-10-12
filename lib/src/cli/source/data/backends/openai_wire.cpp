@@ -72,6 +72,20 @@ std::string effort_for(const harness::Thinking& thinking, std::string_view model
         }
         return model.starts_with("gpt-5") ? "minimal" : "low";
     }
+    if (thinking.effort.has_value() && !thinking.budget.has_value()) {
+        // A level (39a) in OpenAI's own words: it takes low, medium and
+        // high, so xhigh and max run as high -- the highest at or below.
+        switch (*thinking.effort) {
+            case harness::Effort::Low:
+                return "low";
+            case harness::Effort::Medium:
+                return "medium";
+            case harness::Effort::High:
+            case harness::Effort::XHigh:
+            case harness::Effort::Max:
+                return "high";
+        }
+    }
     return effort_for_budget(thinking.budget.value_or(configured));
 }
 

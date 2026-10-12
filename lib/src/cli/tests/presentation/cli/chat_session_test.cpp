@@ -161,6 +161,8 @@ std::string battery() {
         out += scenario(home, {"__complete", "chat", "--"});
         out += scenario(home, {"__complete", "chat", "--suite", ""});
         out += scenario(home, {"__complete", "chat", "--think", ""});
+        out += scenario(home, {"__complete", "chat", "--effort", ""});
+        out += scenario(home, {"__complete", "chat", "--permission-mode", ""});
         out += scenario(home, {"__complete", "chat", "--output-format", ""});
     }
     return out;

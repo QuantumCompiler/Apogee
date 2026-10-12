@@ -725,3 +725,130 @@ TEST_CASE("/permissions says each answer and where it comes from",
     CHECK(apogee::commands::describe_permissions({}, {}, {}) ==
           std::vector<std::string>{"no tool in this chat asks permission (--tools)"});
 }
+
+// ---------------------------------------------------------------------------
+// The session's permission mode (39b)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("each permission mode answers what manual would ask, and a deny wins in all five",
+          "[commands][permissions][modes]") {
+    using apogee::commands::PermissionMode;
+    Config config;
+    config.permissions.levels["delete_note"] = PermissionLevel::Allow;
+    config.permissions.levels["run_command"] = PermissionLevel::Deny;
+    const auto approvals = std::make_shared<SessionApprovals>();
+    approvals->denied_tools.insert("delete_file");
+    approvals->denied_hosts.insert("evil.example");
+    const apogee::agent::PermissionChecker check = make_permission_checker(config, approvals);
+    // An edit, an edit the config allows, a command the config denies, an
+    // edit the session denies, an MCP writer, a website, a denied website.
+    const GateRequest edit{"write_file", "notes.txt", {}, false, true};
+    const GateRequest allowed_edit{"delete_note", "todo", {}, false, true};
+    const GateRequest command{"run_command", "ls"};
+    const GateRequest denied_edit{"delete_file", "x", {}, false, true};
+    const GateRequest mcp{"mcp_create_issue", "repo"};
+    const GateRequest page{"fetch_url", "docs.python.org", "https://docs.python.org/", true};
+    const GateRequest denied_site{"fetch_url", "evil.example", "https://evil.example/", true};
+    const auto answers = [&]() {
+        return std::vector<Permission>{check(edit),        check(allowed_edit), check(command),
+                                       check(denied_edit), check(mcp),          check(page),
+                                       check(denied_site)};
+    };
+    const Permission A = Permission::Allow;
+    const Permission D = Permission::Deny;
+    const Permission Q = Permission::Ask;
+
+    // Manual: the gate as it was.
+    CHECK(answers() == std::vector<Permission>{Q, A, D, D, Q, Q, D});
+    // Accept-edits: only the unanswered edit changes.
+    approvals->mode = PermissionMode::AcceptEdits;
+    CHECK(answers() == std::vector<Permission>{A, A, D, D, Q, Q, D});
+    // Plan: every writer refused, the config's allow included; websites ask.
+    approvals->mode = PermissionMode::Plan;
+    CHECK(answers() == std::vector<Permission>{D, D, D, D, D, Q, D});
+    // Dont-ask: what would ask is refused; what is allowed still runs.
+    approvals->mode = PermissionMode::DontAsk;
+    CHECK(answers() == std::vector<Permission>{D, A, D, D, D, D, D});
+    // Bypass: nothing asks -- and every deny still refuses.
+    approvals->mode = PermissionMode::Bypass;
+    CHECK(answers() == std::vector<Permission>{A, A, D, D, A, A, D});
+}
+
+TEST_CASE("Shift+Tab's cycle: manual, accept-edits, plan, bypass when allowed, back to manual",
+          "[commands][permissions][modes]") {
+    using apogee::commands::next_permission_mode;
+    using apogee::commands::PermissionMode;
+    CHECK(next_permission_mode(PermissionMode::Manual, false) == PermissionMode::AcceptEdits);
+    CHECK(next_permission_mode(PermissionMode::AcceptEdits, false) == PermissionMode::Plan);
+    CHECK(next_permission_mode(PermissionMode::Plan, false) == PermissionMode::Manual);
+    CHECK(next_permission_mode(PermissionMode::Plan, true) == PermissionMode::Bypass);
+    CHECK(next_permission_mode(PermissionMode::Bypass, true) == PermissionMode::Manual);
+    // Dont-ask is never in the cycle: leaving it goes to manual.
+    CHECK(next_permission_mode(PermissionMode::DontAsk, true) == PermissionMode::Manual);
+
+    for (const PermissionMode mode : apogee::commands::kPermissionModes) {
+        CHECK(apogee::commands::permission_mode_from_string(apogee::commands::to_string(mode)) ==
+              mode);
+        CHECK_FALSE(apogee::commands::permission_mode_description(mode).empty());
+    }
+    CHECK_FALSE(apogee::commands::permission_mode_from_string("acceptEdits").has_value());
+    CHECK(apogee::commands::permission_mode_words() ==
+          std::vector<std::string>{"manual", "accept-edits", "plan", "dont-ask", "bypass"});
+    // Claude Code's status words; manual shows nothing.
+    const apogee::ansi::Style plain{false};
+    CHECK(apogee::commands::permission_mode_label(PermissionMode::Manual, plain).empty());
+    CHECK(apogee::commands::permission_mode_label(PermissionMode::AcceptEdits, plain) ==
+          "⏵⏵ accept edits on");
+    CHECK(apogee::commands::permission_mode_label(PermissionMode::Plan, plain) == "⏸ plan mode on");
+    CHECK(apogee::commands::permission_mode_label(PermissionMode::DontAsk, plain) ==
+          "⏵⏵ don't ask on");
+    CHECK(apogee::commands::permission_mode_label(PermissionMode::Bypass, plain) ==
+          "⏵⏵ bypass permissions on");
+}
+
+TEST_CASE("plan mode's note and a mode's refusal are said only in their mode",
+          "[commands][permissions][modes]") {
+    using apogee::commands::PermissionMode;
+    const auto approvals = std::make_shared<SessionApprovals>();
+    const apogee::agent::RefusalNote refusal = apogee::commands::mode_refusal(approvals);
+    const GateRequest write{"write_file", "x"};
+    const GateRequest page{"fetch_url", "pypi.org", {}, true};
+    CHECK(apogee::commands::plan_note(*approvals).empty());
+    CHECK(refusal(write).empty());
+    approvals->mode = PermissionMode::Plan;
+    CHECK(apogee::commands::plan_note(*approvals).find("Plan mode is on") != std::string::npos);
+    CHECK(refusal(write).find("plan mode is on") != std::string::npos);
+    CHECK(refusal(page).empty());  // plan mode still asks about websites
+    approvals->mode = PermissionMode::DontAsk;
+    CHECK(apogee::commands::plan_note(*approvals).empty());
+    CHECK(refusal(page).find("dont-ask") != std::string::npos);
+    CHECK_FALSE(apogee::commands::mode_refusal(nullptr));
+}
+
+TEST_CASE("/permissions leads with the mode and says what it does to each answer",
+          "[commands][permissions][modes]") {
+    using apogee::commands::PermissionMode;
+    Config config;
+    config.permissions.levels["run_command"] = PermissionLevel::Ask;
+    SessionApprovals approvals;
+    const std::vector<std::string> edits{"delete_file", "write_file"};
+    approvals.mode = PermissionMode::AcceptEdits;
+    CHECK(apogee::commands::describe_permissions(config, approvals, gated(), edits) ==
+          std::vector<std::string>{
+              "mode: accept-edits -- file and note edits run without asking; commands and "
+              "websites still ask",
+              "delete_file  allow  (accept-edits mode)", "run_command  ask    (config)",
+              "write_file   allow  (accept-edits mode)"});
+    approvals.mode = PermissionMode::Plan;
+    const std::vector<std::string> plan =
+        apogee::commands::describe_permissions(config, approvals, gated(), edits);
+    REQUIRE(plan.size() == 4);
+    CHECK(plan.at(0) == "mode: plan -- nothing that writes runs; the model plans");
+    CHECK(plan.at(2) == "run_command  deny   (plan mode)");
+    approvals.mode = PermissionMode::Bypass;
+    CHECK(apogee::commands::describe_permissions(config, approvals, gated(), edits).at(2) ==
+          "run_command  allow  (bypass mode)");
+    approvals.mode = PermissionMode::DontAsk;
+    CHECK(apogee::commands::describe_permissions(config, approvals, gated(), edits).at(2) ==
+          "run_command  deny   (dont-ask mode)");
+}

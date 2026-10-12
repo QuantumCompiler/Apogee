@@ -59,7 +59,7 @@ One JSON object per line on stdout. Every object has a `type`.
 | Event | Meaning |
 |---|---|
 | `session` | Once, first, unprompted. Names the protocol version, the model and the session's `capabilities` (below). |
-| `thinking` | The model began reasoning. No text. Sent again with `"budget_reached": true` when the reasoning reached its thinking budget and was ended there (`--think-budget`, or the backend's `thinking_budget`). |
+| `thinking` | The model began reasoning. No text. Sent again with `"budget_reached": true` when the reasoning reached its thinking budget and was ended there (`--think-budget`, an `--effort` level's budget, or the backend's `thinking_budget`). |
 | `thinking_delta` | A chunk of reasoning. **Droppable** — see below. |
 | `memory` | `chat` only: what a turn was handed from earlier conversations -- `chats`, past chats' summaries, and `decisions`, recorded knowledge records -- injected for this turn and never into the transcript (26l). Sent before the turn, only when it recalled something. |
 | `tool_status` | A tool is running, described in `text` for display -- or another model call the turn makes besides the chat model's own (the embedder, the utility model, the rerank judge, the knowledge clerk, a suite member the model consults), as `<role> — <what it is doing>` (26n). A `consult` (27f) is an ordinary tool call: `[tool] consult`, then `consult — asking utility (<backend>): <the question's first words>` while the member answers, and the answer reaches the model as the tool's result. A suite's verifier checking a tool call or an answer (27g) is said the same way: `validate — asking utility (<backend>): Check …`. A symphony the root model plays on its own (27t, an orchestrating `execute` session) is an ordinary tool call too: `[tool] play_<symphony>`, then `play — the model chose <symphony>: <n> member calls, <roles>`, then a line per stage. |
@@ -450,6 +450,22 @@ fetched from it:
 The answers are the same words: `session` allows that host for the rest of the
 run, and `always` adds it to `tools.allowed_hosts`. With no driver, only the
 listed hosts are reached.
+
+**The session's permission mode** decides what is asked at all. It is set at
+launch with `--permission-mode manual|accept-edits|plan|dont-ask|bypass`, the
+same modes a terminal session moves between with `/permission-mode` and
+Shift+Tab. The protocol carries no settings verbs, so a driver chooses the mode
+when it starts the child.
+
+- `manual`, the default, asks as above.
+- `accept-edits` runs the file and note edits unasked.
+- `plan` refuses every tool that writes, saying so in the tool result.
+- `dont-ask` refuses whatever would have been a `question`. It is the mode for
+  a driver that must never be asked.
+- `bypass` asks nothing.
+
+A config `deny` refuses in every mode. `bypass` can be chosen mid-session only
+when the child was started with `--allow-bypass` or `--permission-mode bypass`.
 
 ## Everything else is a CLI command
 

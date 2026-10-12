@@ -60,6 +60,7 @@ enum class ChatVerb : std::uint8_t {
     System,
     Temperature,
     Think,
+    Effort,
     MaxTokens,
     Compact,
     Title,
@@ -77,6 +78,7 @@ enum class ChatVerb : std::uint8_t {
     Deny,
     Revoke,
     Permissions,
+    PermissionMode,
     Exit,
     // Execute's (27s), after `Exit`: chat's rows hold every verb up to it.
     Symphonies,
@@ -100,12 +102,16 @@ enum class ArgumentValues : std::uint8_t {
     AttachmentNames,
     /// `on`, `off`, `auto` (26i).
     ThinkingModes,
+    /// The five effort levels, lowest first, then `auto` (39a).
+    EffortLevels,
     /// `on`, `off` (26l).
     OnOff,
     /// The tools this chat asks permission for (26o).
     GatedTools,
     /// The tools and websites this chat has answered for itself (26o).
     SessionPermissions,
+    /// The permission modes, described; bypass only when allowed (39b).
+    PermissionModes,
     /// The configured suites, and `off` (27d).
     Suites,
     /// An attach's graph methods: `code`, `off` (27p).
@@ -202,6 +208,9 @@ struct ChatCompletionSources {
     /// for itself, for `/allow`, `/deny` and `/revoke` (26o).
     std::function<std::vector<std::string>()> gated_tools;
     std::function<std::vector<std::string>()> session_permissions;
+    /// Whether `/permission-mode` offers bypass: the session was started
+    /// allowing it (39b).
+    bool bypass_allowed = false;
     DirectoryLister list;
     /// Which session the line is typed into (27s): the rows it offers.
     SessionMode mode = SessionMode::Chat;

@@ -195,6 +195,9 @@ std::string serialize(const Session& session) {
     if (session.params.thinking_budget.has_value()) {
         params["think_budget"] = *session.params.thinking_budget;
     }
+    if (session.params.effort.has_value()) {
+        params["effort"] = harness::to_string(*session.params.effort);
+    }
     if (!session.params.system_prompt.empty()) {
         params["system_prompt"] = session.params.system_prompt;
     }
@@ -283,6 +286,9 @@ LoadedSession deserialize(std::string_view text, const KnownDependencies& known)
         if (const auto it = params->find("think_budget");
             it != params->end() && it->is_number_integer()) {
             session.params.thinking_budget = it->get<std::int64_t>();
+        }
+        if (const auto it = params->find("effort"); it != params->end() && it->is_string()) {
+            session.params.effort = harness::effort_from_string(it->get<std::string>());
         }
         session.params.system_prompt = string_field(*params, "system_prompt", loaded.warnings);
     }

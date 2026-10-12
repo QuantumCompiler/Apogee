@@ -1,8 +1,12 @@
 #pragma once
 
+#include <array>
+#include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <istream>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -27,6 +31,46 @@ namespace apogee::commands {
 
 class DriverInput;
 
+/// How much a session may do without asking (39b): Claude Code's permission
+/// modes, one layer over the gate. A config `deny` and a session `/deny`
+/// refuse in every mode.
+enum class PermissionMode : std::uint8_t {
+    /// The gate as configured: the config's level, the session's answers,
+    /// else ask.
+    Manual,
+    /// A tool that edits a file or a note (`Tool::edits`) runs without
+    /// asking; a command, an MCP tool and a website still ask.
+    AcceptEdits,
+    /// Nothing that writes runs, and the model is told to plan.
+    Plan,
+    /// Whatever would ask is refused. Never in the Shift+Tab cycle.
+    DontAsk,
+    /// Nothing asks. Reachable only when the session was started allowing it.
+    Bypass,
+};
+
+/// Every mode, in the order `/permission-mode` offers them.
+inline constexpr std::array kPermissionModes{PermissionMode::Manual, PermissionMode::AcceptEdits,
+                                             PermissionMode::Plan, PermissionMode::DontAsk,
+                                             PermissionMode::Bypass};
+
+/// `manual`, `accept-edits`, `plan`, `dont-ask`, `bypass`.
+[[nodiscard]] std::string_view to_string(PermissionMode mode) noexcept;
+/// The mode a word names, or unset.
+[[nodiscard]] std::optional<PermissionMode> permission_mode_from_string(
+    std::string_view text) noexcept;
+/// The modes' words, in order: what `--permission-mode` accepts.
+[[nodiscard]] std::vector<std::string> permission_mode_words();
+/// What a mode does, in a phrase: `/permission-mode`'s reply and completion.
+[[nodiscard]] std::string_view permission_mode_description(PermissionMode mode) noexcept;
+/// Claude Code's status words for a mode -- `⏵⏵ accept edits on`, `⏸ plan
+/// mode on` -- coloured by `style`; empty for manual, which shows nothing.
+[[nodiscard]] std::string permission_mode_label(PermissionMode mode, const ansi::Style& style);
+/// Shift+Tab's next: manual → accept-edits → plan → (bypass, when allowed) →
+/// manual; from dont-ask, outside the cycle, manual.
+[[nodiscard]] PermissionMode next_permission_mode(PermissionMode mode,
+                                                  bool bypass_allowed) noexcept;
+
 /// What the user answered `session` for. Shared between the checker and the
 /// prompt so an answer given once holds for the run and not the next.
 struct SessionApprovals {
@@ -40,6 +84,13 @@ struct SessionApprovals {
     /// the keyboard saying no in advance is the safest answer the gate gets.
     std::set<std::string, std::less<>> denied_tools;
     std::set<std::string, std::less<>> denied_hosts;
+    /// The session's permission mode (39b). Atomic: the shell's Shift+Tab
+    /// moves it from its own thread while a turn may be running, and the
+    /// checker reads it at each call.
+    std::atomic<PermissionMode> mode{PermissionMode::Manual};
+    /// Whether bypass may be chosen: set at launch by `--allow-bypass` or
+    /// `--permission-mode bypass`, never mid-session.
+    bool bypass_allowed = false;
 };
 
 /// What a run was started with (26o): `--allow` and `--deny` take a gated
@@ -57,6 +108,8 @@ struct PermissionPresets {
 
 /// The tools a session can be asked about: those in `registry` that write.
 [[nodiscard]] std::vector<std::string> gated_tools(const agent::ToolRegistry& registry);
+/// Those of them that edit a file or a note (`Tool::edits`, 39b).
+[[nodiscard]] std::vector<std::string> edit_tools(const agent::ToolRegistry& registry);
 
 /// A name a preset or a slash verb was given: a gated tool, or a website by
 /// its canonical host. `error` names the gated set when it is neither -- a
@@ -83,14 +136,17 @@ bool revoke_for_session(SessionApprovals& approvals, const GatedName& name);
                                          const std::vector<std::string>& gated);
 
 /// `/permissions`: each gated tool's effective answer and where it comes
-/// from -- the config, this session, or the default -- then the websites
-/// the session answered and the ones the config lists.
-[[nodiscard]] std::vector<std::string> describe_permissions(const harness::Config& config,
-                                                            const SessionApprovals& approvals,
-                                                            const std::vector<std::string>& gated);
+/// from -- the config, this session, the mode, or the default -- then the
+/// websites the session answered and the ones the config lists. Outside
+/// manual the mode leads (39b); `edits` are the gated tools that edit.
+[[nodiscard]] std::vector<std::string> describe_permissions(
+    const harness::Config& config, const SessionApprovals& approvals,
+    const std::vector<std::string>& gated, const std::vector<std::string>& edits = {});
 
 /// The checker. For a tool that writes: the config's level for the tool, then
-/// the session's answers, then `Ask`. For an outbound one: the host in
+/// the session's answers, then the session's mode (39b: plan refuses every
+/// writer, accept-edits allows an edit, bypass allows, dont-ask refuses),
+/// then `Ask`. For an outbound one: the host in
 /// `tools.allowed_hosts`, then the session's hosts, then `Ask` -- so a
 /// surface with nobody to ask reaches only the listed hosts. `approvals` may
 /// be null (nothing is remembered).
@@ -128,10 +184,21 @@ bool revoke_for_session(SessionApprovals& approvals, const GatedName& name);
                                                       std::filesystem::path config_path,
                                                       std::shared_ptr<SessionApprovals> approvals);
 
+/// Plan mode's note for a turn's system prompt (39b), or empty in any other
+/// mode: it rides the turn, never the transcript.
+[[nodiscard]] std::string plan_note(const SessionApprovals& approvals);
+
+/// The refusal's reason a mode gives the model (39b): plan mode's and
+/// dont-ask's, read from the mode at the call; empty otherwise.
+[[nodiscard]] agent::RefusalNote mode_refusal(std::shared_ptr<const SessionApprovals> approvals);
+
 /// Both halves, so a surface hands them to the loop as one thing.
 struct ToolGate {
     agent::PermissionChecker permission;
     agent::ConfirmFn confirm;
+    /// The session's answers and mode (39b), for plan mode's note and a
+    /// refusal's reason; null where no session holds any.
+    std::shared_ptr<const SessionApprovals> approvals;
 };
 
 }  // namespace apogee::commands

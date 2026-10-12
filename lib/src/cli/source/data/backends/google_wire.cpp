@@ -248,8 +248,11 @@ std::optional<std::int64_t> thinking_off_budget(std::string_view model) noexcept
 }
 
 std::int64_t thinking_budget_for(std::string_view model, std::int64_t budget) noexcept {
-    return model.find("-pro") != std::string_view::npos ? std::max(budget, kProMinThinkingBudget)
-                                                        : budget;
+    // Each model's own range: Pro thinks at least a little and at most
+    // 32,768; Flash at most 24,576 -- `max` (39a) runs at its ceiling.
+    return model.find("-pro") != std::string_view::npos
+               ? std::clamp(budget, kProMinThinkingBudget, kProMaxThinkingBudget)
+               : std::min(budget, kFlashMaxThinkingBudget);
 }
 
 harness::ChatResponse parse_response(const nlohmann::json& body, std::string* thinking_out) {

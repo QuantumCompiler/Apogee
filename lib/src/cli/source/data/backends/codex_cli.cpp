@@ -102,7 +102,8 @@ std::unique_ptr<CodexCliProvider> CodexCliProvider::from_config(
 std::vector<std::string> CodexCliProvider::build_arguments(const Options& options,
                                                            Invocation invocation,
                                                            const std::string& thread_id,
-                                                           const std::string& schema_path) {
+                                                           const std::string& schema_path,
+                                                           std::string_view effort) {
     std::vector<std::string> arguments{"exec"};
 
     if (invocation == Invocation::Resume) {
@@ -115,6 +116,13 @@ std::vector<std::string> CodexCliProvider::build_arguments(const Options& option
     // The CLI expects a git repository and refuses outside one; a chat backend
     // has no business caring where the user's shell happens to be.
     arguments.emplace_back("--skip-git-repo-check");
+
+    if (!effort.empty()) {
+        // A level (39a), as a config override: `exec` and `exec resume` both
+        // take `-c`, so each turn can carry the session's current one.
+        arguments.emplace_back("-c");
+        arguments.push_back("model_reasoning_effort=\"" + std::string{effort} + "\"");
+    }
 
     if (invocation == Invocation::Fresh) {
         // `resume` REJECTS both of these. Verified on 0.153.4: passing --color
@@ -144,6 +152,24 @@ std::vector<std::string> CodexCliProvider::build_arguments(const Options& option
     return arguments;
 }
 
+std::string CodexCliProvider::codex_effort(const harness::Thinking& thinking) {
+    if (thinking.off() || !thinking.effort.has_value()) {
+        return {};
+    }
+    switch (*thinking.effort) {
+        case harness::Effort::Low:
+            return "low";
+        case harness::Effort::Medium:
+            return "medium";
+        case harness::Effort::High:
+            return "high";
+        case harness::Effort::XHigh:
+        case harness::Effort::Max:
+            return "xhigh";
+    }
+    return {};
+}
+
 std::string_view CodexCliProvider::backend_name() const noexcept {
     return options_.backend_name;
 }
@@ -170,12 +196,13 @@ harness::StatusEvent CodexCliProvider::model_status() const {
 
 CodexCliProvider::Outcome CodexCliProvider::run_turn(const std::string& prompt,
                                                      const std::string& schema_path,
-                                                     const harness::StreamOptions& options) {
+                                                     const harness::StreamOptions& options,
+                                                     std::string_view effort) {
     const Invocation invocation = thread_id_.empty() ? Invocation::Fresh : Invocation::Resume;
 
     platform::ChildCommand command;
     command.program = options_.binary;
-    command.arguments = build_arguments(options_, invocation, thread_id_, schema_path);
+    command.arguments = build_arguments(options_, invocation, thread_id_, schema_path, effort);
     command.arguments.push_back(prompt);
 
     ++spawns_;
@@ -397,7 +424,8 @@ harness::ChatResponse CodexCliProvider::stream_chat(const harness::ChatRequest& 
     }
 
     const std::string prompt = prompt_for(request.messages, !thread_id_.empty());
-    Outcome outcome = run_turn(prompt, {}, options);
+    Outcome outcome = run_turn(prompt, {}, options,
+                               side_request ? std::string{} : codex_effort(request.thinking));
 
     if (side_request) {
         // Whatever thread the side request created is discarded; the

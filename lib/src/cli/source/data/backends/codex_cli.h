@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "contracts/config.h"
@@ -121,10 +122,19 @@ public:
     /// Public because two of its rules are load-bearing enough to deserve their
     /// own assertions: the sandbox is always `read-only`, and the `resume`
     /// form omits the flags that subcommand rejects.
+    ///
+    /// `effort` is a level's word as Codex takes it (`codex_effort`), or empty
+    /// for the model's own.
     [[nodiscard]] static std::vector<std::string> build_arguments(const Options& options,
                                                                   Invocation invocation,
                                                                   const std::string& thread_id,
-                                                                  const std::string& schema_path);
+                                                                  const std::string& schema_path,
+                                                                  std::string_view effort = {});
+
+    /// A level (39a) as Codex's `model_reasoning_effort` spells it: low,
+    /// medium, high and xhigh, so max runs as xhigh. Empty for none, and
+    /// for thinking off, which Codex has no word for.
+    [[nodiscard]] static std::string codex_effort(const harness::Thinking& thinking);
 
     /// The thread id captured from the last run, if any.
     [[nodiscard]] const std::string& thread_id() const noexcept;
@@ -146,7 +156,8 @@ private:
     };
 
     [[nodiscard]] Outcome run_turn(const std::string& prompt, const std::string& schema_path,
-                                   const harness::StreamOptions& options);
+                                   const harness::StreamOptions& options,
+                                   std::string_view effort = {});
 
     Options options_;
     Spawner spawner_;

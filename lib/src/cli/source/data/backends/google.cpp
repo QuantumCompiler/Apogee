@@ -135,7 +135,7 @@ google::RequestOptions GoogleProvider::request_options(const harness::ChatReques
         options.thinking_off_budget = google::thinking_off_budget(options_.model);
     } else if (google::model_thinks(options_.model)) {
         const std::int64_t budget =
-            request.thinking.budget.value_or(options_.thinking_budget_tokens);
+            request.thinking.tokens().value_or(options_.thinking_budget_tokens);
         options.thinking_budget_tokens =
             budget > 0 ? google::thinking_budget_for(options_.model, budget) : 0;
     }
@@ -299,9 +299,8 @@ std::vector<harness::ModelInfo> GoogleProvider::list_catalog(
         const nlohmann::json parsed = nlohmann::json::parse(response.body, nullptr, false);
         if (parsed.is_discarded() || !parsed.is_object() || !parsed.contains("models") ||
             !parsed["models"].is_array()) {
-            throw harness::ProviderError(
-                options_.backend_name,
-                "the models endpoint did not return its documented shape");
+            throw harness::ProviderError(options_.backend_name,
+                                         "the models endpoint did not return its documented shape");
         }
         for (const nlohmann::json& row : parsed["models"]) {
             if (!row.is_object()) {

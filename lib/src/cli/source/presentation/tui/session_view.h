@@ -100,6 +100,11 @@ public:
     /// What is typed completes through `suggest` -- chat's own completer,
     /// the one command table's rows and values.
     void set_completion(commands::Suggester suggest);
+    /// Shift+Tab hands the conversation's `next` (39b: the session's
+    /// permission mode moved on), and the row under the input shows `label`,
+    /// read as each frame is drawn -- empty for no row. Both are called on
+    /// the shell's thread, so they read only what is safe there.
+    void set_mode_switch(std::function<void()> next, std::function<std::string()> label);
     /// The line above the input: the model, the suite, the chat.
     void set_header(std::string line);
     /// A line kept in the transcript, as the core styled it.

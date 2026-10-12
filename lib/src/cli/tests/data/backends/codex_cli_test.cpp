@@ -121,6 +121,37 @@ TEST_CASE("resume omits the flags that subcommand rejects", "[backends][codex][f
     }
 }
 
+TEST_CASE("an effort level reaches both forms as a config override, in Codex's words",
+          "[backends][codex][flags][effort]") {
+    // `exec` and `exec resume` both take `-c` (verified on 0.153.4), so each
+    // turn carries the session's level, whichever form it runs as (39a).
+    CodexCliProvider::Options options;
+    for (const auto invocation :
+         {CodexCliProvider::Invocation::Fresh, CodexCliProvider::Invocation::Resume}) {
+        const std::vector<std::string> args =
+            CodexCliProvider::build_arguments(options, invocation, "thread-abc", {}, "high");
+        const auto at = std::find(args.begin(), args.end(), "-c");
+        REQUIRE(at != args.end());
+        REQUIRE(std::next(at) != args.end());
+        CHECK(*std::next(at) == R"(model_reasoning_effort="high")");
+    }
+    // No level, no override: the model's own.
+    CHECK_FALSE(
+        has(CodexCliProvider::build_arguments(options, CodexCliProvider::Invocation::Fresh, {}, {}),
+            "-c"));
+
+    using apogee::harness::Effort;
+    using apogee::harness::Thinking;
+    CHECK(CodexCliProvider::codex_effort(Thinking{.effort = Effort::Low}) == "low");
+    CHECK(CodexCliProvider::codex_effort(Thinking{.effort = Effort::High}) == "high");
+    CHECK(CodexCliProvider::codex_effort(Thinking{.effort = Effort::XHigh}) == "xhigh");
+    CHECK(CodexCliProvider::codex_effort(Thinking{.effort = Effort::Max}) == "xhigh");
+    CHECK(CodexCliProvider::codex_effort(Thinking{}).empty());
+    CHECK(CodexCliProvider::codex_effort(
+              Thinking{.mode = apogee::harness::ThinkingMode::Off, .effort = Effort::High})
+              .empty());
+}
+
 TEST_CASE("a schema is passed as a file path", "[backends][codex][flags]") {
     // The opposite of Claude's --json-schema, which took inline JSON. Passing
     // the schema bytes here would be read as a filename.

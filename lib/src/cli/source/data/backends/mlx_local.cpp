@@ -863,7 +863,7 @@ mlx::GenerateRequest MlxLocalProvider::make_request(const harness::ChatRequest& 
         logger::log(logger::Level::Info, "mlx", text);
         notice(options, text);
     }
-    if (request.thinking.budget.has_value() && !request.thinking.off() && !side &&
+    if (request.thinking.tokens().has_value() && !request.thinking.off() && !side &&
         !budget_noticed_) {
         budget_noticed_ = true;
         notice(options, "the thinking budget is not applied on " + options_.model +

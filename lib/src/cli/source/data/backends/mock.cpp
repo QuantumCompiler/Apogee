@@ -69,12 +69,16 @@ std::string expand_mock_text(std::string_view text, const harness::ChatRequest& 
     replace_all(out, "{{last_tool_result}}", last_tool_result);
     replace_all(out, "{{system}}", system);
     // Whether the model was asked to think, and for how long (26i):
-    // `on`, `off` or `auto`, with `:N` for a budget.
+    // `on`, `off` or `auto`, with `:N` for a budget and `@level` for a
+    // level (39a).
     replace_all(
         out, "{{thinking}}",
         std::string{harness::to_string(request.thinking.mode)} +
             (request.thinking.budget.has_value() ? ":" + std::to_string(*request.thinking.budget)
-                                                 : std::string{}));
+                                                 : std::string{}) +
+            (request.thinking.effort.has_value()
+                 ? "@" + std::string{harness::to_string(*request.thinking.effort)}
+                 : std::string{}));
     return out;
 }
 

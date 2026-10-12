@@ -71,7 +71,13 @@ struct ClaudeCliInvocation {
     /// A one-shot invocation carries its prompt in argv and does not read
     /// stdin as a stream.
     bool streaming_stdin = true;
+    /// A level's word (39a), as `--effort` takes it; empty for the model's own.
+    std::string effort;
 };
+
+/// A level (39a) as the Claude Code CLI's `--effort` takes it: all five, by
+/// name. Empty for none, and for thinking off, which the CLI has no flag for.
+[[nodiscard]] std::string claude_effort(const harness::Thinking& thinking);
 
 [[nodiscard]] std::vector<std::string> build_arguments(const ClaudeCliInvocation& invocation);
 
@@ -196,6 +202,8 @@ private:
     /// The CLI's own session id, captured from every terminal event and used
     /// to resume. Stored by Apogee; never read from the CLI's files.
     std::string session_id_;
+    /// The level the running child was launched with (39a): a change restarts it.
+    std::string effort_;
 
     /// How many IR messages have already been delivered to the live child.
     ///

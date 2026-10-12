@@ -151,6 +151,10 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
     std::vector<std::string> history;
     std::optional<std::size_t> history_at;
     commands::Suggester suggest;
+    /// The session's permission mode (39b): Shift+Tab's step and the row's
+    /// words, set by the session's line reader.
+    std::function<void()> mode_next;
+    std::function<std::string()> mode_label;
     std::optional<Prompt> prompt;
     /// Rows scrolled back from the end of the transcript; 0 follows it.
     int scrollback = 0;
@@ -255,6 +259,8 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
         stopping = false;
         renderer.reset();
         suggest = std::move(completer);
+        mode_next = {};
+        mode_label = {};
     }
 
     // --- drawing --------------------------------------------------------------
@@ -416,6 +422,21 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
         return vbox(std::move(rows)) | border;
     }
 
+    /// The permission mode's row under the input (39b), as Claude Code's
+    /// status bar words it; none in manual.
+    [[nodiscard]] std::optional<ftxui::Element> draw_mode() const {
+        using namespace ftxui;  // NOLINT(google-build-using-namespace): the DOM's vocabulary
+        if (!mode_label) {
+            return std::nullopt;
+        }
+        const std::string label = mode_label();
+        if (label.empty()) {
+            return std::nullopt;
+        }
+        return hbox({text(" "), paint_row(spans_from_sgr(label), theme),
+                     text(" (shift+tab to cycle)") | dim});
+    }
+
     [[nodiscard]] ftxui::Element draw_conversation() {
         using namespace ftxui;  // NOLINT(google-build-using-namespace): the DOM's vocabulary
         const std::vector<markdown::Row> rows = transcript_rows();
@@ -454,9 +475,15 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
         frame.push_back(hbox({text(" "), paint_row(spans_from_sgr(state_line), theme)}) | dim);
         if (prompt.has_value()) {
             frame.push_back(draw_prompt());
+            if (std::optional<Element> row = draw_mode(); row.has_value()) {
+                frame.push_back(std::move(*row));
+            }
             return vbox(std::move(frame));
         }
         frame.push_back(draw_input());
+        if (std::optional<Element> row = draw_mode(); row.has_value()) {
+            frame.push_back(std::move(*row));
+        }
         if (suggest && !input.empty()) {
             const commands::Suggestions offered =
                 suggest(std::string_view{input}.substr(0, cursor));
@@ -602,6 +629,13 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
     }
 
     [[nodiscard]] bool on_conversation_key(const ftxui::Event& event) {
+        if (event == ftxui::Event::TabReverse && mode_next) {
+            // Shift+Tab moves the session's permission mode on (39b),
+            // whatever is open: the conversation takes it, never the shell's
+            // previous view.
+            mode_next();
+            return true;
+        }
         if (prompt.has_value()) {
             return on_prompt_key(event);
         }
@@ -865,6 +899,13 @@ void SessionView::begin_session() {
 void SessionView::set_completion(commands::Suggester suggest) {
     state_->post([completer = std::move(suggest)](State& state) mutable {
         state.suggest = std::move(completer);
+    });
+}
+
+void SessionView::set_mode_switch(std::function<void()> next, std::function<std::string()> label) {
+    state_->post([next = std::move(next), label = std::move(label)](State& state) mutable {
+        state.mode_next = std::move(next);
+        state.mode_label = std::move(label);
     });
 }
 

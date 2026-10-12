@@ -42,6 +42,9 @@ struct InferenceParams {
     /// and named so a file holding any reasoning still stands out.
     std::optional<harness::ThinkingMode> thinking;
     std::optional<std::int64_t> thinking_budget;
+    /// The level `--effort` or `/effort` chose (39a), saved as `effort`; held
+    /// instead of a budget, never with one. Absent from an older file.
+    std::optional<harness::Effort> effort;
 };
 
 /// Why a resume was imperfect.

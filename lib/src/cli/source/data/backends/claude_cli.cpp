@@ -64,6 +64,13 @@ std::optional<ClaudeCliMode> claude_cli_mode_from_string(std::string_view name) 
     return std::nullopt;
 }
 
+std::string claude_effort(const harness::Thinking& thinking) {
+    if (thinking.off() || !thinking.effort.has_value()) {
+        return {};
+    }
+    return std::string{harness::to_string(*thinking.effort)};
+}
+
 std::vector<std::string> build_arguments(const ClaudeCliInvocation& invocation) {
     std::vector<std::string> arguments{"-p"};
 
@@ -82,6 +89,10 @@ std::vector<std::string> build_arguments(const ClaudeCliInvocation& invocation) 
     // message-granular, which is the choppiness this design exists to remove.
     arguments.emplace_back("--include-partial-messages");
 
+    if (!invocation.effort.empty()) {
+        arguments.emplace_back("--effort");
+        arguments.push_back(invocation.effort);
+    }
     if (!invocation.model.empty()) {
         arguments.emplace_back("--model");
         arguments.push_back(invocation.model);
@@ -211,6 +222,7 @@ bool ClaudeCliProvider::ensure_child(std::string& error) {
     invocation.mode = options_.mode;
     invocation.model = options_.model;
     invocation.resume_session_id = session_id_;
+    invocation.effort = effort_;
 
     platform::ChildCommand command;
     command.program = options_.binary;
@@ -442,6 +454,20 @@ harness::ChatResponse ClaudeCliProvider::stream_chat(const harness::ChatRequest&
     if (!extends) {
         end_session();
         session_id_.clear();  // the CLI's copy of the old history is worthless now
+    }
+    // The CLI takes a level (39a) only at launch, so a changed one restarts
+    // the child on the same session: resumed, the history its own, and told
+    // only what is new -- unless it never said its session, when a fresh
+    // child must be told everything.
+    if (const std::string wanted = claude_effort(request.thinking); wanted != effort_) {
+        const std::size_t delivered = delivered_;
+        std::vector<std::string> digest = delivered_digest_;
+        end_session();
+        if (!session_id_.empty()) {
+            delivered_ = delivered;
+            delivered_digest_ = std::move(digest);
+        }
+        effort_ = wanted;
     }
 
     std::string error;

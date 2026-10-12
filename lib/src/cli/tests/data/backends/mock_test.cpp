@@ -263,6 +263,11 @@ TEST_CASE("placeholders expand against the request: the last tool result and the
     request.thinking =
         apogee::harness::Thinking{.mode = apogee::harness::ThinkingMode::Off, .budget = 64};
     CHECK(apogee::backends::expand_mock_text("{{thinking}}", request) == "off:64");
+    // A level (39a) after `@`.
+    request.thinking = apogee::harness::Thinking{.effort = apogee::harness::Effort::XHigh};
+    CHECK(apogee::backends::expand_mock_text("{{thinking}}", request) == "on@xhigh");
+    request.thinking =
+        apogee::harness::Thinking{.mode = apogee::harness::ThinkingMode::Off, .budget = 64};
     // The :json forms are string literals, quotes included, so a scripted JSON
     // answer can carry a tool result verbatim.
     const std::string answer =

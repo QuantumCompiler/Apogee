@@ -518,3 +518,47 @@ TEST_CASE("a person's long line wraps within its box's share, set against the ri
     CHECK(has(rows.at(first + 1), "│ "));
     CHECK(rows.at(first + 1).at(edge + std::string_view{"│ "}.size()) != ' ');
 }
+
+TEST_CASE("Shift+Tab hands the conversation's mode on, and the row under the input says it",
+          "[tui][session][modes]") {
+    // 39b: the session's hooks, called on the shell's thread.
+    Stage stage;
+    stage.view.begin_session();
+    int moved = 0;
+    std::string label;
+    stage.view.set_mode_switch(
+        [&moved, &label]() {
+            ++moved;
+            label = moved % 2 == 1 ? "\x1b[35m⏵⏵ accept edits on\x1b[0m" : "";
+        },
+        [&label]() { return label; });
+    // Manual: no row, the input the frame's last line before the bar.
+    CHECK_FALSE(has(stage.frame(), "shift+tab"));
+    CHECK(stage.shell.press(Key::named(Key::Name::BackTab)));
+    CHECK(moved == 1);
+    const std::string frame = stage.frame();
+    INFO(frame);
+    CHECK(has(frame, "\n ›\n ⏵⏵ accept edits on (shift+tab to cycle)\n"));
+    // Taken by the conversation: the shell's view stays where it is.
+    CHECK(has(frame, "[1 Session]"));
+    (void)stage.shell.press(Key::named(Key::Name::BackTab));
+    CHECK(moved == 2);
+    CHECK_FALSE(has(stage.frame(), "shift+tab"));
+}
+
+TEST_CASE("the picker leaves Shift+Tab to the shell, and a new conversation drops the old hooks",
+          "[tui][session][modes]") {
+    Stage stage;
+    int moved = 0;
+    stage.view.begin_session();
+    stage.view.set_mode_switch([&moved]() { ++moved; }, []() { return std::string{"MODE"}; });
+    CHECK(has(stage.frame(), "MODE (shift+tab to cycle)"));
+    stage.view.show_picker({}, [](const std::string&) {});
+    (void)stage.frame();
+    (void)stage.shell.press(Key::named(Key::Name::BackTab));
+    CHECK(moved == 0);
+    stage.view.begin_session();
+    CHECK_FALSE(has(stage.frame(), "MODE"));
+    (void)stage.shell.press(Key::named(Key::Name::BackTab));
+    CHECK(moved == 0);
+}

@@ -354,6 +354,7 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
     agent::DispatchContext dispatch_context;
     dispatch_context.permission = options.permission;
     dispatch_context.confirm = options.confirm;
+    dispatch_context.refusal = options.refusal;
     dispatch_context.on_status = [&reporter](std::string_view detail) {
         // An empty status means "back to rest" -- reported as thinking rather
         // than as an empty tool status, which the Reporter contract forbids.

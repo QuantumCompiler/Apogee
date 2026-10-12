@@ -380,6 +380,7 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
     write.parameters_schema =
         R"({"type":"object","properties":{"path":{"type":"string","description":"Absolute path, ~ path, or a path relative to the root"},"content":{"type":"string","description":"The text to write"}},"required":["path","content"]})";
     write.writes = true;
+    write.edits = true;
     write.describe_target = read.describe_target;
     write.run = [root](std::string_view arguments) -> agent::ToolOutcome {
         agent::ToolOutcome failure;
@@ -424,6 +425,7 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
     edit.parameters_schema =
         R"({"type":"object","properties":{"path":{"type":"string","description":"Absolute path, ~ path, or a path relative to the root"},"old_string":{"type":"string","description":"The exact text to replace"},"new_string":{"type":"string","description":"The text to put in its place"},"replace_all":{"type":"boolean","description":"Replace every occurrence rather than exactly one"}},"required":["path","old_string","new_string"]})";
     edit.writes = true;
+    edit.edits = true;
     edit.describe_target = read.describe_target;
     // What validation checks before waking a verifier (27g): the file must
     // be there to be edited.
@@ -549,6 +551,7 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
         restricted + " This operation requires the user's permission.";
     remove.parameters_schema = read.parameters_schema;
     remove.writes = true;
+    remove.edits = true;
     remove.describe_target = read.describe_target;
     remove.precheck = [root](std::string_view arguments) -> std::string {
         return existing_file_problem(root, arguments, "delete_file deletes an existing file");

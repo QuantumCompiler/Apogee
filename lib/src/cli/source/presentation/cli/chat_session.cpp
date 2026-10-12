@@ -86,6 +86,32 @@ std::string trim(std::string_view text) {
     return std::string{text};
 }
 
+/// `words` as a list: `a, b and c` with `between` and `last` the joins.
+std::string join_words(const std::vector<std::string>& words, std::string_view between,
+                       std::string_view last) {
+    std::string joined;
+    for (std::size_t i = 0; i < words.size(); ++i) {
+        if (i > 0) {
+            joined += i + 1 == words.size() ? last : between;
+        }
+        joined += words.at(i);
+    }
+    return joined;
+}
+
+/// `/effort`'s line (39a): the level, or `auto` with the budget in force,
+/// and whether thinking is on -- a level spends nothing with it off.
+std::string effort_line(const harness::Thinking& thinking) {
+    std::string line = "effort: " + (thinking.effort.has_value()
+                                         ? std::string{harness::to_string(*thinking.effort)}
+                                         : std::string{"auto"});
+    line += " (thinking " + std::string{harness::to_string(thinking.mode)};
+    if (!thinking.effort.has_value() && thinking.budget.has_value()) {
+        line += ", at most " + std::to_string(*thinking.budget) + " tokens";
+    }
+    return line + ")";
+}
+
 }  // namespace
 
 std::optional<SlashCommand> parse_slash(std::string_view line) {
@@ -390,10 +416,19 @@ void bind_session_flags(CLI::App& command, const std::shared_ptr<SessionFlags>& 
         ->expected(1)
         ->allow_extra_args(false)
         ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
+    cmd->add_option("--permission-mode", flags->permission_mode,
+                    "How much runs without asking: manual, accept-edits, plan, dont-ask or bypass")
+        ->check(CLI::IsMember(permission_mode_words()));
+    cmd->add_flag("--allow-bypass", flags->allow_bypass,
+                  "Let /permission-mode and Shift+Tab choose bypass, where nothing asks");
     flags->think_budget_option =
         cmd->add_option("--think-budget", flags->think_budget,
                         "The most tokens a reasoning model may think for before it answers")
             ->check(CLI::Range(std::int64_t{0}, harness::kMaxThinkingBudget));
+    cmd->add_option("--effort", flags->effort,
+                    "How hard a reasoning model thinks: low, medium, high, xhigh or max")
+        ->check(CLI::IsMember(effort_words()))
+        ->excludes(flags->think_budget_option);
     cmd->add_flag("--tools", flags->tools, "Let the model call tools");
     cmd->add_flag("--search", flags->search, "Enable the provider's server-side web search");
     cmd->add_flag("--no-color", flags->no_color, "Disable ANSI colour output");
@@ -768,8 +803,15 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     if (!flags->think.empty()) {
         session.params.thinking = harness::thinking_mode_from_string(flags->think);
     }
+    // A level and a budget are one control (39a): the one given at launch
+    // replaces whichever the resumed chat held.
     if (flags->think_budget_option->count() > 0) {
         session.params.thinking_budget = flags->think_budget;
+        session.params.effort.reset();
+    }
+    if (!flags->effort.empty()) {
+        session.params.effort = harness::effort_from_string(flags->effort);
+        session.params.thinking_budget.reset();
     }
     // A system prompt enters history and the session file as typed, so as
     // text whatever bytes the shell handed in.
@@ -961,11 +1003,21 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // The gate: config levels, then what the user answers for this
     // session. The prompt half is chosen per surface below.
     const auto approvals = std::make_shared<SessionApprovals>();
+    // The mode the session starts in (39b); bypass only when allowed at
+    // launch, as Claude Code allows it.
+    approvals->bypass_allowed = flags->allow_bypass || flags->permission_mode == "bypass";
+    if (const std::optional<PermissionMode> start =
+            permission_mode_from_string(flags->permission_mode);
+        start.has_value()) {
+        approvals->mode = *start;
+    }
     const agent::PermissionChecker permission = make_permission_checker(config, approvals);
     // The session's answers, given at launch (26o): exactly the `session`
     // answer, given before the prompt would ask.
     const std::vector<std::string> gated =
         flags->tools ? gated_tools(registry) : std::vector<std::string>{};
+    const std::vector<std::string> edits =
+        flags->tools ? edit_tools(registry) : std::vector<std::string>{};
     if (const PermissionPresets presets{
             .allow = flags->allow, .deny = flags->deny, .allow_hosts = flags->allow_hosts};
         !presets.empty()) {
@@ -1249,9 +1301,11 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             const ChatTurnResult outcome = run_chat_turn(
                 harness, session, message.text, tools_on() ? offered : nullptr, selection.get(),
                 member_calls.get(), driver_ask,
-                ToolGate{permission, flags->tools ? make_driver_confirm_fn(machine_reporter, driver,
-                                                                           config_path, approvals)
-                                                  : agent::ConfirmFn{}},
+                ToolGate{permission,
+                         flags->tools ? make_driver_confirm_fn(machine_reporter, driver,
+                                                               config_path, approvals)
+                                      : agent::ConfirmFn{},
+                         approvals},
                 machine_reporter, machine_notice, rag_settings, review_note, &attached, &recall,
                 got->turn);
             if (outcome.cancelled) {
@@ -1341,6 +1395,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     ChatCompletionSources completion = chat_completion_sources(config, working_directory);
     completion.attachment_names = [&attached] { return attached.names(); };
     completion.gated_tools = [&gated] { return gated; };
+    completion.bypass_allowed = approvals->bypass_allowed;
     completion.session_permissions = [approvals] {
         std::vector<std::string> names;
         for (const auto* set : {&approvals->tools, &approvals->denied_tools, &approvals->hosts,
@@ -1362,6 +1417,15 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     };
     reader_options.live = true;
     reader_options.color = style.color_enabled();
+    // Shift+Tab moves the permission mode on, as Claude Code's does (39b),
+    // and the prompt carries the mode's words. Both read the shared
+    // approvals alone, so the shell may call them from its own thread.
+    reader_options.on_shift_tab = [approvals] {
+        approvals->mode = next_permission_mode(approvals->mode.load(), approvals->bypass_allowed);
+    };
+    reader_options.prompt_tag = [approvals, style] {
+        return permission_mode_label(approvals->mode.load(), style);
+    };
     const std::unique_ptr<LineReader> reader = out.line_reader(std::move(reader_options));
 
     // --- capture: this conversation as one knowledge record --------------
@@ -1558,10 +1622,44 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     break;
                 case ChatVerb::Permissions:
                     for (const std::string& line :
-                         describe_permissions(config, *approvals, gated)) {
+                         describe_permissions(config, *approvals, gated, edits)) {
                         out.print_line("  " + line);
                     }
                     break;
+                case ChatVerb::PermissionMode: {
+                    // How much runs without asking (39b): the mode is read by
+                    // the gate at each call, so it holds from the next one.
+                    if (!argument.empty()) {
+                        const std::optional<PermissionMode> chosen =
+                            permission_mode_from_string(argument);
+                        if (!chosen.has_value()) {
+                            out.print_line(style.tag(ansi::Role::Error) +
+                                           " not a permission mode: '" + argument +
+                                           "' (manual, accept-edits, plan, dont-ask or bypass)");
+                            break;
+                        }
+                        if (*chosen == PermissionMode::Bypass && !approvals->bypass_allowed) {
+                            out.print_line(style.tag(ansi::Role::Error) +
+                                           " bypass is chosen only in a session started with "
+                                           "--allow-bypass (or --permission-mode bypass)");
+                            break;
+                        }
+                        approvals->mode = *chosen;
+                    }
+                    const PermissionMode now = approvals->mode.load();
+                    out.print_line(
+                        style.tag(ansi::Role::Permission) +
+                        " permission mode: " + std::string{to_string(now)} + " -- " +
+                        std::string{permission_mode_description(now)} +
+                        (argument.empty()
+                             ? std::string{approvals->bypass_allowed
+                                               ? " (manual, accept-edits, plan, dont-ask or "
+                                                 "bypass; Shift+Tab cycles)"
+                                               : " (manual, accept-edits, plan or dont-ask; "
+                                                 "Shift+Tab cycles)"}
+                             : std::string{}));
+                    break;
+                }
                 case ChatVerb::Allow:
                 case ChatVerb::Deny:
                 case ChatVerb::Revoke: {
@@ -1845,12 +1943,15 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     if (argument.empty()) {
                         const harness::Thinking thinking = resolve_thinking(
                             session.params.thinking, session.params.thinking_budget,
-                            harness.config(), session.backend);
+                            harness.config(), session.backend, session.params.effort);
                         out.print_line(
                             style.tag(ansi::Role::Apogee) +
                             " thinking: " + std::string{harness::to_string(thinking.mode)} +
                             (thinking.budget.has_value()
                                  ? ", at most " + std::to_string(*thinking.budget) + " tokens"
+                                 : std::string{}) +
+                            (thinking.effort.has_value()
+                                 ? ", effort " + std::string{harness::to_string(*thinking.effort)}
                                  : std::string{}));
                     } else if (const std::optional<harness::ThinkingMode> thinking =
                                    harness::thinking_mode_from_string(argument);
@@ -1861,6 +1962,39 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                                        argument + "' (on, off or auto)");
                     }
                     break;
+                case ChatVerb::Effort: {
+                    // How hard the model thinks (39a): a level stands in for
+                    // the session's budget, and asking for one turns thinking
+                    // on when it was off -- a level with thinking off would
+                    // do nothing.
+                    const auto resolved = [&]() {
+                        return resolve_thinking(session.params.thinking,
+                                                session.params.thinking_budget, harness.config(),
+                                                session.backend, session.params.effort);
+                    };
+                    if (argument == "auto") {
+                        session.params.effort.reset();
+                    } else if (const std::optional<harness::Effort> effort =
+                                   harness::effort_from_string(argument);
+                               effort.has_value()) {
+                        session.params.effort = effort;
+                        session.params.thinking_budget.reset();
+                        if (resolved().off()) {
+                            session.params.thinking = harness::ThinkingMode::On;
+                        }
+                    } else if (!argument.empty()) {
+                        out.print_line(style.tag(ansi::Role::Error) + " not an effort level: '" +
+                                       argument + "' (" + join_words(effort_words(), ", ", " or ") +
+                                       ", or auto)");
+                        break;
+                    }
+                    out.print_line(
+                        style.tag(ansi::Role::Apogee) + " " + effort_line(resolved()) +
+                        (argument.empty()
+                             ? " -- " + join_words(effort_words(), ", ", ", ") + ", or auto"
+                             : std::string{}));
+                    break;
+                }
                 case ChatVerb::MaxTokens:
                     try {
                         session.params.max_tokens = std::stoll(argument);
@@ -2051,8 +2185,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             run_chat_turn(
                 harness, session, input, tools_on() ? offered : nullptr, selection.get(),
                 member_calls.get(), flags->tools ? out.ask_fn() : agentloop::AskFn{},
-                ToolGate{permission, flags->tools ? out.confirm_fn(config_path, approvals)
-                                                  : agent::ConfirmFn{}},
+                ToolGate{permission,
+                         flags->tools ? out.confirm_fn(config_path, approvals) : agent::ConfirmFn{},
+                         approvals},
                 out.reporter(),
                 [&out, &style](const std::string& message) {
                     // Above the thinking block when side calls have opened

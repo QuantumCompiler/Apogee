@@ -164,6 +164,11 @@ Opened 2026-10-04 (the user's call) with its first item; track **32** by the eve
 - [x] **The command runner** *(37h, shipped 2026-10-10 — [Milestone AH](MILESTONES.md#milestone-ah--the-full-screen-tui))* — the whole command language inside the shell: an exec line on every view (global, and scoped to the view's own command group) speaking the CLI's grammar — **119 leaf surfaces and 434 flags through one line, zero per-verb forms** (a second same-day spike's census; `execute`'s 36 flags the maximum) — completed by the binary's one completion core, executed as a captured child byte-identical to a script's run, streamed to the stage with its exit code, Ctrl-C killing the child alone; the interactive doors refuse by name toward the Session view, and `reset`/`uninstall`/`serve` refuse with their reasons (the user's call, answered the same day it was asked, 2026-10-10).
 - [x] **The views in categories** *(38, shipped 2026-10-10 — [Milestone AH](MILESTONES.md#milestone-ah--the-full-screen-tui))* — the shell's twenty views grouped into Modes, Studio, Knowledge, Training and Setup: the strip shows the shown view's category, its views numbered within it, and Ctrl-G opens a Go-to menu of every category and view.
 
+**Effort and permission modes — track 39** *(joined 2026-10-11, the user's call: Claude Code's thinking presets and permission levels, set mid-session in `apogee chat` and the shell, Tab completing both)*:
+
+- [x] **Session effort levels** *(39a, shipped 2026-10-11 — [Milestone AI](MILESTONES.md#milestone-ai--effort-and-permission-modes))* — `/effort low|medium|high|xhigh|max|auto` and `--effort`, Claude Code's five levels: the Claude Code CLI and Codex given their own effort flags, OpenAI and gpt-oss their native effort, every budget-driven backend the level's token budget from one table; `/think on|off|auto` kept as the switch.
+- [x] **Permission modes** *(39b, shipped 2026-10-11 — [Milestone AI](MILESTONES.md#milestone-ai--effort-and-permission-modes))* — manual, accept-edits, plan, dont-ask and bypass as one layer over the existing gate: `/permission-mode`, `--permission-mode` and `--allow-bypass`, Shift+Tab cycling manual → accept-edits → plan in both front ends with the mode shown, bypass only when allowed at launch, and a denial winning in every mode.
+
 ---
 
 ## Architecture

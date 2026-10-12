@@ -75,6 +75,8 @@ struct Options {
     /// function resolves to deny.
     agent::PermissionChecker permission;
     agent::ConfirmFn confirm;
+    /// Why the gate refused, said to the model with the refusal (39b).
+    agent::RefusalNote refusal;
 
     /// Injected into each outgoing request at `transient_at`, never appended to
     /// history. The seam RAG will ride; see splice_transient. The tools'

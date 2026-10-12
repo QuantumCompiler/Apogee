@@ -176,6 +176,9 @@ std::function<bool(const std::string&)> TuiOutput::confirm_large() {
 
 std::unique_ptr<LineReader> TuiOutput::line_reader(EditingLineReader::Options options) {
     view_.set_completion(std::move(options.suggest));
+    // Shift+Tab and the mode's row (39b): the session's own hooks, which read
+    // only its shared approvals, so the shell's thread may call them.
+    view_.set_mode_switch(std::move(options.on_shift_tab), std::move(options.prompt_tag));
     return std::make_unique<TuiLineReader>(view_);
 }
 

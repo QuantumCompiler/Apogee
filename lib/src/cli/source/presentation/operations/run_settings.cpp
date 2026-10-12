@@ -13,7 +13,8 @@ const harness::BackendConfig* entry_for(const harness::Config& config,
 
 harness::Thinking resolve_thinking(const std::optional<harness::ThinkingMode>& mode,
                                    const std::optional<std::int64_t>& budget,
-                                   const harness::Config& config, std::string_view backend_name) {
+                                   const harness::Config& config, std::string_view backend_name,
+                                   const std::optional<harness::Effort>& effort) {
     const harness::BackendConfig* entry = entry_for(config, backend_name);
     harness::Thinking thinking;
     if (mode.has_value()) {
@@ -23,10 +24,20 @@ harness::Thinking resolve_thinking(const std::optional<harness::ThinkingMode>& m
     }
     if (budget.has_value()) {
         thinking.budget = budget;
+    } else if (effort.has_value()) {
+        thinking.effort = effort;
     } else if (entry != nullptr) {
         thinking.budget = entry->thinking_budget;
     }
     return thinking;
+}
+
+std::vector<std::string> effort_words() {
+    std::vector<std::string> words;
+    for (const harness::Effort effort : harness::kEfforts) {
+        words.emplace_back(harness::to_string(effort));
+    }
+    return words;
 }
 
 std::optional<double> resolve_temperature(const std::optional<double>& flag_value,

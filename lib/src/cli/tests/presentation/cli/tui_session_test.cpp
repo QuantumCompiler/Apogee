@@ -328,6 +328,58 @@ TEST_CASE("/model moves the shell's conversation onto a roster model, its header
     CHECK(saved.front().model == "mock-pro");
 }
 
+TEST_CASE("/effort sets the shell's conversation's level, offered by chat's one completer",
+          "[cli][tui][session][effort]") {
+    // 39a: the shell's session takes /effort from the one table.
+    Conversation chat{nlohmann::json{{"turns", {{{"text", "thought {{thinking}}"}}}}}};
+    chat.open();
+    chat.until([&chat]() { return has(chat.frame(), "\n ›"); }, "the input");
+    for (const char c : std::string{"/effort x"}) {
+        (void)chat.shell.press(Key::character(std::string(1, c)));
+    }
+    chat.until([&chat]() { return has(chat.frame(), "xhigh"); }, "the levels offered");
+    CHECK(has(chat.frame(), "Think harder still"));
+    for (int i = 0; i < 9; ++i) {
+        (void)chat.shell.press(Key::named(Key::Name::Backspace));
+    }
+    chat.send("/effort high");
+    chat.until([&chat]() { return has(chat.frame(), "effort: high (thinking on)"); },
+               "the level said");
+    chat.send("hello");
+    chat.until([&chat]() { return has(chat.frame(), "thought on@high"); }, "the answer");
+    chat.finish();
+    CHECK(chat.failure.empty());
+    const std::vector<apogee::logger::Session> saved = apogee::logger::list_sessions();
+    REQUIRE(saved.size() == 1);
+    CHECK(saved.front().params.effort == apogee::harness::Effort::High);
+}
+
+TEST_CASE("Shift+Tab cycles the shell's conversation's permission mode, the row following",
+          "[cli][tui][session][modes]") {
+    // 39b: the session's own hooks behind the shell's key, and /permission-mode
+    // moving the same mode the row reads.
+    Conversation chat{nlohmann::json{{"turns", {{{"text", "fine"}}}}}};
+    chat.open();
+    // Reading: its line reader, and so its hooks, are in place.
+    chat.until([&chat]() { return chat.view.waiting_for_line(); }, "the session reading");
+    CHECK_FALSE(has(chat.frame(), "shift+tab to cycle"));
+    (void)chat.shell.press(Key::named(Key::Name::BackTab));
+    chat.until([&chat]() { return has(chat.frame(), "⏵⏵ accept edits on (shift+tab to cycle)"); },
+               "accept-edits shown");
+    (void)chat.shell.press(Key::named(Key::Name::BackTab));
+    chat.until([&chat]() { return has(chat.frame(), "⏸ plan mode on (shift+tab to cycle)"); },
+               "plan shown");
+    // No bypass without the allowance: plan cycles back to manual.
+    (void)chat.shell.press(Key::named(Key::Name::BackTab));
+    chat.until([&chat]() { return !has(chat.frame(), "shift+tab to cycle"); }, "manual again");
+    chat.send("/permission-mode dont-ask");
+    chat.until([&chat]() { return has(chat.frame(), "⏵⏵ don't ask on (shift+tab to cycle)"); },
+               "dont-ask shown");
+    CHECK(has(chat.frame(), "permission mode: dont-ask -- whatever would ask is refused"));
+    chat.finish();
+    CHECK(chat.failure.empty());
+}
+
 TEST_CASE("a session grant writes nothing and dies with the session", "[cli][tui][session]") {
     Conversation chat{kWriteThenAnswer};
     const std::string before = slurp(chat.home.config_path());

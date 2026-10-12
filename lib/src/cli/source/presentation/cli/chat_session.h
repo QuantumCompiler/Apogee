@@ -93,12 +93,19 @@ struct SessionFlags {
     std::int64_t max_tokens = 0;
     /// Whether the model thinks first, and for how long (26i).
     std::string think;
+    /// How hard it thinks, as a level (39a): `low` to `max`, never with
+    /// `--think-budget`.
+    std::string effort;
     /// Recall no earlier chats in this run (26l).
     bool no_recall = false;
     /// The session's answers, given at launch (26o).
     std::vector<std::string> allow;
     std::vector<std::string> deny;
     std::vector<std::string> allow_hosts;
+    /// The mode the session starts in (39b), and whether bypass may be
+    /// chosen in it.
+    std::string permission_mode;
+    bool allow_bypass = false;
     std::int64_t think_budget = 0;
     bool tools = false;
     bool search = false;

@@ -187,6 +187,22 @@ TEST_CASE("every destructive native tool is gated and every other one is not",
     CHECK(world.registry.find("write_note") != nullptr);
 }
 
+TEST_CASE("the file and note writers say they edit; the shell and everything else do not",
+          "[tools][gate][permission][modes]") {
+    // What a session's accept-edits mode runs without asking (39b).
+    World world{{says("")}};
+    const std::vector<std::string> edits{"write_file", "edit_file", "delete_file", "write_note",
+                                         "delete_note"};
+    for (const std::string& name : world.registry.names()) {
+        const apogee::agent::Tool* tool = world.registry.find(name);
+        const bool listed = std::find(edits.begin(), edits.end(), name) != edits.end();
+        INFO(name);
+        CHECK(tool->edits == listed);
+        CHECK((!tool->edits || tool->writes));  // an edit is always gated
+    }
+    CHECK_FALSE(world.registry.find("run_command")->edits);
+}
+
 TEST_CASE("edit_file asks through the gate where someone can answer and is refused where not",
           "[tools][gate][permission][edit]") {
     const auto script = [] {

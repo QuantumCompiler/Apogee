@@ -444,6 +444,20 @@ TEST_CASE("a turn's thinking becomes Anthropic's budget", "[backends][anthropic]
     CHECK(thinking_budget_for(Thinking{.budget = 256}, 0) == kMinThinkingBudget);
 }
 
+TEST_CASE("an effort level is spent as its budget on Anthropic's API",
+          "[backends][anthropic][thinking][effort]") {
+    using apogee::backends::anthropic::thinking_budget_for;
+    using apogee::harness::Effort;
+    using apogee::harness::Thinking;
+    // The level's budget over the backend's own; a budget chosen over both.
+    CHECK(thinking_budget_for(Thinking{.effort = Effort::Low}, 8192) == 1'024);
+    CHECK(thinking_budget_for(Thinking{.effort = Effort::Max}, 0) == 32'768);
+    CHECK(thinking_budget_for(Thinking{.budget = 2048, .effort = Effort::Max}, 0) == 2048);
+    CHECK(thinking_budget_for(
+              Thinking{.mode = apogee::harness::ThinkingMode::Off, .effort = Effort::High}, 0) ==
+          0);
+}
+
 TEST_CASE("thinking asked off sends no thinking, even on a backend configured to think",
           "[backends][anthropic][thinking]") {
     AnthropicProvider::Options options;
@@ -874,14 +888,12 @@ TEST_CASE("list_catalog pages through the vendor's models, ids verbatim",
     // headers; the roster is the vendor's answer, nothing invented.
     Fixture fixture = make_provider(
         {FakeTransport::Reply{
-             200,
-             R"({"data":[{"id":"claude-opus-5-5","display_name":"Claude Opus 5.5"},)"
-             R"({"id":"claude-sonnet-5-5","display_name":"Claude Sonnet 5.5"}],)"
-             R"("has_more":true,"last_id":"claude-sonnet-5-5"})"},
+             200, R"({"data":[{"id":"claude-opus-5-5","display_name":"Claude Opus 5.5"},)"
+                  R"({"id":"claude-sonnet-5-5","display_name":"Claude Sonnet 5.5"}],)"
+                  R"("has_more":true,"last_id":"claude-sonnet-5-5"})"},
          FakeTransport::Reply{
-             200,
-             R"({"data":[{"id":"claude-haiku-4-5","display_name":"Claude Haiku 4.5"}],)"
-             R"("has_more":false})"}});
+             200, R"({"data":[{"id":"claude-haiku-4-5","display_name":"Claude Haiku 4.5"}],)"
+                  R"("has_more":false})"}});
 
     const std::vector<apogee::harness::ModelInfo> models =
         fixture.provider->list_catalog(apogee::harness::CancellationToken{});

@@ -720,6 +720,8 @@ TEST_CASE("execute's /help, golden", "[execute][completer]") {
               "  /temperature <number>     Set the sampling temperature",
               "  /think [on|off|auto]      Show or set whether the model thinks first: on, off, "
               "or auto per question",
+              "  /effort [level|auto]      Show or set how hard the model thinks: low, medium, "
+              "high, xhigh or max; auto leaves it to the model",
               "  /max-tokens <number>      Cap each answer's length in tokens",
               "  /compact                  Summarise the conversation so far, to free context",
               "  /title <name>             Rename this chat",
@@ -743,6 +745,8 @@ TEST_CASE("execute's /help, golden", "[execute][completer]") {
               "asking",
               "  /revoke <tool|website>    Forget this chat's answer for a tool or website",
               "  /permissions              List each tool's answer and where it comes from",
+              "  /permission-mode [mode]   Show or set how much runs without asking: manual, "
+              "accept-edits, plan, dont-ask or bypass (Shift+Tab cycles)",
               "  /exit                     Save and leave",
               "  /quit                     Save and leave",
           });

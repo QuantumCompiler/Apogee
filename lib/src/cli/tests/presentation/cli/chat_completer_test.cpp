@@ -186,6 +186,14 @@ TEST_CASE("a command's own values follow it", "[chat][completer]") {
           std::vector<std::string>{"on", "off", "auto"});
     CHECK(texts(suggest_chat_input("/think o", project())) ==
           std::vector<std::string>{"on", "off"});
+    // The levels, lowest first, then auto, each described (39a).
+    CHECK(texts(suggest_chat_input("/ef", project())) == std::vector<std::string>{"/effort "});
+    CHECK(texts(suggest_chat_input("/effort ", project())) ==
+          std::vector<std::string>{"low", "medium", "high", "xhigh", "max", "auto"});
+    CHECK(texts(suggest_chat_input("/effort x", project())) == std::vector<std::string>{"xhigh"});
+    for (const auto& candidate : suggest_chat_input("/effort ", project()).candidates) {
+        CHECK_FALSE(candidate.description.empty());
+    }
     CHECK(texts(suggest_chat_input("/recall ", project())) ==
           std::vector<std::string>{"on", "off"});
     // The gated tools for /allow and /deny, the session's answers for /revoke
@@ -197,6 +205,17 @@ TEST_CASE("a command's own values follow it", "[chat][completer]") {
           std::vector<std::string>{"run_command", "write_file"});
     CHECK(texts(suggest_chat_input("/deny w", gated)) == std::vector<std::string>{"write_file"});
     CHECK(texts(suggest_chat_input("/revoke ", gated)) == std::vector<std::string>{"write_file"});
+    // The modes, described; bypass only in a session that may choose it (39b).
+    CHECK(texts(suggest_chat_input("/permission-mode ", project())) ==
+          std::vector<std::string>{"manual", "accept-edits", "plan", "dont-ask"});
+    apogee::commands::ChatCompletionSources bypassing = project();
+    bypassing.bypass_allowed = true;
+    CHECK(texts(suggest_chat_input("/permission-mode ", bypassing)) ==
+          std::vector<std::string>{"manual", "accept-edits", "plan", "dont-ask", "bypass"});
+    CHECK(texts(suggest_chat_input("/permission-mode a", project())) ==
+          std::vector<std::string>{"accept-edits"});
+    CHECK(texts(suggest_chat_input("/permission", project())) ==
+          std::vector<std::string>{"/permissions", "/permission-mode "});
 
     std::vector<std::string> statuses;
     for (const std::string_view status : apogee::knowledge::valid_statuses()) {

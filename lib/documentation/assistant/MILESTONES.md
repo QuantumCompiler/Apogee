@@ -6978,3 +6978,98 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,154 
 - [x] **Tests**: `session_view_test`'s row-for-row golden is now the whole box, rule to rule, around `StreamRenderer`'s own rows; the layout cases hold the person's box ending at the right margin with its rules above and below, a long line's box at one column top to bottom and within its share, and the answer's edges in one column on every row; the cases that found a sent line by `You:` find it by the box's edge.
 
 The permission block's blank row is unchanged. The full suite through `lib/scripts/cicd.sh --test` passed, 3,155 of 3,155 with one test skipped: the PDF case that needs `pdftotext`, which this machine does not have. The shell's PTY check (`cli.tui_shell`) passed against the fast build too.
+
+## Milestone AI — Effort and permission modes
+
+**Goal.** Claude Code gives a session two controls the person reaches for constantly: how hard the model thinks (five effort levels) and how much it may do without asking (a permission mode, cycled with Shift+Tab). Apogee had the pieces of both -- `/think on|off|auto` with a raw token budget, and per-tool answers over one permission gate -- but not the controls. Track 39 (the user's call, 2026-10-11) gives `apogee chat`, `apogee execute` and the full-screen shell Claude Code's two, set mid-session in either front end and Tab-completed in both.
+
+### 2026-10-11 — `session-effort-levels` (backlog item 39a): `/effort` and `--effort`
+
+**What was built**
+
+- [x] **The level in the IR** (`contracts/types.h/.cpp`): `Effort` -- `low`, `medium`, `high`, `xhigh`, `max`, Claude Code's five -- with its words, and `Thinking::effort`, held instead of a budget. `effort_budget` is the one table a budget-driven backend spends a level as: 1,024 · 4,096 · 16,384 · 24,576 · 32,768 tokens, from Anthropic's minimum to Gemini Pro's ceiling, with OpenAI's existing budget thresholds separating the first three. `Thinking::tokens()` is the budget to spend either way.
+- [x] **Each backend spends it its own way**:
+  - the Claude Code CLI gets its own `--effort <level>`, all five by name; it reads the flag at launch alone, so a changed level ends the child and resumes the same session with the new flag, telling it only what is new;
+  - Codex gets `-c model_reasoning_effort="<word>"` on every turn (`exec` and `exec resume` both take it), with `max` running as `xhigh`;
+  - OpenAI's API and gpt-oss's template get `low`, `medium` or `high`, with `xhigh` and `max` running as `high` -- the highest each takes at or below, Claude Code's own rule;
+  - Anthropic's API, Gemini (held to its model's ceiling: Flash 24,576, Pro 32,768) and llama.cpp's budget sampler get the level's budget;
+  - MLX says its budget is not applied, as it does for a budget.
+- [x] **One control at a time**: `resolve_thinking` takes the session's level, which stands in for a budget -- the config's `thinking_budget` is not taken under it. `/effort high` clears a session budget; `--effort` with `--think-budget` is a usage error from the parser, naming both.
+- [x] **`/effort [low|medium|high|xhigh|max|auto]`**: one row in chat's command table, so the terminal REPL, execute and the shell's session all take it.
+  - Alone, it says `effort: high (thinking on) -- low, medium, high, xhigh, max, or auto`.
+  - A level asked for turns thinking on when it was off, since a level with thinking off would do nothing.
+  - `auto` hands the choice back to the model or the backend's budget.
+  - An unknown word is refused, naming the five.
+  - `/think` alone names the level.
+- [x] **`--effort`** on `chat`, `execute` and `complete`, completed by `__complete` from its `CLI::IsMember`; `/effort ` completes the levels lowest first, each described, then `auto`, in both front ends.
+- [x] **Saved with the chat** as an additive `effort` beside `think` and `think_budget`; a chat saved before it resumes unchanged.
+- [x] **Tests**:
+  - contracts: the words round-trip, the table is pinned, and `tokens()` holds;
+  - each backend's mapping (OpenAI, Anthropic, Gemini's ceilings, Codex's override on both forms, the Claude CLI's flag, and its restart on a changed level with only the new message sent);
+  - the mock's `{{thinking}}` naming the level after `@`;
+  - the completer's values;
+  - the REPL: `/effort` alone, set, refused and handed back, each request's level read off the mock; and `--effort` saved, resumed, refused beside a budget, and on `complete`;
+  - the shell's session, where the levels are offered, `/effort high` is said, a turn carries it, and it is saved;
+  - chat's and execute's goldens, which gain the `/effort` row, the flag, and `__complete chat --effort`'s five.
+
+**Decisions** (2026-10-11, recorded in the item before it shipped)
+
+- The user's calls: `/effort` with Claude Code's level names and `--effort`; `/think on|off|auto` kept as the switch; each backend spending the level its own way.
+- The budget table and the native spellings above. Gemini's budget is now held to each model's ceiling for any budget, which also stops an over-large `--think-budget` from being refused by the API.
+- The banner is unchanged, and there is no config default (a follow-up). HTTP is named skipped: a request carries no thinking override today, and a `reasoning_effort` field is a follow-up. Machine mode takes `--effort` at launch.
+- On llama.cpp, the level reaches both gpt-oss's template switch and the budget sampler where the format names its reasoning. Only a budget chosen outright is said to be unapplied on a format that names none, since a level has already reached the template's own switch where it has one.
+
+**Notes.** Out of scope as specced: Claude Code's slider and `ultrathink` keyword, and the Anthropic API's own effort parameter, which needs a live check against the API before its budget path is replaced.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) ran 3,164 tests, with one skipped for want of `pdftotext`. 3,162 passed. The two failures had one cause: the new launch-flag test's name began with `--effort`, which ctest hands Catch2 as an option, and which `cli.test_names` exists to refuse. The test was renamed, and both pass under ctest. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+### 2026-10-11 — `permission-modes` (backlog item 39b): five modes over the one gate, and Shift+Tab
+
+**What was built**
+
+- [x] **The modes** (`cli/permissions.h/.cpp`), Claude Code's, one layer over the existing gate:
+  - `manual`: the gate as configured;
+  - `accept-edits`: the file and note edits run unasked;
+  - `plan`: every tool that writes is refused, over any allow, and websites still ask;
+  - `dont-ask`: whatever would ask is refused;
+  - `bypass`: nothing asks.
+
+  `SessionApprovals::mode` is atomic, so the shell's Shift+Tab can move it from its own thread while a turn runs; the checker reads it at each call, **after every deny has spoken**, so a config `deny` and a session `/deny` refuse in all five, as Claude Code's deny rules do. Bypass is reachable only when the session was started with `--allow-bypass` or `--permission-mode bypass`.
+- [x] **A tool says it edits** (`agent::Tool::edits`, carried to the checker on `GateRequest::edits`): `write_file`, `edit_file`, `delete_file`, `write_note` and `delete_note`, and no other built-in. `run_command`, MCP tools that write and websites keep asking in accept-edits.
+- [x] **A refusal says why** (`DispatchContext::refusal`, passed by the loop): in plan mode the model reads `'write_file' was not run: plan mode is on, and nothing that changes files or runs commands runs until the person leaves it; propose the change instead.`, and in dont-ask that the session refuses what it would ask. Plan mode's note -- research the request and propose a plan, change nothing -- rides each turn's system prompt in the transient prefix, as the branch-review note does, so leaving plan mode leaves no trace in the transcript.
+- [x] **`/permission-mode [manual|accept-edits|plan|dont-ask|bypass]`**: one row in chat's table.
+  - Alone, it says the mode, what it does and the choices: bypass is listed only when allowed, and `Shift+Tab cycles`.
+  - An unknown word is refused, and so is bypass without the allowance, naming `--allow-bypass`.
+  - `/permissions` leads with the mode outside manual and words each answer it changes (`write_file   deny   (plan mode)`).
+  - Tab completes the modes, described, bypass only where it can be chosen.
+- [x] **`--permission-mode` and `--allow-bypass`** on chat and execute, machine mode included -- the mode a driver chooses at launch (`dont-ask` for one that must never be asked), said in the machine-mode reference. `__complete` offers the five.
+- [x] **Shift+Tab in both front ends**, cycling manual → accept-edits → plan → (bypass, when allowed) → manual, dont-ask leaving to manual, through two hooks the session hands its line reader. The hooks read only the shared approvals, so the shell can call them safely.
+  - **The terminal** (`views/line_reader`): replxx's Shift+Tab redraws the prompt in place with the mode's words ahead of it -- `⏵⏵ accept edits on · You: ` -- the line typed so far kept. Manual's prompt is `You: ` as before.
+  - **The shell** (`tui/session_view`): the conversation takes Shift+Tab whenever a session's hooks are set, never the shell's previous view there, and draws the mode's row under the input in Claude Code's status words (`⏸ plan mode on (shift+tab to cycle)`), read as each frame is drawn. There is no row in manual.
+- [x] **Tests**:
+  - the checker: every mode against an edit, a config-allowed edit, a config-denied command, a session-denied edit, an MCP writer, a website and a denied website;
+  - the cycle and the words;
+  - plan's note and the modes' refusals;
+  - `/permissions` under each mode;
+  - the gate hearing `edits` and saying a surface's reason;
+  - exactly the five writers declaring edits;
+  - the completer, with and without bypass;
+  - the REPL: accept-edits writing unasked on a pipe, plan refusing over an allow with the refusal and note read off the mock and the note never saved, `/permission-mode` shown, set and refused, and bypass with the allowance;
+  - machine mode taking accept-edits and dont-ask with no `question`;
+  - the session view's Shift+Tab and row, and the picker leaving the key to the shell;
+  - the shell's conversation cycled end to end, `/permission-mode` moving the same row;
+  - the terminal under a PTY (`cli.chat_line_editing`), with the prompt redrawn through accept-edits and plan and bare again, and the line typed across the switches sent whole;
+  - chat's and execute's goldens, gaining the row, the two flags and `__complete chat --permission-mode`'s five. Chat's `/help` column widened by one space for the new longest command.
+
+**Decisions** (2026-10-11, recorded in the item before it shipped)
+
+- The user's calls: five modes with auto left out; bypass only when allowed at launch; a deny winning in every mode; Shift+Tab cycling in both front ends with the mode shown under the input.
+- Manual draws no row and keeps the bare prompt, so a session that never changes mode looks exactly as before.
+- Plan mode keeps the tools offered and refuses at the gate, rather than dropping them as the read-only agent policy does: a local model's prompt and its cache stay the same across a switch.
+- Accept-edits approves only the edit tools, not Claude Code's in-scope shell commands.
+- The mode is not saved with the chat, as session answers are not; there is no config default (a follow-up); and there is no plan-approval prompt -- plan mode is left by switching.
+- Named skipped (ADR 0002): `apogee serve`, whose gate has no one to ask and already refuses what would ask, and `task run` and `analyze`, which keep their declared policies.
+
+**Notes.** A Shift+Tab pressed in the moment before a newly opened conversation's line reader exists still reaches the shell's previous view; the hooks are in place from the first time the session reads a line.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3,176 tests ran with none failing, one skipped for want of `pdftotext`. That includes `cli.chat_line_editing` (the terminal's Shift+Tab under a PTY), `cli.tui_shell` and `cli.test_names`. `clang-format` is clean on every touched file, and `make lint` was not run.

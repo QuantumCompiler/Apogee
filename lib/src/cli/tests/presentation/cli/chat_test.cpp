@@ -947,6 +947,53 @@ TEST_CASE("what --think asks for reaches the model, and the backend's default ot
     CHECK(complete.out.find("on:64") != std::string::npos);
 }
 
+TEST_CASE("/effort shows and sets the chat's level, which reaches the model and is saved",
+          "[chat][cli][thinking][effort]") {
+    // The mock's `{{thinking}}` says what each request carried (39a).
+    HelperChat chat{texts({"{{thinking}}", "{{thinking}}", "{{thinking}}"}),
+                    {"Title"},
+                    "    thinking: off\n    thinking_budget: 128\n"};
+    REQUIRE(chat.run({"chat"},
+                     "/effort\nfirst\n/effort high\nsecond\n/effort bogus\n/think\n"
+                     "/effort auto\nthird\n") == 0);
+    const std::string said = chat.out + chat.err;
+    INFO(said);
+    // Bare: no level, the backend's budget, and the choices.
+    CHECK(said.find("effort: auto (thinking off, at most 128 tokens) -- low, medium, high, "
+                    "xhigh, max, or auto") != std::string::npos);
+    // A level asked for turns thinking on, and stands in for the budget.
+    CHECK(said.find("effort: high (thinking on)") != std::string::npos);
+    CHECK(said.find("not an effort level: 'bogus' (low, medium, high, xhigh or max, or auto)") !=
+          std::string::npos);
+    CHECK(said.find("thinking: on, effort high") != std::string::npos);
+    CHECK(said.find("effort: auto (thinking on, at most 128 tokens)") != std::string::npos);
+    CHECK(replies(HelperChat::only_session()) ==
+          std::vector<std::string>{"off:128", "on@high", "on:128"});
+    CHECK_FALSE(HelperChat::only_session().params.effort.has_value());
+}
+
+TEST_CASE(
+    "the --effort flag sets the level at launch, is saved and resumed, and never joins a budget",
+    "[chat][cli][thinking][effort]") {
+    HelperChat chat{texts({"{{thinking}}", "{{thinking}}"}), {"Title"}};
+    REQUIRE(chat.run({"chat", "--effort", "max"}, "first\n") == 0);
+    const apogee::logger::Session saved = HelperChat::only_session();
+    CHECK(saved.params.effort == apogee::harness::Effort::Max);
+    CHECK_FALSE(saved.params.thinking_budget.has_value());
+    // Resumed, the level holds.
+    REQUIRE(chat.run({"chat", "--resume", saved.chat_id}, "second\n") == 0);
+    CHECK(replies(HelperChat::only_session()) == std::vector<std::string>{"on@max", "on@max"});
+    // A level and a budget are one control: both at once is a usage error.
+    CHECK(chat.run({"chat", "--effort", "low", "--think-budget", "64"}, "") != 0);
+    CHECK(chat.err.find("--effort") != std::string::npos);
+    CHECK(chat.run({"chat", "--effort", "extreme"}, "") != 0);
+
+    HelperChat complete{texts({"{{thinking}}"}), {"unused"}};
+    REQUIRE(complete.run({"complete", "--effort", "medium", "hello"}) == 0);
+    CHECK(complete.out.find("on@medium") != std::string::npos);
+    CHECK(complete.run({"complete", "--effort", "low", "--think-budget", "64", "hello"}) != 0);
+}
+
 TEST_CASE("complete takes the same thinking flags, and refuses a bad one",
           "[chat][cli][thinking][helpers]") {
     HelperChat chat{texts({"391"}), {"yes"}};
@@ -1330,6 +1377,96 @@ TEST_CASE("chat --allow writes without asking, and a fresh chat asks again",
     // Grants die with the process: on a pipe nobody can be asked, so denied.
     REQUIRE(chat.run({"chat", "--tools"}, "write it\n") == 0);
     CHECK_FALSE(std::filesystem::exists(written));
+}
+
+TEST_CASE("a permission mode at launch: accept-edits writes unasked, plan refuses and says so",
+          "[chat][cli][permissions][modes]") {
+    // 39b, on a pipe where nobody can be asked: manual is denied as ever.
+    HelperChat chat{writes_a_file(), {"Title"}};
+    sandboxed(chat);
+    const std::filesystem::path written = chat.home.path() / "work" / "out.txt";
+    REQUIRE(chat.run({"chat", "--tools", "--permission-mode", "accept-edits"}, "write it\n") == 0);
+    CHECK(std::filesystem::exists(written));
+    std::filesystem::remove(written);
+
+    // Plan: refused at the gate over an allow, the refusal naming the mode,
+    // and the turn's system prompt carrying the note.
+    HelperChat plan{
+        nlohmann::json::array({{{"tool_calls",
+                                 {{{"name", "write_file"},
+                                   {"arguments", {{"path", "out.txt"}, {"content", "hello"}}}}}}},
+                               {{"text", "{{last_tool_result}} || {{system}}"}}}),
+        {"Title"}};
+    sandboxed(plan);
+    REQUIRE(plan.run({"chat", "--tools", "--allow", "write_file", "--permission-mode", "plan"},
+                     "write it\n") == 0);
+    CHECK_FALSE(std::filesystem::exists(plan.home.path() / "work" / "out.txt"));
+    const std::vector<std::string> said = replies(HelperChat::only_session());
+    REQUIRE_FALSE(said.empty());
+    CHECK(said.back().find("'write_file' was not run: plan mode is on") != std::string::npos);
+    CHECK(said.back().find("Plan mode is on. Research the request") != std::string::npos);
+    // The note rode the turn alone: the saved chat holds no system line of it
+    // (the answer above only echoes what the request carried).
+    for (const ChatMessage& message : HelperChat::only_session().messages) {
+        if (message.role == apogee::harness::Role::System) {
+            CHECK(message.content.plain_text().find("Plan mode is on.") == std::string::npos);
+        }
+    }
+    CHECK(chat.run({"chat", "--permission-mode", "sideways"}, "") != 0);
+}
+
+TEST_CASE("/permission-mode shows and sets the mode, bypass only when allowed at launch",
+          "[chat][cli][permissions][modes]") {
+    HelperChat chat{writes_a_file(), {"Title"}};
+    sandboxed(chat);
+    const std::filesystem::path written = chat.home.path() / "work" / "out.txt";
+    REQUIRE(chat.run({"chat", "--tools"},
+                     "/permission-mode\n/permission-mode plan\n/permissions\n"
+                     "/permission-mode bypass\n/permission-mode sideways\n"
+                     "/permission-mode accept-edits\nwrite it\n") == 0);
+    const std::string said = chat.out + chat.err;
+    INFO(said);
+    CHECK(said.find("permission mode: manual -- each gated tool asks, as configured (manual, "
+                    "accept-edits, plan or dont-ask; Shift+Tab cycles)") != std::string::npos);
+    CHECK(said.find("permission mode: plan -- nothing that writes runs; the model plans") !=
+          std::string::npos);
+    CHECK(said.find("mode: plan -- nothing that writes runs; the model plans\n") !=
+          std::string::npos);
+    CHECK(said.find("write_file   deny   (plan mode)") != std::string::npos);
+    CHECK(said.find("bypass is chosen only in a session started with --allow-bypass") !=
+          std::string::npos);
+    CHECK(said.find("not a permission mode: 'sideways'") != std::string::npos);
+    // Accept-edits holds from the next call: the write ran unasked.
+    CHECK(std::filesystem::exists(written));
+    std::filesystem::remove(written);
+
+    // Allowed at launch, bypass is a mode like any other.
+    REQUIRE(chat.run({"chat", "--tools", "--allow-bypass"},
+                     "/permission-mode bypass\nwrite it\n") == 0);
+    CHECK((chat.out + chat.err)
+              .find("permission mode: bypass -- nothing asks; a deny still "
+                    "refuses") != std::string::npos);
+    CHECK(std::filesystem::exists(written));
+}
+
+TEST_CASE("machine mode takes the permission mode at launch, asking nothing it covers",
+          "[chat][cli][permissions][modes][machine]") {
+    HelperChat chat{writes_a_file(), {"Title"}};
+    sandboxed(chat);
+    const std::string input = std::string{R"({"type":"user","text":"write it"})"} + "\n";
+    REQUIRE(chat.run({"chat", "--tools", "--input-format", "stream-json", "--output-format",
+                      "stream-json", "--permission-mode", "accept-edits"},
+                     input) == 0);
+    CHECK(chat.out.find(R"("type":"question")") == std::string::npos);
+    CHECK(std::filesystem::exists(chat.home.path() / "work" / "out.txt"));
+    std::filesystem::remove(chat.home.path() / "work" / "out.txt");
+    // Dont-ask: what would have been a question is refused unasked.
+    REQUIRE(chat.run({"chat", "--tools", "--input-format", "stream-json", "--output-format",
+                      "stream-json", "--permission-mode", "dont-ask"},
+                     input) == 0);
+    CHECK(chat.out.find(R"("type":"question")") == std::string::npos);
+    CHECK(chat.out.find("dont-ask") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(chat.home.path() / "work" / "out.txt"));
 }
 
 TEST_CASE("the slash verbs answer for the chat, and /permissions says from where",

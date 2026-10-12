@@ -49,6 +49,9 @@ struct GateRequest {
     /// are per host rather than per tool: allowing one website is not
     /// allowing the next.
     bool outbound = false;
+    /// The tool edits a file or a note (`Tool::edits`): what a session's
+    /// accept-edits mode lets run without asking (39b).
+    bool edits = false;
 };
 
 /// Consulted before a gated tool runs -- one that `writes`, or is `outbound`.
@@ -62,6 +65,11 @@ using PermissionChecker = std::function<Permission(const GateRequest& request)>;
 /// Asks someone to confirm a gated operation. Non-null only on a surface with
 /// someone to ask.
 using ConfirmFn = std::function<bool(const GateRequest& request)>;
+
+/// Why a gated call was refused, when the surface knows a reason the person
+/// set -- a session's plan or dont-ask mode (39b) -- in a sentence the model
+/// reads; empty for the plain refusal.
+using RefusalNote = std::function<std::string(const GateRequest& request)>;
 
 /// Puts one more target through the gate while a tool runs: `fetch_url`'s
 /// redirect to a new host. The same checker and the same prompt the call's
@@ -86,6 +94,13 @@ struct Tool {
     /// too, per target host, while a `read-only` agent policy (which drops
     /// `writes` tools) still keeps it (2026-09-25).
     bool outbound = false;
+
+    /// Whether this tool edits a file or a note -- `write_file`, `edit_file`,
+    /// `delete_file`, `write_note`, `delete_note` (39b). Implies `writes`. A
+    /// session in accept-edits mode runs these without asking; a command, an
+    /// MCP tool and a website still ask. The tool says so itself, so the gate
+    /// never keeps a list of names.
+    bool edits = false;
 
     /// The implementation. Receives the raw JSON argument string.
     ///
@@ -183,6 +198,8 @@ private:
 struct DispatchContext {
     PermissionChecker permission;
     ConfirmFn confirm;
+    /// Why a refusal happened, said to the model with it. Optional.
+    RefusalNote refusal;
     /// Reports progress. Optional.
     std::function<void(std::string_view)> on_status;
 };
