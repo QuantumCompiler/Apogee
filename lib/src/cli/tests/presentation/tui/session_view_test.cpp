@@ -395,25 +395,147 @@ TEST_CASE("closing the view ends a waiting read and a waiting prompt", "[tui][se
     CHECK_THROWS_AS(stage.view.ask({.lines = {"Allow?"}}), std::runtime_error);
 }
 
-TEST_CASE("completion offers the session's completer and Tab takes the first", "[tui][session]") {
-    Stage stage;
-    stage.view.begin_session();
-    stage.view.set_completion([](std::string_view before) {
+namespace {
+
+/// A completer over a fixed table, as chat's offers commands: a name taking
+/// an argument ends in a space.
+apogee::commands::Suggester table_completer(std::vector<apogee::commands::Suggestion> table) {
+    return [table = std::move(table)](std::string_view before) {
         apogee::commands::Suggestions offered;
-        if (before.starts_with("/mo")) {
-            offered.from = 0;
-            offered.candidates = {{.text = "/model", .label = "/model", .description = "switch"},
-                                  {.text = "/models", .label = "/models", .description = "list"}};
+        if (!before.starts_with('/') || before.find(' ') != std::string_view::npos) {
+            return offered;
+        }
+        for (const apogee::commands::Suggestion& row : table) {
+            if (row.label.starts_with(before)) {
+                offered.candidates.push_back(row);
+            }
         }
         return offered;
-    });
+    };
+}
+
+const std::vector<apogee::commands::Suggestion> kMenuTable{
+    {.text = "/model ", .label = "/model", .description = "switch"},
+    {.text = "/models", .label = "/models", .description = "list"},
+    {.text = "/help", .label = "/help", .description = "commands"}};
+
+}  // namespace
+
+TEST_CASE("the menu marks its choice, which the arrows move and Tab takes", "[tui][session]") {
+    Stage stage;
+    stage.view.begin_session();
+    stage.view.set_completion(table_completer(kMenuTable));
     (void)stage.frame();
     stage.type("/mo");
     const std::string offered = stage.frame();
-    CHECK(has(offered, "/model  switch"));
-    CHECK(has(offered, "/models  list"));
+    INFO(offered);
+    // The first chosen, the descriptions in one column.
+    CHECK(has(offered, "\n › /model   switch\n"));
+    CHECK(has(offered, "\n   /models  list\n"));
+    // Down chooses the next, wrapping; Tab takes the choice.
+    CHECK(stage.shell.press(Key::named(Key::Name::Down)));
+    CHECK(has(stage.frame(), "\n › /models  list\n"));
+    (void)stage.shell.press(Key::named(Key::Name::Down));
+    CHECK(has(stage.frame(), "\n › /model   switch\n"));
+    (void)stage.shell.press(Key::named(Key::Name::Up));
     CHECK(stage.shell.press(Key::named(Key::Name::Tab)));
-    CHECK(has(stage.frame(), " › /model"));
+    CHECK(has(stage.frame(), " › /models"));
+    // Esc closes it until the line changes.
+    CHECK(has(stage.frame(), "/models  list\n"));
+    CHECK(stage.shell.press(Key::named(Key::Name::Escape)));
+    CHECK_FALSE(has(stage.frame(), "list\n"));
+    (void)stage.shell.press(Key::named(Key::Name::Backspace));
+    CHECK(has(stage.frame(), "/models  list\n"));
+}
+
+TEST_CASE("the menu scrolls a window over a long list, saying how many more", "[tui][session]") {
+    Stage stage;
+    stage.view.begin_session();
+    std::vector<apogee::commands::Suggestion> many;
+    for (int i = 0; i < 12; ++i) {
+        const std::string name = "/c" + std::to_string(10 + i);
+        many.push_back({.text = name, .label = name, .description = "row"});
+    }
+    stage.view.set_completion(table_completer(many));
+    (void)stage.frame(64, 30);
+    stage.type("/c");
+    std::string frame = stage.frame(64, 30);
+    INFO(frame);
+    CHECK(has(frame, " › /c10  row\n"));
+    CHECK(has(frame, "   /c17  row\n"));
+    CHECK_FALSE(has(frame, "/c18"));
+    CHECK(has(frame, "   ↓ 4 more\n"));
+    for (int i = 0; i < 9; ++i) {
+        (void)stage.shell.press(Key::named(Key::Name::Down));
+    }
+    frame = stage.frame(64, 30);
+    CHECK(has(frame, " › /c19  row\n"));
+    CHECK(has(frame, "   ↑ 2 more\n"));
+    CHECK(has(frame, "   ↓ 2 more\n"));
+    CHECK_FALSE(has(frame, "/c11 "));
+}
+
+TEST_CASE(
+    "Enter takes the chosen command: run when it is whole, its argument next when it "
+    "takes one",
+    "[tui][session]") {
+    Stage stage;
+    stage.view.begin_session();
+    stage.view.set_completion(table_completer(kMenuTable));
+    (void)stage.frame();
+    const auto enter = [&stage]() {
+        std::future<std::optional<std::string>> read =
+            std::async(std::launch::async, [&stage]() { return stage.view.read_line(); });
+        stage.until([&stage]() { return !has(stage.frame(), "working…"); });
+        (void)stage.shell.press(Key::named(Key::Name::Return));
+        stage.until([&read]() {
+            return read.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready;
+        });
+        return read.get();
+    };
+    // A command taking an argument stops there for it, the session still
+    // waiting: nothing is sent.
+    {
+        std::future<std::optional<std::string>> read =
+            std::async(std::launch::async, [&stage]() { return stage.view.read_line(); });
+        stage.until([&stage]() { return !has(stage.frame(), "working…"); });
+        stage.type("/mo");
+        (void)stage.shell.press(Key::named(Key::Name::Return));
+        CHECK(has(stage.frame(), "\n › /model\n"));
+        CHECK(read.wait_for(std::chrono::milliseconds{50}) == std::future_status::timeout);
+        // Typed whole, it runs as typed.
+        (void)stage.shell.press(Key::named(Key::Name::Backspace));
+        (void)stage.shell.press(Key::named(Key::Name::Return));
+        CHECK(read.get() == std::optional<std::string>{"/model"});
+    }
+    // A command taking none is taken and run; so is the one the arrows chose.
+    stage.type("/he");
+    CHECK(enter() == std::optional<std::string>{"/help"});
+    stage.type("/mo");
+    (void)stage.shell.press(Key::named(Key::Name::Down));
+    CHECK(enter() == std::optional<std::string>{"/models"});
+}
+
+TEST_CASE("a recalled line opens no menu: the arrows go on through history", "[tui][session]") {
+    Stage stage;
+    stage.view.begin_session();
+    stage.view.set_completion(table_completer(kMenuTable));
+    (void)stage.frame();
+    for (const char* line : {"/models", "hello"}) {
+        std::future<std::optional<std::string>> read =
+            std::async(std::launch::async, [&stage]() { return stage.view.read_line(); });
+        stage.until([&stage]() { return !has(stage.frame(), "working…"); });
+        stage.type(line);
+        (void)stage.shell.press(Key::named(Key::Name::Return));
+        REQUIRE(read.get() == std::optional<std::string>{line});
+    }
+    (void)stage.shell.press(Key::named(Key::Name::Up));
+    CHECK(has(stage.frame(), " › hello"));
+    (void)stage.shell.press(Key::named(Key::Name::Up));
+    CHECK(has(stage.frame(), " › /models"));
+    CHECK_FALSE(has(stage.frame(), "list\n"));  // no menu on a recalled line
+    (void)stage.shell.press(Key::named(Key::Name::Down));
+    CHECK(has(stage.frame(), " › hello"));
 }
 
 TEST_CASE(

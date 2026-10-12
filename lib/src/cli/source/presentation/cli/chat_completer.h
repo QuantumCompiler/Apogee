@@ -211,6 +211,15 @@ struct ChatCompletionSources {
     DirectoryLister list;
     /// Which session the line is typed into (27s): the rows it offers.
     SessionMode mode = SessionMode::Chat;
+    /// Match a command's name and its values loosely (the shell's menu,
+    /// 2026-10-11): after the prefixes, a name whose words the typed words
+    /// begin (`/perm-` finds `/permission-mode`), then one with a later word
+    /// so begun (`sonnet` finds `claude-sonnet-5-5`), then one holding the
+    /// typed text, then one holding its letters in order -- each tier after
+    /// the last, the table's order within one. The terminal keeps prefixes:
+    /// replxx draws a row as the typed span and then the rest of its label,
+    /// which only a prefix keeps whole.
+    bool loose = false;
     /// The symphonies `/play` takes, described (27s). Empty offers none.
     std::function<std::vector<NamedChoice>()> symphonies;
 };

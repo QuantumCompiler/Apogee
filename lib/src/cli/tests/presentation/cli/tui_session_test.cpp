@@ -417,6 +417,30 @@ TEST_CASE("/permission-mode bypass in the shell asks once, then joins the Shift+
     CHECK(chat.failure.empty());
 }
 
+TEST_CASE("the shell's menu finds /perm- loosely, and the arrows and Enter choose the mode",
+          "[cli][tui][session][completer]") {
+    // Chat's one completer, matching loosely behind the shell's own menu.
+    Conversation chat{nlohmann::json{{"turns", {{{"text", "fine"}}}}}};
+    chat.open();
+    chat.until([&chat]() { return chat.view.waiting_for_line(); }, "the session reading");
+    for (const char c : std::string{"/perm-"}) {
+        (void)chat.shell.press(Key::character(std::string(1, c)));
+    }
+    chat.until([&chat]() { return has(chat.frame(), " › /permission-mode"); }, "the loose match");
+    CHECK_FALSE(has(chat.frame(), "/permissions "));
+    (void)chat.shell.press(Key::named(Key::Name::Tab));
+    chat.until([&chat]() { return has(chat.frame(), " › manual"); }, "the modes offered");
+    (void)chat.shell.press(Key::named(Key::Name::Down));
+    (void)chat.shell.press(Key::named(Key::Name::Down));
+    chat.until([&chat]() { return has(chat.frame(), " › plan"); }, "plan chosen");
+    (void)chat.shell.press(Key::named(Key::Name::Return));
+    chat.until([&chat]() { return has(chat.frame(), "⏸ plan mode on (shift+tab to cycle)"); },
+               "plan set");
+    CHECK(has(chat.frame(), "permission mode: plan -- nothing that writes runs"));
+    chat.finish();
+    CHECK(chat.failure.empty());
+}
+
 TEST_CASE("a session grant writes nothing and dies with the session", "[cli][tui][session]") {
     Conversation chat{kWriteThenAnswer};
     const std::string before = slurp(chat.home.config_path());

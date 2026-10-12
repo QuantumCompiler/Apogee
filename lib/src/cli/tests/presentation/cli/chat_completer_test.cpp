@@ -221,6 +221,39 @@ TEST_CASE("a command's own values follow it", "[chat][completer]") {
     CHECK(texts(suggest_chat_input("/capture ", project())) == statuses);
 }
 
+TEST_CASE("the shell's menu matches loosely: words begun, a later word, anywhere, in order",
+          "[chat][completer]") {
+    apogee::commands::ChatCompletionSources loose = project();
+    loose.loose = true;
+    // Prefixes first, as ever, in the table's order.
+    CHECK(texts(suggest_chat_input("/perm", loose)) ==
+          std::vector<std::string>{"/permissions", "/permission-mode "});
+    // The typed words begin the name's words.
+    CHECK(texts(suggest_chat_input("/perm-", loose)) ==
+          std::vector<std::string>{"/permission-mode "});
+    CHECK(texts(suggest_chat_input("/p-m", loose)) ==
+          std::vector<std::string>{"/permission-mode "});
+    CHECK(texts(suggest_chat_input("/max-t", loose)) == std::vector<std::string>{"/max-tokens "});
+    // A later word begun, after every prefix.
+    const std::vector<std::string> mode = texts(suggest_chat_input("/mode", loose));
+    REQUIRE_FALSE(mode.empty());
+    CHECK(mode.front() == "/model ");
+    CHECK(std::find(mode.begin(), mode.end(), "/permission-mode ") != mode.end());
+    CHECK(texts(suggest_chat_input("/tokens", loose)) == std::vector<std::string>{"/max-tokens "});
+    // Anywhere in it, then its letters in order -- and case is no matter.
+    CHECK(texts(suggest_chat_input("/ATTACH", loose)).front() == "/attach ");
+    const std::vector<std::string> ordered = texts(suggest_chat_input("/pmode", loose));
+    CHECK(std::find(ordered.begin(), ordered.end(), "/permission-mode ") != ordered.end());
+    // A value's too: a later word, and anywhere.
+    CHECK(texts(suggest_chat_input("/permission-mode edits", loose)) ==
+          std::vector<std::string>{"accept-edits"});
+    CHECK(texts(suggest_chat_input("/effort hi", loose)) ==
+          std::vector<std::string>{"high", "xhigh"});
+    // The terminal keeps prefixes: its rows show the typed span, then the rest.
+    CHECK(suggest_chat_input("/perm-", project()).candidates.empty());
+    CHECK(texts(suggest_chat_input("/effort hi", project())) == std::vector<std::string>{"high"});
+}
+
 TEST_CASE("an argument with no values, or past its one word, offers nothing", "[chat][completer]") {
     CHECK(suggest_chat_input("/system ", project()).candidates.empty());
     CHECK(suggest_chat_input("/model claude extra", project()).candidates.empty());

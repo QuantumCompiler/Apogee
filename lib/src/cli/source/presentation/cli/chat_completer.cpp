@@ -217,6 +217,97 @@ char lower(char c) {
     return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 }
 
+/// Where a word starts in a name: after a `-`, `_`, `:` or `.`.
+bool separator(char c) {
+    return c == '-' || c == '_' || c == ':' || c == '.';
+}
+
+/// `text` cut at its separators: `permission-mode` is `permission`, `mode`;
+/// `perm-` is `perm` and an empty word.
+std::vector<std::string_view> name_words(std::string_view text) {
+    std::vector<std::string_view> words;
+    std::size_t start = 0;
+    for (std::size_t at = 0; at <= text.size(); ++at) {
+        if (at == text.size() || separator(text[at])) {
+            words.push_back(text.substr(start, at - start));
+            start = at + 1;
+        }
+    }
+    return words;
+}
+
+bool starts_with_folded(std::string_view text, std::string_view prefix) {
+    if (prefix.size() > text.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < prefix.size(); ++i) {
+        if (lower(text[i]) != lower(prefix[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// How well `typed` names `name`, best first, or unset for not at all: 0 a
+/// prefix; loosely, 1 its words begun by the typed words from the first, 2
+/// from a later one, 3 the typed text anywhere in it, 4 its letters in
+/// order. Loose tiers ignore case.
+std::optional<int> match_tier(std::string_view name, std::string_view typed, bool loose) {
+    if (name.starts_with(typed)) {
+        return 0;
+    }
+    if (!loose) {
+        return std::nullopt;
+    }
+    const std::vector<std::string_view> words = name_words(name);
+    const std::vector<std::string_view> wanted = name_words(typed);
+    for (std::size_t first = 0; first + wanted.size() <= words.size(); ++first) {
+        bool begun = true;
+        for (std::size_t i = 0; i < wanted.size() && begun; ++i) {
+            begun = starts_with_folded(words.at(first + i), wanted.at(i));
+        }
+        if (begun) {
+            return first == 0 ? 1 : 2;
+        }
+    }
+    const auto folded = [](std::string_view text) {
+        std::string out;
+        out.reserve(text.size());
+        for (const char c : text) {
+            out += lower(c);
+        }
+        return out;
+    };
+    const std::string haystack = folded(name);
+    const std::string needle = folded(typed);
+    if (haystack.find(needle) != std::string::npos) {
+        return 3;
+    }
+    // Letters in order, only once two are typed: one letter is in most names.
+    if (needle.size() < 2) {
+        return std::nullopt;
+    }
+    std::size_t at = 0;
+    for (const char c : haystack) {
+        if (at < needle.size() && c == needle[at]) {
+            ++at;
+        }
+    }
+    return at == needle.size() ? std::optional<int>{4} : std::nullopt;
+}
+
+/// `ranked` in tier order, the order they were found in within one.
+std::vector<Suggestion> by_tier(std::vector<std::pair<int, Suggestion>> ranked) {
+    std::stable_sort(ranked.begin(), ranked.end(),
+                     [](const auto& a, const auto& b) { return a.first < b.first; });
+    std::vector<Suggestion> out;
+    out.reserve(ranked.size());
+    for (auto& [tier, suggestion] : ranked) {
+        out.push_back(std::move(suggestion));
+    }
+    return out;
+}
+
 /// Smart case: a prefix with a capital in it must match exactly; one without
 /// matches either case, because on a case-insensitive disk `@readme` not
 /// finding `README.md` reads as broken.
@@ -683,15 +774,18 @@ Suggestions suggest_chat_input(std::string_view before_cursor,
         if (typed.find('/') != std::string_view::npos) {
             return out;
         }
+        std::vector<std::pair<int, Suggestion>> ranked;
         for (const ChatCommandSpec& spec : chat_commands(sources.mode)) {
-            if (spec.verb.starts_with(typed)) {
+            if (const std::optional<int> tier = match_tier(spec.verb, typed, sources.loose);
+                tier.has_value()) {
                 const std::string name = "/" + std::string{spec.verb};
                 // A trailing space when it takes an argument, so the next
                 // rows are already that argument's values.
-                out.candidates.push_back({spec.argument.empty() ? name : name + " ", name,
-                                          std::string{spec.description}});
+                ranked.emplace_back(*tier, Suggestion{spec.argument.empty() ? name : name + " ",
+                                                      name, std::string{spec.description}});
             }
         }
+        out.candidates = by_tier(std::move(ranked));
         return out;
     }
 
@@ -766,11 +860,14 @@ Suggestions suggest_chat_input(std::string_view before_cursor,
             }
         }
     }
+    std::vector<std::pair<int, Suggestion>> ranked;
     for (NamedChoice& choice : argument_choices(spec->values, sources)) {
-        if (choice.name.starts_with(typed)) {
-            out.candidates.push_back({choice.name, {}, std::move(choice.description)});
+        if (const std::optional<int> tier = match_tier(choice.name, typed, sources.loose);
+            tier.has_value()) {
+            ranked.emplace_back(*tier, Suggestion{choice.name, {}, std::move(choice.description)});
         }
     }
+    out.candidates = by_tier(std::move(ranked));
     return out;
 }
 

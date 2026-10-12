@@ -6979,6 +6979,32 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,154 
 
 The permission block's blank row is unchanged. The full suite through `lib/scripts/cicd.sh --test` passed, 3,155 of 3,155 with one test skipped: the PDF case that needs `pdftotext`, which this machine does not have. The shell's PTY check (`cli.tui_shell`) passed against the fast build too.
 
+### 2026-10-11 — the session's completion menu (the user's request)
+
+**Why.** In the shell, completing a slash command was a list of dim rows with Tab always taking the first. A row further down could be reached only by typing more of it, and typing more often reached nothing: `/perm-` found neither `/permissions` nor `/permission-mode`, because a completion had to be a prefix.
+
+- [x] **A menu with a choice.** The rows under the input are a menu (`tui/session_view`):
+  - **What it shows:** the chosen row marked `›` (bold, cyan in colour), the descriptions in one column, up to eight rows in a window that scrolls with the choice, and `↑ N more` / `↓ N more` above and below it.
+  - **The arrows and Esc:** ↑ and ↓ move the choice, wrapping at the ends. Esc closes the menu until the line changes. A line recalled from history opens none, so the arrows go on through history.
+  - **Tab** takes the chosen row.
+  - **Enter on a slash command** takes the chosen row, unless it is what the line already says (`/model` typed whole runs as typed) or nothing was typed for it and the choice never moved. A command taking no argument then runs, a command taking one is filled in with its argument's rows next, and a chosen value runs with its command. A prompt's `@` path is sent as typed.
+- [x] **Loose matching in the shell** (`cli/chat_completer`, `ChatCompletionSources::loose`), for a command's name and its values:
+  1. the prefixes, as before;
+  2. then a name whose words the typed words begin (`/perm-`, `/p-m` → `/permission-mode`; `/max-t` → `/max-tokens`);
+  3. then one with a later word so begun (`/tokens` → `/max-tokens`; `sonnet` → `claude-sonnet-5-5`);
+  4. then one holding the typed text (`/permission-mode edits` → `accept-edits`);
+  5. then one holding its letters in order, once two are typed.
+
+  Each tier comes after the last, in the table's order within one, and the loose tiers ignore case. The terminal keeps prefixes alone: replxx draws a suggestion row as the typed span followed by the rest of its label, which only a prefix keeps whole. So the session turns `loose` on for any front end that is not the terminal.
+- [x] **Tests**:
+  - `chat_completer_test`: every tier, values included, and the terminal's prefixes unchanged.
+  - `session_view_test`: the marked choice and its column, the arrows wrapping, Tab taking the choice, and Esc closing the menu until an edit; a twelve-row list scrolling its window with both counts; Enter stopping at a command that takes an argument with the session still waiting, running one typed whole, taking one without an argument, and taking the arrows' choice; and a recalled line opening no menu.
+  - `tui_session_test`: `/perm-` found loosely through chat's real completer, then Tab, ↓ ↓ and Enter setting plan mode.
+
+Only the shell's menu and the completer's matching changed: the terminal's completion is as it was. Done on the user's direct request, with no backlog item.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3,182 tests ran with none failing, one skipped for want of `pdftotext`. That includes `cli.tui_shell` and `cli.chat_line_editing`, which shows the terminal's completion unchanged. `clang-format` is clean on every touched file.
+
 ## Milestone AI — Effort and permission modes
 
 **Goal.** Claude Code gives a session two controls the person reaches for constantly: how hard the model thinks (five effort levels) and how much it may do without asking (a permission mode, cycled with Shift+Tab). Apogee had the pieces of both -- `/think on|off|auto` with a raw token budget, and per-tool answers over one permission gate -- but not the controls. Track 39 (the user's call, 2026-10-11) gives `apogee chat`, `apogee execute` and the full-screen shell Claude Code's two, set mid-session in either front end and Tab-completed in both.

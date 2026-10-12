@@ -1406,6 +1406,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // An execute session's rows, and the symphonies `/play` takes, read as
     // `/play` finds them (27s).
     completion.mode = mode;
+    // The shell draws its menu rows whole, so it can match loosely; the
+    // terminal's replxx rows need prefixes (2026-10-11).
+    completion.loose = !out.terminal();
     if (mode == SessionMode::Execute) {
         completion.symphonies = [&harness, config_path] {
             return symphony_choices(session_catalog(harness.config(), config_path));

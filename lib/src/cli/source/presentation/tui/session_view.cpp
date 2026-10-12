@@ -14,6 +14,7 @@
 
 #include "agentloop/recall.h"
 #include "ansi/ansi.h"
+#include "ansi/text_width.h"
 #include "contracts/errors.h"
 #include "markdown/layout.h"
 #include "markdown/stream_renderer.h"
@@ -29,8 +30,9 @@ using Clock = std::chrono::steady_clock;
 
 /// How many rows of the live reasoning the thinking block shows.
 constexpr std::size_t kReasoningRows = 3;
-/// How many completions show under the input.
-constexpr std::size_t kSuggestionRows = 5;
+/// How many completions the menu under the input shows at once; the rest
+/// scroll into its window as the choice moves.
+constexpr std::size_t kMenuRows = 8;
 /// The cells a box takes on each side of what it holds: its edge and a
 /// column of padding.
 constexpr std::size_t kBoxSide = 2;
@@ -151,6 +153,15 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
     std::vector<std::string> history;
     std::optional<std::size_t> history_at;
     commands::Suggester suggest;
+    // The completion menu (2026-10-11): the row chosen and the first shown,
+    // for the text before the cursor they were chosen against; whether the
+    // person moved the choice; and the line the menu was closed for (Esc, a
+    // history recall) -- open again as soon as the line changes.
+    std::string menu_line;
+    std::size_t menu_chosen = 0;
+    std::size_t menu_top = 0;
+    bool menu_moved = false;
+    std::optional<std::string> menu_closed;
     /// The session's permission mode (39b): Shift+Tab's step and the row's
     /// words, set by the session's line reader.
     std::function<void()> mode_next;
@@ -422,6 +433,50 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
         return vbox(std::move(rows)) | border;
     }
 
+    /// The completion menu under the input: a window of rows, the chosen one
+    /// marked, the descriptions in one column, and how many more there are
+    /// above and below.
+    [[nodiscard]] ftxui::Elements draw_menu() {
+        using namespace ftxui;  // NOLINT(google-build-using-namespace): the DOM's vocabulary
+        const commands::Suggestions offered = open_menu();
+        Elements rows;
+        if (offered.candidates.empty()) {
+            return rows;
+        }
+        const std::size_t count = offered.candidates.size();
+        const std::size_t end = std::min(count, menu_top + kMenuRows);
+        const auto label_of = [](const commands::Suggestion& candidate) {
+            return candidate.label.empty() ? candidate.text : candidate.label;
+        };
+        std::size_t widest = 0;
+        for (std::size_t i = menu_top; i < end; ++i) {
+            widest = std::max(widest, ansi::display_width(label_of(offered.candidates.at(i))));
+        }
+        if (menu_top > 0) {
+            rows.push_back(text("   ↑ " + std::to_string(menu_top) + " more") | dim);
+        }
+        for (std::size_t i = menu_top; i < end; ++i) {
+            const commands::Suggestion& candidate = offered.candidates.at(i);
+            const std::string label = label_of(candidate);
+            std::string row = (i == menu_chosen ? " › " : "   ") + label;
+            if (!candidate.description.empty()) {
+                row += std::string(widest - ansi::display_width(label) + 2, ' ') +
+                       candidate.description;
+            }
+            Element line = text(std::move(row));
+            if (i == menu_chosen) {
+                line = theme.color ? line | bold | color(Color::Cyan) : line | bold;
+            } else {
+                line = line | dim;
+            }
+            rows.push_back(std::move(line));
+        }
+        if (end < count) {
+            rows.push_back(text("   ↓ " + std::to_string(count - end) + " more") | dim);
+        }
+        return rows;
+    }
+
     /// The permission mode's row under the input (39b), as Claude Code's
     /// status bar words it; none in manual.
     [[nodiscard]] std::optional<ftxui::Element> draw_mode() const {
@@ -484,18 +539,8 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
         if (std::optional<Element> row = draw_mode(); row.has_value()) {
             frame.push_back(std::move(*row));
         }
-        if (suggest && !input.empty()) {
-            const commands::Suggestions offered =
-                suggest(std::string_view{input}.substr(0, cursor));
-            for (std::size_t i = 0; i < offered.candidates.size() && i < kSuggestionRows; ++i) {
-                const commands::Suggestion& candidate = offered.candidates.at(i);
-                std::string row =
-                    "   " + (candidate.label.empty() ? candidate.text : candidate.label);
-                if (!candidate.description.empty()) {
-                    row += "  " + candidate.description;
-                }
-                frame.push_back(text(std::move(row)) | dim);
-            }
+        for (Element& row : draw_menu()) {
+            frame.push_back(std::move(row));
         }
         return vbox(std::move(frame));
     }
@@ -543,15 +588,83 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
         return true;
     }
 
-    void complete() {
-        const commands::Suggestions offered = suggest(std::string_view{input}.substr(0, cursor));
-        if (offered.candidates.empty()) {
-            return;
+    /// The completion menu for the line as it stands: what the completer
+    /// offers, the choice kept in range and in the window -- or nothing, with
+    /// nothing typed or the menu closed for this line.
+    [[nodiscard]] commands::Suggestions open_menu() {
+        if (!suggest || input.empty()) {
+            return {};
         }
+        std::string before = input.substr(0, std::min(cursor, input.size()));
+        if (before != menu_line) {
+            menu_line = before;
+            menu_chosen = 0;
+            menu_top = 0;
+            menu_moved = false;
+        }
+        if (menu_closed.has_value()) {
+            if (*menu_closed == before) {
+                return {};
+            }
+            menu_closed.reset();
+        }
+        commands::Suggestions offered = suggest(before);
+        if (offered.candidates.empty()) {
+            return offered;
+        }
+        menu_chosen = std::min(menu_chosen, offered.candidates.size() - 1);
+        menu_top = std::min(menu_top, menu_chosen);
+        if (menu_chosen >= menu_top + kMenuRows) {
+            menu_top = menu_chosen + 1 - kMenuRows;
+        }
+        return offered;
+    }
+
+    /// Closes the menu until the line changes.
+    void close_menu() {
+        menu_closed = input.substr(0, std::min(cursor, input.size()));
+    }
+
+    /// Takes the chosen row into the line.
+    void take(const commands::Suggestions& offered) {
         const commands::Applied applied =
-            commands::apply_suggestion(input, cursor, offered, offered.candidates.front());
+            commands::apply_suggestion(input, cursor, offered, offered.candidates.at(menu_chosen));
         input = applied.line;
         cursor = applied.cursor;
+    }
+
+    /// Enter with the menu open on a slash command: the chosen row is what
+    /// was meant -- unless nothing was typed for it and the choice never
+    /// moved, or it is what the line already says. True when the line now
+    /// wants more typed (a command taking an argument, a folder), so Enter
+    /// stops there rather than sending it.
+    [[nodiscard]] bool take_on_enter() {
+        if (!input.starts_with('/')) {
+            return false;  // a prompt's `@` path: sent as typed
+        }
+        const commands::Suggestions offered = open_menu();
+        if (offered.candidates.empty()) {
+            return false;
+        }
+        const std::size_t from = std::min(offered.from, cursor);
+        if (from == cursor && !menu_moved) {
+            return false;
+        }
+        const commands::Suggestion& chosen = offered.candidates.at(menu_chosen);
+        const commands::Applied applied =
+            commands::apply_suggestion(input, cursor, offered, chosen);
+        const auto trimmed = [](std::string_view text) {
+            while (!text.empty() && text.back() == ' ') {
+                text.remove_suffix(1);
+            }
+            return text;
+        };
+        if (trimmed(applied.line) == trimmed(input)) {
+            return false;  // `/model` typed whole: run as typed
+        }
+        input = applied.line;
+        cursor = applied.cursor;
+        return chosen.text.ends_with(' ') || chosen.text.ends_with('/');
     }
 
     /// Editing keys the input and a prompt's free text share.
@@ -646,6 +759,9 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
             if (input.empty()) {
                 return true;
             }
+            if (take_on_enter()) {
+                return true;  // the command's argument comes next
+            }
             bool taken = false;
             {
                 const std::lock_guard lock{mutex};
@@ -671,8 +787,17 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
             if (!suggest || input.empty()) {
                 return false;  // the shell's: the next view
             }
-            complete();
+            if (const commands::Suggestions offered = open_menu(); !offered.candidates.empty()) {
+                take(offered);
+            }
             return true;
+        }
+        if (event == ftxui::Event::Escape) {
+            if (!open_menu().candidates.empty()) {
+                close_menu();
+                return true;
+            }
+            return false;
         }
         if (event == ftxui::Event::PageUp) {
             scrollback += std::max(1, frame_width() / 8);
@@ -683,6 +808,15 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
             return true;
         }
         if (event == ftxui::Event::ArrowUp || event == ftxui::Event::ArrowDown) {
+            // The menu's choice while it is open, wrapping at its ends.
+            if (const commands::Suggestions offered = open_menu(); !offered.candidates.empty()) {
+                const std::size_t count = offered.candidates.size();
+                menu_chosen = event == ftxui::Event::ArrowDown ? (menu_chosen + 1) % count
+                                                               : (menu_chosen + count - 1) % count;
+                menu_moved = true;
+                (void)open_menu();  // the window follows the choice
+                return true;
+            }
             if (history.empty()) {
                 return true;
             }
@@ -696,6 +830,9 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
             }
             input = history_at.has_value() ? history.at(*history_at) : std::string{};
             cursor = input.size();
+            // A recalled line opens no menu: ↑ and ↓ go on through history
+            // until the line is edited.
+            close_menu();
             return true;
         }
         return edit(event);
