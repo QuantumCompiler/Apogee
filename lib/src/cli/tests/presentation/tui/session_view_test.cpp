@@ -65,6 +65,36 @@ struct Stage {
     return frame.find(text) != std::string::npos;
 }
 
+/// The frame's rows, each without its newline.
+[[nodiscard]] std::vector<std::string> rows_of(const std::string& frame) {
+    std::vector<std::string> rows;
+    std::size_t at = 0;
+    for (std::size_t end = frame.find('\n'); end != std::string::npos;
+         at = end + 1, end = frame.find('\n', at)) {
+        rows.push_back(frame.substr(at, end - at));
+    }
+    return rows;
+}
+
+/// The index of the first row holding `text`, or the row count.
+[[nodiscard]] std::size_t row_with(const std::vector<std::string>& rows, const std::string& text) {
+    std::size_t i = 0;
+    while (i < rows.size() && !has(rows.at(i), text)) {
+        ++i;
+    }
+    return i;
+}
+
+/// The cells a drawn row takes: a cell a codepoint, the box's edges among
+/// them.
+[[nodiscard]] std::size_t cells(const std::string& row) {
+    std::size_t count = 0;
+    for (const char c : row) {
+        count += (static_cast<unsigned char>(c) & 0xC0U) != 0x80U ? 1 : 0;
+    }
+    return count;
+}
+
 }  // namespace
 
 TEST_CASE("a terminal's styled line reads back as the same looks", "[tui][styled]") {
@@ -119,37 +149,55 @@ TEST_CASE("a scripted turn renders every Reporter callback, side calls included"
     CHECK(has(answered, "✻ Thought for "));
     CHECK_FALSE(has(answered, "rewriting the follow-up"));
     CHECK_FALSE(has(answered, "Let me think"));
-    // `markdown/` rendered it: no asterisks, bullets drawn.
-    CHECK(has(answered, " Here is the answer:\n"));
-    CHECK(has(answered, " • one\n"));
-    CHECK(has(answered, " • two\n"));
+    // `markdown/` rendered it: no asterisks, bullets drawn, in the answer's box.
+    CHECK(has(answered, "│ Here is the answer: │\n"));
+    CHECK(has(answered, "│ • one "));
+    CHECK(has(answered, "│ • two "));
     CHECK_FALSE(has(answered, "**"));
 }
 
 TEST_CASE("the answer is markdown/'s rendering, row for row: one renderer", "[tui][session]") {
     const std::string answer = "# Title\n\nSome *text* with `code`.\n\n1. first\n2. second\n";
     apogee::markdown::StreamRenderer renderer;
-    std::vector<std::string> expected;
-    // The view's margin, and the label every row of an answer stands beside:
-    // `Apogee: ` on the first row of text, as many spaces on the rest.
-    const std::size_t width = 64 - 2 - std::string_view{"Apogee: "}.size();
+    std::vector<apogee::markdown::Row> rendered;
+    // The view's margin, and the box's sides: an edge and a column of
+    // padding each.
+    const std::size_t width = 64 - 2 - 4;
     for (const auto& ops : {renderer.feed(answer, width), renderer.finish(width)}) {
-        for (const apogee::markdown::Row& row : ops.commit) {
-            const std::string text = apogee::markdown::plain_text(row);
-            expected.push_back((expected.empty() ? " Apogee: " : "         ") + text);
-        }
+        rendered.insert(rendered.end(), ops.commit.begin(), ops.commit.end());
     }
+    // The box holds the rows from the first with text to the last, as wide
+    // as the widest.
+    while (!rendered.empty() && apogee::markdown::row_width(rendered.back()) == 0) {
+        rendered.pop_back();
+    }
+    std::size_t inner = 0;
+    for (const apogee::markdown::Row& row : rendered) {
+        inner = std::max(inner, apogee::markdown::row_width(row));
+    }
+    std::string rule;
+    for (std::size_t i = 0; i < inner + 2; ++i) {
+        rule += "─";
+    }
+    std::vector<std::string> expected{" ╭" + rule + "╮"};
+    for (const apogee::markdown::Row& row : rendered) {
+        expected.push_back(" │ " + apogee::markdown::plain_text(row) +
+                           std::string(inner - apogee::markdown::row_width(row), ' ') + " │");
+    }
+    expected.push_back(" ╰" + rule + "╯");
     Stage stage;
     stage.view.begin_session();
+    (void)stage.frame(66, 24);
     stage.view.reporter().on_answer_start();
     stage.view.reporter().on_answer_token(answer);
     stage.view.reporter().on_answer_end();
-    const std::string frame = stage.frame(66, 24);
-    REQUIRE(expected.size() > 4);
-    for (const std::string& row : expected) {
-        std::string trimmed = row;
-        trimmed.erase(trimmed.find_last_not_of(' ') + 1);
-        CHECK(has(frame, "\n" + trimmed + "\n"));
+    const std::vector<std::string> frame = rows_of(stage.frame(66, 24));
+    REQUIRE(rendered.size() > 4);
+    REQUIRE(apogee::markdown::row_width(rendered.front()) > 0);
+    const std::size_t top = row_with(frame, " ╭");
+    REQUIRE(top + expected.size() <= frame.size());
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        CHECK(frame.at(top + i) == expected.at(i));
     }
 }
 
@@ -225,7 +273,7 @@ TEST_CASE("a queued line is the conversation's next, shown as typed; a new one d
     stage.view.begin_session();
     stage.view.queue_line("/play echo2 hello");
     (void)stage.frame();
-    CHECK(has(stage.frame(), "You: /play echo2 hello"));
+    CHECK(has(stage.frame(), "│ /play echo2 hello │"));
     CHECK(stage.view.read_line() == std::optional<std::string>{"/play echo2 hello"});
     // Left for a conversation that never read it: not the next one's.
     stage.view.queue_line("stale");
@@ -250,7 +298,7 @@ TEST_CASE("a line typed reaches the session's thread, and only while it waits fo
     (void)stage.shell.press(Key::named(Key::Name::Return));
     REQUIRE(read.get() == std::optional<std::string>{"early"});
     const std::string frame = stage.frame();
-    CHECK(has(frame, " You: early\n"));
+    CHECK(has(frame, "│ early │\n"));
     CHECK(has(frame, "\n ›\n"));
 }
 
@@ -390,7 +438,7 @@ TEST_CASE(
     CHECK(has(stage.frame(64, 20), "\n ›"));
 }
 
-TEST_CASE("the person's lines sit at the right, Apogee's answers named at the left",
+TEST_CASE("the person's lines sit boxed at the right, Apogee's answers boxed at the left",
           "[tui][session]") {
     Stage stage;
     stage.view.begin_session();
@@ -406,21 +454,44 @@ TEST_CASE("the person's lines sit at the right, Apogee's answers named at the le
     stage.view.reporter().on_answer_end();
     const std::string frame = stage.frame(66, 24);
     INFO(frame);
-    // The person's line ends at the right edge, the margin kept.
-    CHECK(has(frame, "  You: Hello, how are you today?\n"));
-    const std::size_t line_start = frame.rfind('\n', frame.find("You: Hello")) + 1;
-    const std::size_t line_end = frame.find('\n', line_start);
-    CHECK(line_end - line_start == 65);  // 66 columns less the right margin
-    CHECK(frame.find("You: Hello") - line_start > 20);
-    // The answer: named on its first row, the next under its text.
-    CHECK(has(frame, "\n Apogee: I'm doing well, thank you for asking!"));
-    const std::size_t answer = frame.find(" Apogee: ");
-    const std::size_t next = frame.find('\n', answer) + 1;
-    CHECK(frame.substr(next, 9) == "         ");
-    CHECK(frame.at(next + 9) != ' ');
+    const std::vector<std::string> rows = rows_of(frame);
+    // The person's line: no label, a box with a column of padding inside its
+    // edges, ending at the right edge with the margin kept.
+    CHECK_FALSE(has(frame, "You:"));
+    const std::size_t said = row_with(rows, "│ Hello, how are you today? │");
+    REQUIRE(said > 0);
+    REQUIRE(said + 1 < rows.size());
+    const std::string& line = rows.at(said);
+    CHECK(cells(line) == 65);  // 66 columns less the right margin
+    const std::size_t edge = line.find_first_not_of(' ');
+    CHECK(edge > 20);
+    CHECK(rows.at(said - 1).find_first_not_of(' ') == edge);
+    CHECK(has(rows.at(said - 1), "╭───"));
+    CHECK(rows.at(said - 1).ends_with("╮"));
+    CHECK(cells(rows.at(said - 1)) == 65);
+    CHECK(has(rows.at(said + 1), "╰───"));
+    CHECK(rows.at(said + 1).ends_with("╯"));
+    // The answer: no label, boxed at the left margin, its rows wrapped
+    // inside the box and every edge in one column.
+    CHECK_FALSE(has(frame, "Apogee:"));
+    const std::size_t answer = row_with(rows, " │ I'm doing well, thank you for asking!");
+    REQUIRE(answer > 0);
+    REQUIRE(answer + 2 < rows.size());
+    CHECK(rows.at(answer - 1).starts_with(" ╭───"));
+    const std::size_t width = cells(rows.at(answer - 1));
+    CHECK(rows.at(answer + 1).starts_with(" │ "));
+    CHECK(rows.at(answer + 1).at(3) != ' ');
+    std::size_t bottom = answer + 1;
+    while (bottom < rows.size() && !rows.at(bottom).starts_with(" ╰")) {
+        CHECK(rows.at(bottom).ends_with(" │"));
+        CHECK(cells(rows.at(bottom)) == width);
+        ++bottom;
+    }
+    REQUIRE(bottom < rows.size());
+    CHECK(cells(rows.at(bottom)) == width);
 }
 
-TEST_CASE("a person's long line wraps within its share, set against the right as one block",
+TEST_CASE("a person's long line wraps within its box's share, set against the right",
           "[tui][session]") {
     Stage stage;
     stage.view.begin_session();
@@ -429,13 +500,21 @@ TEST_CASE("a person's long line wraps within its share, set against the right as
         "this evening if it keeps raining?");
     const std::string frame = stage.frame(66, 24);
     INFO(frame);
-    const std::size_t first = frame.find("You: What");
-    REQUIRE(first != std::string::npos);
-    const std::size_t first_start = frame.rfind('\n', first) + 1;
-    const std::size_t second_start = frame.find('\n', first) + 1;
-    // The continuation starts under the text, not under the label.
-    CHECK(frame.find_first_not_of(' ', second_start) - second_start ==
-          first - first_start + std::string_view{"You: "}.size());
-    // Neither row runs wider than its share of the width.
-    CHECK(frame.find('\n', first) - first <= 64 * 2 / 3);
+    const std::vector<std::string> rows = rows_of(frame);
+    const std::size_t first = row_with(rows, "│ What is the current");
+    REQUIRE(first > 0);
+    // The box, top to bottom: every row from the same column to the right
+    // margin, none wider than its share of the width.
+    const std::size_t edge = rows.at(first).find_first_not_of(' ');
+    CHECK(has(rows.at(first - 1), "╭"));
+    std::size_t row = first - 1;
+    for (; row < rows.size() && !has(rows.at(row - 1), "╰"); ++row) {
+        CHECK(rows.at(row).find_first_not_of(' ') == edge);
+        CHECK(cells(rows.at(row)) == 65);
+        CHECK(cells(rows.at(row)) - edge <= 64 * 2 / 3);
+    }
+    // Wrapped: more than one row of text between the edges.
+    CHECK(row - first > 3);
+    CHECK(has(rows.at(first + 1), "│ "));
+    CHECK(rows.at(first + 1).at(edge + std::string_view{"│ "}.size()) != ' ');
 }

@@ -31,11 +31,11 @@ using Clock = std::chrono::steady_clock;
 constexpr std::size_t kReasoningRows = 3;
 /// How many completions show under the input.
 constexpr std::size_t kSuggestionRows = 5;
-/// What an answer's first row opens with, its others indented to match: the
-/// speaker named as the person's lines name theirs.
-constexpr std::string_view kAnswerLabel = "Apogee: ";
-/// The share of the width a person's line may take before it wraps: their
-/// lines sit at the right, a chat's other side.
+/// The cells a box takes on each side of what it holds: its edge and a
+/// column of padding.
+constexpr std::size_t kBoxSide = 2;
+/// The share of the width a person's box may take before their line wraps:
+/// their lines sit at the right, a chat's other side.
 constexpr std::size_t kUserShareNumerator = 2;
 constexpr std::size_t kUserShareDenominator = 3;
 
@@ -65,6 +65,33 @@ struct Block {
     ansi::TextAttributes look;
     look.dim = true;
     return look;
+}
+
+/// `content` in a rounded box `indent` cells from the left, as wide as its
+/// widest row and a column of padding inside each edge -- the person's line
+/// and Apogee's answer drawn as Claude Code draws its prompt.
+[[nodiscard]] std::vector<markdown::Row> boxed(const std::vector<markdown::Row>& content,
+                                               std::size_t indent, ansi::TextAttributes edge) {
+    std::size_t inner = 0;
+    for (const markdown::Row& row : content) {
+        inner = std::max(inner, markdown::row_width(row));
+    }
+    std::string rule;
+    for (std::size_t i = 0; i < inner + 2; ++i) {
+        rule += "─";
+    }
+    const markdown::Span margin = span(std::string(indent, ' '));
+    std::vector<markdown::Row> rows;
+    rows.push_back({margin, span("╭" + rule + "╮", edge)});
+    for (const markdown::Row& row : content) {
+        markdown::Row line{margin, span("│", edge), span(" ")};
+        line.insert(line.end(), row.begin(), row.end());
+        line.push_back(span(std::string(inner - markdown::row_width(row) + 1, ' ')));
+        line.push_back(span("│", edge));
+        rows.push_back(std::move(line));
+    }
+    rows.push_back({margin, span("╰" + rule + "╯", edge)});
+    return rows;
 }
 
 /// The byte offset one codepoint before or after `at` in `text`.
@@ -189,9 +216,9 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
         return static_cast<std::size_t>(std::max(20, frame_width() - 2));
     }
 
-    /// What an answer is rendered at: the width less its label's.
+    /// What an answer is rendered at: the width less its box's sides.
     [[nodiscard]] std::size_t answer_text_width() const {
-        return std::max<std::size_t>(20, answer_width() - kAnswerLabel.size());
+        return std::max<std::size_t>(20, answer_width() - 2 * kBoxSide);
     }
 
     void apply(const markdown::RenderOps& ops) {
@@ -244,25 +271,18 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
         for (const Block& block : blocks) {
             switch (block.kind) {
                 case Block::Kind::User: {
-                    // The person's side: wrapped to a share of the width and
-                    // set against the right edge as one block, so a line
-                    // that wraps still reads from the left.
-                    ansi::TextAttributes you;
-                    you.bold = true;
-                    you.color = ansi::Color::Green;
-                    const markdown::Row content{span("You: ", you), span(block.text)};
+                    // The person's side: boxed, wrapped to a share of the
+                    // width and set against the right edge.
                     const std::size_t share = std::max<std::size_t>(
                         20, width * kUserShareNumerator / kUserShareDenominator);
-                    std::vector<markdown::Row> said =
-                        markdown::wrap(content, share, {}, {span("     ")});
+                    const std::vector<markdown::Row> said =
+                        markdown::wrap({span(block.text)}, share - 2 * kBoxSide, {}, {});
                     std::size_t widest = 0;
                     for (const markdown::Row& row : said) {
-                        widest = std::max(widest, markdown::row_width(row));
+                        widest = std::max(widest, markdown::row_width(row) + 2 * kBoxSide);
                     }
-                    for (markdown::Row& row : said) {
-                        if (widest < width) {
-                            row.insert(row.begin(), span(std::string(width - widest, ' ')));
-                        }
+                    for (markdown::Row& row :
+                         boxed(said, widest < width ? width - widest : 0, dim_look())) {
                         rows.push_back(std::move(row));
                     }
                     break;
@@ -305,29 +325,23 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
                     break;
                 }
                 case Block::Kind::Answer: {
-                    // Apogee's side: its first row of text named, the rest
-                    // indented under it, the rendering `markdown/`'s.
-                    ansi::TextAttributes apogee;
-                    apogee.bold = true;
-                    apogee.color = ansi::Color::Cyan;
-                    bool named = false;
-                    const auto add = [&rows, &named, &apogee](const markdown::Row& row) {
-                        markdown::Row labelled = row;
-                        if (!named && markdown::row_width(row) > 0) {
-                            labelled.insert(labelled.begin(),
-                                            span(std::string{kAnswerLabel}, apogee));
-                            named = true;
-                        } else {
-                            labelled.insert(labelled.begin(),
-                                            span(std::string(kAnswerLabel.size(), ' ')));
-                        }
-                        rows.push_back(std::move(labelled));
+                    // Apogee's side: `markdown/`'s rows boxed at the left,
+                    // the blank rows at either end left out of the box.
+                    std::vector<markdown::Row> said = block.rows;
+                    said.insert(said.end(), block.open_rows.begin(), block.open_rows.end());
+                    const auto blank = [](const markdown::Row& row) {
+                        return markdown::row_width(row) == 0;
                     };
-                    for (const markdown::Row& row : block.rows) {
-                        add(row);
+                    const auto first = std::find_if_not(said.begin(), said.end(), blank);
+                    const auto last = std::find_if_not(said.rbegin(), said.rend(), blank).base();
+                    if (first >= last) {
+                        break;  // nothing said yet
                     }
-                    for (const markdown::Row& row : block.open_rows) {
-                        add(row);
+                    ansi::TextAttributes apogee;
+                    apogee.color = ansi::Color::Cyan;
+                    for (markdown::Row& row :
+                         boxed(std::vector<markdown::Row>(first, last), 0, apogee)) {
+                        rows.push_back(std::move(row));
                     }
                     break;
                 }

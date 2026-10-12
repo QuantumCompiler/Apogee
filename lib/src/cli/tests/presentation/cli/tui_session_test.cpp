@@ -141,12 +141,12 @@ struct Conversation {
         for (const char c : line) {
             (void)shell.press(Key::character(std::string(1, c)));
         }
-        const std::size_t sent = count("You: " + line);
+        const std::size_t sent = count("│ " + line);
         until(
             [this, &line, sent]() {
                 (void)shell.press(Key::named(Key::Name::Return));
                 (void)pump.drain();
-                return count("You: " + line) > sent;
+                return count("│ " + line) > sent;
             },
             "the line taken");
     }
@@ -250,7 +250,7 @@ TEST_CASE("a tool-using, permission-prompted turn runs to its answer on the shel
     chat.send("please write a note");
     chat.until([&chat]() { return has(chat.frame(), "Allow?"); }, "the permission prompt");
     const std::string asked = chat.frame();
-    CHECK(has(asked, " You: please write a note\n"));
+    CHECK(has(asked, "│ please write a note │\n"));
     CHECK(has(asked, "[perm] write_file -> note.txt"));
     CHECK(has(asked, "[y]es / [n]o / [a]lways / [s]ession"));
     (void)chat.shell.press(Key::character("a"));
@@ -433,7 +433,7 @@ TEST_CASE("the workbench's choices reach the conversation through its own comman
     chat.until([&chat]() { return has(chat.frame(), "suite duo"); }, "the chat under duo");
     chat.until([&chat]() { return chat.view.waiting_for_line(); }, "the chat reading");
     CHECK(driver.use_suite("duo") == "/suite duo sent to the conversation");
-    chat.until([&chat]() { return has(chat.frame(), "You: /suite duo"); }, "/suite entered");
+    chat.until([&chat]() { return has(chat.frame(), "│ /suite duo │"); }, "/suite entered");
 
     chat.until([&chat]() { return chat.view.waiting_for_line(); }, "the chat reading again");
     CHECK(driver.open_chat("20261009-100000-aaaa") == "opened 20261009-100000-aaaa");
@@ -509,7 +509,7 @@ TEST_CASE("the picker's execute door opens execute's session, and a play there i
     // its summary once the play is over, above the answer -- as the terminal
     // draws them (their words are machine mode's, `execute_test`'s).
     const std::string played = chat.frame();
-    CHECK(played.find("✻ Worked for") > played.find("You: /play echo2 hello"));
+    CHECK(played.find("✻ Worked for") > played.find("│ /play echo2 hello │"));
     CHECK(played.find("✻ Worked for") < played.find(std::string{kPlayed}));
     driver.stop();
     const std::vector<apogee::logger::Session> saved = apogee::logger::list_sessions();
@@ -593,7 +593,7 @@ TEST_CASE("the Symphonies view draws symphonies list's document, and plays throu
     (void)chat.shell.press(Key::named(Key::Name::Return));
     // The session shown, the play run there and its output the answer.
     chat.until([&chat]() { return has(chat.frame(), std::string{kPlayed}); }, "the play's output");
-    CHECK(has(chat.frame(), "You: /play echo2 hello"));
+    CHECK(has(chat.frame(), "│ /play echo2 hello │"));
 
     // Open and reading: entered there; a play missing its input is refused in
     // the session's own words, and nothing kept.

@@ -6970,3 +6970,11 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,153 
 Only the shell changed: the terminal's `apogee chat` prints as before. Done on the user's direct request, with no backlog item.
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,154 of 3,155. The one failure was this entry's own new test, which streamed an answer before drawing its first frame; in its own process that answer wrapped at the default width. The test now draws first, as the shell always does, and ctest's 76 session cases pass in that tree. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+**Later the same day: boxes in place of the labels.** Seen in use, `You:` and `Apogee:` read as clutter, and the user asked for the look of Claude Code's prompt box instead.
+
+- [x] **Each side is boxed, the labels gone.** The person's line and Apogee's answer are each drawn in a rounded box (`╭─╮ │ │ ╰─╯`) with a column of padding inside each edge, as wide as its widest row. The person's box keeps its place at the right, wrapped to two-thirds of the width, edges dim. The answer's box sits at the left margin, edges cyan. The blank rows at either end of an answer stay outside its box, and nothing is boxed until the answer has text.
+- [x] **The answer is rendered four columns narrower** than the transcript, room for its box's edges and padding, still by `markdown/`'s one renderer.
+- [x] **Tests**: `session_view_test`'s row-for-row golden is now the whole box, rule to rule, around `StreamRenderer`'s own rows; the layout cases hold the person's box ending at the right margin with its rules above and below, a long line's box at one column top to bottom and within its share, and the answer's edges in one column on every row; the cases that found a sent line by `You:` find it by the box's edge.
+
+The permission block's blank row is unchanged. The full suite through `lib/scripts/cicd.sh --test` passed, 3,155 of 3,155 with one test skipped: the PDF case that needs `pdftotext`, which this machine does not have. The shell's PTY check (`cli.tui_shell`) passed against the fast build too.
