@@ -7,6 +7,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -129,10 +130,13 @@ TEST_CASE("the answer is markdown/'s rendering, row for row: one renderer", "[tu
     const std::string answer = "# Title\n\nSome *text* with `code`.\n\n1. first\n2. second\n";
     apogee::markdown::StreamRenderer renderer;
     std::vector<std::string> expected;
-    const std::size_t width = 64 - 2;  // the view's margin
+    // The view's margin, and the label every row of an answer stands beside:
+    // `Apogee: ` on the first row of text, as many spaces on the rest.
+    const std::size_t width = 64 - 2 - std::string_view{"Apogee: "}.size();
     for (const auto& ops : {renderer.feed(answer, width), renderer.finish(width)}) {
         for (const apogee::markdown::Row& row : ops.commit) {
-            expected.push_back(" " + apogee::markdown::plain_text(row));
+            const std::string text = apogee::markdown::plain_text(row);
+            expected.push_back((expected.empty() ? " Apogee: " : "         ") + text);
         }
     }
     Stage stage;
@@ -384,4 +388,54 @@ TEST_CASE(
     // Scrolled back, the input stays where it is.
     (void)stage.shell.press(apogee::tui::Key::named(apogee::tui::Key::Name::PageUp));
     CHECK(has(stage.frame(64, 20), "\n ›"));
+}
+
+TEST_CASE("the person's lines sit at the right, Apogee's answers named at the left",
+          "[tui][session]") {
+    Stage stage;
+    stage.view.begin_session();
+    stage.view.say("[apogee] local  ·  chat 1");
+    // Drawn once before the answer streams, as the shell always has been:
+    // an answer wraps at the width the frame was last drawn at.
+    (void)stage.frame(66, 24);
+    stage.view.queue_line("Hello, how are you today?");
+    stage.view.reporter().on_answer_start();
+    stage.view.reporter().on_answer_token(
+        "I'm doing well, thank you for asking! How can I help you today? Here is a longer "
+        "sentence that wraps past the first row of the answer.\n");
+    stage.view.reporter().on_answer_end();
+    const std::string frame = stage.frame(66, 24);
+    INFO(frame);
+    // The person's line ends at the right edge, the margin kept.
+    CHECK(has(frame, "  You: Hello, how are you today?\n"));
+    const std::size_t line_start = frame.rfind('\n', frame.find("You: Hello")) + 1;
+    const std::size_t line_end = frame.find('\n', line_start);
+    CHECK(line_end - line_start == 65);  // 66 columns less the right margin
+    CHECK(frame.find("You: Hello") - line_start > 20);
+    // The answer: named on its first row, the next under its text.
+    CHECK(has(frame, "\n Apogee: I'm doing well, thank you for asking!"));
+    const std::size_t answer = frame.find(" Apogee: ");
+    const std::size_t next = frame.find('\n', answer) + 1;
+    CHECK(frame.substr(next, 9) == "         ");
+    CHECK(frame.at(next + 9) != ' ');
+}
+
+TEST_CASE("a person's long line wraps within its share, set against the right as one block",
+          "[tui][session]") {
+    Stage stage;
+    stage.view.begin_session();
+    stage.view.queue_line(
+        "What is the current weather in Lehi Utah, and what should I wear to walk the dog "
+        "this evening if it keeps raining?");
+    const std::string frame = stage.frame(66, 24);
+    INFO(frame);
+    const std::size_t first = frame.find("You: What");
+    REQUIRE(first != std::string::npos);
+    const std::size_t first_start = frame.rfind('\n', first) + 1;
+    const std::size_t second_start = frame.find('\n', first) + 1;
+    // The continuation starts under the text, not under the label.
+    CHECK(frame.find_first_not_of(' ', second_start) - second_start ==
+          first - first_start + std::string_view{"You: "}.size());
+    // Neither row runs wider than its share of the width.
+    CHECK(frame.find('\n', first) - first <= 64 * 2 / 3);
 }

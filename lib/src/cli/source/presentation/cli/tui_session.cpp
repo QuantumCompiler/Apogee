@@ -120,6 +120,7 @@ agentloop::AskFn TuiOutput::ask_fn() {
             // option, anything else is the answer as written.
             std::string answer = chosen_answer(question, view_.ask(prompt));
             view_.say(style_.dim("  " + (answer.empty() ? std::string{"(no answer)"} : answer)));
+            view_.say("");  // the block ended, set off from what follows
             answers.values.push_back(std::move(answer));
         }
         return answers;
@@ -156,6 +157,7 @@ agent::ConfirmFn TuiOutput::confirm_fn(std::filesystem::path config_path,
             view_.say(style_.dim("  " + note));
         }
         view_.say(style_.dim(allowed ? "  allowed" : "  denied"));
+        view_.say("");  // the block ended, set off from what follows
         return allowed;
     };
 }

@@ -6957,3 +6957,16 @@ Decisions taken while building, for veto:
 - **Setup's order follows the grouping you accepted**: Config, Auth, Providers, Check, System, Home, Keys. A bare `apogee` still lands on Session.
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,153 of 3,153, the pdftotext case skipped as before, the PTY cases run on a real terminal. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+### 2026-10-11 — the session view as a chat (the user's request)
+
+**Why.** The shell's conversation read as one column of text: the person's lines and Apogee's answers looked alike, and a permission block ran straight into the turn that followed it.
+
+- [x] **The person's lines sit at the right.** Each is wrapped to two-thirds of the width and set against the right edge as one block, so a wrapped line still reads from the left, continuing under its text rather than under `You:`.
+- [x] **Apogee's answers are named.** Each answer's first row of text opens with `Apogee:` in bold cyan, the colour of the `[apogee]` tag, and its other rows are indented under it. The answer is rendered eight columns narrower to make room, still by `markdown/`'s one renderer.
+- [x] **A permission block ends with a blank row** after its `allowed` or `denied` line, and so does an answered question, so the next turn's thinking summary stands apart.
+- [x] **Tests**: `session_view_test` holds a person's line ending at the right margin, a long one wrapped within its share as one block, and the answer's label with its next row under its text; the answer's row-for-row golden is rendered at the narrower width; `tui_session_test` holds the blank row after `allowed`.
+
+Only the shell changed: the terminal's `apogee chat` prints as before. Done on the user's direct request, with no backlog item.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,154 of 3,155. The one failure was this entry's own new test, which streamed an answer before drawing its first frame; in its own process that answer wrapped at the default width. The test now draws first, as the shell always does, and ctest's 76 session cases pass in that tree. `clang-format` is clean on every touched file, and `make lint` was not run.

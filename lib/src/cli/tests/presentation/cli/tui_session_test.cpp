@@ -257,6 +257,8 @@ TEST_CASE("a tool-using, permission-prompted turn runs to its answer on the shel
     chat.until([&chat]() { return has(chat.frame(), "I wrote note.txt for you."); }, "the answer");
     const std::string answered = chat.frame();
     CHECK(has(answered, "permissions.write_file = allow written to"));
+    // The permission block ends with a blank row before what follows.
+    CHECK(has(answered, "  allowed\n\n"));
     CHECK_FALSE(has(answered, "**"));
     CHECK(slurp(chat.work() / "note.txt") == "hi");
     chat.finish();

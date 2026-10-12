@@ -31,6 +31,13 @@ using Clock = std::chrono::steady_clock;
 constexpr std::size_t kReasoningRows = 3;
 /// How many completions show under the input.
 constexpr std::size_t kSuggestionRows = 5;
+/// What an answer's first row opens with, its others indented to match: the
+/// speaker named as the person's lines name theirs.
+constexpr std::string_view kAnswerLabel = "Apogee: ";
+/// The share of the width a person's line may take before it wraps: their
+/// lines sit at the right, a chat's other side.
+constexpr std::size_t kUserShareNumerator = 2;
+constexpr std::size_t kUserShareDenominator = 3;
 
 /// One entry of the transcript.
 struct Block {
@@ -182,6 +189,11 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
         return static_cast<std::size_t>(std::max(20, frame_width() - 2));
     }
 
+    /// What an answer is rendered at: the width less its label's.
+    [[nodiscard]] std::size_t answer_text_width() const {
+        return std::max<std::size_t>(20, answer_width() - kAnswerLabel.size());
+    }
+
     void apply(const markdown::RenderOps& ops) {
         Block* block = open_answer();
         if (block == nullptr) {
@@ -193,7 +205,7 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
 
     void finish_answer() {
         if (Block* block = open_answer(); block != nullptr) {
-            apply(renderer.finish(answer_width()));
+            apply(renderer.finish(answer_text_width()));
             block->open_rows.clear();
             block->open = false;
         }
@@ -232,11 +244,27 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
         for (const Block& block : blocks) {
             switch (block.kind) {
                 case Block::Kind::User: {
+                    // The person's side: wrapped to a share of the width and
+                    // set against the right edge as one block, so a line
+                    // that wraps still reads from the left.
                     ansi::TextAttributes you;
                     you.bold = true;
                     you.color = ansi::Color::Green;
-                    markdown::Row content{span("You: ", you), span(block.text)};
-                    wrapped(content, {span("     ")});
+                    const markdown::Row content{span("You: ", you), span(block.text)};
+                    const std::size_t share = std::max<std::size_t>(
+                        20, width * kUserShareNumerator / kUserShareDenominator);
+                    std::vector<markdown::Row> said =
+                        markdown::wrap(content, share, {}, {span("     ")});
+                    std::size_t widest = 0;
+                    for (const markdown::Row& row : said) {
+                        widest = std::max(widest, markdown::row_width(row));
+                    }
+                    for (markdown::Row& row : said) {
+                        if (widest < width) {
+                            row.insert(row.begin(), span(std::string(width - widest, ' ')));
+                        }
+                        rows.push_back(std::move(row));
+                    }
                     break;
                 }
                 case Block::Kind::Line:
@@ -276,10 +304,33 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
                     }
                     break;
                 }
-                case Block::Kind::Answer:
-                    rows.insert(rows.end(), block.rows.begin(), block.rows.end());
-                    rows.insert(rows.end(), block.open_rows.begin(), block.open_rows.end());
+                case Block::Kind::Answer: {
+                    // Apogee's side: its first row of text named, the rest
+                    // indented under it, the rendering `markdown/`'s.
+                    ansi::TextAttributes apogee;
+                    apogee.bold = true;
+                    apogee.color = ansi::Color::Cyan;
+                    bool named = false;
+                    const auto add = [&rows, &named, &apogee](const markdown::Row& row) {
+                        markdown::Row labelled = row;
+                        if (!named && markdown::row_width(row) > 0) {
+                            labelled.insert(labelled.begin(),
+                                            span(std::string{kAnswerLabel}, apogee));
+                            named = true;
+                        } else {
+                            labelled.insert(labelled.begin(),
+                                            span(std::string(kAnswerLabel.size(), ' ')));
+                        }
+                        rows.push_back(std::move(labelled));
+                    };
+                    for (const markdown::Row& row : block.rows) {
+                        add(row);
+                    }
+                    for (const markdown::Row& row : block.open_rows) {
+                        add(row);
+                    }
                     break;
+                }
             }
         }
         return rows;
@@ -733,7 +784,7 @@ public:
 
     void on_answer_token(std::string_view chunk) override {
         post([text = std::string{chunk}](SessionView::State& state) {
-            state.apply(state.renderer.feed(text, state.answer_width()));
+            state.apply(state.renderer.feed(text, state.answer_text_width()));
         });
     }
 
