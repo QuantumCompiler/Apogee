@@ -18,6 +18,7 @@
 - 2026-10-11 — Depth is exactly one: a delegate cannot delegate (the cap that keeps the budget arithmetic and the narration readable; a real need for two becomes its own item's evidence).
 - 2026-10-11 — The sub-session runs on the session's own model unless the call names a **role** (resolved through the one resolver) — never a backend by name from the model's mouth.
 - 2026-10-11 — The sub-session's transcript is the tool call's detail inside the parent's record, never a saved chat.
+- 2026-10-11 — **The parent's checker now carries the session's permission mode** (39b shipped the same day, recorded here by the pre-MR docs pass): `make_permission_checker` reads `SessionApprovals::mode` at each call, so a delegate sharing it inherits the mode as it stands when each sub-call reaches the gate -- plan mode refuses the sub-session's writers too, dont-ask its asks, bypass asks nothing, and a deny wins in every mode. A mode's refusal reason reaches the sub-session's tool results through `DispatchContext::refusal` (`mode_refusal`), and plan mode's turn note (`plan_note`) is the parent's to hand the sub-session's system prompt, or the sub-session plans blind. `ToolGate::approvals` is the handle on the mode.
 
 **Open calls:**
 - [default: caps — 8 sub-turns and a token budget named beside it; the tool result reports spend either way.]
