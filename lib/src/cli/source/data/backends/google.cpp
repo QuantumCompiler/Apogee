@@ -121,6 +121,13 @@ std::unique_ptr<GoogleProvider> GoogleProvider::from_config(const std::string& b
         std::move(options), std::make_unique<HttpClient>(std::make_unique<CurlTransport>()));
 }
 
+harness::ModelBehavior GoogleProvider::model_behavior() const {
+    // `includeThoughts` streams Gemini's thought summaries, not its thinking.
+    harness::ModelBehavior behavior;
+    behavior.reasoning_summarized = true;
+    return behavior;
+}
+
 std::string_view GoogleProvider::backend_name() const noexcept {
     return options_.backend_name;
 }

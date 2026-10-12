@@ -441,6 +441,37 @@ TEST_CASE("the shell's menu finds /perm- loosely, and the arrows and Enter choos
     CHECK(chat.failure.empty());
 }
 
+TEST_CASE("the shell draws a local model's reasoning as the utility model's line, then folds it",
+          "[cli][tui][session][summary]") {
+    // 43 end to end: the chat model reasons for a couple of seconds; the
+    // helper, the utility model -- local and not the chat model -- writes
+    // the line, which the shell draws in the reasoning's place.
+    const std::string reasoning(480, 'r');
+    Conversation chat{nlohmann::json{
+        {"turns", {{{"text", "the answer"}, {"reasoning", reasoning}, {"delay_ms", 40}}}}}};
+    std::ofstream{chat.home.home() / "helper.json", std::ios::binary}
+        << nlohmann::json{{"turns", {{{"text", "Tracing the bug."}}}}}.dump();
+    std::ofstream{chat.home.config_path(), std::ios::binary}
+        << "{\n  \"backends\": {\"local\": {\"type\": \"mock\", \"model_path\": "
+        << nlohmann::json((chat.home.home() / "script.json").generic_string()).dump()
+        << "},\n    \"helper\": {\"type\": \"mock\", \"model_path\": "
+        << nlohmann::json((chat.home.home() / "helper.json").generic_string()).dump()
+        << "}},\n  \"models\": {\"default\": \"local\", \"default_utility\": \"helper\"}\n}\n";
+    chat.open();
+    chat.until([&chat]() { return chat.view.waiting_for_line(); }, "the session reading");
+    chat.send("why does it fail?");
+    chat.until([&chat]() { return has(chat.frame(), "Tracing the bug"); }, "the line drawn");
+    const std::string thinking = chat.frame();
+    CHECK(has(thinking, "✻ Thinking…"));
+    CHECK_FALSE(has(thinking, "rrrrrrrr"));  // never the reasoning itself
+    chat.until([&chat]() { return has(chat.frame(), "the answer"); }, "the answer");
+    const std::string answered = chat.frame();
+    CHECK(has(answered, "✻ Thought for "));
+    CHECK_FALSE(has(answered, "Tracing the bug"));
+    chat.finish();
+    CHECK(chat.failure.empty());
+}
+
 TEST_CASE("a session grant writes nothing and dies with the session", "[cli][tui][session]") {
     Conversation chat{kWriteThenAnswer};
     const std::string before = slurp(chat.home.config_path());

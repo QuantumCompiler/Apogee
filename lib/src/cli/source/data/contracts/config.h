@@ -702,6 +702,17 @@ struct AgentConfig {
     std::string save_subdir;
 };
 
+/// How the terminal and the shell draw a turn's reasoning while it streams
+/// (43): `summary`, one line of what it is doing, kept current by the utility
+/// model; `raw`, the reasoning itself.
+enum class ThinkingDisplay : std::uint8_t { Summary, Raw };
+
+/// "summary", "raw".
+[[nodiscard]] std::string_view to_string(ThinkingDisplay display) noexcept;
+/// The display a word names, or unset.
+[[nodiscard]] std::optional<ThinkingDisplay> thinking_display_from_string(
+    std::string_view text) noexcept;
+
 /// The `ui:` section -- how a terminal shows what Apogee prints.
 struct UiConfig {
     /// Render answers' Markdown on a terminal (bold, lists, tables, code
@@ -709,6 +720,10 @@ struct UiConfig {
     /// model's text as written; this only chooses what a terminal shows.
     /// `--raw` turns it off for one run.
     bool markdown = true;
+    /// How a turn's reasoning is drawn while it streams (43). The summary is
+    /// the default; `/thinking-display` flips it for a session. Machine mode
+    /// and `serve` carry the reasoning as it streams, whatever this says.
+    ThinkingDisplay thinking_display = ThinkingDisplay::Summary;
 };
 
 /// The `knowledge:` section -- the organizational knowledge layer's two

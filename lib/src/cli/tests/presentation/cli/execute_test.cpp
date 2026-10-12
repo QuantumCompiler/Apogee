@@ -705,51 +705,55 @@ TEST_CASE("execute's table is what its /help, completion and dispatch all read",
 }
 
 TEST_CASE("execute's /help, golden", "[execute][completer]") {
-    CHECK(c::chat_help_lines(0, c::SessionMode::Execute) ==
-          std::vector<std::string>{
-              "  /help                     List these commands",
-              "  /model [backend|model]    Show the backend answering, or switch: a backend, a "
-              "roster model, or backend:model",
-              "  /models                   List the configured backends",
-              "  /suite [name]             Show the suite and what its members hold, or switch "
-              "to another (then --force, --warm)",
-              "  /symphonies               List the symphonies /play can play",
-              "  /play <symphony> [input]  Play a symphony on the input: its stages on the "
-              "suite's members, its output this session's answer",
-              "  /system <text>            Replace the system prompt",
-              "  /temperature <number>     Set the sampling temperature",
-              "  /think [on|off|auto]      Show or set whether the model thinks first: on, off, "
-              "or auto per question",
-              "  /effort [level|auto]      Show or set how hard the model thinks: low, medium, "
-              "high, xhigh or max; auto leaves it to the model",
-              "  /max-tokens <number>      Cap each answer's length in tokens",
-              "  /compact                  Summarise the conversation so far, to free context",
-              "  /title <name>             Rename this chat",
-              "  /retriever [mode]         Show or set how documents are searched: auto, "
-              "lexical, vector or hybrid",
-              "  /rerank [backend]         Show or set the model that reranks search results, "
-              "or off, or auto",
-              "  /branch [ref]             Show or set the branch under review: head, "
-              "base..head, or off",
-              "  /capture [status|link]    Save this conversation as a knowledge record",
-              "  /check                    Have the suite's verifier check the last answer, once",
-              "  /attach <path>            Attach a file, folder or glob: inlined when it fits, "
-              "retrieved when not (then --graph=code|off)",
-              "  /attachments              List what is attached",
-              "  /detach <name>            Detach an attachment",
-              "  /recall [on|off]          Show or set whether turns recall earlier chats",
-              "  /private                  Never summarise this chat for recall",
-              "  /allow [tool|website]     Allow a tool or website for this chat; alone, list "
-              "each answer",
-              "  /deny <tool|website>      Refuse a tool or website for this chat, without "
-              "asking",
-              "  /revoke <tool|website>    Forget this chat's answer for a tool or website",
-              "  /permissions              List each tool's answer and where it comes from",
-              "  /permission-mode [mode]   Show or set how much runs without asking: manual, "
-              "accept-edits, plan, dont-ask or bypass (Shift+Tab cycles)",
-              "  /exit                     Save and leave",
-              "  /quit                     Save and leave",
-          });
+    CHECK(
+        c::chat_help_lines(0, c::SessionMode::Execute) ==
+        std::vector<std::string>{
+            "  /help                            List these commands",
+            "  /model [backend|model]           Show the backend answering, or switch: a backend, "
+            "a roster model, or backend:model",
+            "  /models                          List the configured backends",
+            "  /suite [name]                    Show the suite and what its members hold, or "
+            "switch to another (then --force, --warm)",
+            "  /symphonies                      List the symphonies /play can play",
+            "  /play <symphony> [input]         Play a symphony on the input: its stages on the "
+            "suite's members, its output this session's answer",
+            "  /system <text>                   Replace the system prompt",
+            "  /temperature <number>            Set the sampling temperature",
+            "  /think [on|off|auto]             Show or set whether the model thinks first: on, "
+            "off, or auto per question",
+            "  /effort [level|auto]             Show or set how hard the model thinks: low, "
+            "medium, high, xhigh or max; auto leaves it to the model",
+            "  /thinking-display [summary|raw]  Show or set how reasoning is drawn while it "
+            "streams: a summary line, or raw",
+            "  /max-tokens <number>             Cap each answer's length in tokens",
+            "  /compact                         Summarise the conversation so far, to free context",
+            "  /title <name>                    Rename this chat",
+            "  /retriever [mode]                Show or set how documents are searched: auto, "
+            "lexical, vector or hybrid",
+            "  /rerank [backend]                Show or set the model that reranks search results, "
+            "or off, or auto",
+            "  /branch [ref]                    Show or set the branch under review: head, "
+            "base..head, or off",
+            "  /capture [status|link]           Save this conversation as a knowledge record",
+            "  /check                           Have the suite's verifier check the last answer, "
+            "once",
+            "  /attach <path>                   Attach a file, folder or glob: inlined when it "
+            "fits, retrieved when not (then --graph=code|off)",
+            "  /attachments                     List what is attached",
+            "  /detach <name>                   Detach an attachment",
+            "  /recall [on|off]                 Show or set whether turns recall earlier chats",
+            "  /private                         Never summarise this chat for recall",
+            "  /allow [tool|website]            Allow a tool or website for this chat; alone, list "
+            "each answer",
+            "  /deny <tool|website>             Refuse a tool or website for this chat, without "
+            "asking",
+            "  /revoke <tool|website>           Forget this chat's answer for a tool or website",
+            "  /permissions                     List each tool's answer and where it comes from",
+            "  /permission-mode [mode]          Show or set how much runs without asking: manual, "
+            "accept-edits, plan, dont-ask or bypass (Shift+Tab cycles)",
+            "  /exit                            Save and leave",
+            "  /quit                            Save and leave",
+        });
 }
 
 TEST_CASE("/play completes the symphonies; execute's /suite completes no off",

@@ -81,7 +81,9 @@ struct ClaudeCliInvocation {
 
 [[nodiscard]] std::vector<std::string> build_arguments(const ClaudeCliInvocation& invocation);
 
-class ClaudeCliProvider final : public harness::LLMProvider, public harness::StatusReporting {
+class ClaudeCliProvider final : public harness::LLMProvider,
+                                public harness::StatusReporting,
+                                public harness::ModelBehaviorReporting {
 public:
     /// Starts a child. Injected so the whole provider is testable without the
     /// real CLI — no subscription spend, and failure modes (a child that dies
@@ -122,6 +124,8 @@ public:
     ~ClaudeCliProvider() override;
 
     [[nodiscard]] std::string_view backend_name() const noexcept override;
+    /// Its reasoning is the vendor's own summary (43): shown as it is.
+    [[nodiscard]] harness::ModelBehavior model_behavior() const override;
 
     [[nodiscard]] harness::ChatResponse chat(
         const harness::ChatRequest& request,

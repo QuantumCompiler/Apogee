@@ -9,8 +9,10 @@
 #include <string>
 #include <vector>
 
+#include "backends/claude_cli.h"
 #include "backends/codex_cli.h"
 #include "backends/factory.h"
+#include "backends/gemini_cli.h"
 #include "backends/mock.h"
 #include "backends/provider_cache.h"
 #include "contracts/config.h"
@@ -221,6 +223,72 @@ backends:
     CHECK(harness.pin_model("helper", ""));
     CHECK(harness.config().find_backend("helper")->model.empty());
     CHECK_FALSE(harness.pin_model("ghost", "mock-pro"));
+}
+
+TEST_CASE("the built providers say whose reasoning is already its vendor's summary",
+          "[backends][factory][behavior][summary]") {
+    // 43: the cloud APIs and the vendor CLIs stream a summary of the
+    // reasoning, never the chain of thought -- shown as it is; Claude 3.7
+    // streamed its reasoning whole, and the mock, a local model's stand-in,
+    // says nothing, so its raw reasoning is summarised.
+    Harness harness{config_from(R"(
+backends:
+  claude:
+    type: anthropic
+    api_key: sk-ant-test
+    model: claude-sonnet-5
+  claude37:
+    type: anthropic
+    api_key: sk-ant-test
+    model: claude-3-7-sonnet-20250219
+  gpt:
+    type: openai
+    api_key: sk-test
+  gemini:
+    type: google
+    api_key: AIza-test
+  local:
+    type: mock
+)")};
+    REQUIRE(build_providers(harness, no_env()).constructed_count() == 5);
+    CHECK(harness.model_behavior_for("claude").reasoning_summarized);
+    CHECK_FALSE(harness.model_behavior_for("claude37").reasoning_summarized);
+    CHECK(harness.model_behavior_for("gpt").reasoning_summarized);
+    CHECK(harness.model_behavior_for("gemini").reasoning_summarized);
+    CHECK_FALSE(harness.model_behavior_for("local").reasoning_summarized);
+
+    // The vendor CLIs, each over a fake child: built by hand, as the factory
+    // would need each one installed.
+    Harness clis{config_from(R"(
+backends:
+  claude-cli:
+    type: claude-cli
+  codex:
+    type: codex-cli
+  gemini-cli:
+    type: gemini-cli
+)")};
+    auto spawner = std::make_shared<apogee::testing::FakeSpawner>();
+    const auto spawn = [spawner](const apogee::platform::ChildCommand& command,
+                                 std::string& error) { return (*spawner)(command, error); };
+    apogee::backends::ClaudeCliProvider::Options claude_cli;
+    claude_cli.backend_name = "claude-cli";
+    clis.register_provider("claude-cli", std::make_shared<apogee::backends::ClaudeCliProvider>(
+                                             std::move(claude_cli), spawn));
+    apogee::backends::CodexCliProvider::Options codex_cli;
+    codex_cli.backend_name = "codex";
+    clis.register_provider(
+        "codex", std::make_shared<apogee::backends::CodexCliProvider>(std::move(codex_cli), spawn));
+    apogee::backends::GeminiCliProvider::Options gemini_cli;
+    gemini_cli.backend_name = "gemini-cli";
+    clis.register_provider("gemini-cli",
+                           std::make_shared<apogee::backends::GeminiCliProvider>(
+                               std::move(gemini_cli), spawn, [] { return std::string{"id"}; }));
+    clis.use_default_router();
+    for (const char* name : {"claude-cli", "codex", "gemini-cli"}) {
+        INFO(name);
+        CHECK(clis.model_behavior_for(name).reasoning_summarized);
+    }
 }
 
 TEST_CASE("the Codex CLI's catalog is a capability the Harness finds; a mock has none",

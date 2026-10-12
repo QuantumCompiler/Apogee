@@ -162,6 +162,13 @@ std::unique_ptr<ClaudeCliProvider> ClaudeCliProvider::from_config(
         });
 }
 
+harness::ModelBehavior ClaudeCliProvider::model_behavior() const {
+    // The CLI passes on the API's thinking blocks: a summary of the reasoning.
+    harness::ModelBehavior behavior;
+    behavior.reasoning_summarized = true;
+    return behavior;
+}
+
 std::string_view ClaudeCliProvider::backend_name() const noexcept {
     return options_.backend_name;
 }

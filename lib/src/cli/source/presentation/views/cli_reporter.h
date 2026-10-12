@@ -62,6 +62,14 @@ public:
     void on_thinking() override;
     void on_thinking_token(std::string_view chunk) override;
     void on_thinking_budget_reached() override;
+    void on_thinking_summary(std::string_view line) override;
+    void on_thinking_raw(std::string_view why) override;
+
+    /// Draws the reasoning as its one-line summary, or as it streams (43).
+    void set_thinking_summarized(bool on) noexcept {
+        thinking_.set_summarized(on);
+    }
+
     /// A line that stays, said during a turn: above the thinking block when
     /// one is open, so the block's rows stay its own (26n); else as any
     /// other line.

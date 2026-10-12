@@ -170,6 +170,13 @@ std::string CodexCliProvider::codex_effort(const harness::Thinking& thinking) {
     return {};
 }
 
+harness::ModelBehavior CodexCliProvider::model_behavior() const {
+    // Codex's reasoning items are its summaries of the reasoning.
+    harness::ModelBehavior behavior;
+    behavior.reasoning_summarized = true;
+    return behavior;
+}
+
 std::string_view CodexCliProvider::backend_name() const noexcept {
     return options_.backend_name;
 }

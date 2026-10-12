@@ -69,6 +69,14 @@ agent::ConfirmFn TerminalOutput::confirm_fn(std::filesystem::path config_path,
                                std::move(approvals));
 }
 
+bool TerminalOutput::draws_reasoning() const {
+    return reporter_options_.decorate && reporter_options_.verbosity != ansi::Verbosity::Verbose;
+}
+
+void TerminalOutput::set_thinking_summarized(bool on) {
+    reporter_.set_thinking_summarized(on);
+}
+
 std::function<bool(const std::string&)> TerminalOutput::ask_yes_no() {
     // A pipe cannot be asked, so what needs a yes is refused there.
     if (!platform::is_terminal(platform::StandardStream::In)) {

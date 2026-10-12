@@ -994,6 +994,37 @@ TEST_CASE(
     CHECK(complete.run({"complete", "--effort", "low", "--think-budget", "64", "hello"}) != 0);
 }
 
+TEST_CASE("/thinking-display says who writes the line, and flips the display for the chat",
+          "[chat][cli][thinking][summary]") {
+    // 43: chatty's reasoning, by the helper -- the utility model, local and
+    // not the chat model.
+    HelperChat chat{texts({"fine"}), {"Title"}};
+    REQUIRE(chat.run({"chat"},
+                     "/thinking-display\n/thinking-display raw\n"
+                     "/thinking-display sideways\n/thinking-display\n") == 0);
+    const std::string said = chat.out + chat.err;
+    INFO(said);
+    CHECK(said.find("thinking display: summary -- a line of what it is doing, written by helper "
+                    "(summary or raw)") != std::string::npos);
+    CHECK(said.find("thinking display: raw -- the reasoning as it streams\n") != std::string::npos);
+    CHECK(said.find("not a thinking display: 'sideways' (summary or raw)") != std::string::npos);
+    CHECK(said.find("thinking display: raw -- the reasoning as it streams (summary or raw)") !=
+          std::string::npos);
+    REQUIRE(chat.run({"config", "get", "ui.thinking_display"}) == 0);
+    CHECK(chat.out == "summary\n");
+
+    // The config's default, read and said; and a word outside the two refused.
+    HelperChat raw{texts({"fine"}), {"Title"}, "", "ui:\n  thinking_display: raw\n"};
+    REQUIRE(raw.run({"chat"}, "/thinking-display\n") == 0);
+    CHECK((raw.out + raw.err).find("thinking display: raw") != std::string::npos);
+    REQUIRE(raw.run({"config", "get", "ui.thinking_display"}) == 0);
+    CHECK(raw.out == "raw\n");
+    HelperChat bad{texts({"fine"}), {"Title"}, "", "ui:\n  thinking_display: sideways\n"};
+    CHECK(bad.run({"chat"}, "") != 0);
+    CHECK(bad.err.find("ui.thinking_display: unknown value 'sideways' (accepted: summary, raw)") !=
+          std::string::npos);
+}
+
 TEST_CASE("complete takes the same thinking flags, and refuses a bad one",
           "[chat][cli][thinking][helpers]") {
     HelperChat chat{texts({"391"}), {"yes"}};

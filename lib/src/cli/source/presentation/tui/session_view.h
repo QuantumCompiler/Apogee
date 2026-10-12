@@ -100,6 +100,9 @@ public:
     /// What is typed completes through `suggest` -- chat's own completer,
     /// the one command table's rows and values.
     void set_completion(commands::Suggester suggest);
+    /// Draws a turn's reasoning as its one-line summary, or as it streams
+    /// (43).
+    void set_thinking_summarized(bool on);
     /// Shift+Tab hands the conversation's `next` (39b: the session's
     /// permission mode moved on), and the row under the input shows `label`,
     /// read as each frame is drawn -- empty for no row. Both are called on

@@ -18,6 +18,7 @@
 #include "agentloop/member_call.h"
 #include "agentloop/query_rewrite.h"
 #include "agentloop/rag.h"
+#include "agentloop/reasoning_summary.h"
 #include "agentloop/rerank.h"
 #include "agentloop/retriever.h"
 #include "agentloop/review_context.h"
@@ -1431,6 +1432,15 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     };
     const std::unique_ptr<LineReader> reader = out.line_reader(std::move(reader_options));
 
+    // How the reasoning is drawn while it streams (43): the config's, flipped
+    // for this chat by `/thinking-display`. A summary is asked for only where
+    // the front end draws the reasoning at all.
+    harness::ThinkingDisplay thinking_display = config.ui.thinking_display;
+    const auto summarizing = [&thinking_display, &out]() {
+        return thinking_display == harness::ThinkingDisplay::Summary && out.draws_reasoning();
+    };
+    out.set_thinking_summarized(summarizing());
+
     // --- capture: this conversation as one knowledge record --------------
     //
     // The loaded model is the clerk -- no second backend, no second load
@@ -1976,6 +1986,39 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                                        argument + "' (on, off or auto)");
                     }
                     break;
+                case ChatVerb::ThinkingDisplay: {
+                    // How the reasoning is drawn while it streams (43), for
+                    // this chat; the route says who writes the line, or why
+                    // none can be had, as the loop will find it.
+                    if (!argument.empty()) {
+                        const std::optional<harness::ThinkingDisplay> chosen =
+                            harness::thinking_display_from_string(argument);
+                        if (!chosen.has_value()) {
+                            out.print_line(style.tag(ansi::Role::Error) +
+                                           " not a thinking display: '" + argument +
+                                           "' (summary or raw)");
+                            break;
+                        }
+                        thinking_display = *chosen;
+                        out.set_thinking_summarized(summarizing());
+                    }
+                    std::string line =
+                        "thinking display: " + std::string{harness::to_string(thinking_display)};
+                    if (thinking_display == harness::ThinkingDisplay::Raw) {
+                        line += " -- the reasoning as it streams";
+                    } else {
+                        const agentloop::SummaryRoute route = agentloop::route_summary(
+                            harness, session.backend, named_utility(harness.config()));
+                        line += route.vendor ? " -- this model's reasoning is its vendor's own "
+                                               "summary, shown as it is"
+                                : !route.model.empty()
+                                    ? " -- a line of what it is doing, written by " + route.model
+                                    : " -- but the reasoning shows as it streams: " + route.why_not;
+                    }
+                    out.print_line(style.tag(ansi::Role::Apogee) + " " + line +
+                                   (argument.empty() ? " (summary or raw)" : ""));
+                    break;
+                }
                 case ChatVerb::Effort: {
                     // How hard the model thinks (39a): a level stands in for
                     // the session's budget, and asking for one turns thinking
@@ -2208,7 +2251,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     // one (26n): never inside its rows.
                     out.keep_line(style.tag(ansi::Role::Warning) + " " + message);
                 },
-                rag_settings, review_note, &attached, &recall, turn.token);
+                rag_settings, review_note, &attached, &recall, turn.token, summarizing());
         }
         title.start_if_due(session);
         if (session.compactions != saved_compactions) {

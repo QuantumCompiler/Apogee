@@ -75,6 +75,9 @@ constexpr std::array kCommands{
                     "Show or set how hard the model thinks: low, medium, high, xhigh or max; "
                     "auto leaves it to the model",
                     ArgumentValues::EffortLevels},
+    ChatCommandSpec{"thinking-display", ChatVerb::ThinkingDisplay, "[summary|raw]",
+                    "Show or set how reasoning is drawn while it streams: a summary line, or raw",
+                    ArgumentValues::ThinkingDisplays},
     ChatCommandSpec{"max-tokens", ChatVerb::MaxTokens, "<number>",
                     "Cap each answer's length in tokens"},
     ChatCommandSpec{"compact", ChatVerb::Compact, "",
@@ -430,6 +433,10 @@ std::vector<NamedChoice> argument_choices(ArgumentValues values,
             choices.push_back({"on", "Think before every answer"});
             choices.push_back({"off", "Answer without thinking first"});
             choices.push_back({"auto", "Think when the question needs it"});
+            break;
+        case ArgumentValues::ThinkingDisplays:
+            choices.push_back({"summary", "One line of what the model is doing"});
+            choices.push_back({"raw", "The reasoning itself, as it streams"});
             break;
         case ArgumentValues::EffortLevels:
             for (const harness::Effort effort : harness::kEfforts) {

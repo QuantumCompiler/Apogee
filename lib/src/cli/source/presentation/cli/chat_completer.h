@@ -61,6 +61,7 @@ enum class ChatVerb : std::uint8_t {
     Temperature,
     Think,
     Effort,
+    ThinkingDisplay,
     MaxTokens,
     Compact,
     Title,
@@ -104,6 +105,8 @@ enum class ArgumentValues : std::uint8_t {
     ThinkingModes,
     /// The five effort levels, lowest first, then `auto` (39a).
     EffortLevels,
+    /// `summary`, `raw` (43).
+    ThinkingDisplays,
     /// `on`, `off` (26l).
     OnOff,
     /// The tools this chat asks permission for (26o).

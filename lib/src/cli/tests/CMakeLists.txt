@@ -144,6 +144,7 @@ add_library(apogee_tests_business OBJECT
     business/agentloop/query_rewrite_test.cpp
     business/agentloop/tool_selection_test.cpp
     business/agentloop/tool_summary_test.cpp
+    business/agentloop/reasoning_summary_test.cpp
     business/agentloop/conformance_test.cpp
     business/agent/tool_test.cpp
     business/agent/fetch_url_test.cpp

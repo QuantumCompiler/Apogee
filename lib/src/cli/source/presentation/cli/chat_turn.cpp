@@ -27,15 +27,13 @@ harness::StatusSink progress_sink(agentloop::Reporter& reporter) {
     };
 }
 
-ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& session,
-                             const std::string& input, const agent::ToolRegistry* tools,
-                             agentloop::ToolSelection* selection,
-                             agentloop::MemberCalls* member_calls, const agentloop::AskFn& ask,
-                             const ToolGate& gate, agentloop::Reporter& reporter,
-                             const std::function<void(const std::string&)>& notice,
-                             const RagSettings& rag, const std::string& review_note,
-                             ChatAttachments* attached, ChatRecall* recall,
-                             const harness::CancellationToken& cancellation) {
+ChatTurnResult run_chat_turn(
+    const harness::Harness& harness, logger::Session& session, const std::string& input,
+    const agent::ToolRegistry* tools, agentloop::ToolSelection* selection,
+    agentloop::MemberCalls* member_calls, const agentloop::AskFn& ask, const ToolGate& gate,
+    agentloop::Reporter& reporter, const std::function<void(const std::string&)>& notice,
+    const RagSettings& rag, const std::string& review_note, ChatAttachments* attached,
+    ChatRecall* recall, const harness::CancellationToken& cancellation, bool summarize_reasoning) {
     ChatTurnResult outcome;
     const std::vector<harness::ChatMessage> incoming = build_messages({}, {}, input, {});
     // The turn's model calls besides the chat model's own, said where the
@@ -92,6 +90,10 @@ ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& s
         resolve_thinking(session.params.thinking, session.params.thinking_budget, harness.config(),
                          session.backend, session.params.effort);
     loop_options.thinking_judge = named_utility(harness.config());
+    // The reasoning as one line, by the utility model, for a surface that
+    // draws it (43); the loop decides whether it can.
+    loop_options.summarize_reasoning = summarize_reasoning;
+    loop_options.reasoning_summary_model = named_utility(harness.config());
     loop_options.stream_answer = true;
     // A large tool result is summarised by the utility model, when one is
     // set, before the chat model reads it (26b).

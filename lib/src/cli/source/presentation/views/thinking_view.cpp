@@ -74,8 +74,49 @@ void ThinkingView::write(std::string_view chunk) {
     }
 
     open_block();
+    if (summarized_ && !raw_) {
+        // The summary stands in for the text (43): the block is open and its
+        // clock runs, but the chunk itself is not drawn. Painted once, so
+        // the header shows while the first line is written.
+        const bool first = !reasoned_ || painted_ == 0;
+        reasoned_ = true;
+        if (first) {
+            writer_.with_lock([this](std::ostream& out) { repaint_locked(out); });
+        }
+        return;
+    }
     reasoned_ = true;
     append(chunk);
+}
+
+void ThinkingView::summary(std::string_view line) {
+    if (!options_.active || options_.verbose || line.empty()) {
+        return;
+    }
+    open_block();
+    reasoned_ = true;
+    summary_ = std::string{line};
+    writer_.with_lock([this](std::ostream& out) { repaint_locked(out); });
+}
+
+void ThinkingView::show_raw(std::string_view why) {
+    raw_ = true;
+    if (!options_.active || why.empty()) {
+        return;
+    }
+    const std::string line =
+        cut_to("· reasoning shown in full -- " + std::string{why}, content_width());
+    if (options_.verbose) {
+        writer_.write(options_.style.dim(line) + "\n");
+        return;
+    }
+    open_block();
+    std::string text;
+    if (!tail_.empty() && tail_.back() != '\n') {
+        text += '\n';
+    }
+    text += line + "\n";
+    append(text);
 }
 
 void ThinkingView::open_block() {
@@ -163,7 +204,11 @@ void ThinkingView::append(std::string_view text) {
 }
 
 void ThinkingView::repaint_locked(std::ostream& out) {
-    const std::vector<std::string> rows = ansi::wrap_tail(tail_, content_width(), kTailLines);
+    // The summary, when it shows, is the window's last row (43).
+    const bool summary = showing_summary();
+    const std::vector<std::string> rows =
+        tail_.empty() ? std::vector<std::string>{}
+                      : ansi::wrap_tail(tail_, content_width(), kTailLines - (summary ? 1 : 0));
 
     erase_locked(out);
 
@@ -171,9 +216,12 @@ void ThinkingView::repaint_locked(std::ostream& out) {
     for (const std::string& row : rows) {
         out << "\n  " << options_.style.dim(row);
     }
+    if (summary) {
+        out << "\n  " << options_.style.dim(cut_to(summary_, content_width()));
+    }
     // Deliberately NO trailing newline: erase_locked's row count depends on the
     // cursor still sitting on the last painted row.
-    painted_ = 1 + rows.size();
+    painted_ = 1 + rows.size() + (summary ? 1 : 0);
 }
 
 void ThinkingView::erase_locked(std::ostream& out) {
@@ -192,6 +240,7 @@ void ThinkingView::finish() {
         return;  // idempotent: the end-of-turn path calls this unconditionally
     }
     open_ = false;
+    end_summary();
 
     if (options_.verbose) {
         // No summary to carry the note: the transcript ends with it instead.
@@ -225,6 +274,7 @@ void ThinkingView::abandon() {
     }
     open_ = false;
     tail_.clear();
+    end_summary();
     if (!options_.active || options_.verbose) {
         return;
     }

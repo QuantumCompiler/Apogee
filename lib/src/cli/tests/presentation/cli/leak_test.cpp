@@ -11,6 +11,7 @@
 #include <string_view>
 #include <thread>
 
+#include "agentloop/reasoning_summary.h"
 #include "backends/factory.h"
 #include "cli/auth_cmd.h"
 #include "cli/check.h"
@@ -215,6 +216,16 @@ TEST_CASE("a stored key reaches no listing, report, response, event or log", "[s
     expect_clean("build summary", built.skipped_summary());
     for (const auto& status : built.statuses) {
         expect_clean("build status", status.reason);
+    }
+    // The reasoning summary's route, as `/thinking-display` says it (43):
+    // a backend's name and why, never its key -- with every entry the chat
+    // model, and each the utility model too.
+    for (const auto& [chat, unused] : world.config.backends) {
+        for (const auto& [utility, also_unused] : world.config.backends) {
+            const apogee::agentloop::SummaryRoute route =
+                apogee::agentloop::route_summary(harness, chat, utility);
+            expect_clean("summary route " + chat + " by " + utility, route.model + route.why_not);
+        }
     }
 
     // Whatever any of that published or logged.

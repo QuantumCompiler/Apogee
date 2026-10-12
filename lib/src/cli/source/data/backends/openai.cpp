@@ -175,6 +175,14 @@ std::unique_ptr<OpenAIProvider> OpenAIProvider::from_config(const std::string& b
         std::move(options), std::make_unique<HttpClient>(std::make_unique<CurlTransport>()));
 }
 
+harness::ModelBehavior OpenAIProvider::model_behavior() const {
+    // What streams as reasoning is the reasoning summary asked for (`summary:
+    // auto`), never the chain of thought itself.
+    harness::ModelBehavior behavior;
+    behavior.reasoning_summarized = true;
+    return behavior;
+}
+
 std::string_view OpenAIProvider::backend_name() const noexcept {
     return options_.backend_name;
 }

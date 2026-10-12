@@ -162,6 +162,10 @@ agent::ConfirmFn TuiOutput::confirm_fn(std::filesystem::path config_path,
     };
 }
 
+void TuiOutput::set_thinking_summarized(bool on) {
+    view_.set_thinking_summarized(on);
+}
+
 std::function<bool(const std::string&)> TuiOutput::ask_yes_no() {
     return [this](const std::string& question) {
         const std::string line = style_.tag(ansi::Role::Warning) + " " + question;

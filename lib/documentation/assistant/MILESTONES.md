@@ -7116,3 +7116,59 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) ran 3,164 tes
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3,177 tests ran with none failing, one skipped for want of `pdftotext`. That includes `cli.chat_line_editing` with the bypass question answered in a real terminal. `clang-format` is clean on every touched file.
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3,176 tests ran with none failing, one skipped for want of `pdftotext`. That includes `cli.chat_line_editing` (the terminal's Shift+Tab under a PTY), `cli.tui_shell` and `cli.test_names`. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+## Milestone AJ — The thinking summary
+
+**Goal.** A turn's thinking block showed the model's raw reasoning as it streamed: the terminal painted its last two wrapped lines, and the shell drew its last rows. That is verbose text where a reader wants the gist. This milestone makes one short line of what the model is doing the default, in both front ends, and makes it honest: written only by a model that costs nothing, and the vendor's own summary shown as it is.
+
+### 2026-10-11 — `thinking-summary` (backlog item 43): the gist, not the stream
+
+**What was built**
+
+- [x] **The fourth chore** (`agentloop/reasoning_summary.h/.cpp`), beside the query rewrite, the tool summary and the thinking judge.
+  - **What it asks:** the utility model gets the reasoning's last 3,000 bytes and is asked for one short present-tense phrase of what it is doing now. The reply is a side request with no thinking of its own, at most 40 tokens.
+  - **How the reply is shaped** (`summary_line`): the first line with words in it, without a list mark, quotes, a closing full stop or a leading subject ("It is parsing the problem" becomes "Parsing the problem"). It opens with a capital and is cut at 80 characters, never inside one.
+  - **The cadence** (`ReasoningSummarizer`): the first line once the reasoning has run 1.5 s, each next one 4 s after the last arrived, and only with 120 new bytes since.
+  - **When it fails:** a failed call ends the summaries for that model call. A cancelled one ends them quietly, so the cancel never crosses a backend's callback; the chat model's own stream ends the turn.
+- [x] **One model call at a time** (the user's call, asked when the item was taken): the line is written inside the reasoning stream's own callback, so the chat model's stream waits while it is written. A local provider is never driven from two threads, the rule the background title keeps. The cadence bounds what the pause costs.
+- [x] **The route, decided once** (`route_summary`, read by the loop and by `/thinking-display`):
+  - Reasoning that is already the vendor's own summary is shown as it is. That is `ModelBehavior::reasoning_summarized`, reported by the Anthropic, OpenAI and Google APIs and the Claude Code, Codex and Gemini CLIs, with Anthropic's Claude 3.7, which streams its reasoning whole, the exception.
+  - Raw reasoning is summarised by the utility model only when one is set, it is not the chat model itself, and it is unmetered. A summary is never worth a charge.
+  - Anything else shows the reasoning as it streams, with one dim reason.
+- [x] **Two Reporter events, no wire change.**
+  - `on_thinking_summary(line)` draws the latest line.
+  - `on_thinking_raw(why)` says a model call's reasoning is shown as it streams after all. It fires once a model call, before the chunk, since each call opens its own block, and the reason is said only the first time in a turn.
+  - Both fire only for a run that asked for summaries (`Options::summarize_reasoning`). The session asks only where the front end draws the reasoning: the terminal on a terminal, but not on a pipe or under `--verbose`, which keeps every word; and the shell. Machine mode, `serve`, a task's rounds and a pipe never ask, so they never pay, and their wire is unchanged (ADR 0002, the 26n precedent, skipped and said).
+- [x] **Both painters.**
+  - The terminal's thinking view draws the line as its window's last row, with a side call's row above it, and never draws the reasoning's text. The header shows alone until the first line arrives. A block shown raw streams as before, the reason a dim `· reasoning shown in full -- …` row.
+  - The shell's thinking block draws the same, in the reasoning's place.
+  - The `✻ Thought for Ns` fold is unchanged in both.
+- [x] **The display, and flipping it.**
+  - `ui.thinking_display: summary|raw` sits in the existing `ui:` section beside `ui.markdown`. The summary is the default. A word outside the two is refused, naming both. `config get` reads it, and the starter config documents it.
+  - `/thinking-display [summary|raw]` flips it for the chat in both front ends, from the next turn. Alone, it says who writes the line, or why none can be had: "a line of what it is doing, written by helper", or "the reasoning shows as it streams: no utility model is set to summarise it". Tab completes it in both.
+- [x] **The mock streams reasoning**: a scripted turn's `reasoning`, in chunks with its `delay_ms`, on the thinking channel, never in the answer.
+- [x] **Tests**:
+  - the chore: the request's shape, the line table, the cadence on a hand-moved clock, a failure, a cancel;
+  - the routing table, in a loop over fake providers: a summary on an unmetered member, the vendor's as it is, no utility model, the chat model as its own utility, a metered utility never asked, a failed call, not asked for, no reasoning, and raw said per model call with the reason once;
+  - the built providers' facts;
+  - both painters, summary and raw;
+  - the terminal reporter;
+  - `/thinking-display`'s words, the config's default, a refused word and `config get`;
+  - the completer;
+  - the leak sweep's new surface, the route's words;
+  - the shell end to end: a mock reasoning for two seconds, the helper's line drawn, never the reasoning, then the fold.
+
+**Decisions** (2026-10-11, recorded in the item before it shipped)
+
+- The user's call: the summary is written while the chat model waits -- one model call at a time -- rather than beside it on a second thread.
+- **`ui.thinking_display`, not the item's `cli.thinking_display`**: the `ui:` section is where the terminal's display already lives, and a second section would split one concern. It is hand-edited like `ui.markdown`, with no `config` verb, since no `ui:` setting has one, so no admin twin is owed. `/thinking-display` is the chat's own and is not saved.
+- The chore is not narrated as a side call: the line it writes is what is shown.
+- **The prompt carries no example.** On real weights the first draft's example, "comparing the two config paths", came back verbatim from a 1B utility model. Without it, the same model wrote "It is parsing the problem" and "It is checking the CMake files", whose subject the line drops.
+- The open calls' defaults, taken: vendor summaries are shown as they are, never compressed; the cadence, slice and length are the named constants above; the fallback reason is one dim row, not one per chunk.
+- **On real weights** (optional, one family): the OpenAI family's gpt-oss-20b, from its full weights since no Q4_K_M build is installed, with Meta's Llama 3.2 1B (Q4_K_M) as the utility model, under a PTY.
+  - The prompt was the farmer's-sheep puzzle.
+  - Over 8 s of reasoning, two lines were drawn: "The farmer buys twice as many sheep as remain", then "He buys twice as many as remain".
+  - The answer was unchanged (22), and the turn took 11.6 s.
+  - The other families were skipped, as the guardrail allows.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3,199 tests ran with none failing, one skipped for want of `pdftotext`. That includes `cli.machine_schema_conformance` (the wire byte-stable), `harness.layering`, `cli.tui_shell` and `cli.chat_line_editing`. `clang-format` is clean on every touched file, and `make lint` was not run.

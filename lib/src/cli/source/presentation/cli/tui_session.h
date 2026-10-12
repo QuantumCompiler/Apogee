@@ -62,6 +62,12 @@ public:
     [[nodiscard]] agent::ConfirmFn confirm_fn(std::filesystem::path config_path,
                                               std::shared_ptr<SessionApprovals> approvals) override;
     [[nodiscard]] std::function<bool(const std::string&)> ask_yes_no() override;
+
+    [[nodiscard]] bool draws_reasoning() const override {
+        return true;
+    }
+
+    void set_thinking_summarized(bool on) override;
     [[nodiscard]] std::unique_ptr<LineReader> line_reader(
         EditingLineReader::Options options) override;
 

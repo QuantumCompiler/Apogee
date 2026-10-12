@@ -1428,6 +1428,20 @@ std::optional<PermissionLevel> permission_level_from_string(std::string_view nam
     return std::nullopt;
 }
 
+std::string_view to_string(ThinkingDisplay display) noexcept {
+    return display == ThinkingDisplay::Raw ? "raw" : "summary";
+}
+
+std::optional<ThinkingDisplay> thinking_display_from_string(std::string_view text) noexcept {
+    if (text == "summary") {
+        return ThinkingDisplay::Summary;
+    }
+    if (text == "raw") {
+        return ThinkingDisplay::Raw;
+    }
+    return std::nullopt;
+}
+
 std::string_view to_string(AttachmentGraphMethod method) noexcept {
     switch (method) {
         case AttachmentGraphMethod::Code:
@@ -2018,6 +2032,18 @@ Config parse_config(std::string_view content, std::string_view origin) {
             fail(origin, "ui: expected a mapping");
         }
         config.ui.markdown = boolean(ui["markdown"], origin, "ui.markdown", true);
+        // A word outside the two is refused naming them -- never read as the
+        // default (43).
+        if (const std::string display =
+                scalar(ui["thinking_display"], origin, "ui.thinking_display");
+            !display.empty()) {
+            const std::optional<ThinkingDisplay> parsed = thinking_display_from_string(display);
+            if (!parsed.has_value()) {
+                fail(origin, "ui.thinking_display: unknown value '" + display +
+                                 "' (accepted: summary, raw)");
+            }
+            config.ui.thinking_display = *parsed;
+        }
     }
 
     if (const YAML::Node knowledge = root["knowledge"];

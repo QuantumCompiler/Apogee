@@ -243,6 +243,9 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
     if (key == "ui.markdown") {
         return config.ui.markdown ? "true" : "false";
     }
+    if (key == "ui.thinking_display") {
+        return std::string{harness::to_string(config.ui.thinking_display)};
+    }
     if (key == "attachments.graph") {
         // Unset is each surface's built-in (27p), which no one word names.
         return config.attachments.graph.has_value()
@@ -1242,6 +1245,7 @@ std::vector<std::string> config_keys(const harness::Config& config) {
                                   "tools.fs_root",
                                   "tools.disabled",
                                   "ui.markdown",
+                                  "ui.thinking_display",
                                   "attachments.graph",
                                   "training.python",
                                   "training.trainer",

@@ -115,6 +115,20 @@ void CliReporter::on_thinking_token(std::string_view chunk) {
     thinking_.write(chunk);
 }
 
+void CliReporter::on_thinking_summary(std::string_view line) {
+    if (!thinking_.open()) {
+        status_.stop_spinner();
+    }
+    thinking_.summary(line);
+}
+
+void CliReporter::on_thinking_raw(std::string_view why) {
+    if (!why.empty() && !thinking_.open()) {
+        status_.stop_spinner();
+    }
+    thinking_.show_raw(why);
+}
+
 void CliReporter::on_tool_status(std::string_view detail) {
     settle_answer();
     thinking_.finish();

@@ -684,3 +684,45 @@ TEST_CASE("the picker leaves Shift+Tab to the shell, and a new conversation drop
     (void)stage.shell.press(Key::named(Key::Name::BackTab));
     CHECK(moved == 0);
 }
+
+TEST_CASE("summarised, the thinking block draws the latest line in the reasoning's place",
+          "[tui][session][summary]") {
+    // 43: the shell's painter of the reasoning's one-line summary.
+    Stage stage;
+    stage.view.begin_session();
+    stage.view.set_thinking_summarized(true);
+    apogee::agentloop::Reporter& reporter = stage.view.reporter();
+    reporter.on_thinking();
+    reporter.on_thinking_token("the private chain of thought, word for word");
+    std::string frame = stage.frame();
+    CHECK(has(frame, "✻ Thinking…"));
+    CHECK_FALSE(has(frame, "chain of thought"));
+    reporter.on_thinking_summary("comparing the two config paths");
+    frame = stage.frame();
+    CHECK(has(frame, "\n   comparing the two config paths\n"));
+    reporter.on_thinking_summary("testing the fix");
+    frame = stage.frame();
+    CHECK(has(frame, "testing the fix"));
+    CHECK_FALSE(has(frame, "comparing the two"));
+    // The fold is as ever.
+    reporter.on_answer_start();
+    reporter.on_answer_token("Done.");
+    reporter.on_answer_end();
+    frame = stage.frame();
+    CHECK(has(frame, "✻ Thought for "));
+    CHECK_FALSE(has(frame, "testing the fix"));
+}
+
+TEST_CASE("summarised, a turn shown raw after all draws its reasoning and says why once",
+          "[tui][session][summary]") {
+    Stage stage;
+    stage.view.begin_session();
+    stage.view.set_thinking_summarized(true);
+    apogee::agentloop::Reporter& reporter = stage.view.reporter();
+    reporter.on_thinking();
+    reporter.on_thinking_raw("no utility model is set to summarise it");
+    reporter.on_thinking_token("the reasoning itself");
+    const std::string frame = stage.frame(100, 20);
+    CHECK(has(frame, "reasoning shown in full -- no utility model is set to summarise it"));
+    CHECK(has(frame, "the reasoning itself"));
+}

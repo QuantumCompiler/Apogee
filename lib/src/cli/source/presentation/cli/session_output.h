@@ -73,6 +73,19 @@ public:
         (void)backends;
     }
 
+    /// Whether this surface draws a turn's reasoning as it streams (43): the
+    /// terminal on a terminal -- not on a pipe, nor under `--verbose`, which
+    /// keeps every word -- and the shell. Only there is its one-line summary
+    /// worth a call.
+    [[nodiscard]] virtual bool draws_reasoning() const {
+        return false;
+    }
+
+    /// Draws the reasoning as its one-line summary, or as it streams (43).
+    virtual void set_thinking_summarized(bool on) {
+        (void)on;
+    }
+
     /// Where an MCP server's startup lines go.
     [[nodiscard]] virtual std::function<void(std::string_view)> mcp_status() = 0;
     /// The `ask_user` answerer, or null where nobody can answer.
@@ -137,6 +150,8 @@ public:
     void keep_line(const std::string& line) override;
     void set_resting_label(std::string label) override;
     void on_model_load(std::string_view backend, const harness::StatusEvent& event) override;
+    [[nodiscard]] bool draws_reasoning() const override;
+    void set_thinking_summarized(bool on) override;
 
     [[nodiscard]] std::function<void(std::string_view)> mcp_status() override;
     [[nodiscard]] agentloop::AskFn ask_fn() override;

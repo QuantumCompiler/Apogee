@@ -84,6 +84,22 @@ public:
     /// is painted (26n).
     bool print_above(std::string_view line);
 
+    /// Draws the reasoning as its one-line summary (43): a chunk keeps the
+    /// block open and its clock running, and the window's last row is the
+    /// latest `summary` instead of the reasoning's own text -- until
+    /// `show_raw`. Off, the reasoning itself, as before.
+    void set_summarized(bool on) noexcept {
+        summarized_ = on;
+    }
+
+    /// The reasoning's latest line (43), drawn as the window's last row.
+    void summary(std::string_view line);
+
+    /// This block's reasoning is drawn as it streams after all (43): the
+    /// vendor's own summary (`why` empty), or no line could be had -- said
+    /// once as a dim row of the block.
+    void show_raw(std::string_view why);
+
     /// Whether this block holds reasoning, rather than side calls alone.
     [[nodiscard]] bool reasoned() const noexcept {
         return reasoned_;
@@ -122,6 +138,22 @@ private:
     bool open_ = false;
     bool budget_reached_ = false;
     bool reasoned_ = false;
+    /// The summary display (43): whether it is on, whether this block is
+    /// drawn raw after all, and its latest line.
+    bool summarized_ = false;
+    bool raw_ = false;
+    std::string summary_;
+
+    /// Whether the window's last row is the summary.
+    [[nodiscard]] bool showing_summary() const noexcept {
+        return summarized_ && !raw_ && !summary_.empty();
+    }
+
+    /// Forgets the block's summary state: a block ended.
+    void end_summary() noexcept {
+        raw_ = false;
+        summary_.clear();
+    }
 
     /// Opens a block when none is: its clock, its flags.
     void open_block();

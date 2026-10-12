@@ -47,9 +47,12 @@ struct Block {
     Kind kind = Kind::Line;
     /// User: what was entered. Line: the line, as the core styled it.
     std::string text;
-    // Thinking: the turn's reasoning and its side calls, until the answer.
+    // Thinking: the turn's reasoning and its side calls, until the answer;
+    // and its one-line summary (43), unless it is drawn raw after all.
     std::string reasoning;
     std::vector<std::string> notes;
+    std::string summary;
+    bool raw = false;
     bool open = true;
     bool budget = false;
     Clock::time_point started{};
@@ -153,6 +156,8 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
     std::vector<std::string> history;
     std::optional<std::size_t> history_at;
     commands::Suggester suggest;
+    /// Whether a turn's reasoning is drawn as its one-line summary (43).
+    bool summarize_reasoning = false;
     // The completion menu (2026-10-11): the row chosen and the first shown,
     // for the text before the cursor they were chosen against; whether the
     // person moved the choice; and the line the menu was closed for (Esc, a
@@ -332,7 +337,17 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
                         content.insert(content.begin(), span("  "));
                         wrapped(content, {span("    ")});
                     }
-                    if (!block.reasoning.empty()) {
+                    if (summarize_reasoning && !block.raw) {
+                        // The summary in the reasoning's place (43); nothing
+                        // until its first line.
+                        for (markdown::Row& row :
+                             markdown::wrap({span(block.summary, dim_look())}, width, {span("  ")},
+                                            {span("    ")})) {
+                            if (!block.summary.empty()) {
+                                rows.push_back(std::move(row));
+                            }
+                        }
+                    } else if (!block.reasoning.empty()) {
                         std::vector<markdown::Row> reasoning = markdown::wrap(
                             {span(block.reasoning, dim_look())}, width, {span("  ")}, {span("  ")});
                         const std::size_t keep = std::min(kReasoningRows, reasoning.size());
@@ -903,6 +918,22 @@ public:
         });
     }
 
+    void on_thinking_summary(std::string_view line) override {
+        post([text = std::string{line}](SessionView::State& state) {
+            state.thinking().summary = text;
+        });
+    }
+
+    void on_thinking_raw(std::string_view why) override {
+        post([text = std::string{why}](SessionView::State& state) {
+            Block& block = state.thinking();
+            block.raw = true;
+            if (!text.empty()) {
+                block.notes.push_back("reasoning shown in full -- " + text);
+            }
+        });
+    }
+
     void on_thinking_budget_reached() override {
         post([](SessionView::State& state) { state.thinking().budget = true; });
     }
@@ -1037,6 +1068,10 @@ void SessionView::set_completion(commands::Suggester suggest) {
     state_->post([completer = std::move(suggest)](State& state) mutable {
         state.suggest = std::move(completer);
     });
+}
+
+void SessionView::set_thinking_summarized(bool on) {
+    state_->post([on](State& state) { state.summarize_reasoning = on; });
 }
 
 void SessionView::set_mode_switch(std::function<void()> next, std::function<std::string()> label) {

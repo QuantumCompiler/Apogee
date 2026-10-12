@@ -246,6 +246,14 @@ std::unique_ptr<AnthropicProvider> AnthropicProvider::from_config(
         std::move(options), std::make_unique<HttpClient>(std::make_unique<CurlTransport>()));
 }
 
+harness::ModelBehavior AnthropicProvider::model_behavior() const {
+    // Claude's thinking blocks are a summary of its reasoning from Claude 4 on;
+    // 3.7 Sonnet streamed it whole.
+    harness::ModelBehavior behavior;
+    behavior.reasoning_summarized = !options_.model.starts_with("claude-3-7");
+    return behavior;
+}
+
 std::string_view AnthropicProvider::backend_name() const noexcept {
     return options_.backend_name;
 }
@@ -402,9 +410,8 @@ std::vector<harness::ModelInfo> AnthropicProvider::list_catalog(
         const nlohmann::json parsed = nlohmann::json::parse(response.body, nullptr, false);
         if (parsed.is_discarded() || !parsed.is_object() || !parsed.contains("data") ||
             !parsed["data"].is_array()) {
-            throw harness::ProviderError(
-                options_.backend_name,
-                "the models endpoint did not return its documented shape");
+            throw harness::ProviderError(options_.backend_name,
+                                         "the models endpoint did not return its documented shape");
         }
         for (const nlohmann::json& row : parsed["data"]) {
             if (!row.is_object()) {

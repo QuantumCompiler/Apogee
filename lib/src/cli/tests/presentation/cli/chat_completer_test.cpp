@@ -194,6 +194,11 @@ TEST_CASE("a command's own values follow it", "[chat][completer]") {
     for (const auto& candidate : suggest_chat_input("/effort ", project()).candidates) {
         CHECK_FALSE(candidate.description.empty());
     }
+    // How reasoning is drawn (43): the two, described.
+    CHECK(texts(suggest_chat_input("/thinking-display ", project())) ==
+          std::vector<std::string>{"summary", "raw"});
+    CHECK(texts(suggest_chat_input("/thinking-d", project())) ==
+          std::vector<std::string>{"/thinking-display "});
     CHECK(texts(suggest_chat_input("/recall ", project())) ==
           std::vector<std::string>{"on", "off"});
     // The gated tools for /allow and /deny, the session's answers for /revoke
@@ -384,9 +389,14 @@ backends:
 }
 
 TEST_CASE("/help wraps to the terminal, short of its last column", "[chat][completer]") {
-    // From just wider than the longest usage, `/capture [status|link]`:
-    // narrower than that, no layout keeps a command on one row.
-    for (std::size_t width = 26; width <= 120; ++width) {
+    // From just wider than the longest usage -- its indent, the command and
+    // its argument: narrower than that, no layout keeps a command on one row.
+    std::size_t longest = 0;
+    for (const ChatCommandSpec& spec : chat_commands()) {
+        longest = std::max(longest, apogee::ansi::display_width("  /" + std::string{spec.verb} +
+                                                                " " + std::string{spec.argument}));
+    }
+    for (std::size_t width = longest + 2; width <= 120; ++width) {
         const std::vector<std::string> help = chat_help_lines(width);
         std::string joined;
         for (const std::string& line : help) {
