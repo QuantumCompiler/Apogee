@@ -1,0 +1,28 @@
+# A shipped regime (42b): the harness chores as one gated pipeline -- a small
+# local model distilled into a better suite member for the utility,
+# extraction and tool-calling work Apogee hands its helpers. A shipped regime
+# names kits and tuning only: the teacher and the student are always yours,
+# named at run time (or in a training.regimes entry of your own).
+#
+#   apogee train regime run harness-helpers --teacher <backend> --student <model dir>
+#   apogee train regime show harness-helpers
+#
+# The order is the tuning. utility-chores first: the shortest and most
+# instruction-like chores, which settle the student into answering in the
+# product's own formats. extraction-fidelity next: one JSON object held to a
+# schema, the strictest of those formats. tool-calling last: its calls are
+# JSON too, and the pipeline's cumulative gate replays both earlier kits'
+# evals after it, so a student that learns to call tools at the cost of its
+# formats is stopped there.
+#
+# Counts and iterations are each kit's own (count and iters 0 here):
+# tool-calling's examples are short and its tools and arguments many, so it
+# asks for more of both.
+name: harness-helpers
+description: The harness chores as one gated pipeline -- the utility role's rewrites and summaries, the extraction role's schema-held JSON, then tool calls.
+kits:
+  - utility-chores
+  - extraction-fidelity
+  - tool-calling
+count: 0
+iters: 0

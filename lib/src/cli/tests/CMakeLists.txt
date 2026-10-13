@@ -223,6 +223,7 @@ add_library(apogee_tests_business OBJECT
     business/training/pipeline_test.cpp
     business/training/regime_test.cpp
     business/training/regime_specs_test.cpp
+    business/training/role_kits_test.cpp
     business/training/cycle_test.cpp
     business/tasks/task_test.cpp
     business/tasks/ledger_test.cpp

@@ -1,0 +1,16 @@
+# A shipped regime (42b): the knowledge-capture clerk's chore, for an install
+# that leans on `apogee knowledge` -- a small local model distilled into the
+# member the clerk runs on. One kit: a suite ships only what it needs. A
+# shipped regime names kits and tuning only: the teacher and the student are
+# always yours, named at run time (or in a training.regimes entry of your own).
+#
+#   apogee train regime run knowledge --teacher <backend> --student <model dir>
+#   apogee train regime show knowledge
+#
+# The kit's own count and iterations (count and iters 0 here).
+name: knowledge
+description: The knowledge-capture clerk's chore as one gated stage -- a raw discussion read into a canonical intent record.
+kits:
+  - knowledge-capture
+count: 0
+iters: 0

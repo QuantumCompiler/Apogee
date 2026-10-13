@@ -1,0 +1,280 @@
+# A bundled kit (42b): the extraction role's chores -- one JSON object held
+# to a schema -- in the product's own requests. Mirrors
+# source/business/graph/extract.cpp (extract_system_prompt: the graph clerk's
+# instructions and schema, its system turn carried here before the chunk, a
+# blank line between) and the shipped symphonies' extraction stages
+# (assets/symphonies/extract-facts.yaml, extract-actions.yaml and digest.yaml's
+# card: each stage's prompt up to its variable). Every value an eval item
+# expects is one the schema or the text fixes, checked without a grammar --
+# the fidelity a schema-held answer needs where no grammar holds it.
+# tests/business/training/role_kits_test.cpp holds every prefix to the
+# product byte for byte.
+name: extraction-fidelity
+description: The extraction role's chores in the product's own requests -- the graph clerk's entities and relations, and the shipped symphonies' fact, action and card stages -- each one JSON object held to its schema.
+skill: extraction-fidelity
+
+prefixes:
+  graph-extract: |+
+    You are a disciplined entity-and-relation extraction clerk for a knowledge
+    graph built over a document collection. You are given one text chunk. Your
+    single job is to extract the entities the chunk is actually about and the
+    relations the chunk directly states between them, and emit them as strict JSON.
+
+    You are not a summarizer and not a brainstormer. You record only what the text
+    supports; you do not infer, generalize, or invent. Follow these rules exactly:
+
+    1. ENTITIES. Extract the distinct named things the chunk discusses — at most 12,
+       preferring the most central ones. Each entity has:
+       - name: the canonical display form as the text names it (full name, no
+         pronouns, no leading articles). Use one consistent name per entity.
+       - type: exactly one of: person, organization, system, component, location,
+         event, concept, artifact.
+           person        — an individual human
+           organization  — a company, team, institution, or group
+           system        — a complete product, service, platform, or codebase
+           component     — a part of a system: a module, package, file, tool, API
+           location      — a physical or geographic place
+           event         — something that happened or is scheduled at a time
+           concept       — an abstract idea, principle, policy, or practice
+           artifact      — a produced thing: a document, dataset, model, release
+       - description: one factual sentence about the entity drawn from this chunk
+         only. Leave it an empty string when the chunk names the entity without
+         saying anything about it.
+
+    2. RELATIONS. Extract directed relations the chunk explicitly states — at most
+       16. Each relation has:
+       - source, target: the names of two entities from your entities list,
+         spelled exactly as you listed them. Never reference an entity you did not
+         extract.
+       - relation: a lowercase verb phrase of at most a few words ("operates",
+         "depends on", "was built by", "replaced").
+       - description: one factual sentence of supporting context from the chunk,
+         or an empty string.
+
+    3. RESTRAINT. A chunk about nothing in particular yields few or no entities —
+       empty lists are a correct answer. Do not pad. Do not extract generic words
+       ("the user", "the code", "the meeting") unless the chunk treats them as a
+       specific named thing. Accuracy matters more than coverage.
+
+    Output ONLY the JSON object described by the schema — no commentary, no
+    markdown code fences.
+
+    ---
+    OUTPUT FORMAT
+    Your response MUST be valid JSON conforming to the following JSON Schema. Output only the JSON object -- no surrounding text or markdown code blocks.
+
+    {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Knowledge-graph chunk extraction",
+      "description": "Entities and directed relations extracted from one text chunk. Relations may only reference entities present in the entities list.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entities", "relations"],
+      "properties": {
+        "entities": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "type", "description"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Canonical display name as the text names it — full name, no pronouns, no leading articles."
+              },
+              "type": {
+                "type": "string",
+                "enum": ["person", "organization", "system", "component", "location", "event", "concept", "artifact"]
+              },
+              "description": {
+                "type": "string",
+                "description": "One factual sentence about the entity drawn from this chunk only; empty when the chunk says nothing about it."
+              }
+            }
+          }
+        },
+        "relations": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source", "target", "relation", "description"],
+            "properties": {
+              "source": {
+                "type": "string",
+                "description": "Name of an entity from the entities list, spelled exactly as listed."
+              },
+              "target": {
+                "type": "string",
+                "description": "Name of an entity from the entities list, spelled exactly as listed."
+              },
+              "relation": {
+                "type": "string",
+                "description": "Lowercase verb phrase of at most a few words, e.g. \"operates\", \"depends on\"."
+              },
+              "description": {
+                "type": "string",
+                "description": "One factual sentence of supporting context from the chunk, or empty."
+              }
+            }
+          }
+        }
+      }
+    }
+
+  extract-facts: |
+    Read the text below and record its key facts: what it is about, the people and the places it names, the dates it gives, and each fact it states, one per entry. Leave a list empty when the text names none.
+
+    Text:
+  extract-actions: |
+    Read the notes below and list every action item: something a person agreed or was asked to do. For each, record who will do it, the action starting with a verb, and when it is due. Write "unassigned" when no one took it and "not stated" when no date was given -- never guess either. Leave the list empty when the notes hold no action items.
+
+    Notes:
+  digest-card: |
+    Here is a summary of a passage. Give it a short title, three to five lower-case tags, and a one-line summary of at most twenty words, all drawn from the summary itself.
+
+    Summary:
+
+synth:
+  system: |-
+    You produce supervised fine-tuning examples that teach a small language model the
+    extraction chores Apogee hands its extraction model: reading a text and answering with ONE JSON
+    object that conforms exactly to a given JSON Schema -- every required key present, no extra keys,
+    types as declared, enums from their lists -- with nothing around it (no prose, no code fences).
+
+    "graph-extract": the knowledge-graph clerk. The prompt is its instructions and schema, then one
+    text chunk of 40 to 120 words (an encyclopedia paragraph, design notes, a news item, an incident
+    report, meeting notes). The completion is {"entities": [...], "relations": [...]} following the
+    clerk's rules exactly: at most 12 entities, each {"name", "type", "description"} with the type
+    from the closed list; relations only between listed entities, spelled exactly as listed, with a
+    lowercase verb phrase; empty lists for a chunk about nothing in particular. Keep the completion
+    compact: a handful of entities, short descriptions.
+
+    "extract-facts", "extract-actions", "digest-card": the shipped extraction stages. The prompt is
+    the stage's instruction and then its text -- a passage (facts), meeting notes (actions), or a
+    summary (the card) -- of 30 to 120 words. The completion follows the stage's schema below:
+      extract-facts: {"topic": string, "people": [string], "places": [string], "dates": [string],
+        "facts": [string]} -- every list present, empty when the text names none.
+      extract-actions: {"actions": [{"owner", "action", "due"}]} -- "unassigned" when no one took
+        an action, "not stated" when no date was given, never a guess; an empty list when there are
+        none.
+      digest-card: {"title": string, "tags": [three to five lower-case strings], "one_line": string
+        of at most twenty words}.
+
+    Every value is drawn from the text; nothing is invented.
+  seeds:
+    - "graph-extract: a paragraph about people and the organizations they worked in"
+    - "graph-extract: design notes about services and components that call each other"
+    - "graph-extract: a chunk about nothing in particular (empty lists)"
+    - "graph-extract: a historical event with its place and date"
+    - "extract-facts: a news item or encyclopedia passage"
+    - "extract-actions: meeting notes with owners, unowned tasks and missing dates"
+    - "digest-card: a short summary of an article or report"
+    - "a mix of all four, the hardest cases for schema fidelity"
+  count: 200
+  per_seed: 3
+  temperature: 0.6
+
+train:
+  iters: 400
+  num_layers: 16
+
+eval:
+  - prefix: graph-extract
+    prompt: |-
+      Marie Curie shared the 1903 Nobel Prize in Physics with Pierre Curie and Henri Becquerel for their work on radioactivity. In 1911 she won a second Nobel Prize, in Chemistry, for discovering polonium and radium.
+    expected: "Marie Curie"
+  - prefix: graph-extract
+    prompt: |-
+      The Hoover Dam was built between 1931 and 1936 on the Colorado River, on the border between Nevada and Arizona. Its reservoir, Lake Mead, is the largest in the United States by capacity.
+    expected: "\"location\""
+  - prefix: graph-extract
+    prompt: |-
+      The payments-api service calls the ledger component through a gRPC client. When the ledger is unavailable, payments-api queues the request in Redis and retries it every thirty seconds.
+    expected: "payments-api"
+  - prefix: graph-extract
+    prompt: |-
+      At the March planning offsite, the platform team decided to migrate the build system from Make to Bazel by the end of the quarter. Priya Raman will lead the migration.
+    expected: "Bazel"
+  - prefix: graph-extract
+    prompt: |-
+      Release 4.2 of the mobile app removed the legacy login screen and replaced it with a passkey flow designed by the identity team.
+    expected: "identity team"
+  - prefix: graph-extract
+    prompt: |-
+      It was a quiet week. Nothing much happened, and everyone mostly caught up on email.
+    expected: "[]"
+  - prefix: graph-extract
+    prompt: |-
+      The Treaty of Versailles was signed on 28 June 1919 in the Hall of Mirrors at the Palace of Versailles, formally ending the state of war between Germany and the Allied Powers.
+    expected: "Treaty of Versailles"
+  - prefix: graph-extract
+    prompt: |-
+      Events on the analytics cluster are consumed by the enrichment worker, which writes its output to the warehouse loader. The loader runs nightly at 02:00 UTC.
+    expected: "enrichment worker"
+  - prefix: graph-extract
+    prompt: |-
+      Amara Okafor leads the malaria vaccine trial at the Lagos clinical research centre, which enrolled 4,000 children in 2024.
+    expected: "Amara Okafor"
+  - prefix: graph-extract
+    prompt: |-
+      The style guide requires that every public function have a doc comment. The linter enforces this rule on every pull request.
+    expected: "linter"
+  - prefix: graph-extract
+    prompt: |-
+      Grace Hopper developed one of the first compilers, the A-0 System, in 1952, and later shaped the design of COBOL.
+    expected: "COBOL"
+  - prefix: graph-extract
+    prompt: |-
+      The Berlin office opened in 2019 and now hosts the data engineering team, which owns the customer-events pipeline.
+    expected: "customer-events pipeline"
+  - prefix: extract-facts
+    prompt: |
+      On 20 July 1969, Apollo 11 landed on the Moon. Neil Armstrong and Buzz Aldrin walked on the surface while Michael Collins orbited above in the command module.
+    expected: "1969"
+  - prefix: extract-facts
+    prompt: |
+      Two regional grocery chains, Fairfield Foods and Northway Markets, announced a merger on Monday. The combined company will keep both brands and close no stores.
+    expected: "\"people\""
+  - prefix: extract-facts
+    prompt: |
+      Every July and August, Siena holds the Palio, a horse race around the Piazza del Campo in which ten of the city's seventeen districts compete.
+    expected: "Siena"
+  - prefix: extract-facts
+    prompt: |
+      The library will be closed for renovation from 3 March to 28 April. Returns can be left in the drop box by the north entrance.
+    expected: "\"dates\""
+  - prefix: extract-actions
+    prompt: |
+      Sam will send the budget draft by Friday. We also need someone to book the venue for the launch event.
+    expected: "unassigned"
+  - prefix: extract-actions
+    prompt: |
+      Lena agreed to update the onboarding doc with the new VPN steps. No date was set.
+    expected: "not stated"
+  - prefix: extract-actions
+    prompt: |
+      Decision: we keep the current support vendor. Ravi to renegotiate the support contract before 1 March.
+    expected: "Ravi"
+  - prefix: extract-actions
+    prompt: |
+      General discussion of the roadmap themes for next year. No one took anything on.
+    expected: "\"actions\""
+  - prefix: digest-card
+    prompt: |
+      The city council approved a plan to plant 10,000 street trees over five years, prioritising the neighbourhoods with the least shade.
+    expected: "\"one_line\""
+  - prefix: digest-card
+    prompt: |
+      A study of 2,000 remote workers found that those with a fixed daily schedule reported less burnout than those who worked flexible hours.
+    expected: "\"tags\""
+  - prefix: digest-card
+    prompt: |
+      The team replaced its hand-run release process with an automated pipeline, cutting release time from a day to under an hour.
+    expected: "\"title\""
+  - prefix: digest-card
+    prompt: |
+      Researchers mapped a coral reef off the coast of Belize and found it twice as large as previously estimated.
+    expected: "\"one_line\""

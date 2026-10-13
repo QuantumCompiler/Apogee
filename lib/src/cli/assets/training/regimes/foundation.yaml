@@ -1,4 +1,4 @@
-# A shipped regime (42a): the four bundled kits as one gated pipeline -- the
+# A shipped regime (42a): the four general kits as one gated pipeline -- the
 # foundation a small student needs before anything more specific. A shipped
 # regime names kits and tuning only: the teacher and the student are always
 # yours, named at run time (or in a training.regimes entry of your own).
@@ -18,7 +18,7 @@
 # set them for what each skill needs -- more examples where the form varies
 # most -- and a regime that overrode them would tune every kit alike.
 name: foundation
-description: The four bundled kits as one gated pipeline -- instruction-following, structured output, summarization, then reasoning.
+description: The four general kits as one gated pipeline -- instruction-following, structured output, summarization, then reasoning.
 kits:
   - instruction-following
   - structured-output

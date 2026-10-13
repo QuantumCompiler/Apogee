@@ -116,7 +116,8 @@ struct BundledKit {
     std::string_view text;
 };
 
-/// The four, in the order `apogee datasets kits` shows them.
+/// The eight (the four general ones, and since 42b the four role-chore
+/// kits), in the order `apogee datasets kits` shows them.
 [[nodiscard]] std::span<const BundledKit> bundled_kits();
 
 /// A shipped regime spec (42a): kits and tuning, never a teacher or a

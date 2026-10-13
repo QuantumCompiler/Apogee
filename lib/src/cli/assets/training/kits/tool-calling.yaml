@@ -1,0 +1,185 @@
+# A bundled kit (42b): choosing the one tool call a request needs, against
+# the product's own tool declarations. Each prefix declares a set of the
+# product's tools -- source/business/tools/fs.cpp, shell.cpp and git.cpp, each
+# as the declaration a chat template is handed (name, description, parameters),
+# its sandbox said as /work/project -- and asks for the call as JSON, the
+# loop's own shape for one (a name and its arguments). What it teaches is the
+# call's content: the right tool, and arguments its schema accepts. The
+# wrapper each model family's template puts around a call stays the
+# template's. tests/business/training/role_kits_test.cpp holds every
+# declaration to the product's registry, so a tool's change is a change here,
+# in the same commit.
+name: tool-calling
+description: Choosing the one tool call a request needs -- the right tool and arguments its schema accepts -- against the product's own file, shell and git tool declarations.
+skill: tool-calling
+
+prefixes:
+  read-tools: "You can call the tools below, each declared on one line as it is declared to you. Choose the one call that does what the request asks next, and reply with that call alone, as JSON: {\"name\": \"<tool>\", \"arguments\": {<its arguments, as its parameters declare them>}}\n\nTools:\n{\"description\":\"Read a file and return its contents as text. A file larger than 64 KB is not returned whole: read it in ranges by passing offset (the line to start at, counting from 1) and limit (how many lines), or search it first with grep_files. A ranged read prefixes each line with its number and a tab, which are not part of the file, and returns at most 64 KB. Access is restricted to /work/project and its subdirectories.\",\"name\":\"read_file\",\"parameters\":{\"properties\":{\"limit\":{\"description\":\"How many lines to read\",\"type\":\"integer\"},\"offset\":{\"description\":\"The line to start reading at, counting from 1\",\"type\":\"integer\"},\"path\":{\"description\":\"Absolute path, ~ path, or a path relative to the root\",\"type\":\"string\"}},\"required\":[\"path\"],\"type\":\"object\"}}\n{\"description\":\"List a directory: subdirectories first, then files with their sizes. Access is restricted to /work/project and its subdirectories.\",\"name\":\"list_directory\",\"parameters\":{\"properties\":{\"limit\":{\"description\":\"How many lines to read\",\"type\":\"integer\"},\"offset\":{\"description\":\"The line to start reading at, counting from 1\",\"type\":\"integer\"},\"path\":{\"description\":\"Absolute path, ~ path, or a path relative to the root\",\"type\":\"string\"}},\"required\":[\"path\"],\"type\":\"object\"}}\n{\"description\":\"Find files whose name matches a shell-style pattern (*, ?, [abc]) under a directory, recursively. Hidden directories (.git and the like) are skipped. Access is restricted to /work/project and its subdirectories.\",\"name\":\"search_files\",\"parameters\":{\"properties\":{\"pattern\":{\"description\":\"A filename pattern such as *.md\",\"type\":\"string\"},\"root\":{\"description\":\"Directory to search; defaults to the sandbox root\",\"type\":\"string\"}},\"required\":[\"pattern\"],\"type\":\"object\"}}\n{\"description\":\"Search the contents of files for a regular expression (ECMAScript syntax), recursively, and return each matching line as path:line: text, the path relative to /work/project. Returns at most 100 matches and 16 KB, saying how many more there were. Hidden directories (.git and the like) and binary files are skipped. Access is restricted to /work/project and its subdirectories.\",\"name\":\"grep_files\",\"parameters\":{\"properties\":{\"glob\":{\"description\":\"Search only files whose name matches this pattern, such as *.cpp\",\"type\":\"string\"},\"ignore_case\":{\"description\":\"Match regardless of case\",\"type\":\"boolean\"},\"path\":{\"description\":\"A directory to search, or one file; defaults to the root\",\"type\":\"string\"},\"pattern\":{\"description\":\"A regular expression, such as TODO or ^int main\",\"type\":\"string\"}},\"required\":[\"pattern\"],\"type\":\"object\"}}\n\nRequest: "
+  edit-tools: "You can call the tools below, each declared on one line as it is declared to you. Choose the one call that does what the request asks next, and reply with that call alone, as JSON: {\"name\": \"<tool>\", \"arguments\": {<its arguments, as its parameters declare them>}}\n\nTools:\n{\"description\":\"Read a file and return its contents as text. A file larger than 64 KB is not returned whole: read it in ranges by passing offset (the line to start at, counting from 1) and limit (how many lines), or search it first with grep_files. A ranged read prefixes each line with its number and a tab, which are not part of the file, and returns at most 64 KB. Access is restricted to /work/project and its subdirectories.\",\"name\":\"read_file\",\"parameters\":{\"properties\":{\"limit\":{\"description\":\"How many lines to read\",\"type\":\"integer\"},\"offset\":{\"description\":\"The line to start reading at, counting from 1\",\"type\":\"integer\"},\"path\":{\"description\":\"Absolute path, ~ path, or a path relative to the root\",\"type\":\"string\"}},\"required\":[\"path\"],\"type\":\"object\"}}\n{\"description\":\"Write text to a file, creating it and any missing parent directories. Overwrites existing content. Access is restricted to /work/project and its subdirectories. This operation requires the user's permission.\",\"name\":\"write_file\",\"parameters\":{\"properties\":{\"content\":{\"description\":\"The text to write\",\"type\":\"string\"},\"path\":{\"description\":\"Absolute path, ~ path, or a path relative to the root\",\"type\":\"string\"}},\"required\":[\"path\",\"content\"],\"type\":\"object\"}}\n{\"description\":\"Replace exact text in an existing file, leaving the rest of it byte for byte as it was. old_string must match the file exactly, whitespace and indentation included, and only once: include enough surrounding lines to make it unique, or set replace_all to replace every occurrence. Nothing is changed when it is missing or ambiguous. To create a file, use write_file. Access is restricted to /work/project and its subdirectories. This operation requires the user's permission.\",\"name\":\"edit_file\",\"parameters\":{\"properties\":{\"new_string\":{\"description\":\"The text to put in its place\",\"type\":\"string\"},\"old_string\":{\"description\":\"The exact text to replace\",\"type\":\"string\"},\"path\":{\"description\":\"Absolute path, ~ path, or a path relative to the root\",\"type\":\"string\"},\"replace_all\":{\"description\":\"Replace every occurrence rather than exactly one\",\"type\":\"boolean\"}},\"required\":[\"path\",\"old_string\",\"new_string\"],\"type\":\"object\"}}\n{\"description\":\"Delete a single file permanently. Directories are not accepted -- use the shell tool for recursive removal. Access is restricted to /work/project and its subdirectories. This operation requires the user's permission.\",\"name\":\"delete_file\",\"parameters\":{\"properties\":{\"limit\":{\"description\":\"How many lines to read\",\"type\":\"integer\"},\"offset\":{\"description\":\"The line to start reading at, counting from 1\",\"type\":\"integer\"},\"path\":{\"description\":\"Absolute path, ~ path, or a path relative to the root\",\"type\":\"string\"}},\"required\":[\"path\"],\"type\":\"object\"}}\n\nRequest: "
+  git-tools: "You can call the tools below, each declared on one line as it is declared to you. Choose the one call that does what the request asks next, and reply with that call alone, as JSON: {\"name\": \"<tool>\", \"arguments\": {<its arguments, as its parameters declare them>}}\n\nTools:\n{\"description\":\"Show the working tree status, the current branch and the default branch.\",\"name\":\"git_status\",\"parameters\":{\"properties\":{\"repo\":{\"description\":\"Repository path; defaults to the nearest repository above the working directory\",\"type\":\"string\"}},\"type\":\"object\"}}\n{\"description\":\"Show recent commits: hash, date, subject, author. `range` is a revision range like v1.0..v2.0 or main..HEAD; a bare ref means everything since that ref.\",\"name\":\"git_log\",\"parameters\":{\"properties\":{\"branch\":{\"description\":\"A branch to log instead of the current one\",\"type\":\"string\"},\"n\":{\"description\":\"How many commits (1-200); default 10, or 200 with a range\",\"type\":\"integer\"},\"range\":{\"description\":\"A revision range, or a bare ref meaning <ref>..HEAD\",\"type\":\"string\"},\"repo\":{\"description\":\"Repository path; defaults to the nearest repository above the working directory\",\"type\":\"string\"}},\"type\":\"object\"}}\n{\"description\":\"Show a diff. With `head`/`base`: the merge-base diff base...head (what the head branch adds), resolving refs against `remote` and fetching them when absent. Otherwise `target`: omitted diffs the current branch against the default branch (or shows uncommitted changes when on it); an integer N shows the last N commits; a commit SHA diffs from it to HEAD; any other ref diffs ref...HEAD. `file` restricts the diff to one path.\",\"name\":\"git_diff\",\"parameters\":{\"properties\":{\"base\":{\"description\":\"The base to compare against; defaults to the default branch\",\"type\":\"string\"},\"fetch\":{\"enum\":[\"auto\",\"always\",\"never\"],\"type\":\"string\"},\"file\":{\"description\":\"Restrict to one path\",\"type\":\"string\"},\"head\":{\"description\":\"The branch under review\",\"type\":\"string\"},\"remote\":{\"description\":\"Remote to resolve refs against; default origin\",\"type\":\"string\"},\"repo\":{\"description\":\"Repository path; defaults to the nearest repository above the working directory\",\"type\":\"string\"},\"target\":{\"type\":\"string\"}},\"type\":\"object\"}}\n{\"description\":\"Show one commit (message and file stats); defaults to HEAD.\",\"name\":\"git_show\",\"parameters\":{\"properties\":{\"ref\":{\"description\":\"A commit, tag or branch; default HEAD\",\"type\":\"string\"},\"repo\":{\"description\":\"Repository path; defaults to the nearest repository above the working directory\",\"type\":\"string\"}},\"type\":\"object\"}}\n\nRequest: "
+  shell-tools: "You can call the tools below, each declared on one line as it is declared to you. Choose the one call that does what the request asks next, and reply with that call alone, as JSON: {\"name\": \"<tool>\", \"arguments\": {<its arguments, as its parameters declare them>}}\n\nTools:\n{\"description\":\"Run a shell command and return its output. Commands run through the system shell with a 30-second timeout. Output longer than 16 KB keeps only its first and last 8 KB: redirect a long output to a file and read that in ranges. Default working directory: /work/project. This operation requires the user's permission.\",\"name\":\"run_command\",\"parameters\":{\"properties\":{\"command\":{\"description\":\"The command line to run\",\"type\":\"string\"},\"cwd\":{\"description\":\"Working directory; defaults to the current one\",\"type\":\"string\"}},\"required\":[\"command\"],\"type\":\"object\"}}\n{\"description\":\"Read a file and return its contents as text. A file larger than 64 KB is not returned whole: read it in ranges by passing offset (the line to start at, counting from 1) and limit (how many lines), or search it first with grep_files. A ranged read prefixes each line with its number and a tab, which are not part of the file, and returns at most 64 KB. Access is restricted to /work/project and its subdirectories.\",\"name\":\"read_file\",\"parameters\":{\"properties\":{\"limit\":{\"description\":\"How many lines to read\",\"type\":\"integer\"},\"offset\":{\"description\":\"The line to start reading at, counting from 1\",\"type\":\"integer\"},\"path\":{\"description\":\"Absolute path, ~ path, or a path relative to the root\",\"type\":\"string\"}},\"required\":[\"path\"],\"type\":\"object\"}}\n{\"description\":\"List a directory: subdirectories first, then files with their sizes. Access is restricted to /work/project and its subdirectories.\",\"name\":\"list_directory\",\"parameters\":{\"properties\":{\"limit\":{\"description\":\"How many lines to read\",\"type\":\"integer\"},\"offset\":{\"description\":\"The line to start reading at, counting from 1\",\"type\":\"integer\"},\"path\":{\"description\":\"Absolute path, ~ path, or a path relative to the root\",\"type\":\"string\"}},\"required\":[\"path\"],\"type\":\"object\"}}\n\nRequest: "
+
+synth:
+  system: |-
+    You produce supervised fine-tuning examples that teach a small language model to call
+    tools: given the tools it may call, declared one per line as JSON (name, description, parameters as
+    a JSON Schema), and a person's request, it replies with the one call that does what the request asks
+    next -- the right tool and arguments that satisfy that tool's parameters exactly.
+
+    The prompt is the request alone: one to three sentences a person would type to a coding assistant
+    working in a project -- reading, finding, searching, writing, editing or deleting files, running a
+    command, asking about the repository's git history. Name realistic paths, patterns, commands and
+    refs. The request must be one the declared tools can do in one call.
+
+    The completion is the call alone, exactly in this form, with a space after each colon and comma
+    between keys:
+    {"name": "<tool>", "arguments": {"<parameter>": <value>, ...}}
+    Use only parameters the tool declares, give every required one, use the declared types (integers
+    bare, booleans lowercase), and leave optional ones out unless the request needs them. Paths are
+    relative to the project root. Never add prose, code fences or a second call.
+  seeds:
+    - "read-tools: reading a file or a range of lines"
+    - "read-tools: finding files by name and searching their contents"
+    - "edit-tools: creating, overwriting and editing files with exact old and new text"
+    - "edit-tools: deleting a file, or reading one before changing it"
+    - "git-tools: status, recent history and ranges of commits"
+    - "git-tools: what a branch or one file changed, and one commit"
+    - "shell-tools: running builds, tests and system commands"
+    - "shell-tools: a mix of commands, reads and listings"
+  count: 300
+  per_seed: 8
+  temperature: 0.7
+
+train:
+  iters: 600
+  num_layers: 16
+
+eval:
+  - prefix: read-tools
+    prompt: |-
+      Show me what's in the docs folder.
+    expected: "\"name\": \"list_directory\""
+  - prefix: read-tools
+    prompt: |-
+      Open README.md and show me what it says.
+    expected: "\"name\": \"read_file\""
+  - prefix: read-tools
+    prompt: |-
+      Find every Dockerfile in the project.
+    expected: "\"name\": \"search_files\""
+  - prefix: read-tools
+    prompt: |-
+      Where is the function parse_config defined? Search the code for it.
+    expected: "\"name\": \"grep_files\""
+  - prefix: read-tools
+    prompt: |-
+      Read lines 120 to 160 of src/server/router.cpp.
+    expected: "\"name\": \"read_file\""
+  - prefix: read-tools
+    prompt: |-
+      Which files mention the environment variable DATABASE_URL?
+    expected: "\"name\": \"grep_files\""
+  - prefix: read-tools
+    prompt: |-
+      List the files under tests/integration.
+    expected: "\"name\": \"list_directory\""
+  - prefix: read-tools
+    prompt: |-
+      Find all the YAML files anywhere in the repository.
+    expected: "\"name\": \"search_files\""
+  - prefix: edit-tools
+    prompt: |-
+      Create a file notes/todo.md containing just the heading '# Todo'.
+    expected: "\"name\": \"write_file\""
+  - prefix: edit-tools
+    prompt: |-
+      In src/config.py, change the line DEBUG = True to DEBUG = False.
+    expected: "\"name\": \"edit_file\""
+  - prefix: edit-tools
+    prompt: |-
+      Delete the file build/old_output.log.
+    expected: "\"name\": \"delete_file\""
+  - prefix: edit-tools
+    prompt: |-
+      Show me .env.example before we change anything.
+    expected: "\"name\": \"read_file\""
+  - prefix: edit-tools
+    prompt: |-
+      In utils/stats.py the line `cnt = 0` should read `count = 0`. Fix it.
+    expected: "\"name\": \"edit_file\""
+  - prefix: edit-tools
+    prompt: |-
+      Write a .gitignore that ignores node_modules/ and dist/.
+    expected: "\"name\": \"write_file\""
+  - prefix: edit-tools
+    prompt: |-
+      Remove the stale lock file tmp/deploy.lock.
+    expected: "\"name\": \"delete_file\""
+  - prefix: edit-tools
+    prompt: |-
+      Fix the typo 'recieve' to 'receive' in docs/guide.md -- it appears once.
+    expected: "\"name\": \"edit_file\""
+  - prefix: git-tools
+    prompt: |-
+      What has changed in the working tree?
+    expected: "\"name\": \"git_status\""
+  - prefix: git-tools
+    prompt: |-
+      Show me the last 5 commits.
+    expected: "\"name\": \"git_log\""
+  - prefix: git-tools
+    prompt: |-
+      What does this branch add compared to main?
+    expected: "\"name\": \"git_diff\""
+  - prefix: git-tools
+    prompt: |-
+      Show me commit 4e1c2a9.
+    expected: "\"name\": \"git_show\""
+  - prefix: git-tools
+    prompt: |-
+      Which branch am I on, and is anything uncommitted?
+    expected: "\"name\": \"git_status\""
+  - prefix: git-tools
+    prompt: |-
+      What changed in src/api/handlers.go on this branch?
+    expected: "\"name\": \"git_diff\""
+  - prefix: git-tools
+    prompt: |-
+      List the commits between v1.2.0 and v1.3.0.
+    expected: "\"name\": \"git_log\""
+  - prefix: git-tools
+    prompt: |-
+      What did the latest commit change?
+    expected: "\"name\": \"git_show\""
+  - prefix: shell-tools
+    prompt: |-
+      Run the test suite with make test.
+    expected: "\"name\": \"run_command\""
+  - prefix: shell-tools
+    prompt: |-
+      How much disk space is free? Check with df -h.
+    expected: "\"name\": \"run_command\""
+  - prefix: shell-tools
+    prompt: |-
+      Show me the contents of package.json.
+    expected: "\"name\": \"read_file\""
+  - prefix: shell-tools
+    prompt: |-
+      What's in the scripts directory?
+    expected: "\"name\": \"list_directory\""
+  - prefix: shell-tools
+    prompt: |-
+      Build the project with cmake --build build.
+    expected: "\"name\": \"run_command\""
+  - prefix: shell-tools
+    prompt: |-
+      Print the version of Python installed here.
+    expected: "\"name\": \"run_command\""
+  - prefix: shell-tools
+    prompt: |-
+      Read the Makefile.
+    expected: "\"name\": \"read_file\""
+  - prefix: shell-tools
+    prompt: |-
+      List the top-level folders of the project.
+    expected: "\"name\": \"list_directory\""

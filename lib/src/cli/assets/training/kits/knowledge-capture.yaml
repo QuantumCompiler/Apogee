@@ -1,0 +1,247 @@
+# A bundled kit (42b): the knowledge-capture clerk's chore -- a raw
+# discussion read into one canonical intent record -- in the product's own
+# request. Mirrors source/business/knowledge/clerk.cpp (capture_system_prompt:
+# the clerk's instructions, assets/clerks/capture_prompt.txt, and its schema,
+# capture_schema.json, under the one OUTPUT FORMAT block), its system turn
+# carried here before the raw text, a blank line between. Every value an eval
+# item expects is one the clerk's rules fix: the branch's status, the
+# discipline, a link the text names. tests/business/training/
+# role_kits_test.cpp holds the prefix to the product byte for byte.
+name: knowledge-capture
+description: "The knowledge-capture clerk's chore in the product's own request -- a raw discussion read into one canonical intent record: the why, the decision, its status and discipline, and the link it names."
+skill: knowledge-capture
+
+prefixes:
+  capture: |+
+    You are a disciplined normalization clerk for an organizational knowledge layer.
+    You are given a raw brainstorm, design discussion, or development conversation.
+    Your single job is to extract exactly ONE canonical intent record from it — the
+    durable "why" behind a decision — and emit it as strict JSON.
+
+    You are not a brainstormer and not a summarizer. You preserve reasoning; you do
+    not invent it. Follow these rules exactly:
+
+    1. INTENT (the why). Capture the rationale that explains why the decision was
+       made — the thing that normally evaporates and is missing from tickets and
+       design files later. Prefer the participants' own words; do not pre-summarize
+       the reasoning away into a bland one-liner. If the conversation only states
+       what was done with no why, say so plainly in the intent rather than inventing
+       a rationale.
+
+    2. DECISION (distinct from discussion). State what was actually chosen, not the
+       range of things discussed. Discussion is not decision.
+
+    3. STATUS (the branch marker). Brainstorms are mostly roads not taken. Determine
+       whether the idea this record describes was "shipped" (chosen / implemented),
+       "rejected" (considered and abandoned), or "superseded" (replaced by a later
+       decision). If a conversation contains several competing ideas, write the
+       record for the branch that won and mark it shipped; if you are asked to record
+       an abandoned option, mark it rejected. Never label an abandoned idea shipped.
+
+    4. DISCIPLINE. Classify the originating discipline: program, product, project,
+       ux, or eng. Choose the closest single value.
+
+    5. DOWNSTREAM_LINK (the write-time link). If the conversation references the
+       artifact this decision produced — a ticket ID, a Figma component, a commit, a
+       PR, a file — record it. This is the link that makes the record traceable. If
+       none is present, leave it empty; do not fabricate one.
+
+    6. PROVENANCE. Record the source surface (e.g. claude-code, copilot, chat,
+       meeting, manual) and, separately, attribution (who said it) when clearly
+       identifiable. Keep attribution in its own field; never weave names into the
+       intent or decision text, so attribution can be stripped without losing the
+       reasoning.
+
+    Output ONLY the JSON object described by the schema — no commentary, no markdown
+    code fences. Leave a field as an empty string when the conversation genuinely
+    does not support a value. Accuracy and restraint matter more than completeness.
+
+    ---
+    OUTPUT FORMAT
+    Your response MUST be valid JSON conforming to the following JSON Schema. Output only the JSON object -- no surrounding text or markdown code blocks.
+
+    {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "CanonicalKnowledgeRecord",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One canonical intent record extracted from a raw brainstorm or development conversation. Captures the durable 'why' behind a decision so it can be retrieved later. The system assigns id, raw_ref, and timestamp — do not emit them.",
+      "properties": {
+        "intent": {
+          "type": "string",
+          "description": "The why — the rationale that explains the decision, in the participants' own words where possible. This is the load-bearing field; preserve it verbatim rather than pre-summarizing it away. Required."
+        },
+        "decision": {
+          "type": "string",
+          "description": "What was actually chosen — distinct from the range of options discussed. Discussion is not decision."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["shipped", "rejected", "superseded"],
+          "description": "Which branch this record represents: shipped (chosen/implemented), rejected (considered and abandoned), or superseded (replaced by a later decision). Never label an abandoned idea shipped."
+        },
+        "discipline": {
+          "type": "string",
+          "enum": ["program", "product", "project", "ux", "eng"],
+          "description": "The originating discipline. Choose the closest single value."
+        },
+        "downstream_link": {
+          "type": "string",
+          "description": "The artifact this decision produced — a ticket ID, Figma component, commit, PR, or file path. The write-time link that makes the record traceable. Empty when the conversation references none; do not fabricate."
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Where the record came from. Source and attribution are deliberately separate so attribution can be stripped without losing the chain.",
+          "properties": {
+            "source": {
+              "type": "string",
+              "description": "The source surface, e.g. claude-code, copilot, chat, meeting, manual."
+            },
+            "attribution": {
+              "type": "string",
+              "description": "Who said it, when clearly identifiable. Keep names ONLY here — never in intent or decision."
+            }
+          },
+          "required": ["source"]
+        }
+      },
+      "required": ["intent", "decision", "status", "discipline", "provenance"]
+    }
+
+synth:
+  system: |-
+    You produce supervised fine-tuning examples that teach a small language model the
+    knowledge-capture clerk's chore: reading a raw brainstorm, design discussion, meeting note or
+    development chat and answering with exactly ONE canonical intent record as strict JSON, following
+    the clerk's rules and schema in the prefix -- intent (the why, in the participants' own words,
+    never invented), decision (what was chosen, not what was discussed), status (shipped, rejected or
+    superseded: the branch the record describes), discipline (program, product, project, ux or eng),
+    downstream_link (a ticket, PR, commit, frame or file the text names, else empty -- never made
+    up), and provenance (the source surface, and attribution kept out of intent and decision).
+
+    The prompt is the raw text alone: 30 to 120 words -- a chat excerpt with speakers, meeting notes,
+    a design review, an incident write-up, or a request to "record" a particular branch (an abandoned
+    option, a superseded decision). Vary the disciplines and statuses evenly, and include texts with
+    no rationale (the intent then says so plainly), no artifact link, and several competing ideas.
+
+    The completion is the JSON object only, compact, with every required field.
+  seeds:
+    - "an engineering decision in a chat, with a ticket or PR named"
+    - "a UX decision from a design review or research readout"
+    - "a product scope decision with its reason"
+    - "program or project planning: release trains, phases, freezes"
+    - "a request to record an abandoned option (rejected)"
+    - "a request to record a decision a later one replaced (superseded)"
+    - "a brainstorm with several competing ideas and one winner"
+    - "a terse note that states a decision with no rationale"
+  count: 200
+  per_seed: 3
+  temperature: 0.6
+
+train:
+  iters: 400
+  num_layers: 16
+
+eval:
+  - prefix: capture
+    prompt: |-
+      Ana: should we keep polling the status endpoint or move to webhooks?
+      Ben: polling costs us about 40k requests an hour for nothing.
+      Ana: agreed, webhooks it is. I'll file PLAT-311 for the switch.
+    expected: "PLAT-311"
+  - prefix: capture
+    prompt: |-
+      We tried a global store for the settings page, but it doubled the code for no gain. We're keeping plain local component state there instead.
+    expected: "\"shipped\""
+  - prefix: capture
+    prompt: |-
+      Record the option we abandoned: we considered sharding the users table by region, but cross-region joins turned out to be too common, so we dropped the idea.
+    expected: "\"rejected\""
+  - prefix: capture
+    prompt: |-
+      Record the nightly batch export decision. Context: last year we chose nightly batch exports for the reporting warehouse. This quarter the streaming exporter (ADR-14) replaced them completely.
+    expected: "\"superseded\""
+  - prefix: capture
+    prompt: |-
+      Design review: we moved the primary checkout button to the bottom right because people on phones couldn't reach it with one thumb. See frame Checkout/v3.
+    expected: "\"ux\""
+  - prefix: capture
+    prompt: |-
+      PM sync: we're cutting the referral program from Q3 scope. Activation, not acquisition, is our bottleneck right now, and referrals only help acquisition.
+    expected: "\"product\""
+  - prefix: capture
+    prompt: |-
+      Program review: the three app teams will share one release train every two weeks, so cross-team dependencies land together instead of drifting apart.
+    expected: "\"program\""
+  - prefix: capture
+    prompt: |-
+      Kickoff: we'll deliver the warehouse migration in two phases, read path first, so the cutover stays reversible until the write path is proven.
+    expected: "\"project\""
+  - prefix: capture
+    prompt: |-
+      The flaky timeout came from using wall-clock time for intervals; NTP adjustments made durations negative. Fixed by switching to a monotonic clock in commit 9f2e4b1.
+    expected: "9f2e4b1"
+  - prefix: capture
+    prompt: |-
+      Notes from Tuesday's architecture meeting: we'll keep one database per service rather than a shared schema, so teams can migrate on their own schedules. Source: meeting.
+    expected: "\"meeting\""
+  - prefix: capture
+    prompt: |-
+      Dev chat:
+      Kai: the image resizer keeps running out of memory on large uploads.
+      Noor: let's stream the decode instead of loading the whole file -- memory stays flat.
+      Kai: done, it's in PR #482.
+    expected: "#482"
+  - prefix: capture
+    prompt: |-
+      We are going with a monorepo. Shared tooling and atomic cross-package changes matter more to us than independent versioning, which we rarely used anyway.
+    expected: "\"eng\""
+  - prefix: capture
+    prompt: |-
+      Record the rejected proposal: Ines suggested rewriting the billing service in a new language. We declined -- the risk to invoicing outweighed the speed gain, and the team knows the current stack.
+    expected: "\"rejected\""
+  - prefix: capture
+    prompt: |-
+      UX research readout: participants missed the filter panel when it was collapsed by default, so the panel now opens expanded on desktop.
+    expected: "\"ux\""
+  - prefix: capture
+    prompt: |-
+      Product decision: the free tier keeps three projects, not five. Usage data showed 90% of free users never pass three, and five was cannibalising the starter plan.
+    expected: "\"product\""
+  - prefix: capture
+    prompt: |-
+      Record the session-cookie decision. We originally stored sessions in signed cookies; after the security review we replaced that with server-side sessions in March (SEC-77).
+    expected: "\"superseded\""
+  - prefix: capture
+    prompt: |-
+      Eng sync: retries in the API client are capped at five with jitter, because the uncapped retries took down the auth service during last month's incident. Ticket: API-1290.
+    expected: "API-1290"
+  - prefix: capture
+    prompt: |-
+      Planning notes: the mobile and web teams will freeze features two weeks before each quarterly launch to give QA a stable target. Decided by the program leads.
+    expected: "\"program\""
+  - prefix: capture
+    prompt: |-
+      We picked weekly releases over continuous deploys for the desktop app: installers are slow to roll out, and users complained about constant update prompts.
+    expected: "\"shipped\""
+  - prefix: capture
+    prompt: |-
+      Project update: the data-centre exit slips one month. We'll finish moving the archival storage before the compute, since storage contracts end first.
+    expected: "\"project\""
+  - prefix: capture
+    prompt: |-
+      From the incident review: alert on error rate, not error count, because traffic varies ten times over a day and counts paged us at night for nothing. Runbook: docs/runbooks/alerts.md
+    expected: "docs/runbooks/alerts.md"
+  - prefix: capture
+    prompt: |-
+      Brainstorm: someone floated a dark mode, someone else a redesign of the dashboard, and a third person wanted keyboard shortcuts. We agreed to build keyboard shortcuts first: they were the top request from power users.
+    expected: "\"shipped\""
+  - prefix: capture
+    prompt: |-
+      Chat with the design team -- Mei: icons-only navigation tested badly, people couldn't tell the sections apart. We're keeping text labels under every icon.
+    expected: "\"ux\""
+  - prefix: capture
+    prompt: |-
+      Record the abandoned plan: we explored self-hosting the search cluster, but the on-call load for a team of four was too much, so we stayed on the managed service.
+    expected: "\"rejected\""

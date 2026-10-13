@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -18,6 +19,7 @@
 #include "support/env_guard.h"
 #include "training/kit.h"
 #include "training/mock_trainer.h"
+#include "training/pipeline.h"
 #include "training/regime.h"
 
 /// The regime specs a run can name (42a): the ladder -- a config entry over
@@ -26,7 +28,9 @@
 /// its problems, the two documents, and the shipped `foundation` run whole
 /// over the four bundled kits on the mock trainer: every cumulative gate
 /// passed by a student that answers the evals, and a planted kit the student
-/// fails stopping the pipeline at its own stage.
+/// fails stopping the pipeline at its own stage -- and the two role-chore
+/// regimes (42b) the same way, their kits' prefixes kept on what the teacher
+/// wrote.
 namespace {
 
 using apogee::training::RegimeBook;
@@ -125,7 +129,7 @@ TEST_CASE(
     Fixture fixture;
     RegimeBook book = fixture.book();
     CHECK(book.problems.empty());
-    REQUIRE(book.regimes.size() == 1);
+    CHECK(book.names() == "foundation, harness-helpers, knowledge");  // the shipped, by name
     const RegimeEntry* entry = book.find("foundation");
     REQUIRE(entry != nullptr);
     CHECK(entry->source == RegimeSource::Shipped);
@@ -154,7 +158,7 @@ TEST_CASE(
     REQUIRE(entry != nullptr);
     CHECK(entry->source == RegimeSource::User);
     CHECK(entry->spec.student == "my-student");
-    CHECK(book.regimes.size() == 1);
+    CHECK(book.regimes.size() == 3);
 }
 
 TEST_CASE(
@@ -175,7 +179,7 @@ TEST_CASE(
     CHECK(entry->path.empty());
     CHECK(entry->spec.name == "foundation");
     CHECK(entry->spec.kits == std::vector<std::string>{"reasoning"});
-    CHECK(book.regimes.size() == 1);  // the file it stands over is not listed twice
+    CHECK(book.regimes.size() == 3);  // the file it stands over is not listed twice
 
     // A config-only entry, and files of the user's own -- .yaml and .yml --
     // in that order after the shipped one; a config entry hides its file.
@@ -187,7 +191,7 @@ TEST_CASE(
     write(fixture.dir / "notes.txt", "not a spec");
     book = fixture.book();
     CHECK(book.problems.empty());
-    CHECK(book.names() == "foundation, alpha, zeta, aardvark, beta");
+    CHECK(book.names() == "foundation, harness-helpers, knowledge, alpha, zeta, aardvark, beta");
     REQUIRE(book.find("zeta") != nullptr);
     CHECK(book.find("zeta")->config);
     CHECK(book.find("zeta")->spec.kits == std::vector<std::string>{"reasoning"});
@@ -205,7 +209,7 @@ TEST_CASE("a spec file that does not parse, or names itself otherwise, is left o
     write(fixture.dir / "renamed.yaml", "name: other\nkits: [reasoning]\n");
     write(fixture.dir / "fine.yaml", "kits: [reasoning]\n");
     RegimeBook book = fixture.book();
-    CHECK(book.names() == "foundation, fine");
+    CHECK(book.names() == "foundation, harness-helpers, knowledge, fine");
     REQUIRE(book.problems.size() == 2);
     CHECK(book.problems[0].find("broken.yaml") != std::string::npos);
     CHECK(book.problems[1].find("names itself 'other'") != std::string::npos);
@@ -256,10 +260,10 @@ TEST_CASE("the documents: training.regime for one, the list idiom for the book",
 
     const nlohmann::json list = apogee::training::to_json(book);
     CHECK(list["object"] == "list");
-    REQUIRE(list["data"].size() == 2);
+    REQUIRE(list["data"].size() == 4);
     CHECK(list["data"][0]["name"] == "foundation");
     CHECK_FALSE(list["data"][0].contains("object"));
-    CHECK(list["data"][1]["name"] == "mine");
+    CHECK(list["data"][3]["name"] == "mine");
     REQUIRE(list["problems"].size() == 1);
     CHECK(list["problems"][0].get<std::string>().find("broken.yaml") != std::string::npos);
 }
@@ -358,4 +362,120 @@ TEST_CASE(
     CHECK_FALSE(stopped.stages[2].cumulative_passed);
     CHECK(stopped.stages[2].eval->num_passed == 48);
     CHECK_FALSE(stopped.stages[3].eval.has_value());
+}
+
+TEST_CASE(
+    "harness-helpers and knowledge run their kits as gated pipelines on the mock trainer, "
+    "and a planted kit the student fails stops each at that kit's stage",
+    "[training][regimes][run][role-kits]") {
+    const apogee::testing::TempDir root{"regime-roles-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path kits = root.path() / "kits";
+    OracleTrainer trainer;
+    std::map<std::string, std::vector<std::string>> prompts_of;
+    std::vector<std::string> prefixes;
+    for (const apogee::harness::BundledKit& bundled : apogee::harness::bundled_kits()) {
+        const std::filesystem::path path = kits / (std::string{bundled.name} + ".yaml");
+        write(path, bundled.text);
+        const apogee::training::Kit kit = apogee::training::load_kit(path);
+        for (const apogee::training::EvalItem& item : kit.eval) {
+            trainer.answers[item.prompt] = item.expected;
+            prompts_of[kit.name].push_back(item.prompt);
+        }
+        for (const apogee::training::KitPrefix& prefix : kit.prefixes) {
+            prefixes.push_back(prefix.name);
+        }
+    }
+    const std::filesystem::path snap = root.path() / "snap";
+    write(snap / "config.json", R"({"model_type": "llama"})");
+    write(snap / "model.safetensors", "w");
+    const RegimeBook book =
+        apogee::training::regime_book(apogee::harness::Config{}, root.path() / "regimes");
+
+    const auto run = [&](const std::string& regime, const std::string& run_id) {
+        apogee::training::RegimeRequest request;
+        REQUIRE(book.find(regime) != nullptr);
+        request.spec = book.find(regime)->spec;
+        request.spec.student = "snap";
+        request.kits_dir = kits;
+        request.training_dir = root.path() / "training";
+        request.regime_run_id = run_id;
+        request.work_dir = root.path() / "training" / "regime" / run_id;
+        request.base_model = snap;
+        request.trainer = &trainer;
+        // A teacher naming every prefix there is: each kit keeps its own.
+        request.generate = [counter = std::make_shared<int>(0), &prefixes](
+                               std::string_view, std::string_view, double, int,
+                               const apogee::harness::CancellationToken&) {
+            nlohmann::json examples = nlohmann::json::array();
+            for (const std::string& prefix : prefixes) {
+                for (int i = 0; i < 4; ++i) {
+                    const std::string n = std::to_string(++*counter);
+                    examples.push_back({{"prefix", prefix},
+                                        {"prompt", "input " + n},
+                                        {"completion", "answer " + n}});
+                }
+            }
+            return apogee::training::GenerateOutcome{.ok = true, .text = examples.dump()};
+        };
+        return apogee::training::run_regime(request);
+    };
+
+    struct Case {
+        std::string regime;
+        std::vector<std::string> kits;
+        std::string planted;
+    };
+
+    for (const Case& c : {Case{"harness-helpers",
+                               {"utility-chores", "extraction-fidelity", "tool-calling"},
+                               "tool-calling"},
+                          Case{"knowledge", {"knowledge-capture"}, "knowledge-capture"}}) {
+        INFO(c.regime);
+        trainer.wrong.clear();
+        apogee::training::RegimeOutcome outcome = run(c.regime, c.regime + "-1");
+        INFO(outcome.error);
+        REQUIRE(outcome.ok);
+        REQUIRE(outcome.kits.size() == c.kits.size());
+        std::size_t total = 0;
+        for (std::size_t i = 0; i < c.kits.size(); ++i) {
+            CHECK(outcome.kits[i].kit == c.kits[i]);
+            const apogee::training::Kit loaded =
+                apogee::training::load_kit(kits / (c.kits[i] + ".yaml"));
+            CHECK(outcome.kits[i].examples == loaded.synth.count);  // each kit's own
+            // What the teacher wrote, after the kit's own prefix.
+            std::ifstream in{outcome.kits[i].dataset};
+            std::string line;
+            REQUIRE(std::getline(in, line));
+            const std::string user = nlohmann::json::parse(line)["messages"][0]["content"];
+            CHECK(std::ranges::any_of(loaded.prefixes,
+                                      [&user](const apogee::training::KitPrefix& prefix) {
+                                          return user.starts_with(prefix.text);
+                                      }));
+            total += prompts_of[c.kits[i]].size();
+            const apogee::training::PipelineStageRecord& stage =
+                outcome.pipeline->manifest.stages[i];
+            CHECK(stage.name == c.kits[i]);
+            CHECK(stage.cumulative_passed);
+            REQUIRE(stage.eval.has_value());
+            CHECK(stage.eval->total == static_cast<int>(total));
+            CHECK(stage.eval->num_skipped == 0);
+        }
+
+        // The planted case: the student fails one kit's evals.
+        for (const std::string& prompt : prompts_of[c.planted]) {
+            trainer.wrong.insert(prompt);
+        }
+        outcome = run(c.regime, c.regime + "-2");
+        CHECK_FALSE(outcome.ok);
+        CHECK(outcome.error.find("stage '" + c.planted + "' failed the cumulative eval gate") !=
+              std::string::npos);
+        REQUIRE(outcome.pipeline.has_value());
+        const std::vector<apogee::training::PipelineStageRecord>& stages =
+            outcome.pipeline->manifest.stages;
+        REQUIRE(stages.size() == c.kits.size());
+        for (std::size_t i = 0; i + 1 < stages.size(); ++i) {
+            CHECK(stages[i].cumulative_passed);
+        }
+        CHECK_FALSE(stages.back().cumulative_passed);
+    }
 }

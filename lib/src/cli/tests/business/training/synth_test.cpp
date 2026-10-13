@@ -304,3 +304,44 @@ TEST_CASE("no teacher is an error", "[training][synth]") {
     const SynthResult result = synthesize(kit_with(1, 1), GenerateFn{}, no_sleep());
     CHECK(result.error.find("teacher") != std::string::npos);
 }
+
+TEST_CASE(
+    "a kit with prefixes shows each to the teacher once, keeps the one an example names "
+    "before what it wrote, and drops an example naming none of the kit's",
+    "[training][synth][prefixes]") {
+    Kit kit = kit_with(3, 4);
+    // A kit without prefixes asks exactly as before.
+    CHECK(synth_system_prompt(kit) == synth_system_prompt(kit.synth.system));
+
+    kit.prefixes = {{"ask", "Answer the question below.\n\nQuestion: "}, {"sum", "Summarise:\n"}};
+    const std::string system = synth_system_prompt(kit);
+    CHECK(system.starts_with("Teach the thing."));
+    CHECK(system.find("=== the prefix \"ask\" ===\nAnswer the question below.\n\nQuestion: \n") !=
+          std::string::npos);
+    CHECK(system.find("=== the prefix \"sum\" ===\nSummarise:\n") != std::string::npos);
+    CHECK(system.find("exactly three string fields: \"prefix\"") != std::string::npos);
+
+    const auto parsed = parse_synth_examples(
+        R"([{"prefix": " ask ", "prompt": "Why?", "completion": "Because."}])");
+    REQUIRE(parsed.size() == 1);
+    CHECK(parsed[0].prefix == "ask");
+    CHECK(parsed[0].prompt == "Why?");  // the prefix is the core's to add
+
+    const GenerateFn teacher = [](std::string_view, std::string_view, double, int,
+                                  const apogee::harness::CancellationToken&) {
+        return ok(
+            R"([{"prefix": "ask", "prompt": "Why is the sky blue?", "completion": "Scattering."},
+                      {"prefix": "sum", "prompt": "A long text.", "completion": "Short."},
+                      {"prefix": "nope", "prompt": "Elsewhere.", "completion": "x"},
+                      {"prompt": "No prefix at all.", "completion": "y"},
+                      {"prefix": "ask", "prompt": "Why is grass green?", "completion": "Chlorophyll."}])");
+    };
+    const SynthResult result = synthesize(kit, teacher, no_sleep());
+    REQUIRE(result.examples.size() == 3);
+    CHECK(result.examples[0].prompt ==
+          "Answer the question below.\n\nQuestion: Why is the sky blue?");
+    CHECK(result.examples[0].prefix == "ask");
+    CHECK(result.examples[1].prompt == "Summarise:\nA long text.");
+    CHECK(result.examples[2].prompt ==
+          "Answer the question below.\n\nQuestion: Why is grass green?");
+}

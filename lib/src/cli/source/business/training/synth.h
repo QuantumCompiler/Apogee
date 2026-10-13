@@ -29,8 +29,12 @@
 namespace apogee::training {
 
 struct SynthExample {
+    /// The whole prompt: in a kit with prefixes (42b), its prefix's text and
+    /// what the teacher wrote after it.
     std::string prompt;
     std::string completion;
+    /// The prefix the teacher named, for a kit with prefixes.
+    std::string prefix;
 };
 
 /// One teacher call's result. `retryable` says whether trying again could
@@ -83,6 +87,12 @@ struct SynthResult {
 /// The kit's prompt plus the output contract every teacher gets.
 [[nodiscard]] std::string synth_system_prompt(std::string_view kit_system);
 
+/// The teacher's system prompt for `kit`: as above for a kit with no
+/// prefixes; for one with prefixes (42b), each prefix written out once and
+/// the contract asking for its name beside a prompt that holds only what
+/// follows it.
+[[nodiscard]] std::string synth_system_prompt(const Kit& kit);
+
 /// The per-batch instruction.
 [[nodiscard]] std::string synth_user_prompt(int n, std::string_view seed, std::string_view topic);
 
@@ -93,7 +103,7 @@ struct SynthResult {
 /// The examples in a teacher reply: the array extracted, each object read
 /// through the aliases `prompt|input|user|instruction|question` and
 /// `completion|output|assistant|response|answer` (case-insensitive), blank
-/// halves dropped.
+/// halves dropped, and a `prefix` named kept as it is.
 [[nodiscard]] std::vector<SynthExample> parse_synth_examples(std::string_view raw);
 
 /// The bound on teacher calls: `(target / per_call + 1) * 3 + seeds`.

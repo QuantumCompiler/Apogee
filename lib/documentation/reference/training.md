@@ -240,7 +240,8 @@ refuses, naming both the converter and `--safetensors`.
 ## Training kits
 
 A kit is one YAML file bundling a teacher **synthesis spec** and an inline
-**eval suite** for one skill. Four ship, seeded under `training/kits/`:
+**eval suite** for one skill. Eight ship, seeded under `training/kits/` --
+four general skills:
 
 | Kit | Skill |
 |---|---|
@@ -249,11 +250,24 @@ A kit is one YAML file bundling a teacher **synthesis spec** and an inline
 | `summarization` | condense a passage into a faithful, concise summary |
 | `reasoning` | solve arithmetic and logic problems with a correct final answer |
 
-The `tool-use` and `web-search` kits are
-deferred: today a local model is shown no tool definitions and only one
-family's native tool tokens are parsed, so a kit teaching a prose tool-call
-line would tune a student into lines nobody dispatches. They arrive with the
-in-text tool protocol as its own item, re-authored for Apogee's tool names.
+and four **role chores** -- the jobs Apogee hands a suite's small helper
+models, each in the product's own request format:
+
+| Kit | Chore |
+|---|---|
+| `utility-chores` | the utility role's: a follow-up rewritten as a standalone search query, and a tool's output summarised for the model that acts on it |
+| `extraction-fidelity` | the extraction role's: the knowledge graph's entities and relations, and the shipped symphonies' fact, action and card stages, each one JSON object held to its schema |
+| `tool-calling` | the one tool call a request needs -- the right tool, and arguments its schema accepts -- against Apogee's own file, shell and git tools |
+| `knowledge-capture` | the capture clerk's: a raw discussion read into one canonical intent record |
+
+A role-chore kit's prompts are Apogee's own requests, byte for byte: the
+fixed part of each -- an instruction, a clerk's system prompt, a stage's
+prompt, a set of tool declarations -- is one of the kit's **prefixes**, and a
+test fails the build the moment a prefix and the product drift apart. A clerk's
+system prompt rides in the one turn a kit holds, a blank line before the
+text it reads. `tool-calling` teaches the call's content as JSON (`{"name":
+…, "arguments": {…}}`); the wrapper each model family's template puts around a
+call stays the template's. The `web-search` kit stays deferred.
 
 ```yaml
 name: reasoning
@@ -274,6 +288,24 @@ eval:                  # gates the trained model (at least one item)
   - prompt: "What is 15% of 240?"
     expected: "36"     # a substring the answer must contain
 ```
+
+A kit whose prompts begin with a fixed text names each once under
+`prefixes:`, and then every prompt begins with one:
+
+```yaml
+prefixes:              # name -> the text a prompt begins with, byte for byte
+  ask: "Answer the question below.\n\nQuestion: "
+eval:
+  - prefix: ask        # this prompt is the prefix's text, then its own
+    prompt: "Why is the sky blue?"
+    expected: "scatter"
+```
+
+The teacher is shown each prefix once, names the one an example begins with
+in a `prefix` field, and writes only what follows it; Apogee puts the text
+back, so a long fixed text is never copied out at every call, and an example
+naming none of the kit's is dropped. In a kit with prefixes, an eval item
+without one is refused.
 
 Drop a `<name>.yaml` of the same shape beside the bundled ones; `apogee
 check` validates every installed kit.
@@ -532,7 +564,7 @@ apogee train regime list [--output-format json]          # name, source, kit cou
 apogee train regime show <name> [--output-format json]   # its kits in order and its tuning
 ```
 
-Apogee ships **`foundation`**: the four bundled kits as one gated pipeline,
+Apogee ships three. **`foundation`**: the four general kits as one gated pipeline,
 in the order instruction-following → structured-output → summarization →
 reasoning (the spec's comments say why), each kit's own count and
 iterations. A shipped regime names kits and tuning only -- **never a
@@ -542,14 +574,19 @@ teacher or a student**, which are always yours:
 apogee train regime run foundation --teacher <backend> --student <snapshot>
 ```
 
-`check --fix` seeds it to `training/regimes/foundation.yaml`, skip if
+**`harness-helpers`**: `utility-chores` → `extraction-fidelity` →
+`tool-calling`, the regime that makes a small local model a better suite
+member for the helper roles. **`knowledge`**: `knowledge-capture` alone, for
+an install that leans on `apogee knowledge`.
+
+`check --fix` seeds each to `training/regimes/<name>.yaml`, skip if
 present: `list` says `shipped` while no file is there, `seeded` while the
 file is byte for byte the shipped one, and `user` once you edit it (or for
 a spec or a `training.regimes:` entry of your own). A spec file under
 `training/regimes/` that does not parse is left out of `list` and said on
 stderr; a run naming it is told why. Every bundled kit's inline eval holds
-at least 24 items, each with an `expected`, so a stage's cumulative gate
-asks something real of the student.
+at least 24 items (`tool-calling` 32), each with an `expected`, so a
+stage's cumulative gate asks something real of the student.
 
 `--all-kits` runs every installed kit alphabetically; an explicit `--kit`
 list wins, so the order can be curated. The teacher is named explicitly

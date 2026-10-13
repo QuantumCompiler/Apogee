@@ -4952,6 +4952,47 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,202
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,269 tests, none failing, one skipped for want of `pdftotext` -- `cli.train_lifecycle`, `cli.install_parity` and `harness.layering` among them. `clang-format` is clean on every touched file.
 
+### 2026-10-13 — `role-chore-kits` (backlog item 42b): training the helpers for Apogee's own jobs
+
+**Goal.** The four bundled kits train general skills; none trained the chores Apogee hands its small local members (the training-suites spike's W3). Four kits now do, each in the product's own request format and held to it by a test, bundled as two shipped regimes. Track 42 complete.
+
+**What was built**
+
+- [x] **Four role-chore kits** under `assets/training/kits/`, each headed by the source files it mirrors:
+  - `utility-chores`: the utility role's two chores -- a follow-up rewritten as one standalone search query (`agentloop/query_rewrite.cpp`'s `rewrite_request`), and a tool's output summarised for the model that acts on it (`tool_summary.cpp`'s `summary_request`). 12 + 12 eval items.
+  - `extraction-fidelity`: the extraction role's -- the graph clerk's entities and relations (`graph::extract_system_prompt`), and the shipped symphonies' extraction stages (`extract-facts`, `extract-actions`, `digest`'s card), each one JSON object held to its schema. 12 + 4 + 4 + 4.
+  - `tool-calling`: the one call a request needs, against the product's own `read_file`, `list_directory`, `search_files`, `grep_files`, `write_file`, `edit_file`, `delete_file`, `run_command` and four git tools, declared as a template is handed them, in four sets of three or four. 32 items, 8 per set; count 300, iters 600.
+  - `knowledge-capture`: the capture clerk's (`knowledge::capture_system_prompt`) -- a raw discussion read into one canonical intent record. 24 items.
+- [x] **Every expected value is one the chore's own rules fix**: the referent a rewrite must fill in, the identifier a summary must keep, an entity, a schema key checked without a grammar, `unassigned` and `not stated` where the actions stage demands them, a tool's name in the call's form, a record's status, discipline or link.
+- [x] **Kits gain `prefixes:`** (`training/kit.h/.cpp`, `synth.h/.cpp`): the fixed texts a kit's prompts begin with, by name. An eval item names its own (`prefix:`) and its prompt is that text and its own; in a kit with prefixes an item naming none is refused. The teacher is shown each prefix once and names one per example (`"prefix"`), writing only what follows; the synth core puts the text back, and an example naming none of the kit's is dropped. A kit without prefixes reads, and asks its teacher, byte for byte as before.
+- [x] **Two shipped regimes**: `harness-helpers` (`utility-chores` → `extraction-fidelity` → `tool-calling`, the order the spec's comments justify) and `knowledge` (`knowledge-capture` alone). `train regime list` shows three; `foundation`'s description now says "the four general kits".
+- [x] `datasets kits` lists eight; the kits route serves eight.
+
+**Decisions** (2026-10-13; the item's own were one `utility-chores` kit for both chores, and the 24-item floor with more where items are cheap)
+
+| Decision | Choice | Why |
+|---|---|---|
+| Where the product's fixed text lives | **Once per kit, as a named prefix** | The product's words byte for byte in every example, one copy for the mirror to hold, and no teacher copying a 5 KB clerk prompt out -- and paying for it -- at every call. |
+| A system prompt in a one-turn kit | **Carried in the turn, a blank line before the text it reads** | The kit shape and the eval's one-prompt candidate hold one turn; a system turn would be trainer and eval behavior the item rules out. |
+| What `tool-calling` teaches | **The call's content as JSON -- the loop's `{"name", "arguments"}` -- not each family's wrapper** | The wrapper is the template's: training it needs the drivers to render `tools` and `tool_calls` through the student's template and the eval to give tools at inference, which is trainer behavior this item rules out. A later item, if the evals show the gap. |
+| Which tools | **The twelve fs, shell and git tools, in sets of three or four** | Each set stays within the trainers' 2,048-token window; the tools that need a session's state (`consult`, `delegate`, `todo_write`, the notes, RAG and graph tools) cannot be shown in one turn. |
+| A judge rubric | **None needed: every item carries a checkable `expected`** | Each chore's format fixes a checkable answer; a kit's `synth.system` says what a good completion is. |
+| The vendor rule | **Checked on everything a kit says for itself; a prefix is the mirror's** | The capture clerk's own prompt names two tools as provenance examples; the product's words stay the product's. |
+| `foundation`'s description | **"The four general kits"** | With eight shipped, "the four bundled kits" no longer named them. |
+
+**Guardrails.**
+- `training/role_kits_test.cpp`: every prefix byte for byte the product's own text, read from its functions, the tool declarations from a registry with the sandbox said as `/work/project`; every eval prompt rebuilt through the product's own builder into itself (`rewrite_request`, `summary_request`, `render_template` over the shipped stage) and within 6,000 bytes; a synth round over a scripted teacher whose examples rebuild the same way and whose completions the product accepts -- the graph and capture schemas, each stage's schema, the one-line query rule, the declared tool's parameters -- with an example in no format of the kit's dropped; **a planted drift caught** in a prefix (one word of the rewrite instruction), a prompt (no question line; a conversation longer than the product shows), a tool (a renamed parameter) and a completion (arguments off the schema, a record without its status); and nothing a kit or its regimes says naming a vendor or model family, the check shown to bite.
+- `training/regime_specs_test.cpp`: `harness-helpers` and `knowledge` run whole on the mock trainer, the teacher's examples kept behind each kit's prefix, every cumulative gate passed by a student that answers the evals, and a planted kit it fails (`tool-calling`, `knowledge-capture`) stopping each at that stage.
+- `training/kit_test.cpp` and `synth_test.cpp`: prefixes parsed, applied, refused when unknown or missing, shown to the teacher once, put back on what it wrote; a kit without them asked byte for byte as before.
+- `contracts/assets_test.cpp`: eight kits and three regimes byte-equal to their files, every file compiled in; the seeding counts. `kit_test`, `admin_datasets_test` and `train_test` moved to eight kits and three regimes.
+- `cli.datasets_lifecycle` lists the eight seeded kits and their document; `cli.train_lifecycle` lists the three shipped regimes seeded and shows `harness-helpers` whole.
+
+**Not verified.**
+- Linux and Windows.
+- On real weights: the item's optional pass -- one family, `harness-helpers` once, the before/after eval delta -- was not run. It needs a training environment and a SafeTensors snapshot, and building the environment downloads packages, which this run does not do. Nothing here trains or promotes on Apogee's initiative.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,277 tests, none failing, one skipped for want of `pdftotext` -- `cli.datasets_lifecycle`, `cli.train_lifecycle` and `harness.layering` among them. `clang-format` is clean on every touched file.
+
 ---
 
 ## Milestone AA — The four layers

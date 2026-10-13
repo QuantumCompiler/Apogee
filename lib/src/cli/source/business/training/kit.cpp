@@ -102,6 +102,24 @@ Kit parse_kit(std::string_view text, std::string_view origin) {
         kit.train.num_layers = integer(train["num_layers"], origin, "train.num_layers", 0);
     }
 
+    if (const YAML::Node prefixes = root["prefixes"]; prefixes.IsDefined() && !prefixes.IsNull()) {
+        if (!prefixes.IsMap()) {
+            fail(origin, "prefixes: expected a mapping of a name to the text prompts begin with");
+        }
+        for (const auto& entry : prefixes) {
+            KitPrefix prefix;
+            prefix.name = scalar(entry.first, origin, "prefixes");
+            prefix.text = scalar(entry.second, origin, "prefixes." + prefix.name);
+            if (blank(prefix.name) || blank(prefix.text)) {
+                fail(origin, "prefixes: each needs a name and a text");
+            }
+            if (find_prefix(kit, prefix.name) != nullptr) {
+                fail(origin, "prefixes: '" + prefix.name + "' is declared twice");
+            }
+            kit.prefixes.push_back(std::move(prefix));
+        }
+    }
+
     if (const YAML::Node eval = root["eval"]; eval.IsDefined() && !eval.IsNull()) {
         if (!eval.IsSequence()) {
             fail(origin, "eval: expected a list of {prompt, expected} items");
@@ -113,10 +131,31 @@ Kit parse_kit(std::string_view text, std::string_view origin) {
             EvalItem parsed;
             parsed.prompt = scalar(item["prompt"], origin, "eval.prompt");
             parsed.expected = scalar(item["expected"], origin, "eval.expected");
+            if (const std::string named = scalar(item["prefix"], origin, "eval.prefix");
+                !named.empty()) {
+                const KitPrefix* prefix = find_prefix(kit, named);
+                if (prefix == nullptr) {
+                    fail(origin, "eval.prefix: no prefix named '" + named + "'");
+                }
+                parsed.prompt = prefix->text + parsed.prompt;
+            } else if (!kit.prefixes.empty()) {
+                fail(origin, "eval item " + std::to_string(kit.eval.size() + 1) +
+                                 " names no prefix -- in a kit with prefixes, every prompt "
+                                 "begins with one");
+            }
             kit.eval.push_back(std::move(parsed));
         }
     }
     return kit;
+}
+
+const KitPrefix* find_prefix(const Kit& kit, std::string_view name) noexcept {
+    for (const KitPrefix& prefix : kit.prefixes) {
+        if (prefix.name == name) {
+            return &prefix;
+        }
+    }
+    return nullptr;
 }
 
 Kit load_kit(const std::filesystem::path& path) {

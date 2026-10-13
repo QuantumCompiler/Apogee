@@ -1162,14 +1162,17 @@ TEST_CASE(
     const std::filesystem::path spec = fixture.training / "regimes" / "foundation.yaml";
     REQUIRE(std::filesystem::exists(spec));  // seeded with the data directory
     const std::string description =
-        "The four bundled kits as one gated pipeline -- instruction-following, structured "
+        "The four general kits as one gated pipeline -- instruction-following, structured "
         "output, summarization, then reasoning.";
 
     REQUIRE(fixture.run({"train", "regime", "list"}, &out, &err) == 0);
-    CHECK(out ==
-          "NAME        SOURCE   KITS  DESCRIPTION\n"
-          "foundation  seeded   4     " +
-              description + "\n");
+    CHECK(
+        out.starts_with("NAME             SOURCE   KITS  DESCRIPTION\n"
+                        "foundation       seeded   4     " +
+                        description + "\n"));
+    CHECK(out.find("\nharness-helpers  seeded   3     The harness chores") != std::string::npos);
+    CHECK(out.find("\nknowledge        seeded   1     The knowledge-capture clerk") !=
+          std::string::npos);
     REQUIRE(fixture.run({"train", "regime", "show", "foundation"}, &out, &err) == 0);
     CHECK(out == "foundation  seeded  " + spec.string() + "\n" + description +
                      "\n\nkits, in order:\n"
@@ -1187,7 +1190,7 @@ TEST_CASE(
     REQUIRE(fixture.run({"train", "regime", "list", "--output-format", "json"}, &out, &err) == 0);
     nlohmann::json list = nlohmann::json::parse(out);
     CHECK(list["object"] == "list");
-    REQUIRE(list["data"].size() == 1);
+    REQUIRE(list["data"].size() == 3);
     CHECK(list["data"][0]["name"] == "foundation");
     CHECK(list["data"][0]["source"] == "seeded");
     CHECK(list["data"][0]["path"] == spec.string());
@@ -1202,7 +1205,8 @@ TEST_CASE(
     CHECK(shown["teacher"] == "");
     CHECK(shown["student"] == "");
     CHECK(fixture.run({"train", "regime", "show", "nope"}, &out, &err) == 1);
-    CHECK(err.find("no regime named 'nope' (there are: foundation)") != std::string::npos);
+    CHECK(err.find("no regime named 'nope' (there are: foundation, harness-helpers, knowledge)") !=
+          std::string::npos);
     CHECK(fixture.run({"train", "regime", "list", "--output-format", "stream-json"}, &out, &err) !=
           0);  // a read is text or a document
 
@@ -1210,12 +1214,12 @@ TEST_CASE(
     // config entry of its name, the entry -- and a file of the user's own.
     std::filesystem::remove(spec);
     REQUIRE(fixture.run({"train", "regime", "list"}, &out, &err) == 0);
-    CHECK(out.find("foundation  shipped  4") != std::string::npos);
+    CHECK(out.find("foundation       shipped  4") != std::string::npos);
     write_file(spec, "description: mine now\nkits: [reasoning]\n");
     write_file(fixture.training / "regimes" / "quick.yaml", "kits: [alpha]\ncount: 2\n");
     REQUIRE(fixture.run({"train", "regime", "list"}, &out, &err) == 0);
-    CHECK(out.find("foundation  user     1     mine now\n") != std::string::npos);
-    CHECK(out.find("quick       user     1") != std::string::npos);
+    CHECK(out.find("foundation       user     1     mine now\n") != std::string::npos);
+    CHECK(out.find("quick            user     1") != std::string::npos);
     write_file(fixture.base.base.config_path,
                read_file(fixture.base.base.config_path) +
                    "training:\n  regimes:\n    foundation:\n      kits: [alpha, beta]\n");

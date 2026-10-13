@@ -1114,7 +1114,7 @@ job and writes nothing.
 
 ### `GET /v1/admin/datasets/kits`
 
-The training kits installed under `training/kits/` -- the four bundled ones
+The training kits installed under `training/kits/` -- the eight bundled ones
 and any the user added: `200 {"object": "list", "data": [{name, path,
 description, eval_items[, error]}]}`, sorted by name; a kit that does not
 parse or validate carries `error` rather than being hidden.

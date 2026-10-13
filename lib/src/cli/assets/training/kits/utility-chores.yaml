@@ -1,0 +1,335 @@
+# A bundled kit (42b): the utility role's two chores, in the product's own
+# words. Mirrors source/business/agentloop/query_rewrite.cpp (rewrite_request:
+# a follow-up rewritten as one standalone search query) and
+# source/business/agentloop/tool_summary.cpp (summary_request: a tool's output
+# summarised for the model that acts on it). Each prefix is byte for byte the
+# product's request up to its first variable part, and every prompt rebuilds
+# through those functions into itself -- tests/business/training/
+# role_kits_test.cpp holds both, so a change to either request is a change
+# here, in the same commit.
+name: utility-chores
+description: The utility role's chores in the product's own formats -- a follow-up rewritten as a standalone search query, and a tool's output summarised for the model that acts on it.
+skill: utility-chores
+
+prefixes:
+  rewrite: |
+    Rewrite the last question below as one standalone search query: fill in whatever it refers to from the conversation, so it can be understood with nothing before it. Reply with the query alone, on one line.
+
+    Conversation:
+  tool-summary: "Summarise this tool output for someone who will act on it. Keep exact names, numbers, paths, identifiers and error messages, and quote any lines the task is likely to need. Say briefly what kinds of content you left out. Reply with the summary only.\n\nTool: "
+
+synth:
+  system: |-
+    You produce supervised fine-tuning examples that teach a small language model the two
+    chores Apogee hands its utility model, each in the exact request format the product sends.
+
+    Chore 1, "rewrite": a follow-up question rewritten as one standalone search query. The prompt
+    is the conversation so far -- alternating lines that begin "User: " and "Assistant: ", at most
+    six of them, each under 400 characters -- then a blank line, then "Last question: " and the
+    follow-up. The follow-up must lean on the conversation ("it", "that one", "the second", "there",
+    "and what about ..."). The completion is the query alone, on one line: the follow-up with every
+    reference filled in from the conversation, so it can be searched with nothing before it. Keep
+    the names exactly as the conversation spells them. No quotes, no "Query:" label, no explanation,
+    never an answer to the question.
+
+    Chore 2, "tool-summary": a tool's output summarised for the model that will act on it. The prompt
+    is the tool's name, then a line "Arguments: " with the call's JSON arguments, then a blank line,
+    "Output:" and the output itself -- realistic output of that tool (a command's stdout and
+    [stderr] and [exit N] lines, a file's text, grep matches as path:line: text, a git log, a diff, a
+    directory listing), long enough to be worth summarising but under about 1,500 characters. The
+    completion is the summary only: keep exact names, numbers, paths, identifiers and error messages,
+    quote any lines the task is likely to need, and say briefly what kinds of content were left out.
+    The tools are read_file, list_directory, search_files, grep_files, run_command, git_status,
+    git_log, git_diff and git_show.
+
+    Vary the subjects widely: software, science, history, geography, operations, everyday questions.
+  seeds:
+    - "rewrite: a follow-up about a technical term defined earlier"
+    - "rewrite: a follow-up naming 'the second one' from a list the assistant gave"
+    - "rewrite: a follow-up about a place or person named two turns back"
+    - "rewrite: a follow-up about a project or service named by the user"
+    - "tool-summary: a failing test run from run_command"
+    - "tool-summary: a configuration or source file from read_file"
+    - "tool-summary: grep matches, a directory listing or a file search"
+    - "tool-summary: a git log, a git diff or git show output"
+  count: 200
+  per_seed: 4
+  temperature: 0.7
+
+train:
+  iters: 400
+  num_layers: 16
+
+eval:
+  - prefix: rewrite
+    prompt: |-
+      User: What's the default port for PostgreSQL?
+      Assistant: PostgreSQL listens on port 5432 unless postgresql.conf says otherwise.
+
+      Last question: And how do I change it?
+    expected: "PostgreSQL"
+  - prefix: rewrite
+    prompt: |-
+      User: I'm reading about the Treaty of Westphalia.
+      Assistant: It was a set of agreements signed in 1648 that ended the Thirty Years' War.
+
+      Last question: Who signed it?
+    expected: "Westphalia"
+  - prefix: rewrite
+    prompt: |-
+      User: Can you explain how Raft elects a leader?
+      Assistant: A follower that hears no heartbeat before its election timeout becomes a candidate, votes for itself and asks the others for their votes; a majority makes it leader.
+
+      Last question: What happens if two candidates tie?
+    expected: "Raft"
+  - prefix: rewrite
+    prompt: |-
+      User: How tall is Mount Kilimanjaro?
+      Assistant: About 5,895 metres -- the highest mountain in Africa.
+
+      Last question: How long does the climb usually take?
+    expected: "Kilimanjaro"
+  - prefix: rewrite
+    prompt: |-
+      User: We use the retry_with_backoff helper in the payments service.
+      Assistant: That helper retries a call with exponentially growing delays, capped at a maximum.
+
+      Last question: Where is it defined?
+    expected: "retry_with_backoff"
+  - prefix: rewrite
+    prompt: |-
+      User: Tell me about the Voyager 1 probe.
+      Assistant: Launched in 1977, it is the most distant human-made object and crossed into interstellar space in 2012.
+
+      Last question: Is it still sending data?
+    expected: "Voyager"
+  - prefix: rewrite
+    prompt: |-
+      User: I'm choosing between SQLite and DuckDB for local analytics.
+      Assistant: SQLite stores rows and suits transactional work; DuckDB stores columns and suits scans and aggregations.
+
+      Last question: Which one handles large joins better?
+    expected: "DuckDB"
+  - prefix: rewrite
+    prompt: |-
+      User: Who designed the Eiffel Tower?
+      Assistant: Gustave Eiffel's company built it; the engineers Maurice Koechlin and Emile Nouguier drew the first design.
+
+      Last question: When was it finished?
+    expected: "Eiffel Tower"
+  - prefix: rewrite
+    prompt: |-
+      User: Our staging cluster is called orion-stg.
+      Assistant: Noted -- orion-stg for staging.
+      User: Deployments to it keep timing out.
+      Assistant: Timeouts like that are often a readiness probe failing or an image pull stalling.
+
+      Last question: How do I see its pod logs?
+    expected: "orion-stg"
+  - prefix: rewrite
+    prompt: |-
+      User: What is the Rust borrow checker?
+      Assistant: It is the part of the Rust compiler that enforces ownership: any number of shared references, or exactly one mutable one, never both.
+
+      Last question: Why does it reject two mutable references at once?
+    expected: "borrow checker"
+  - prefix: rewrite
+    prompt: |-
+      User: The meeting with the Lisbon office moved to Thursday.
+      Assistant: Got it -- Thursday with Lisbon.
+
+      Last question: What time is it there when it's 9am here in Chicago?
+    expected: "Lisbon"
+  - prefix: rewrite
+    prompt: |-
+      User: Explain the CAP theorem.
+      Assistant: It says a distributed data store cannot guarantee consistency, availability and partition tolerance all at once: under a partition it must give up one of the first two.
+
+      Last question: Which two does Cassandra favour?
+    expected: "CAP"
+  - prefix: tool-summary
+    prompt: |-
+      run_command
+      Arguments: {"command":"make test"}
+
+      Output:
+      [ 12%] Building CXX object tests/CMakeFiles/unit.dir/net/socket_test.cpp.o
+      [ 48%] Building CXX object tests/CMakeFiles/unit.dir/net/http_test.cpp.o
+      [100%] Linking CXX executable unit
+      Running 214 tests...
+      PASSED tests/net/http_test.cpp (38 cases)
+      PASSED tests/core/config_test.cpp (51 cases)
+      FAILED tests/net/socket_test.cpp:142: connect() returned ECONNREFUSED (expected 0)
+      PASSED tests/core/log_test.cpp (17 cases)
+      213 passed, 1 failed
+      [stderr]
+      make: *** [test] Error 1
+      [exit 2]
+    expected: "socket_test.cpp:142"
+  - prefix: tool-summary
+    prompt: |-
+      read_file
+      Arguments: {"path":"config/app.yaml"}
+
+      Output:
+      server:
+        host: 0.0.0.0
+        port: 8080
+        workers: 4
+      database:
+        host: db-primary.internal
+        port: 6432
+        name: orders
+        pool_size: 20
+        statement_timeout_ms: 15000
+      cache:
+        backend: memory
+        ttl_seconds: 300
+      logging:
+        level: info
+        format: json
+    expected: "6432"
+  - prefix: tool-summary
+    prompt: |-
+      grep_files
+      Arguments: {"pattern":"TODO"}
+
+      Output:
+      src/api/routes.py:14: # TODO: paginate the list endpoint
+      src/api/routes.py:97: # TODO: remove the v1 alias after the migration
+      src/auth/token.cpp:88: // TODO: rotate the signing key before 2027-01-01
+      src/ui/table.tsx:203: // TODO: virtualise rows past 500
+      docs/setup.md:41: TODO: document the Windows steps
+      scripts/deploy.sh:12: # TODO: fail fast when the tag is missing
+    expected: "src/auth/token.cpp:88"
+  - prefix: tool-summary
+    prompt: |-
+      git_log
+      Arguments: {"n":6}
+
+      Output:
+      a3f9c21 2026-10-09 Fix the race in the job scheduler (Mira Chen)
+      77b0e4d 2026-10-08 Add pagination to the orders endpoint (Tom Reyes)
+      c41d9a8 2026-10-08 Bump the TLS library to 3.2.1 (Mira Chen)
+      19e2f55 2026-10-07 Revert "Cache the session lookups" (Ola Berg)
+      0d8c3b7 2026-10-06 Cache the session lookups (Ola Berg)
+      5e61aa0 2026-10-05 Document the release checklist (Tom Reyes)
+    expected: "19e2f55"
+  - prefix: tool-summary
+    prompt: |-
+      run_command
+      Arguments: {"command":"df -h"}
+
+      Output:
+      Filesystem      Size   Used  Avail Capacity  Mounted on
+      /dev/disk3s1s1  460Gi   10Gi   43Gi    19%    /
+      devfs           205Ki  205Ki    0Bi   100%    /dev
+      /dev/disk3s5    460Gi  402Gi   43Gi    91%    /System/Volumes/Data
+      /dev/disk3s2    460Gi  2.1Gi   43Gi     5%    /System/Volumes/Preboot
+      map auto_home     0Bi    0Bi    0Bi   100%    /System/Volumes/Data/home
+      [exit 0]
+    expected: "91%"
+  - prefix: tool-summary
+    prompt: |-
+      list_directory
+      Arguments: {"path":"src"}
+
+      Output:
+      api/
+      core/
+      ui/
+      workers/
+      main.cpp  2.1 KB
+      main.h  0.4 KB
+      version.h  0.2 KB
+      CMakeLists.txt  1.6 KB
+      build_info.cpp.in  0.3 KB
+      README.md  3.9 KB
+    expected: "main.cpp"
+  - prefix: tool-summary
+    prompt: |-
+      run_command
+      Arguments: {"command":"npm install"}
+
+      Output:
+      npm ERR! code ERESOLVE
+      npm ERR! ERESOLVE unable to resolve dependency tree
+      npm ERR!
+      npm ERR! While resolving: web-dashboard@2.3.0
+      npm ERR! Found: react@19.0.0
+      npm ERR! node_modules/react
+      npm ERR!   react@"^19.0.0" from the root project
+      npm ERR!
+      npm ERR! Could not resolve dependency:
+      npm ERR! peer react@"^18.2.0" from chart-kit@4.1.2
+      npm ERR! Fix the upstream dependency conflict, or retry with --legacy-peer-deps
+      [exit 1]
+    expected: "ERESOLVE"
+  - prefix: tool-summary
+    prompt: "read_file\nArguments: {\"path\":\"logs/server.log\",\"offset\":2040,\"limit\":12}\n\nOutput:\n2040\t2026-10-12T03:14:07Z INFO  request id=8812 path=/reports status=200 ms=412\n2041\t2026-10-12T03:14:09Z INFO  request id=8813 path=/reports status=200 ms=398\n2042\t2026-10-12T03:14:11Z WARN  heap usage at 94%\n2043\t2026-10-12T03:14:12Z ERROR java.lang.OutOfMemoryError: Java heap space\n2044\t    at com.acme.reports.Builder.render(Builder.java:233)\n2045\t    at com.acme.reports.Handler.handle(Handler.java:71)\n2046\t2026-10-12T03:14:12Z INFO  worker restarted"
+    expected: "OutOfMemoryError"
+  - prefix: tool-summary
+    prompt: |-
+      git_diff
+      Arguments: {}
+
+      Output:
+      diff --git a/src/client/retry.py b/src/client/retry.py
+      --- a/src/client/retry.py
+      +++ b/src/client/retry.py
+      @@ -8,7 +8,7 @@ import time
+       
+      -MAX_RETRIES = 3
+      +MAX_RETRIES = 5
+       BASE_DELAY_S = 0.5
+       
+       def with_retries(fn):
+      diff --git a/README.md b/README.md
+      --- a/README.md
+      +++ b/README.md
+      @@ -20,3 +20,4 @@
+       Retries are configured in src/client/retry.py.
+      +The client now retries five times before giving up.
+    expected: "MAX_RETRIES"
+  - prefix: tool-summary
+    prompt: |-
+      run_command
+      Arguments: {"command":"pytest -q"}
+
+      Output:
+      ........................F.....F..........F....
+      FAILED tests/test_invoice.py::test_rounding - AssertionError: 10.01 != 10.0
+      FAILED tests/test_invoice.py::test_currency_symbol - KeyError: 'CHF'
+      FAILED tests/test_export.py::test_csv_header - AssertionError
+      3 failed, 41 passed in 2.84s
+      [exit 1]
+    expected: "3 failed"
+  - prefix: tool-summary
+    prompt: |-
+      search_files
+      Arguments: {"pattern":"*.proto"}
+
+      Output:
+      api/v1/orders.proto
+      api/v1/users.proto
+      api/v2/orders.proto
+      api/v2/payments.proto
+      internal/events/audit.proto
+      internal/events/billing.proto
+      third_party/annotations/http.proto
+    expected: "api/v2/orders.proto"
+  - prefix: tool-summary
+    prompt: |-
+      run_command
+      Arguments: {"command":"curl -sI https://status.example.com/health"}
+
+      Output:
+      HTTP/2 503
+      content-type: application/json
+      content-length: 61
+      retry-after: 120
+      date: Mon, 12 Oct 2026 09:30:01 GMT
+      x-request-id: 4c1f0e2a-9b7d
+
+      [exit 0]
+    expected: "503"

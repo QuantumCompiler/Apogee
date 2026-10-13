@@ -80,12 +80,13 @@ TEST_CASE("seeding writes absent files only: an edit survives a re-seed",
     const apogee::testing::TempDir root{"assets-seed-" + std::to_string(std::random_device{}())};
     const apogee::harness::AssetSeedResult first = seed_bundled_assets(root.path());
     REQUIRE(first.ok());
-    // Fourteen agent files (40a), four kits, one training regime (42a), seven
-    // symphony starters (27q, 40b), three task recipes (40c), three training
-    // drivers, the two mlx drivers, the vendored converter.
+    // Fourteen agent files (40a), eight kits (42b), three training regimes
+    // (42a, 42b), seven symphony starters (27q, 40b), three task recipes
+    // (40c), three training drivers, the two mlx drivers, the vendored
+    // converter.
     CHECK(first.created.size() == apogee::harness::bundled_files().size());
     CHECK(first.created.size() ==
-          14 + 4 + 1 + 7 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
+          14 + 8 + 3 + 7 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
     for (const apogee::harness::BundledSymphony& starter : apogee::harness::bundled_symphonies()) {
         CHECK(read(root.path() / "symphonies" / (std::string{starter.name} + ".yaml")) ==
               starter.text);
@@ -261,8 +262,10 @@ TEST_CASE(
         files.insert(entry.path().filename().string());
     }
     std::set<std::string> compiled;
-    REQUIRE(apogee::harness::bundled_regimes().size() == 1);
+    REQUIRE(apogee::harness::bundled_regimes().size() == 3);
     CHECK(apogee::harness::bundled_regimes()[0].name == "foundation");
+    CHECK(apogee::harness::bundled_regimes()[1].name == "harness-helpers");
+    CHECK(apogee::harness::bundled_regimes()[2].name == "knowledge");
     for (const apogee::harness::BundledRegime& regime : apogee::harness::bundled_regimes()) {
         INFO(regime.name);
         compiled.insert(std::string{regime.name} + ".yaml");
@@ -304,9 +307,16 @@ TEST_CASE(
 TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
           "[harness][assets][training]") {
     const std::filesystem::path assets{APOGEE_ASSETS_DIR};
-    REQUIRE(apogee::harness::bundled_kits().size() == 4);
+    REQUIRE(apogee::harness::bundled_kits().size() == 8);
+    std::set<std::string> kit_files;
+    for (const std::filesystem::directory_entry& entry :
+         std::filesystem::directory_iterator{assets / "training" / "kits"}) {
+        kit_files.insert(entry.path().filename().string());
+    }
+    std::set<std::string> compiled_kits;
     for (const apogee::harness::BundledKit& kit : apogee::harness::bundled_kits()) {
         INFO(kit.name);
+        compiled_kits.insert(std::string{kit.name} + ".yaml");
         CHECK(read(assets / "training" / "kits" / (std::string{kit.name} + ".yaml")) == kit.text);
         CHECK(apogee::harness::bundled_kit_relative_path(kit.name) ==
               "training/kits/" + std::string{kit.name} + ".yaml");
@@ -314,6 +324,8 @@ TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
     REQUIRE(apogee::harness::bundled_training_scripts().size() == 3);
     const apogee::harness::BundledScript& script = apogee::harness::bundled_training_scripts()[0];
     CHECK(script.name == "prepare_dataset.py");
+    // scripts/generate_training_assets.py compiles every kit file, and nothing else.
+    CHECK(kit_files == compiled_kits);
     CHECK(apogee::harness::bundled_training_scripts()[1].name == "train_mlx.py");
     CHECK(apogee::harness::bundled_training_scripts()[2].name == "train_peft.py");
     for (const apogee::harness::BundledScript& driver :
@@ -324,7 +336,7 @@ TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
     CHECK(apogee::harness::bundled_script_relative_path(script.name) ==
           "training/scripts/prepare_dataset.py");
     CHECK(apogee::harness::bundled_files().size() ==
-          14 + 4 + 1 + 7 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
+          14 + 8 + 3 + 7 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
 }
 
 TEST_CASE("the compiled-in mlx drivers byte-match the shipped files and seed beside the trainers",

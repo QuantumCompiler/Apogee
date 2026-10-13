@@ -875,8 +875,8 @@ struct PipelineInputs {
         }
         // A spec of that name the book left out is the likelier story: say why.
         for (const std::string& problem : book.problems) {
-            const std::string file = (harness::training_regimes_dir() / named).string();
-            if (problem.starts_with(file + ".yaml") || problem.starts_with(file + ".yml")) {
+            const std::string spec = (harness::training_regimes_dir() / named).string();
+            if (problem.starts_with(spec + ".yaml") || problem.starts_with(spec + ".yml")) {
                 fail_user("regime '" + named + "': " + problem);
             }
         }
