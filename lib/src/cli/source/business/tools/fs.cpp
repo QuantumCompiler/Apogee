@@ -304,6 +304,10 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
     const std::string root_text = root.string();
     const std::string restricted =
         " Access is restricted to " + root_text + " and its subdirectories.";
+    // What `delete_file` and `list_directory` take: a path, and nothing else
+    // -- read_file's offset and limit count lines, which neither reads.
+    const std::string path_only =
+        R"({"type":"object","properties":{"path":{"type":"string","description":"Absolute path, ~ path, or a path relative to the root"}},"required":["path"]})";
 
     agent::Tool read;
     read.name = "read_file";
@@ -549,7 +553,7 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
         "Delete a single file permanently. Directories are not accepted -- use the shell tool "
         "for recursive removal." +
         restricted + " This operation requires the user's permission.";
-    remove.parameters_schema = read.parameters_schema;
+    remove.parameters_schema = path_only;
     remove.writes = true;
     remove.edits = true;
     remove.describe_target = read.describe_target;
@@ -588,7 +592,7 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
     list.name = "list_directory";
     list.description =
         "List a directory: subdirectories first, then files with their sizes." + restricted;
-    list.parameters_schema = read.parameters_schema;
+    list.parameters_schema = path_only;
     list.run = [root](std::string_view arguments) -> agent::ToolOutcome {
         agent::ToolOutcome failure;
         const std::optional<Arguments> args =

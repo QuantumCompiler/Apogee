@@ -4456,6 +4456,16 @@ Also checked:
 - **Cloud backends** get the same note and descriptions through the same request assembly; no cloud model was run.
 - **MCP tools** reach the paragraph's wording but cannot switch it on: a session without `fetch_url` or `web_search` has no paragraph, whatever its MCP servers offer.
 
+### 2026-10-13 — `delete_file` and `list_directory` declare what they read (the user's request)
+
+**Why.** Building 42b's `tool-calling` kit against the product's own tool declarations showed `delete_file` and `list_directory` declaring `read_file`'s parameters: both assigned `read.parameters_schema`, so every model -- and every MCP client of `__mcp-tools`, for `list_directory` -- was told they took `offset` ("The line to start reading at, counting from 1") and `limit` ("How many lines to read"). Neither reads either.
+
+- [x] **Both declare `path` alone** (`register_fs_tools`'s `path_only`), required as before; `list_directory` still reads an empty path as the root. Nothing a tool does changed, only what it says it takes.
+- [x] **The `tool-calling` kit follows**: its `read-tools`, `edit-tools` and `shell-tools` prefixes carry the corrected declarations, and the compiled-in copy is regenerated. `training/role_kits_test.cpp` failed the build on exactly those three prefixes until they did -- the mirror doing its job.
+- [x] **Tests**: `fs_test` holds each of the seven filesystem tools to exactly the parameters its run reads, `delete_file` requiring `path`.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,278 tests, none failing, one skipped for want of `pdftotext`. `clang-format` is clean on every touched file.
+
 ## Milestone W — The MCP client
 
 **Goal.** The model picking up anyone else's tools: a from-scratch client for stdio MCP servers whose tools join the shared loop as first-class registry entries, with the subprocess discipline a misbehaving server demands, `apogee mcp` and its admin twins over one scaffold core, and Apogee hosting a server of its own.
