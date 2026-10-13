@@ -17,10 +17,8 @@
 - 2026-10-11 — The set lands in v0.1.7 as track 41 (the user's placement call on the spike report).
 - 2026-10-11 — The todo is a **whole-list-per-call tool** (`todo_write` replaces the list), not incremental item verbs — one call a small model can form, idempotent, nothing to diff (the spike's "deliberately small", standing).
 - 2026-10-11 — Scope: sessions with `--tools`, both modes (chat and execute) — the surface is the session core's, not execute's alone.
-
-**Open calls:**
-- [default: caps — 20 items, 120 characters a line, the overflow refused in the tool result naming the cap.]
-- [default: the terminal renders the todo as a dim block that repaints on change below the status area; the shell as a fold above the input; exact looks at build.]
+- 2026-10-13 — The caps are 20 items and 120 characters a line, the overflow refused in the tool result naming the cap (the default, confirmed 2026-10-13).
+- 2026-10-13 — The terminal renders the todo as a dim block repainting on change below the status area, the shell as a fold above the input; exact looks the build's, against both painters' goldens (the default, confirmed 2026-10-13).
 
 **Guardrail(s).** The tool's state table (replace, states, caps, UTF-8); one scripted turn driving every Reporter adapter's golden for the same change; schema conformance green with the new event; a resume on either door showing the saved list; the leak test's surfaces gain the todo renders.
 

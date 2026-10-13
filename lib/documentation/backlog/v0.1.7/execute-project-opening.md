@@ -16,10 +16,8 @@
 - 2026-10-11 — The set lands in v0.1.7 as track 41 (the user's placement call on the spike report).
 - 2026-10-11 — The context file is **`AGENTS.md`** first, `CLAUDE.md` honored read-if-present (never written), in that order, first found wins (the spike's default, standing).
 - 2026-10-11 — The opening attach is on in a project (a git repository, or a directory holding the context file), off elsewhere, always skippable (the spike's default, standing).
-
-**Open calls:**
-- [default: the context cap is a named constant around a few thousand words; past it the head is kept, the truncation said on the banner.]
-- [default: nested context files (a subdirectory's AGENTS.md) are out of the first cut — one file at the root the session opened in.]
+- 2026-10-13 — The context cap is a named constant around a few thousand words; past it the head is kept and the truncation is said on the banner — never a silent cut (the default, confirmed 2026-10-13).
+- 2026-10-13 — Nested context files (a subdirectory's AGENTS.md) are out of the first cut: one file at the root the session opened in; subdirectory folding is a later item if wanted (the default, confirmed 2026-10-13).
 
 **Guardrail(s).** The ritual's matrix pinned in fixture repos (project/non-project × context file present/absent × skip/explicit attach); the fold golden over FakeTransport (the request carries the context beside the environment note; `-s` and the context coexist); the session file never holding the context; byte-stability of `chat` and of execute outside a project.
 

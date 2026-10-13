@@ -17,10 +17,8 @@
 - 2026-10-11 — The set lands in v0.1.7 as track 42 (the user's placement call on the spike report; 42 by the ever-assigned rule).
 - 2026-10-11 — Shipped specs never name backends: teacher and student stay the user's at run time (the spike's default, standing) — a "training suite" is a regime spec, and the docs defer to the regime vocabulary so the model-suite concept stays unambiguous.
 - 2026-10-11 — The eval floor is **24 items per kit**, judge-scored where no `expected` fits (the spike's default, standing); the gate's meaning is this item's deliverable as much as the suite is.
-
-**Open calls:**
-- [default: `foundation`'s per-kit counts and iterations are the build's tuning, recorded in the spec's comments with why; the kit order as specced above.]
-- [default: `regime list` shows name, kits, source (user/seeded/shipped) and description — the `datasets kits` table's shape.]
+- 2026-10-13 — `foundation`'s per-kit counts and iterations are the build's tuning, recorded in the spec's comments with why; the kit order as specced (the default, confirmed 2026-10-13).
+- 2026-10-13 — `train regime list` shows name, kits, source (user/seeded/shipped) and description — the `datasets kits` table's shape (the default, confirmed 2026-10-13).
 
 **Guardrail(s).** Ladder precedence exhaustively; the mock-trainer `foundation` run green and gated (a deliberately failing eval set fails the stage — the planted case); document conformance for both reads; byte-identity of spec and kit assets; `cli.install_parity` green (seeding unchanged or its row updated in the same commit); every existing training suite of tests untouched and green.
 

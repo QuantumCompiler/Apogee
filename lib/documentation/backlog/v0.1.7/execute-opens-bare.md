@@ -15,9 +15,7 @@
 - 2026-10-11 — The set lands in v0.1.7 as track 41 (the user's placement call on the spike report; 41 by the ever-assigned rule).
 - 2026-10-11 — Bare execute runs **suite-less through the resolver's existing rungs** rather than synthesizing a one-member suite — `chat`'s own mechanism, no new resolver state (the spike's design, standing).
 - 2026-10-11 — `--orchestrate` remains the suite's: a bare session has no symphony-offer validation surface, and the refusal names the suite as the way in.
-
-**Open calls:**
-- [default: the banner's bare-mode line says `execute — <backend> (no suite)`, the suite line unchanged when one is given; exact wording at build.]
+- 2026-10-13 — The banner's bare-mode line names the backend and says no suite (`execute — <backend> (no suite)` in shape), the suite line unchanged when one is given; exact wording the build's (the default, confirmed 2026-10-13).
 
 **Guardrail(s).** The refusal matrix pinned (suite / `-m` / default / none × terminal / pipe / machine mode); a bare session's `/play` golden over mock members through the resolver chain; `--orchestrate` bare-refusal; the suite-given path byte-stable against today's goldens.
 

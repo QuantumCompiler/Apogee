@@ -18,10 +18,8 @@
 - 2026-10-11 — The **full `--recipe` surface** ships, not documentation-only examples (the spike's recommendation, standing — the user executed without a trim): what makes a task pre-shipped is a name the binary knows, lists, and expands.
 - 2026-10-11 — Grants are **suggested, printed, consented** — never auto-granted; the recipe is convenience, the ceiling is law.
 - 2026-10-11 — The three starters are the spike's recommended cut, standing: `digest-folder`, `changelog-draft`, `capture-decisions`.
-
-**Open calls:**
-- [default: a recipe's template takes one `{{input}}` (from `--input` or omitted where the recipe needs none); multi-argument templating is out of the first cut — a second variable is a second item's evidence.]
-- [default: the Task view offers no recipe picker yet — the exec line launches `task run --recipe …` in the shell; a curated picker over the view is a later call.]
+- 2026-10-13 — A recipe's template takes exactly one `{{input}}` (from `--input`, or omitted where the recipe needs none); multi-argument templating is out of the first cut — a second variable is a second item's evidence (the default, confirmed 2026-10-13).
+- 2026-10-13 — The Task view offers no recipe picker yet: the exec line launches `task run --recipe …` in the shell, and a curated picker is a later call (the default, confirmed 2026-10-13).
 
 **Guardrail(s).** The expansion golden (recipe run vs. hand-typed twin: ledger and view byte-equal but the provenance name); ladder precedence exhaustively (user over seeded over compiled-in, nearest name wins); a suggested grant wider than the config refused at launch naming the rule, recipe or no recipe; the parser's refusals (unknown variable, missing goal, empty requires allowed); `task recipes` document conformance; compiled-in byte-identity; `cli.install_parity` green with the new layout row.
 

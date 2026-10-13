@@ -15,10 +15,8 @@
 - 2026-10-11 — The set lands in v0.1.7 as track 42 (the user's placement call on the spike report).
 - 2026-10-11 — **The coder kit/suite stays out of this wave** (the spike's recommendation, standing — the user executed without a trim): a research-grade bet best made after track 41's execute mode lands and a real local-coder eval exists; recorded here so revisiting it is a deliberate act.
 - 2026-10-11 — The suites are two, as specced: `harness-helpers` (the three harness-chore kits) and `knowledge` (capture alone) — a kit may appear in both worlds later, but no suite ships padded.
-
-**Open calls:**
-- [default: `utility-chores` trains both chores in one kit (rewrite and tool-summary are one role's voice); splitting is a later call if evals disagree.]
-- [default: eval set sizes at the 42a floor (24), higher where `expected`-checkable items are cheap to write (tool-calling especially).]
+- 2026-10-13 — `utility-chores` trains both chores in one kit (rewrite and tool-summary are one role's voice); splitting is a later call if the evals disagree (the default, confirmed 2026-10-13).
+- 2026-10-13 — Eval sets sit at the 42a floor (24), higher where `expected`-checkable items are cheap to write — tool-calling especially (the default, confirmed 2026-10-13).
 
 **Guardrail(s).** The format-mirror tests (a synth'd item and the product's own golden share the assertion — a drifted chore format fails the kit's test and the product's in the same run); the two suites green end-to-end on the mock trainer with a planted failing stage caught; `datasets kits` lists eight with descriptions; byte-identity; no vendor name in any prompt (a grep case); optional real-weights pass per the model families — one family, `harness-helpers` once, the before/after eval delta recorded, never a promotion on Apogee's initiative.
 

@@ -15,10 +15,8 @@
 - 2026-10-11 — The set lands in v0.1.7 as track 40 (the user's placement call on the spike report; 40 by the ever-assigned rule — 38 and 39 were assigned in the same window by parallel tracks).
 - 2026-10-11 — The four agents are the spike's recommended cut, standing (the user executed the spike without trims): `code-review`, `test-gaps`, `doc-drift`, `meeting-minutes`.
 - 2026-10-11 — `doc-drift` demonstrates `--collection` auto-RAG and ships pointing at no collection; the prompt names the corpus it expects and the run says when there is none.
-
-**Open calls:**
-- [default: `issue-triage` and other close seconds stay out of this item — added only if the user asks at build time; the catalog is deliberately four.]
-- [default: each schema's exact fields are finalized at build from its prompt's needs, within the shapes sketched above — findings/gaps/minutes as arrays of flat objects, no nesting a small model fumbles.]
+- 2026-10-13 — The catalog stays deliberately four; `issue-triage` and the other close seconds are added only on the user's word at build (the default, confirmed 2026-10-13).
+- 2026-10-13 — Each schema's exact fields are the build's, within the sketched shapes — flat arrays of simple objects, no nesting a small model fumbles (the default, confirmed 2026-10-13).
 
 **Guardrail(s).** Hermetic: each agent parses, lists as `bundled`, and produces schema-valid output over the mock backend (FakeTransport-scripted); compiled-in copies byte-identical to `assets/`; a same-named user agent still shadows cleanly. Optional real-weights pass per the model families — one family at a time, each agent once, result recorded; a family with no local model skipped and said.
 

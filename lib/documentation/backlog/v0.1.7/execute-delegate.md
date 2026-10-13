@@ -19,10 +19,8 @@
 - 2026-10-11 — The sub-session runs on the session's own model unless the call names a **role** (resolved through the one resolver) — never a backend by name from the model's mouth.
 - 2026-10-11 — The sub-session's transcript is the tool call's detail inside the parent's record, never a saved chat.
 - 2026-10-11 — **The parent's checker now carries the session's permission mode** (39b shipped the same day, recorded here by the pre-MR docs pass): `make_permission_checker` reads `SessionApprovals::mode` at each call, so a delegate sharing it inherits the mode as it stands when each sub-call reaches the gate -- plan mode refuses the sub-session's writers too, dont-ask its asks, bypass asks nothing, and a deny wins in every mode. A mode's refusal reason reaches the sub-session's tool results through `DispatchContext::refusal` (`mode_refusal`), and plan mode's turn note (`plan_note`) is the parent's to hand the sub-session's system prompt, or the sub-session plans blind. `ToolGate::approvals` is the handle on the mode.
-
-**Open calls:**
-- [default: caps — 8 sub-turns and a token budget named beside it; the tool result reports spend either way.]
-- [default: the delegate's kit is the parent's kit minus `delegate` (and minus nothing else); a narrower kit per call is a later item if wanted.]
+- 2026-10-13 — The bounds are 8 sub-turns plus a token budget named beside them; the tool result reports the spend whether the sub-session finished or hit a cap (the default, confirmed 2026-10-13).
+- 2026-10-13 — The delegate's kit is the parent's kit minus `delegate` itself and nothing else; per-call kit narrowing is a later item if wanted (the default, confirmed 2026-10-13).
 
 **Guardrail(s).** Depth-one and the caps enforced (a delegate offered `delegate` is a planted failure); the shared gate proven (a sub-tool's `always` leaving exactly the one config edit; a pipe's denial identical with and without nesting); cancellation mid-sub-turn releasing both loops; machine-mode conformance with the narration; parent-record round-trip (resume shows the delegation's account); the leak test across the nested surfaces; optional real-weights pass per the model families (one family, one delegated fixture job, recorded).
 

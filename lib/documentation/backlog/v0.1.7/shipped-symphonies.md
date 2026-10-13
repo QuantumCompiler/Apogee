@@ -16,10 +16,8 @@
 - 2026-10-11 — The four starters are the spike's recommended cut, standing (the user executed without trims): `redact-text`, `extract-actions`, `critique-revise`, `digest`.
 - 2026-10-11 — `digest` plays `summarize-verify` rather than inlining its stages: the point is a shipped, visible chain exercising 27r in the box.
 - 2026-10-11 — Audio symphonies are out until a stage can provably take audio (W2); the transcription role stays chat's media machinery's for now.
-
-**Open calls:**
-- [default: `translate-check` stays out (model-dependent quality the starters shouldn't promise); a close second, added only if the user asks at build.]
-- [default: `redact-text`'s category list (emails, phones, people, addresses, credentials/keys, ids) is finalized at build in its schema — flat, enumerable, nothing a small model fumbles.]
+- 2026-10-13 — `translate-check` stays out: translation quality is too model-dependent for a shipped starter to promise; added only on the user's word at build (the default, confirmed 2026-10-13).
+- 2026-10-13 — `redact-text`'s category list is finalized at build in its schema, starting from the sketched six (emails, phones, people, addresses, credentials/keys, ids) — flat, enumerable, nothing a small model fumbles (the default, confirmed 2026-10-13).
 
 **Guardrail(s).** Parse-and-validate on load for all seven starters; mock-member plays with every schema stage held to its schema and `digest`'s chain depth, budget and position-narration asserted; compiled-in byte-identity; `--from` copies editable. Optional real-weights pass per the model families, one family at a time, each starter once, recorded.
 

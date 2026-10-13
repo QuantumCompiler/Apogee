@@ -15,10 +15,8 @@
 - 2026-10-11 — The set lands in v0.1.7 as track 41 (the user's placement call on the spike report).
 - 2026-10-11 — The persona applies to **execute in a project** only — chat stays unopinionated, and a bare execute outside a project opens as today (the spike's design, standing).
 - 2026-10-11 — `-s` replaces the persona whole; there is no merge of the two (one steering text, the user's when given).
-
-**Open calls:**
-- [default: the persona's exact text is the build's craft within the rules above — reviewed against a local Q4 model and one cloud model behaving sanely on the same fixture task before ship.]
-- [default: sessions gaining a general `--agent` policy (the tasks mechanism) stays out of this item — a later item's question if wanted.]
+- 2026-10-13 — The persona's exact text is the build's craft within this document's rules, reviewed against one local Q4 model and one cloud model behaving sanely on the same fixture task before ship (the default, confirmed 2026-10-13).
+- 2026-10-13 — A general `--agent` policy for sessions stays out of this item — a later item's question if wanted (the default, confirmed 2026-10-13).
 
 **Guardrail(s).** FakeTransport goldens for the three states (project / outside / `-s`); byte-identity of the compiled-in copy; the budget's accounting includes the persona; `chat`'s requests byte-stable; an optional real-weights sanity pass per the model families (one family, the fixture task, result recorded).
 
