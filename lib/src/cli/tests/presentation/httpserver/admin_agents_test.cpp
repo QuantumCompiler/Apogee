@@ -125,16 +125,18 @@ TEST_CASE("an HTTP-created agent is byte-identical to a CLI-created one: files a
               .status == 400);
 }
 
-TEST_CASE("list shows the bundled three and the entries; get inlines the bodies",
+TEST_CASE("list shows the bundled seven and the entries; get inlines the bodies",
           "[httpserver][admin][agents]") {
     const Fixture fixture;
     const HttpResponse listed = admin_list_agents(fixture.context());
     REQUIRE(listed.status == 200);
     const nlohmann::json data = parsed(listed)["data"];
-    REQUIRE(data.size() == 3);
+    REQUIRE(data.size() == 7);
     CHECK(data[0]["name"] == "security-review");
     CHECK(data[0]["bundled"] == true);
     CHECK(data[0]["tools"] == "read-only");
+    CHECK(data[6]["name"] == "meeting-minutes");
+    CHECK(data[6]["bundled"] == true);
 
     // A bundled agent's bodies come from the compiled-in text until seeded.
     const HttpResponse bundled = admin_get_agent(fixture.context(), "release-notes");
@@ -157,7 +159,7 @@ TEST_CASE("list shows the bundled three and the entries; get inlines the bodies"
     CHECK(parsed(mine)["prompt_bodies"][0]["body"] == "MY PROMPT\n");
     CHECK(parsed(mine)["prompt_bodies"][0]["present"] == true);
     CHECK(parsed(mine)["schema_bodies"].empty());
-    CHECK(parsed(admin_list_agents(fixture.context()))["data"].size() == 4);
+    CHECK(parsed(admin_list_agents(fixture.context()))["data"].size() == 8);
     CHECK(admin_get_agent(fixture.context(), "nope").status == 404);
 
     // An entry overriding a bundled agent is listed in its slot.
@@ -165,7 +167,7 @@ TEST_CASE("list shows the bundled three and the entries; get inlines the bodies"
         fixture.context(),
         with_body("POST", nlohmann::json{{"name", "security-review"}, {"model", "local"}}));
     const nlohmann::json after = parsed(admin_list_agents(fixture.context()))["data"];
-    REQUIRE(after.size() == 4);
+    REQUIRE(after.size() == 8);
     CHECK(after[0]["name"] == "security-review");
     CHECK(after[0]["overrides_bundled"] == true);
     CHECK(after[0]["model"] == "local");

@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MeetingMinutes",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "One to three sentences: what the meeting was about and where it ended."
+    },
+    "decisions": {
+      "type": "array",
+      "description": "What the group agreed, as it finally stood. Empty when nothing was decided.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": { "type": "string", "description": "What was agreed, in one sentence." },
+          "reason": { "type": "string", "description": "The reason given, or 'not stated'." }
+        },
+        "required": ["decision", "reason"]
+      }
+    },
+    "action_items": {
+      "type": "array",
+      "description": "Who will do what, by when. Empty when nobody took anything on.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "owner": { "type": "string", "description": "The person, as the transcript names them, or 'unassigned'." },
+          "task": { "type": "string", "description": "What they will do, in one sentence." },
+          "due": { "type": "string", "description": "The date or deadline given, or 'not stated'." }
+        },
+        "required": ["owner", "task", "due"]
+      }
+    },
+    "open_questions": {
+      "type": "array",
+      "description": "What was raised and not settled. Empty when nothing was left open.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "question": { "type": "string", "description": "The question, in one sentence." },
+          "raised_by": { "type": "string", "description": "Who raised it, or 'not stated'." }
+        },
+        "required": ["question", "raised_by"]
+      }
+    },
+    "human_summary": {
+      "type": "string",
+      "description": "Written LAST. The minutes as a short Markdown note for the attendees: a one-line summary, then Decisions, Action items and Open questions, omitting any that are empty."
+    }
+  },
+  "required": ["summary", "decisions", "action_items", "open_questions", "human_summary"]
+}

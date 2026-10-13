@@ -4616,6 +4616,38 @@ The prefill, which lives only in the llama build, was checked on real weights in
 - An `analyze` agent with tools is held only on its final pass, and most answer before it.
 - Qwen3.8-27B over the corpus (see the decision above).
 
+### 2026-10-13 — `shipped-agents` (backlog item 40a): four more bundled agents
+
+**Goal.** The three bundled agents were all repo-and-release reviewers. Four more cover the rest of what people hand a model, each a prompt and a schema in the shipped three's shape: read-only, default-model, compiled in and seeded skip-if-present. No new verb, flag or tool policy.
+
+- [x] **`code-review`** — correctness and simplification findings over a diff, a file or the branch under review: each with its file, location, severity (`high|medium|low`), kind (`correctness|simplification`), the claim, a suggested fix and a confidence, and a verdict (`approve|approve_with_suggestions|changes_requested`). `security-review`'s general sibling.
+- [x] **`test-gaps`** — the behaviors a change adds that no test would notice breaking, each with a priority, its location and a suggested test name in the project's own style, and the test files it read while looking.
+- [x] **`doc-drift`** — documentation statements a change made untrue, each quoted with its document, why it is stale and the edit that fixes it (`stale`, or `missing` for something new no document mentions). The first bundled agent written for auto-RAG: it expects the project's docs ingested into a collection and retrieved with `analyze --agent doc-drift --rag <collection>`, and also searches the repository's own files. It ships pointing at no collection.
+- [x] **`meeting-minutes`** — a transcript into decisions (with the reason given), action items (owner, task, due — `unassigned` and `not stated` where the transcript gives none, never invented) and open questions. The first bundled agent with no git in it.
+- [x] **The generator** — `scripts/generate_agent_assets.py` writes `contracts/assets_agents.cpp`: all seven agents' prompts and schemas as raw literals, with their order and descriptions, which it holds. The shipped three's literals moved there from `assets.cpp` unchanged (the byte-identity test held them through the move). It refuses a prompt file with no agent, a literal over 15,000 bytes, and a text holding its raw-string terminator.
+- [x] **The starter config's comment** names the seven where it said "Three review agents are built in".
+
+**Decisions** (2026-10-13, made while building; the item's own were the catalog, `doc-drift` with no default collection, flat schemas and no `issue-triage`)
+
+| Decision | Choice | Why |
+|---|---|---|
+| A generator for the agents | Added, writing all seven | The item's acceptance asks that "the generator reproduces them", and the agents had none: their literals were placed by a one-off script recorded in Milestone X. The symphonies' generator was the shape copied. |
+| How `doc-drift` says what it read | The report's `docs_source` (`retrieved_excerpts`, `repository_files`, `both`, `none`), and `analyze`'s existing retrieval note | Content only: no surface change. With `--rag <collection>` the run already says what it retrieved, and an absent collection is already said as "retrieval unavailable" without failing the run; with none, the report itself says it had nothing to check against and how to give it some. |
+| The prompts' rule on refs | Held only for prompts that call `git_diff` | `meeting-minutes` reads a transcript; the rule that refs come from `--branch/--base` is about the git tools. |
+| Model-agnostic, tested | Every bundled prompt is checked for vendor and family names (Claude, Anthropic, OpenAI, GPT, Gemini, Llama, Qwen) | The item's constraint, made a test rather than a review rule. |
+
+**Guardrails.**
+- `contracts/assets_test.cpp`: seven agents, each literal byte-identical to its files; every prompt and schema file shipped is a bundled agent's; the seeding count (fourteen agent files); the list order, an override still in its bundled slot.
+- `bundled_agents_test.cpp`: every schema draft-07, closed, `human_summary` last; every prompt's nothing-found rule; a nothing-found instance per new schema; a full report per new schema conforming, and refused with a stray field in an item.
+- `admin_agents_test.cpp`: the admin listing shows seven bundled.
+- `cli.analyze_lifecycle` on the real binary: `agents list` shows seven bundled; each new agent seeded, run over a scripted mock with `analyze --agent <name> --json`, conforming, and saved under `analyses/<name>/`; `doc-drift` with an ingested docs collection (said), with an absent one (said, and still run) and with none (nothing said of retrieval).
+
+**Not verified.**
+- On real weights: not run — the item's real-weights pass is optional, and this run is unattended.
+- Linux and Windows.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,202 tests, none failing, one skipped for want of `pdftotext` -- `cli.analyze_lifecycle` with the new agents among them. The llama-off unit binary: 3,141 passed, 5 skipped. `clang-format` is clean on every touched file; `make lint` runs once at the end of the v0.1.7 group.
+
 ## Milestone Y — The knowledge layer
 
 **Goal.** Capture the *why* behind a decision at the moment the idea is formed — before it evaporates into a ticket, a design file, or a commit with the rationale stripped out — as one canonical record in an ordinary collection: findable with no model at all, archived rich and indexed thin, produced identically by the command line, a live chat, a saved session and the control plane, and edited without ever re-embedding.

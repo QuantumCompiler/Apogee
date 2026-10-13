@@ -38,11 +38,12 @@ std::string read(const std::filesystem::path& path) {
 
 TEST_CASE("the compiled-in prompts and schemas byte-match the shipped files",
           "[harness][assets][template]") {
-    // The config template's drift test, for six more files: the literal in
-    // the binary and the file under assets/ are the same bytes, or the build
+    // The config template's drift test, for fourteen more files: the literal
+    // in the binary and the file under assets/ are the same bytes, or the build
     // fails -- so an edit to one cannot silently leave the other behind.
+    // scripts/generate_agent_assets.py writes the literals (40a).
     const std::filesystem::path assets{APOGEE_ASSETS_DIR};
-    REQUIRE(bundled_agents().size() == 3);
+    REQUIRE(bundled_agents().size() == 7);
     for (const apogee::harness::BundledAgent& agent : bundled_agents()) {
         INFO(agent.name);
         CHECK(read(assets / "prompts" / (std::string{agent.name} + ".txt")) == agent.prompt);
@@ -53,7 +54,24 @@ TEST_CASE("the compiled-in prompts and schemas byte-match the shipped files",
     CHECK(find_bundled_agent("security-review") != nullptr);
     CHECK(find_bundled_agent("release-notes") != nullptr);
     CHECK(find_bundled_agent("merge-request") != nullptr);
+    CHECK(find_bundled_agent("code-review") != nullptr);
+    CHECK(find_bundled_agent("test-gaps") != nullptr);
+    CHECK(find_bundled_agent("doc-drift") != nullptr);
+    CHECK(find_bundled_agent("meeting-minutes") != nullptr);
     CHECK(find_bundled_agent("nope") == nullptr);
+    // Every prompt and schema file shipped is a bundled agent's: a file the
+    // generator was never told about would be seeded by nothing.
+    for (const char* const dir : {"prompts", "schemas"}) {
+        for (const std::filesystem::directory_entry& entry :
+             std::filesystem::directory_iterator{assets / dir}) {
+            std::string name = entry.path().stem().string();
+            if (name.ends_with("-output")) {
+                name.resize(name.size() - std::string_view{"-output"}.size());
+            }
+            INFO(entry.path().string());
+            CHECK(find_bundled_agent(name) != nullptr);
+        }
+    }
 }
 
 TEST_CASE("seeding writes absent files only: an edit survives a re-seed",
@@ -61,11 +79,11 @@ TEST_CASE("seeding writes absent files only: an edit survives a re-seed",
     const apogee::testing::TempDir root{"assets-seed-" + std::to_string(std::random_device{}())};
     const apogee::harness::AssetSeedResult first = seed_bundled_assets(root.path());
     REQUIRE(first.ok());
-    // Six agent files, four kits, three symphony starters (27q), three
+    // Fourteen agent files (40a), four kits, three symphony starters (27q), three
     // training drivers, the two mlx drivers, the vendored converter.
     CHECK(first.created.size() == apogee::harness::bundled_files().size());
     CHECK(first.created.size() ==
-          6 + 4 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
+          14 + 4 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
     for (const apogee::harness::BundledSymphony& starter : apogee::harness::bundled_symphonies()) {
         CHECK(read(root.path() / "symphonies" / (std::string{starter.name} + ".yaml")) ==
               starter.text);
@@ -133,15 +151,20 @@ TEST_CASE("a config entry of the same name overrides a bundled agent; unknown na
     CHECK(bundled != nullptr);  // still reported, for the compiled-in fallback
 
     const std::vector<apogee::harness::NamedAgent> agents = all_agents(config);
-    REQUIRE(agents.size() == 4);
+    REQUIRE(agents.size() == 8);
     CHECK(agents[0].name == "security-review");
     CHECK(agents[0].overrides_bundled);
     CHECK_FALSE(agents[0].bundled);
     CHECK(agents[1].name == "release-notes");
     CHECK(agents[1].bundled);
     CHECK(agents[2].name == "merge-request");
-    CHECK(agents[3].name == "zeta");
-    CHECK_FALSE(agents[3].bundled);
+    CHECK(agents[3].name == "code-review");
+    CHECK(agents[4].name == "test-gaps");
+    CHECK(agents[5].name == "doc-drift");
+    CHECK(agents[6].name == "meeting-minutes");
+    CHECK(agents[6].bundled);
+    CHECK(agents[7].name == "zeta");
+    CHECK_FALSE(agents[7].bundled);
 }
 
 TEST_CASE("agent paths resolve against the data directory, absolute paths as they are",
@@ -194,7 +217,7 @@ TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
     CHECK(apogee::harness::bundled_script_relative_path(script.name) ==
           "training/scripts/prepare_dataset.py");
     CHECK(apogee::harness::bundled_files().size() ==
-          6 + 4 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
+          14 + 4 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
 }
 
 TEST_CASE("the compiled-in mlx drivers byte-match the shipped files and seed beside the trainers",

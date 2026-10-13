@@ -32,6 +32,7 @@ apogee_add_module(contracts
     contracts/utf8.cpp
     contracts/assets.h
     contracts/assets.cpp
+    contracts/assets_agents.cpp
     contracts/assets_training.cpp
     contracts/assets_converter.cpp
     contracts/assets_mlx.cpp

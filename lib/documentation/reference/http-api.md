@@ -387,7 +387,7 @@ registered from the terminal.
 Every agent `apogee analyze --agent` can run, as a view: `{name, description,
 model, prompts, schemas, output_format, tools, mcp, questions, collection,
 save_dir, save_filename, save_subdir, bundled, overrides_bundled}`. The
-bundled three appear with `bundled: true` unless a config entry of the same
+bundled seven appear with `bundled: true` unless a config entry of the same
 name overrides them, in which case the entry is listed with
 `overrides_bundled: true`. `tools` is the agent's permission model:
 `read-only` (never prompts), `all` (gated like `chat`), or `none`.

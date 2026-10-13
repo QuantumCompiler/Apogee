@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TestGapsReport",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "Two to four sentences: what the change does and how well its behaviors are tested."
+    },
+    "tests_read": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "The test files read while looking, relative to the repository root. Empty when none were found."
+    },
+    "gaps": {
+      "type": "array",
+      "description": "Behaviors the change introduces that no test would notice breaking, highest priority first. Empty when there are none.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "priority": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+            "description": "high = wrong results or lost data would ship unnoticed; medium = an edge case or an error path; low = cosmetic."
+          },
+          "file": { "type": "string", "description": "The file holding the behavior, relative to the repository root, or 'input'." },
+          "location": { "type": "string", "description": "A line range when known, otherwise the function or rule's name." },
+          "behavior": { "type": "string", "description": "The one behavior that is untested, stated so a test could be written from it." },
+          "suggested_test": { "type": "string", "description": "A test name in the project's own style." }
+        },
+        "required": ["priority", "file", "location", "behavior", "suggested_test"]
+      }
+    },
+    "human_summary": {
+      "type": "string",
+      "description": "Written LAST. A short note for the author in Markdown: the coverage in plain words, then the gaps worth closing first."
+    }
+  },
+  "required": ["summary", "tests_read", "gaps", "human_summary"]
+}

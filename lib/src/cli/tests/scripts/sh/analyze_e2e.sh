@@ -76,6 +76,41 @@ JSON
 grep -q "security-review" "$WORK_DIR/list.txt" || fail "--list does not name the bundled agents"
 grep -q "release-notes" "$WORK_DIR/list.txt" || fail "--list does not name release-notes"
 
+# --- the seven bundled agents (40a): seeded, listed, each run schema-valid ---
+# Each new agent over a scripted mock answering its nothing-found report: the
+# run conforms, is saved under its own analyses/<name>/, and its files were
+# seeded beside the shipped three.
+"$APOGEE_BIN" agents list </dev/null >"$WORK_DIR/agents.txt" 2>&1 || fail "agents list"
+[ "$(grep -c 'bundled' "$WORK_DIR/agents.txt")" -eq 7 ] || fail "agents list does not show seven bundled agents: $(cat "$WORK_DIR/agents.txt")"
+for agent in code-review test-gaps doc-drift meeting-minutes; do
+    case "$agent" in
+        code-review) answer='{"summary": "s", "findings": [], "verdict": "approve", "verdict_rationale": "clean", "human_summary": "NOTHING-FOUND"}' ;;
+        test-gaps) answer='{"summary": "s", "tests_read": [], "gaps": [], "human_summary": "NOTHING-FOUND"}' ;;
+        doc-drift) answer='{"summary": "s", "docs_source": "none", "drifts": [], "human_summary": "NOTHING-FOUND"}' ;;
+        meeting-minutes) answer='{"summary": "s", "decisions": [], "action_items": [], "open_questions": [], "human_summary": "NOTHING-FOUND"}' ;;
+    esac
+    [ -f "$APOGEE_HOME/prompts/$agent.txt" ] || fail "$agent: the prompt was not seeded"
+    [ -f "$APOGEE_HOME/schemas/$agent-output.json" ] || fail "$agent: the schema was not seeded"
+    python3 -c 'import json, sys; print(json.dumps({"turns": [{"text": sys.argv[1]}]}))' "$answer" >"$WORK_DIR/$agent.json"
+    "$APOGEE_BIN" config add-backend "mock-$agent" --type mock --model-path "$WORK_DIR/$agent.json" >/dev/null || fail "add-backend mock-$agent"
+    "$APOGEE_BIN" analyze --agent "$agent" -m "mock-$agent" --json "x" </dev/null >"$WORK_DIR/$agent.out" 2>"$WORK_DIR/$agent.err" || fail "analyze --agent $agent: $(cat "$WORK_DIR/$agent.err")"
+    grep -q "NOTHING-FOUND" "$WORK_DIR/$agent.out" || fail "$agent: the report was not delivered: $(cat "$WORK_DIR/$agent.out")"
+    grep -q '"conforms": false' "$WORK_DIR/$agent.out" && fail "$agent: a conforming report was flagged"
+    ls "$APOGEE_HOME/analyses/$agent/"*.json >/dev/null 2>&1 || fail "$agent: the report did not land under analyses/$agent/"
+done
+# doc-drift with its collection (an ingested docs corpus) and without one:
+# with one, the run says it retrieved from it; with a collection that does
+# not exist, it says retrieval was unavailable and still runs; with none, it
+# runs and says nothing of retrieval -- the report's docs_source says it.
+mkdir -p "$WORK_DIR/docs"
+echo "The --colour flag turns colour on." >"$WORK_DIR/docs/guide.md"
+"$APOGEE_BIN" embed ingest docs "$WORK_DIR/docs" </dev/null >/dev/null 2>&1 || fail "ingest the docs corpus"
+"$APOGEE_BIN" analyze --agent doc-drift -m mock-doc-drift --rag docs --json "the colour flag" </dev/null >"$WORK_DIR/drift-rag.out" 2>"$WORK_DIR/drift-rag.err" || fail "doc-drift --rag docs: $(cat "$WORK_DIR/drift-rag.err")"
+grep -q "'docs'" "$WORK_DIR/drift-rag.err" || fail "doc-drift did not say it retrieved from its collection: $(cat "$WORK_DIR/drift-rag.err")"
+"$APOGEE_BIN" analyze --agent doc-drift -m mock-doc-drift --rag nowhere --json "x" </dev/null >"$WORK_DIR/drift-none.out" 2>"$WORK_DIR/drift-none.err" || fail "doc-drift with an absent collection must still run: $(cat "$WORK_DIR/drift-none.err")"
+grep -q "retrieval unavailable" "$WORK_DIR/drift-none.err" || fail "an absent collection was not said: $(cat "$WORK_DIR/drift-none.err")"
+grep -q "retriev" "$WORK_DIR/doc-drift.err" && fail "doc-drift without a collection spoke of retrieval: $(cat "$WORK_DIR/doc-drift.err")"
+
 # --- --branch reviews a ref that is NOT checked out, from the flags ---------
 # The input text names a different branch: it must change nothing.
 "$APOGEE_BIN" analyze --agent security-review --branch feature --no-fetch --json "please review main against nothing" </dev/null >"$WORK_DIR/branch.json" 2>"$WORK_DIR/branch.err" || fail "analyze --branch: $(cat "$WORK_DIR/branch.err")"
