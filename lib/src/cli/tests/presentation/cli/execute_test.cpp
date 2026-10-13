@@ -18,6 +18,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 #include "agentloop/member_call.h"
@@ -1144,4 +1145,150 @@ TEST_CASE("execute's whole surface, golden", "[execute][golden]") {
         slurp(std::filesystem::path{APOGEE_TEST_FIXTURES} / "cli" / "execute_session.golden");
     REQUIRE(golden.has_value());
     CHECK(actual == *golden);
+}
+
+// --- the project opening (41b) ---------------------------------------------------
+
+namespace {
+
+/// Moves the working directory for the life of the object.
+class WorkingDirectory {
+public:
+    explicit WorkingDirectory(const std::filesystem::path& to)
+        : previous_{std::filesystem::current_path()} {
+        std::filesystem::current_path(to);
+    }
+
+    ~WorkingDirectory() {
+        std::error_code ignored;
+        std::filesystem::current_path(previous_, ignored);
+    }
+
+    WorkingDirectory(const WorkingDirectory&) = delete;
+    WorkingDirectory& operator=(const WorkingDirectory&) = delete;
+    WorkingDirectory(WorkingDirectory&&) = delete;
+    WorkingDirectory& operator=(WorkingDirectory&&) = delete;
+
+private:
+    std::filesystem::path previous_;
+};
+
+/// A home whose root echoes every system message it was sent, and a project
+/// folder beside it: a repository holding `AGENTS.md` and one file.
+struct ProjectHome : Home {
+    std::filesystem::path project = home.home() / "project";
+
+    ProjectHome() {
+        std::ofstream{home.home() / "scripts" / "root.json", std::ios::trunc}
+            << R"({"turns": [{"text": "SYS<<{{system}}>>"}]})";
+        std::filesystem::create_directories(project / ".git");
+        std::ofstream{project / "AGENTS.md"} << "Use tabs.\nRun make test before done.\n";
+        std::ofstream{project / "notes.md"} << "The build is make.\n";
+    }
+
+    /// The saved session file of the newest session, as text.
+    [[nodiscard]] std::string session_file() const {
+        const apogee::testing::EnvGuard guard{"APOGEE_HOME", home.home().string()};
+        std::ifstream in{apogee::logger::session_path(sessions().front().chat_id)};
+        return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    }
+};
+
+}  // namespace
+
+TEST_CASE("execute in a project reads AGENTS.md into every request, says it, never saves it",
+          "[execute][project]") {
+    const ProjectHome home;
+    const WorkingDirectory here{home.project};
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"execute", "--attach", ""}, &out, &err, "hi\nagain\n") == 0);
+    // Both turns carry it, as transient system context.
+    std::size_t carried = 0;
+    for (std::size_t at = out.find("Project context, from AGENTS.md"); at != std::string::npos;
+         at = out.find("Project context, from AGENTS.md", at + 1)) {
+        ++carried;
+    }
+    CHECK(carried == 2);
+    CHECK_THAT(out, Catch::Matchers::ContainsSubstring("Run make test before done."));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring(
+                        "project context: AGENTS.md, 7 words, in every request"));
+    // Never the conversation's: the saved file holds the turns and no word of
+    // it but what the model's own echo quoted back.
+    const apogee::logger::Session saved = home.sessions().front();
+    for (const apogee::harness::ChatMessage& message : saved.messages) {
+        if (message.role != apogee::harness::Role::Assistant) {
+            CHECK(message.content.plain_text().find("Use tabs.") == std::string::npos);
+        }
+    }
+    CHECK(saved.params.system_prompt.empty());
+    CHECK(saved.attachments.empty());  // --attach "" skipped the folder
+}
+
+TEST_CASE("the opening attaches the project folder; an explicit --attach replaces it",
+          "[execute][project]") {
+    {
+        const ProjectHome home;
+        const WorkingDirectory here{home.project};
+        std::string out;
+        std::string err;
+        REQUIRE(home.run({"execute"}, &out, &err, "hi\n") == 0);
+        const apogee::logger::Session saved = home.sessions().front();
+        REQUIRE(saved.attachments.size() == 1);
+        CHECK(saved.attachments.front().name == ".");
+    }
+    {
+        const ProjectHome home;
+        const WorkingDirectory here{home.project};
+        std::string out;
+        std::string err;
+        REQUIRE(home.run({"execute", "--attach", "notes.md"}, &out, &err, "hi\n") == 0);
+        const apogee::logger::Session saved = home.sessions().front();
+        REQUIRE(saved.attachments.size() == 1);
+        CHECK(saved.attachments.front().name == "notes.md");
+    }
+}
+
+TEST_CASE("outside a project execute opens as before, and chat never reads the file",
+          "[execute][project]") {
+    const ProjectHome home;
+    std::string out;
+    std::string err;
+    {
+        // A folder with neither a repository nor a context file.
+        const std::filesystem::path elsewhere = home.home.home() / "elsewhere";
+        std::filesystem::create_directories(elsewhere);
+        const WorkingDirectory here{elsewhere};
+        REQUIRE(home.run({"execute"}, &out, &err, "hi\n") == 0);
+        CHECK(out.find("Project context") == std::string::npos);
+        CHECK(err.find("project context") == std::string::npos);
+        CHECK(home.sessions().front().attachments.empty());
+    }
+    {
+        // Chat in the project: unchanged, no context and no attach.
+        const WorkingDirectory here{home.project};
+        REQUIRE(home.run({"chat"}, &out, &err, "hi\n") == 0);
+        CHECK(out.find("Project context") == std::string::npos);
+        CHECK(err.find("project context") == std::string::npos);
+    }
+}
+
+TEST_CASE("machine mode says the project opening in the notices it already has",
+          "[execute][project][machine]") {
+    const ProjectHome home;
+    const WorkingDirectory here{home.project};
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"execute", "--attach", "", "--output-format", "stream-json"}, &out, &err,
+                     "{\"type\":\"user\",\"text\":\"hi\"}\n") == 0);
+    bool said = false;
+    std::istringstream lines{out};
+    for (std::string line; std::getline(lines, line);) {
+        const nlohmann::json event = nlohmann::json::parse(line);
+        said =
+            said || (event.at("type") == "notice" &&
+                     event.at("text") == "project context: AGENTS.md, 7 words, in every request");
+    }
+    CHECK(said);
+    CHECK_THAT(out, Catch::Matchers::ContainsSubstring("Project context, from AGENTS.md"));
 }

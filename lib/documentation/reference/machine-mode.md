@@ -363,6 +363,14 @@ Since 41a it also opens **bare** -- no suite named and none the default, on
 the `session` event naming the model, and a `/play`'s stages resolved through
 the one role chain (a helper role on the conversation's backend, the chat
 role on its pointer). `--orchestrate` is a suite's, and refused bare.
+Since 41b an execute session opened inside a **project** -- a folder holding a
+`.git` or a context file -- opens with it: `AGENTS.md` (else `CLAUDE.md`, read and
+never written) rides every request as system context, never the conversation's,
+and the folder is attached as `--attach .` would attach it (`--attach ""` skips
+that; any other `--attach` replaces it). Both are said in the events the session
+already has: a `notice` -- `project context: AGENTS.md, 1,234 words, in every
+request`, or the cut when the file passes 4,000 words -- before the folder's own
+attach lines.
 
 ```jsonl
 {"type":"user","text":"/play summarize-verify The minutes of the meeting…"}

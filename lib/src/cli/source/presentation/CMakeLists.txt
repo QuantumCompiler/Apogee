@@ -300,6 +300,8 @@ apogee_add_module(cli
     cli/chat_session.cpp
     cli/chat_turn.h
     cli/chat_turn.cpp
+    cli/project_context.h
+    cli/project_context.cpp
     cli/task_cmd.h
     cli/task_cmd.cpp
     cli/complete_sources.h

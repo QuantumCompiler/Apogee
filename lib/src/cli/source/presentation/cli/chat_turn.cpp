@@ -27,13 +27,16 @@ harness::StatusSink progress_sink(agentloop::Reporter& reporter) {
     };
 }
 
-ChatTurnResult run_chat_turn(
-    const harness::Harness& harness, logger::Session& session, const std::string& input,
-    const agent::ToolRegistry* tools, agentloop::ToolSelection* selection,
-    agentloop::MemberCalls* member_calls, const agentloop::AskFn& ask, const ToolGate& gate,
-    agentloop::Reporter& reporter, const std::function<void(const std::string&)>& notice,
-    const RagSettings& rag, const std::string& review_note, ChatAttachments* attached,
-    ChatRecall* recall, const harness::CancellationToken& cancellation, bool summarize_reasoning) {
+ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& session,
+                             const std::string& input, const agent::ToolRegistry* tools,
+                             agentloop::ToolSelection* selection,
+                             agentloop::MemberCalls* member_calls, const agentloop::AskFn& ask,
+                             const ToolGate& gate, agentloop::Reporter& reporter,
+                             const std::function<void(const std::string&)>& notice,
+                             const RagSettings& rag, const std::string& review_note,
+                             ChatAttachments* attached, ChatRecall* recall,
+                             const harness::CancellationToken& cancellation,
+                             bool summarize_reasoning, const std::vector<std::string>& standing) {
     ChatTurnResult outcome;
     const std::vector<harness::ChatMessage> incoming = build_messages({}, {}, input, {});
     // The turn's model calls besides the chat model's own, said where the
@@ -245,6 +248,14 @@ ChatTurnResult run_chat_turn(
         loop_options.transient_prefix.insert(loop_options.transient_prefix.begin(),
                                              harness::ChatMessage::system(review_note));
     }
+    // The session's standing context (41b) heads what the turn injects: the
+    // last the budget would trim, and never in the transcript.
+    std::vector<harness::ChatMessage> head;
+    for (const std::string& note : standing) {
+        head.push_back(harness::ChatMessage::system(note));
+    }
+    loop_options.transient_prefix.insert(loop_options.transient_prefix.begin(), head.begin(),
+                                         head.end());
 
     try {
         agentloop::RunResult result =

@@ -37,6 +37,7 @@
 #include "cli/embed.h"
 #include "cli/helpers.h"
 #include "cli/permissions.h"
+#include "cli/project_context.h"
 #include "cli/provider_offer.h"
 #include "cli/session_output.h"
 #include "cli/suite_residency.h"
@@ -1048,6 +1049,24 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         }
     }
 
+    // Execute's project opening (41b): opened in a project -- a git
+    // repository, or a folder holding a context file -- it reads AGENTS.md
+    // (else CLAUDE.md) into every request as standing context, and attaches
+    // the folder through the one attach driver unless `--attach` says
+    // otherwise. Chat opens as it always has.
+    ProjectOpening project;
+    if (mode == SessionMode::Execute) {
+        std::error_code here_error;
+        project = read_project_opening(std::filesystem::current_path(here_error));
+    }
+    std::vector<std::string> standing;
+    if (project.context.has_value()) {
+        standing.push_back(project_context_note(*project.context));
+    }
+    const std::vector<std::string> launch_attaches =
+        mode == SessionMode::Execute ? opening_attaches(flags->attach, project.project)
+                                     : flags->attach;
+
     if (decorate) {
         // A base model is said in the banner and the spinner, all session
         // (26r) -- never on an answer. Under execute the banner counts what
@@ -1206,7 +1225,15 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         for (const std::string& spec : flags->images) {
             (void)attached.attach(spec, working_directory);
         }
-        for (const std::string& spec : flags->attach) {
+        // The project opening said as the banner says it (41b), before the
+        // folder's own attach lines.
+        if (project.context.has_value()) {
+            machine_reporter.on_notice(project_context_line(*project.context));
+        }
+        if (!project.unreadable.empty()) {
+            machine_reporter.on_notice("project context: " + project.unreadable);
+        }
+        for (const std::string& spec : launch_attaches) {
             (void)attached.attach(spec, working_directory, attached.graph_method(launch_graph));
         }
         bool first_line = true;
@@ -1323,7 +1350,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                                       : agent::ConfirmFn{},
                          approvals},
                 machine_reporter, machine_notice, rag_settings, review_note, &attached, &recall,
-                got->turn);
+                got->turn, /*summarize_reasoning=*/false, standing);
             if (outcome.cancelled) {
                 cancelled_result();
                 close_turn();
@@ -1393,7 +1420,14 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     for (const std::string& spec : flags->images) {
         (void)attached.attach(spec, working_directory);
     }
-    for (const std::string& spec : flags->attach) {
+    if (project.context.has_value()) {
+        out.print_line(style.tag(ansi::Role::Apogee) + " " +
+                       project_context_line(*project.context));
+    }
+    if (!project.unreadable.empty()) {
+        out.print_line(style.tag(ansi::Role::Warning) + " project context: " + project.unreadable);
+    }
+    for (const std::string& spec : launch_attaches) {
         (void)attached.attach(spec, working_directory, attached.graph_method(launch_graph));
     }
 
@@ -2266,7 +2300,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     // one (26n): never inside its rows.
                     out.keep_line(style.tag(ansi::Role::Warning) + " " + message);
                 },
-                rag_settings, review_note, &attached, &recall, turn.token, summarizing());
+                rag_settings, review_note, &attached, &recall, turn.token, summarizing(), standing);
         }
         title.start_if_due(session);
         if (session.compactions != saved_compactions) {

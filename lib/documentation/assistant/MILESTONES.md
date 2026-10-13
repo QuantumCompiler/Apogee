@@ -7355,3 +7355,34 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3
 - Linux and Windows.
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,224 tests, none failing, one skipped for want of `pdftotext` -- `cli.execute_lifecycle`, `cli.one_role_resolver` and `cli.unit_suite_under_a_tty` among them. `clang-format` is clean on every touched file.
+
+### 2026-10-13 — `execute-project-opening` (backlog item 41b): the context file read, the folder attached
+
+**What was built**
+
+- [x] **What a project is** (`cli/project_context`): the folder the session opened in, when it holds a `.git` or a context file. Nothing above it is probed, so a subfolder of a repository opens as any folder does.
+- [x] **The context file**: `AGENTS.md`, else `CLAUDE.md`, first found wins, read and never written. Its text is mended to UTF-8 where it is read, and capped at `kProjectContextWords` (4,000): the head kept to a word's end and the cut said, in the note ("[AGENTS.md goes on: 100 more words were left out, past the 4,000-word cap. Read the file itself for the rest.]") and on the opening line. A file that is there and cannot be read is said as a warning; the folder is still a project.
+- [x] **Standing context, never the conversation's**: the note rides every request at the head of what the turn injects (`run_chat_turn`'s new `standing`), so it is never history, never saved, never in the transcript, and the last thing the budget would trim -- said when it is.
+- [x] **The folder attached** through the one attach driver, as `--attach .` would -- indexed, its code graph per `attachments.graph`, its map card, the graph toolset scoped to it, the attachment share -- and re-attached through the same update path on a resume. `--attach ""` skips it (and is never attached itself); any other `--attach` replaces it (`opening_attaches`).
+- [x] **Said where the session opens**: `project context: AGENTS.md, 7 words, in every request` (or `the first 4,000 of 6,000 words, in every request -- the rest left out`) on the terminal and on a pipe's stderr, and in machine mode as a `notice` event, before the folder's own attach lines. Documented in `machine-mode.md`.
+- [x] `chat` opens exactly as it did; `execute` outside a project too.
+
+**Decisions** (2026-10-13; the item's own were AGENTS.md first, the opening on in a project and off elsewhere, the cap named, and no nested files)
+
+| Decision | Choice | Why |
+|---|---|---|
+| Where the note rides | The head of the turn's injected context, not the never-trimmed slot the environment note has | It can be thousands of words; on a small window the budget must be able to say it trimmed it rather than refuse the turn. At the head it is trimmed last, after retrieval and recall. |
+| The cap | 4,000 words, cut at a word's end | "A few thousand words" as the item put it; words are what a person counts in their own file, and the line says the counts. |
+| The detection | The folder itself: a `.git` or a context file there | The item's "cheap and local". A subfolder of a repository opens as any folder; walking up is the nested-files item's question. |
+| Machine mode | The existing `notice` event, no new event type | The item's "the banner facts ride the existing header events": the vocabulary, and the schema, unchanged. |
+| The helper's home | `cli/project_context`, not `contracts/` | The session core is its only reader; the item allowed `contracts/` only "if one is needed". |
+
+**Guardrails.**
+- `cli/project_context_test.cpp`: neither, a repository, a context file alone; `AGENTS.md` before `CLAUDE.md`; past the cap the head kept with the counts and the cut said in the note and the line; a Latin-1 file mended; `opening_attaches` -- the folder by default, `""` a skip, anything else a replacement.
+- `cli/execute_test.cpp`, in a fixture repository: `AGENTS.md` carried on both turns of a session and said on stderr, and no word of it in the saved conversation's user content, system prompt or attachments; the folder attached as `.`, an explicit `--attach notes.md` replacing it; outside a project execute as before and `chat` in the project never reading the file; machine mode's `notice`.
+
+**Not verified.**
+- A project opened on real weights; the opening attach of a large repository (the attach driver's own size guard asks at a terminal and refuses on a pipe, unchanged).
+- Linux and Windows.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,230 tests, none failing, one skipped for want of `pdftotext` -- `cli.unit_suite_under_a_tty` (which runs `execute_test` on a terminal) among them; the conformance checks passed again after `machine-mode.md` gained the opening. `clang-format` is clean on every touched file.

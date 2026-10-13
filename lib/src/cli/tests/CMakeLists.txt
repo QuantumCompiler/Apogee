@@ -297,6 +297,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/chat_roster_test.cpp
     presentation/cli/chat_session_test.cpp
     presentation/cli/execute_test.cpp
+    presentation/cli/project_context_test.cpp
     presentation/httpserver/handler_test.cpp
     presentation/httpserver/sse_test.cpp
     presentation/httpserver/session_test.cpp

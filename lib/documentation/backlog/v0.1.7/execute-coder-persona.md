@@ -25,4 +25,4 @@
 - [ ] The persona is compiled in, byte-identical to its asset, budgeted, and never saved as user content.
 - [ ] `chat` and non-project execute byte-stable; the full suite green.
 
-**Scope note.** Earmarked for v0.1.7; gated on [41b](execute-project-opening.md) (the persona rides the project detection). Out of scope: a `--agent` for sessions, any chat change, per-model persona variants.
+**Scope note.** Earmarked for v0.1.7; gated on 41b, the project opening -- **shipped 2026-10-13** ([MILESTONES.md](../../assistant/MILESTONES.md#milestone-ak--the-coding-mode) → Milestone AK), so the gate is satisfied (the persona rides the project detection, `cli/project_context`). Out of scope: a `--agent` for sessions, any chat change, per-model persona variants.
