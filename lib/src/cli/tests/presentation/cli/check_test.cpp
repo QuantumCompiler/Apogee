@@ -2467,7 +2467,7 @@ TEST_CASE(
     REQUIRE(row != nullptr);
     CHECK(row->status == Status::Fail);
     CHECK(row->detail ==
-          "orchestrate: 'summarize-verify' reaches utility ('helper') through its summarize stage "
+          "orchestrate: 'critique-revise' reaches utility ('helper') through its critique stage "
           "(utility), and 'helper' is billed per call -- a play the model starts runs on its "
           "initiative, which never spends: only a suite whose symphonies reach local, unmetered "
           "members can orchestrate");

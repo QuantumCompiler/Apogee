@@ -66,12 +66,16 @@ HELPER<Two: HELPER<One: again>>
   /exit                            Save and leave
   /quit                            Save and leave
   NAME                  STAGES                        SOURCE                      DESCRIPTION
+  critique-revise       utility → chat                shipped                     Critique a draft against what it is meant to do, then revise it to answer the critique.
   describe-answer       vision → chat                 shipped                     Describe an image with the vision member, then answer a question about it from the description.
+  digest                play:summarize-verify → extraction shipped                     Summarize and check a passage by playing summarize-verify, then card it with a title, tags and a one-line summary.
+  extract-actions       extraction                    shipped                     Pull the action items out of notes -- who does what, by when -- as one JSON document, held to its schema.
   extract-facts         extraction                    shipped                     Pull the key facts out of a text as one JSON document, held to its schema.
+  redact-text           utility → chat                shipped                     List the personal details and secrets in a text, then rewrite it with placeholders in their place.
   summarize-verify      utility → chat                shipped                     Summarize a passage, then check the summary against the passage and correct it.
   echo2                 utility → chat                config                      Two stages, the second given the first's answer.
 [error] /play takes a symphony, then its input -- /play <symphony> [input] (/symphonies lists them)
-[error] no symphony named 'nope' (there are: describe-answer, extract-facts, summarize-verify, echo2)
+[error] no symphony named 'nope' (there are: critique-revise, describe-answer, digest, extract-actions, extract-facts, redact-text, summarize-verify, echo2)
 [error] 'echo2' reads its input (Any text.), and none was given -- /play <symphony> [input]
 [apogee] suite: duo -- chat root · utility helper
 footprint: suite duo

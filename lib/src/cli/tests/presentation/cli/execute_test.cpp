@@ -922,7 +922,9 @@ TEST_CASE("without orchestration a session registers no symphony tool, as 27s sh
     // `/suite` moves the offer with the suite: on under orch, off again under duo.
     REQUIRE(home.run({"execute", "--suite", "duo"}, &out, &err,
                      "hi\n/suite orch\nhi\n/suite duo\nhi\n") == 0);
-    CHECK(out == "TOOLS<>\nTOOLS<play_echo2,play_extract-facts,play_summarize-verify>\nTOOLS<>\n");
+    CHECK(out ==
+          "TOOLS<>\nTOOLS<play_critique-revise,play_digest,play_echo2,play_extract-actions,play_"
+          "extract-facts,play_redact-text,play_summarize-verify>\nTOOLS<>\n");
     // And the flag is execute's alone.
     CHECK(home.run({"chat", "--suite", "duo", "--orchestrate"}, &out, &err, "hi\n") != 0);
     CHECK(err.find("--orchestrate") != std::string::npos);
@@ -937,7 +939,9 @@ TEST_CASE("orchestrating, the root is offered each symphony it can play, framed 
     // The flag, with no --tools: orchestration is its own consent. The vision
     // starter takes an image, so it is not offered -- said under --verbose.
     REQUIRE(home.run({"execute", "--suite", "duo", "--orchestrate"}, &out, &err, "hi\n") == 0);
-    CHECK(out == "TOOLS<play_echo2,play_extract-facts,play_summarize-verify>\n");
+    CHECK(out ==
+          "TOOLS<play_critique-revise,play_digest,play_echo2,play_extract-actions,play_extract-"
+          "facts,play_redact-text,play_summarize-verify>\n");
     CHECK(err.find("orchestrate:") == std::string::npos);
     REQUIRE(home.run({"execute", "--suite", "duo", "--orchestrate", "--verbose"}, &out, &err,
                      "hi\n") == 0);
@@ -946,7 +950,9 @@ TEST_CASE("orchestrating, the root is offered each symphony it can play, framed 
     // The suite's own `orchestrate: true`: no consult without --tools, the
     // consent every other tool asks for.
     REQUIRE(home.run({"execute", "--suite", "orch"}, &out, &err, "hi\n") == 0);
-    CHECK(out == "TOOLS<play_echo2,play_extract-facts,play_summarize-verify>\n");
+    CHECK(out ==
+          "TOOLS<play_critique-revise,play_digest,play_echo2,play_extract-actions,play_extract-"
+          "facts,play_redact-text,play_summarize-verify>\n");
     // With the native tools and consult beside.
     REQUIRE(home.run({"execute", "--suite", "orch", "--tools"}, &out, &err, "hi\n") == 0);
     CHECK(out.find("play_echo2") != std::string::npos);

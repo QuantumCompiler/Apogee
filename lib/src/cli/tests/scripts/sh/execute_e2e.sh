@@ -221,7 +221,7 @@ PY
 printf '{"turns": [{"text": "TOOLS<{{tool_names}}>"}]}\n' > "$WORK_DIR/scripts/root.json"
 OUT=$(printf 'hi\n' | "$APOGEE_BIN" execute --suite duo 2>/dev/null) || fail "orchestration off"
 [ "$OUT" = "TOOLS<>" ] || fail "orchestration off: the root was offered '$OUT'"
-OFFERED="TOOLS<play_echo2,play_extract-facts,play_summarize-verify>"
+OFFERED="TOOLS<play_critique-revise,play_digest,play_echo2,play_extract-actions,play_extract-facts,play_redact-text,play_summarize-verify>"
 OUT=$(printf 'hi\n' | "$APOGEE_BIN" execute --suite duo --orchestrate 2>"$WORK_DIR/err.txt") ||
     fail "--orchestrate: $(cat "$WORK_DIR/err.txt")"
 [ "$OUT" = "$OFFERED" ] || fail "--orchestrate: offered '$OUT'"
@@ -241,7 +241,7 @@ printf '{"metered": true, "turns": [{"text": "PAID"}]}\n' > "$WORK_DIR/scripts/p
 cp "$CONFIG" "$WORK_DIR/before.yaml"
 "$APOGEE_BIN" config set-suite duo --utility paid </dev/null >/dev/null 2>"$WORK_DIR/err.txt" &&
     fail "a billed member reached by a symphony was written"
-grep -q "orchestrate: 'summarize-verify' reaches utility ('paid') through its summarize stage (utility), and 'paid' is billed per call" \
+grep -q "orchestrate: 'critique-revise' reaches utility ('paid') through its critique stage (utility), and 'paid' is billed per call" \
     "$WORK_DIR/err.txt" || fail "billed member: $(cat "$WORK_DIR/err.txt")"
 cmp -s "$CONFIG" "$WORK_DIR/before.yaml" || fail "a refused set-suite changed the config"
 

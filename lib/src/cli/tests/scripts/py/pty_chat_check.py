@@ -531,7 +531,7 @@ def check_execute(binary, home, env):
     term.close()
     text = term.text()
     failures = []
-    if b"scripted  \xc2\xb7  suite duo  \xc2\xb7  3 symphonies  \xc2\xb7  chat " not in text:
+    if b"scripted  \xc2\xb7  suite duo  \xc2\xb7  7 symphonies  \xc2\xb7  chat " not in text:
         failures.append(f"the banner does not name the suite and its symphonies: {text!r}")
     for stage in ("stage 1/2 summarize \u2014 asking utility (helper)",
                   "stage 2/2 verify \u2014 asking chat (scripted)"):
@@ -582,7 +582,7 @@ def check_orchestrate(binary, home, env):
     term.close()
     text = term.text()
     failures = []
-    if b"3 symphonies  \xc2\xb7  orchestrating 2  \xc2\xb7  chat " not in text:
+    if b"7 symphonies  \xc2\xb7  orchestrating 6  \xc2\xb7  chat " not in text:
         failures.append(f"the banner does not say what the model is offered: {text!r}")
     for line in ("play \u2014 the model chose summarize-verify: 2 member calls, utility \u2192 chat",
                  "stage 1/2 summarize \u2014 asking utility (helper)",

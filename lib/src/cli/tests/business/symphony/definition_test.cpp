@@ -169,14 +169,21 @@ TEST_CASE("the sources: an entry over a starter over a file, each name once, in 
                         std::string{apogee::symphony::to_string(definition.source)} +
                         (definition.overrides ? "+" : ""));
     }
-    CHECK(names == std::vector<std::string>{"describe-answer:shipped", "extract-facts:config+",
-                                            "summarize-verify:shipped", "alpha:config",
-                                            "zeta:config+", "mine:file"});
-    CHECK(all.definitions[2].spec.description == "my edit");
-    CHECK(all.definitions[2].path == dir / "summarize-verify.yaml");
+    // The shipped starters in their compiled-in order (40b added four), the
+    // entries after, the spec files last.
+    CHECK(names == std::vector<std::string>{
+                       "critique-revise:shipped", "describe-answer:shipped", "digest:shipped",
+                       "extract-actions:shipped", "extract-facts:config+", "redact-text:shipped",
+                       "summarize-verify:shipped", "alpha:config", "zeta:config+", "mine:file"});
+    const Definition* const edited = all.find("summarize-verify");
+    REQUIRE(edited != nullptr);
+    CHECK(edited->spec.description == "my edit");
+    CHECK(edited->path == dir / "summarize-verify.yaml");
     // The compiled-in text stands in for a starter whose file is absent.
-    CHECK(all.definitions[0].path.empty());
-    CHECK(all.definitions[0].spec.input.image);
+    const Definition* const describe = all.find("describe-answer");
+    REQUIRE(describe != nullptr);
+    CHECK(describe->path.empty());
+    CHECK(describe->spec.input.image);
     REQUIRE(all.problems.size() == 2);
     CHECK_THAT(all.problems[0], Catch::Matchers::ContainsSubstring("broken.yaml"));
     CHECK_THAT(all.problems[1],
@@ -193,7 +200,8 @@ TEST_CASE("the sources: an entry over a starter over a file, each name once, in 
         const apogee::symphony::Found none = find_definition(config, dir, "nope");
         CHECK_FALSE(none.definition.has_value());
         CHECK_THAT(none.error, Catch::Matchers::ContainsSubstring(
-                                   "no symphony named 'nope' (there are: describe-answer"));
+                                   "no symphony named 'nope' (there are: critique-revise, "
+                                   "describe-answer"));
         CHECK_THAT(find_definition(config, dir, "broken").error,
                    Catch::Matchers::ContainsSubstring("not valid YAML"));
     }
@@ -213,7 +221,7 @@ TEST_CASE("the sources: an entry over a starter over a file, each name once, in 
         CHECK_THAT(find_definition(with_backend, dir, elsewhere.string()).error,
                    Catch::Matchers::ContainsSubstring("'l3b' is a backend"));
     }
-    CHECK(apogee::symphony::role_chain(all.definitions[0].spec) == "vision → chat");
+    CHECK(apogee::symphony::role_chain(describe->spec) == "vision → chat");
 }
 
 TEST_CASE("with no directory and no entries, the starters alone", "[symphony][definition]") {

@@ -1,0 +1,57 @@
+# A shipped symphony (40b): the private details in a text listed by the
+# suite's utility member, held to a schema, then the text rewritten by its
+# chat member with a placeholder in each one's place -- a privacy pass a
+# local suite runs without the text leaving the machine.
+# What it shows: a schema stage feeding a prose stage -- stage two reads
+# stage one's JSON list as {{find}}, beside the input as {{input}}.
+#
+#   apogee symphonies play redact-text --input "$(cat notes.txt)"
+#   apogee symphonies create my-redact --from redact-text
+name: redact-text
+description: List the personal details and secrets in a text, then rewrite it with placeholders in their place.
+input:
+  description: The text to redact.
+stages:
+  - name: find
+    role: utility
+    answer_tokens: 800
+    prompt: |
+      List every private detail in the text below, each exactly as it is written there, with its category:
+      email (an email address), phone (a phone number), person (a person's name), address (a postal or street address), credential (a password, API key, token or other secret), id (an account, card, passport or other identifying number).
+      List each detail once. Leave the list empty when the text has none.
+
+      Text:
+      {{input}}
+    schema: |
+      {
+        "type": "object",
+        "properties": {
+          "found": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "category": {"type": "string", "enum": ["email", "phone", "person", "address", "credential", "id"]},
+                "text": {"type": "string"}
+              },
+              "required": ["category", "text"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["found"],
+        "additionalProperties": false
+      }
+  - name: redact
+    role: chat
+    answer_tokens: 1500
+    prompt: |
+      Here is a text and a list of the private details found in it.
+
+      Text:
+      {{input}}
+
+      Private details:
+      {{find}}
+
+      Rewrite the text with each listed detail replaced by its category in capitals and brackets: [EMAIL], [PHONE], [PERSON], [ADDRESS], [CREDENTIAL] or [ID]. Replace any other detail of those kinds the list missed the same way. Change nothing else. Reply with the rewritten text only.

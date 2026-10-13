@@ -5835,6 +5835,37 @@ No family ever played the wrong symphony: every miss was a choice not to play --
 
 **Left for the owner.** The pick rates above are the evidence a default-on decision must cite; Qwen3-VL-8B's under-playing after its first control and Llama 3.1 8B's playing on controls are the two behaviours a default would have to answer. Llama 3.1 8B cut its first play's input at an apostrophe (`… because the payment provider` -- the minutes' "provider's"): the call's argument ended there as the model wrote it, a template or model behaviour outside this item. The labeled line's closing time and tokens scroll out of the default thinking block's two-row tail once its stages are drawn (each stage line keeps its own; `--verbose` keeps all of them). There is no session-level off switch for a suite's `orchestrate: true` (`--no-orchestrate`). The `summarize-verify` starter's verdict-instead-of-summary (27r) stands.
 
+### 2026-10-13 — `shipped-symphonies` (backlog item 40b): four more starters, and the first chain in the box
+
+**Goal.** Three starters shipped, and two shipped capabilities had no shipped definition to show them: chains (27r), and with them what the Orchestrator (27t) is offered. Four starters in the 27q grammar, nothing else: no grammar, walk, cap, runner, surface or Orchestrator change.
+
+- [x] **`redact-text`** — the utility member lists the private details in a text (email, phone, person, address, credential, id), each exactly as written, held to a schema with that closed category list; the chat member rewrites the text with `[EMAIL]`, `[PHONE]`, `[PERSON]`, `[ADDRESS]`, `[CREDENTIAL]` or `[ID]` in each one's place and changes nothing else. A privacy pass that never leaves a local suite.
+- [x] **`extract-actions`** — one schema stage on the extraction member: who does what by when, `unassigned` and `not stated` where the notes give none, never guessed. `extract-facts`' sibling on a different document.
+- [x] **`critique-revise`** — the utility member works out what a draft is for and lists at most five specific ways it falls short, quoting each; the chat member revises it to answer the critique and nothing more.
+- [x] **`digest`, the first shipped chain** — stage one plays `summarize-verify` on the input, its stages narrated in place; stage two, on the extraction member, cards the result with a title, tags and a one-line summary, held to a schema. Three member calls, one budget across the walk.
+- [x] Each is headed as the shipped three are (what it shows, the play line, the `--from` line), caps every role stage with `answer_tokens`, and is compiled in by `generate_symphony_assets.py` and seeded skip-if-present.
+
+**Decisions** (2026-10-13, made while building; the item's own were the catalog, `digest` playing rather than inlining, no audio and no `translate-check`)
+
+| Decision | Choice | Why |
+|---|---|---|
+| `digest`'s card stage | On the extraction role | The role that already holds schema answers (`extract-facts`, `extract-actions`); the utility and chat members are `summarize-verify`'s. |
+| `redact-text`'s categories | email, phone, person, address, credential, id — the sketched six, unchanged | Flat and enumerable; the schema's enum refuses anything else, so a member inventing a category stops the walk before the rewrite. |
+| Tests that name the catalog's first starter | Updated, not decoupled | The Orchestrator's offers and the orchestrate refusals name a starter by catalog order, which is alphabetical: `critique-revise` now comes first. Those tests pin the observable catalog, so they move with it. The recipe in DEVELOPER.md now says so. |
+| The `/symphonies` table's role column | Left as it is | `digest`'s role chain, `play:summarize-verify → extraction`, is wider than the column and pushes its row's last columns along by four characters. A layout change would be a surface change, which this item rules out. |
+
+**Guardrails.**
+- `contracts/symphony_spec_test.cpp`: seven starters, each byte-identical to its file and parsed; the new four's stage features; every role stage of every starter capped.
+- `symphony/runner_test.cpp`, over scripted members: `redact-text`'s list held to its schema and threaded into the rewrite, a category outside the list stopping the walk before it; `extract-actions` one call, a missing `due` refused; `critique-revise`'s critique beside the draft; `digest` validated within the caps, played as a chain with each line naming its position (`digest → summarize-verify, stage 1/2 summarize`, `… stage 2/2 verify`, `digest, stage 2/2 card`), the card held to its schema over `summarize-verify`'s output, a two-call budget stopping it with no answer and the card never asked, and a depth cap of one refusing it before any call.
+- The catalog, the offers, the orchestrate refusals, `execute_session.golden`, `cli.execute_lifecycle`'s offered tools and refusal, and the PTY check's banner counts (`7 symphonies`, `orchestrating 6`), moved to the seven.
+- `cli.symphonies_lifecycle` on the real binary: seven listed as shipped; `create --from` each new one, shown and deleted; the shipped `digest` played under a suite, every position said on stderr and the card on stdout; completion offering the new names.
+
+**Not verified.**
+- On real weights: not run — the item's pass is optional, and this run is unattended.
+- Linux and Windows.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on): 3,203 of 3,206 passed on the first run, one skipped for want of `pdftotext`. The three failures were this item's own pins the first pass had missed -- `cli.symphonies_lifecycle` (its new `create --from` loop left an empty `symphonies:` key behind the editor's inverse check), `cli.execute_lifecycle` (the offered tools and the billed refusal) and `cli.chat_typeahead_and_crash_safety` (the banner's counts) -- each fixed in its script and passing when run again. The llama-off unit binary: 3,145 passed, 5 skipped. `clang-format` is clean on every touched file.
+
 ---
 
 ## Milestone AD — Autonomous tasks

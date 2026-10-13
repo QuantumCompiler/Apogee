@@ -79,11 +79,11 @@ TEST_CASE("seeding writes absent files only: an edit survives a re-seed",
     const apogee::testing::TempDir root{"assets-seed-" + std::to_string(std::random_device{}())};
     const apogee::harness::AssetSeedResult first = seed_bundled_assets(root.path());
     REQUIRE(first.ok());
-    // Fourteen agent files (40a), four kits, three symphony starters (27q), three
+    // Fourteen agent files (40a), four kits, seven symphony starters (27q, 40b), three
     // training drivers, the two mlx drivers, the vendored converter.
     CHECK(first.created.size() == apogee::harness::bundled_files().size());
     CHECK(first.created.size() ==
-          14 + 4 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
+          14 + 4 + 7 + 3 + 2 + apogee::harness::bundled_converter_files().size());
     for (const apogee::harness::BundledSymphony& starter : apogee::harness::bundled_symphonies()) {
         CHECK(read(root.path() / "symphonies" / (std::string{starter.name} + ".yaml")) ==
               starter.text);
@@ -217,7 +217,7 @@ TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
     CHECK(apogee::harness::bundled_script_relative_path(script.name) ==
           "training/scripts/prepare_dataset.py");
     CHECK(apogee::harness::bundled_files().size() ==
-          14 + 4 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
+          14 + 4 + 7 + 3 + 2 + apogee::harness::bundled_converter_files().size());
 }
 
 TEST_CASE("the compiled-in mlx drivers byte-match the shipped files and seed beside the trainers",

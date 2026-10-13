@@ -479,12 +479,12 @@ TEST_CASE(
     const std::string before = home.config_text();
     const std::vector<std::pair<std::vector<std::string>, std::string>> refused{
         {{"config", "set-suite", "research", "--utility", "paid"},
-         "set-suite: orchestrate: 'summarize-verify' reaches utility ('paid') through its "
-         "summarize stage (utility), and 'paid' is billed per call -- a play the model starts "
+         "set-suite: orchestrate: 'critique-revise' reaches utility ('paid') through its "
+         "critique stage (utility), and 'paid' is billed per call -- a play the model starts "
          "runs on its initiative, which never spends"},
         {{"config", "add-suite", "x", "--chat", "paid", "--orchestrate", "on"},
-         "add-suite: orchestrate: 'summarize-verify' reaches utility ('paid') through its "
-         "summarize stage (utility)"},
+         "add-suite: orchestrate: 'critique-revise' reaches utility ('paid') through its "
+         "critique stage (utility)"},
         {{"config", "set-suite", "research", "--orchestrate", "maybe"},
          "--orchestrate maybe: on or off"},
     };
