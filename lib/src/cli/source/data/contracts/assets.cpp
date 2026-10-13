@@ -111,6 +111,19 @@ std::string bundled_symphony_relative_path(std::string_view name) {
     return "symphonies/" + std::string{name} + ".yaml";
 }
 
+const BundledRecipe* find_bundled_recipe(std::string_view name) noexcept {
+    for (const BundledRecipe& recipe : bundled_recipes()) {
+        if (recipe.name == name) {
+            return &recipe;
+        }
+    }
+    return nullptr;
+}
+
+std::string bundled_recipe_relative_path(std::string_view name) {
+    return "recipes/" + std::string{name} + ".yaml";
+}
+
 std::string bundled_script_relative_path(std::string_view name) {
     return "training/scripts/" + std::string{name};
 }
@@ -314,6 +327,9 @@ std::vector<BundledFile> bundled_files() {
     }
     for (const BundledSymphony& starter : bundled_symphonies()) {
         files.push_back({bundled_symphony_relative_path(starter.name), starter.text});
+    }
+    for (const BundledRecipe& recipe : bundled_recipes()) {
+        files.push_back({bundled_recipe_relative_path(recipe.name), recipe.text});
     }
     for (const BundledScript& script : bundled_training_scripts()) {
         files.push_back({bundled_script_relative_path(script.name), script.text});

@@ -25,6 +25,7 @@
 #include "platform/child_process.h"
 #include "symphony/definition.h"
 #include "tasks/ledger.h"
+#include "tasks/recipe.h"
 #include "tasks/task.h"
 #include "tools/toolsets.h"
 #include "training/convert.h"
@@ -316,6 +317,11 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         }
         // `edit` takes a name alone: a spec file is edited in place.
         list.paths = kind == kSymphonyValue;
+    } else if (kind == kRecipeValue) {
+        for (const tasks::RecipeEntry& entry : tasks::recipe_book(harness::recipes_dir()).recipes) {
+            list.names.push_back(entry.recipe.name);
+        }
+        list.none = "no recipes -- 'apogee check --fix' seeds the shipped ones";
     } else if (kind == kSymphonyEntryValue) {
         for (const auto& [name, spec] : config.symphonies) {
             list.names.push_back(name);

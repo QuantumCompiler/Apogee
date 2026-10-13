@@ -226,6 +226,7 @@ add_library(apogee_tests_business OBJECT
     business/tasks/unattended_test.cpp
     business/tasks/runner_test.cpp
     business/tasks/view_test.cpp
+    business/tasks/recipe_test.cpp
     business/symphony/definition_test.cpp
     business/symphony/runner_test.cpp
     business/symphony/tools_test.cpp

@@ -448,5 +448,34 @@ echo "$OFFERED" | grep -q "$STALLED" || fail "task resume does not offer $STALLE
 OFFERED=$(cd "$WORK_DIR" && "$APOGEE_BIN" __complete task resume "" </dev/null 2>/dev/null)
 [ -z "$OFFERED" ] || fail "task resume offers tasks started in another folder: $OFFERED"
 
+# --- Recipes (40c): seeded, listed, run as the hand-typed twin, completed ------
+for recipe in digest-folder changelog-draft capture-decisions; do
+    [ -f "$APOGEE_HOME/recipes/$recipe.yaml" ] || fail "the recipe $recipe was not seeded"
+done
+LIST=$("$APOGEE_BIN" task recipes </dev/null 2>&1) || fail "task recipes: $LIST"
+for recipe in digest-folder changelog-draft capture-decisions; do
+    echo "$LIST" | grep -Eq "^$recipe +seeded +yes " || fail "task recipes: $recipe is not listed as seeded: $LIST"
+done
+"$APOGEE_BIN" task recipes --output-format json </dev/null | python3 -c 'import json, sys; d = json.load(sys.stdin); assert d["object"] == "list" and len(d["data"]) == 3, d' ||
+    fail "task recipes --output-format json"
+script cycle '{"text": "1. Draft it."}, {"text": "## Unreleased\n### Added\n- Recipes.\nTASK STATUS: DONE"}'
+"$APOGEE_BIN" task run --recipe changelog-draft --input "feat: recipes" </dev/null >"$WORK_DIR/out.txt" 2>"$WORK_DIR/err.txt" ||
+    fail "task run --recipe: $(cat "$WORK_DIR/err.txt")"
+RECIPE_TASK=$(newest)
+[ "$(field "$RECIPE_TASK" "t['status']")" = "done" ] || fail "the recipe's task did not finish done"
+[ "$(field "$RECIPE_TASK" "t['recipe']")" = "changelog-draft" ] || fail "the ledger does not name its recipe"
+[ "$(field "$RECIPE_TASK" "t['checks'][0]['value']")" = "## Unreleased" ] || fail "the recipe's check was not attached"
+# On a pipe a suggested grant is said and never given.
+"$APOGEE_BIN" task run --recipe digest-folder --input docs --rounds 1 </dev/null >/dev/null 2>"$WORK_DIR/err.txt"
+grep -q "digest-folder suggests --allow write_file -- not granted" "$WORK_DIR/err.txt" ||
+    fail "a suggested grant was not said: $(cat "$WORK_DIR/err.txt")"
+[ "$(field "$(newest)" "t['policy'].get('grants', [])")" = "[]" ] || fail "a suggested grant was given with nobody to say yes"
+OFFERED=$("$APOGEE_BIN" __complete task run --recipe "" </dev/null 2>/dev/null)
+for recipe in digest-folder changelog-draft capture-decisions; do
+    echo "$OFFERED" | grep -qx "$recipe" || fail "completion: --recipe does not offer $recipe: $OFFERED"
+done
+OFFERED=$("$APOGEE_BIN" __complete task recipes show "" </dev/null 2>/dev/null)
+echo "$OFFERED" | grep -qx changelog-draft || fail "completion: recipes show offers nothing: $OFFERED"
+
 "$APOGEE_BIN" check </dev/null >"$WORK_DIR/check.txt" 2>&1 || fail "check after the tasks: $(cat "$WORK_DIR/check.txt")"
 echo "task lifecycle OK"

@@ -499,6 +499,25 @@ apogee task list --output-format json        # {"object":"list","data":[…],"to
 newest 50 (`id`, `status`, `rounds_used`, `rounds_budget`, `goal`), `total` every
 task. A read given `stream-json`, or any word but `text` and `json`, is refused.
 
+Since 40c the task recipes — named goals with their checks baked in, which `task
+run --recipe <name> [--input "…"]` expands — read the same way:
+
+```bash
+apogee task recipes --output-format json              # {"object":"list","data":[…],"problems":[…]}
+apogee task recipes show <name> --output-format json  # {"object":"task.recipe",…}
+```
+
+Each recipe is `name`, `description`, `source` (`shipped` — its compiled-in
+text, `seeded` — its file under the data directory's `recipes/`, as shipped,
+or `user` — a file of the user's, or a starter's edited), `path` (`null` for
+`shipped`), `input` (what `--input` is for; `""` when the goal reads none),
+`tools`, `require` and `require_files` (the checks), `allow` (the grants it
+SUGGESTS — a run asks the person at the terminal for each and, with nobody
+there, gives none the line did not), `agent` and `rounds`; `show` adds `goal`,
+the template. `problems` names a file under `recipes/` that did not parse. A
+recipe's run is a task run like any other — the same events, ledger and view
+— its ledger carrying the recipe's name as `recipe`.
+
 Since 27l the graph navigation verbs are reads of the same kind:
 
 ```bash

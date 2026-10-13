@@ -212,10 +212,11 @@ struct ConverterTreeState {
 /// to `assets/symphonies/<name>.yaml` by test, and seeded skip-if-present
 /// under `symphonies/` -- so, as a kit's, the seeded copy is the user's once
 /// it exists and is what plays by the starter's name, the compiled-in text
-/// standing in only while the file is absent. Three ship, each showing a
-/// distinct stage feature: `summarize-verify` (output threading),
-/// `extract-facts` (a grammar-held stage), `describe-answer` (a vision stage
-/// given the input's image).
+/// standing in only while the file is absent. Seven ship, each showing a
+/// stage feature: `summarize-verify` (output threading), `extract-facts` (a
+/// grammar-held stage), `describe-answer` (a vision stage given the input's
+/// image), and since 40b `redact-text` (a schema stage feeding a prose one),
+/// `extract-actions`, `critique-revise` and `digest` (a chain, 27r).
 struct BundledSymphony {
     std::string_view name;
     std::string_view text;
@@ -229,6 +230,25 @@ struct BundledSymphony {
 
 /// `symphonies/<name>.yaml`, relative to the data directory.
 [[nodiscard]] std::string bundled_symphony_relative_path(std::string_view name);
+
+/// A shipped task recipe (40c): a recipe file compiled in, byte-identical to
+/// `assets/recipes/<name>.yaml` by test, and seeded skip-if-present under
+/// `recipes/` -- the seeded copy is the user's once it exists, the
+/// compiled-in text standing in only while it is absent, as a starter's.
+struct BundledRecipe {
+    std::string_view name;
+    std::string_view text;
+};
+
+/// The recipes, by name (`assets_recipes.cpp`, written by
+/// `scripts/generate_recipe_assets.py`).
+[[nodiscard]] std::span<const BundledRecipe> bundled_recipes() noexcept;
+
+/// The recipe `name` (exactly), or nullptr.
+[[nodiscard]] const BundledRecipe* find_bundled_recipe(std::string_view name) noexcept;
+
+/// `recipes/<name>.yaml`, relative to the data directory.
+[[nodiscard]] std::string bundled_recipe_relative_path(std::string_view name);
 
 /// `training/kits/<name>.yaml` and `training/scripts/<name>`, relative to the
 /// data directory -- the paths seeding writes and the commands read.

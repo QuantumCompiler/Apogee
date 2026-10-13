@@ -243,6 +243,8 @@ const std::map<std::string, Classification>& table() {
         {"knowledge info", read_only()},
         {"knowledge export", read_only()},
         {"datasets kits", read_only()},
+        // `task recipes` lists them too, the parent of this leaf (40c).
+        {"task recipes show", read_only()},
         {"datasets list", read_only()},
         {"datasets info", read_only()},
         {"train versions", read_only()},

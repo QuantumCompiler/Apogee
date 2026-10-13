@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <random>
+#include <set>
 #include <span>
 #include <sstream>
 #include <string>
@@ -79,11 +80,12 @@ TEST_CASE("seeding writes absent files only: an edit survives a re-seed",
     const apogee::testing::TempDir root{"assets-seed-" + std::to_string(std::random_device{}())};
     const apogee::harness::AssetSeedResult first = seed_bundled_assets(root.path());
     REQUIRE(first.ok());
-    // Fourteen agent files (40a), four kits, seven symphony starters (27q, 40b), three
-    // training drivers, the two mlx drivers, the vendored converter.
+    // Fourteen agent files (40a), four kits, seven symphony starters (27q, 40b),
+    // three task recipes (40c), three training drivers, the two mlx drivers,
+    // the vendored converter.
     CHECK(first.created.size() == apogee::harness::bundled_files().size());
     CHECK(first.created.size() ==
-          14 + 4 + 7 + 3 + 2 + apogee::harness::bundled_converter_files().size());
+          14 + 4 + 7 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
     for (const apogee::harness::BundledSymphony& starter : apogee::harness::bundled_symphonies()) {
         CHECK(read(root.path() / "symphonies" / (std::string{starter.name} + ".yaml")) ==
               starter.text);
@@ -194,6 +196,33 @@ TEST_CASE("an unedited bundled file is Apogee's, an edited one is the user's",
     CHECK_FALSE(apogee::harness::is_unmodified_bundled_asset(root.path(), root.path() / "nope"));
 }
 
+TEST_CASE("the compiled-in task recipes byte-match the shipped files, every one compiled in",
+          "[harness][assets][recipes]") {
+    const std::filesystem::path dir = std::filesystem::path{APOGEE_ASSETS_DIR} / "recipes";
+    std::set<std::string> files;
+    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator{dir}) {
+        files.insert(entry.path().filename().string());
+    }
+    std::set<std::string> compiled;
+    REQUIRE(apogee::harness::bundled_recipes().size() == 3);
+    for (const apogee::harness::BundledRecipe& recipe : apogee::harness::bundled_recipes()) {
+        INFO(recipe.name);
+        compiled.insert(std::string{recipe.name} + ".yaml");
+        CHECK(read(dir / (std::string{recipe.name} + ".yaml")) == recipe.text);
+        CHECK(apogee::harness::find_bundled_recipe(recipe.name) == &recipe);
+    }
+    // scripts/generate_recipe_assets.py compiles every file, and nothing else.
+    CHECK(files == compiled);
+    CHECK(apogee::harness::find_bundled_recipe("nope") == nullptr);
+
+    // Seeded with the rest, under the layout's recipes row, skip-if-present.
+    const apogee::testing::TempDir root{"assets-recipes-" + std::to_string(std::random_device{}())};
+    REQUIRE(seed_bundled_assets(root.path()).ok());
+    for (const apogee::harness::BundledRecipe& recipe : apogee::harness::bundled_recipes()) {
+        CHECK(read(root.path() / "recipes" / (std::string{recipe.name} + ".yaml")) == recipe.text);
+    }
+}
+
 TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
           "[harness][assets][training]") {
     const std::filesystem::path assets{APOGEE_ASSETS_DIR};
@@ -217,7 +246,7 @@ TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
     CHECK(apogee::harness::bundled_script_relative_path(script.name) ==
           "training/scripts/prepare_dataset.py");
     CHECK(apogee::harness::bundled_files().size() ==
-          14 + 4 + 7 + 3 + 2 + apogee::harness::bundled_converter_files().size());
+          14 + 4 + 7 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
 }
 
 TEST_CASE("the compiled-in mlx drivers byte-match the shipped files and seed beside the trainers",

@@ -147,6 +147,10 @@ struct LayoutEntry {
 /// starters, seeded skip-if-present, and any the user drops beside them, each
 /// played by its file's name.
 [[nodiscard]] std::filesystem::path symphonies_dir();
+/// `<APOGEE_HOME>/recipes` -- task recipe files (40c): the shipped starters,
+/// seeded skip-if-present, and any the user drops beside them, each run by
+/// its file's name (`task run --recipe <name>`).
+[[nodiscard]] std::filesystem::path recipes_dir();
 [[nodiscard]] std::filesystem::path cache_dir();
 /// `cache/prompt` -- a local model's attention cache kept between processes
 /// (26j): `models/<model>/` holds each model's prefix files (the state after

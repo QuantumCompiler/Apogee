@@ -1,0 +1,18 @@
+# A shipped task recipe (40c): an excerpt of a git log turned into a
+# CHANGELOG section. No tools: the section is the answer, and the task is
+# done when it opens with its heading and the model says so.
+#
+#   apogee task run --recipe changelog-draft --input "$(git log --format='%s%n%b' v1.2.0..HEAD)"
+#   apogee task run "<the goal below, the log in place of {{input}}>" --require "## Unreleased"
+name: changelog-draft
+description: Turn an excerpt of a git log into a CHANGELOG section.
+input:
+  description: The commits, as git log prints their subjects and bodies.
+goal: |
+  Here is an excerpt of a git log:
+
+  {{input}}
+
+  Write the CHANGELOG section for these commits, in Markdown. Open with the heading "## Unreleased", then the subsections the commits call for, from "### Added", "### Changed", "### Fixed" and "### Removed", each change one line in plain words a user would understand. Leave out merges and changes no user would notice. Reply with the section only.
+require:
+  - "## Unreleased"

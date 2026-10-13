@@ -1,0 +1,21 @@
+# A shipped task recipe (40c): a transcript swept for its decisions, each
+# captured as a knowledge record by 'apogee knowledge capture' -- the one
+# writer of the knowledge store, which the task reaches by running it. So it
+# suggests granting run_command, which runs ANY command without asking: asked
+# at the terminal, never assumed, and on a pipe given only by --allow.
+#
+#   apogee task run --recipe capture-decisions --input meeting.txt
+#   apogee task run "<the goal below, meeting.txt in place of {{input}}>" --tools --require "Captured:" --allow run_command
+name: capture-decisions
+description: Sweep a transcript for its decisions and capture each as a knowledge record.
+input:
+  description: The transcript file, relative to where the task runs.
+goal: |
+  Read the transcript {{input}} and find every decision it records -- what was agreed, and why. For each one, write the passage of the transcript that makes it to a file of its own under decisions/ (decisions/1.txt, decisions/2.txt, and so on), then capture it by running: apogee knowledge capture --source meeting --input decisions/<n>.txt
+  Capture each decision once. End your answer with the line "Captured: <n>", naming the record ids the captures printed -- "Captured: 0" when the transcript decided nothing -- and say the task is done.
+tools: true
+require:
+  - "Captured:"
+allow:
+  - run_command
+  - write_file

@@ -13,11 +13,13 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "agent/tool.h"
 #include "cli/permissions.h"
 #include "cli/task_cmd.h"
+#include "contracts/assets.h"
 #include "contracts/layout.h"
 #include "httpserver/admin_tasks.h"
 #include "logger/session.h"
@@ -25,6 +27,7 @@
 #include "support/env_guard.h"
 #include "tasks/ledger.h"
 #include "tasks/policy.h"
+#include "tasks/recipe.h"
 #include "tasks/unattended.h"
 #include "tasks/view.h"
 
@@ -1137,4 +1140,204 @@ TEST_CASE("task list as JSON is the newest fifty unless --all, with the total",
     // The person's list says what --all adds.
     REQUIRE(home.run({"task", "list"}, &out) == 0);
     CHECK(has(out, "... 1 more -- --all lists them\n"));
+}
+
+// ---- Recipes (40c) ---------------------------------------------------------------
+
+namespace {
+
+/// A model that plans, then answers with a CHANGELOG section and done.
+constexpr const char* kChangelog = R"({"text": "1. Draft it."},
+    {"text": "## Unreleased\n### Added\n- Task recipes.\nTASK STATUS: DONE"})";
+
+/// The ledger with what differs between any two runs taken out -- the ids,
+/// the times, the folder -- and the recipe's provenance, kept apart.
+nlohmann::json comparable(const t::Task& task) {
+    nlohmann::json json = t::task_to_json(task);
+    for (const char* key :
+         {"id", "session_id", "created_at", "updated_at", "working_directory", "recipe"}) {
+        json.erase(key);
+    }
+    for (nlohmann::json& transition : json.at("transitions")) {
+        transition.erase("at");
+    }
+    return json;
+}
+
+}  // namespace
+
+TEST_CASE("a recipe run is its hand-typed twin, its ledger naming the recipe and nothing more",
+          "[commands][task][recipe]") {
+    const std::string log = "feat: task recipes\n\nfix: a typo";
+    std::string error;
+    const std::string goal = t::expand_goal(
+        t::parse_recipe(apogee::harness::find_bundled_recipe("changelog-draft")->text, "x",
+                        "changelog-draft"),
+        log, error);
+    REQUIRE(error.empty());
+
+    const Home recipe_home{kChangelog};
+    std::string out;
+    std::string err;
+    REQUIRE(recipe_home.run({"task", "run", "--recipe", "changelog-draft", "--input", log}, &out,
+                            &err) == 0);
+    const Home typed_home{kChangelog};
+    REQUIRE(typed_home.run({"task", "run", goal, "--require", "## Unreleased"}, &out) == 0);
+
+    const t::Task from_recipe = recipe_home.task();
+    const t::Task typed = typed_home.task();
+    CHECK(from_recipe.recipe == "changelog-draft");
+    CHECK(typed.recipe.empty());
+    CHECK(from_recipe.goal == goal);
+    CHECK(from_recipe.status == t::kDone);
+    // Byte for byte the twin's, but for the provenance and what any two runs
+    // differ by -- and a hand-typed ledger writes no recipe key at all.
+    CHECK(comparable(from_recipe) == comparable(typed));
+    CHECK(t::task_to_json(from_recipe).at("recipe") == "changelog-draft");
+    CHECK_FALSE(t::task_to_json(typed).contains("recipe"));
+    // The view is the twin's too: provenance is the ledger's, never a field
+    // a surface grows.
+    CHECK_FALSE(t::to_json(t::make_task_view(from_recipe, std::nullopt)).contains("recipe"));
+    // A ledger read back keeps it.
+    std::string loaded_error;
+    CHECK(t::load_task(recipe_home.tasks(), from_recipe.id, loaded_error)->recipe ==
+          "changelog-draft");
+}
+
+TEST_CASE("a recipe's suggested grant is said and never assumed on a pipe; one typed is given",
+          "[commands][task][recipe][grant]") {
+    SECTION("nobody to say yes: said, not granted, and the run goes on without it") {
+        const Home home{kWrites};
+        std::string out;
+        std::string err;
+        (void)home.run(
+            {"task", "run", "--recipe", "digest-folder", "--input", "docs", "--rounds", "1"}, &out,
+            &err);
+        CHECK(has(err,
+                  "[recipe] digest-folder suggests --allow write_file -- not granted: nobody "
+                  "is at the terminal to say yes, so only a grant typed on the line is "
+                  "given (add --allow write_file to grant it)"));
+        const t::Task task = home.task();
+        CHECK(task.recipe == "digest-folder");
+        CHECK(task.tools);
+        CHECK(task.policy.grants.empty());
+        // The write asked, and with nobody there it was denied -- as without a
+        // recipe.
+        REQUIRE_FALSE(task.rounds.empty());
+        CHECK(task.rounds.back().allowed.empty());
+        CHECK_FALSE(task.rounds.back().denied.empty());
+    }
+    SECTION("typed on the line: the grant is the line's, and nothing is said of it") {
+        const Home home{kWrites};
+        std::string out;
+        std::string err;
+        (void)home.run({"task", "run", "--recipe", "digest-folder", "--input", "docs", "--rounds",
+                        "1", "--allow", "write_file"},
+                       &out, &err);
+        CHECK_FALSE(has(err, "suggests"));
+        CHECK(home.task().policy.grants == std::vector<std::string>{"write_file"});
+    }
+    SECTION("a grant past the config is refused naming the rule, recipe or no recipe") {
+        const Home home{kWrites, "permissions:\n  write_file: deny\n"};
+        std::string out;
+        CHECK(home.run({"task", "run", "--recipe", "digest-folder", "--input", "docs", "--allow",
+                        "write_file"},
+                       &out) == 1);
+        CHECK(has(out,
+                  "--allow write_file: the config says permissions.write_file: deny -- a "
+                  "task's grant is never wider than the config"));
+        CHECK(t::list_tasks(home.tasks()).empty());
+    }
+}
+
+TEST_CASE("a recipe's grants are asked one by one at a terminal, no the default",
+          "[commands][task][recipe][grant]") {
+    const t::Recipe recipe = t::parse_recipe(
+        apogee::harness::find_bundled_recipe("capture-decisions")->text, "x", "capture-decisions");
+    std::istringstream answers{"y\n\n"};
+    std::ostringstream said;
+    const std::vector<std::string> granted = apogee::commands::consent_to_recipe_grants(
+        recipe, {}, {.can_ask = true, .in = &answers, .out = &said});
+    CHECK(granted == std::vector<std::string>{"run_command"});
+    CHECK(has(said.str(),
+              "[recipe] capture-decisions suggests granting run_command for this "
+              "task's life, as --allow run_command would: it runs without asking, "
+              "every use recorded. Grant it? [y/N] "));
+    CHECK(has(said.str(), "[recipe] write_file not granted -- a call to it asks"));
+
+    // One the line already gives is never asked.
+    std::istringstream none;
+    std::ostringstream quiet;
+    CHECK(apogee::commands::consent_to_recipe_grants(recipe, {"run_command", "write_file"},
+                                                     {.can_ask = true, .in = &none, .out = &quiet})
+              .empty());
+    CHECK(quiet.str().empty());
+}
+
+TEST_CASE("task recipes lists them and shows one whole, each as a document too",
+          "[commands][task][recipe]") {
+    const Home home{kChangelog};
+    std::string out;
+    REQUIRE(home.run({"task", "recipes"}, &out) == 0);
+    CHECK(has(out, "NAME               SOURCE   INPUT  DESCRIPTION\n"));
+    CHECK(has(out,
+              "changelog-draft    shipped  yes    Turn an excerpt of a git log into a "
+              "CHANGELOG section.\n"));
+    CHECK(has(out, "digest-folder      shipped  yes    "));
+    CHECK(has(out, "capture-decisions  shipped  yes    "));
+
+    REQUIRE(home.run({"task", "recipes", "--output-format", "json"}, &out) == 0);
+    const nlohmann::json listed = nlohmann::json::parse(out);
+    CHECK(listed.at("object") == "list");
+    REQUIRE(listed.at("data").size() == 3);
+    CHECK(listed.at("data")[0].at("name") == "capture-decisions");
+    CHECK(listed.at("problems").empty());
+
+    REQUIRE(home.run({"task", "recipes", "show", "digest-folder"}, &out) == 0);
+    CHECK(has(out, "digest-folder  shipped\n"));
+    CHECK(has(out, "suggests:  --allow write_file -- asked at launch, never assumed\n"));
+    CHECK(has(out, "files:     DIGEST.md\n"));
+    CHECK(has(out, "goal:\n  Read the folder {{input}}: "));
+    REQUIRE(home.run({"task", "recipes", "show", "digest-folder", "--output-format", "json"},
+                     &out) == 0);
+    const nlohmann::json shown = nlohmann::json::parse(out);
+    CHECK(shown.at("allow") == nlohmann::json{"write_file"});
+    CHECK(shown.at("source") == "shipped");
+
+    // A recipe file the user drops in runs by its name, and lists as theirs.
+    fs::create_directories(home.home.home() / "recipes");
+    std::ofstream{home.home.home() / "recipes" / "hello.yaml"} << "goal: Say hello.\n";
+    REQUIRE(home.run({"task", "recipes"}, &out) == 0);
+    CHECK(has(out, "hello              user     no     \n"));
+    CHECK(home.run({"task", "recipes", "show", "nope"}, &out) == 1);
+    CHECK(has(out,
+              "no recipe named 'nope' (there are: capture-decisions, changelog-draft, "
+              "digest-folder, hello)"));
+}
+
+TEST_CASE("task run --recipe refuses what it cannot expand, before anything is made",
+          "[commands][task][recipe]") {
+    const Home home{kChangelog};
+    std::string out;
+    const std::vector<std::pair<std::vector<std::string>, std::string>> refused{
+        {{"task", "run", "A goal", "--recipe", "changelog-draft", "--input", "x"},
+         "--recipe 'changelog-draft' gives the goal -- drop the typed goal, or the recipe"},
+        {{"task", "run", "A goal", "--input", "x"},
+         "--input is a recipe's input -- give --recipe <name> with it"},
+        {{"task", "run", "--recipe", "changelog-draft"},
+         "the recipe 'changelog-draft' takes an input -- The commits, as git log prints their "
+         "subjects and bodies. -- given with --input"},
+        {{"task", "run", "--recipe", "nope"},
+         "no recipe named 'nope' (there are: capture-decisions, changelog-draft, digest-folder) "
+         "-- 'apogee task recipes' lists them"},
+        {{"task", "run"},
+         "a task needs a goal: apogee task run \"<goal>\", or a recipe's: "
+         "--recipe <name>"},
+    };
+    for (const auto& [args, says] : refused) {
+        INFO(says);
+        CHECK(home.run(args, &out) == 1);
+        CHECK(has(out, says));
+    }
+    CHECK(t::list_tasks(home.tasks()).empty());
 }
