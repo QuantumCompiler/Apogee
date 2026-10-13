@@ -6024,6 +6024,47 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on): 3,203 of 3,2
 
 **Left for the owner.** Readings this item chose, each in the table and each a one-place change if vetoed: the served view and the JSON document withholding a person's answers as well as the declared one; machine mode prompting nobody even at a terminal; and `created` delivered as `task_started`'s history rather than as an event of its own. The parity table's training reads (`train status`, `train versions`, `train pipeline status`, `train cycle status`) are still classified read-only though `/v1/admin/training/*` serves them -- the new `served` kind could name their routes too; left as they were, since they are not this item's.
 
+### 2026-10-13 — `task-recipes` (backlog item 40c): pre-shipped goals with their checks baked in
+
+**Goal.** Agents and symphonies ship in the box; a task was a free-text goal on argv and nothing more. A **recipe** gives tasks their shipped form: a named goal template with its acceptance checks and suggested grants baked in, which the binary knows, lists and expands into exactly the run a person would type.
+
+- [x] **`tasks/recipe`** — the definition (name, description, an input contract, the goal template over one `{{input}}`, `tools`, `require`, `require_files`, the suggested `allow`, `agent`, `rounds`), the one parser and the ladder. `parse_recipe` refuses, naming the file and the reason: not YAML, an unknown key, no goal, any variable but `{{input}}`, an unclosed `{{`, an input the goal never reads (or one it reads without saying what it is), a `name:` that disagrees with the file's, a grant or an agent without `tools: true`, rounds out of range, a blank check. `recipe_book` is the symphonies' ladder without a config section: a file under `recipes/` over the shipped starter of its name -- `seeded` while it is the shipped bytes, `user` once edited, `shipped` from the compiled-in text while no file is there -- then the user's own files by name, a file that does not parse said once in `problems`.
+- [x] **`task recipes` and `task recipes show <name>`**, each with `--output-format json` (`{"object":"list","data":[…],"problems":[…]}` and `{"object":"task.recipe",…}`), documented in `machine-mode.md`.
+- [x] **`task run --recipe <name> [--input TEXT]`** — the recipe expanded into the very flags a hand-typed run takes: its goal rendered, its checks before any typed ones, `--tools`, its `rounds` unless `--rounds` was typed, its `agent` unless `--agent` was. The run is `drive`'s own; the ledger's new `recipe` key is the provenance, written only when set, so a hand-typed ledger reads byte for byte as before. The task view is unchanged.
+- [x] **Grants are suggested, never assumed** (`consent_to_recipe_grants`). Each suggested grant the line does not already give is asked `[y/N]` at a terminal, no the default; on a pipe or in machine mode it is said with the `--allow` that would give it, and not given. A consented grant is the line's own, held to the same ceiling: one past the config or the agent is refused naming the rule, recipe or no recipe.
+- [x] **Three starters**, compiled in by `scripts/generate_recipe_assets.py` and seeded skip-if-present under the new **`recipes`** layout row, which seeding, `check`, `reset --keep` and install parity all learn from the row: `digest-folder` (a folder read and its digest written to `DIGEST.md`; `--require-file DIGEST.md`; suggests `write_file`), `changelog-draft` (a git log excerpt into a CHANGELOG section; no tools; `--require "## Unreleased"`) and `capture-decisions` (a transcript's decisions each captured as a knowledge record; `--require "Captured:"`; suggests `run_command` and `write_file`).
+- [x] Completion: `--recipe` and `task recipes show` offer the recipes (the `RECIPE` name kind). The full-screen shell needs nothing: `task` is already a classified view, and the exec line runs the new verbs.
+
+**Decisions** (2026-10-13, made while building; the item's own were the full `--recipe` surface, suggested-never-granted grants, the three starters, one `{{input}}` and no Task-view picker)
+
+| Decision | Choice | Why |
+|---|---|---|
+| `capture-decisions`' grant | `run_command` and `write_file`: each decision's passage written to `decisions/<n>.txt`, then `apogee knowledge capture --source meeting --input decisions/<n>.txt` run | No native tool writes knowledge records; `knowledge capture` is the store's one writer, and a task reaches it only by running it. Granted, `run_command` runs any command without asking, so the recipe's header says so and the consent prompt names it. |
+| `digest-folder` "read-only" | Read as "changes nothing in the folder": it writes only `DIGEST.md`, so it suggests `write_file` | Its check is `--require-file DIGEST.md`, which a read-only task could never pass. |
+| A recipe's `agent` | Applied as a typed `--agent` would be, a typed one winning; grants stay suggestions | An agent's policy only narrows what a task may do; a grant widens it, which is what consent is for. None of the three starters names an agent. |
+| The ladder's three rungs | One directory: a starter's file `seeded` while it is the shipped bytes, `user` once edited; other files `user` | Recipes have no config section; this is the symphonies' ladder with the config rung absent, and the source column still says which a run will read. |
+| The checks | Written as they are, never templated | Only the goal reads `{{input}}` (the item's one-variable call); a templated check would be a second grammar. |
+| A typed goal beside `--recipe`, and `--input` without one | Both refused before anything is made | Two goals for one task, and an input with nothing to read it, are each a mistake to say, not to guess past. |
+| The documents | The list idiom, `object: list` and `object: task.recipe` | As `task list` and `symphonies list` print theirs. |
+| An admin twin | None: `task recipes show` is classified read-only in the HTTP parity table | Task control is CLI-only; the reads the admin plane serves are a task's status and list. A recipe route is a later call if a remote client needs one. |
+
+**Guardrails.**
+- `tasks/recipe_test.cpp`: every field parsed; each refusal by name and reason; a goal expanded, braces in the input left as text, a missing or unwanted input refused; the shipped three as specced; the ladder (no directory, seeded, edited, the user's own, a broken file said once, a broken starter's file never silently replaced); both documents.
+- `contracts/assets_test.cpp`: the three byte-identical to their files, every file compiled in, seeded under `recipes/`; the seeding count.
+- `cli/task_test.cpp`: a recipe's run and its hand-typed twin's ledgers equal but for the provenance and what any two runs differ by, the view unchanged and a hand-typed ledger writing no `recipe` key; a suggested grant said and not given on a pipe, the write it would have allowed denied as without a recipe; one typed given; one past the config refused naming the rule; the grants asked one by one at a terminal, no the default; `task recipes` and `show` as text and as documents, a user's file listed as theirs; every refusal before anything is made.
+- The parity table classifies `task recipes show`; `cli.lifecycle`'s free-text list names `--input`.
+- `cli.task_lifecycle` on the real binary: the three seeded and listed as `seeded`, the list document, a recipe run to done with its check attached and its name in the ledger, a suggested grant said and never given on a pipe, and completion offering the names to `--recipe` and `recipes show`.
+- `cli.install_parity` holds the new row.
+
+Fixed in passing: `contracts/assets.h`'s symphony comment still said three starters ship, stale since 40b.
+
+**Not verified.**
+- A recipe run on real weights (none was asked for); `capture-decisions` end to end, which needs a clerk model and a granted `run_command`.
+- The terminal consent prompt is tested through its function with a scripted stream, not at a real terminal.
+- Linux and Windows.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,218 tests, none failing, one skipped for want of `pdftotext` -- `cli.task_lifecycle` and `cli.install_parity` among them. `clang-format` is clean on every touched file.
+
 ## Milestone AE — The code graph
 
 **Goal.** Milestone Y's knowledge graph is built by a model: one structured call per chunk of prose, the right tool for documents and decisions and the wrong one for source code, whose structure is *in* the code. A parser recovers it deterministically, locally and for nothing -- no hallucinated edge, no spend. This milestone adds a second extraction *source* to the one graph layer (Graphify's shape, adopted as a source, never a second graph system): tree-sitter parses a source tree into the same `kg_*` tables, every edge saying whether it was parsed or asserted, and a code-only graph is built, updated, clustered and walked with **no model, no key, no embedder and no network** -- the user's call (2026-09-30), held by tests rather than by care. Track 27's graph items open here: 27k the extractor; 27l navigation, 27m the artifacts and 27n–27p the attachment code graph build on it.
