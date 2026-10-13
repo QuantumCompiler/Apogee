@@ -2,10 +2,13 @@
 # Execute mode (27s) on the real binary, against scripted mock members that
 # echo the brief they were sent, with no input after the command is typed:
 #
-#   * suite-first: `execute` with no suite named and none the default refused
-#     naming `config set-default-suite`, with no suite configured at all
-#     naming `config add-suite`, `--suite off` refused -- each with nothing on
-#     stdout and no conversation saved; with a default suite, that suite;
+#   * the door (41a): `execute` with no suite named and none the default
+#     opening bare on `models.default` or `-m` as chat runs, its `/play`
+#     through the one role chain and `--orchestrate` refused bare; with
+#     nothing to open on refused naming `config set-default-suite` and the
+#     bare door, with no suite configured at all naming `config add-suite`,
+#     `--suite off` refused -- each refusal with nothing on stdout and no
+#     conversation saved; with a default suite, that suite;
 #   * bare input answered by the suite's root, exactly as `chat --suite` --
 #     stdout and the saved conversation byte for byte the same;
 #   * `/play <symphony> <input>`: each stage one member's call, stage two
@@ -99,25 +102,46 @@ for m in json.load(open(sys.argv[1]))["messages"]:
 ' "$1"
 }
 
-# --- suite-first ---------------------------------------------------------------
-OUT=$(printf 'hi\n' | "$APOGEE_BIN" execute 2>"$WORK_DIR/err.txt"); code=$?
-[ "$code" = 1 ] || fail "no suite: exit $code, want 1"
-[ -z "$OUT" ] || fail "no suite: stdout carried: $OUT"
+# --- the door (41a): a suite, else bare on -m or the default backend ------------
+# No suite named and none the default: bare on models.default, as chat runs.
+OUT=$(printf 'hi\n' | "$APOGEE_BIN" execute 2>"$WORK_DIR/err.txt") || fail "bare: $(cat "$WORK_DIR/err.txt")"
+[ "$OUT" = "ROOT<hi>" ] || fail "bare: answered '$OUT'"
+OUT=$(printf 'hi\n' | "$APOGEE_BIN" execute -m helper 2>"$WORK_DIR/err.txt") || fail "bare -m: $(cat "$WORK_DIR/err.txt")"
+[ "$OUT" = "HELPER<hi>" ] || fail "bare -m: answered '$OUT'"
+# /play in a bare session: the utility stage on the conversation's backend,
+# the chat stage on the chat role's pointer -- the one chain.
+OUT=$(printf '/play echo2 hello\n' | "$APOGEE_BIN" execute 2>"$WORK_DIR/err.txt") || fail "bare /play: $(cat "$WORK_DIR/err.txt")"
+[ "$OUT" = "ROOT<Two: ROOT<One: hello>>" ] || fail "bare /play: answered '$OUT'"
+# --orchestrate is a suite's: refused bare, nothing saved.
+BEFORE=$(count_sessions)
+printf 'hi\n' | "$APOGEE_BIN" execute --orchestrate >/dev/null 2>"$WORK_DIR/err.txt" && fail "--orchestrate ran bare"
+grep -q -- "--orchestrate offers a suite's symphonies to its chat model, and this session runs under none" "$WORK_DIR/err.txt" ||
+    fail "--orchestrate bare: $(cat "$WORK_DIR/err.txt")"
+[ "$(count_sessions)" = "$BEFORE" ] || fail "a refused execute saved a conversation"
+rm -f "$APOGEE_HOME"/sessions/*.json
+
+# Nothing to open on -- no suite the default, no -m, no default backend:
+# refused, naming the suites, the default to set, and the bare door.
+mkdir -p "$WORK_DIR/nodefault/config"
+printf 'backends:\n  root:\n    type: mock\nsuites:\n  duo:\n    members:\n      chat: root\n' > "$WORK_DIR/nodefault/config/config.yaml"
+OUT=$("$APOGEE_BIN" --config "$WORK_DIR/nodefault/config/config.yaml" execute </dev/null 2>"$WORK_DIR/err.txt"); code=$?
+[ "$code" = 1 ] || fail "nothing to open on: exit $code, want 1"
+[ -z "$OUT" ] || fail "nothing to open on: stdout carried: $OUT"
 grep -q 'execute opens a session with a suite, and none is named or the default' "$WORK_DIR/err.txt" &&
-    grep -q 'configured: duo, fast' "$WORK_DIR/err.txt" &&
-    grep -q 'apogee config set-default-suite <name>' "$WORK_DIR/err.txt" ||
-    fail "no suite: no remediation: $(cat "$WORK_DIR/err.txt")"
-[ "$(count_sessions)" = 0 ] || fail "a refused execute saved a conversation"
+    grep -q 'configured: duo' "$WORK_DIR/err.txt" &&
+    grep -q 'apogee config set-default-suite <name>' "$WORK_DIR/err.txt" &&
+    grep -q 'or open it bare on one model: apogee execute -m <backend>' "$WORK_DIR/err.txt" ||
+    fail "nothing to open on: no remediation: $(cat "$WORK_DIR/err.txt")"
 
 mkdir -p "$WORK_DIR/bare/config"
-printf 'backends:\n  root:\n    type: mock\nmodels:\n  default: root\n' > "$WORK_DIR/bare/config/config.yaml"
+printf 'backends:\n  root:\n    type: mock\n' > "$WORK_DIR/bare/config/config.yaml"
 OUT=$("$APOGEE_BIN" --config "$WORK_DIR/bare/config/config.yaml" execute </dev/null 2>"$WORK_DIR/err.txt"); code=$?
 [ "$code" = 1 ] || fail "no suites: exit $code, want 1"
 grep -q 'none is configured -- add one: apogee config add-suite <name> --chat <backend>' "$WORK_DIR/err.txt" ||
     fail "no suites: no add-suite remediation: $(cat "$WORK_DIR/err.txt")"
 
 printf 'hi\n' | "$APOGEE_BIN" execute --suite off >/dev/null 2>"$WORK_DIR/err.txt" && fail "--suite off ran"
-grep -q -- "--suite off names no suite, and execute opens a session with one" "$WORK_DIR/err.txt" ||
+grep -q -- "--suite off names no suite, and execute opens a session with one or bare on a model" "$WORK_DIR/err.txt" ||
     fail "--suite off: $(cat "$WORK_DIR/err.txt")"
 [ "$(count_sessions)" = 0 ] || fail "a refused execute saved a conversation"
 

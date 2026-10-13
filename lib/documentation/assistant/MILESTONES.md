@@ -7317,3 +7317,41 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3
   - The other families were skipped, as the guardrail allows.
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3,199 tests ran with none failing, one skipped for want of `pdftotext`. That includes `cli.machine_schema_conformance` (the wire byte-stable), `harness.layering`, `cli.tui_shell` and `cli.chat_line_editing`. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+## Milestone AK — The coding mode
+
+**Goal.** `apogee execute` grown into a Claude-Code-class coding session over local and cloud models alike, from the execute-mode spike of 2026-10-11 (track 41). The spike found the inventory mostly standing -- the sandboxed fs, shell and git kit, the permission gate with 39's modes, compaction, the code graph, local tool-calling through each model's own template -- and six walls: execute refusing to open without a suite, no project-context convention, no workspace ritual, no visible plan, no tool-using sub-agent and no coding persona. Each item takes one wall down without a second loop, a second resolver or a second attach path.
+
+### 2026-10-13 — `execute-opens-bare` (backlog item 41a): one strong model and its tools
+
+**What was built**
+
+- [x] **Three rungs, decided once in `run_session`.** A suite -- `--suite`, or `models.default_suite` -- opens execute as it always has. With neither, execute now opens **bare** on `-m <backend>` or `models.default`, suite-less through the role resolver's existing chain, exactly as `chat` runs -- no synthesized suite, no new rung. A resumed session that had no suite, under a config with no default suite, resumes bare on its own backend.
+- [x] **Refused only with nothing to open on** (`execute_suite_refusal`): no suite named or the default, no `-m`, no `models.default`. Today's wording for the suite half stands, and the bare door follows: "-- or open it bare on one model: apogee execute -m <backend>, or with a default backend set (apogee config set-default <backend>)". A resumed session that names no backend under such a config is refused the same way.
+- [x] **`--orchestrate` stays the suite's** (`execute_orchestrate_refusal`): refused bare, at launch or on a resume, naming the suites there are and `config set-default-suite`. `--suite off` is refused naming the bare door.
+- [x] **`/play` in a bare session** resolves each stage's role through the one chain: a helper role (utility, extraction, vision, transcription) on the conversation's backend, the chat role on its pointer, `models.default`.
+- [x] **The banner** says `no suite` where a suite would be named: `root  ·  no suite  ·  7 symphonies  ·  chat …`. A session under a suite banners as before.
+- [x] **The shell's doors take the same rungs**, through execute's own session: with no suite configured, the picker offers `Execute on <default backend> (no suite)`, and a `/play` with no session open plays in a new execute session under the default suite, else bare on the default backend, else says there is nothing to open on.
+- [x] `execute`'s one-line summary now says it: "Open a session under a suite, its symphonies playable (/play), or bare on one model". SPEC's surface line carries a dated revision.
+
+**Decisions** (2026-10-13; the item's own were the resolver's existing rungs, `--orchestrate` the suite's, and the banner's shape)
+
+| Decision | Choice | Why |
+|---|---|---|
+| A bare `/play`'s chat stage | The chat role's pointer, `models.default` -- not the session's `-m` | The one chain, unchanged: a member call asks its role, and with no suite and no pointer only a helper role falls to the conversation's backend. A rung for "the session's model" would be the new resolver state the item rules out. |
+| A resumed session whose suite was turned off in chat | Resumes bare on its own backend | It used to be refused for want of a suite; bare is now a door, and a saved session names its backend. |
+| `--orchestrate` on a resume of a bare session | Refused | The Orchestrator offers a suite's symphonies; a resume with none has nothing to offer them from. |
+
+**Guardrails.**
+- `cli/execute_test.cpp`: bare on the default and on `-m`, its answer and transcript byte for byte chat's; refused only with nothing to open on, both refusals pinned whole; `--orchestrate` refused bare and on a bare resume, nothing saved; `--suite off` and a missing suite refused; a bare `/play`'s stages through the chain; machine mode over a bare session in the events it already has, the `session` event naming the model; a resumed session turned off resuming bare.
+- `execute_session.golden` moved only where the door did (the bare scenario, the `--suite off` wording, the summary line); every suite-given section byte-stable.
+- `cli/tui_session_test.cpp`: the picker's bare door; a play with no session open, bare on the default backend; nothing to open on, said.
+- `root_help.txt`, the summary line.
+- `cli.one_role_resolver`: the door asks the resolver (`resolve_chat_backend`) what it would open on, never `models.default` raw -- the first draft read the field, in the session core and the shell's door, and the guard failed it.
+- The golden's bare scenario runs in a home of its own: in the shared one, it saved a session in the same second as the suite scenario's, and the `execute -c` after them resumed whichever sorted first -- a flake ctest's run found and five consecutive runs now pass.
+- `cli.execute_lifecycle` on the real binary: bare on the default and on `-m`, a bare `/play`, `--orchestrate` refused bare, the nothing-to-open-on refusal with every way in, no suites configured, `--suite off`.
+
+**Not verified.**
+- Linux and Windows.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,224 tests, none failing, one skipped for want of `pdftotext` -- `cli.execute_lifecycle`, `cli.one_role_resolver` and `cli.unit_suite_under_a_tty` among them. `clang-format` is clean on every touched file.

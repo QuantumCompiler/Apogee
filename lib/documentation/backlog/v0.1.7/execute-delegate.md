@@ -30,4 +30,4 @@
 - [ ] The delegation narrates as a side call with tool lines in all four front ends; the machine event is documented and pinned.
 - [ ] No second loop, no saved sub-chat, no gate widening; the full suite green.
 
-**Scope note.** Earmarked for v0.1.7; gated on [41a](execute-opens-bare.md) (the mode it exists to serve opens first) — buildable beside 41b–41d in any order after it. Out of scope: depth beyond one, parallel delegates, per-call kit narrowing, consult/symphony changes.
+**Scope note.** Earmarked for v0.1.7; gated on 41a, execute opens bare -- **shipped 2026-10-13** ([MILESTONES.md](../../assistant/MILESTONES.md#milestone-ak--the-coding-mode) → Milestone AK), so the gate is satisfied (the mode it exists to serve opens first) — buildable beside 41b–41d in any order after it. Out of scope: depth beyond one, parallel delegates, per-call kit narrowing, consult/symphony changes.

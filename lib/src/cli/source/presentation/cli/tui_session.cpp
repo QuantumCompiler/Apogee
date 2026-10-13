@@ -9,6 +9,7 @@
 #include "cli/chat_session.h"
 #include "cli/tui_common.h"
 #include "contracts/config.h"
+#include "harness/roles.h"
 #include "logger/session.h"
 #include "views/ask_prompt.h"
 
@@ -261,7 +262,10 @@ void TuiSessionDriver::start() {
 
 void TuiSessionDriver::show_picker() {
     // The execute door (37d): a session under each configured suite, the
-    // default first -- absent, rather than refusing, with none.
+    // default first -- and with no suite configured, since 41a, one door
+    // bare on the default backend, the rungs `apogee execute` opens on;
+    // absent, rather than refusing, with neither. Each opens through
+    // execute's own session, the one door logic.
     std::vector<tui::PickerDoor> doors;
     try {
         if (const std::optional<harness::Config> config = config_if_any(config_file(context_));
@@ -281,6 +285,13 @@ void TuiSessionDriver::show_picker() {
                     .open = [this, name]() {
                         open(Opening{.suite = name, .mode = SessionMode::Execute});
                     }});
+            }
+            // Bare on what the one resolver answers for the chat role.
+            if (const std::string bare = harness::resolve_chat_backend(*config, {});
+                suites.empty() && !bare.empty()) {
+                doors.push_back(tui::PickerDoor{
+                    .label = "Execute on " + bare + " (no suite)",
+                    .open = [this]() { open(Opening{.mode = SessionMode::Execute}); }});
             }
         }
     } catch (const std::exception&) {
@@ -347,24 +358,32 @@ TuiSessionDriver::Handed TuiSessionDriver::play(const std::string& symphony,
         }
         return {.sent = true, .said = line + " sent to the conversation"};
     }
-    // None open: execute's session under the default suite, the play its
-    // first line -- execute's own rule, a suite insisted on.
+    // None open: execute's session on its own rungs (41a), the play its
+    // first line -- under the default suite, else bare on the default
+    // backend.
     std::string fallback;
+    std::string bare;
     try {
         if (const std::optional<harness::Config> config = config_if_any(config_file(context_));
             config.has_value()) {
             fallback = config->models.default_suite;
+            bare = harness::resolve_chat_backend(*config, {});
         }
     } catch (const std::exception& e) {
         return {.said = std::string{"not played: "} + e.what()};
     }
-    if (fallback.empty()) {
-        return {.said =
-                    "not played: no suite is the default to open an execute session under -- "
-                    "'apogee config set-default-suite <name>' names one"};
+    if (!fallback.empty()) {
+        open(Opening{.suite = fallback, .mode = SessionMode::Execute, .first_line = line});
+        return {.sent = true, .said = line + " in a new execute session under suite " + fallback};
     }
-    open(Opening{.suite = fallback, .mode = SessionMode::Execute, .first_line = line});
-    return {.sent = true, .said = line + " in a new execute session under suite " + fallback};
+    if (bare.empty()) {
+        return {.said =
+                    "not played: no suite and no backend is the default to open an execute "
+                    "session on -- 'apogee config set-default-suite <name>' or 'apogee "
+                    "config set-default <backend>' names one"};
+    }
+    open(Opening{.mode = SessionMode::Execute, .first_line = line});
+    return {.sent = true, .said = line + " in a new execute session on " + bare + " (no suite)"};
 }
 
 std::string TuiSessionDriver::use_suite(const std::string& suite) {

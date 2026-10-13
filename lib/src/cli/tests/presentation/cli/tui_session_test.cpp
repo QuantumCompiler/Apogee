@@ -622,10 +622,13 @@ TEST_CASE("the picker's execute door opens execute's session, and a play there i
     Conversation chat{script};
     apogee::commands::TuiSessionDriver driver{chat.view, chat.pump, chat.context,
                                               []() { return apogee::models::MachineBudget{}; }};
-    // No suite configured: no door, rather than one that refuses.
+    // No suite configured: no suite's door, rather than one that refuses --
+    // and since 41a the bare door on the default backend, execute's own
+    // rungs.
     driver.show_picker();
     chat.until([&chat]() { return has(chat.frame(), "New chat"); }, "the picker");
     CHECK_FALSE(has(chat.frame(), "Execute under"));
+    CHECK(has(chat.frame(), "Execute on local (no suite)"));
 
     std::ofstream{chat.home.config_path(), std::ios::binary | std::ios::trunc}
         << execute_config(chat.home.home() / "scripts");
@@ -758,7 +761,44 @@ TEST_CASE("the Symphonies view draws symphonies list's document, and plays throu
         std::vector<std::string>{"user: /play echo2 hello", "assistant: " + std::string{kPlayed}});
 }
 
-TEST_CASE("a play is never offered outside execute: a chat open, or no default suite, says why",
+TEST_CASE("with no suite the default, a play opens execute bare on the default backend",
+          "[cli][tui][session][execute][bare]") {
+    const nlohmann::json script = {{"turns", {{{"text", "answer to {{last_user}}"}}}}};
+    Conversation chat{script};
+    std::ofstream{chat.home.config_path(), std::ios::binary | std::ios::trunc}
+        << execute_config(chat.home.home() / "scripts", /*with_default=*/false);
+    apogee::commands::TuiSessionDriver driver{chat.view, chat.pump, chat.context,
+                                              []() { return apogee::models::MachineBudget{}; }};
+    // Execute's own rungs (41a): no suite the default, so bare on root --
+    // both stages on root, the utility one by the conversation's backend.
+    const apogee::commands::TuiSessionDriver::Handed opened = driver.play("echo2", "hello");
+    CHECK(opened.sent);
+    CHECK(opened.said == "/play echo2 hello in a new execute session on root (no suite)");
+    chat.until([&chat]() { return has(chat.frame(), "ROOT<Two: ROOT<One: hello>>"); },
+               "the bare session's play");
+    CHECK(has(chat.frame(), "no suite"));
+    driver.stop();
+}
+
+TEST_CASE("with no default suite and no default backend, a play says there is nothing to open on",
+          "[cli][tui][session][execute][bare]") {
+    const nlohmann::json script = {{"turns", {{{"text", "answer to {{last_user}}"}}}}};
+    Conversation chat{script};
+    nlohmann::json config =
+        nlohmann::json::parse(execute_config(chat.home.home() / "scripts", /*with_default=*/false));
+    config["models"].erase("default");
+    std::ofstream{chat.home.config_path(), std::ios::binary | std::ios::trunc} << config.dump(2);
+    apogee::commands::TuiSessionDriver driver{chat.view, chat.pump, chat.context,
+                                              []() { return apogee::models::MachineBudget{}; }};
+    const apogee::commands::TuiSessionDriver::Handed none = driver.play("echo2", "hello");
+    CHECK_FALSE(none.sent);
+    CHECK(none.said ==
+          "not played: no suite and no backend is the default to open an execute "
+          "session on -- 'apogee config set-default-suite <name>' or 'apogee config "
+          "set-default <backend>' names one");
+}
+
+TEST_CASE("a play is never offered outside execute: a chat open says why",
           "[cli][tui][session][execute]") {
     const nlohmann::json script = {{"turns", {{{"text", "answer to {{last_user}}"}}}}};
     Conversation chat{script};
@@ -766,10 +806,6 @@ TEST_CASE("a play is never offered outside execute: a chat open, or no default s
         << execute_config(chat.home.home() / "scripts", /*with_default=*/false);
     apogee::commands::TuiSessionDriver driver{chat.view, chat.pump, chat.context,
                                               []() { return apogee::models::MachineBudget{}; }};
-    // Nothing open and no suite the default: no session to open under.
-    const apogee::commands::TuiSessionDriver::Handed none = driver.play("echo2", "hello");
-    CHECK_FALSE(none.sent);
-    CHECK(has(none.said, "no suite is the default"));
     // A chat open: /play is not in its table.
     CHECK(driver.use_model("root") == "a new chat on root");
     chat.until([&chat]() { return chat.view.waiting_for_line(); }, "the chat reading");

@@ -17,12 +17,13 @@ std::string_view ExecuteCommand::name() const noexcept {
 }
 
 std::string_view ExecuteCommand::summary() const noexcept {
-    return "Open a session with a suite: chat's session, its symphonies playable (/play)";
+    return "Open a session under a suite, its symphonies playable (/play), or bare on one model";
 }
 
 void ExecuteCommand::bind(CLI::App& root, const RootContext& context) {
     // The session core, as execute (27s): chat's flags, chat's session --
-    // opened with a suite, its symphonies playable.
+    // opened with a suite, its symphonies playable, or since 41a bare on one
+    // model as chat runs.
     auto flags = std::make_shared<SessionFlags>();
     CLI::App* cmd = root.add_subcommand(std::string{name()}, std::string{summary()});
     bind_session_flags(*cmd, flags, SessionMode::Execute);

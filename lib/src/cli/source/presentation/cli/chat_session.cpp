@@ -543,18 +543,27 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             fail_user(mode, "--suite: " + refused);
         }
     }
-    // Execute is a session opened with a suite (27s): never off, and never a
-    // plain chat for want of one -- said before anything is built when no
-    // suite is named, none is the default and no session is resumed.
+    // Execute opens on three rungs (41a): a suite -- named, or the default
+    // -- else bare on one model, `-m`'s or `models.default`, suite-less
+    // through the role resolver's own chain exactly as `chat` runs. Refused
+    // before anything is built only with none of them and no session to
+    // resume; `--orchestrate` is a suite's, refused without one.
     if (mode == SessionMode::Execute) {
         if (flags->suite == harness::kSuiteOff) {
             fail_user(mode,
-                      "--suite off names no suite, and execute opens a session with one -- "
-                      "'apogee chat --suite off' is a session without");
+                      "--suite off names no suite, and execute opens a session with one or bare "
+                      "on a model -- leave --suite out, or 'apogee execute -m <backend>' opens "
+                      "it bare");
         }
-        if (flags->suite.empty() && config.models.default_suite.empty() && flags->resume.empty() &&
-            !flags->cont) {
+        const bool suite = !flags->suite.empty() || !config.models.default_suite.empty();
+        // What it would open on bare, asked of the one resolver: `-m`, else
+        // the chat role's rungs down to `models.default`.
+        if (!suite && harness::resolve_chat_backend(config, flags->model).empty() &&
+            flags->resume.empty() && !flags->cont) {
             fail_user(mode, execute_suite_refusal(config));
+        }
+        if (!suite && flags->orchestrate && flags->resume.empty() && !flags->cont) {
+            fail_user(mode, execute_orchestrate_refusal(config));
         }
     }
     // `--graph` is how the launch's own attaches are indexed (27p): with
@@ -694,9 +703,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         }
     }
     // A resumed session that had no suite, under a config with no default,
-    // gives execute none to run under (27s).
-    if (mode == SessionMode::Execute && config.models.default_suite.empty()) {
-        fail_user(mode, execute_suite_refusal(config));
+    // runs bare (41a) -- unless it was asked to orchestrate, which only a
+    // suite can.
+    if (mode == SessionMode::Execute && config.models.default_suite.empty() && flags->orchestrate) {
+        fail_user(mode, execute_orchestrate_refusal(config));
     }
     // A member naming nothing is refused before a turn could fall back to
     // models.default and answer from a model nobody chose.
@@ -747,6 +757,11 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         config, harness::RoleRequest{.role = harness::ModelRole::Chat,
                                      .override = flags->model,
                                      .entry_backend = session.backend});
+    // A bare execute (41a) with nothing to open on: a resumed session that
+    // named no backend, under a config with no default.
+    if (mode == SessionMode::Execute && model.empty()) {
+        fail_user(mode, execute_suite_refusal(config));
+    }
     session.backend = model;
     // The chat's roster pin (33): the launch's; else, unless -m named a
     // backend, the one the chat was left on -- pinned again when the chat
@@ -2296,16 +2311,29 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
 }
 
 std::string execute_suite_refusal(const harness::Config& config) {
+    // The suite half as it was (27s); the bare door (41a) after it.
+    const std::string bare =
+        " -- or open it bare on one model: apogee execute -m <backend>, or with a default "
+        "backend set (apogee config set-default <backend>)";
     if (config.suite_names().empty()) {
         return "execute opens a session with a suite, and none is configured -- add one: "
                "apogee config add-suite <name> --chat <backend> [--utility <backend> ...], then "
                "run it with --suite <name>, or make it the default: apogee config "
-               "set-default-suite <name>";
+               "set-default-suite <name>" +
+               bare;
     }
     return "execute opens a session with a suite, and none is named or the default -- run one "
            "with --suite <name> (" +
            known_suites(config) +
-           "), or make one the default: apogee config set-default-suite <name>";
+           "), or make one the default: apogee config set-default-suite <name>" + bare;
+}
+
+std::string execute_orchestrate_refusal(const harness::Config& config) {
+    const std::string suites =
+        config.suite_names().empty() ? std::string{} : " (" + known_suites(config) + ")";
+    return "--orchestrate offers a suite's symphonies to its chat model, and this session runs "
+           "under none -- run one with --suite <name>" +
+           suites + ", or make one the default: apogee config set-default-suite <name>";
 }
 
 std::string orchestration_count(std::size_t offered) {
@@ -2321,6 +2349,10 @@ std::string session_banner(SessionMode mode, std::string_view model, bool base_m
     }
     banner += banner_suite(suite, forced);
     if (mode == SessionMode::Execute) {
+        // Bare (41a): said, where a suite would be named.
+        if (suite.empty()) {
+            banner += "  ·  no suite";
+        }
         banner += "  ·  " + symphony_count(symphonies);
         if (orchestrated.has_value()) {
             banner += "  ·  " + orchestration_count(*orchestrated);

@@ -161,9 +161,16 @@ void run_session(const RootContext& context, const SessionFlags& flags,
 
 /// Why an execute session cannot open under `config` as it stands (27s):
 /// no suite was named, the session had none and the config has no default --
-/// with the way to one: the suites there are and `config set-default-suite`,
-/// or, with none configured, `config add-suite`.
+/// and since 41a nothing to open it bare on either: no `-m` and no
+/// `models.default`. With the ways in: the suites there are and `config
+/// set-default-suite`, or, with none configured, `config add-suite`; then
+/// the bare door, `-m <backend>` or a default backend.
 [[nodiscard]] std::string execute_suite_refusal(const harness::Config& config);
+
+/// Why `--orchestrate` cannot run in an execute session with no suite (41a):
+/// the Orchestrator offers a suite's symphonies to its chat model, so the
+/// way in is a suite -- named, or the default.
+[[nodiscard]] std::string execute_orchestrate_refusal(const harness::Config& config);
 
 /// The line a session opens with on a terminal, after its tag: the model --
 /// `· base model` when it is one (26r) -- the suite (27d, 27e), under execute

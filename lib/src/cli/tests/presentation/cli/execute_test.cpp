@@ -143,49 +143,137 @@ constexpr std::string_view kPlayed = "ROOT<Two: HELPER<One: hello>>";
 
 // --- suite-first -------------------------------------------------------------
 
-TEST_CASE("execute with no suite named and none the default refuses, naming the way to one",
-          "[execute][suites]") {
+TEST_CASE("execute opens on three rungs: a suite, else bare on -m or the default backend",
+          "[execute][suites][bare]") {
+    // No suite named and none the default: bare on models.default -- the
+    // session chat would open, as chat opens it.
+    const Home home;
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"execute"}, &out, &err, "hi\n") == 0);
+    CHECK(out == "ROOT<hi>\n");
+    std::vector<apogee::logger::Session> sessions = home.sessions();
+    REQUIRE(sessions.size() == 1);
+    CHECK(sessions.front().backend == "root");
+    CHECK_FALSE(sessions.front().suite.has_value());
+    // -m names the model it opens on.
+    REQUIRE(home.run({"execute", "-m", "helper"}, &out, &err, "hi\n") == 0);
+    CHECK(out == "HELPER<hi>\n");
+    // Bare input is chat's own turn, byte for byte.
+    const Home chat_home;
+    const Home execute_home;
+    std::string chat_out;
+    std::string chat_err;
+    REQUIRE(chat_home.run({"chat"}, &chat_out, &chat_err, "hello\nand then\n") == 0);
+    REQUIRE(execute_home.run({"execute"}, &out, &err, "hello\nand then\n") == 0);
+    CHECK(out == chat_out);
+    CHECK(transcript(execute_home.sessions().front()) == transcript(chat_home.sessions().front()));
+}
+
+TEST_CASE("execute is refused only with nothing to open on, naming every way in",
+          "[execute][suites][bare]") {
+    const std::string bare =
+        " -- or open it bare on one model: apogee execute -m <backend>, or with a default backend "
+        "set (apogee config set-default <backend>)\n";
     {
-        const Home home;
+        // Suites configured, none the default, and no default backend.
+        CliHome home{
+            "backends:\n  root:\n    type: mock\nsuites:\n  duo:\n    members:\n"
+            "      chat: root\n"};
         std::string out;
         std::string err;
-        CHECK(home.run({"execute"}, &out, &err, "hi\n") == 1);
+        CHECK(home.run({"execute"}, &out, &err) == 1);
         CHECK(out.empty());
         CHECK(err ==
-              "apogee execute: execute opens a session with a suite, and none is named or the "
-              "default -- run one with --suite <name> (configured: duo, fast, strict), or make "
-              "one the default: apogee config set-default-suite <name>\n");
-        CHECK(home.sessions().empty());
+              "apogee execute: execute opens a session with a suite, and none is named or "
+              "the default -- run one with --suite <name> (configured: duo), or make one "
+              "the default: apogee config set-default-suite <name>" +
+                  bare);
+        // -m opens it all the same.
+        CHECK(home.run({"execute", "-m", "root"}, &out, &err) == 0);
     }
     {
-        // With no suite at all: how to add one -- never a plain chat.
-        CliHome bare{"backends:\n  root:\n    type: mock\nmodels:\n  default: root\n"};
+        // No suite at all and no default backend: how to add one, then bare.
+        CliHome home{"backends:\n  root:\n    type: mock\n"};
         std::string out;
         std::string err;
-        CHECK(bare.run({"execute"}, &out, &err) == 1);
-        CHECK(out.empty());
+        CHECK(home.run({"execute"}, &out, &err) == 1);
         CHECK(err ==
-              "apogee execute: execute opens a session with a suite, and none is configured -- "
-              "add one: apogee config add-suite <name> --chat <backend> [--utility <backend> "
-              "...], then run it with --suite <name>, or make it the default: apogee config "
-              "set-default-suite <name>\n");
+              "apogee execute: execute opens a session with a suite, and none is "
+              "configured -- add one: apogee config add-suite <name> --chat <backend> "
+              "[--utility <backend> ...], then run it with --suite <name>, or make it the "
+              "default: apogee config set-default-suite <name>" +
+                  bare);
     }
 }
 
-TEST_CASE("execute never runs under no suite: --suite off and a missing suite are refused",
-          "[execute][suites]") {
+TEST_CASE("execute's --orchestrate is a suite's: refused bare, naming the way to one",
+          "[execute][suites][bare][orchestrate]") {
+    const Home home;
+    std::string out;
+    std::string err;
+    CHECK(home.run({"execute", "--orchestrate"}, &out, &err, "hi\n") == 1);
+    CHECK(out.empty());
+    CHECK(err ==
+          "apogee execute: --orchestrate offers a suite's symphonies to its chat model, and "
+          "this session runs under none -- run one with --suite <name> (configured: duo, "
+          "fast, strict), or make one the default: apogee config set-default-suite "
+          "<name>\n");
+    CHECK(home.sessions().empty());
+    // A resumed bare session asked to orchestrate is refused the same way.
+    REQUIRE(home.run({"execute"}, &out, &err, "hi\n") == 0);
+    CHECK(home.run({"execute", "-c", "--orchestrate"}, &out, &err, "again\n") == 1);
+    CHECK_THAT(err, Catch::Matchers::StartsWith("apogee execute: --orchestrate offers a suite's"));
+}
+
+TEST_CASE("execute never takes --suite off, and a missing suite is refused", "[execute][suites]") {
     const Home home{"  default_suite: duo\n"};
     std::string out;
     std::string err;
     CHECK(home.run({"execute", "--suite", "off"}, &out, &err, "hi\n") == 1);
     CHECK(out.empty());
     CHECK(err ==
-          "apogee execute: --suite off names no suite, and execute opens a session with one -- "
-          "'apogee chat --suite off' is a session without\n");
+          "apogee execute: --suite off names no suite, and execute opens a session with "
+          "one or bare on a model -- leave --suite out, or 'apogee execute -m <backend>' "
+          "opens it bare\n");
     CHECK(home.run({"execute", "--suite", "nope"}, &out, &err, "hi\n") == 1);
     CHECK(err ==
           "apogee execute: --suite: no suite named 'nope' (configured: duo, fast, strict)\n");
     CHECK(home.sessions().empty());
+}
+
+TEST_CASE("a bare session's /play resolves each stage's role through the one chain",
+          "[execute][play][bare]") {
+    // No suite: the utility stage has no member and no role pointer, so it
+    // falls to the conversation's own backend; the chat stage takes the
+    // chat role's pointer, models.default -- as any member call does.
+    const Home home;
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"execute"}, &out, &err, "/play echo2 hello\n") == 0);
+    CHECK(out == "ROOT<Two: ROOT<One: hello>>\n");
+    // On -m, the helper stage asks the model the session opened on; the
+    // chat stage still the chat role's own, with no new rung for a bare
+    // session (41a).
+    const Home pinned;
+    REQUIRE(pinned.run({"execute", "-m", "helper"}, &out, &err, "/play echo2 hello\n") == 0);
+    CHECK(out == "ROOT<Two: HELPER<One: hello>>\n");
+    CHECK(transcript(pinned.sessions().front()) ==
+          std::vector<std::string>{"user: /play echo2 hello",
+                                   "assistant: ROOT<Two: HELPER<One: hello>>"});
+}
+
+TEST_CASE("machine mode carries a bare execute session in the events it already has",
+          "[execute][machine][bare]") {
+    const Home home;
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"execute", "--output-format", "stream-json"}, &out, &err,
+                     "{\"type\":\"user\",\"text\":\"hi\"}\n") == 0);
+    CHECK(event_types(out) == std::vector<std::string>{"session", "thinking", "answer_start",
+                                                       "answer_delta", "answer_end", "result"});
+    const nlohmann::json session = nlohmann::json::parse(out.substr(0, out.find('\n')));
+    CHECK(session.at("model") == "root");
 }
 
 TEST_CASE("execute with no suite named runs under the config's default", "[execute][suites]") {
@@ -200,20 +288,20 @@ TEST_CASE("execute with no suite named runs under the config's default", "[execu
     CHECK(sessions.front().suite == std::optional<std::string>{"duo"});
 }
 
-TEST_CASE("a resumed session's suite is execute's when none is named; one with none is refused",
+TEST_CASE("a resumed session's suite is execute's when none is named; one with none runs bare",
           "[execute][suites]") {
     const Home home;
     std::string out;
     std::string err;
-    // A chat under fast, then turned off: execute takes neither "off" nor
-    // nothing -- with no default it refuses; named, it runs.
+    // A chat under fast, then turned off: execute takes no "off" -- with no
+    // default suite it resumes bare on the chat's backend (41a); named, it
+    // runs under the suite.
     REQUIRE(home.run({"chat", "--suite", "fast"}, &out, &err, "hi\n") == 0);
     REQUIRE(home.run({"execute", "-c"}, &out, &err, "again\n") == 0);
     CHECK(out == "HELPER<again>\n");
     REQUIRE(home.run({"chat", "-c"}, &out, &err, "/suite off\n") == 0);
-    CHECK(home.run({"execute", "-c"}, &out, &err, "more\n") == 1);
-    CHECK_THAT(err, Catch::Matchers::StartsWith(
-                        "apogee execute: execute opens a session with a suite, and none is named"));
+    REQUIRE(home.run({"execute", "-c"}, &out, &err, "more\n") == 0);
+    CHECK(out == "HELPER<more>\n");
     REQUIRE(home.run({"execute", "-c", "--suite", "duo"}, &out, &err, "more\n") == 0);
     CHECK(out == "ROOT<more>\n");
 }
@@ -844,8 +932,14 @@ std::string scenario(const Home& home, const std::vector<std::string>& args,
 std::string battery() {
     std::string out;
     {
+        // Bare (41a): a session of its own, so the `-c` below resumes the
+        // one it means and not whichever of two same-second sessions sorts
+        // first.
         const Home home;
         out += scenario(home, {"execute"}, "hi\n");
+    }
+    {
+        const Home home;
         out += scenario(home, {"execute", "--suite", "off"}, "hi\n");
         out += scenario(home, {"execute", "--suite", "duo"},
                         "/help\n/symphonies\nhello\n/play echo2 hello\n/play\n/play nope x\n"

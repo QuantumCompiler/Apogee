@@ -27,4 +27,4 @@
 - [ ] The context rides requests as transient system context, capped and mended, never saved as user content.
 - [ ] `chat` byte-stable; machine-mode conformance green with the documented opening.
 
-**Scope note.** Earmarked for v0.1.7; gated on [41a](execute-opens-bare.md) (the ritual assumes the bare door). Out of scope: writing any context file, nested context files, the persona ([`execute-coder-persona.md`](execute-coder-persona.md)).
+**Scope note.** Earmarked for v0.1.7; gated on 41a, execute opens bare -- **shipped 2026-10-13** ([MILESTONES.md](../../assistant/MILESTONES.md#milestone-ak--the-coding-mode) → Milestone AK), so the gate is satisfied (the ritual assumes the bare door). Out of scope: writing any context file, nested context files, the persona ([`execute-coder-persona.md`](execute-coder-persona.md)).

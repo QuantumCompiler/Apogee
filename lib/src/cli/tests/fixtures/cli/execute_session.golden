@@ -1,17 +1,17 @@
 === apogee execute
 --- stdin
 hi
---- exit 1
+--- exit 0
 --- stdout
+ROOT<hi>
 --- stderr
-apogee execute: execute opens a session with a suite, and none is named or the default -- run one with --suite <name> (configured: duo, fast, strict), or make one the default: apogee config set-default-suite <name>
 === apogee execute --suite off
 --- stdin
 hi
 --- exit 1
 --- stdout
 --- stderr
-apogee execute: --suite off names no suite, and execute opens a session with one -- 'apogee chat --suite off' is a session without
+apogee execute: --suite off names no suite, and execute opens a session with one or bare on a model -- leave --suite out, or 'apogee execute -m <backend>' opens it bare
 === apogee execute --suite duo
 --- stdin
 /help
@@ -137,7 +137,7 @@ apogee: 'echo2' reads its input (Any text.), and none was given -- /play <sympho
 --- stdin
 --- exit 0
 --- stdout
-Open a session with a suite: chat's session, its symphonies playable (/play)
+Open a session under a suite, its symphonies playable (/play), or bare on one model
 Usage: apogee execute [OPTIONS]
 
 Options:

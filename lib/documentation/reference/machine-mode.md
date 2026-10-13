@@ -32,7 +32,8 @@ JSONL user turns on stdin, which is what makes one `chat` child serve a whole
 conversation. It defaults to whatever `--output-format` is, so a driver may pass
 one flag; on `chat` the two directions **must agree**, and disagreeing is an
 error rather than a silently ignored flag. `execute` (27s) is chat's session
-opened with a suite, and takes both flags as chat does (see
+opened with a suite -- or, since 41a, bare on one model -- and takes both flags
+as chat does (see
 [Playing a symphony](#playing-a-symphony-execute)). `task run` and `task resume` take
 `--output-format` alone: a task reads nothing from its driver (see
 [A task's run](#a-tasks-run)).
@@ -357,6 +358,11 @@ conversation, and exits cleanly.
 the same events out, a `user` line answered by the suite's root model as chat
 answers it. One `user` line means more there: one whose text is a `/play`
 command plays that symphony on the suite's members instead of asking the root.
+Since 41a it also opens **bare** -- no suite named and none the default, on
+`-m <backend>` or `models.default` -- exactly as chat opens: the same events,
+the `session` event naming the model, and a `/play`'s stages resolved through
+the one role chain (a helper role on the conversation's backend, the chat
+role on its pointer). `--orchestrate` is a suite's, and refused bare.
 
 ```jsonl
 {"type":"user","text":"/play summarize-verify The minutes of the meeting…"}

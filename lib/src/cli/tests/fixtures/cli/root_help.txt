@@ -30,7 +30,7 @@ Subcommands:
   config                      Inspect and edit the config file
   datasets                    Create, prepare, and distil training datasets
   embed                       Ingest documents into a searchable collection, and query it
-  execute                     Open a session with a suite: chat's session, its symphonies playable (/play)
+  execute                     Open a session under a suite, its symphonies playable (/play), or bare on one model
   graph                       Build and inspect the knowledge graph over a collection or a named graph
   knowledge, kn               Capture the why behind decisions as searchable records
   mcp                         Manage MCP tool servers
