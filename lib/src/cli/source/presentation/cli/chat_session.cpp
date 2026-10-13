@@ -42,6 +42,7 @@
 #include "cli/session_output.h"
 #include "cli/suite_residency.h"
 #include "cli/symphonies_cmd.h"
+#include "contracts/assets.h"
 #include "contracts/config.h"
 #include "contracts/errors.h"
 #include "contracts/layout.h"
@@ -1059,7 +1060,22 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         std::error_code here_error;
         project = read_project_opening(std::filesystem::current_path(here_error));
     }
+    // The coder persona (41c): a project session's way of working, carried
+    // ahead of the project's own file so the file, closer to the
+    // conversation, wins where they differ. `-s` -- given now, or saved with
+    // a resumed session -- replaces it whole.
     std::vector<std::string> standing;
+    std::optional<std::string> persona_line;
+    if (mode == SessionMode::Execute && project.project) {
+        if (session.params.system_prompt.empty()) {
+            standing.emplace_back(harness::find_bundled_persona("coder")->text);
+            persona_line =
+                "persona: coder, the shipped coding prompt, in every request -- -s "
+                "replaces it";
+        } else {
+            persona_line = "persona: your -s prompt, in place of the coder persona";
+        }
+    }
     if (project.context.has_value()) {
         standing.push_back(project_context_note(*project.context));
     }
@@ -1227,6 +1243,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         }
         // The project opening said as the banner says it (41b), before the
         // folder's own attach lines.
+        if (persona_line.has_value()) {
+            machine_reporter.on_notice(*persona_line);
+        }
         if (project.context.has_value()) {
             machine_reporter.on_notice(project_context_line(*project.context));
         }
@@ -1419,6 +1438,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             .built_in_graph = harness::AttachmentGraphMethod::Code}};
     for (const std::string& spec : flags->images) {
         (void)attached.attach(spec, working_directory);
+    }
+    if (persona_line.has_value()) {
+        out.print_line(style.tag(ansi::Role::Apogee) + " " + *persona_line);
     }
     if (project.context.has_value()) {
         out.print_line(style.tag(ansi::Role::Apogee) + " " +

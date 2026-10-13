@@ -28,6 +28,7 @@
 #include "cli/chat_play.h"
 #include "cli/chat_session.h"
 #include "cli/chat_turn.h"
+#include "contracts/assets.h"
 #include "contracts/config.h"
 #include "harness/harness.h"
 #include "logger/session.h"
@@ -1291,4 +1292,93 @@ TEST_CASE("machine mode says the project opening in the notices it already has",
     }
     CHECK(said);
     CHECK_THAT(out, Catch::Matchers::ContainsSubstring("Project context, from AGENTS.md"));
+}
+
+// --- the coder persona (41c) -----------------------------------------------------
+
+TEST_CASE("execute in a project carries the coder persona, ahead of the project's own file",
+          "[execute][project][persona]") {
+    const std::string_view persona = apogee::harness::find_bundled_persona("coder")->text;
+    const std::string opening{persona.substr(0, persona.find('.'))};
+    {
+        const ProjectHome home;
+        const WorkingDirectory here{home.project};
+        std::string out;
+        std::string err;
+        REQUIRE(home.run({"execute", "--attach", ""}, &out, &err, "hi\n") == 0);
+        CHECK_THAT(out, Catch::Matchers::ContainsSubstring(opening));
+        // The persona first: the project's file, closer to the conversation,
+        // wins where they differ.
+        CHECK(out.find(opening) < out.find("Project context, from AGENTS.md"));
+        CHECK_THAT(err, Catch::Matchers::ContainsSubstring(
+                            "persona: coder, the shipped coding prompt, in every request -- -s "
+                            "replaces it"));
+        // Never the conversation's.
+        const apogee::logger::Session saved = home.sessions().front();
+        CHECK(saved.params.system_prompt.empty());
+        for (const apogee::harness::ChatMessage& message : saved.messages) {
+            if (message.role != apogee::harness::Role::Assistant) {
+                CHECK(message.content.plain_text().find(opening) == std::string::npos);
+            }
+        }
+    }
+    {
+        // -s replaces it whole, said; the project's file still rides.
+        const ProjectHome home;
+        const WorkingDirectory here{home.project};
+        std::string out;
+        std::string err;
+        REQUIRE(home.run({"execute", "--attach", "", "-s", "MY RULES"}, &out, &err, "hi\n") == 0);
+        CHECK(out.find(opening) == std::string::npos);
+        CHECK_THAT(out, Catch::Matchers::ContainsSubstring("MY RULES"));
+        CHECK_THAT(out, Catch::Matchers::ContainsSubstring("Project context, from AGENTS.md"));
+        CHECK_THAT(err, Catch::Matchers::ContainsSubstring(
+                            "persona: your -s prompt, in place of the coder persona"));
+        // A resumed session keeps its own -s: the persona stays out.
+        REQUIRE(home.run({"execute", "-c", "--attach", ""}, &out, &err, "again\n") == 0);
+        CHECK(out.find(opening) == std::string::npos);
+        CHECK_THAT(out, Catch::Matchers::ContainsSubstring("MY RULES"));
+    }
+    {
+        // Outside a project: no persona, no line; and chat never carries it.
+        const ProjectHome home;
+        std::filesystem::create_directories(home.home.home() / "elsewhere");
+        const WorkingDirectory here{home.home.home() / "elsewhere"};
+        std::string out;
+        std::string err;
+        REQUIRE(home.run({"execute"}, &out, &err, "hi\n") == 0);
+        CHECK(out.find(opening) == std::string::npos);
+        CHECK(err.find("persona:") == std::string::npos);
+        const WorkingDirectory in_project{home.project};
+        REQUIRE(home.run({"chat"}, &out, &err, "hi\n") == 0);
+        CHECK(out.find(opening) == std::string::npos);
+    }
+}
+
+TEST_CASE("a turn's standing context is injected, so the budget counts it, never history",
+          "[execute][persona][budget]") {
+    Members members;
+    apogee::logger::Session session;
+    session.chat_id = "test-standing";
+    session.backend = "root";
+    apogee::agentloop::NullReporter reporter;
+    const c::RagSettings rag{.config_path = members.config_path};
+    const c::ChatTurnResult turn =
+        c::run_chat_turn(*members.harness, session, "hi", nullptr, nullptr, nullptr, {},
+                         c::ToolGate{}, reporter, [](const std::string&) {}, rag, {}, nullptr,
+                         nullptr, {}, false, {"PERSONA TEXT", "PROJECT TEXT"});
+    REQUIRE(turn.completed);
+    const apogee::harness::ChatRequest& asked = members.mocks["root"]->requests().back();
+    // Both inside the request's injected range -- what the budget assembles,
+    // counts and, past the window, trims -- in their order.
+    REQUIRE(asked.transient.length >= 2);
+    const auto& first = asked.messages.at(asked.transient.start);
+    const auto& second = asked.messages.at(asked.transient.start + 1);
+    CHECK(first.role == apogee::harness::Role::System);
+    CHECK(first.content.plain_text() == "PERSONA TEXT");
+    CHECK(second.content.plain_text() == "PROJECT TEXT");
+    // And never the saved history.
+    for (const apogee::harness::ChatMessage& message : session.messages) {
+        CHECK(message.content.plain_text().find("PERSONA TEXT") == std::string::npos);
+    }
 }

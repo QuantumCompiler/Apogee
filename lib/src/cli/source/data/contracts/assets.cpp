@@ -28,6 +28,15 @@ const BundledAgent* find_bundled_agent(std::string_view name) noexcept {
     return nullptr;
 }
 
+const BundledPersona* find_bundled_persona(std::string_view name) noexcept {
+    for (const BundledPersona& persona : bundled_personas()) {
+        if (persona.name == name) {
+            return &persona;
+        }
+    }
+    return nullptr;
+}
+
 std::string bundled_prompt_relative_path(std::string_view name) {
     return "prompts/" + std::string{name} + ".txt";
 }

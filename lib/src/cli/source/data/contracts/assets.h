@@ -51,6 +51,22 @@ struct BundledAgent {
 /// `save_subdir`.
 [[nodiscard]] AgentConfig bundled_agent_config(const BundledAgent& agent);
 
+/// A shipped persona (41c): a session's standing system prompt, compiled in
+/// and byte-identical to `assets/personas/<name>.txt` by test -- never
+/// seeded, never saved into a conversation. `coder` is the one execute
+/// carries in a project when no `-s` is given.
+struct BundledPersona {
+    std::string_view name;
+    std::string_view text;
+};
+
+/// The personas, by name (`assets_agents.cpp`, written by
+/// `scripts/generate_agent_assets.py`).
+[[nodiscard]] std::span<const BundledPersona> bundled_personas() noexcept;
+
+/// The persona `name` (exactly), or nullptr.
+[[nodiscard]] const BundledPersona* find_bundled_persona(std::string_view name) noexcept;
+
 /// `prompts/<name>.txt` and `schemas/<name>-output.json`, relative to the
 /// data directory -- the paths the bundled entries and the scaffold write.
 [[nodiscard]] std::string bundled_prompt_relative_path(std::string_view name);

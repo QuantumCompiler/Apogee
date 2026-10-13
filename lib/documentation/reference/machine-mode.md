@@ -370,7 +370,11 @@ and the folder is attached as `--attach .` would attach it (`--attach ""` skips
 that; any other `--attach` replaces it). Both are said in the events the session
 already has: a `notice` -- `project context: AGENTS.md, 1,234 words, in every
 request`, or the cut when the file passes 4,000 words -- before the folder's own
-attach lines.
+attach lines. Since 41c such a session also carries the shipped **coder persona** -- a
+coding system prompt, ahead of the project's file -- unless it has a system
+prompt of its own (`-s`), which replaces it; a `notice` says which (`persona:
+coder, the shipped coding prompt, in every request -- -s replaces it`, or
+`persona: your -s prompt, in place of the coder persona`).
 
 ```jsonl
 {"type":"user","text":"/play summarize-verify The minutes of the meeting…"}

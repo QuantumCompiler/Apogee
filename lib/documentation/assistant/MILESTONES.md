@@ -7386,3 +7386,35 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,224
 - Linux and Windows.
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,230 tests, none failing, one skipped for want of `pdftotext` -- `cli.unit_suite_under_a_tty` (which runs `execute_test` on a terminal) among them; the conformance checks passed again after `machine-mode.md` gained the opening. `clang-format` is clean on every touched file.
+
+### 2026-10-13 — `execute-coder-persona` (backlog item 41c): a shipped system prompt for the project session
+
+**What was built**
+
+- [x] **The coder persona** (`assets/personas/coder.txt`, 304 words): read before changing anything, never edit a file not read in the session; change as little as the task needs, an exact edit over a rewrite, the project's own style; check the work before saying it is done -- the project's build or tests, or at least a re-read -- and never claim a success not seen; ask before anything that cannot be taken back, or when the task is unclear; say what was done, by path, and what was checked. It names no vendor, no model and no tool by name, and ends by deferring to the project's own instructions.
+- [x] **Compiled in, never seeded**: `generate_agent_assets.py` writes it beside the agents as `bundled_personas()` (`find_bundled_persona("coder")`), and `contracts/assets_test.cpp` holds it byte-identical to its file, every persona file compiled in, free of vendor and family names and under 4 KiB.
+- [x] **Carried in a project** (41b's detection) as standing context ahead of the project's file, so the file, closer to the conversation, wins where they differ. Never saved; injected, so the budget counts it and, past the window, trims it and says so.
+- [x] **`-s` replaces it whole**: a session with a system prompt -- given now, or saved with a resumed session -- carries no persona. The opening says which: `persona: coder, the shipped coding prompt, in every request -- -s replaces it`, or `persona: your -s prompt, in place of the coder persona`; in machine mode as a `notice`.
+- [x] Outside a project, and in `chat`, nothing changes.
+
+**Decisions** (2026-10-13; the item's own were execute-in-a-project only, `-s` replacing it whole with no merge, and no session `--agent`)
+
+| Decision | Choice | Why |
+|---|---|---|
+| Where the text lives | `assets/personas/coder.txt`, not `assets/prompts/coder-system.txt` | Since 40a every file under `assets/prompts/` is a bundled agent's -- seeded for `analyze` and refused by the generator otherwise. A persona is neither seeded nor an agent. |
+| What "under `-s`" means | A session with any system prompt: typed now, or saved with a resumed session | A resumed session's own `-s` is its steering text; adding the persona back on a resume would be the merge the item rules out. |
+| Its generator | `generate_agent_assets.py`, beside the agents | One generator for the compiled-in prompts; a second script for one file would be a second pipeline to keep. |
+
+**Reviewed on real weights** (the item's confirmed default: one local Q4 model and one cloud model on the same fixture task before ship). The fixture was a repository whose `add()` subtracted, with a failing `test_calc.py` and an `AGENTS.md` naming the test command. The task, for both: "The test in this project fails. Find the cause and fix it." Both ran in `--permission-mode accept-edits` on a pipe, so edits ran and commands were denied.
+- **Google family, gemma-4-12B-it Q4_K_M** (local, llama.cpp): it named the cause, made the one-line fix (`a - b` → `a + b`, a one-line diff), tried to run the test (denied), and said so -- "I cannot run the test script directly as the permission was denied" -- listing the file and line it changed. The same model without the persona (a stale binary, run first by mistake) made the same fix but never tried the test and reported nothing about checking.
+- **The Claude Code CLI** (cloud, the user's subscription; one turn): it named the cause with `calc.py:3`, gave the exact one-line edit, and said it had applied nothing and run nothing because this session's permissions did not allow either -- the vendor CLI's own permissions, not Apogee's gate. No success was claimed.
+- Neither model wandered outside the task or edited more than the line.
+
+**Guardrails.**
+- `cli/execute_test.cpp`: the persona carried in a project, ahead of the project's file, said and never saved; `-s` replacing it, on a resume too; outside a project and in `chat`, nothing; `run_chat_turn`'s standing context inside the request's injected range, in order, never in history.
+- `contracts/assets_test.cpp`: the persona's byte-identity, vendor-free and bounded.
+
+**Not verified.**
+- Families other than Google on real weights (one family, as the guardrail asks); Linux and Windows.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,233 tests, none failing, one skipped for want of `pdftotext`. `clang-format` is clean on every touched file.

@@ -196,6 +196,33 @@ TEST_CASE("an unedited bundled file is Apogee's, an edited one is the user's",
     CHECK_FALSE(apogee::harness::is_unmodified_bundled_asset(root.path(), root.path() / "nope"));
 }
 
+TEST_CASE("the compiled-in personas byte-match the shipped files, every one compiled in",
+          "[harness][assets][personas]") {
+    // The coder persona (41c), compiled in by scripts/generate_agent_assets.py
+    // and never seeded: what a project session carries when no -s is given.
+    const std::filesystem::path dir = std::filesystem::path{APOGEE_ASSETS_DIR} / "personas";
+    std::set<std::string> files;
+    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator{dir}) {
+        files.insert(entry.path().filename().string());
+    }
+    std::set<std::string> compiled;
+    for (const apogee::harness::BundledPersona& persona : apogee::harness::bundled_personas()) {
+        INFO(persona.name);
+        compiled.insert(std::string{persona.name} + ".txt");
+        CHECK(read(dir / (std::string{persona.name} + ".txt")) == persona.text);
+        // Model-agnostic: no vendor or family a small local model would trip
+        // over, and short enough to ride every request.
+        for (const std::string_view vendor :
+             {"Claude", "Anthropic", "OpenAI", "GPT", "Gemini", "Llama", "Qwen", "Apogee"}) {
+            CHECK(persona.text.find(vendor) == std::string_view::npos);
+        }
+        CHECK(persona.text.size() < 4096);
+    }
+    CHECK(files == compiled);
+    CHECK(apogee::harness::find_bundled_persona("coder") != nullptr);
+    CHECK(apogee::harness::find_bundled_persona("nope") == nullptr);
+}
+
 TEST_CASE("the compiled-in task recipes byte-match the shipped files, every one compiled in",
           "[harness][assets][recipes]") {
     const std::filesystem::path dir = std::filesystem::path{APOGEE_ASSETS_DIR} / "recipes";
