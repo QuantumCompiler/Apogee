@@ -72,6 +72,7 @@ enum class ChatVerb : std::uint8_t {
     Check,
     Attach,
     Attachments,
+    Todo,
     Detach,
     Recall,
     Private,

@@ -151,6 +151,9 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
     std::vector<Block> blocks;
     std::string header;
     std::string status;
+    /// The session's todo (41d), as `describe_todo` words it: a fold above
+    /// the input, redrawn whole when the list changes; empty when none.
+    std::vector<std::string> todo;
     std::string input;
     std::size_t cursor = 0;
     std::vector<std::string> history;
@@ -543,6 +546,9 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
                           std::string{"scrolled back -- Page Down returns"};
         }
         frame.push_back(hbox({text(" "), paint_row(spans_from_sgr(state_line), theme)}) | dim);
+        for (const std::string& line : todo) {
+            frame.push_back(hbox({text(" "), text(line)}) | dim);
+        }
         if (prompt.has_value()) {
             frame.push_back(draw_prompt());
             if (std::optional<Element> row = draw_mode(); row.has_value()) {
@@ -975,6 +981,13 @@ public:
 
     void on_progress(std::string_view text) override {
         post([line = std::string{text}](SessionView::State& state) { state.status = line; });
+    }
+
+    void on_todo(const harness::TodoList& todo) override {
+        // The fold above the input (41d): the same lines the terminal keeps.
+        post([lines = harness::describe_todo(todo)](SessionView::State& state) {
+            state.todo = lines;
+        });
     }
 
     void on_recall(int chats, int decisions) override {

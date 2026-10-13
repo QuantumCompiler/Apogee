@@ -830,6 +830,7 @@ TEST_CASE("execute's /help, golden", "[execute][completer]") {
             "  /attach <path>                   Attach a file, folder or glob: inlined when it "
             "fits, retrieved when not (then --graph=code|off)",
             "  /attachments                     List what is attached",
+            "  /todo                            Show the plan the model keeps for this session",
             "  /detach <name>                   Detach an attachment",
             "  /recall [on|off]                 Show or set whether turns recall earlier chats",
             "  /private                         Never summarise this chat for recall",

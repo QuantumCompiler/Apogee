@@ -64,6 +64,7 @@
 #include "symphony/tools.h"
 #include "tools/consult.h"
 #include "tools/git.h"
+#include "tools/todo.h"
 #include "views/ask_prompt.h"
 #include "views/cli_reporter.h"
 #include "views/input_gate.h"
@@ -883,6 +884,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 std::cerr << bytes << std::flush;
             }}
                                              : mcp::StderrTail::Sink{}});
+        // The session todo (41d): the plan, kept by the model, drawn by
+        // every front end; its board is this session's, set below.
+        tools::register_todo_tool(registry);
     }
     // What the chat's backend is offered: every registered tool, or the
     // toolset the active suite pins on that backend (27d), and the
@@ -1197,6 +1201,15 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 .tools = tools_on(),
                 .ask = flags->tools},
             next_turn);
+        // The todo's board (41d): this conversation's list, each change an
+        // event; a resumed list is said as the session opens.
+        const tools::TodoScope todo_scope{tools::TodoBoard{
+            .list = &session.todo, .changed = [&machine_reporter](const harness::TodoList& todo) {
+                machine_reporter.on_todo(todo);
+            }}};
+        if (!session.todo.empty()) {
+            machine_reporter.on_todo(session.todo);
+        }
         // The driver's lines, read while a turn runs, so a `cancel` reaches
         // it (28f); the loop, a question and the permission prompt all take
         // their lines from this one reader.
@@ -1451,6 +1464,14 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     }
     for (const std::string& spec : launch_attaches) {
         (void)attached.attach(spec, working_directory, attached.graph_method(launch_graph));
+    }
+    // The todo's board (41d): this conversation's list, each change drawn
+    // where this front end draws it; a resumed list shown as it was left.
+    const tools::TodoScope todo_scope{tools::TodoBoard{
+        .list = &session.todo,
+        .changed = [&out](const harness::TodoList& todo) { out.reporter().on_todo(todo); }}};
+    if (!session.todo.empty()) {
+        out.reporter().on_todo(session.todo);
     }
 
     // Once, immediately before the first prompt -- never between turns.
@@ -2204,6 +2225,20 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     }
                     for (const std::string& row : lines) {
                         out.print_line(style.tag(ansi::Role::Apogee) + " " + row);
+                    }
+                    break;
+                }
+                case ChatVerb::Todo: {
+                    const std::vector<std::string> lines = harness::describe_todo(session.todo);
+                    if (lines.empty()) {
+                        out.print_line(style.tag(ansi::Role::Apogee) +
+                                       (flags->tools ? " no todo yet -- the model keeps one with "
+                                                       "todo_write when a task has steps"
+                                                     : " no todo -- a session with --tools keeps "
+                                                       "one"));
+                    }
+                    for (const std::string& line : lines) {
+                        out.print_line(style.tag(ansi::Role::Apogee) + " " + line);
                     }
                     break;
                 }

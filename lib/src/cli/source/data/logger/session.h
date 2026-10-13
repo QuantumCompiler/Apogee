@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "contracts/todo.h"
 #include "contracts/types.h"
 
 /// Persisted chat sessions.
@@ -198,6 +199,10 @@ struct Session {
     /// The ledger names the chat and the chat names its task; `chats delete`
     /// refuses a chat whose task is live.
     std::string task;
+    /// The plan the model keeps with `todo_write` (41d), as it last left it
+    /// -- shown again when the chat resumes. Empty writes nothing, so a chat
+    /// that never kept one saves exactly as before.
+    harness::TodoList todo;
     /// What is attached to this chat, in the order attached (26d). Its index
     /// is `attachments/<chat_id>.db`, deleted with the chat.
     std::vector<Attachment> attachments;

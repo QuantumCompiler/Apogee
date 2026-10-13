@@ -82,6 +82,8 @@ public:
 
     /// `[memory] 2 past chats, 1 decision`, a line that stays (26l).
     void on_recall(int chats, int decisions) override;
+    /// The todo (41d): a dim block, kept, each time the list changes.
+    void on_todo(const harness::TodoList& todo) override;
     /// `· <role> — <what it is doing>` inside the thinking block, completed
     /// in place with what it took (26n).
     void on_side_call(const agentloop::SideCall& call) override;

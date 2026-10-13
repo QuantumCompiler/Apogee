@@ -135,6 +135,12 @@ void JsonReporter::on_recall(int chats, int decisions) {
     write(object);
 }
 
+void JsonReporter::on_todo(const harness::TodoList& todo) {
+    nlohmann::json object = event("todo");
+    object["items"] = harness::todo_to_json(todo);
+    write(object);
+}
+
 void JsonReporter::on_notice(std::string_view text) {
     if (text.empty()) {
         return;

@@ -413,6 +413,25 @@ TEST_CASE("a registered consult is in the core: offered whatever the question ra
     CHECK_FALSE(without.begin_turn("show the commit history", {}).names.contains("consult"));
 }
 
+TEST_CASE("a registered todo_write is in the core: a plan the ranking drops is no plan",
+          "[agentloop][tool_selection][todo]") {
+    // 41d: the session's todo never drops out past sixteen tools.
+    ToolRegistry registry = full_registry();
+    Tool todo;
+    todo.name = "todo_write";
+    todo.description = "Keep a short todo list for a task with several steps";
+    todo.run = [](std::string_view) { return ToolOutcome{"ok"}; };
+    registry.add(std::move(todo));
+    ToolSelection selection{words_ranker(registry), registry.size()};
+    const ToolOffer offer = selection.begin_turn(
+        "read write edit delete list search files directory git log diff show notes commit "
+        "branch status",
+        {});
+    REQUIRE(offer.active);
+    REQUIRE(std::ranges::find(offer.ranked, "todo_write") == offer.ranked.end());
+    CHECK(offer.names.contains("todo_write"));
+}
+
 TEST_CASE("every registered symphony tool is in the core: the model's choice is never ranked out",
           "[agentloop][tool_selection][orchestrate]") {
     // 27t: orchestration is the user's opt-in to the model choosing among the

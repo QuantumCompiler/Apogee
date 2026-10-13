@@ -27,6 +27,7 @@
 #include "logger/session.h"
 #include "support/env_guard.h"
 #include "support/fake_mlx_driver.h"
+#include "tools/todo.h"
 
 /// The conformance suite: every route, driven through the listener-free mux.
 ///
@@ -1393,4 +1394,34 @@ TEST_CASE("a served destructive tool runs only when the config allows it; ask is
         REQUIRE(fixture.send(post("/v1/chat/completions", chat_body("write it"))).status == 200);
         CHECK_FALSE(ran);
     }
+}
+
+TEST_CASE("a served session keeps a todo: a meta-frame on the stream, saved with the session",
+          "[httpserver][tools][todo]") {
+    ToolCall call;
+    call.id = "call_1";
+    call.name = "todo_write";
+    call.arguments = R"({"items":[{"text":"Fix it","state":"active"}]})";
+    Fixture fixture{{tool_turn({call}), text_turn("planned")}, served_default(), true};
+    apogee::tools::register_todo_tool(fixture.registry);
+    nlohmann::json body = chat_body("plan it");
+    body["stream"] = true;
+    body["apogee_events"] = true;
+    body["session_id"] = "new";
+    const HttpResponse response = fixture.send(post("/v1/chat/completions", body));
+    const std::string id = response.headers.at("X-Apogee-Session-Id");
+    const Frames parsed_frames = frames(collect(response));
+    CHECK(content_of(parsed_frames) == "planned");
+    bool drawn = false;
+    for (const nlohmann::json& frame : metas(parsed_frames)) {
+        if (frame["meta"]["type"] == "todo") {
+            CHECK(frame["meta"]["items"] ==
+                  nlohmann::json::parse(R"([{"text":"Fix it","state":"active"}])"));
+            drawn = true;
+        }
+    }
+    CHECK(drawn);
+    const apogee::logger::Session saved = apogee::logger::load(id, {}).session;
+    CHECK(saved.todo == apogee::harness::TodoList{
+                            {.text = "Fix it", .state = apogee::harness::TodoState::Active}});
 }

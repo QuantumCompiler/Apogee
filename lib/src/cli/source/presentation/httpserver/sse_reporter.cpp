@@ -94,6 +94,13 @@ void SseReporter::on_notice(std::string_view text) {
     emit_meta(event);
 }
 
+void SseReporter::on_todo(const harness::TodoList& todo) {
+    if (!options_.emit_events) {
+        return;
+    }
+    (void)writer_->send(todo_chunk(identity_, todo));
+}
+
 void SseReporter::on_clear_status() {
     model_ready_if_pending();
     if (in_tool_call_) {

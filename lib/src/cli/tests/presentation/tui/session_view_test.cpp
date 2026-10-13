@@ -726,3 +726,21 @@ TEST_CASE("summarised, a turn shown raw after all draws its reasoning and says w
     CHECK(has(frame, "reasoning shown in full -- no utility model is set to summarise it"));
     CHECK(has(frame, "the reasoning itself"));
 }
+
+TEST_CASE("the shell folds the todo above the input, redrawn whole on change",
+          "[tui][session][todo]") {
+    Stage stage;
+    stage.view.begin_session();
+    stage.view.reporter().on_todo(
+        {{.text = "Read it", .state = apogee::harness::TodoState::Done},
+         {.text = "Fix it", .state = apogee::harness::TodoState::Active}});
+    std::string frame = stage.frame();
+    CHECK(frame.find("todo · 1 of 2 done") != std::string::npos);
+    CHECK(frame.find("[>] Fix it") != std::string::npos);
+    stage.view.reporter().on_todo({{.text = "Fix it", .state = apogee::harness::TodoState::Done}});
+    frame = stage.frame();
+    CHECK(frame.find("todo · 1 of 1 done") != std::string::npos);
+    CHECK(frame.find("Read it") == std::string::npos);
+    stage.view.reporter().on_todo({});
+    CHECK(stage.frame().find("todo ·") == std::string::npos);
+}

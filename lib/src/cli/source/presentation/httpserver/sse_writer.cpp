@@ -71,6 +71,12 @@ nlohmann::json meta_chunk(const StreamIdentity& identity, const harness::StatusE
     return chunk;
 }
 
+nlohmann::json todo_chunk(const StreamIdentity& identity, const harness::TodoList& todo) {
+    nlohmann::json chunk = chat_chunk(identity, nlohmann::json{{"content", ""}}, std::nullopt);
+    chunk["meta"] = nlohmann::json{{"type", "todo"}, {"items", harness::todo_to_json(todo)}};
+    return chunk;
+}
+
 nlohmann::json completion_chunk(const StreamIdentity& identity, std::string_view text,
                                 const std::optional<std::string>& finish_reason) {
     nlohmann::json choice{{"index", 0}, {"text", std::string{text}}};

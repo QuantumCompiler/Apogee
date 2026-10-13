@@ -56,6 +56,7 @@ HELPER<again>
   /check                           Have the suite's verifier check the last answer, once
   /attach <path>                   Attach a file, folder or glob: inlined when it fits, retrieved when not (then --graph=code|off)
   /attachments                     List what is attached
+  /todo                            Show the plan the model keeps for this session
   /detach <name>                   Detach an attachment
   /recall [on|off]                 Show or set whether turns recall earlier chats
   /private                         Never summarise this chat for recall
@@ -178,7 +179,7 @@ ROOT<hi>
 {"type":"nonsense"}
 --- exit 0
 --- stdout
-{"capabilities":{"accepts":["user","answer","attach","hello","cancel"],"ask":false,"events":["session","thinking","thinking_delta","memory","tool_status","notice","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished"],"schema":"2026-10-07","tools":false},"model":"root","next_turn":1,"protocol_version":1,"type":"session"}
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel"],"ask":false,"events":["session","thinking","thinking_delta","memory","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished"],"schema":"2026-10-13","tools":false},"model":"root","next_turn":1,"protocol_version":1,"type":"session"}
 {"turn":1,"type":"thinking"}
 {"turn":1,"type":"answer_start"}
 {"text":"ROOT<hel","turn":1,"type":"answer_delta"}
@@ -200,7 +201,7 @@ ROOT<hi>
 {"type":"user","text":"hi"}
 --- exit 0
 --- stdout
-{"capabilities":{"accepts":["user","answer","attach","hello","cancel"],"ask":false,"events":["session","thinking","thinking_delta","memory","tool_status","notice","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished"],"schema":"2026-10-07","tools":false},"model":"root","next_turn":1,"protocol_version":1,"type":"session"}
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel"],"ask":false,"events":["session","thinking","thinking_delta","memory","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished"],"schema":"2026-10-13","tools":false},"model":"root","next_turn":1,"protocol_version":1,"type":"session"}
 {"turn":1,"type":"thinking"}
 {"turn":1,"type":"answer_start"}
 {"text":"ROOT<hi>","turn":1,"type":"answer_delta"}

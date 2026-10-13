@@ -23,6 +23,7 @@
 #include "logger/operational.h"
 #include "operations/backend_names.h"
 #include "operations/run_settings.h"
+#include "tools/todo.h"
 
 namespace apogee::httpserver {
 namespace {
@@ -509,6 +510,14 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
                        {"tools", loop_options.tools == nullptr ? 0 : loop_options.tools->size()},
                        {"stream", plan.stream},
                        {"session_id", plan.session.has_value() ? plan.session->chat_id : ""}});
+    // The session's todo (41d): `todo_write` writes to the conversation's own
+    // list, saved with it -- a stateless request's dies with it -- and each
+    // change crosses the reporter: a meta-frame on a stream that asked for
+    // events.
+    harness::TodoList unsaved;
+    const tools::TodoScope todo_scope{tools::TodoBoard{
+        .list = plan.session.has_value() ? &plan.session->todo : &unsaved,
+        .changed = [&reporter](const harness::TodoList& todo) { reporter.on_todo(todo); }}};
     agentloop::RunResult result;
     try {
         result = agentloop::run(*harness_, history, loop_options, reporter);

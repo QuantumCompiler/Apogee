@@ -101,6 +101,7 @@ constexpr std::array kCommands{
                     "(then --graph=code|off)",
                     ArgumentValues::Paths, kAttachFlags},
     ChatCommandSpec{"attachments", ChatVerb::Attachments, "", "List what is attached"},
+    ChatCommandSpec{"todo", ChatVerb::Todo, "", "Show the plan the model keeps for this session"},
     ChatCommandSpec{"detach", ChatVerb::Detach, "<name>", "Detach an attachment",
                     ArgumentValues::AttachmentNames},
     ChatCommandSpec{"recall", ChatVerb::Recall, "[on|off]",

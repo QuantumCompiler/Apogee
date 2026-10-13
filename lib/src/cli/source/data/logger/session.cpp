@@ -139,6 +139,9 @@ std::string serialize(const Session& session) {
     if (!session.task.empty()) {
         out["task"] = session.task;
     }
+    if (!session.todo.empty()) {
+        out["todo"] = harness::todo_to_json(session.todo);
+    }
     if (!session.title.empty()) {
         out["title"] = session.title;
     }
@@ -263,6 +266,11 @@ LoadedSession deserialize(std::string_view text, const KnownDependencies& known)
         session.suite.reset();
     }
     session.task = string_field(parsed, "task", loaded.warnings);
+    // The todo (41d): an older file has none; a malformed entry is left out,
+    // never fatal.
+    if (const auto todo = parsed.find("todo"); todo != parsed.end()) {
+        session.todo = harness::todo_from_json(*todo);
+    }
     session.provider_session_id = string_field(parsed, "provider_session_id", loaded.warnings);
     session.started_at = string_field(parsed, "started_at", loaded.warnings);
     session.updated_at = string_field(parsed, "updated_at", loaded.warnings);

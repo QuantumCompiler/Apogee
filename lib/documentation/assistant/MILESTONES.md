@@ -7418,3 +7418,43 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,230
 - Families other than Google on real weights (one family, as the guardrail asks); Linux and Windows.
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,233 tests, none failing, one skipped for want of `pdftotext`. `clang-format` is clean on every touched file.
+
+### 2026-10-13 — `session-todo` (backlog item 41d): the plan, visible while it runs
+
+**What was built**
+
+- [x] **`todo_write`** (`tools/todo`): the whole list each call -- items with `pending`, `active` or `done` -- replacing the last; at most 20 items of 120 characters, each refusal naming its cap ("the todo holds at most 20 items, and this call gave 21 -- merge or drop some, and send the whole list again"), an unknown state, an empty line or no list refused the same way and nothing changed; text mended where it enters. Native and ungated, as the notes are: it writes session state only. In tool selection's core, so it never drops out past sixteen tools.
+- [x] **The types at the floor** (`contracts/todo`): `TodoState`, `TodoItem`, `TodoList`, the caps, `describe_todo` (the lines every text surface draws: `todo · 1 of 3 done`, then `[x]`, `[>]`, `[ ]` per item) and the `{text, state}` document every machine face carries, read back leniently.
+- [x] **One Reporter change, four renderers.** `on_todo(list)`, the list whole:
+  - the terminal keeps a dim block below the status each time it changes (`todo · cleared` when emptied);
+  - the shell folds it above the input, redrawn whole;
+  - machine mode emits a `todo` event (`items`), declared in the protocol, the schema and `machine-mode.md`, the vocabulary's date moved to 2026-10-13;
+  - a served stream that asked for events gets a `todo` meta-frame, documented in `http-api.md`.
+- [x] **Saved with the session** (`logger`), written only when it holds one; a resumed session shows it as it opens -- in machine mode as a `todo` event right after `session` -- and `/todo` prints it.
+- [x] **Serve too**: `serve --tools` registers it, and each request's board is its conversation's list, saved with the session; a stateless request's lasts its turn.
+
+**Decisions** (2026-10-13; the item's own were the whole-list tool, chat and execute both, the caps, and the two painters' places)
+
+| Decision | Choice | Why |
+|---|---|---|
+| How a change reaches the surfaces | The tool writes to a board current on its thread (`TodoScope`), whose `changed` is the front end's `on_todo`; the loop is untouched | Tools run on the loop's own thread, so one registry -- serve's is built once, a suite's pinned copies are copies -- serves every conversation, and the loop never has to know a todo exists. The item's "the loop handing state changes through it" is met by the Reporter carrying it, without a loop change. |
+| Where the types live | `contracts/` | The session file (`logger`, Data), the Reporter (`agentloop`), the tool and machine mode all read them; the floor is the one place every one reaches. |
+| Who registers it | The session core with `--tools` (chat and execute), and `serve --tools` | The item's scope; a task's turns and an agent's analysis keep their own registries, unchanged. |
+| The terminal's block | Reprinted whole as kept lines on each change | A kept line is how the terminal keeps anything above its prompt; a region repainted in place would fight the answer's scrollback. |
+| A suite that pins a toolset | `todo_write` goes where the pin says | A pin is the user's choice of toolsets; the core keeps it in the offer when it is registered, not past a pin. |
+
+Fixed in passing: a machine-mode reader test checked that a `cancel` had reached a turn the instant the reader handed the turn over, when the reader thread reaches that line on its own time -- 8 runs in 40 failed on the binary before this item, and none in 60 after it waits for the cancel, bounded.
+
+**Guardrails.**
+- `tools/todo_test.cpp`: the state table, every refusal, characters not bytes, the UTF-8 door, the board's scope.
+- `contracts/todo_test.cpp`: the words, the lines, the lenient document.
+- One change through every adapter: `cli_reporter_test`, `session_view_test`, `sse_test` (and none without events), `machine_mode_test` (field for field against the declaration).
+- `cli/session_todo_test.cpp`, on the real command tree: drawn, saved, shown again on resume, `/todo`; machine mode's event and a resumed stream opening with it; a session without tools keeping none.
+- `handler_test.cpp`: a served session's meta-frame and its saved list. `tool_selection_test.cpp`: in the core. `logger/session_test.cpp`: saved, read back, a bad entry left out. The leak test's surfaces gain the renders.
+- The chat and execute goldens moved only by `/todo`'s help row and `todo` in the capabilities' event list.
+
+**Not verified.**
+- A model keeping a todo on real weights (the mock plays the model; whether a small local model reaches for the tool unprompted is the persona's and the model's business, as the item says).
+- Linux and Windows.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,249 tests, none failing, one skipped for want of `pdftotext` -- `cli.machine_schema_conformance` (the `todo` event pinned to the declaration, the schema the binary prints and `machine-mode.md`) and `cli.http_api_conformance` among them. `clang-format` is clean on every touched file.

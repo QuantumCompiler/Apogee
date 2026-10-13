@@ -2,6 +2,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -12,6 +13,7 @@
 #include <streambuf>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "agentloop/loop.h"
@@ -989,6 +991,14 @@ TEST_CASE("the driver's reader: a cancel reaches the open turn, and is ignored w
         const std::optional<DriverLine> line = driver.next_line();
         REQUIRE(line.has_value());
         CHECK(line->sequence == 1);
+        // The reader thread reaches the cancel when it reaches that line --
+        // possibly after next_line has handed the turn over -- so it is
+        // waited for, bounded, rather than raced (8 runs in 40 failed when
+        // it was checked at once, 2026-10-13).
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+        while (!line->turn.stop_requested() && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        }
         CHECK(line->turn.stop_requested());
         CHECK_FALSE(driver.next_line().has_value());  // the cancel was consumed, never queued
     }
@@ -1107,6 +1117,8 @@ TEST_CASE("every event every emitter writes is the declaration's, field for fiel
     side.detail = "titling";
     reporter.on_side_call(side);
     reporter.on_notice("a note");
+    reporter.on_todo({{.text = "Read it", .state = apogee::harness::TodoState::Done},
+                      {.text = "Fix it", .state = apogee::harness::TodoState::Active}});
     reporter.on_answer_start();
     reporter.on_answer_token("hi");
     reporter.on_answer_end();

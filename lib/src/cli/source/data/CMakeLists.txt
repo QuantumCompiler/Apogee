@@ -30,6 +30,8 @@ apogee_add_module(contracts
     contracts/host.cpp
     contracts/utf8.h
     contracts/utf8.cpp
+    contracts/todo.h
+    contracts/todo.cpp
     contracts/assets.h
     contracts/assets.cpp
     contracts/assets_agents.cpp
