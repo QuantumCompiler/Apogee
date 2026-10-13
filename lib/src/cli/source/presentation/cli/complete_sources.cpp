@@ -32,6 +32,7 @@
 #include "training/datasets.h"
 #include "training/kit.h"
 #include "training/mlx_convert.h"
+#include "training/regime_specs.h"
 #include "training/script_runner.h"
 #include "training/store.h"
 
@@ -334,8 +335,11 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         }
         list.paths = true;
     } else if (kind == kRegimeValue) {
-        for (const auto& [name, spec] : config.training.regimes) {
-            list.names.push_back(name);
+        // Every regime a run can name (42a): the config's entries, the specs
+        // under training/regimes/, the shipped ones.
+        for (const training::RegimeEntry& entry :
+             training::regime_book(config, harness::training_regimes_dir()).regimes) {
+            list.names.push_back(entry.spec.name);
         }
         list.paths = true;
     } else if (kind == kModelValue) {

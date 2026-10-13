@@ -111,6 +111,9 @@ struct LayoutEntry {
 [[nodiscard]] std::filesystem::path training_raw_datasets_dir();
 /// `training/kits` -- the seeded training kits, plus the user's own.
 [[nodiscard]] std::filesystem::path training_kits_dir();
+/// `training/regimes` -- regime spec files (42a): the shipped ones seeded
+/// skip-if-present, and any the user drops beside them, run by name.
+[[nodiscard]] std::filesystem::path training_regimes_dir();
 /// `training/scripts` -- the seeded Python drivers.
 [[nodiscard]] std::filesystem::path training_scripts_dir();
 /// `training/venv` -- the Python environment `apogee train setup` creates.

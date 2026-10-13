@@ -247,6 +247,8 @@ apogee_add_module(training
     training/pipeline.cpp
     training/regime.h
     training/regime.cpp
+    training/regime_specs.h
+    training/regime_specs.cpp
     training/cycle.h
     training/cycle.cpp
 )

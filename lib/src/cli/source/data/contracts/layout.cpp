@@ -138,6 +138,10 @@ std::filesystem::path training_kits_dir() {
     return training_dir() / "kits";
 }
 
+std::filesystem::path training_regimes_dir() {
+    return training_dir() / "regimes";
+}
+
 std::filesystem::path training_scripts_dir() {
     return training_dir() / "scripts";
 }

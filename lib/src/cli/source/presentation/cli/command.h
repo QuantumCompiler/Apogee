@@ -90,7 +90,8 @@ inline constexpr const char* kSymphonyEntryValue = "SYMPHONY_ENTRY";
 inline constexpr const char* kRecipeValue = "RECIPE";
 /// A `training.pipelines` entry, or a spec path.
 inline constexpr const char* kPipelineValue = "PIPELINE";
-/// A `training.regimes` entry, or a spec path.
+/// A regime by name -- a `training.regimes` entry, a spec under
+/// `training/regimes/`, a shipped one (42a) -- or a spec path.
 inline constexpr const char* kRegimeValue = "REGIME";
 /// A model in the store, or one set of its weights (`<model>/<format>/<id>`).
 inline constexpr const char* kModelValue = "MODEL";

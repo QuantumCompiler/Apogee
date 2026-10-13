@@ -24,6 +24,7 @@ environment under its data directory**:
 ~/.apogee/training/scripts/       the shipped Python drivers, seeded by `apogee check --fix` (the trainers', the mlx backend's mlx_generate.py, and mlx_convert.py for `models convert --mlx`)
 ~/.apogee/training/scripts/convert/  llama.cpp's converter, vendored at the pinned revision
 ~/.apogee/training/kits/          the bundled training kits, seeded the same way
+~/.apogee/training/regimes/       the shipped regime specs, seeded the same way; yours beside them
 ~/.apogee/training/datasets/      trainer-ready datasets, one .jsonl per dataset
 ~/.apogee/training/datasets/raw/  downloaded dataset files, for `datasets prepare`
 ~/.apogee/training/runs/<id>/     one directory per run: manifest.json, adapters/
@@ -501,13 +502,17 @@ materialised beside it; the kits then become **one eval-gated pipeline**
 over the student -- a stage per kit with the kit's `train:` block as its
 defaults (`--iters` overrides every kit's), the cumulative gate across
 skills -- and the last passing stage is promoted as `--as` unless
-`--no-promote`. A regime is ad hoc from flags, a `training.regimes:` entry
-by name, or a spec file, and **flags always win** over a loaded spec:
+`--no-promote`. A regime is ad hoc from flags, a regime by name, or a spec
+file, and **flags always win** over a loaded spec. A name is looked up
+nearest first: a `training.regimes:` entry, then a spec under
+`training/regimes/` (run by its file's name), then a shipped regime's
+compiled-in text while no file of its name is there:
 
 ```jsonc
 "training": {
   "regimes": {
     "everything": {
+      "description": "every kit I care about",   // what `train regime list` shows
       "teacher": "paid",
       "student": "Qwen--Qwen2.5-0.5B",
       "kits": ["instruction-following", "reasoning"],   // ordered; each becomes one stage
@@ -519,6 +524,32 @@ by name, or a spec file, and **flags always win** over a loaded spec:
   }
 }
 ```
+
+### Shipped regimes
+
+```bash
+apogee train regime list [--output-format json]          # name, source, kit count, description
+apogee train regime show <name> [--output-format json]   # its kits in order and its tuning
+```
+
+Apogee ships **`foundation`**: the four bundled kits as one gated pipeline,
+in the order instruction-following → structured-output → summarization →
+reasoning (the spec's comments say why), each kit's own count and
+iterations. A shipped regime names kits and tuning only -- **never a
+teacher or a student**, which are always yours:
+
+```bash
+apogee train regime run foundation --teacher <backend> --student <snapshot>
+```
+
+`check --fix` seeds it to `training/regimes/foundation.yaml`, skip if
+present: `list` says `shipped` while no file is there, `seeded` while the
+file is byte for byte the shipped one, and `user` once you edit it (or for
+a spec or a `training.regimes:` entry of your own). A spec file under
+`training/regimes/` that does not parse is left out of `list` and said on
+stderr; a run naming it is told why. Every bundled kit's inline eval holds
+at least 24 items, each with an `expected`, so a stage's cumulative gate
+asks something real of the student.
 
 `--all-kits` runs every installed kit alphabetically; an explicit `--kit`
 list wins, so the order can be curated. The teacher is named explicitly

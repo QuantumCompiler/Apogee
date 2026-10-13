@@ -52,7 +52,7 @@ TEST_CASE("the four bundled kits load with their numbers and every eval item gat
     for (const apogee::training::KitSummary& summary : kits) {
         INFO(summary.name);
         CHECK(summary.error.empty());
-        CHECK(summary.eval_items == 8);
+        CHECK(summary.eval_items == 24);
         const Kit kit = load_kit(summary.path);
         CHECK(kit.name == summary.name);
         CHECK(kit.skill == summary.name);

@@ -119,6 +119,25 @@ struct BundledKit {
 /// The four, in the order `apogee datasets kits` shows them.
 [[nodiscard]] std::span<const BundledKit> bundled_kits();
 
+/// A shipped regime spec (42a): kits and tuning, never a teacher or a
+/// student, compiled in byte-identical to `assets/training/regimes/<name>.yaml`
+/// and seeded skip-if-present under `training/regimes/` -- the seeded copy
+/// the user's once it exists, the compiled-in text standing in while it is
+/// absent, as a kit's.
+struct BundledRegime {
+    std::string_view name;
+    std::string_view text;
+};
+
+/// The shipped regimes, by name.
+[[nodiscard]] std::span<const BundledRegime> bundled_regimes();
+
+/// The regime `name` (exactly), or nullptr.
+[[nodiscard]] const BundledRegime* find_bundled_regime(std::string_view name) noexcept;
+
+/// `training/regimes/<name>.yaml`, relative to the data directory.
+[[nodiscard]] std::string bundled_regime_relative_path(std::string_view name);
+
 /// A bundled Python driver -- `prepare_dataset.py`, `train_mlx.py`,
 /// `train_peft.py` -- compiled in, byte-identical to `assets/training/<name>`,
 /// and seeded skip-if-present under `training/scripts/` so a user's edit

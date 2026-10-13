@@ -107,6 +107,19 @@ std::string bundled_kit_relative_path(std::string_view name) {
     return "training/kits/" + std::string{name} + ".yaml";
 }
 
+const BundledRegime* find_bundled_regime(std::string_view name) noexcept {
+    for (const BundledRegime& regime : bundled_regimes()) {
+        if (regime.name == name) {
+            return &regime;
+        }
+    }
+    return nullptr;
+}
+
+std::string bundled_regime_relative_path(std::string_view name) {
+    return "training/regimes/" + std::string{name} + ".yaml";
+}
+
 const BundledSymphony* find_bundled_symphony(std::string_view name) noexcept {
     for (const BundledSymphony& starter : bundled_symphonies()) {
         if (starter.name == name) {
@@ -333,6 +346,9 @@ std::vector<BundledFile> bundled_files() {
     }
     for (const BundledKit& kit : bundled_kits()) {
         files.push_back({bundled_kit_relative_path(kit.name), kit.text});
+    }
+    for (const BundledRegime& regime : bundled_regimes()) {
+        files.push_back({bundled_regime_relative_path(regime.name), regime.text});
     }
     for (const BundledSymphony& starter : bundled_symphonies()) {
         files.push_back({bundled_symphony_relative_path(starter.name), starter.text});

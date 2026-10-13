@@ -631,6 +631,8 @@ apogee train versions [backend] --output-format json   # byte for byte GET /v1/a
 apogee datasets list --output-format json   # byte for byte GET /v1/admin/datasets
 apogee datasets info <name> --output-format json       # byte for byte GET /v1/admin/datasets/{name}
 apogee datasets kits --output-format json   # byte for byte GET /v1/admin/datasets/kits
+apogee train regime list --output-format json        # {"object":"list","data":[…],"problems":[…]}
+apogee train regime show <name> --output-format json # {"object":"training.regime",…}
 apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: metadata only
 ```
 
@@ -693,6 +695,19 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   37f): the control plane's bodies -- each dataset's `name`, `path`, `lines`,
   `bytes` and `shape`; each kit's `name`, `path`, `description`,
   `eval_items` and `error` when it cannot be read.
+- **`train regime list`** and **`train regime show`** (since 42a): the
+  regimes a `train regime run` can name, the host's own -- each `name`,
+  `description`, `source` (`shipped` -- its compiled-in text, `seeded` --
+  its file under `training/regimes/`, as shipped, or `user` -- a
+  `training.regimes:` entry, a spec of the user's, or a shipped one's
+  edited), `config` (`true` for a `training.regimes:` entry), `path`
+  (`null` for `shipped` and for an entry), `kits` in order, `count` and
+  `iters` (`0`: each kit's own), `temperature` (`0`: each kit's), and
+  `teacher`, `student` and `promote_as` -- always `""` for anything
+  shipped, which names kits and tuning only. `list` adds `problems`, a line
+  per spec file left out because it does not parse; `show` is one regime
+  as `{"object":"training.regime",…}`. A name nothing answers is refused
+  as the text refuses it.
 - **`auth list`** (since 37g): the control plane's body -- each stored slot's
   `provider` and `stored_at`, which rung answers for each configured backend
   that takes a key (`backends`: `name`, `type`, `source`, and the `variable`

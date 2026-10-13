@@ -1,0 +1,28 @@
+# A shipped regime (42a): the four bundled kits as one gated pipeline -- the
+# foundation a small student needs before anything more specific. A shipped
+# regime names kits and tuning only: the teacher and the student are always
+# yours, named at run time (or in a training.regimes entry of your own).
+#
+#   apogee train regime run foundation --teacher <backend> --student <model dir>
+#   apogee train regime show foundation
+#
+# The order is the tuning. Instruction-following first: every later kit's
+# examples are instructions, and a student that does not keep to the asked
+# form fails their evals on form rather than skill. Structured output next,
+# while the form discipline is fresh -- the strictest form there is. Then
+# summarization, which leans on both. Reasoning last: it is the most general
+# and the most easily disturbed by later stages, and the pipeline's
+# cumulative gate replays every earlier kit's evals after it.
+#
+# Counts and iterations are each kit's own (count and iters 0 here): the kits
+# set them for what each skill needs -- more examples where the form varies
+# most -- and a regime that overrode them would tune every kit alike.
+name: foundation
+description: The four bundled kits as one gated pipeline -- instruction-following, structured output, summarization, then reasoning.
+kits:
+  - instruction-following
+  - structured-output
+  - summarization
+  - reasoning
+count: 0
+iters: 0

@@ -539,8 +539,7 @@ TEST_CASE("check --fix seeds the starter config where none exists, and only ther
 
     // Byte-identical to what `config init` writes.
     std::ifstream in(inputs.config_path, std::ios::binary);
-    const std::string written{std::istreambuf_iterator<char>{in},
-                              std::istreambuf_iterator<char>{}};
+    const std::string written{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
     CHECK(written == std::string{apogee::harness::config_template()});
 
     // A second pass seeds nothing: the file exists now.
@@ -1295,7 +1294,7 @@ TEST_CASE(
     const apogee::commands::CheckRow* kit = row_with(report, "kit: reasoning");
     REQUIRE(kit != nullptr);
     CHECK(kit->status == Status::Ok);
-    CHECK(kit->detail.find("8 eval item(s)") != std::string::npos);
+    CHECK(kit->detail.find("24 eval item(s)") != std::string::npos);
 
     // The environment exists: an Ok row naming its sets. The interpreter goes
     // where the platform's venv layout puts it (bin/python, or Scripts/

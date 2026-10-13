@@ -251,6 +251,10 @@ const std::map<std::string, Classification>& table() {
         {"train status", read_only()},
         {"train pipeline status", read_only()},
         {"train cycle status", read_only()},
+        // The shipped and the user's regime specs (42a): reads of the host's
+        // own files, beside `datasets kits`.
+        {"train regime list", read_only()},
+        {"train regime show", read_only()},
     };
     return rows;
 }

@@ -232,7 +232,7 @@ TEST_CASE("the kits route lists the seeded kits", "[httpserver][admin][datasets]
     REQUIRE(kits["data"].size() == 4);
     CHECK(kits["data"][0]["name"] == "instruction-following");
     CHECK(kits["data"][1]["name"] == "reasoning");
-    CHECK(kits["data"][1]["eval_items"] == 8);
+    CHECK(kits["data"][1]["eval_items"] == 24);
     CHECK_FALSE(kits["data"][1].contains("error"));
 }
 

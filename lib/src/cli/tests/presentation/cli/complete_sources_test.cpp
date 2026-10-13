@@ -233,7 +233,7 @@ TEST_CASE("delete offers backends whose model is stored; add-backend the stored 
     CHECK(home.names(c::kNewBackendValue).names == std::vector<std::string>{"m-Q4_K_M"});
 }
 
-TEST_CASE("collections, datasets, kits and runs complete from the data directory",
+TEST_CASE("collections, datasets, kits, regimes and runs complete from the data directory",
           "[commands][completion][sources]") {
     const Home home;
     {
@@ -253,6 +253,13 @@ TEST_CASE("collections, datasets, kits and runs complete from the data directory
     for (const apogee::harness::BundledKit& kit : apogee::harness::bundled_kits()) {
         CHECK(has(kits, kit.name));
     }
+
+    // The shipped regimes likewise (42a), and a spec of the user's beside them.
+    write_file(apogee::harness::training_regimes_dir() / "quick.yaml", "kits: [reasoning]\n");
+    const c::NameList regimes = home.names(c::kRegimeValue);
+    CHECK(has(regimes.names, "foundation"));
+    CHECK(has(regimes.names, "quick"));
+    CHECK(regimes.paths);  // a spec file's path is a regime too
 
     apogee::training::RunManifest run;
     run.run_id = "20260924-090000";

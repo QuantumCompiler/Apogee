@@ -379,7 +379,7 @@ TEST_CASE(
         apogee::commands::resolve_suite(fixture.training, "reasoning");
     CHECK(kit.error.empty());
     CHECK(kit.label == "kit:reasoning");
-    CHECK(kit.items.size() == 8);
+    CHECK(kit.items.size() == 24);
     CHECK(
         apogee::commands::resolve_suite(fixture.training, "nowhere").error.find("no eval suite") !=
         std::string::npos);
@@ -1149,6 +1149,132 @@ TEST_CASE(
                        "--kit", "alpha", "--max-tokens", "0"},
                       &out, &err) == 1);
     CHECK(fixture.pipelines().size() == before);
+}
+
+TEST_CASE(
+    "train regime list and show read the shipped foundation -- seeded, edited, under a "
+    "training.regimes entry -- as text and as documents, and a named spec that does not parse "
+    "is said",
+    "[commands][train][regime][regimes]") {
+    const PipelineFixture fixture;
+    std::string out;
+    std::string err;
+    const std::filesystem::path spec = fixture.training / "regimes" / "foundation.yaml";
+    REQUIRE(std::filesystem::exists(spec));  // seeded with the data directory
+    const std::string description =
+        "The four bundled kits as one gated pipeline -- instruction-following, structured "
+        "output, summarization, then reasoning.";
+
+    REQUIRE(fixture.run({"train", "regime", "list"}, &out, &err) == 0);
+    CHECK(out ==
+          "NAME        SOURCE   KITS  DESCRIPTION\n"
+          "foundation  seeded   4     " +
+              description + "\n");
+    REQUIRE(fixture.run({"train", "regime", "show", "foundation"}, &out, &err) == 0);
+    CHECK(out == "foundation  seeded  " + spec.string() + "\n" + description +
+                     "\n\nkits, in order:\n"
+                     "  1. instruction-following\n"
+                     "  2. structured-output\n"
+                     "  3. summarization\n"
+                     "  4. reasoning\n"
+                     "count:       each kit's own synth.count\n"
+                     "iters:       each kit's own train.iters\n"
+                     "temperature: each kit's own\n"
+                     "teacher:     yours: --teacher <backend>\n"
+                     "student:     yours: --student <snapshot>\n");
+
+    // The documents: the list idiom, and one regime whole.
+    REQUIRE(fixture.run({"train", "regime", "list", "--output-format", "json"}, &out, &err) == 0);
+    nlohmann::json list = nlohmann::json::parse(out);
+    CHECK(list["object"] == "list");
+    REQUIRE(list["data"].size() == 1);
+    CHECK(list["data"][0]["name"] == "foundation");
+    CHECK(list["data"][0]["source"] == "seeded");
+    CHECK(list["data"][0]["path"] == spec.string());
+    CHECK(list["data"][0]["kits"].size() == 4);
+    CHECK(list["problems"].empty());
+    REQUIRE(fixture.run({"train", "regime", "show", "foundation", "--output-format", "json"}, &out,
+                        &err) == 0);
+    const nlohmann::json shown = nlohmann::json::parse(out);
+    CHECK(shown["object"] == "training.regime");
+    CHECK(shown["description"] == description);
+    CHECK(shown["kits"][3] == "reasoning");
+    CHECK(shown["teacher"] == "");
+    CHECK(shown["student"] == "");
+    CHECK(fixture.run({"train", "regime", "show", "nope"}, &out, &err) == 1);
+    CHECK(err.find("no regime named 'nope' (there are: foundation)") != std::string::npos);
+    CHECK(fixture.run({"train", "regime", "list", "--output-format", "stream-json"}, &out, &err) !=
+          0);  // a read is text or a document
+
+    // Without its file, the compiled-in text; edited, the user's; under a
+    // config entry of its name, the entry -- and a file of the user's own.
+    std::filesystem::remove(spec);
+    REQUIRE(fixture.run({"train", "regime", "list"}, &out, &err) == 0);
+    CHECK(out.find("foundation  shipped  4") != std::string::npos);
+    write_file(spec, "description: mine now\nkits: [reasoning]\n");
+    write_file(fixture.training / "regimes" / "quick.yaml", "kits: [alpha]\ncount: 2\n");
+    REQUIRE(fixture.run({"train", "regime", "list"}, &out, &err) == 0);
+    CHECK(out.find("foundation  user     1     mine now\n") != std::string::npos);
+    CHECK(out.find("quick       user     1") != std::string::npos);
+    write_file(fixture.base.base.config_path,
+               read_file(fixture.base.base.config_path) +
+                   "training:\n  regimes:\n    foundation:\n      kits: [alpha, beta]\n");
+    REQUIRE(fixture.run({"train", "regime", "show", "foundation"}, &out, &err) == 0);
+    CHECK(out.starts_with("foundation  user  (training.regimes entry)\n"));
+    CHECK(out.find("  2. beta\n") != std::string::npos);
+
+    // A spec of the user's that does not parse: listed as skipped, and a run
+    // naming it is told why rather than that nothing is there.
+    write_file(fixture.training / "regimes" / "quick.yaml", "kits: [unterminated\n");
+    REQUIRE(fixture.run({"train", "regime", "list"}, &out, &err) == 0);
+    CHECK(err.find("[regime] skipped: " + (fixture.training / "regimes" / "quick.yaml").string()) !=
+          std::string::npos);
+    CHECK(out.find("quick") == std::string::npos);
+    CHECK(fixture.run(
+              {"train", "regime", "run", "quick", "--teacher", "teacher", "--student", "tiny"},
+              &out, &err) == 1);
+    CHECK(err.find("regime 'quick': " + (fixture.training / "regimes" / "quick.yaml").string()) !=
+          std::string::npos);
+}
+
+TEST_CASE(
+    "train regime run foundation runs the four bundled kits as one gated pipeline on the mock "
+    "trainer: the echoing student fails the first kit's evals under a hard gate, and a soft "
+    "gate runs all four",
+    "[commands][train][regime][regimes]") {
+    std::string out;
+    std::string err;
+    {
+        const PipelineFixture fixture{"training:\n  trainer: mock\n"};
+        CHECK(fixture.run({"train", "regime", "run", "foundation", "--teacher", "teacher",
+                           "--student", "tiny", "--count", "2", "--no-promote"},
+                          &out, &err) == 2);  // the gate's failure, as a pipeline's
+        CHECK(err.find("[regime] foundation as") != std::string::npos);
+        CHECK(err.find("kits instruction-following -> structured-output -> summarization -> "
+                       "reasoning") != std::string::npos);
+        CHECK(err.find("stage 'instruction-following' failed the cumulative eval gate") !=
+              std::string::npos);
+        REQUIRE(fixture.pipelines().size() == 1);
+        const apogee::training::PipelineRunManifest stopped =
+            fixture.pipeline(fixture.pipelines().front().id);
+        REQUIRE(stopped.stages.size() == 4);
+        REQUIRE(stopped.stages[0].eval.has_value());
+        CHECK(stopped.stages[0].eval->total == 24);  // the deepened floor, gating
+        CHECK_FALSE(stopped.stages[0].cumulative_passed);
+        CHECK_FALSE(stopped.stages[1].eval.has_value());
+    }
+    const PipelineFixture fixture{"training:\n  trainer: mock\n  gate_mode: soft\n"};
+    REQUIRE(fixture.run({"train", "regime", "run", "foundation", "--teacher", "teacher",
+                         "--student", "tiny", "--count", "2", "--no-promote"},
+                        &out, &err) == 0);
+    REQUIRE(fixture.pipelines().size() == 1);
+    const apogee::training::PipelineRunManifest ran =
+        fixture.pipeline(fixture.pipelines().front().id);
+    REQUIRE(ran.stages.size() == 4);
+    CHECK(ran.stages[0].name == "instruction-following");
+    CHECK(ran.stages[3].name == "reasoning");
+    REQUIRE(ran.stages[3].eval.has_value());
+    CHECK(ran.stages[3].eval->total == 96);  // every kit's evals, cumulatively
 }
 
 TEST_CASE(
