@@ -63,6 +63,7 @@
 #include "platform/platform.h"
 #include "symphony/tools.h"
 #include "tools/consult.h"
+#include "tools/delegate.h"
 #include "tools/git.h"
 #include "tools/todo.h"
 #include "views/ask_prompt.h"
@@ -887,6 +888,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         // The session todo (41d): the plan, kept by the model, drawn by
         // every front end; its board is this session's, set below.
         tools::register_todo_tool(registry);
+        // The delegate (41e): a bounded sub-session, re-entering the loop
+        // under this session's gate; its context is each turn's.
+        tools::register_delegate_tool(registry);
     }
     // What the chat's backend is offered: every registered tool, or the
     // toolset the active suite pins on that backend (27d), and the

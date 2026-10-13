@@ -7458,3 +7458,42 @@ Fixed in passing: a machine-mode reader test checked that a `cancel` had reached
 - Linux and Windows.
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,249 tests, none failing, one skipped for want of `pdftotext` -- `cli.machine_schema_conformance` (the `todo` event pinned to the declaration, the schema the binary prints and `machine-mode.md`) and `cli.http_api_conformance` among them. `clang-format` is clean on every touched file.
+
+### 2026-10-13 — `execute-delegate` (backlog item 41e): a bounded sub-session as a tool
+
+**What was built**
+
+- [x] **`delegate`** (`tools/delegate`): its call runs a sub-session with **the one loop, re-entered** -- `agentloop::run` on a fresh conversation (the brief, framed as a delegate's task, and nothing of the parent's history), with:
+  - the tools the parent's turn offers, less `delegate` itself (`delegate_kit`), so depth is exactly one;
+  - the session's own model, or a role's through the one resolver when the call names one -- one billed per call refused, as consult's rule says;
+  - the parent's own gate whole: its permission checker, its prompt (the terminal, the shell's widget, machine mode's `question`), its mode's refusals; with nobody to ask, a deny;
+  - the parent's standing context and plan mode's note as system context, so a plan-mode parent's delegate plans too, and a project's rules bind it;
+  - the parent's cancellation, so Ctrl-C or a driver's `cancel` stops it mid-sub-turn and the parent's turn with it.
+- [x] **Bounded by construction**: at most `kDelegateSubTurns` (8) model calls, each answer capped at `kDelegateAnswerTokens` (4,096); past the cap it answers without tools, and says so.
+- [x] **Its result**: the sub-session's answer and a one-line account -- `[delegate on root: 3 model calls, tools read_file ×2, 1,840 tokens]`, or the cap said -- returned as the tool's result. That result, in the parent's record, is all that is kept: no second chat, nothing in `chats list`.
+- [x] **Narrated as a side call** with its tool lines: the delegation (`delegate — a sub-session on root: <brief>`, closed with its time and tokens) and each sub-tool line opened and closed inside it. The terminal and the shell draw them in the thinking block as a consult's call; machine mode says them as `tool_status`, its pinned vocabulary unchanged.
+- [x] **Offered where it belongs**: registered with `--tools` in chat and execute, in tool selection's core, and named in the environment note -- when to hand work off, and that the brief is all the delegate gets -- only where it is registered, so the delegate's own note never mentions it.
+- [x] **The turn's context, current on its thread** (`DelegateScope`, made by `cli/chat_turn` from the options it builds): every surface that runs a chat turn gets the same delegate, with nothing per surface.
+
+**Decisions** (2026-10-13; the item's own were depth one, the session's model unless a role is named, the transcript as the tool call's detail, the parent's checker carrying the mode, the bounds, and the kit as the parent's less `delegate`)
+
+| Decision | Choice | Why |
+|---|---|---|
+| The token budget beside the 8 calls | Each sub-call's answer capped at 4,096 tokens, the total spend reported in the result | The loop has no mid-run stop on tokens; adding one would be a loop change this item does not need, and 8 × 4,096 bounds what a delegate can generate. What it spent, prompts included, is said whether it finished or not. |
+| Questions from the sub-session | None: it gets no `ask_user` | It reports back to the session that asked; a question goes through the parent, who has the conversation. A permission prompt still reaches the person, through the parent's gate. |
+| What is kept of the sub-session | Its answer and its account, as the tool result | "The tool call's detail inside the parent's record": the parent's history holds what the parent read. The sub-session's own turns are not saved anywhere. |
+| A delegation on another role's model that bills per call | Refused | The model's initiative never spends (27f's rule, the consult's): the session's own model is the user's spend already, another one is not. |
+| How the delegate reaches the turn | A context current on the turn's thread (`DelegateScope`), as the todo's board is | Tools run on the loop's own thread; one registry -- shared, pinned or scoped copies alike -- serves every turn, and no surface wires the delegate by hand. |
+
+**Guardrails.**
+- `tools/delegate_test.cpp`, over scripted mocks: a fresh context with no parent history, the standing notes as system context, `delegate` absent from the kit, each answer capped, the answer and account returned, the narration in order; the kit's environment kept; the call cap stopping a delegate that never stops; the parent's prompt deciding once per call, a deny with nobody to ask; the parent's cancellation thrown through; a role's model, a billed one refused, an unknown role and an empty brief refused; no turn current said.
+- `cli/delegate_session_test.cpp`, through the session core: the answer and account kept only in the parent's record, one chat saved; a pipe's denial identical with and without nesting; a delegated prompt reaching a driver as one `question`, its `always` writing the config's one line through the one editor.
+- `tui/session_view_test`: the delegation folding in the thinking block as a consult's call.
+
+**On real weights** (optional, one family): the Google family's gemma-4-12B-it (Q4_K_M), in `apogee execute` with tools inside the 41c fixture repository (a `calc.py` whose `add()` subtracts), asked to "use the delegate tool to have a delegate read calc.py and report exactly what add() returns". The model formed the `delegate` call itself, from 26 registered tools with selection on. The sub-session made 3 model calls (`list_directory`, then `read_file`, then its answer), spent 17,543 tokens, and answered "The function `add(a, b)` in `calc.py` returns `a - b`." The parent relayed it, and the session record kept the tool result with its account -- `[delegate on gemma: 3 model calls, tools list_directory, read_file, 17543 tokens]`. The other families were not run, as the guardrail allows.
+
+**Not verified.**
+- A delegation cancelled mid-sub-turn on real weights (the unit test throws the parent's cancellation through; the session core's cancel path is the one every tool already rides).
+- Linux and Windows.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,261 tests, none failing, one skipped for want of `pdftotext` -- `cli.machine_schema_conformance` (no event added) and `cli.unit_suite_under_a_tty` among them. `clang-format` is clean on every touched file.

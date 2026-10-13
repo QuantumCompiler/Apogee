@@ -16,6 +16,7 @@
 #include "contracts/config.h"
 #include "contracts/errors.h"
 #include "logger/operational.h"
+#include "tools/delegate.h"
 
 namespace apogee::commands {
 
@@ -257,6 +258,20 @@ ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& s
     loop_options.transient_prefix.insert(loop_options.transient_prefix.begin(), head.begin(),
                                          head.end());
 
+    // The delegate (41e): what a `delegate` call re-enters the loop with --
+    // this turn's model, gate, mode and cancellation, its standing context
+    // and mode note -- current on this thread while the turn runs.
+    std::vector<std::string> delegate_notes = standing;
+    if (tools != nullptr && gate.approvals != nullptr) {
+        if (const std::string note = plan_note(*gate.approvals); !note.empty()) {
+            delegate_notes.push_back(note);
+        }
+    }
+    const tools::DelegateScope delegate_scope{tools::DelegateContext{.harness = &harness,
+                                                                     .tools = tools,
+                                                                     .parent = loop_options,
+                                                                     .reporter = &reporter,
+                                                                     .notes = delegate_notes}};
     try {
         agentloop::RunResult result =
             agentloop::run(harness, session.messages, loop_options, reporter);

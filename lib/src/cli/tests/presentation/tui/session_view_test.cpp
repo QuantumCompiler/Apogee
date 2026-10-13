@@ -744,3 +744,33 @@ TEST_CASE("the shell folds the todo above the input, redrawn whole on change",
     stage.view.reporter().on_todo({});
     CHECK(stage.frame().find("todo ·") == std::string::npos);
 }
+
+TEST_CASE(
+    "a delegation folds in the thinking block as a consult's call does, its tool lines inside",
+    "[tui][session][delegate]") {
+    Stage stage;
+    stage.view.begin_session();
+    apogee::agentloop::Reporter& reporter = stage.view.reporter();
+    reporter.on_thinking();
+    reporter.on_tool_status("delegate");
+    // What the delegate's narrator says (41e): the delegation, then each of
+    // its tool lines opened and closed inside it.
+    reporter.on_side_call({.role = "delegate", .detail = "a sub-session on root: Find it"});
+    reporter.on_side_call({.role = "delegate", .detail = "read_file a.cpp"});
+    reporter.on_side_call({.role = "delegate", .detail = "read_file a.cpp", .done = true});
+    reporter.on_side_call({.role = "delegate",
+                           .detail = "a sub-session on root: Find it",
+                           .done = true,
+                           .seconds = 2.5,
+                           .tokens = 300});
+    const std::string working = stage.frame(96, 24);
+    CHECK(working.find("delegate — a sub-session on root: Find it · 2.5 s · 300 tokens") !=
+          std::string::npos);
+    CHECK(working.find("delegate — read_file a.cpp") != std::string::npos);
+    reporter.on_clear_status();
+    reporter.on_answer_start();
+    reporter.on_answer_token("Found it.");
+    reporter.on_answer_end();
+    // Folded with the turn's thinking once the answer comes.
+    CHECK(stage.frame(96, 24).find("a sub-session on root") == std::string::npos);
+}

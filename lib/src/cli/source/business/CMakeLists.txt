@@ -154,6 +154,8 @@ apogee_add_module(tools
     tools/notes.cpp
     tools/todo.h
     tools/todo.cpp
+    tools/delegate.h
+    tools/delegate.cpp
     tools/rag_query.h
     tools/rag_query.cpp
     tools/graph_nav.h

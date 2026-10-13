@@ -76,7 +76,8 @@ const std::vector<std::string>& core_tools() {
                                                "run_command",
                                                std::string{kConsultToolName},
                                                std::string{kFindToolsName},
-                                               std::string{harness::kTodoToolName}};
+                                               std::string{harness::kTodoToolName},
+                                               std::string{kDelegateToolName}};
     return core;
 }
 

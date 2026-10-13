@@ -8,8 +8,10 @@
 
 #include "agent/fetch_url.h"
 #include "agent/web_search.h"
+#include "agentloop/tool_selection.h"
 #include "contracts/layout.h"
 #include "platform/platform.h"
+#include "tools/delegate.h"
 #include "tools/environment.h"
 #include "tools/fs.h"
 #include "tools/graph_nav.h"
@@ -113,6 +115,11 @@ void register_native_toolsets(agent::ToolRegistry& registry, const ToolsetOption
             environment, platform::local_date(std::chrono::system_clock::now()));
         if (const std::string policy = render_tool_use_policy(tool_reach(tools)); !policy.empty()) {
             note += "\n\n" + policy;
+        }
+        // When to hand work off (41e) -- only where `delegate` is registered,
+        // so a delegate's own kit, which lacks it, is never told to.
+        if (tools.find(agentloop::kDelegateToolName) != nullptr) {
+            note += "\n\n" + delegate_policy();
         }
         return note;
     });

@@ -167,6 +167,7 @@ add_library(apogee_tests_business OBJECT
     business/tools/shell_test.cpp
     business/tools/notes_test.cpp
     business/tools/todo_test.cpp
+    business/tools/delegate_test.cpp
     business/tools/git_test.cpp
     business/tools/rag_query_test.cpp
     business/tools/gate_test.cpp
@@ -301,6 +302,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/execute_test.cpp
     presentation/cli/project_context_test.cpp
     presentation/cli/session_todo_test.cpp
+    presentation/cli/delegate_session_test.cpp
     presentation/httpserver/handler_test.cpp
     presentation/httpserver/sse_test.cpp
     presentation/httpserver/session_test.cpp

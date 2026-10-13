@@ -377,6 +377,16 @@ prompt of its own (`-s`), which replaces it; a `notice` says which (`persona:
 coder, the shipped coding prompt, in every request -- -s replaces it`, or
 `persona: your -s prompt, in place of the coder persona`).
 
+Since 41e a session with tools may **delegate**: the model's `delegate` call runs
+a bounded sub-session -- the same loop on a fresh conversation, with the
+session's tools less `delegate` itself, under the session's own permissions --
+and its answer comes back as that call's result. A driver sees it in the events
+it already has: the delegation and each of its tool lines as `tool_status`
+(`delegate — a sub-session on <model>: <brief>`, then `delegate — read_file …`),
+and a permission prompt a delegated tool raises as an ordinary `question`,
+answered the same way -- `always` included. Nothing of the sub-session is saved
+but the result, in this session's record.
+
 ```jsonl
 {"type":"user","text":"/play summarize-verify The minutes of the meeting…"}
 ```
