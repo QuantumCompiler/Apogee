@@ -192,9 +192,24 @@ The release's third track, **training suites in the box** *(track 42, opened 202
 
 ## In progress
 
-### v0.1.8
+### v0.1.8 — The doors made law
 
-*Nothing is queued for v0.1.8 yet: its theme and its first track arrive with its first item.*
+Opened 2026-10-14 (the user's call, from that day's CLI↔TUI disparity audit — track **44**): the shell's entries brought to full parity with the CLI, and the rules that keep them there written first. The audit found execute effectively unreachable from the shell (no picker on a fresh install, no bare door, no suite-less row), the door a second suite-only composition that never ran the project opening or the persona, `apogee tui` flagless against execute's 40 flags — and the parity law green over the absent door. In build order:
+
+- [ ] **The door ADRs** *([44a](../backlog/v0.1.8/door-adrs.md))* — written before the fixes (the user's call): **ADR 0011**, a mode is opened by its command's own path — one open function and one flag table per mode, every front end's door calling it, a second composition the defect; **ADR 0012**, a classified door is reachable on a fresh install, conditions recorded and said. Forward pointers on ADRs 0002/0010, the Implementing-a-Feature checklist line, documents only.
+- [ ] **The execute door** *([44b](../backlog/v0.1.8/tui-execute-door.md))* — the picker appears on every fresh session: New chat first, an execute row per configured suite, and the bare row whenever the CLI's bare door would open — each opening through `cli/execute.cpp`'s own function, so 41a's rungs, the `AGENTS.md` ritual and the coder persona reach shell sessions by construction; the parity table's claim becomes true.
+- [ ] **Session launch** *([44c](../backlog/v0.1.8/tui-session-launch.md))* — `apogee tui` takes the session flag table the modes share and opens its first session with it (`apogee tui --suite dev --attach . --effort high`); a flag the modes grow lands on `tui` with zero wiring; flagless behavior byte-stable.
+- [ ] **The reachability law** *([44d](../backlog/v0.1.8/tui-reachability-law.md))* — ADR 0012's teeth: every View row's door walked and seen on a fresh install under the PTY recipe, deliberately conditional rows carrying their recorded condition in the refusal's own words, and a planted conditional door failing the law by name.
+
+The release's second track, **completion presented well** *(track 45, opened 2026-10-14 from that day's spike)*: Tab stops dumping the world. The spike measured `--model <Tab>` at ~60 flat, case-sensitively ordered candidates, the wire bare strings, every stub and owned surface rendering the same wall; of the four concepts mocked, the user chose **A + D** (B's wire groups and C's curation out, recorded). In build order:
+
+- [ ] **Completion namespaces** *([45a](../backlog/v0.1.8/completion-namespaces.md))* — the first Tab offers the map: your configured backends, one `<vendor>:` prefix per roster and `local:` for the store (the shipped `backend:model` spelling reused); each shelf completes behind its prefix, a typed partial still matches everything, and one ordering rule — configured first, case-insensitive, chats most-recent-first — applies to every value kind through a per-kind treatment table. All in the core: every shell and surface improves with no wire or stub change.
+- [ ] **The completion menu** *([45b](../backlog/v0.1.8/completion-menu.md))* — on the surfaces Apogee owns (the TUI's exec line and session input), Tab with more than one candidate opens a real picker: grouped (configured · each roster with its fetched date · local models), described (type and model, family · quant · size, title · date · turns), arrow-selectable and filtering as you type — over in-process candidate metadata the wire never carries; the terminal REPL stays plain over 45a's ordering, said.
+
+The release's third track, **names and fields editable** *(track 46, opened 2026-10-14 after the user tried to rename a model and found no verb anywhere)*: nothing in `models`' nine verbs or `config`'s twenty-four edits or renames, while a backend key is referenced by the defaults, the role pointers, the suites and every saved chat, and a stored model's name is the store directory every `model_path` spells. Two independent items:
+
+- [ ] **Renames that propagate** *([46a](../backlog/v0.1.8/rename-propagation.md))* — `apogee config rename-backend old new` renames the key and rewrites every in-config reference in one atomic, comment-preserving edit, then sweeps saved sessions so old chats resume on the new name; `apogee models rename old new` moves the store directory with its records and repoints every pointing backend. The coupling is bidirectional and automatic where the mapping is 1:1 — M3-derived backend names follow their model, a sole-owner derived backend carries the store with it — and withheld **and said** where shared or underived, never a guess. Admin twins, the exec line, completion: all along for free.
+- [ ] **`config set-backend`** *([46b](../backlog/v0.1.8/edit-backend.md))* — editing an entry in place at last: one flag per editable field, each one pure transform (two already exist in the editor), only the named fields touched, comments kept — and never a key on the command line: storing a key stays `auth add`'s, refused with the rule. The admin twin calls the same transforms, byte-identical.
 
 ---
 
