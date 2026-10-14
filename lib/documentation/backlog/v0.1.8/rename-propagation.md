@@ -18,10 +18,9 @@
 - 2026-10-14 — The set lands in v0.1.8 as track 46 (the user's placement call); the verbs are `config rename-backend` and `models rename`.
 - 2026-10-14 — **Coupling rule (a)**, refined: bidirectional and automatic where 1:1 (M3-derived names follow the model; a sole-owner derived backend carries the store with it), withheld **and said** where shared or underived — never a guess, never a silent half-rename (the spike's recommendation, standing — the user executed without a veto).
 - 2026-10-14 — Saved sessions are swept (the user's "propagate immediately"), the graceful orphan path kept as the net for what the sweep cannot touch.
+- 2026-10-15 — A derived-name collision on `models rename` renames the model and repoints the paths but leaves the colliding backends' names, each collision said by name — never auto-suffixed (the default, confirmed 2026-10-15).
+- 2026-10-15 — No curated TUI key in the first cut: the exec line runs both verbs, the Models/Config views show the new names on their next read (the default, confirmed 2026-10-15).
 
-**Open calls:**
-- [default: `models rename` on a model whose derived backends would collide with existing keys renames the model and repoints paths but leaves those backends' names, each said — the collision is the user's to resolve, never auto-suffixed.]
-- [default: no curated TUI key in the first cut — the exec line runs both verbs; the Models/Config views show the new names on their next read.]
 
 **Guardrail(s).** The transform goldens over comment-dense fixtures (references rewritten exactly, everything else byte-stable, re-parse green, idempotent); the refusal matrix (taken key, taken store name, unknown names, mid-pull); the sweep proven by a resume across a rename; the store move's records intact and the three coupling cases pinned; admin twin byte-parity; the classification and completion rows green.
 

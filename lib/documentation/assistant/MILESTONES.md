@@ -7241,6 +7241,30 @@ Decisions taken while building, for veto:
 - The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,201 tests, one skipped for want of `pdftotext`.
 - Nothing here can run a Windows binary, so the Windows test runs stay CI's.
 
+### 2026-10-14 — `door-adrs` (backlog item 44a): one opening, and every door reachable
+
+**Why.** The day's CLI↔TUI disparity audit drove the installed binary on a real terminal against sandboxed homes. Mid-session the shell measured strong, with some forty slash twins in the one command table. Every wall it found was at a session's opening, and all were one drift class: **a front end composing its own second opening of a mode.**
+- A fresh shell opens straight into a chat, since `TuiSessionDriver::start()` shows the picker only once a saved chat exists.
+- The picker decides its own execute rows: a row per suite, and a bare row only when no suite is configured at all.
+- The suite door is a function of its own (`open_execute`, suite-only), and every shell session is opened from an argv the shell spells itself (`shell_session_flags`).
+- `apogee tui` takes no option, against `apogee execute`'s 40.
+
+Meanwhile the parity law classified `execute` as a view whose door was often absent, and stayed green. Track 44 (44a–44d, the user's placement) fixes the class, and **the records come first** (the user's call): the fixes build under them.
+
+- [x] **[ADR 0011](../adrs/cli/one-session-opening.md), a mode is opened by its command's own path.** One open function and one flag table per mode (`run_session` and `bind_session_flags` today), and every front end's door calls that function with that table. A front end owns presentation only. A door offered by a picker follows the command's own rules, worded in its vocabulary. A second composition of an opening is the defect.
+- [x] **[ADR 0012](../adrs/cli/doors-are-reachable.md), a classified door is reachable.** A `View` classification asserts a door reachable on a fresh install: a data directory as `check --fix` seeds it, with no suite and no saved chat. A genuinely conditional door either becomes unconditional or its row records the condition, which the shell says where the door is absent.
+- [x] **Each record's enforcement is pending, and says so**, dated. ADR 0011's door goldens land with 44b and 44c, ADR 0012's real-terminal walk with 44d. Neither record claims teeth it does not yet have.
+- [x] **The pointers**:
+  - ADR 0002 and ADR 0010 each gained one dated line pointing forward (ADRs are append-only);
+  - the ADR index has its two rows;
+  - CLAUDE.md's per-change checklist has the rule, and its map row lists every record's topic;
+  - the presentation layer card points at both, its wording tightened to stay under its 3,000-byte limit.
+
+Decisions taken while building, for veto:
+- **The audit's third wall is stated as found in the code, not as the audit worded it.** The audit read "zero references to 41b's project opening or 41c's persona" in `tui_session.cpp` as the shell's sessions lacking them. Both actually live inside `run_session`, keyed on the mode and the process's working directory, which the shell's door also calls. So ADR 0011 records them as reaching the shell **by where they happen to sit**, with no test holding a shell-opened session to them. That is the class the record closes, without claiming a wall that was not measured. 44b's golden settles it either way.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,278 tests, one skipped for want of `pdftotext`, `harness.layer_context` among them with the card's pointer and the ADR index's two new rows. No source or test file changed. The link sweep over the documentation, the skills and the layer cards found nothing new broken.
+
 ## Milestone AI — Effort and permission modes
 
 **Goal.** Claude Code gives a session two controls the person reaches for constantly: how hard the model thinks (five effort levels) and how much it may do without asking (a permission mode, cycled with Shift+Tab). Apogee had the pieces of both -- `/think on|off|auto` with a raw token budget, and per-tool answers over one permission gate -- but not the controls. Track 39 (the user's call, 2026-10-11) gives `apogee chat`, `apogee execute` and the full-screen shell Claude Code's two, set mid-session in either front end and Tab-completed in both.

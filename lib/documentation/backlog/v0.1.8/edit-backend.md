@@ -15,10 +15,9 @@
 **Decisions made** (dated):
 - 2026-10-14 — The set lands in v0.1.8 as track 46 (the user's placement call); the edit gap ships as its own item beside the renames, each useful alone.
 - 2026-10-14 — No `--api-key` on `set-backend`, ever — keys stay `auth add`'s doors (the secrets invariant applied, not reopened).
+- 2026-10-15 — The editable field list is enumerated from the entry schema's writable fields minus the key and the api-key, tied by a test — a field added later fails the enumeration rather than silently missing its flag (the default, confirmed 2026-10-15).
+- 2026-10-15 — Clearing an optional field spells the empty string (`--mmproj ""` removes the line, said); one spelling, no `--unset-*` family (the default, confirmed 2026-10-15).
 
-**Open calls:**
-- [default: the editable field list is the entry schema's writable fields minus the key and the api-key — enumerated exactly at build from the config engine's own schema, so a field added later fails the enumeration test rather than silently missing its flag.]
-- [default: clearing an optional field spells `--mmproj ""` (the empty string removes the line, said) — one spelling, no separate `--unset-*` flags.]
 
 **Guardrail(s).** The per-field golden matrix (exact spans, byte-stable elsewhere, compositions, re-parse); the refusals (no fields, unknown key, api-key); twin parity; the enumeration test tying the flag set to the schema; `cli.config_lifecycle`'s in-place edit on the real binary.
 

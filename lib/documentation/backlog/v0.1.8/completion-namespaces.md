@@ -16,10 +16,9 @@
 - 2026-10-14 — The set lands in v0.1.8 as track 45 (the user's placement call); **Concepts A + D are the pick, B and C are out** — no wire change, no stub renderings, no curation policy (the user's call on the spike's concepts).
 - 2026-10-14 — The namespaces reuse the shipped spellings: `<backend>:` for a vendor's roster, `local:` for the store; nothing invents a third grammar.
 - 2026-10-14 — The ordering rule is one function over every value kind: configured first, rosters, locals, case-insensitive within bands; chats most-recent-first (the per-kind table above is this item's contract).
+- 2026-10-15 — Bare roster ids stay directly completable once typed: the map governs only the empty-word Tab, and any typed partial prefix-matches everything, so muscle memory and scripts keep working (the default, confirmed 2026-10-15).
+- 2026-10-15 — `local:`'s final insertion form is decided by the insertion-validity tests — whichever spelling the parser already accepts — never by taste (the default, confirmed 2026-10-15).
 
-**Open calls:**
-- [default: the bare (un-prefixed) roster ids stay completable once typed past the map — a person who types `claude-op` still completes `claude-opus-5-5` directly (prefix-match against everything remains the fallback when the typed word matches no namespace); the map only governs the empty-word Tab.]
-- [default: `local:` inserts the store name without the prefix in the final argument where the parser wants the bare name — or keeps the prefix if 34's resolution accepts it; whichever the parser already accepts, decided at build by the insertion-validity tests.]
 
 **Guardrail(s).** The insertion-validity rule: every candidate the shaping emits is run through the real parser in tests — a candidate that cannot be typed is a failing test; the shaping matrix and ordering goldens; the wire-shape pin (protocol v2 bytes unchanged); the user-facing before/after captured in the item's tests (top-level count ≤ the map for a many-source install).
 

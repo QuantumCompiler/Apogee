@@ -16,10 +16,9 @@
 - 2026-10-14 — The set lands in v0.1.8 as track 45; **A + D the user's pick, B and C out** `(consumed decision — the sibling records it)`.
 - 2026-10-14 — The metadata is **in-process only**: the candidate struct's optional fields, never the wire — a later Concept-B item would serialize them; nothing here presumes it.
 - 2026-10-14 — The terminal REPL keeps replxx's plain list over 45a's shaped candidates — the menu is the TUI's, skipped and said for the terminal.
+- 2026-10-15 — The interaction: Tab opens with more than one candidate, a second Tab cycles, arrows move, typing filters, Esc closes, Enter and Tab fill — exact keys at build within the shell's key law (the default, confirmed 2026-10-15).
+- 2026-10-15 — The menu caps to the stage's height and scrolls; groups collapse to headers when a filter empties them; exact looks at build against the headless goldens (the default, confirmed 2026-10-15).
 
-**Open calls:**
-- [default: the menu opens on Tab when >1 candidate; a second Tab cycles, arrows move, typing filters, Esc closes, Enter and Tab fill — exact keys at build within the shell's key law.]
-- [default: the menu caps its height to the stage and scrolls; groups collapse to headers when a filter empties them; exact looks at build against the headless goldens.]
 
 **Guardrail(s).** Headless goldens for the menu's render states (groups, filter, selection, overflow); the one-candidate fast path unchanged; the pump never blocked (manual-pump case); the PTY pick case; the wire-shape pin (bare strings, byte-identical) re-asserted beside the metadata; the leak test registers the menu's rows (descriptions come only from the public reads).
 
