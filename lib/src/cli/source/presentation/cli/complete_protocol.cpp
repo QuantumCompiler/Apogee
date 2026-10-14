@@ -35,6 +35,8 @@ namespace {
     value.list = base.ends_with(",...") || option.get_delimiter() == ',';
     if (base == kBackendValue) {
         value.kind = ValueKind::Backend;
+    } else if (base == kBackendOrModelValue) {
+        value.kind = ValueKind::Model;
     } else if (base == kPathValue) {
         value.kind = ValueKind::Path;
     } else if (std::ranges::find(kNameValues, base) != kNameValues.end()) {
@@ -160,6 +162,20 @@ namespace {
         case ValueKind::Names:
             return offer_names(value, sources, context, current);
         case ValueKind::Backend: {
+            // A backend's name alone: the configured keys, as the BACKEND
+            // column shows them -- never a shelf or a roster id, which name
+            // a model to run and no entry.
+            std::vector<std::string> keys = config.backend_names();
+            if (keys.empty()) {
+                completion.hint =
+                    value.hint + " -- no backends configured yet ('apogee config add-backend')";
+            }
+            order_names(keys);
+            completion.candidates = filter_prefix(keys, current);
+            completion.notes = model_notes(config, completion.candidates);
+            break;
+        }
+        case ValueKind::Model: {
             if (config.backend_names().empty()) {
                 completion.hint =
                     value.hint + " -- no backends configured yet ('apogee config add-backend')";

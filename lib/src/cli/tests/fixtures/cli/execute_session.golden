@@ -143,7 +143,7 @@ Usage: apogee execute [OPTIONS]
 
 Options:
   -h,--help                   Print this help message and exit
-  -m,--model BACKEND          Backend or model to use
+  -m,--model BACKEND_OR_MODEL Backend or model to use
   -s,--system TEXT            System prompt for the session
   --rag COLLECTION            Retrieve context from this collection each turn (see 'apogee embed'); "" switches off the config's auto_rag for this session
   --rag-limit INT             How many chunks to inject (default 4)

@@ -4,6 +4,8 @@
 #include <array>
 #include <cctype>
 #include <exception>
+#include <regex>
+#include <set>
 #include <system_error>
 #include <utility>
 
@@ -263,15 +265,216 @@ RenameOutcome rename_backend_everywhere(const std::filesystem::path& config_path
     return out;
 }
 
+namespace {
+
+/// `models rename` by the name a model's backends share (the user's
+/// request): `family` the stored backends `<old>-<level>`.
+[[nodiscard]] RenameOutcome rename_model_family(const std::filesystem::path& config_path,
+                                                const models::StoreRoots& roots,
+                                                const harness::Config& config,
+                                                std::string_view old_name,
+                                                std::string_view new_name,
+                                                const std::vector<std::string>& family) {
+    RenameOutcome out;
+    if (new_name.empty() || models::safe_model_name(new_name) != new_name) {
+        out.refusal = "'" + std::string{new_name} +
+                      "' cannot name a model -- one word: no spaces, no / : @ \\";
+        return out;
+    }
+    // Where the family runs from, and who else runs from there.
+    std::set<std::string> dirs;
+    for (const std::string& name : family) {
+        const harness::BackendConfig& backend = *config.find_backend(name);
+        for (const std::string& path : {backend.model_path, backend.mmproj_path}) {
+            if (const std::string model = stored_model_at(roots, path); !model.empty()) {
+                dirs.insert(model);
+            }
+        }
+    }
+    std::string outsider;
+    for (const auto& [name, backend] : config.backends) {
+        if (std::ranges::find(family, name) != family.end()) {
+            continue;
+        }
+        if (dirs.contains(stored_model_at(roots, backend.model_path)) ||
+            dirs.contains(stored_model_at(roots, backend.mmproj_path))) {
+            outsider = name;
+            break;
+        }
+    }
+    // The backends' new names, a taken one left.
+    std::vector<std::pair<std::string, std::string>> renames;
+    std::vector<std::string> left;
+    for (const std::string& name : family) {
+        const std::string renamed = std::string{new_name} + "-" + *quant_level(name);
+        if (renamed == name) {
+            continue;
+        }
+        const bool taken = std::ranges::any_of(config.backend_names(), [&](const auto& key) {
+            return key != name && (key == renamed || harness::fold_collision({key}, renamed));
+        });
+        if (taken) {
+            left.push_back("left backend '" + name + "' as it is -- '" + renamed +
+                           "' is already a backend's name");
+        } else {
+            renames.emplace_back(name, renamed);
+        }
+    }
+    // The directory follows when the family alone runs it.
+    const std::string dir = dirs.size() == 1 ? *dirs.begin() : std::string{};
+    std::string store_said;
+    bool move = false;
+    if (dirs.size() > 1) {
+        store_said = "its weights sit in " + std::to_string(dirs.size()) +
+                     " stored models -- each left as it is";
+    } else if (dir == new_name) {
+        // Already named after it.
+    } else if (!outsider.empty()) {
+        store_said = "store '" + dir + "' unchanged -- '" + outsider + "' also runs from it";
+    } else if (!model_dirs(roots, new_name).empty()) {
+        store_said =
+            "store '" + dir + "' unchanged -- '" + std::string{new_name} + "' is already stored";
+    } else if (being_written(model_dirs(roots, dir))) {
+        store_said = "store '" + dir + "' unchanged -- it is being written";
+    } else {
+        move = true;
+    }
+    if (renames.empty() && !move) {
+        out.refusal = left.empty() && store_said.empty()
+                          ? "'" + std::string{old_name} + "' is already its name"
+                          : (left.empty() ? store_said : left.front());
+        return out;
+    }
+
+    std::vector<std::pair<std::filesystem::path, std::filesystem::path>> moves;
+    if (move) {
+        for (const std::filesystem::path& from : model_dirs(roots, dir)) {
+            moves.emplace_back(from, from.parent_path() / std::string{new_name});
+        }
+    }
+    std::size_t done = 0;
+    if (const std::string error = move_all(moves, done); !error.empty()) {
+        move_back(moves, done);
+        out.refusal = "could not move '" + dir + "': " + error;
+        return out;
+    }
+    try {
+        harness::edit_config_file(config_path, [&](std::string_view content) {
+            std::string text{content};
+            if (move) {
+                for (const std::string& name : family) {
+                    const harness::BackendConfig& backend = *config.find_backend(name);
+                    if (stored_model_at(roots, backend.model_path) == dir) {
+                        text = harness::set_backend_model_path(
+                            text, name, rebased(backend.model_path, dir, new_name));
+                    }
+                    if (stored_model_at(roots, backend.mmproj_path) == dir) {
+                        text = harness::set_backend_mmproj_path(
+                            text, name, rebased(backend.mmproj_path, dir, new_name));
+                    }
+                }
+            }
+            for (const auto& [from, to] : renames) {
+                text = harness::rename_backend(text, from, to);
+            }
+            return text;
+        });
+    } catch (const std::exception& e) {
+        move_back(moves, moves.size());
+        out.refusal = e.what();
+        return out;
+    }
+    for (const auto& [from, to] : renames) {
+        out.said.push_back("renamed backend '" + from + "' to '" + to +
+                           "', every reference to it with it");
+    }
+    if (move) {
+        out.said.push_back("moved store '" + dir + "' to '" + std::string{new_name} +
+                           "', its records inside it");
+    } else if (!store_said.empty()) {
+        out.said.push_back(store_said);
+    }
+    for (std::string& line : left) {
+        out.said.push_back(std::move(line));
+    }
+    for (const auto& [from, to] : renames) {
+        say_sweep(out, from, to);
+    }
+    return out;
+}
+
+}  // namespace
+
+std::optional<std::string> quant_level(std::string_view backend) {
+    const std::size_t dash = backend.rfind('-');
+    if (dash == std::string_view::npos || dash == 0) {
+        return std::nullopt;
+    }
+    static const std::regex kLevel{"(B?F(16|32)|I?Q[0-9][A-Z0-9]*)"};
+    const std::string level{backend.substr(dash + 1)};
+    if (!std::regex_match(level, kLevel)) {
+        return std::nullopt;
+    }
+    return level;
+}
+
+std::vector<std::string> model_names(const harness::Config& config,
+                                     const models::StoreRoots& roots) {
+    std::vector<std::string> names;
+    std::set<std::string> named;  // the stored models a family covers
+    for (const auto& [name, backend] : config.backends) {
+        const std::string model = stored_model_at(roots, backend.model_path);
+        const std::optional<std::string> level = quant_level(name);
+        if (model.empty() || !level.has_value()) {
+            continue;
+        }
+        names.push_back(name.substr(0, name.size() - level->size() - 1));
+        named.insert(model);
+    }
+    for (const std::string& model : models::list_store_models(roots)) {
+        if (!named.contains(model)) {
+            names.push_back(model);
+        }
+    }
+    std::ranges::sort(names);
+    const auto [repeats, end] = std::ranges::unique(names);
+    names.erase(repeats, end);
+    return names;
+}
+
 RenameOutcome rename_stored_model(const std::filesystem::path& config_path,
                                   const models::StoreRoots& roots, std::string_view old_model,
                                   std::string_view new_model) {
+    // A model by the name its backends share, first (the user's request).
+    std::error_code absent;
+    if (std::filesystem::exists(config_path, absent)) {
+        try {
+            const harness::Config config = harness::load_config(config_path);
+            std::vector<std::string> family;
+            for (const auto& [name, backend] : config.backends) {
+                const std::optional<std::string> level = quant_level(name);
+                if (level.has_value() &&
+                    std::string_view{name}.substr(0, name.size() - level->size() - 1) ==
+                        old_model &&
+                    !stored_model_at(roots, backend.model_path).empty()) {
+                    family.push_back(name);
+                }
+            }
+            if (!family.empty()) {
+                return rename_model_family(config_path, roots, config, old_model, new_model,
+                                           family);
+            }
+        } catch (const std::exception& e) {
+            return RenameOutcome{.said = {}, .refusal = e.what()};
+        }
+    }
     RenameOutcome out;
     const models::StoreTarget target = models::resolve_store_target(roots, old_model);
     if (!target.error.empty() || target.outside || !target.format.empty() ||
         model_dirs(roots, target.model).empty()) {
-        out.refusal = "no stored model named '" + std::string{old_model} +
-                      "' -- 'apogee models list --all' shows them";
+        out.refusal = "no model named '" + std::string{old_model} +
+                      "' -- name it as its backends share it (the backend without its "
+                      "-F16 or -Q4KM), or by its stored directory";
         return out;
     }
     const std::string model = target.model;

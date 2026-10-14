@@ -54,6 +54,8 @@ backends:
     using apogee::commands::ValueKind;
     using apogee::commands::ValueSpec;
     static const ValueSpec kBackend{.kind = ValueKind::Backend};
+    // A session's `-m` (45a): a model to run, the provider shelves with it.
+    static const ValueSpec kModel{.kind = ValueKind::Model};
     static const ValueSpec kText{.kind = ValueKind::Text, .hint = "a word"};
     static const ValueSpec kPath{.kind = ValueKind::Path};
     static const CommandSpec kRoot{
@@ -66,12 +68,12 @@ backends:
             {
                 CommandSpec{.name = "chat",
                             .flags = {"--help", "--model", "--search", "--tools", "-h", "-m"},
-                            .values = {{"--model", kBackend}, {"-m", kBackend}}},
+                            .values = {{"--model", kModel}, {"-m", kModel}}},
                 CommandSpec{.name = "check", .flags = {"--fix", "--help", "--no-color", "-h"}},
                 CommandSpec{.name = "chats", .flags = {"--help", "-h"}},
                 CommandSpec{.name = "complete",
                             .flags = {"--help", "--image", "--model", "--tools", "-h", "-m"},
-                            .values = {{"--image", kPath}, {"--model", kBackend}, {"-m", kBackend}},
+                            .values = {{"--image", kPath}, {"--model", kModel}, {"-m", kModel}},
                             .positionals = {kText}},
                 CommandSpec{.name = "config", .flags = {"--help", "-h"}},
                 CommandSpec{.name = "knowledge",

@@ -227,6 +227,27 @@ Decisions taken while building, for veto:
 
 **Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,312 tests, one skipped for want of `pdftotext`. `make format-check` is clean for both files touched.
 
+### 2026-10-14 — a model is the name its backends share (the user's request)
+
+**Why.** After the day's renames, the user's names had drifted apart. `models list`'s BACKEND column read `Gemma4-12B-Assistant-F16` and `-Q4KM`, while the folder they run from was still `google--gemma-4-12B-it-assistant`. `models rename <TAB>` offered those folders and every `<folder>/gguf/<id>` handle, none of them names the user had ever typed, and the config verbs offered things no config verb takes. The user's rule: the names offered are the BACKEND column's, and a model with several quantizations is renamed by its base name.
+
+- [x] **`models rename` takes a model by the name its backends share** (`operations/renames`, `rename_model_family`):
+  - a model is identified by its stored backends named `<name>-<level>`, the level read as M3 spells it (`quant_level`: `F16`, `BF16`, `F32`, `Q4KM`, `Q80`, `IQ4XS`);
+  - `apogee models rename Gemma4-12B-Assistant Gemma4-12B-Helper` renames every one of them `Gemma4-12B-Helper-<level>` in one edit, their references and saved chats with them;
+  - the folder they run from moves to `Gemma4-12B-Helper` when they alone run it. Another backend running from it, a name already stored, a model being written, or weights spread over several folders leave it where it is, said with why;
+  - renaming a model to the name it already has brings a drifted folder into line, and when nothing is left to do it says `'X' is already its name`;
+  - a stored folder name still works as before.
+- [x] **`models rename` completes the models by that name** (`MODEL_NAME`, `model_names`): each stored backend family's base, plus any stored model no family runs, by its folder. Never a `<model>/<format>/<id>` handle.
+- [x] **A backend's name completes as the BACKEND column shows it.** This fixes a 45a gap. `BACKEND` (`ValueKind::Backend`) now offers the configured keys alone, never a provider shelf or a roster id, for the roughly thirty arguments that take a backend's name: `config rename-backend`, `set-backend`, `set-default` and `delete-backend`, a suite's members, `--teacher`, `--judge` and the rest. 45a had proven only `-m` valid, the one place a model to run is taken. The two that resolve a session's model, `-m` on `chat`, `execute` and `tui` and on `complete`, are declared `BACKEND_OR_MODEL` (`ValueKind::Model`) and keep the shelves. Their `--help` names the new type, and the chat and execute help goldens move with it.
+- [x] **The tests** (`renames_test`):
+  - a family renamed with its folder following, from a folder whose name had drifted;
+  - a drifted folder brought into line by renaming a model to its own name, then refused as already its name;
+  - a folder another backend runs from left and said;
+  - the quantization level read as M3 writes it;
+  - completion on a live install: `models rename` offering the family's base and an unrun folder, `config rename-backend` and `set-default` offering the backends alone with a roster cached, and `chat -m` still offering the shelf.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,317 tests, one skipped for want of `pdftotext`, the chat and execute help goldens among them with `-m`'s new type. `make format-check` is clean for every file touched.
+
 ## Milestone C — The harness core
 
 **Goal.** The interface layer everything else is written against: one provider interface, one canonical message IR, one router. After this, "add a backend" means implementing an interface, and no surface, loop, or session file learns that a fifth vendor exists. Streaming, cancellation, multimodal content, and tool structures have to be in the interface on day one — adding any of them later means touching every implementation and every caller at once.

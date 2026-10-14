@@ -354,7 +354,7 @@ void bind_session_flags(CLI::App& command, const std::shared_ptr<SessionFlags>& 
     CLI::App* cmd = &command;
 
     cmd->add_option("-m,--model", flags->model, "Backend or model to use")
-        ->type_name(kBackendValue);
+        ->type_name(kBackendOrModelValue);
     cmd->add_option("-s,--system", flags->system_prompt, "System prompt for the session");
     flags->rag_option =
         cmd->add_option("--rag", flags->rag,

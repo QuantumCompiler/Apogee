@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "backends/model_roster.h"
 #include "contracts/config.h"
 #include "logger/session.h"
 #include "support/cli_home.h"
@@ -200,7 +201,7 @@ TEST_CASE(
 
     // Refusals, each named.
     CHECK(run(store.home, {"models", "rename", "org--nope", "org--x"}, &out, &err) == 1);
-    CHECK_THAT(err, ContainsSubstring("no stored model named 'org--nope'"));
+    CHECK_THAT(err, ContainsSubstring("no model named 'org--nope'"));
     CHECK(run(store.home, {"models", "rename", "org--gem", "a/b"}, &out, &err) == 1);
     CHECK_THAT(err, ContainsSubstring("cannot name a stored model"));
     write_file(store.home.home() / "models" / "org--other" / "gguf" / "222222222222" / "o.gguf");
@@ -241,4 +242,138 @@ TEST_CASE("the M3 spelling is read as M3 writes it", "[renames][coupling]") {
     CHECK_FALSE(derived_level("gemma-4-E2B", "google--gemma-4-E2B").has_value());
     CHECK_FALSE(derived_level("mine", "google--gemma-4-E2B").has_value());
     CHECK_FALSE(derived_level("gemma-4-E2B-Q4_K_M", "google--gemma-4-E2B").has_value());
+}
+
+// --- a model by the name its backends share (the user's request) ------------
+
+namespace {
+
+/// A stored model `dir`, its F16 and Q4_K_M files, and a backend for each
+/// named `<base>-F16` / `<base>-Q4KM` -- plus any `others`, each a backend
+/// running the Q4_K_M file too.
+struct FamilyHome {
+    apogee::testing::CliHome home{std::string{}};
+    fs::path f16;
+    fs::path q4;
+
+    FamilyHome(const std::string& dir, const std::string& base,
+               const std::vector<std::string>& others = {}) {
+        const fs::path models = home.home() / "models" / dir / "gguf";
+        f16 = models / "111111111111" / "m-F16.gguf";
+        q4 = models / "222222222222" / "m-Q4_K_M.gguf";
+        write_file(f16, "GGUF");
+        write_file(q4, "GGUF");
+        std::string config = "backends:\n";
+        const auto entry = [&config](const std::string& name, const fs::path& file) {
+            config +=
+                "  " + name + ":\n    type: llamacpp\n    model_path: " + file.string() + "\n";
+        };
+        entry(base + "-F16", f16);
+        entry(base + "-Q4KM", q4);
+        for (const std::string& other : others) {
+            entry(other, q4);
+        }
+        config += "models:\n  default: " + base + "-Q4KM\n";
+        std::ofstream{home.config_path(), std::ios::binary | std::ios::trunc} << config;
+    }
+
+    [[nodiscard]] fs::path dir(const std::string& name) const {
+        return home.home() / "models" / name;
+    }
+};
+
+}  // namespace
+
+TEST_CASE(
+    "models rename by the backends' shared name renames every quantization, the folder following",
+    "[renames][models][family]") {
+    // The folder kept its pulled name while the backends were renamed by
+    // hand: the model is what the backends call it.
+    const FamilyHome store{"google--gemma-4-12B-it-assistant", "Gemma4-12B-Assistant"};
+    std::string out;
+    std::string err;
+    REQUIRE(run(store.home, {"models", "rename", "Gemma4-12B-Assistant", "Gemma4-12B-Helper"}, &out,
+                &err) == 0);
+    CHECK_THAT(out, ContainsSubstring(
+                        "renamed backend 'Gemma4-12B-Assistant-F16' to 'Gemma4-12B-Helper-F16'"));
+    CHECK_THAT(out, ContainsSubstring(
+                        "renamed backend 'Gemma4-12B-Assistant-Q4KM' to 'Gemma4-12B-Helper-Q4KM'"));
+    CHECK_THAT(out, ContainsSubstring(
+                        "moved store 'google--gemma-4-12B-it-assistant' to 'Gemma4-12B-Helper'"));
+    CHECK_FALSE(fs::exists(store.dir("google--gemma-4-12B-it-assistant")));
+    const apogee::harness::Config config = apogee::harness::load_config(store.home.config_path());
+    REQUIRE(config.find_backend("Gemma4-12B-Helper-F16") != nullptr);
+    REQUIRE(config.find_backend("Gemma4-12B-Helper-Q4KM") != nullptr);
+    CHECK(config.find_backend("Gemma4-12B-Helper-Q4KM")->model_path ==
+          (store.dir("Gemma4-12B-Helper") / "gguf" / "222222222222" / "m-Q4_K_M.gguf").string());
+    CHECK(fs::exists(config.find_backend("Gemma4-12B-Helper-F16")->model_path));
+    CHECK(config.models.default_backend == "Gemma4-12B-Helper-Q4KM");
+}
+
+TEST_CASE("models rename to the name it already has brings a drifted folder into line",
+          "[renames][models][family]") {
+    const FamilyHome store{"google--gemma-4-E4B-it-assistant", "Gemma4-E4B-Assistant"};
+    std::string out;
+    std::string err;
+    REQUIRE(run(store.home, {"models", "rename", "Gemma4-E4B-Assistant", "Gemma4-E4B-Assistant"},
+                &out, &err) == 0);
+    CHECK_THAT(out,
+               ContainsSubstring(
+                   "moved store 'google--gemma-4-E4B-it-assistant' to 'Gemma4-E4B-Assistant'"));
+    CHECK(out.find("renamed backend") == std::string::npos);
+    CHECK(fs::exists(store.dir("Gemma4-E4B-Assistant")));
+    // In line now: nothing left to do, and said so.
+    CHECK(run(store.home, {"models", "rename", "Gemma4-E4B-Assistant", "Gemma4-E4B-Assistant"},
+              &out, &err) == 1);
+    CHECK_THAT(err, ContainsSubstring("'Gemma4-E4B-Assistant' is already its name"));
+}
+
+TEST_CASE("a folder another backend runs from stays where it is when the family is renamed",
+          "[renames][models][family]") {
+    const FamilyHome store{"Gemma4-E2B", "Gemma4-E2B", {"mine"}};
+    std::string out;
+    std::string err;
+    REQUIRE(run(store.home, {"models", "rename", "Gemma4-E2B", "Gemma4-Tiny"}, &out, &err) == 0);
+    CHECK_THAT(out, ContainsSubstring("renamed backend 'Gemma4-E2B-F16' to 'Gemma4-Tiny-F16'"));
+    CHECK_THAT(out, ContainsSubstring("store 'Gemma4-E2B' unchanged -- 'mine' also runs from it"));
+    CHECK(fs::exists(store.q4));
+}
+
+TEST_CASE("models rename completes the models by their backends' name; config verbs the backends",
+          "[renames][completion]") {
+    const FamilyHome store{"google--gemma-4-12B-it-assistant", "Gemma4-12B-Assistant"};
+    // A stored model nothing runs, by its folder.
+    write_file(store.home.home() / "models" / "org--unrun" / "gguf" / "333333333333" / "u.gguf");
+    // A cloud backend with its roster cached: a shelf `-m` would offer.
+    std::string config = slurp(store.home.config_path());
+    config.insert(config.find("backends:\n") + 10, "  claude:\n    type: anthropic\n");
+    std::ofstream{store.home.config_path(), std::ios::binary | std::ios::trunc} << config;
+    apogee::backends::RosterCache cache;
+    cache.rosters["anthropic"] =
+        apogee::backends::ProviderRoster{{{"claude-opus-5-5", "Claude Opus 5.5"}}, "2026-10-14"};
+    REQUIRE(apogee::backends::save_roster_cache(cache).empty());
+    std::string out;
+    std::string err;
+    REQUIRE(store.home.run({"__complete", "models", "rename", ""}, &out, &err) == 0);
+    CHECK(out == "Gemma4-12B-Assistant\norg--unrun\n");
+    // The config side offers the backends' names, never a handle or a shelf.
+    REQUIRE(store.home.run({"__complete", "config", "rename-backend", ""}, &out, &err) == 0);
+    CHECK(out == "claude\nGemma4-12B-Assistant-F16\nGemma4-12B-Assistant-Q4KM\n");
+    REQUIRE(store.home.run({"__complete", "config", "set-default", "c"}, &out, &err) == 0);
+    CHECK(out == "claude\n");  // no `claude:`, no roster id
+    // A session's -m keeps the shelves: a model to run, not a backend's name.
+    REQUIRE(store.home.run({"__complete", "chat", "-m", "c"}, &out, &err) == 0);
+    CHECK(out == "claude\nclaude:\nclaude-opus-5-5\n");
+}
+
+TEST_CASE("the quantization level is read as M3 spells it", "[renames][family]") {
+    using apogee::commands::quant_level;
+    CHECK(quant_level("Gemma4-12B-Instruct-Q4KM") == std::optional<std::string>{"Q4KM"});
+    CHECK(quant_level("Gemma4-12B-Instruct-F16") == std::optional<std::string>{"F16"});
+    CHECK(quant_level("x-BF16") == std::optional<std::string>{"BF16"});
+    CHECK(quant_level("x-Q80") == std::optional<std::string>{"Q80"});
+    CHECK(quant_level("x-IQ4XS") == std::optional<std::string>{"IQ4XS"});
+    CHECK_FALSE(quant_level("Gemma4-12B-Instruct").has_value());
+    CHECK_FALSE(quant_level("local").has_value());
+    CHECK_FALSE(quant_level("x-q4km").has_value());
 }

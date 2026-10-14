@@ -569,7 +569,7 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->add_option("prompt", flags->prompt, "The prompt. Read from stdin when omitted");
     cmd->add_option("-m,--model", flags->model,
                     "Backend or model to use (default: models.default from config)")
-        ->type_name(kBackendValue);
+        ->type_name(kBackendOrModelValue);
     cmd->add_option("-s,--system", flags->system_prompt, "System prompt for this turn");
     cmd->add_option("--context", flags->context, "Extra context injected before the prompt");
     // allow_extra_args(false) is load-bearing: a CLI11 vector option is GREEDY

@@ -1852,18 +1852,21 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
 
 void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_dir,
                           const RootContext& context) {
-    // `models rename` (46a): the directory, what points into it, and the
-    // backends named after it, through the one core.
+    // `models rename` (46a): a model by the name its backends share -- every
+    // quantization renamed together, the directory following -- or by its
+    // stored directory, through the one core.
     auto rename_old = std::make_shared<std::string>();
     auto rename_new = std::make_shared<std::string>();
     CLI::App* rename = models.add_subcommand(
         "rename",
-        "Rename a stored model -- its directory, the backends pointing into it, the backends "
-        "named after it");
-    rename->add_option("model", *rename_old, "The stored model")
-        ->type_name(kModelValue)
+        "Rename a model -- every quantization's backend, and the stored directory they run from");
+    rename
+        ->add_option("model", *rename_old,
+                     "The model: its backends' name without the level (-F16, -Q4KM), or its "
+                     "stored directory")
+        ->type_name(kModelNameValue)
         ->required();
-    rename->add_option("new-name", *rename_new, "Its new name: a directory's")->required();
+    rename->add_option("new-name", *rename_new, "Its new name")->required();
     rename->callback([&context, models_dir, rename_old, rename_new]() {
         const RenameOutcome outcome = rename_stored_model(
             harness::resolve_config_path(context.config_path),

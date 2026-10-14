@@ -52,8 +52,12 @@ enum class ValueKind : std::uint8_t {
     /// One of a fixed set the parser validates (`CLI::IsMember`), read from
     /// that validator: `config add-backend --type`.
     Choice,
-    /// A configured backend's name -- declared `kBackendValue`.
+    /// A configured backend's name -- declared `kBackendValue`: the keys
+    /// alone, as `models list`'s BACKEND column shows them.
     Backend,
+    /// What a session runs -- declared `kBackendOrModelValue`: the keys, each
+    /// roster's `<key>:` shelf, a roster id once typed (45a's namespaces).
+    Model,
     /// The name of something that exists -- a collection, a chat, a model,
     /// a run -- declared with one of `kNameValues`, listed by a
     /// `CompletionSources`.

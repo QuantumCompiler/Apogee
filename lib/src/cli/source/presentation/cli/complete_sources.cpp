@@ -25,6 +25,7 @@
 #include "modelstore/kv_cache.h"
 #include "modelstore/store.h"
 #include "operations/knowledge_core.h"
+#include "operations/renames.h"
 #include "platform/child_process.h"
 #include "symphony/definition.h"
 #include "tasks/ledger.h"
@@ -414,6 +415,11 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         list.none = "the model store is empty -- 'apogee models pull'";
         list.as_listed = true;  // by format, then name (45a)
         note_store(store_roots(config), list);
+    } else if (kind == kModelNameValue) {
+        // A model by the name its backends share (the user's request), as the
+        // BACKEND column shows them without their level.
+        list.names = model_names(config, store_roots_of(config));
+        list.none = "no models -- 'apogee models pull' stores one";
     } else if (kind == kSnapshotValue) {
         list.names = stored_models(store_roots(config), false, true);
         list.paths = true;

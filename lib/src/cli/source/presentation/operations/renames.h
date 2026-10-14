@@ -45,6 +45,19 @@ struct RenameOutcome {
 [[nodiscard]] std::optional<std::string> derived_level(std::string_view backend,
                                                        std::string_view model);
 
+/// The quantization level a backend's name ends with, in M3's spelling --
+/// `F16`, `BF16`, `F32`, `Q4KM`, `Q80`, `IQ4XS` -- or nullopt: what makes
+/// `<name>-<level>` one quantization of the model `<name>`.
+[[nodiscard]] std::optional<std::string> quant_level(std::string_view backend);
+
+/// The models the config runs from the store, by the name their backends
+/// share (the user's request): each stored backend `<name>-<level>` gives
+/// `<name>` -- `Gemma4-12B-Instruct` for its `-F16` and `-Q4KM` -- and a
+/// stored model no such backend runs gives its directory. What `models
+/// rename` completes, in the one order.
+[[nodiscard]] std::vector<std::string> model_names(const harness::Config& config,
+                                                   const models::StoreRoots& roots);
+
 /// The stored model whose directory `file` sits in, under either of `roots`,
 /// or empty: where a backend's `model_path` or `mmproj_path` points.
 [[nodiscard]] std::string stored_model_at(const models::StoreRoots& roots,
@@ -60,11 +73,15 @@ struct RenameOutcome {
                                                       std::string_view old_name,
                                                       std::string_view new_name);
 
-/// `models rename <old> <new>`: the model's directories moved, records
-/// riding inside them; every backend pointing into them repointed; the
-/// backends named the M3 way after it renamed to the new base, their
-/// references and chats with them -- a name already taken left, said.
-/// Refused for a model being written (a `.partial` inside it).
+/// `models rename <old> <new>`. `old` is first a model by the name its
+/// backends share (the user's request): every stored backend `<old>-<level>`
+/// renamed `<new>-<level>`, their references and chats with them, and the
+/// directory they run from moved to `<new>` when they alone run it -- else
+/// left, said with why. Otherwise `old` is a stored model's directory: moved,
+/// records riding inside; every backend pointing into it repointed; the
+/// backends named the M3 way after it renamed to the new base. A name
+/// already taken is left, said. Refused for a model being written (a
+/// `.partial` inside it).
 [[nodiscard]] RenameOutcome rename_stored_model(const std::filesystem::path& config_path,
                                                 const models::StoreRoots& roots,
                                                 std::string_view old_model,
