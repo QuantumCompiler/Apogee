@@ -2,7 +2,7 @@
 
 How we work: features get discussed in chat, written up here (and in [SPEC.md](SPEC.md)), given their own document in [`backlog/`](../backlog/README.md) when they're specced, then an agent takes the backlog item and builds it straight from that document (there is no separate TODO file — the backlog is the queue). When work ships it's recorded in detail in [MILESTONES.md](MILESTONES.md); this file stays high-level — the running board of themes per release, plus what's next.
 
-**Version scheme:** feature releases are `v0.x.0`, patch releases are `v0.x.y`; development happens on a branch named for the release being built (currently `v0.1.7`) and merges into `stable` — **and that merge is the release** (decided 2026-09-22): the pipeline publishes the version `lib/release/VERSION` names, if it hasn't shipped already (since 2026-09-25; the CLI's own version in `lib/src/cli/CMakeLists.txt` moves only when the CLI changes, and then to the same number). Checked boxes are shipped; the detailed write-up of each is in MILESTONES.md.
+**Version scheme:** feature releases are `v0.x.0`, patch releases are `v0.x.y`; development happens on a branch named for the release being built (currently `v0.1.8`) and merges into `stable` — **and that merge is the release** (decided 2026-09-22): the pipeline publishes the version `lib/release/VERSION` names, if it hasn't shipped already (since 2026-09-25; the CLI's own version in `lib/src/cli/CMakeLists.txt` moves only when the CLI changes, and then to the same number). Checked boxes are shipped; the detailed write-up of each is in MILESTONES.md.
 
 ---
 
@@ -165,11 +165,7 @@ Opened 2026-10-04 (the user's call) with its first item; track **32** by the eve
 - [x] **Permission modes** *(39b, shipped 2026-10-11 — [Milestone AI](MILESTONES.md#milestone-ai--effort-and-permission-modes))* — manual, accept-edits, plan, dont-ask and bypass as one layer over the existing gate: `/permission-mode`, `--permission-mode` and `--allow-bypass`, Shift+Tab cycling manual → accept-edits → plan in both front ends with the mode shown, bypass only when allowed at launch, and a denial winning in every mode.
 - [x] **Thinking summaries** *(43, shipped 2026-10-11 — [Milestone AJ](MILESTONES.md#milestone-aj--the-thinking-summary))* — the thinking block shows the gist, not the stream: a fourth utility chore, `reasoning_summary`, keeps one short present-tense line current over raw chain-of-thought (local models, Ollama-style streams), run only on an **unmetered** member and degrading honestly to today's raw window when none exists; vendor-summarized thinking (Anthropic's blocks) displays as-is, routed by a `ModelBehavior` fact rather than re-summarized; both painters draw the same slot, `cli.thinking_display`/`/thinking-display` toggles raw back, and machine mode and `serve` keep raw reasoning unchanged (the side-call precedent, said).
 
----
-
-## In progress
-
-### v0.1.7 — The pre-shipped library
+### v0.1.7 — The pre-shipped library *(released 2026-10-14 · [release notes](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.7))*
 
 Opened 2026-10-11 (the user's call, from that day's spike — track **40**): the box, stocked. The spike found three bundled agents (all repo-and-release flavored), three shipped symphonies (chains and the Orchestrator's automatic offer live but undemonstrated), and no shipped notion for tasks at all — a goal is free text on argv. Three independent items, no gates:
 
@@ -191,6 +187,14 @@ The release's third track, **training suites in the box** *(track 42, opened 202
 - [x] **Role-chore kits** *(42b, shipped 2026-10-13 — [Milestone Z](MILESTONES.md#milestone-z--the-training-track))* — four more kits train a small local model for the jobs Apogee hands its helpers, each in Apogee's own request format and held to it by a test, so a change to the product is a change to the kit: `utility-chores` (a follow-up rewritten as a standalone search query, a tool's output summarised), `extraction-fidelity` (the knowledge graph's entities and relations, the shipped extraction stages' JSON), `tool-calling` (the one call a request needs, against Apogee's own file, shell and git tools) and `knowledge-capture` (a discussion read into an intent record). They ship bundled as the **`harness-helpers`** and **`knowledge`** regimes; `datasets kits` lists eight. The coder suite stays the recorded default-out until the execute track lands.
 
 **Dropped 2026-10-14 (the user's call): per-run integration wiring** (28e) -- carried from v0.1.5 and v0.1.6 without ever getting a backlog document -- is no longer planned, and leaves the backlog. The [Milestone M](MILESTONES.md#milestone-m--the-front-end-contract) record keeps what was learned.
+
+---
+
+## In progress
+
+### v0.1.8
+
+*Nothing is queued for v0.1.8 yet: its theme and its first track arrive with its first item.*
 
 ---
 
@@ -222,7 +226,7 @@ The standing upkeep queue *(created 2026-10-03, the user's call)* — release-ag
 
 ## Up next
 
-*Nothing is queued past v0.1.7 yet.*
+*Nothing is queued past v0.1.8 yet.*
 
 ## Unspecced ideas
 
