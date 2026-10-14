@@ -182,6 +182,42 @@ Decisions taken while building, for veto:
 
 **Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) ran 3,304 tests, one skipped for want of `pdftotext`. One failed: `serve_test`'s pinned count of admin routes, 86, which the rename twin made 87. It now names the route as well, and that case was rerun green in the same build. `cli.config_lifecycle`, `cli.http_api_conformance`, `harness.layering` (with `operations`' new link) and `harness.layer_context` all passed. `make format-check` is clean for every file touched.
 
+### 2026-10-14 — `edit-backend` (backlog item 46b): `config set-backend`, an entry edited in place
+
+**Why.** A backend's fields could not be changed. `config`'s verbs were add, delete, set-default and scan, so the only edit was delete-and-re-add, which lost the entry's comments and its place, and orphaned every reference while the key was gone. The editor already half-knew how: `set_backend_model_path` and `set_backend_mmproj_path` each touched exactly their field, with comments kept.
+
+- [x] **One transform per field** (`contracts/config_edit`, `set_backend_field`):
+  - one field of an entry set in place: the value token replaced where it stands, a comment after it kept, or the field written after `type:` when the entry lacks it;
+  - an empty value removes the field's line;
+  - the fields (`backend_editable_fields`) are every one the loader reads, but the key and `api_key`;
+  - refused: `api_key`, with the secrets rule ("a key is never taken on the command line -- store it with 'apogee auth add'"), a field no backend has, and a cleared `type`.
+- [x] **`config set-backend <name>`** over one core (`operations/backend_fields`, `set_backend_fields`):
+  - **the flags**: one per field, spelled as `add-backend` spells them, typed for completion (`INT`, `FLOAT`, a path, a choice set that also takes the `""` that clears);
+  - **the edit**: every named field in one edit, each its own transform, re-parsed before it lands;
+  - **the checks**: a new type checked as `add-backend` checks one, the rest of a value's shape the loader's (`--context-size lots` refused naming the field);
+  - **the key**: `--api-key` exists only to refuse, hidden from `--help` and from completion, naming `auth add`;
+  - **the result line**: the fields it set and cleared, and the file.
+- [x] **Every mode** (ADR 0002):
+  - `PATCH /v1/admin/backends/{id}` is the twin: a JSON object of fields, strings or numbers, through the same core, byte for byte, never a key. The HTTP parity table classifies it, and `http-api.md` documents it;
+  - the exec line runs the verb (ADR 0010);
+  - completion offers the backends and each flag's values (ADR 0007). An option hidden from `--help` is now hidden from completion too, as a hidden subcommand always was.
+- [x] **The tests**:
+  - the transform's goldens: a value in place with its comment, a field inserted, one cleared with its line, a missing one cleared leaving the file, two composed;
+  - the enumeration tie, both ways:
+    - every editable field, set through the transform, is read back by the loader, so a name it does not know fails;
+    - every field `add-backend`'s writer writes is editable;
+    - `set-backend`'s flags are exactly the editable fields, with every field `add-backend` takes among them;
+  - the verb end to end: a YAML config with every other byte kept, a JSONC one with its comments kept, and each refusal, a key never written or said;
+  - the twin byte-identical to the CLI;
+  - `cli.config_lifecycle` on the real binary: an edit read back, its reverse leaving the template-seeded file as it was, no field and a key both refused.
+
+Decisions taken while building, for veto:
+- **The tie is to the loader and to `add-backend`'s writer, not a list in a test.** The writer never writes four fields a person writes by hand (`binary`, `mode`, `host`, `idle_unload_seconds`), so "every field add-backend writes" alone would not have reached them. Each is editable, read back by the loader, and named in the test.
+- **`--mmproj-path`, as `add-backend` spells it**, rather than the document's illustrative `--mmproj`: one spelling per field across the two verbs.
+- **No `--unset-*` family**: the empty value clears, as confirmed at grooming. A choice set takes it beside its values, a typed number refuses it, and `type` can never be cleared.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,311 tests, one skipped for want of `pdftotext`. `cli.config_lifecycle`, `cli.http_api_conformance`, the completion audits and `serve_test`'s route count (now 88) are among them. `make format-check` is clean for every file touched.
+
 ## Milestone C — The harness core
 
 **Goal.** The interface layer everything else is written against: one provider interface, one canonical message IR, one router. After this, "add a backend" means implementing an interface, and no surface, loop, or session file learns that a fifth vendor exists. Streaming, cancellation, multimodal content, and tool structures have to be in the interface on day one — adding any of them later means touching every implementation and every caller at once.

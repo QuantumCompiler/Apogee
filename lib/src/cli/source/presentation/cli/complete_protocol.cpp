@@ -214,6 +214,9 @@ namespace {
     spec.aliases = app.get_aliases();
 
     for (const CLI::Option* option : app.get_options()) {
+        if (option->get_group().empty()) {
+            continue;  // hidden from --help, so hidden from completion too
+        }
         if (!option->nonpositional()) {
             spec.positionals.push_back(value_of(*option, option->get_name(true)));
             spec.last_positional_repeats = option->get_items_expected_max() > 1;

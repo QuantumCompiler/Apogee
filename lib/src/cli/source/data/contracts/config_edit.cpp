@@ -1589,7 +1589,78 @@ std::string set_backend_path_field(std::string_view content, std::string_view na
     return join_lines(lines);
 }
 
+/// Removes `backends.<name>.<key>` -- its line, a comment after it with it --
+/// leaving the entry otherwise as it was; a field it lacks leaves it as is.
+std::string remove_backend_field(std::string_view content, std::string_view name,
+                                 std::string_view key) {
+    Lines lines = split_lines(content);
+    const SectionRange range = find_section(lines, "backends");
+    if (!range.found) {
+        throw ConfigEditError("no 'backends:' section in this config");
+    }
+    const std::optional<std::size_t> key_line = find_entry_line(lines, range, name);
+    if (!key_line.has_value()) {
+        throw ConfigEditError("backend '" + std::string{name} + "' not found in config");
+    }
+    const auto [begin, end] = entry_extent(lines, *key_line, range.end);
+    const std::string prefix = std::string{key} + ":";
+    for (std::size_t i = begin + 1; i < end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (!is_blank(line) && !is_comment(line) && indent_of(line) == kFieldIndent &&
+            line.substr(kFieldIndent).starts_with(prefix)) {
+            lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(i));
+            return join_lines(lines);
+        }
+    }
+    return std::string{content};
+}
+
 }  // namespace
+
+std::vector<std::string_view> backend_editable_fields() {
+    return {"type",
+            "model",
+            "model_path",
+            "mmproj_path",
+            "embedding_model",
+            "system_prompt",
+            "context_size",
+            "cache_type",
+            "max_tokens",
+            "temperature",
+            "top_p",
+            "top_k",
+            "min_p",
+            "repeat_penalty",
+            "presence_penalty",
+            "seed",
+            "thinking",
+            "thinking_budget",
+            "binary",
+            "mode",
+            "host",
+            "idle_unload_seconds"};
+}
+
+std::string set_backend_field(std::string_view content, std::string_view name,
+                              std::string_view field, std::string_view value) {
+    if (field == "api_key") {
+        throw ConfigEditError(
+            "a key is never taken on the command line -- store it with 'apogee auth add' "
+            "(asked with echo off, or --stdin, or --from-env)");
+    }
+    const std::vector<std::string_view> fields = backend_editable_fields();
+    if (std::ranges::find(fields, field) == fields.end()) {
+        throw ConfigEditError("'" + std::string{field} + "' is no field of a backend");
+    }
+    if (value.empty()) {
+        if (field == "type") {
+            throw ConfigEditError("a backend's type cannot be cleared -- name the type it is");
+        }
+        return remove_backend_field(content, name, field);
+    }
+    return set_backend_path_field(content, name, field, "", value);
+}
 
 std::string set_backend_model_path(std::string_view content, std::string_view name,
                                    std::string_view path) {
@@ -2605,6 +2676,17 @@ std::string set_backend_model_path(std::string_view content, std::string_view na
                                    std::string_view path) {
     return in_format(content, [&](std::string_view text) {
         return yaml_text::set_backend_model_path(text, name, path);
+    });
+}
+
+std::vector<std::string_view> backend_editable_fields() {
+    return yaml_text::backend_editable_fields();
+}
+
+std::string set_backend_field(std::string_view content, std::string_view name,
+                              std::string_view field, std::string_view value) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::set_backend_field(text, name, field, value);
     });
 }
 

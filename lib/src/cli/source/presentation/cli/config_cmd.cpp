@@ -25,6 +25,7 @@
 #include "contracts/paths.h"
 #include "graph/code_languages.h"
 #include "modelstore/store.h"
+#include "operations/backend_fields.h"
 #include "operations/graph_sources.h"
 #include "operations/renames.h"
 #include "tools/toolsets.h"
@@ -974,6 +975,101 @@ void bind_delete_backend(CLI::App& parent, const RootContext& context) {
     });
 }
 
+/// One `set-backend` flag (46b): a field, how it is typed for completion,
+/// and what it says.
+struct FieldFlag {
+    std::string_view field;
+    std::string_view type;  ///< a type name; empty: free text
+    std::string_view description;
+    std::vector<std::string> choices{};
+};
+
+/// A validator taking `choices` or the empty word that clears the field,
+/// written as the choice set completion reads.
+[[nodiscard]] CLI::Validator choice_or_clear(std::vector<std::string> choices) {
+    std::string set;
+    for (const std::string& choice : choices) {
+        set += (set.empty() ? "" : ",") + choice;
+    }
+    return CLI::Validator(
+        [choices](std::string& value) {
+            return value.empty() || std::ranges::find(choices, value) != choices.end()
+                       ? std::string{}
+                       : "'" + value + "' is none of them";
+        },
+        "{" + set + "}");
+}
+
+void bind_set_backend(CLI::App& parent, const RootContext& context) {
+    auto name = std::make_shared<std::string>();
+    auto values = std::make_shared<std::map<std::string, std::string>>();
+    auto api_key = std::make_shared<std::string>();
+    CLI::App* cmd = parent.add_subcommand(
+        "set-backend", "Edit a backend's fields in place -- only the ones named; \"\" clears one");
+    cmd->add_option("name", *name, "The backend to edit")->type_name(kBackendValue)->required();
+    std::vector<std::string> types;
+    for (const std::string_view type : harness::backend_type_names()) {
+        types.emplace_back(type);
+    }
+    // One flag per editable field, spelled as `add-backend` spells it.
+    const std::vector<FieldFlag> flags{
+        {"type", "", "Backend type", types},
+        {"model", "", "Model name"},
+        {"model_path", kPathValue, "Path to a local model file"},
+        {"mmproj_path", kPathValue, "Path to the model's projector (an mmproj GGUF)"},
+        {"embedding_model", "", "Model used when this entry embeds text"},
+        {"system_prompt", "", "Default system prompt"},
+        {"context_size", "INT", "Context window, in tokens"},
+        {"cache_type", "", "The attention cache: f16, q8_0 or q4_0", {"f16", "q8_0", "q4_0"}},
+        {"max_tokens", "INT", "Maximum tokens to generate"},
+        {"temperature", "FLOAT", "Sampling temperature"},
+        {"top_p", "FLOAT", "Nucleus sampling: the probability mass kept"},
+        {"top_k", "INT", "Sample from the k likeliest tokens (0: all)"},
+        {"min_p", "FLOAT", "Drop tokens below this share of the likeliest"},
+        {"repeat_penalty", "FLOAT", "Penalty on repeated tokens (1: none)"},
+        {"presence_penalty", "FLOAT", "Penalty on tokens already present"},
+        {"seed", "INT", "A fixed sampling seed, so answers repeat"},
+        {"thinking", "", "Whether a reasoning model thinks first", {"on", "off", "auto"}},
+        {"thinking_budget", "INT", "The most tokens a reasoning model may think for"},
+        {"binary", kPathValue, "The vendor CLI's executable"},
+        {"mode", "", "The vendor CLI's mode"},
+        {"host", "", "The host the backend reaches"},
+        {"idle_unload_seconds", "INT", "Seconds idle before a local model is unloaded"}};
+    for (const FieldFlag& flag : flags) {
+        std::string spelling = "--" + std::string{flag.field};
+        std::ranges::replace(spelling, '_', '-');
+        CLI::Option* option = cmd->add_option_function<std::string>(
+            spelling,
+            [values, field = std::string{flag.field}](const std::string& value) {
+                (*values)[field] = value;
+            },
+            std::string{flag.description} + " (\"\" clears it)");
+        if (!flag.choices.empty()) {
+            option->check(choice_or_clear(flag.choices));
+        } else if (!flag.type.empty()) {
+            option->type_name(std::string{flag.type});
+        }
+    }
+    // Never a key on the command line: the flag is there only to say so.
+    cmd->add_option("--api-key", *api_key, "refused: keys are stored with 'apogee auth add'")
+        ->group("");
+    cmd->callback([&context, name, values, api_key]() {
+        std::vector<BackendFieldEdit> edits;
+        if (!api_key->empty()) {
+            edits.push_back({.field = "api_key", .value = *api_key});
+        }
+        for (const auto& [field, value] : *values) {
+            edits.push_back({.field = field, .value = value});
+        }
+        const BackendFieldsOutcome outcome =
+            set_backend_fields(config_path_for(context), *name, edits);
+        if (!outcome.refusal.empty()) {
+            fail(outcome.refusal);
+        }
+        std::cout << outcome.said << "\n";
+    });
+}
+
 void bind_rename_backend(CLI::App& parent, const RootContext& context) {
     auto old_name = std::make_shared<std::string>();
     auto new_name = std::make_shared<std::string>();
@@ -1343,6 +1439,7 @@ void ConfigCommand::bind(CLI::App& root, const RootContext& context) {
     bind_scan(*cmd, context);
     bind_delete_backend(*cmd, context);
     bind_rename_backend(*cmd, context);
+    bind_set_backend(*cmd, context);
     bind_set_role(*cmd, context, "set-default", "default", "Set the default backend");
     bind_set_role(*cmd, context, "set-default-embedding", "default_embedding",
                   "Set the backend used for embeddings");

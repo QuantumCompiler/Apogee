@@ -82,6 +82,7 @@ const std::map<std::string, Classification>& table() {
                    "providers-scan precedent)")},
         {"config delete-backend", twin("DELETE", "/v1/admin/backends/{id}")},
         {"config rename-backend", twin("POST", "/v1/admin/backends/{id}/rename")},
+        {"config set-backend", twin("PATCH", "/v1/admin/backends/{id}")},
         {"config set-default", twin("POST", "/v1/admin/backends/default")},
         {"config set-default-embedding", twin("POST", "/v1/admin/backends/default-embedding")},
         {"config set-default-extraction", twin("POST", "/v1/admin/backends/default-extraction")},

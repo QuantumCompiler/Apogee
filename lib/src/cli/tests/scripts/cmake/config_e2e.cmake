@@ -253,6 +253,19 @@ if(NOT AFTER_RENAME STREQUAL BEFORE_RENAME)
     message(FATAL_ERROR "a rename and its reverse did not leave the file as it was")
 endif()
 
+# An edit in place (46b): one field, read back, then put back -- the file as
+# it was, byte for byte. No key is ever taken.
+apogee_run(0 config set-backend claude --model claude-opus-5-5)
+apogee_run(0 config get backends.claude.model)
+expect_equal("${APOGEE_OUT}" "claude-opus-5-5" "set-backend wrote the field")
+apogee_run(0 config set-backend claude --model claude-sonnet-5)
+file(READ "${CONFIG_FILE}" AFTER_EDIT)
+if(NOT AFTER_EDIT STREQUAL BEFORE_RENAME)
+    message(FATAL_ERROR "an edit and its reverse did not leave the file as it was")
+endif()
+apogee_run(1 config set-backend claude)
+apogee_run(1 config set-backend claude --api-key sk-never)
+
 # --- auto_rag: injection with no flag, reported, and switchable off --------
 apogee_run(0 config add-backend mock --type mock --model mock-1)
 file(READ "${CONFIG_FILE}" BEFORE_AUTO_RAG)

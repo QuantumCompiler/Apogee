@@ -170,6 +170,21 @@ public:
 /// `rename_backend` rewrites.
 [[nodiscard]] std::vector<std::vector<std::string>> backend_reference_paths();
 
+/// A backend entry's fields `config set-backend` edits (46b): every field the
+/// entry's schema reads, but its key and its `api_key` -- a key is stored
+/// with `auth add` alone. One flag each, held to `add-backend`'s by a test.
+[[nodiscard]] std::vector<std::string_view> backend_editable_fields();
+
+/// Sets `backends.<name>.<field>` to `value` in place (46b): the value token
+/// replaced where it stands, a comment after it kept, or the field written
+/// after `type:` when the entry has none -- every other byte as it was. An
+/// empty `value` removes the field's line (`type` cannot be cleared).
+/// Throws ConfigEditError for a field no backend has, `api_key` (the
+/// secrets rule: a key is never taken on the command line), or a backend
+/// not in the config.
+[[nodiscard]] std::string set_backend_field(std::string_view content, std::string_view name,
+                                            std::string_view field, std::string_view value);
+
 /// Field names accepted by set_models_role.
 [[nodiscard]] std::vector<std::string_view> models_role_fields();
 

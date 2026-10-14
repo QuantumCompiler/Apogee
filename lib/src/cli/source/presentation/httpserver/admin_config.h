@@ -126,6 +126,14 @@ struct AdminConfigContext {
 [[nodiscard]] HttpResponse admin_rename_backend(const AdminConfigContext& context,
                                                 std::string_view name, const HttpRequest& request);
 
+/// `PATCH /v1/admin/backends/{name}` -- the `config set-backend` twin (46b):
+/// a JSON object of fields to their values, a string or a number, `""`
+/// clearing one -- through the one core, byte-identical to the CLI's. Never
+/// `api_key`: a key is stored through the credential routes alone.
+[[nodiscard]] HttpResponse admin_set_backend_fields(const AdminConfigContext& context,
+                                                    std::string_view name,
+                                                    const HttpRequest& request);
+
 /// `POST /v1/admin/config/format` -- the `config format` twin: whitespace
 /// tidied, content untouched.
 [[nodiscard]] HttpResponse admin_format_config(const AdminConfigContext& context);

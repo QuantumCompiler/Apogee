@@ -39,6 +39,7 @@ using apogee::httpserver::admin_list_mcp_servers;
 using apogee::httpserver::admin_list_permissions;
 using apogee::httpserver::admin_put_permission;
 using apogee::httpserver::admin_rename_backend;
+using apogee::httpserver::admin_set_backend_fields;
 using apogee::httpserver::admin_set_mcp_server_enabled;
 using apogee::httpserver::admin_set_role;
 using apogee::httpserver::AdminConfigContext;
@@ -627,4 +628,38 @@ TEST_CASE("a backend renamed over HTTP is byte-identical to the CLI's, every ref
     CHECK(Fixture::bytes(fixture.http_config) == before);
     CHECK(admin_rename_backend(fixture.context(), "assistant", post(nlohmann::json::object()))
               .status == 400);
+}
+
+TEST_CASE("a backend edited over HTTP is byte-identical to the CLI's, and never takes a key",
+          "[httpserver][admin][parity][set-backend]") {
+    // 46b: the twin calls the CLI's one core.
+    const Fixture fixture;
+    fixture.cli({"config", "add-backend", "helper", "--type", "mock", "--model", "m1"});
+    REQUIRE(admin_create_backend(
+                fixture.context(),
+                post(nlohmann::json{{"name", "helper"}, {"type", "mock"}, {"model", "m1"}}))
+                .status == 201);
+    REQUIRE(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
+
+    fixture.cli({"config", "set-backend", "helper", "--model", "m2", "--context-size", "8192"});
+    HttpRequest patch = post(nlohmann::json{{"model", "m2"}, {"context_size", 8192}});
+    patch.method = "PATCH";
+    const HttpResponse edited = admin_set_backend_fields(fixture.context(), "helper", patch);
+    REQUIRE(edited.status == 200);
+    CHECK(parsed(edited).at("edited") == "helper");
+    CHECK(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
+
+    // A key is refused, and the file is untouched; so is a field no backend has.
+    const std::string before = Fixture::bytes(fixture.http_config);
+    const HttpResponse keyed = admin_set_backend_fields(
+        fixture.context(), "helper", post(nlohmann::json{{"api_key", "sk-planted"}}));
+    CHECK(keyed.status == 400);
+    CHECK(keyed.body.find("a key is never taken on the command line") != std::string::npos);
+    CHECK(keyed.body.find("sk-planted") == std::string::npos);
+    CHECK(
+        admin_set_backend_fields(fixture.context(), "helper", post(nlohmann::json{{"colour", "x"}}))
+            .status == 400);
+    CHECK(Fixture::bytes(fixture.http_config) == before);
+    CHECK(admin_set_backend_fields(fixture.context(), "nope", post(nlohmann::json{{"model", "x"}}))
+              .status == 404);
 }

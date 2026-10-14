@@ -772,7 +772,9 @@ namespace {
 void check_values_against(const CLI::App& app, const apogee::commands::CommandSpec& spec,
                           const std::string& path, std::size_t& flags) {
     for (const CLI::Option* option : app.get_options()) {
-        if (!option->nonpositional()) {
+        // Hidden from --help, so hidden from completion too (46b's refusing
+        // `--api-key`), as a hidden subcommand is.
+        if (!option->nonpositional() || option->get_group().empty()) {
             continue;
         }
         const bool takes_value = option->get_expected_max() > 0;
@@ -1074,6 +1076,11 @@ const std::vector<std::string> kFreeText{"agents create name",
                                          "symphonies create --play",
                                          "symphonies play --input",
                                          "config rename-backend new-name",
+                                         "config set-backend --model",
+                                         "config set-backend --embedding-model",
+                                         "config set-backend --system-prompt",
+                                         "config set-backend --mode",
+                                         "config set-backend --host",
                                          "models rename new-name",
                                          "tui -s",
                                          "tui --system",

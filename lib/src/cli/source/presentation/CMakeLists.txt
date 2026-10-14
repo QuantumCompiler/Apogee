@@ -57,6 +57,8 @@ apogee_add_module(machine
 target_link_libraries(apogee_presentation_machine PUBLIC nlohmann_json::nlohmann_json)
 
 apogee_add_module(operations
+    operations/backend_fields.h
+    operations/backend_fields.cpp
     operations/backend_names.h
     operations/backend_names.cpp
     operations/collections.h

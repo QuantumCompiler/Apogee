@@ -11,6 +11,7 @@
 #include "contracts/config_edit.h"
 #include "contracts/host.h"
 #include "harness/roles.h"
+#include "operations/backend_fields.h"
 #include "operations/read_views.h"
 #include "operations/renames.h"
 #include "scaffold/mcp_server.h"
@@ -397,6 +398,42 @@ HttpResponse admin_rename_backend(const AdminConfigContext& context, std::string
     return json_response(200,
                          nlohmann::json{{"renamed", std::string{name}},
                                         {"to", renamed},
+                                        {"said", outcome.said},
+                                        {"restart_required", drifted(context, *after.config)}});
+}
+
+HttpResponse admin_set_backend_fields(const AdminConfigContext& context, std::string_view name,
+                                      const HttpRequest& request) {
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, false);
+    if (body.is_discarded() || !body.is_object()) {
+        return error_response(400, "the request body must be a JSON object");
+    }
+    const Loaded loaded = load_now(context);
+    if (!loaded.config.has_value()) {
+        return loaded.failure;
+    }
+    if (loaded.config->find_backend(name) == nullptr) {
+        return error_response(404, "no backend named '" + std::string{name} + "'", kNotFoundError);
+    }
+    std::vector<commands::BackendFieldEdit> edits;
+    for (const auto& [field, value] : body.items()) {
+        if (!value.is_string() && !value.is_number()) {
+            return error_response(400, field + ": a string or a number");
+        }
+        edits.push_back(
+            {.field = field, .value = value.is_string() ? value.get<std::string>() : value.dump()});
+    }
+    const commands::BackendFieldsOutcome outcome =
+        commands::set_backend_fields(context.config_path, name, edits);
+    if (!outcome.refusal.empty()) {
+        return error_response(400, outcome.refusal);
+    }
+    const Loaded after = load_now(context);
+    if (!after.config.has_value()) {
+        return after.failure;
+    }
+    return json_response(200,
+                         nlohmann::json{{"edited", std::string{name}},
                                         {"said", outcome.said},
                                         {"restart_required", drifted(context, *after.config)}});
 }

@@ -96,10 +96,11 @@ TEST_CASE("the route table is the documented one", "[httpserver][mux]") {
         }
     }
     CHECK(public_rows == 8);
-    CHECK(admin_rows == 87);
+    CHECK(admin_rows == 88);
     CHECK(has("POST", "/v1/admin/backends/default-vision"));
     // The rename twin (46a).
     CHECK(has("POST", "/v1/admin/backends/{id}/rename"));
+    CHECK(has("PATCH", "/v1/admin/backends/{id}"));  // the field-edit twin (46b)
     // The symphonies slice (27q): three twins and two reads, no play.
     CHECK(has("GET", "/v1/admin/symphonies"));
     CHECK(has("POST", "/v1/admin/symphonies"));

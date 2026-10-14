@@ -37,6 +37,10 @@ HttpResponse AdminHandler::rename_backend(const HttpRequest& request, std::strin
     return admin_rename_backend(config_context(), name, request);
 }
 
+HttpResponse AdminHandler::set_backend_fields(const HttpRequest& request, std::string_view name) {
+    return admin_set_backend_fields(config_context(), name, request);
+}
+
 HttpResponse AdminHandler::list_agents(const HttpRequest&) {
     return admin_list_agents(config_context());
 }
