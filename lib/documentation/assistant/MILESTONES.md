@@ -4456,6 +4456,16 @@ Also checked:
 - **Cloud backends** get the same note and descriptions through the same request assembly; no cloud model was run.
 - **MCP tools** reach the paragraph's wording but cannot switch it on: a session without `fetch_url` or `web_search` has no paragraph, whatever its MCP servers offer.
 
+### 2026-10-13 — `delete_file` and `list_directory` declare what they read (the user's request)
+
+**Why.** Building 42b's `tool-calling` kit against the product's own tool declarations showed `delete_file` and `list_directory` declaring `read_file`'s parameters: both assigned `read.parameters_schema`, so every model -- and every MCP client of `__mcp-tools`, for `list_directory` -- was told they took `offset` ("The line to start reading at, counting from 1") and `limit` ("How many lines to read"). Neither reads either.
+
+- [x] **Both declare `path` alone** (`register_fs_tools`'s `path_only`), required as before; `list_directory` still reads an empty path as the root. Nothing a tool does changed, only what it says it takes.
+- [x] **The `tool-calling` kit follows**: its `read-tools`, `edit-tools` and `shell-tools` prefixes carry the corrected declarations, and the compiled-in copy is regenerated. `training/role_kits_test.cpp` failed the build on exactly those three prefixes until they did -- the mirror doing its job.
+- [x] **Tests**: `fs_test` holds each of the seven filesystem tools to exactly the parameters its run reads, `delete_file` requiring `path`.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,278 tests, none failing, one skipped for want of `pdftotext`. `clang-format` is clean on every touched file.
+
 ## Milestone W — The MCP client
 
 **Goal.** The model picking up anyone else's tools: a from-scratch client for stdio MCP servers whose tools join the shared loop as first-class registry entries, with the subprocess discipline a misbehaving server demands, `apogee mcp` and its admin twins over one scaffold core, and Apogee hosting a server of its own.
@@ -4615,6 +4625,38 @@ The prefill, which lives only in the llama build, was checked on real weights in
 - DeepSeek's template renders the schema into the prompt itself, so a caller's OUTPUT FORMAT block states it a second time there. No DeepSeek model was run.
 - An `analyze` agent with tools is held only on its final pass, and most answer before it.
 - Qwen3.8-27B over the corpus (see the decision above).
+
+### 2026-10-13 — `shipped-agents` (backlog item 40a): four more bundled agents
+
+**Goal.** The three bundled agents were all repo-and-release reviewers. Four more cover the rest of what people hand a model, each a prompt and a schema in the shipped three's shape: read-only, default-model, compiled in and seeded skip-if-present. No new verb, flag or tool policy.
+
+- [x] **`code-review`** — correctness and simplification findings over a diff, a file or the branch under review: each with its file, location, severity (`high|medium|low`), kind (`correctness|simplification`), the claim, a suggested fix and a confidence, and a verdict (`approve|approve_with_suggestions|changes_requested`). `security-review`'s general sibling.
+- [x] **`test-gaps`** — the behaviors a change adds that no test would notice breaking, each with a priority, its location and a suggested test name in the project's own style, and the test files it read while looking.
+- [x] **`doc-drift`** — documentation statements a change made untrue, each quoted with its document, why it is stale and the edit that fixes it (`stale`, or `missing` for something new no document mentions). The first bundled agent written for auto-RAG: it expects the project's docs ingested into a collection and retrieved with `analyze --agent doc-drift --rag <collection>`, and also searches the repository's own files. It ships pointing at no collection.
+- [x] **`meeting-minutes`** — a transcript into decisions (with the reason given), action items (owner, task, due — `unassigned` and `not stated` where the transcript gives none, never invented) and open questions. The first bundled agent with no git in it.
+- [x] **The generator** — `scripts/generate_agent_assets.py` writes `contracts/assets_agents.cpp`: all seven agents' prompts and schemas as raw literals, with their order and descriptions, which it holds. The shipped three's literals moved there from `assets.cpp` unchanged (the byte-identity test held them through the move). It refuses a prompt file with no agent, a literal over 15,000 bytes, and a text holding its raw-string terminator.
+- [x] **The starter config's comment** names the seven where it said "Three review agents are built in".
+
+**Decisions** (2026-10-13, made while building; the item's own were the catalog, `doc-drift` with no default collection, flat schemas and no `issue-triage`)
+
+| Decision | Choice | Why |
+|---|---|---|
+| A generator for the agents | Added, writing all seven | The item's acceptance asks that "the generator reproduces them", and the agents had none: their literals were placed by a one-off script recorded in Milestone X. The symphonies' generator was the shape copied. |
+| How `doc-drift` says what it read | The report's `docs_source` (`retrieved_excerpts`, `repository_files`, `both`, `none`), and `analyze`'s existing retrieval note | Content only: no surface change. With `--rag <collection>` the run already says what it retrieved, and an absent collection is already said as "retrieval unavailable" without failing the run; with none, the report itself says it had nothing to check against and how to give it some. |
+| The prompts' rule on refs | Held only for prompts that call `git_diff` | `meeting-minutes` reads a transcript; the rule that refs come from `--branch/--base` is about the git tools. |
+| Model-agnostic, tested | Every bundled prompt is checked for vendor and family names (Claude, Anthropic, OpenAI, GPT, Gemini, Llama, Qwen) | The item's constraint, made a test rather than a review rule. |
+
+**Guardrails.**
+- `contracts/assets_test.cpp`: seven agents, each literal byte-identical to its files; every prompt and schema file shipped is a bundled agent's; the seeding count (fourteen agent files); the list order, an override still in its bundled slot.
+- `bundled_agents_test.cpp`: every schema draft-07, closed, `human_summary` last; every prompt's nothing-found rule; a nothing-found instance per new schema; a full report per new schema conforming, and refused with a stray field in an item.
+- `admin_agents_test.cpp`: the admin listing shows seven bundled.
+- `cli.analyze_lifecycle` on the real binary: `agents list` shows seven bundled; each new agent seeded, run over a scripted mock with `analyze --agent <name> --json`, conforming, and saved under `analyses/<name>/`; `doc-drift` with an ingested docs collection (said), with an absent one (said, and still run) and with none (nothing said of retrieval).
+
+**Not verified.**
+- On real weights: not run — the item's real-weights pass is optional, and this run is unattended.
+- Linux and Windows.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,202 tests, none failing, one skipped for want of `pdftotext` -- `cli.analyze_lifecycle` with the new agents among them. The llama-off unit binary: 3,141 passed, 5 skipped. `clang-format` is clean on every touched file; `make lint` runs once at the end of the v0.1.7 group.
 
 ## Milestone Y — The knowledge layer
 
@@ -4879,6 +4921,87 @@ The prefill, which lives only in the llama build, was checked on real weights in
 **Verified on the real binary.** `cli.train_lifecycle` continues with the mock and no Python: a two-stage pipeline whose second stage regresses the first's suite aborting under the cumulative gate (stage 0 fused, the last stage not, the lineage in the stage manifests), `pipeline status` with the resume hint, `resume` after the data is fixed completing and the last stage promoted like any run, a complete run refused; a regime over two kits with the mock backend as the teacher and `--no-promote` (a dataset and a suite per kit, one pipeline, no new ledger); the cycle from a queue directory -- skipped with nothing queued, a pass promoting into `training.cycle.backend` with the anchor set and the file consumed and not a config line removed, a regression failing, discarding and tripping the breaker at `k=1`, the halted loop refused naming `cycle resume` and reported by `check`, resumed and running again with the lock released; `train status` rolling both up; `check` green. The merge-blocking build passes every test (1445) through `cicd.sh`; a rebuild after the lock's lint fix passed all but two in a parallel `ctest` -- two models-package cases of the known temp-directory flake class, untouched by this item, passing serially and on three repeats; the llama build passes all but the two embedstore ingest cases of the same class, passing serially. `make lint` ran clean over the tree once the lock moved into the platform seam (the full run's one error was that deleter; the three files it changed re-linted clean in the error classes). The format check is clean.
 
 **Guardrails, each mutation-tested.** 82 mutants, every one caught in its final form. Four were re-formed after the first run because `make format` had reflowed the lines their first shape named, and one was re-formed because its first shape was equivalent (dropping the "no prior data" short-circuit on the previous-cycle half changes nothing while scores are non-negative; the re-form makes no data *fail*, which the gate must not). **Two survived on first contact, and one of them was the design finding above:** "a failed gate still promotes" survived because no test could reach a regression -- the cycle read the last *passed* stage's score, which is 100% by definition, so the dual gate was dead code; the cycle now reads the final stage and a soft-gate case drives a real regression through it. The other was a config test that refused a pipeline with no `stages` key but never one with `stages: []`. The mutations: stage 1's base not the fused checkpoint, the last stage fused too, the cumulative suite only the stage's own, a hard-gate failure ignored, the gate below 100%, a transition not written, `parent_run` and `pipeline_run_id` not set, resume always from stage 0, a complete run and a drifted spec resumable, cancellation not aborting, rehearsal never mixed and the fraction ignored, a failed stage not fused under continue, `completed_at` never set, `last_passed` counting every stage, the stage run never marked complete, its eval not recorded, the judge's baseline the candidate itself, a stage-count mismatch and a path-shaped id accepted; the teacher flag not winning, `--all-kits` unsorted and overriding `--kit`, the regime's `iters` never overriding, no kits accepted, the eval suite not materialised, the count not passed, `promote_run_id` not set, an empty teacher output not an error; `k = 0` not disabling the breaker, a halt ignored, resume not resetting the count, non-jsonl files collected, consumed files copied not moved, consent not required, the watermark ignored, the newest session not tracked, blank lines merged, the threshold ignored, no prior data failing, the anchor half ignored, the first passing score read instead of the last, a pass not resetting the count, a skip counted as a failure, the breaker tripping one late, no data still training, a failed gate still promoting, the queue not consumed, the anchor never set and overwritten on every pass, the lock not required and not exclusive and never released, the breaker not checked, stage datasets not replaced by the merge, the history not saved on a failure, the watermark not advanced, a failed promotion counted as a pass, the pinned anchor ignored, `consecutive_fails` not persisted, `history_exists` always true; a sessions source without consent loading, an unknown source type loading, the threshold unbounded, zero stages accepted, `eval_suite` not required, the breaker's default not 3; the active pipeline a complete one, pipelines oldest first; `?kind=pipeline` keeping the runs, the cycle route answering with no history, `active_pipeline` never reported; the mock's answer ignored and not carried into the fused checkpoint; a halted cycle not warned and a non-llamacpp cycle backend ok by the doctor; a failed cycle exiting 0, `--no-promote` ignored, the config edited despite a failed build, a resume refusal not honoured at the command.
+
+### 2026-10-13 — `shipped-regimes` (backlog item 42a): training suites in the box
+
+**Goal.** The regime mechanism shipped full, from the training-suites spike of 2026-10-11 (track 42). `train regime run [name]` already took a named regime or a spec file, but `train regime` had one verb, nothing shipped as a regime, and the four bundled kits carried 8 eval items each -- too thin for the pipeline's cumulative gate to mean anything.
+
+**What was built**
+
+- [x] **`foundation`, the first shipped regime** (`assets/training/regimes/foundation.yaml`): the four bundled kits as one gated pipeline, instruction-following → structured-output → summarization → reasoning, each kit's own count and iterations (`count: 0`, `iters: 0`), with a `description` and a header saying why the order is the tuning. It names kits and tuning only -- never a teacher, a student or a promoted name: `train regime run foundation --teacher <backend> --student <snapshot>`.
+- [x] **The ladder** (`training/regime_specs.h/.cpp`, `regime_book`): a name answered nearest first by a `training.regimes:` entry, a spec under the data directory's `training/regimes/` (run by its file's name; `seeded` while byte for byte a shipped spec, `user` once edited or for a file of the user's own), then a shipped spec's compiled-in text (`shipped`) while no file of its name is there. Each name once, in the order the shipped names, then the config's other entries, then the other files. A file that does not parse, or names itself otherwise, is left out and said in `problems`.
+- [x] **`train regime list` and `train regime show <name>`**: a NAME / SOURCE / KITS / DESCRIPTION table (the `datasets kits` shape) with any skipped file on stderr, and one regime whole -- its source and path, its kits in order, count, iters and temperature (`each kit's own` at zero), and the teacher and student as `yours: --teacher <backend>` where the spec leaves them out. Both take `--output-format json`: `{"object":"list","data":[…],"problems":[…]}` and `{"object":"training.regime",…}`, documented in machine-mode.md.
+- [x] **A run by name reads the same book** (`resolve_regime_spec`), so `foundation` runs from its compiled-in text before `check --fix` has seeded it. A spec of that name that does not parse is said as the reason, rather than "no regime"; a name nothing answers lists the names there are.
+- [x] **Every bundled kit's inline eval deepened from 8 items to 24**, each with a checkable `expected`, so a stage's gate asks something of the student with or without a judge configured.
+- [x] **The asset pipeline**: `scripts/generate_training_assets.py` compiles the regimes into `assets_training.cpp` (`bundled_regimes`, `find_bundled_regime`, `bundled_regime_relative_path`), `bundled_files()` carries them, and the one seeding path writes them skip-if-present under `training/regimes/` -- inside the existing `training` layout row (`training_regimes_dir`), so no new row. `RegimeSpec` gains `description`, read from a spec or a config entry.
+- [x] **Completion**: `train regime run <TAB>` and `show <TAB>` offer every name the book holds, a spec file's path too.
+
+**Decisions** (2026-10-13; the item's own were the 24-item floor, the kit order, `foundation`'s counts and iterations as the build's tuning, and `list`'s columns)
+
+| Decision | Choice | Why |
+|---|---|---|
+| `foundation`'s counts and iterations | **Each kit's own** (`0` in the spec) | The kits already set what each skill needs; a regime that overrode them would tune every kit alike. The spec's comments say so. |
+| Judge-scored eval items | **None: all 96 carry an `expected`** | The spec allowed the judge where no `expected` fits. Every item written has a checkable answer, so the gate means something on an install with no judge backend, where a judged item would skip and auto-pass. |
+| A spec file at a shipped name that does not parse | **Left out and said, never replaced by the compiled-in text** | The file is what a run by that name reads; running the shipped spec in its place would quietly run something other than what the user wrote. |
+| A `training.regimes:` entry's source | **`user`, with `config: true` in the documents** | Three sources keep the column the ladder's own; an entry is the user's, and the flag says which kind. |
+| A spec file's name | **Its file's name; a file whose `name:` disagrees is refused** | A run names a file by its name; a file answering to two names would make `list` and `run` disagree. |
+| The book's order | **The shipped names, then the config's other entries, then the other files, each by name** | What ships leads on a fresh install, and a user's own regimes follow in a stable order. |
+| HTTP | **No route: `read_only` in the parity table**, as `task recipes show` is | Training control is CLI-only, so a regime is run, and read, on the host; the JSON documents are the reads' twin, as the item specced. |
+
+**Guardrails.**
+- `training/regime_specs_test.cpp`: `foundation` from its compiled-in text with no file, `seeded` at the shipped bytes, `user` once edited; a config entry over a file of its name, listed once; the order, `.yaml` and `.yml`; a broken file, a misnamed one and a broken one at a shipped name each left out and said once; both documents field by field; and **`foundation` run whole over the four bundled kits on the mock trainer** -- a student answering the evals passing every cumulative gate (24, 48, 72, 96 items, none skipped), and **a planted kit it fails stopping the pipeline at that kit's stage**, the first two passed and the last never run.
+- `contracts/assets_test.cpp`: the regimes byte-equal to their files, every file compiled in, each naming kits and tuning only over bundled kits, seeded under `training/regimes/`; the seeding counts moved by one.
+- `cli/train_test.cpp`: `list` and `show` pinned whole as text over the seeded install, both documents, a stream-json read refused, `shipped` with the file removed, `user` edited, a config entry over it, a spec of the user's beside it, a broken spec skipped on `list` and named on a run; and `train regime run foundation` on the mock trainer -- the echoing student failing the first kit's 24 evals under the hard gate (exit 2), a soft gate running all four stages to the cumulative 96.
+- `cli/complete_sources_test.cpp`: the shipped regime and a user's spec offered. `httpserver/parity_test.cpp`: both reads classified.
+- The pins the deeper kits moved: `kit_test`, `check_test`'s kit row, `admin_datasets_test`'s kits route and `train_test`'s kit suite resolution, 8 → 24.
+- The existing regime refusals -- no teacher, a vendor CLI as teacher, no student, an unknown student, no kits, an unknown kit, `--as` a mock, a zero token budget -- are untouched and still pass.
+
+**Not verified.**
+- Linux and Windows.
+- On real weights: nothing here trains a model, and a `foundation` run needs a teacher, a Python environment and a snapshot. The hermetic run on the mock trainer is the item's vehicle.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,269 tests, none failing, one skipped for want of `pdftotext` -- `cli.train_lifecycle`, `cli.install_parity` and `harness.layering` among them. `clang-format` is clean on every touched file.
+
+### 2026-10-13 — `role-chore-kits` (backlog item 42b): training the helpers for Apogee's own jobs
+
+**Goal.** The four bundled kits train general skills; none trained the chores Apogee hands its small local members (the training-suites spike's W3). Four kits now do, each in the product's own request format and held to it by a test, bundled as two shipped regimes. Track 42 complete.
+
+**What was built**
+
+- [x] **Four role-chore kits** under `assets/training/kits/`, each headed by the source files it mirrors:
+  - `utility-chores`: the utility role's two chores -- a follow-up rewritten as one standalone search query (`agentloop/query_rewrite.cpp`'s `rewrite_request`), and a tool's output summarised for the model that acts on it (`tool_summary.cpp`'s `summary_request`). 12 + 12 eval items.
+  - `extraction-fidelity`: the extraction role's -- the graph clerk's entities and relations (`graph::extract_system_prompt`), and the shipped symphonies' extraction stages (`extract-facts`, `extract-actions`, `digest`'s card), each one JSON object held to its schema. 12 + 4 + 4 + 4.
+  - `tool-calling`: the one call a request needs, against the product's own `read_file`, `list_directory`, `search_files`, `grep_files`, `write_file`, `edit_file`, `delete_file`, `run_command` and four git tools, declared as a template is handed them, in four sets of three or four. 32 items, 8 per set; count 300, iters 600.
+  - `knowledge-capture`: the capture clerk's (`knowledge::capture_system_prompt`) -- a raw discussion read into one canonical intent record. 24 items.
+- [x] **Every expected value is one the chore's own rules fix**: the referent a rewrite must fill in, the identifier a summary must keep, an entity, a schema key checked without a grammar, `unassigned` and `not stated` where the actions stage demands them, a tool's name in the call's form, a record's status, discipline or link.
+- [x] **Kits gain `prefixes:`** (`training/kit.h/.cpp`, `synth.h/.cpp`): the fixed texts a kit's prompts begin with, by name. An eval item names its own (`prefix:`) and its prompt is that text and its own; in a kit with prefixes an item naming none is refused. The teacher is shown each prefix once and names one per example (`"prefix"`), writing only what follows; the synth core puts the text back, and an example naming none of the kit's is dropped. A kit without prefixes reads, and asks its teacher, byte for byte as before.
+- [x] **Two shipped regimes**: `harness-helpers` (`utility-chores` → `extraction-fidelity` → `tool-calling`, the order the spec's comments justify) and `knowledge` (`knowledge-capture` alone). `train regime list` shows three; `foundation`'s description now says "the four general kits".
+- [x] `datasets kits` lists eight; the kits route serves eight.
+
+**Decisions** (2026-10-13; the item's own were one `utility-chores` kit for both chores, and the 24-item floor with more where items are cheap)
+
+| Decision | Choice | Why |
+|---|---|---|
+| Where the product's fixed text lives | **Once per kit, as a named prefix** | The product's words byte for byte in every example, one copy for the mirror to hold, and no teacher copying a 5 KB clerk prompt out -- and paying for it -- at every call. |
+| A system prompt in a one-turn kit | **Carried in the turn, a blank line before the text it reads** | The kit shape and the eval's one-prompt candidate hold one turn; a system turn would be trainer and eval behavior the item rules out. |
+| What `tool-calling` teaches | **The call's content as JSON -- the loop's `{"name", "arguments"}` -- not each family's wrapper** | The wrapper is the template's: training it needs the drivers to render `tools` and `tool_calls` through the student's template and the eval to give tools at inference, which is trainer behavior this item rules out. A later item, if the evals show the gap. |
+| Which tools | **The twelve fs, shell and git tools, in sets of three or four** | Each set stays within the trainers' 2,048-token window; the tools that need a session's state (`consult`, `delegate`, `todo_write`, the notes, RAG and graph tools) cannot be shown in one turn. |
+| A judge rubric | **None needed: every item carries a checkable `expected`** | Each chore's format fixes a checkable answer; a kit's `synth.system` says what a good completion is. |
+| The vendor rule | **Checked on everything a kit says for itself; a prefix is the mirror's** | The capture clerk's own prompt names two tools as provenance examples; the product's words stay the product's. |
+| `foundation`'s description | **"The four general kits"** | With eight shipped, "the four bundled kits" no longer named them. |
+
+**Guardrails.**
+- `training/role_kits_test.cpp`: every prefix byte for byte the product's own text, read from its functions, the tool declarations from a registry with the sandbox said as `/work/project`; every eval prompt rebuilt through the product's own builder into itself (`rewrite_request`, `summary_request`, `render_template` over the shipped stage) and within 6,000 bytes; a synth round over a scripted teacher whose examples rebuild the same way and whose completions the product accepts -- the graph and capture schemas, each stage's schema, the one-line query rule, the declared tool's parameters -- with an example in no format of the kit's dropped; **a planted drift caught** in a prefix (one word of the rewrite instruction), a prompt (no question line; a conversation longer than the product shows), a tool (a renamed parameter) and a completion (arguments off the schema, a record without its status); and nothing a kit or its regimes says naming a vendor or model family, the check shown to bite.
+- `training/regime_specs_test.cpp`: `harness-helpers` and `knowledge` run whole on the mock trainer, the teacher's examples kept behind each kit's prefix, every cumulative gate passed by a student that answers the evals, and a planted kit it fails (`tool-calling`, `knowledge-capture`) stopping each at that stage.
+- `training/kit_test.cpp` and `synth_test.cpp`: prefixes parsed, applied, refused when unknown or missing, shown to the teacher once, put back on what it wrote; a kit without them asked byte for byte as before.
+- `contracts/assets_test.cpp`: eight kits and three regimes byte-equal to their files, every file compiled in; the seeding counts. `kit_test`, `admin_datasets_test` and `train_test` moved to eight kits and three regimes.
+- `cli.datasets_lifecycle` lists the eight seeded kits and their document; `cli.train_lifecycle` lists the three shipped regimes seeded and shows `harness-helpers` whole.
+
+**Not verified.**
+- Linux and Windows.
+- On real weights: the item's optional pass -- one family, `harness-helpers` once, the before/after eval delta -- was not run. It needs a training environment and a SafeTensors snapshot, and building the environment downloads packages, which this run does not do. Nothing here trains or promotes on Apogee's initiative.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,277 tests, none failing, one skipped for want of `pdftotext` -- `cli.datasets_lifecycle`, `cli.train_lifecycle` and `harness.layering` among them. `clang-format` is clean on every touched file.
 
 ---
 
@@ -5803,6 +5926,37 @@ No family ever played the wrong symphony: every miss was a choice not to play --
 
 **Left for the owner.** The pick rates above are the evidence a default-on decision must cite; Qwen3-VL-8B's under-playing after its first control and Llama 3.1 8B's playing on controls are the two behaviours a default would have to answer. Llama 3.1 8B cut its first play's input at an apostrophe (`… because the payment provider` -- the minutes' "provider's"): the call's argument ended there as the model wrote it, a template or model behaviour outside this item. The labeled line's closing time and tokens scroll out of the default thinking block's two-row tail once its stages are drawn (each stage line keeps its own; `--verbose` keeps all of them). There is no session-level off switch for a suite's `orchestrate: true` (`--no-orchestrate`). The `summarize-verify` starter's verdict-instead-of-summary (27r) stands.
 
+### 2026-10-13 — `shipped-symphonies` (backlog item 40b): four more starters, and the first chain in the box
+
+**Goal.** Three starters shipped, and two shipped capabilities had no shipped definition to show them: chains (27r), and with them what the Orchestrator (27t) is offered. Four starters in the 27q grammar, nothing else: no grammar, walk, cap, runner, surface or Orchestrator change.
+
+- [x] **`redact-text`** — the utility member lists the private details in a text (email, phone, person, address, credential, id), each exactly as written, held to a schema with that closed category list; the chat member rewrites the text with `[EMAIL]`, `[PHONE]`, `[PERSON]`, `[ADDRESS]`, `[CREDENTIAL]` or `[ID]` in each one's place and changes nothing else. A privacy pass that never leaves a local suite.
+- [x] **`extract-actions`** — one schema stage on the extraction member: who does what by when, `unassigned` and `not stated` where the notes give none, never guessed. `extract-facts`' sibling on a different document.
+- [x] **`critique-revise`** — the utility member works out what a draft is for and lists at most five specific ways it falls short, quoting each; the chat member revises it to answer the critique and nothing more.
+- [x] **`digest`, the first shipped chain** — stage one plays `summarize-verify` on the input, its stages narrated in place; stage two, on the extraction member, cards the result with a title, tags and a one-line summary, held to a schema. Three member calls, one budget across the walk.
+- [x] Each is headed as the shipped three are (what it shows, the play line, the `--from` line), caps every role stage with `answer_tokens`, and is compiled in by `generate_symphony_assets.py` and seeded skip-if-present.
+
+**Decisions** (2026-10-13, made while building; the item's own were the catalog, `digest` playing rather than inlining, no audio and no `translate-check`)
+
+| Decision | Choice | Why |
+|---|---|---|
+| `digest`'s card stage | On the extraction role | The role that already holds schema answers (`extract-facts`, `extract-actions`); the utility and chat members are `summarize-verify`'s. |
+| `redact-text`'s categories | email, phone, person, address, credential, id — the sketched six, unchanged | Flat and enumerable; the schema's enum refuses anything else, so a member inventing a category stops the walk before the rewrite. |
+| Tests that name the catalog's first starter | Updated, not decoupled | The Orchestrator's offers and the orchestrate refusals name a starter by catalog order, which is alphabetical: `critique-revise` now comes first. Those tests pin the observable catalog, so they move with it. The recipe in DEVELOPER.md now says so. |
+| The `/symphonies` table's role column | Left as it is | `digest`'s role chain, `play:summarize-verify → extraction`, is wider than the column and pushes its row's last columns along by four characters. A layout change would be a surface change, which this item rules out. |
+
+**Guardrails.**
+- `contracts/symphony_spec_test.cpp`: seven starters, each byte-identical to its file and parsed; the new four's stage features; every role stage of every starter capped.
+- `symphony/runner_test.cpp`, over scripted members: `redact-text`'s list held to its schema and threaded into the rewrite, a category outside the list stopping the walk before it; `extract-actions` one call, a missing `due` refused; `critique-revise`'s critique beside the draft; `digest` validated within the caps, played as a chain with each line naming its position (`digest → summarize-verify, stage 1/2 summarize`, `… stage 2/2 verify`, `digest, stage 2/2 card`), the card held to its schema over `summarize-verify`'s output, a two-call budget stopping it with no answer and the card never asked, and a depth cap of one refusing it before any call.
+- The catalog, the offers, the orchestrate refusals, `execute_session.golden`, `cli.execute_lifecycle`'s offered tools and refusal, and the PTY check's banner counts (`7 symphonies`, `orchestrating 6`), moved to the seven.
+- `cli.symphonies_lifecycle` on the real binary: seven listed as shipped; `create --from` each new one, shown and deleted; the shipped `digest` played under a suite, every position said on stderr and the card on stdout; completion offering the new names.
+
+**Not verified.**
+- On real weights: not run — the item's pass is optional, and this run is unattended.
+- Linux and Windows.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on): 3,203 of 3,206 passed on the first run, one skipped for want of `pdftotext`. The three failures were this item's own pins the first pass had missed -- `cli.symphonies_lifecycle` (its new `create --from` loop left an empty `symphonies:` key behind the editor's inverse check), `cli.execute_lifecycle` (the offered tools and the billed refusal) and `cli.chat_typeahead_and_crash_safety` (the banner's counts) -- each fixed in its script and passing when run again. The llama-off unit binary: 3,145 passed, 5 skipped. `clang-format` is clean on every touched file.
+
 ---
 
 ## Milestone AD — Autonomous tasks
@@ -5960,6 +6114,47 @@ No family ever played the wrong symphony: every miss was a choice not to play --
 **Not verified.** Windows (the e2e, the served reads over a socket and the pseudo-terminal check are POSIX; the view, the events and the routes are portable code). A front-end consuming the stream live -- the e2e reads it after the run; the per-event flush is `JsonReporter`'s own, unchanged. A task killed mid-turn under machine mode: the stream simply ends, and the next `task resume --output-format stream-json` opens with the whole history (the resume path is the one verified, after a halt). 28g's schema artifact, not yet shipped, does not yet carry the task events.
 
 **Left for the owner.** Readings this item chose, each in the table and each a one-place change if vetoed: the served view and the JSON document withholding a person's answers as well as the declared one; machine mode prompting nobody even at a terminal; and `created` delivered as `task_started`'s history rather than as an event of its own. The parity table's training reads (`train status`, `train versions`, `train pipeline status`, `train cycle status`) are still classified read-only though `/v1/admin/training/*` serves them -- the new `served` kind could name their routes too; left as they were, since they are not this item's.
+
+### 2026-10-13 — `task-recipes` (backlog item 40c): pre-shipped goals with their checks baked in
+
+**Goal.** Agents and symphonies ship in the box; a task was a free-text goal on argv and nothing more. A **recipe** gives tasks their shipped form: a named goal template with its acceptance checks and suggested grants baked in, which the binary knows, lists and expands into exactly the run a person would type.
+
+- [x] **`tasks/recipe`** — the definition (name, description, an input contract, the goal template over one `{{input}}`, `tools`, `require`, `require_files`, the suggested `allow`, `agent`, `rounds`), the one parser and the ladder. `parse_recipe` refuses, naming the file and the reason: not YAML, an unknown key, no goal, any variable but `{{input}}`, an unclosed `{{`, an input the goal never reads (or one it reads without saying what it is), a `name:` that disagrees with the file's, a grant or an agent without `tools: true`, rounds out of range, a blank check. `recipe_book` is the symphonies' ladder without a config section: a file under `recipes/` over the shipped starter of its name -- `seeded` while it is the shipped bytes, `user` once edited, `shipped` from the compiled-in text while no file is there -- then the user's own files by name, a file that does not parse said once in `problems`.
+- [x] **`task recipes` and `task recipes show <name>`**, each with `--output-format json` (`{"object":"list","data":[…],"problems":[…]}` and `{"object":"task.recipe",…}`), documented in `machine-mode.md`.
+- [x] **`task run --recipe <name> [--input TEXT]`** — the recipe expanded into the very flags a hand-typed run takes: its goal rendered, its checks before any typed ones, `--tools`, its `rounds` unless `--rounds` was typed, its `agent` unless `--agent` was. The run is `drive`'s own; the ledger's new `recipe` key is the provenance, written only when set, so a hand-typed ledger reads byte for byte as before. The task view is unchanged.
+- [x] **Grants are suggested, never assumed** (`consent_to_recipe_grants`). Each suggested grant the line does not already give is asked `[y/N]` at a terminal, no the default; on a pipe or in machine mode it is said with the `--allow` that would give it, and not given. A consented grant is the line's own, held to the same ceiling: one past the config or the agent is refused naming the rule, recipe or no recipe.
+- [x] **Three starters**, compiled in by `scripts/generate_recipe_assets.py` and seeded skip-if-present under the new **`recipes`** layout row, which seeding, `check`, `reset --keep` and install parity all learn from the row: `digest-folder` (a folder read and its digest written to `DIGEST.md`; `--require-file DIGEST.md`; suggests `write_file`), `changelog-draft` (a git log excerpt into a CHANGELOG section; no tools; `--require "## Unreleased"`) and `capture-decisions` (a transcript's decisions each captured as a knowledge record; `--require "Captured:"`; suggests `run_command` and `write_file`).
+- [x] Completion: `--recipe` and `task recipes show` offer the recipes (the `RECIPE` name kind). The full-screen shell needs nothing: `task` is already a classified view, and the exec line runs the new verbs.
+
+**Decisions** (2026-10-13, made while building; the item's own were the full `--recipe` surface, suggested-never-granted grants, the three starters, one `{{input}}` and no Task-view picker)
+
+| Decision | Choice | Why |
+|---|---|---|
+| `capture-decisions`' grant | `run_command` and `write_file`: each decision's passage written to `decisions/<n>.txt`, then `apogee knowledge capture --source meeting --input decisions/<n>.txt` run | No native tool writes knowledge records; `knowledge capture` is the store's one writer, and a task reaches it only by running it. Granted, `run_command` runs any command without asking, so the recipe's header says so and the consent prompt names it. |
+| `digest-folder` "read-only" | Read as "changes nothing in the folder": it writes only `DIGEST.md`, so it suggests `write_file` | Its check is `--require-file DIGEST.md`, which a read-only task could never pass. |
+| A recipe's `agent` | Applied as a typed `--agent` would be, a typed one winning; grants stay suggestions | An agent's policy only narrows what a task may do; a grant widens it, which is what consent is for. None of the three starters names an agent. |
+| The ladder's three rungs | One directory: a starter's file `seeded` while it is the shipped bytes, `user` once edited; other files `user` | Recipes have no config section; this is the symphonies' ladder with the config rung absent, and the source column still says which a run will read. |
+| The checks | Written as they are, never templated | Only the goal reads `{{input}}` (the item's one-variable call); a templated check would be a second grammar. |
+| A typed goal beside `--recipe`, and `--input` without one | Both refused before anything is made | Two goals for one task, and an input with nothing to read it, are each a mistake to say, not to guess past. |
+| The documents | The list idiom, `object: list` and `object: task.recipe` | As `task list` and `symphonies list` print theirs. |
+| An admin twin | None: `task recipes show` is classified read-only in the HTTP parity table | Task control is CLI-only; the reads the admin plane serves are a task's status and list. A recipe route is a later call if a remote client needs one. |
+
+**Guardrails.**
+- `tasks/recipe_test.cpp`: every field parsed; each refusal by name and reason; a goal expanded, braces in the input left as text, a missing or unwanted input refused; the shipped three as specced; the ladder (no directory, seeded, edited, the user's own, a broken file said once, a broken starter's file never silently replaced); both documents.
+- `contracts/assets_test.cpp`: the three byte-identical to their files, every file compiled in, seeded under `recipes/`; the seeding count.
+- `cli/task_test.cpp`: a recipe's run and its hand-typed twin's ledgers equal but for the provenance and what any two runs differ by, the view unchanged and a hand-typed ledger writing no `recipe` key; a suggested grant said and not given on a pipe, the write it would have allowed denied as without a recipe; one typed given; one past the config refused naming the rule; the grants asked one by one at a terminal, no the default; `task recipes` and `show` as text and as documents, a user's file listed as theirs; every refusal before anything is made.
+- The parity table classifies `task recipes show`; `cli.lifecycle`'s free-text list names `--input`.
+- `cli.task_lifecycle` on the real binary: the three seeded and listed as `seeded`, the list document, a recipe run to done with its check attached and its name in the ledger, a suggested grant said and never given on a pipe, and completion offering the names to `--recipe` and `recipes show`.
+- `cli.install_parity` holds the new row.
+
+Fixed in passing: `contracts/assets.h`'s symphony comment still said three starters ship, stale since 40b.
+
+**Not verified.**
+- A recipe run on real weights (none was asked for); `capture-decisions` end to end, which needs a clerk model and a granted `run_command`.
+- The terminal consent prompt is tested through its function with a scripted stream, not at a real terminal.
+- Linux and Windows.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,218 tests, none failing, one skipped for want of `pdftotext` -- `cli.task_lifecycle` and `cli.install_parity` among them. `clang-format` is clean on every touched file.
 
 ## Milestone AE — The code graph
 
@@ -7213,3 +7408,183 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3
   - The other families were skipped, as the guardrail allows.
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: all 3,199 tests ran with none failing, one skipped for want of `pdftotext`. That includes `cli.machine_schema_conformance` (the wire byte-stable), `harness.layering`, `cli.tui_shell` and `cli.chat_line_editing`. `clang-format` is clean on every touched file, and `make lint` was not run.
+
+## Milestone AK — The coding mode
+
+**Goal.** `apogee execute` grown into a Claude-Code-class coding session over local and cloud models alike, from the execute-mode spike of 2026-10-11 (track 41). The spike found the inventory mostly standing -- the sandboxed fs, shell and git kit, the permission gate with 39's modes, compaction, the code graph, local tool-calling through each model's own template -- and six walls: execute refusing to open without a suite, no project-context convention, no workspace ritual, no visible plan, no tool-using sub-agent and no coding persona. Each item takes one wall down without a second loop, a second resolver or a second attach path.
+
+### 2026-10-13 — `execute-opens-bare` (backlog item 41a): one strong model and its tools
+
+**What was built**
+
+- [x] **Three rungs, decided once in `run_session`.** A suite -- `--suite`, or `models.default_suite` -- opens execute as it always has. With neither, execute now opens **bare** on `-m <backend>` or `models.default`, suite-less through the role resolver's existing chain, exactly as `chat` runs -- no synthesized suite, no new rung. A resumed session that had no suite, under a config with no default suite, resumes bare on its own backend.
+- [x] **Refused only with nothing to open on** (`execute_suite_refusal`): no suite named or the default, no `-m`, no `models.default`. Today's wording for the suite half stands, and the bare door follows: "-- or open it bare on one model: apogee execute -m <backend>, or with a default backend set (apogee config set-default <backend>)". A resumed session that names no backend under such a config is refused the same way.
+- [x] **`--orchestrate` stays the suite's** (`execute_orchestrate_refusal`): refused bare, at launch or on a resume, naming the suites there are and `config set-default-suite`. `--suite off` is refused naming the bare door.
+- [x] **`/play` in a bare session** resolves each stage's role through the one chain: a helper role (utility, extraction, vision, transcription) on the conversation's backend, the chat role on its pointer, `models.default`.
+- [x] **The banner** says `no suite` where a suite would be named: `root  ·  no suite  ·  7 symphonies  ·  chat …`. A session under a suite banners as before.
+- [x] **The shell's doors take the same rungs**, through execute's own session: with no suite configured, the picker offers `Execute on <default backend> (no suite)`, and a `/play` with no session open plays in a new execute session under the default suite, else bare on the default backend, else says there is nothing to open on.
+- [x] `execute`'s one-line summary now says it: "Open a session under a suite, its symphonies playable (/play), or bare on one model". SPEC's surface line carries a dated revision.
+
+**Decisions** (2026-10-13; the item's own were the resolver's existing rungs, `--orchestrate` the suite's, and the banner's shape)
+
+| Decision | Choice | Why |
+|---|---|---|
+| A bare `/play`'s chat stage | The chat role's pointer, `models.default` -- not the session's `-m` | The one chain, unchanged: a member call asks its role, and with no suite and no pointer only a helper role falls to the conversation's backend. A rung for "the session's model" would be the new resolver state the item rules out. |
+| A resumed session whose suite was turned off in chat | Resumes bare on its own backend | It used to be refused for want of a suite; bare is now a door, and a saved session names its backend. |
+| `--orchestrate` on a resume of a bare session | Refused | The Orchestrator offers a suite's symphonies; a resume with none has nothing to offer them from. |
+
+**Guardrails.**
+- `cli/execute_test.cpp`: bare on the default and on `-m`, its answer and transcript byte for byte chat's; refused only with nothing to open on, both refusals pinned whole; `--orchestrate` refused bare and on a bare resume, nothing saved; `--suite off` and a missing suite refused; a bare `/play`'s stages through the chain; machine mode over a bare session in the events it already has, the `session` event naming the model; a resumed session turned off resuming bare.
+- `execute_session.golden` moved only where the door did (the bare scenario, the `--suite off` wording, the summary line); every suite-given section byte-stable.
+- `cli/tui_session_test.cpp`: the picker's bare door; a play with no session open, bare on the default backend; nothing to open on, said.
+- `root_help.txt`, the summary line.
+- `cli.one_role_resolver`: the door asks the resolver (`resolve_chat_backend`) what it would open on, never `models.default` raw -- the first draft read the field, in the session core and the shell's door, and the guard failed it.
+- The golden's bare scenario runs in a home of its own: in the shared one, it saved a session in the same second as the suite scenario's, and the `execute -c` after them resumed whichever sorted first -- a flake ctest's run found and five consecutive runs now pass.
+- `cli.execute_lifecycle` on the real binary: bare on the default and on `-m`, a bare `/play`, `--orchestrate` refused bare, the nothing-to-open-on refusal with every way in, no suites configured, `--suite off`.
+
+**Not verified.**
+- Linux and Windows.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,224 tests, none failing, one skipped for want of `pdftotext` -- `cli.execute_lifecycle`, `cli.one_role_resolver` and `cli.unit_suite_under_a_tty` among them. `clang-format` is clean on every touched file.
+
+### 2026-10-13 — `execute-project-opening` (backlog item 41b): the context file read, the folder attached
+
+**What was built**
+
+- [x] **What a project is** (`cli/project_context`): the folder the session opened in, when it holds a `.git` or a context file. Nothing above it is probed, so a subfolder of a repository opens as any folder does.
+- [x] **The context file**: `AGENTS.md`, else `CLAUDE.md`, first found wins, read and never written. Its text is mended to UTF-8 where it is read, and capped at `kProjectContextWords` (4,000): the head kept to a word's end and the cut said, in the note ("[AGENTS.md goes on: 100 more words were left out, past the 4,000-word cap. Read the file itself for the rest.]") and on the opening line. A file that is there and cannot be read is said as a warning; the folder is still a project.
+- [x] **Standing context, never the conversation's**: the note rides every request at the head of what the turn injects (`run_chat_turn`'s new `standing`), so it is never history, never saved, never in the transcript, and the last thing the budget would trim -- said when it is.
+- [x] **The folder attached** through the one attach driver, as `--attach .` would -- indexed, its code graph per `attachments.graph`, its map card, the graph toolset scoped to it, the attachment share -- and re-attached through the same update path on a resume. `--attach ""` skips it (and is never attached itself); any other `--attach` replaces it (`opening_attaches`).
+- [x] **Said where the session opens**: `project context: AGENTS.md, 7 words, in every request` (or `the first 4,000 of 6,000 words, in every request -- the rest left out`) on the terminal and on a pipe's stderr, and in machine mode as a `notice` event, before the folder's own attach lines. Documented in `machine-mode.md`.
+- [x] `chat` opens exactly as it did; `execute` outside a project too.
+
+**Decisions** (2026-10-13; the item's own were AGENTS.md first, the opening on in a project and off elsewhere, the cap named, and no nested files)
+
+| Decision | Choice | Why |
+|---|---|---|
+| Where the note rides | The head of the turn's injected context, not the never-trimmed slot the environment note has | It can be thousands of words; on a small window the budget must be able to say it trimmed it rather than refuse the turn. At the head it is trimmed last, after retrieval and recall. |
+| The cap | 4,000 words, cut at a word's end | "A few thousand words" as the item put it; words are what a person counts in their own file, and the line says the counts. |
+| The detection | The folder itself: a `.git` or a context file there | The item's "cheap and local". A subfolder of a repository opens as any folder; walking up is the nested-files item's question. |
+| Machine mode | The existing `notice` event, no new event type | The item's "the banner facts ride the existing header events": the vocabulary, and the schema, unchanged. |
+| The helper's home | `cli/project_context`, not `contracts/` | The session core is its only reader; the item allowed `contracts/` only "if one is needed". |
+
+**Guardrails.**
+- `cli/project_context_test.cpp`: neither, a repository, a context file alone; `AGENTS.md` before `CLAUDE.md`; past the cap the head kept with the counts and the cut said in the note and the line; a Latin-1 file mended; `opening_attaches` -- the folder by default, `""` a skip, anything else a replacement.
+- `cli/execute_test.cpp`, in a fixture repository: `AGENTS.md` carried on both turns of a session and said on stderr, and no word of it in the saved conversation's user content, system prompt or attachments; the folder attached as `.`, an explicit `--attach notes.md` replacing it; outside a project execute as before and `chat` in the project never reading the file; machine mode's `notice`.
+
+**Not verified.**
+- A project opened on real weights; the opening attach of a large repository (the attach driver's own size guard asks at a terminal and refuses on a pipe, unchanged).
+- Linux and Windows.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,230 tests, none failing, one skipped for want of `pdftotext` -- `cli.unit_suite_under_a_tty` (which runs `execute_test` on a terminal) among them; the conformance checks passed again after `machine-mode.md` gained the opening. `clang-format` is clean on every touched file.
+
+### 2026-10-13 — `execute-coder-persona` (backlog item 41c): a shipped system prompt for the project session
+
+**What was built**
+
+- [x] **The coder persona** (`assets/personas/coder.txt`, 304 words): read before changing anything, never edit a file not read in the session; change as little as the task needs, an exact edit over a rewrite, the project's own style; check the work before saying it is done -- the project's build or tests, or at least a re-read -- and never claim a success not seen; ask before anything that cannot be taken back, or when the task is unclear; say what was done, by path, and what was checked. It names no vendor, no model and no tool by name, and ends by deferring to the project's own instructions.
+- [x] **Compiled in, never seeded**: `generate_agent_assets.py` writes it beside the agents as `bundled_personas()` (`find_bundled_persona("coder")`), and `contracts/assets_test.cpp` holds it byte-identical to its file, every persona file compiled in, free of vendor and family names and under 4 KiB.
+- [x] **Carried in a project** (41b's detection) as standing context ahead of the project's file, so the file, closer to the conversation, wins where they differ. Never saved; injected, so the budget counts it and, past the window, trims it and says so.
+- [x] **`-s` replaces it whole**: a session with a system prompt -- given now, or saved with a resumed session -- carries no persona. The opening says which: `persona: coder, the shipped coding prompt, in every request -- -s replaces it`, or `persona: your -s prompt, in place of the coder persona`; in machine mode as a `notice`.
+- [x] Outside a project, and in `chat`, nothing changes.
+
+**Decisions** (2026-10-13; the item's own were execute-in-a-project only, `-s` replacing it whole with no merge, and no session `--agent`)
+
+| Decision | Choice | Why |
+|---|---|---|
+| Where the text lives | `assets/personas/coder.txt`, not `assets/prompts/coder-system.txt` | Since 40a every file under `assets/prompts/` is a bundled agent's -- seeded for `analyze` and refused by the generator otherwise. A persona is neither seeded nor an agent. |
+| What "under `-s`" means | A session with any system prompt: typed now, or saved with a resumed session | A resumed session's own `-s` is its steering text; adding the persona back on a resume would be the merge the item rules out. |
+| Its generator | `generate_agent_assets.py`, beside the agents | One generator for the compiled-in prompts; a second script for one file would be a second pipeline to keep. |
+
+**Reviewed on real weights** (the item's confirmed default: one local Q4 model and one cloud model on the same fixture task before ship). The fixture was a repository whose `add()` subtracted, with a failing `test_calc.py` and an `AGENTS.md` naming the test command. The task, for both: "The test in this project fails. Find the cause and fix it." Both ran in `--permission-mode accept-edits` on a pipe, so edits ran and commands were denied.
+- **Google family, gemma-4-12B-it Q4_K_M** (local, llama.cpp): it named the cause, made the one-line fix (`a - b` → `a + b`, a one-line diff), tried to run the test (denied), and said so -- "I cannot run the test script directly as the permission was denied" -- listing the file and line it changed. The same model without the persona (a stale binary, run first by mistake) made the same fix but never tried the test and reported nothing about checking.
+- **The Claude Code CLI** (cloud, the user's subscription; one turn): it named the cause with `calc.py:3`, gave the exact one-line edit, and said it had applied nothing and run nothing because this session's permissions did not allow either -- the vendor CLI's own permissions, not Apogee's gate. No success was claimed.
+- Neither model wandered outside the task or edited more than the line.
+
+**Guardrails.**
+- `cli/execute_test.cpp`: the persona carried in a project, ahead of the project's file, said and never saved; `-s` replacing it, on a resume too; outside a project and in `chat`, nothing; `run_chat_turn`'s standing context inside the request's injected range, in order, never in history.
+- `contracts/assets_test.cpp`: the persona's byte-identity, vendor-free and bounded.
+
+**Not verified.**
+- Families other than Google on real weights (one family, as the guardrail asks); Linux and Windows.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,233 tests, none failing, one skipped for want of `pdftotext`. `clang-format` is clean on every touched file.
+
+### 2026-10-13 — `session-todo` (backlog item 41d): the plan, visible while it runs
+
+**What was built**
+
+- [x] **`todo_write`** (`tools/todo`): the whole list each call -- items with `pending`, `active` or `done` -- replacing the last; at most 20 items of 120 characters, each refusal naming its cap ("the todo holds at most 20 items, and this call gave 21 -- merge or drop some, and send the whole list again"), an unknown state, an empty line or no list refused the same way and nothing changed; text mended where it enters. Native and ungated, as the notes are: it writes session state only. In tool selection's core, so it never drops out past sixteen tools.
+- [x] **The types at the floor** (`contracts/todo`): `TodoState`, `TodoItem`, `TodoList`, the caps, `describe_todo` (the lines every text surface draws: `todo · 1 of 3 done`, then `[x]`, `[>]`, `[ ]` per item) and the `{text, state}` document every machine face carries, read back leniently.
+- [x] **One Reporter change, four renderers.** `on_todo(list)`, the list whole:
+  - the terminal keeps a dim block below the status each time it changes (`todo · cleared` when emptied);
+  - the shell folds it above the input, redrawn whole;
+  - machine mode emits a `todo` event (`items`), declared in the protocol, the schema and `machine-mode.md`, the vocabulary's date moved to 2026-10-13;
+  - a served stream that asked for events gets a `todo` meta-frame, documented in `http-api.md`.
+- [x] **Saved with the session** (`logger`), written only when it holds one; a resumed session shows it as it opens -- in machine mode as a `todo` event right after `session` -- and `/todo` prints it.
+- [x] **Serve too**: `serve --tools` registers it, and each request's board is its conversation's list, saved with the session; a stateless request's lasts its turn.
+
+**Decisions** (2026-10-13; the item's own were the whole-list tool, chat and execute both, the caps, and the two painters' places)
+
+| Decision | Choice | Why |
+|---|---|---|
+| How a change reaches the surfaces | The tool writes to a board current on its thread (`TodoScope`), whose `changed` is the front end's `on_todo`; the loop is untouched | Tools run on the loop's own thread, so one registry -- serve's is built once, a suite's pinned copies are copies -- serves every conversation, and the loop never has to know a todo exists. The item's "the loop handing state changes through it" is met by the Reporter carrying it, without a loop change. |
+| Where the types live | `contracts/` | The session file (`logger`, Data), the Reporter (`agentloop`), the tool and machine mode all read them; the floor is the one place every one reaches. |
+| Who registers it | The session core with `--tools` (chat and execute), and `serve --tools` | The item's scope; a task's turns and an agent's analysis keep their own registries, unchanged. |
+| The terminal's block | Reprinted whole as kept lines on each change | A kept line is how the terminal keeps anything above its prompt; a region repainted in place would fight the answer's scrollback. |
+| A suite that pins a toolset | `todo_write` goes where the pin says | A pin is the user's choice of toolsets; the core keeps it in the offer when it is registered, not past a pin. |
+
+Fixed in passing: a machine-mode reader test checked that a `cancel` had reached a turn the instant the reader handed the turn over, when the reader thread reaches that line on its own time -- 8 runs in 40 failed on the binary before this item, and none in 60 after it waits for the cancel, bounded.
+
+**Guardrails.**
+- `tools/todo_test.cpp`: the state table, every refusal, characters not bytes, the UTF-8 door, the board's scope.
+- `contracts/todo_test.cpp`: the words, the lines, the lenient document.
+- One change through every adapter: `cli_reporter_test`, `session_view_test`, `sse_test` (and none without events), `machine_mode_test` (field for field against the declaration).
+- `cli/session_todo_test.cpp`, on the real command tree: drawn, saved, shown again on resume, `/todo`; machine mode's event and a resumed stream opening with it; a session without tools keeping none.
+- `handler_test.cpp`: a served session's meta-frame and its saved list. `tool_selection_test.cpp`: in the core. `logger/session_test.cpp`: saved, read back, a bad entry left out. The leak test's surfaces gain the renders.
+- The chat and execute goldens moved only by `/todo`'s help row and `todo` in the capabilities' event list.
+
+**Not verified.**
+- A model keeping a todo on real weights (the mock plays the model; whether a small local model reaches for the tool unprompted is the persona's and the model's business, as the item says).
+- Linux and Windows.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,249 tests, none failing, one skipped for want of `pdftotext` -- `cli.machine_schema_conformance` (the `todo` event pinned to the declaration, the schema the binary prints and `machine-mode.md`) and `cli.http_api_conformance` among them. `clang-format` is clean on every touched file.
+
+### 2026-10-13 — `execute-delegate` (backlog item 41e): a bounded sub-session as a tool
+
+**What was built**
+
+- [x] **`delegate`** (`tools/delegate`): its call runs a sub-session with **the one loop, re-entered** -- `agentloop::run` on a fresh conversation (the brief, framed as a delegate's task, and nothing of the parent's history), with:
+  - the tools the parent's turn offers, less `delegate` itself (`delegate_kit`), so depth is exactly one;
+  - the session's own model, or a role's through the one resolver when the call names one -- one billed per call refused, as consult's rule says;
+  - the parent's own gate whole: its permission checker, its prompt (the terminal, the shell's widget, machine mode's `question`), its mode's refusals; with nobody to ask, a deny;
+  - the parent's standing context and plan mode's note as system context, so a plan-mode parent's delegate plans too, and a project's rules bind it;
+  - the parent's cancellation, so Ctrl-C or a driver's `cancel` stops it mid-sub-turn and the parent's turn with it.
+- [x] **Bounded by construction**: at most `kDelegateSubTurns` (8) model calls, each answer capped at `kDelegateAnswerTokens` (4,096); past the cap it answers without tools, and says so.
+- [x] **Its result**: the sub-session's answer and a one-line account -- `[delegate on root: 3 model calls, tools read_file ×2, 1,840 tokens]`, or the cap said -- returned as the tool's result. That result, in the parent's record, is all that is kept: no second chat, nothing in `chats list`.
+- [x] **Narrated as a side call** with its tool lines: the delegation (`delegate — a sub-session on root: <brief>`, closed with its time and tokens) and each sub-tool line opened and closed inside it. The terminal and the shell draw them in the thinking block as a consult's call; machine mode says them as `tool_status`, its pinned vocabulary unchanged.
+- [x] **Offered where it belongs**: registered with `--tools` in chat and execute, in tool selection's core, and named in the environment note -- when to hand work off, and that the brief is all the delegate gets -- only where it is registered, so the delegate's own note never mentions it.
+- [x] **The turn's context, current on its thread** (`DelegateScope`, made by `cli/chat_turn` from the options it builds): every surface that runs a chat turn gets the same delegate, with nothing per surface.
+
+**Decisions** (2026-10-13; the item's own were depth one, the session's model unless a role is named, the transcript as the tool call's detail, the parent's checker carrying the mode, the bounds, and the kit as the parent's less `delegate`)
+
+| Decision | Choice | Why |
+|---|---|---|
+| The token budget beside the 8 calls | Each sub-call's answer capped at 4,096 tokens, the total spend reported in the result | The loop has no mid-run stop on tokens; adding one would be a loop change this item does not need, and 8 × 4,096 bounds what a delegate can generate. What it spent, prompts included, is said whether it finished or not. |
+| Questions from the sub-session | None: it gets no `ask_user` | It reports back to the session that asked; a question goes through the parent, who has the conversation. A permission prompt still reaches the person, through the parent's gate. |
+| What is kept of the sub-session | Its answer and its account, as the tool result | "The tool call's detail inside the parent's record": the parent's history holds what the parent read. The sub-session's own turns are not saved anywhere. |
+| A delegation on another role's model that bills per call | Refused | The model's initiative never spends (27f's rule, the consult's): the session's own model is the user's spend already, another one is not. |
+| How the delegate reaches the turn | A context current on the turn's thread (`DelegateScope`), as the todo's board is | Tools run on the loop's own thread; one registry -- shared, pinned or scoped copies alike -- serves every turn, and no surface wires the delegate by hand. |
+
+**Guardrails.**
+- `tools/delegate_test.cpp`, over scripted mocks: a fresh context with no parent history, the standing notes as system context, `delegate` absent from the kit, each answer capped, the answer and account returned, the narration in order; the kit's environment kept; the call cap stopping a delegate that never stops; the parent's prompt deciding once per call, a deny with nobody to ask; the parent's cancellation thrown through; a role's model, a billed one refused, an unknown role and an empty brief refused; no turn current said.
+- `cli/delegate_session_test.cpp`, through the session core: the answer and account kept only in the parent's record, one chat saved; a pipe's denial identical with and without nesting; a delegated prompt reaching a driver as one `question`, its `always` writing the config's one line through the one editor.
+- `tui/session_view_test`: the delegation folding in the thinking block as a consult's call.
+
+**On real weights** (optional, one family): the Google family's gemma-4-12B-it (Q4_K_M), in `apogee execute` with tools inside the 41c fixture repository (a `calc.py` whose `add()` subtracts), asked to "use the delegate tool to have a delegate read calc.py and report exactly what add() returns". The model formed the `delegate` call itself, from 26 registered tools with selection on. The sub-session made 3 model calls (`list_directory`, then `read_file`, then its answer), spent 17,543 tokens, and answered "The function `add(a, b)` in `calc.py` returns `a - b`." The parent relayed it, and the session record kept the tool result with its account -- `[delegate on gemma: 3 model calls, tools list_directory, read_file, 17543 tokens]`. The other families were not run, as the guardrail allows.
+
+**Not verified.**
+- A delegation cancelled mid-sub-turn on real weights (the unit test throws the parent's cancellation through; the session core's cancel path is the one every tool already rides).
+- Linux and Windows.
+
+The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,261 tests, none failing, one skipped for want of `pdftotext` -- `cli.machine_schema_conformance` (no event added) and `cli.unit_suite_under_a_tty` among them. `clang-format` is clean on every touched file.

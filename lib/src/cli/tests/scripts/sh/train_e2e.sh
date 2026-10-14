@@ -321,6 +321,17 @@ REGIME=$(ls "$TRAINING/regime" | head -1)
 [ -f "$TRAINING/pipelines/$REGIME-pipe/manifest.json" ] || fail "no regime pipeline"
 [ "$(ls "$TRAINING/versions" | grep -c '\.json$')" = "$LEDGERS_BEFORE" ] || fail "--no-promote promoted"
 
+# The shipped regimes (42a, 42b), seeded by check --fix: listed, and one shown
+# whole with its kits in order -- the teacher and the student left yours.
+"$APOGEE_BIN" train regime list </dev/null >"$WORK_DIR/regimes.out" 2>&1 || fail "regime list: $(cat "$WORK_DIR/regimes.out")"
+for NAME in foundation harness-helpers knowledge; do
+    grep -q "^$NAME  *seeded " "$WORK_DIR/regimes.out" || fail "regime $NAME not listed seeded: $(cat "$WORK_DIR/regimes.out")"
+done
+"$APOGEE_BIN" train regime show harness-helpers </dev/null >"$WORK_DIR/regime-show.out" 2>&1 || fail "regime show: $(cat "$WORK_DIR/regime-show.out")"
+grep -q "1. utility-chores" "$WORK_DIR/regime-show.out" || fail "regime show kits: $(cat "$WORK_DIR/regime-show.out")"
+grep -q "3. tool-calling" "$WORK_DIR/regime-show.out" || fail "regime show order: $(cat "$WORK_DIR/regime-show.out")"
+grep -q "teacher:     yours" "$WORK_DIR/regime-show.out" || fail "a shipped regime named a teacher"
+
 # The cycle from a queue directory: nothing queued is skipped; a file gates,
 # promotes into training.cycle.backend and sets the anchor; a regressing
 # file fails, trips the breaker at k=1 and halts; resume clears it.

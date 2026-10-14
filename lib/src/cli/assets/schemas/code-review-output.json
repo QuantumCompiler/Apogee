@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CodeReviewReport",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "Two to four sentences: what the change does and its overall quality. No findings here."
+    },
+    "findings": {
+      "type": "array",
+      "description": "Correctness and simplification findings, most severe first. Empty when there are none.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+            "description": "high = wrong results or data loss in normal use; medium = wrong in an edge case, or a real maintenance trap; low = a simplification or a minor risk."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["correctness", "simplification"],
+            "description": "correctness = the code misbehaves; simplification = the code works but could be simpler."
+          },
+          "file": { "type": "string", "description": "The file, relative to the repository root, or 'input' for code given in the input." },
+          "location": { "type": "string", "description": "A line range when known, otherwise an anchor such as 'the new retry loop'." },
+          "claim": { "type": "string", "description": "What is wrong, grounded in the code read." },
+          "suggested_fix": { "type": "string", "description": "A specific change the author could make." },
+          "confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+            "description": "high = verified from code read; medium = strong inference; low = depends on code not seen."
+          }
+        },
+        "required": ["severity", "kind", "file", "location", "claim", "suggested_fix", "confidence"]
+      }
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["approve", "approve_with_suggestions", "changes_requested"],
+      "description": "approve = nothing to address; approve_with_suggestions = only low or medium findings; changes_requested = at least one high finding."
+    },
+    "verdict_rationale": {
+      "type": "string",
+      "description": "One line explaining the verdict."
+    },
+    "human_summary": {
+      "type": "string",
+      "description": "Written LAST. The review comment for the author in Markdown: the verdict in plain words, then the findings that matter most and what to do about each."
+    }
+  },
+  "required": ["summary", "findings", "verdict", "verdict_rationale", "human_summary"]
+}

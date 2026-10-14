@@ -59,6 +59,33 @@ std::string synth_system_prompt(std::string_view kit_system) {
     return trim(kit_system) + std::string{kContract};
 }
 
+std::string synth_system_prompt(const Kit& kit) {
+    if (kit.prefixes.empty()) {
+        return synth_system_prompt(kit.synth.system);
+    }
+    // The prefixes, each once: the teacher writes what follows one, never
+    // the text itself -- which keeps the product's words byte for byte in
+    // every example, and spares a teacher copying them out at every call.
+    std::string out = trim(kit.synth.system) +
+                      "\n\nEvery prompt begins with one of the fixed texts below, which is added "
+                      "to it for you -- never write it yourself. Name the one it begins with, and "
+                      "write only what follows it, so that the fixed text and your prompt "
+                      "together read as one input.\n";
+    for (const KitPrefix& prefix : kit.prefixes) {
+        out += "\n=== the prefix \"" + prefix.name + "\" ===\n" + prefix.text +
+               "\n=== the end of \"" + prefix.name + "\" ===\n";
+    }
+    out +=
+        "\nYou are generating a synthetic supervised fine-tuning dataset. Each example must be "
+        "realistic, self-contained, and correct. Vary phrasing, length, and difficulty across "
+        "examples; never repeat a prompt. Respond with ONLY a JSON array and nothing else -- no "
+        "prose, no markdown code fences. Each array element is an object with exactly three "
+        "string fields: \"prefix\" (the name of the fixed text the prompt begins with), "
+        "\"prompt\" (the user's input that follows it) and \"completion\" (the ideal "
+        "assistant response).";
+    return out;
+}
+
 std::string synth_user_prompt(int n, std::string_view seed, std::string_view topic) {
     std::string out =
         "Generate exactly " + std::to_string(n) + " distinct, high-quality training examples.";
@@ -127,7 +154,7 @@ std::vector<SynthExample> parse_synth_examples(std::string_view raw) {
         if (trim(prompt).empty() || trim(completion).empty()) {
             continue;
         }
-        out.push_back({trim(prompt), trim(completion)});
+        out.push_back({trim(prompt), trim(completion), trim(first_string(row, {"prefix"}))});
     }
     return out;
 }
@@ -152,7 +179,7 @@ SynthResult synthesize(const Kit& kit, const GenerateFn& generate, const SynthOp
     const double temperature =
         options.temperature > 0.0 ? options.temperature : kit.synth.temperature;
     const int per_call = kit.synth.per_seed > 0 ? kit.synth.per_seed : kDefaultPerSeed;
-    const std::string system = synth_system_prompt(kit.synth.system);
+    const std::string system = synth_system_prompt(kit);
     std::vector<std::string> seeds = kit.synth.seeds;
     if (seeds.empty()) {
         seeds.emplace_back();
@@ -232,15 +259,24 @@ SynthResult synthesize(const Kit& kit, const GenerateFn& generate, const SynthOp
                 ++result.failed_batches;
                 continue;
             }
-            for (const SynthExample& example : examples) {
+            for (SynthExample example : examples) {
                 if (static_cast<int>(result.examples.size()) >= target) {
                     break;
+                }
+                if (!kit.prefixes.empty()) {
+                    // The text itself, before what the teacher wrote; an
+                    // example naming none of the kit's is not in its format.
+                    const KitPrefix* prefix = find_prefix(kit, example.prefix);
+                    if (prefix == nullptr) {
+                        continue;
+                    }
+                    example.prompt = prefix->text + example.prompt;
                 }
                 const std::string key = lower(trim(example.prompt));
                 if (!seen.insert(key).second) {
                     continue;
                 }
-                result.examples.push_back(example);
+                result.examples.push_back(std::move(example));
             }
             if (options.on_progress) {
                 options.on_progress(static_cast<int>(result.examples.size()), target);

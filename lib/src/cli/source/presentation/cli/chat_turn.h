@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <vector>
 
 #include "agent/tool.h"
 #include "agentloop/loop.h"
@@ -79,16 +80,16 @@ struct ChatTurnResult {
 /// `cancellation` ends the turn through the loop's own cancellation; the
 /// default never does. `summarize_reasoning` asks for the reasoning as its
 /// one-line summary, written by the utility model (43) -- for a surface that
-/// draws it; machine mode and a task's rounds never ask.
-ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& session,
-                             const std::string& input, const agent::ToolRegistry* tools,
-                             agentloop::ToolSelection* selection,
-                             agentloop::MemberCalls* member_calls, const agentloop::AskFn& ask,
-                             const ToolGate& gate, agentloop::Reporter& reporter,
-                             const std::function<void(const std::string&)>& notice,
-                             const RagSettings& rag, const std::string& review_note,
-                             ChatAttachments* attached, ChatRecall* recall,
-                             const harness::CancellationToken& cancellation = {},
-                             bool summarize_reasoning = false);
+/// draws it; machine mode and a task's rounds never ask. `standing` is the
+/// session's standing context (41b), each a system message ridden ahead of
+/// everything else the turn injects -- never history, so never saved.
+ChatTurnResult run_chat_turn(
+    const harness::Harness& harness, logger::Session& session, const std::string& input,
+    const agent::ToolRegistry* tools, agentloop::ToolSelection* selection,
+    agentloop::MemberCalls* member_calls, const agentloop::AskFn& ask, const ToolGate& gate,
+    agentloop::Reporter& reporter, const std::function<void(const std::string&)>& notice,
+    const RagSettings& rag, const std::string& review_note, ChatAttachments* attached,
+    ChatRecall* recall, const harness::CancellationToken& cancellation = {},
+    bool summarize_reasoning = false, const std::vector<std::string>& standing = {});
 
 }  // namespace apogee::commands

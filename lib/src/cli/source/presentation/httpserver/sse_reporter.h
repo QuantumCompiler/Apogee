@@ -54,6 +54,8 @@ public:
     void on_tool_status(std::string_view detail) override;
     /// A `notice` meta-frame, `detail` the line.
     void on_notice(std::string_view text) override;
+    /// A `todo` meta-frame (41d), the list whole.
+    void on_todo(const harness::TodoList& todo) override;
     void on_clear_status() override;
     void on_answer_start() override;
     void on_answer_token(std::string_view chunk) override;

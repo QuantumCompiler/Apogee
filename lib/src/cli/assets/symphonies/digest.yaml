@@ -1,0 +1,35 @@
+# A shipped symphony (40b): a passage summarized and checked by playing the
+# summarize-verify starter, then given a title, tags and a one-line summary
+# by the suite's extraction member, held to a schema.
+# What it shows: a chain (27r) -- stage one plays another symphony on the
+# same turn, its stages narrated in place, and its output threads on as
+# {{summary}}, inside the depth and budget caps.
+#
+#   apogee symphonies play digest --input "$(cat article.txt)"
+#   apogee symphonies create my-digest --from digest
+name: digest
+description: Summarize and check a passage by playing summarize-verify, then card it with a title, tags and a one-line summary.
+input:
+  description: The passage to digest.
+stages:
+  - name: summary
+    play: summarize-verify
+  - name: card
+    role: extraction
+    answer_tokens: 300
+    prompt: |
+      Here is a summary of a passage. Give it a short title, three to five lower-case tags, and a one-line summary of at most twenty words, all drawn from the summary itself.
+
+      Summary:
+      {{summary}}
+    schema: |
+      {
+        "type": "object",
+        "properties": {
+          "title": {"type": "string"},
+          "tags": {"type": "array", "items": {"type": "string"}},
+          "one_line": {"type": "string"}
+        },
+        "required": ["title", "tags", "one_line"],
+        "additionalProperties": false
+      }

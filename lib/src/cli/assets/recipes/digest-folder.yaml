@@ -1,0 +1,19 @@
+# A shipped task recipe (40c): a folder read and its digest written to
+# DIGEST.md where the task runs -- every file read, nothing in the folder
+# changed. The task is done when DIGEST.md exists and the model says so.
+# It writes one file, so it suggests granting write_file: asked at the
+# terminal, never assumed, and on a pipe given only by --allow.
+#
+#   apogee task run --recipe digest-folder --input docs
+#   apogee task run "<the goal below, docs in place of {{input}}>" --tools --require-file DIGEST.md --allow write_file
+name: digest-folder
+description: Read a folder and write a digest of it to DIGEST.md.
+input:
+  description: The folder to digest, relative to where the task runs.
+goal: |
+  Read the folder {{input}}: list it, then read every file in it. Then write DIGEST.md in the current folder, in Markdown: a short paragraph saying what the folder holds and what it is for, then one line per file -- its path and, in a few words, what it contains. Change nothing else, and say the task is done once DIGEST.md is written.
+tools: true
+require_files:
+  - DIGEST.md
+allow:
+  - write_file

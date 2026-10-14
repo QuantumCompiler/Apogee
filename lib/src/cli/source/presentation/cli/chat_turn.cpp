@@ -16,6 +16,7 @@
 #include "contracts/config.h"
 #include "contracts/errors.h"
 #include "logger/operational.h"
+#include "tools/delegate.h"
 
 namespace apogee::commands {
 
@@ -27,13 +28,16 @@ harness::StatusSink progress_sink(agentloop::Reporter& reporter) {
     };
 }
 
-ChatTurnResult run_chat_turn(
-    const harness::Harness& harness, logger::Session& session, const std::string& input,
-    const agent::ToolRegistry* tools, agentloop::ToolSelection* selection,
-    agentloop::MemberCalls* member_calls, const agentloop::AskFn& ask, const ToolGate& gate,
-    agentloop::Reporter& reporter, const std::function<void(const std::string&)>& notice,
-    const RagSettings& rag, const std::string& review_note, ChatAttachments* attached,
-    ChatRecall* recall, const harness::CancellationToken& cancellation, bool summarize_reasoning) {
+ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& session,
+                             const std::string& input, const agent::ToolRegistry* tools,
+                             agentloop::ToolSelection* selection,
+                             agentloop::MemberCalls* member_calls, const agentloop::AskFn& ask,
+                             const ToolGate& gate, agentloop::Reporter& reporter,
+                             const std::function<void(const std::string&)>& notice,
+                             const RagSettings& rag, const std::string& review_note,
+                             ChatAttachments* attached, ChatRecall* recall,
+                             const harness::CancellationToken& cancellation,
+                             bool summarize_reasoning, const std::vector<std::string>& standing) {
     ChatTurnResult outcome;
     const std::vector<harness::ChatMessage> incoming = build_messages({}, {}, input, {});
     // The turn's model calls besides the chat model's own, said where the
@@ -245,7 +249,29 @@ ChatTurnResult run_chat_turn(
         loop_options.transient_prefix.insert(loop_options.transient_prefix.begin(),
                                              harness::ChatMessage::system(review_note));
     }
+    // The session's standing context (41b) heads what the turn injects: the
+    // last the budget would trim, and never in the transcript.
+    std::vector<harness::ChatMessage> head;
+    for (const std::string& note : standing) {
+        head.push_back(harness::ChatMessage::system(note));
+    }
+    loop_options.transient_prefix.insert(loop_options.transient_prefix.begin(), head.begin(),
+                                         head.end());
 
+    // The delegate (41e): what a `delegate` call re-enters the loop with --
+    // this turn's model, gate, mode and cancellation, its standing context
+    // and mode note -- current on this thread while the turn runs.
+    std::vector<std::string> delegate_notes = standing;
+    if (tools != nullptr && gate.approvals != nullptr) {
+        if (const std::string note = plan_note(*gate.approvals); !note.empty()) {
+            delegate_notes.push_back(note);
+        }
+    }
+    const tools::DelegateScope delegate_scope{tools::DelegateContext{.harness = &harness,
+                                                                     .tools = tools,
+                                                                     .parent = loop_options,
+                                                                     .reporter = &reporter,
+                                                                     .notes = delegate_notes}};
     try {
         agentloop::RunResult result =
             agentloop::run(harness, session.messages, loop_options, reporter);

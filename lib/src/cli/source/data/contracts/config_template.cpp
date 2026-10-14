@@ -255,12 +255,13 @@ constexpr std::string_view kConfigTemplate = R"APOGEE(// Apogee configuration.
   // from prompt files, an optional output schema the answer must satisfy, and a
   // TOOL POLICY that is the agent's permission model: read-only registers only
   // tools that never write (so a run never blocks on a prompt), all puts it under
-  // the gate above like chat, none registers nothing. Three review agents are
-  // built in -- security-review, release-notes, merge-request -- with their files
-  // under prompts/ and schemas/ (seeded by `apogee check --fix`, never overwritten
-  // once present, so edit them freely). An entry here overrides a bundled agent
-  // of the same name; `apogee agents create` scaffolds a new one. Relative paths
-  // are read against this data directory.
+  // the gate above like chat, none registers nothing. Seven agents are built in
+  // -- security-review, release-notes, merge-request, code-review, test-gaps,
+  // doc-drift and meeting-minutes -- with their files under prompts/ and schemas/
+  // (seeded by `apogee check --fix`, never overwritten once present, so edit
+  // them freely). An entry here overrides a bundled agent of the same name;
+  // `apogee agents create` scaffolds a new one. Relative paths are read against
+  // this data directory.
   //
   // "agents": {
   //   "security-review": {

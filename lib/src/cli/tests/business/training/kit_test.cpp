@@ -41,24 +41,31 @@ eval:
 
 }  // namespace
 
-TEST_CASE("the four bundled kits load with their numbers and every eval item gates",
+TEST_CASE("the eight bundled kits load with their numbers and every eval item gates",
           "[training][kits][assets]") {
     const std::vector<apogee::training::KitSummary> kits = list_kits(kKits);
-    REQUIRE(kits.size() == 4);
-    CHECK(kits[0].name == "instruction-following");
-    CHECK(kits[1].name == "reasoning");
-    CHECK(kits[2].name == "structured-output");
-    CHECK(kits[3].name == "summarization");
+    REQUIRE(kits.size() == 8);
+    CHECK(kits[0].name == "extraction-fidelity");
+    CHECK(kits[1].name == "instruction-following");
+    CHECK(kits[2].name == "knowledge-capture");
+    CHECK(kits[3].name == "reasoning");
+    CHECK(kits[4].name == "structured-output");
+    CHECK(kits[5].name == "summarization");
+    CHECK(kits[6].name == "tool-calling");
+    CHECK(kits[7].name == "utility-chores");
     for (const apogee::training::KitSummary& summary : kits) {
         INFO(summary.name);
         CHECK(summary.error.empty());
-        CHECK(summary.eval_items == 8);
+        // The floor (42a); tool-calling's items are cheap to check, so more.
+        CHECK(summary.eval_items == (summary.name == "tool-calling" ? 32U : 24U));
+        CHECK_FALSE(summary.description.empty());
         const Kit kit = load_kit(summary.path);
         CHECK(kit.name == summary.name);
         CHECK(kit.skill == summary.name);
         CHECK(kit.synth.seeds.size() == 8);
-        CHECK(kit.synth.count == 200);
+        CHECK(kit.synth.count == (summary.name == "tool-calling" ? 300 : 200));
         CHECK(kit.train.num_layers == 16);
+        CHECK(apogee::training::validate_kit(kit).empty());
         for (const apogee::training::EvalItem& item : kit.eval) {
             // Every bundled item carries an expected substring, so the gate
             // works with no judge configured.
@@ -151,4 +158,54 @@ TEST_CASE("the inline eval suite is one object per line, prompt before expected"
           "[training][kits]") {
     const Kit kit = parse_kit(kMinimal, "<test>");
     CHECK(eval_suite_text(kit) == "{\"prompt\":\"Say hi\",\"expected\":\"hi\"}\n");
+}
+
+TEST_CASE(
+    "prefixes: each eval prompt begins with the one it names, in a kit that has them every "
+    "item names one, and the materialised suite carries the whole prompt",
+    "[training][kits][prefixes]") {
+    constexpr std::string_view kPrefixed = R"(name: chores
+synth:
+  system: Teach the chores.
+prefixes:
+  ask: "Answer the question below.\n\nQuestion: "
+  sum: |
+    Summarise:
+eval:
+  - prefix: ask
+    prompt: Why is the sky blue?
+    expected: scattering
+  - prefix: sum
+    prompt: A long text.
+    expected: short
+)";
+    const Kit kit = parse_kit(kPrefixed, "<test>");
+    REQUIRE(kit.prefixes.size() == 2);
+    CHECK(kit.prefixes[0].name == "ask");  // as declared
+    CHECK(kit.prefixes[1].text == "Summarise:\n");
+    REQUIRE(kit.eval.size() == 2);
+    CHECK(kit.eval[0].prompt == "Answer the question below.\n\nQuestion: Why is the sky blue?");
+    CHECK(kit.eval[1].prompt == "Summarise:\nA long text.");
+    CHECK(validate_kit(kit).empty());
+    CHECK(apogee::training::find_prefix(kit, "sum") == &kit.prefixes[1]);
+    CHECK(apogee::training::find_prefix(kit, "nope") == nullptr);
+    CHECK(eval_suite_text(kit).starts_with(
+        "{\"prompt\":\"Answer the question below.\\n\\nQuestion: Why is the sky blue?\""));
+
+    // A kit with none is read as ever: no prefix, nothing added.
+    CHECK(parse_kit(kMinimal, "<test>").prefixes.empty());
+
+    std::string unknown{kPrefixed};
+    unknown.replace(unknown.find("prefix: sum"), 11, "prefix: nah");
+    CHECK_THROWS_WITH(parse_kit(unknown, "<x>"),
+                      Catch::Matchers::ContainsSubstring("eval.prefix: no prefix named 'nah'"));
+    std::string missing{kPrefixed};
+    const std::string named = "  - prefix: sum\n    prompt:";
+    missing.replace(missing.find(named), named.size(), "  - prompt:");
+    CHECK_THROWS_WITH(parse_kit(missing, "<x>"),
+                      Catch::Matchers::ContainsSubstring("eval item 2 names no prefix"));
+    CHECK_THROWS_WITH(parse_kit("prefixes: [a, b]\n", "<x>"),
+                      Catch::Matchers::ContainsSubstring("prefixes: expected a mapping"));
+    CHECK_THROWS_WITH(parse_kit("prefixes:\n  empty: \"  \"\n", "<x>"),
+                      Catch::Matchers::ContainsSubstring("each needs a name and a text"));
 }

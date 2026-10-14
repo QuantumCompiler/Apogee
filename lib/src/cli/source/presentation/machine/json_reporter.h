@@ -130,6 +130,9 @@ public:
     void on_thinking_budget_reached() override;
     /// A `memory` event: the past chats and decisions a turn was handed (26l).
     void on_recall(int chats, int decisions) override;
+    /// `todo` (41d): the session's todo, whole, `items` an array of
+    /// `{text, state}`; empty when cleared.
+    void on_todo(const harness::TodoList& todo) override;
     /// A side call, as the existing `tool_status` event: display prose,
     /// said when it starts (26n). No new event type.
     void on_side_call(const agentloop::SideCall& call) override;

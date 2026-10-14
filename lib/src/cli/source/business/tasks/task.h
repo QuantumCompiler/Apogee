@@ -234,6 +234,11 @@ struct Task {
     int schema_version = kLedgerSchemaVersion;
     std::string id;
     std::string goal;
+    /// The recipe the task was started from (40c), by name -- provenance and
+    /// nothing else: the goal, checks and policy are the expansion's, as a
+    /// hand-typed twin's would be. Empty for a goal typed by hand, which
+    /// writes no key, so such a ledger reads byte for byte as before.
+    std::string recipe;
     std::vector<Check> checks;
     int rounds_budget = kDefaultRounds;
     /// Where the task was started: its tools work there, and it resumes

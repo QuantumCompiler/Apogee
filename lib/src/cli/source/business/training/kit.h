@@ -13,6 +13,14 @@
 /// suite (`{prompt, expected}` items) that gates a model trained on that
 /// skill. Four ship compiled in and are seeded under `training/kits/`; a
 /// user drops a `<name>.yaml` of the same shape beside them.
+///
+/// **Prefixes** (42b): a kit whose prompts begin with a fixed text -- the
+/// product's own instruction for a chore, or a system prompt carried into
+/// the turn -- names each such text once under `prefixes:`, and every
+/// prompt, eval item and synthesised example alike, begins with one: an
+/// eval item says which by `prefix:`, and the teacher names one per example
+/// and writes only what follows it. The text is kept byte for byte, never
+/// copied into each prompt or asked of the teacher.
 namespace apogee::training {
 
 inline constexpr int kDefaultSynthCount = 200;
@@ -20,9 +28,16 @@ inline constexpr int kDefaultPerSeed = 8;
 inline constexpr double kDefaultSynthTemperature = 0.9;
 
 struct EvalItem {
+    /// The whole prompt, its prefix's text included.
     std::string prompt;
     /// A substring the answer must contain; empty means a judge decides.
     std::string expected;
+};
+
+/// A fixed text a kit's prompts begin with, by name.
+struct KitPrefix {
+    std::string name;
+    std::string text;
 };
 
 struct KitSynthSpec {
@@ -49,6 +64,8 @@ struct Kit {
     std::string skill;
     KitSynthSpec synth;
     KitTrainDefaults train;
+    /// In the order the kit declares them; empty for most kits.
+    std::vector<KitPrefix> prefixes;
     std::vector<EvalItem> eval;
     /// Where it was loaded from; empty for a parsed text.
     std::filesystem::path path;
@@ -62,9 +79,13 @@ struct Kit {
 /// `parse_kit` over a file, the name defaulting to the file stem.
 [[nodiscard]] Kit load_kit(const std::filesystem::path& path);
 
+/// The prefix of `kit` named `name`, or nullptr.
+[[nodiscard]] const KitPrefix* find_prefix(const Kit& kit, std::string_view name) noexcept;
+
 /// The rule a kit must satisfy: a non-blank `synth.system`, at least one
 /// eval item (it gates the trained model), every prompt non-blank, sane
-/// numbers. Empty when valid.
+/// numbers. Empty when valid. (That every eval item of a kit with prefixes
+/// begins with one is the parser's rule.)
 [[nodiscard]] std::string validate_kit(const Kit& kit);
 
 struct KitSummary {

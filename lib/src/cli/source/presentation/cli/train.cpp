@@ -50,6 +50,7 @@
 #include "training/pipeline.h"
 #include "training/promote.h"
 #include "training/regime.h"
+#include "training/regime_specs.h"
 #include "training/script_runner.h"
 #include "training/store.h"
 #include "views/status_line.h"
@@ -862,15 +863,26 @@ struct PipelineInputs {
         return from_file(file);
     }
     if (!named.empty()) {
-        if (const auto entry = config.training.regimes.find(named);
-            entry != config.training.regimes.end()) {
-            return entry->second;
+        // By name, nearest first (42a): a training.regimes entry, a file
+        // under training/regimes/, a shipped spec.
+        const training::RegimeBook book =
+            training::regime_book(config, harness::training_regimes_dir());
+        if (const training::RegimeEntry* entry = book.find(named); entry != nullptr) {
+            return entry->spec;
         }
         if (std::filesystem::is_regular_file(named, code)) {
             return from_file(named);
         }
-        fail_user("no regime '" + named +
-                  "': not an entry under training.regimes, and not a spec file");
+        // A spec of that name the book left out is the likelier story: say why.
+        for (const std::string& problem : book.problems) {
+            const std::string spec = (harness::training_regimes_dir() / named).string();
+            if (problem.starts_with(spec + ".yaml") || problem.starts_with(spec + ".yml")) {
+                fail_user("regime '" + named + "': " + problem);
+            }
+        }
+        fail_user("no regime '" + named + "': not an entry under training.regimes, a spec under " +
+                  harness::training_regimes_dir().string() + ", a shipped regime or a spec file" +
+                  (book.regimes.empty() ? std::string{} : " (there are: " + book.names() + ")"));
     }
     return harness::RegimeSpec{};
 }
@@ -2119,12 +2131,104 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     auto regime_judge = std::make_shared<std::string>();
     auto regime_no_promote = std::make_shared<bool>(false);
     auto regime_trainer = std::make_shared<std::string>();
+    // ---- regime list / show (42a) ---------------------------------------------
+    auto regimes_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    CLI::App* regime_list = regime->add_subcommand(
+        "list", "The regimes a run can name: shipped, seeded and your own, with their kits");
+    add_read_format(regime_list, regimes_format);
+    regime_list->callback([&context, regimes_format]() {
+        std::filesystem::path config_path;
+        const harness::Config config = load_config_strict(context, config_path);
+        const training::RegimeBook book =
+            training::regime_book(config, harness::training_regimes_dir());
+        if (*regimes_format == ReadFormat::Json) {
+            write_document(std::cout, training::to_json(book));
+            return;
+        }
+        for (const std::string& problem : book.problems) {
+            std::cerr << "[regime] skipped: " << problem << "\n";
+        }
+        if (book.regimes.empty()) {
+            std::cout << "no regimes -- 'apogee check --fix' seeds the shipped ones\n";
+            return;
+        }
+        std::size_t width = 4;
+        for (const training::RegimeEntry& entry : book.regimes) {
+            width = std::max(width, entry.spec.name.size());
+        }
+        std::cout << pad("NAME", width) << "  " << pad("SOURCE", 7) << "  KITS  DESCRIPTION\n";
+        for (const training::RegimeEntry& entry : book.regimes) {
+            std::cout << pad(entry.spec.name, width) << "  "
+                      << pad(std::string{training::to_string(entry.source)}, 7) << "  "
+                      << pad(std::to_string(entry.spec.kits.size()), 4) << "  "
+                      << entry.spec.description << "\n";
+        }
+    });
+    auto regime_shown = std::make_shared<std::string>();
+    auto regime_show_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    CLI::App* regime_show =
+        regime->add_subcommand("show", "One regime whole: its kits in order and its tuning");
+    regime_show->add_option("name", *regime_shown, "The regime")
+        ->type_name(kRegimeValue)
+        ->required();
+    add_read_format(regime_show, regime_show_format);
+    regime_show->callback([&context, regime_shown, regime_show_format]() {
+        std::filesystem::path config_path;
+        const harness::Config config = load_config_strict(context, config_path);
+        const training::RegimeBook book =
+            training::regime_book(config, harness::training_regimes_dir());
+        const training::RegimeEntry* entry = book.find(*regime_shown);
+        if (entry == nullptr) {
+            fail_user(
+                "no regime named '" + *regime_shown + "'" +
+                (book.regimes.empty() ? std::string{} : " (there are: " + book.names() + ")"));
+        }
+        if (*regime_show_format == ReadFormat::Json) {
+            write_document(std::cout, training::to_json(*entry));
+            return;
+        }
+        const harness::RegimeSpec& spec = entry->spec;
+        const auto number = [](double value) {
+            std::ostringstream out;
+            out << value;
+            return out.str();
+        };
+        const auto or_kits = [](int value, const char* what) {
+            return value == 0 ? std::string{"each kit's own "} + what : std::to_string(value);
+        };
+        std::cout << spec.name << "  " << training::to_string(entry->source)
+                  << (entry->config ? "  (training.regimes entry)" : "")
+                  << (entry->path.empty() ? std::string{} : "  " + entry->path.string()) << "\n";
+        if (!spec.description.empty()) {
+            std::cout << spec.description << "\n";
+        }
+        std::cout << "\nkits, in order:\n";
+        for (std::size_t i = 0; i < spec.kits.size(); ++i) {
+            std::cout << "  " << i + 1 << ". " << spec.kits.at(i) << "\n";
+        }
+        std::cout
+            << "count:       " << or_kits(spec.count, "synth.count") << "\n"
+            << "iters:       " << or_kits(spec.iters, "train.iters") << "\n"
+            << "temperature: "
+            << (spec.temperature == 0.0 ? std::string{"each kit's own"} : number(spec.temperature))
+            << "\n"
+            << "teacher:     "
+            << (spec.teacher.empty() ? std::string{"yours: --teacher <backend>"} : spec.teacher)
+            << "\n"
+            << "student:     "
+            << (spec.student.empty() ? std::string{"yours: --student <snapshot>"} : spec.student)
+            << "\n";
+    });
+
     CLI::App* regime_run = regime->add_subcommand(
         "run",
         "Run a regime: a dataset per kit from the teacher, one eval-gated pipeline, "
         "the last passing stage promoted");
     regime_run
-        ->add_option("name", *regime_named, "A regime under training.regimes (or a spec file path)")
+        ->add_option("name", *regime_named,
+                     "A regime by name -- a training.regimes entry, a spec under "
+                     "training/regimes/, a shipped one ('train regime list') -- or a spec file "
+                     "path")
         ->type_name(kRegimeValue);
     regime_run->add_option("--regime", *regime_file, "A regime spec file (YAML)")
         ->type_name(kPathValue);

@@ -32,7 +32,8 @@ JSONL user turns on stdin, which is what makes one `chat` child serve a whole
 conversation. It defaults to whatever `--output-format` is, so a driver may pass
 one flag; on `chat` the two directions **must agree**, and disagreeing is an
 error rather than a silently ignored flag. `execute` (27s) is chat's session
-opened with a suite, and takes both flags as chat does (see
+opened with a suite -- or, since 41a, bare on one model -- and takes both flags
+as chat does (see
 [Playing a symphony](#playing-a-symphony-execute)). `task run` and `task resume` take
 `--output-format` alone: a task reads nothing from its driver (see
 [A task's run](#a-tasks-run)).
@@ -42,7 +43,7 @@ opened with a suite, and takes both flags as chat does (see
 One JSON object per line on stdout. Every object has a `type`.
 
 ```jsonl
-{"type":"session","protocol_version":1,"model":"claude-sonnet-5","next_turn":1,"capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello","cancel"],"tools":true,"ask":true,"schema":"2026-10-07"}}
+{"type":"session","protocol_version":1,"model":"claude-sonnet-5","next_turn":1,"capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello","cancel"],"tools":true,"ask":true,"schema":"2026-10-13"}}
 {"type":"thinking"}
 {"type":"thinking_delta","text":"…"}
 {"type":"memory","chats":2,"decisions":1}
@@ -64,6 +65,7 @@ One JSON object per line on stdout. Every object has a `type`.
 | `memory` | `chat` only: what a turn was handed from earlier conversations -- `chats`, past chats' summaries, and `decisions`, recorded knowledge records -- injected for this turn and never into the transcript (26l). Sent before the turn, only when it recalled something. |
 | `tool_status` | A tool is running, described in `text` for display -- or another model call the turn makes besides the chat model's own (the embedder, the utility model, the rerank judge, the knowledge clerk, a suite member the model consults), as `<role> — <what it is doing>` (26n). A `consult` (27f) is an ordinary tool call: `[tool] consult`, then `consult — asking utility (<backend>): <the question's first words>` while the member answers, and the answer reaches the model as the tool's result. A suite's verifier checking a tool call or an answer (27g) is said the same way: `validate — asking utility (<backend>): Check …`. A symphony the root model plays on its own (27t, an orchestrating `execute` session) is an ordinary tool call too: `[tool] play_<symphony>`, then `play — the model chose <symphony>: <n> member calls, <roles>`, then a line per stage. |
 | `notice` | A line for the user in `text` that is neither progress nor an error — a local model answering without the tools it was given because its chat template cannot take them, or a reply kept as text because it did not match the template's format, or a request trimmed to fit the model's window (`context budget: 2 earlier exchanges not sent`), or what a suite's verifier said (27g): an objection to a tool call returned to the model, a dispute the call runs over, the two positions on an answer under `answers: always` (`validate: …`), a check that could not be made. Show it and keep it; it never ends the turn. |
+| `todo` | The session's todo, whole (41d): `items`, an array of `{text, state}` -- `state` `pending`, `active` (being done now) or `done` -- in the model's order, empty when it cleared it. Sent each time the model rewrites it with `todo_write` (a session with tools), and once as a resumed session opens, right after `session`, when it was left holding one. Draw it in place of the last: it is the plan, not a log. |
 | `answer_start` / `answer_end` | Bracket one answer's deltas. |
 | `answer_delta` | A chunk of answer text. Concatenate in order. |
 | `result` | Ends a turn. Carries the whole answer, so a driver that dropped every delta still has it. `usage` is **absent** when the provider reported none — absent is not zero. A turn ended by a `cancel` ends here too, with `finish_reason: "cancelled"` and the text streamed before it. |
@@ -357,6 +359,33 @@ conversation, and exits cleanly.
 the same events out, a `user` line answered by the suite's root model as chat
 answers it. One `user` line means more there: one whose text is a `/play`
 command plays that symphony on the suite's members instead of asking the root.
+Since 41a it also opens **bare** -- no suite named and none the default, on
+`-m <backend>` or `models.default` -- exactly as chat opens: the same events,
+the `session` event naming the model, and a `/play`'s stages resolved through
+the one role chain (a helper role on the conversation's backend, the chat
+role on its pointer). `--orchestrate` is a suite's, and refused bare.
+Since 41b an execute session opened inside a **project** -- a folder holding a
+`.git` or a context file -- opens with it: `AGENTS.md` (else `CLAUDE.md`, read and
+never written) rides every request as system context, never the conversation's,
+and the folder is attached as `--attach .` would attach it (`--attach ""` skips
+that; any other `--attach` replaces it). Both are said in the events the session
+already has: a `notice` -- `project context: AGENTS.md, 1,234 words, in every
+request`, or the cut when the file passes 4,000 words -- before the folder's own
+attach lines. Since 41c such a session also carries the shipped **coder persona** -- a
+coding system prompt, ahead of the project's file -- unless it has a system
+prompt of its own (`-s`), which replaces it; a `notice` says which (`persona:
+coder, the shipped coding prompt, in every request -- -s replaces it`, or
+`persona: your -s prompt, in place of the coder persona`).
+
+Since 41e a session with tools may **delegate**: the model's `delegate` call runs
+a bounded sub-session -- the same loop on a fresh conversation, with the
+session's tools less `delegate` itself, under the session's own permissions --
+and its answer comes back as that call's result. A driver sees it in the events
+it already has: the delegation and each of its tool lines as `tool_status`
+(`delegate — a sub-session on <model>: <brief>`, then `delegate — read_file …`),
+and a permission prompt a delegated tool raises as an ordinary `question`,
+answered the same way -- `always` included. Nothing of the sub-session is saved
+but the result, in this session's record.
 
 ```jsonl
 {"type":"user","text":"/play summarize-verify The minutes of the meeting…"}
@@ -499,6 +528,25 @@ apogee task list --output-format json        # {"object":"list","data":[…],"to
 newest 50 (`id`, `status`, `rounds_used`, `rounds_budget`, `goal`), `total` every
 task. A read given `stream-json`, or any word but `text` and `json`, is refused.
 
+Since 40c the task recipes — named goals with their checks baked in, which `task
+run --recipe <name> [--input "…"]` expands — read the same way:
+
+```bash
+apogee task recipes --output-format json              # {"object":"list","data":[…],"problems":[…]}
+apogee task recipes show <name> --output-format json  # {"object":"task.recipe",…}
+```
+
+Each recipe is `name`, `description`, `source` (`shipped` — its compiled-in
+text, `seeded` — its file under the data directory's `recipes/`, as shipped,
+or `user` — a file of the user's, or a starter's edited), `path` (`null` for
+`shipped`), `input` (what `--input` is for; `""` when the goal reads none),
+`tools`, `require` and `require_files` (the checks), `allow` (the grants it
+SUGGESTS — a run asks the person at the terminal for each and, with nobody
+there, gives none the line did not), `agent` and `rounds`; `show` adds `goal`,
+the template. `problems` names a file under `recipes/` that did not parse. A
+recipe's run is a task run like any other — the same events, ledger and view
+— its ledger carrying the recipe's name as `recipe`.
+
 Since 27l the graph navigation verbs are reads of the same kind:
 
 ```bash
@@ -583,6 +631,8 @@ apogee train versions [backend] --output-format json   # byte for byte GET /v1/a
 apogee datasets list --output-format json   # byte for byte GET /v1/admin/datasets
 apogee datasets info <name> --output-format json       # byte for byte GET /v1/admin/datasets/{name}
 apogee datasets kits --output-format json   # byte for byte GET /v1/admin/datasets/kits
+apogee train regime list --output-format json        # {"object":"list","data":[…],"problems":[…]}
+apogee train regime show <name> --output-format json # {"object":"training.regime",…}
 apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: metadata only
 ```
 
@@ -645,6 +695,19 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   37f): the control plane's bodies -- each dataset's `name`, `path`, `lines`,
   `bytes` and `shape`; each kit's `name`, `path`, `description`,
   `eval_items` and `error` when it cannot be read.
+- **`train regime list`** and **`train regime show`** (since 42a): the
+  regimes a `train regime run` can name, the host's own -- each `name`,
+  `description`, `source` (`shipped` -- its compiled-in text, `seeded` --
+  its file under `training/regimes/`, as shipped, or `user` -- a
+  `training.regimes:` entry, a spec of the user's, or a shipped one's
+  edited), `config` (`true` for a `training.regimes:` entry), `path`
+  (`null` for `shipped` and for an entry), `kits` in order, `count` and
+  `iters` (`0`: each kit's own), `temperature` (`0`: each kit's), and
+  `teacher`, `student` and `promote_as` -- always `""` for anything
+  shipped, which names kits and tuning only. `list` adds `problems`, a line
+  per spec file left out because it does not parse; `show` is one regime
+  as `{"object":"training.regime",…}`. A name nothing answers is refused
+  as the text refuses it.
 - **`auth list`** (since 37g): the control plane's body -- each stored slot's
   `provider` and `stored_at`, which rung answers for each configured backend
   that takes a key (`backends`: `name`, `type`, `source`, and the `variable`

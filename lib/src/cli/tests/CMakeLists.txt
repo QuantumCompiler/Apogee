@@ -55,6 +55,7 @@ add_library(apogee_tests_data OBJECT
     data/contracts/symphony_walk_test.cpp
     data/contracts/host_test.cpp
     data/contracts/utf8_test.cpp
+    data/contracts/todo_test.cpp
     data/contracts/paths_test.cpp
     data/contracts/types_test.cpp
     support/channel_guard.h
@@ -165,6 +166,8 @@ add_library(apogee_tests_business OBJECT
     business/tools/fs_test.cpp
     business/tools/shell_test.cpp
     business/tools/notes_test.cpp
+    business/tools/todo_test.cpp
+    business/tools/delegate_test.cpp
     business/tools/git_test.cpp
     business/tools/rag_query_test.cpp
     business/tools/gate_test.cpp
@@ -219,6 +222,8 @@ add_library(apogee_tests_business OBJECT
     business/training/mlx_convert_test.cpp
     business/training/pipeline_test.cpp
     business/training/regime_test.cpp
+    business/training/regime_specs_test.cpp
+    business/training/role_kits_test.cpp
     business/training/cycle_test.cpp
     business/tasks/task_test.cpp
     business/tasks/ledger_test.cpp
@@ -226,6 +231,7 @@ add_library(apogee_tests_business OBJECT
     business/tasks/unattended_test.cpp
     business/tasks/runner_test.cpp
     business/tasks/view_test.cpp
+    business/tasks/recipe_test.cpp
     business/symphony/definition_test.cpp
     business/symphony/runner_test.cpp
     business/symphony/tools_test.cpp
@@ -296,6 +302,9 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/chat_roster_test.cpp
     presentation/cli/chat_session_test.cpp
     presentation/cli/execute_test.cpp
+    presentation/cli/project_context_test.cpp
+    presentation/cli/session_todo_test.cpp
+    presentation/cli/delegate_session_test.cpp
     presentation/httpserver/handler_test.cpp
     presentation/httpserver/sse_test.cpp
     presentation/httpserver/session_test.cpp

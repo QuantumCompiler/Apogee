@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "agent/tool.h"
 #include "cli/command.h"
@@ -15,6 +16,7 @@
 #include "logger/session.h"
 #include "tasks/ledger.h"
 #include "tasks/policy.h"
+#include "tasks/recipe.h"
 #include "tasks/task.h"
 
 /// `apogee task` -- a goal in, the application drives it (27h).
@@ -50,6 +52,25 @@ public:
 private:
     MachineBudgetSource machine_;
 };
+
+/// Who consents to a recipe's suggested grants (40c), and where.
+struct RecipeConsent {
+    /// Someone is there to answer: a terminal on stdin, outside machine mode.
+    bool can_ask = false;
+    /// Where an answer is read, and where each suggestion is said.
+    std::istream* in = nullptr;
+    std::ostream* out = nullptr;
+};
+
+/// The grants `recipe` suggests that `typed` (the line's `--allow`) does not
+/// already give, each said on `consent.out` -- asked `[y/N]` of the person
+/// when `consent.can_ask`, no the default, and with nobody there left
+/// ungranted with the `--allow` that would give it. Returns those consented:
+/// a recipe's grant is never assumed (40c), and one given is the line's own,
+/// held to the same ceiling as one typed.
+[[nodiscard]] std::vector<std::string> consent_to_recipe_grants(
+    const tasks::Recipe& recipe, const std::vector<std::string>& typed,
+    const RecipeConsent& consent);
 
 /// What a run from the shell asks for (37e): a new task's goal, or the task
 /// to resume.

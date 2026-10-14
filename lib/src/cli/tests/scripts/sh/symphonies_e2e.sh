@@ -52,6 +52,7 @@ script other '{"text": "OTHER<{{last_user}}>"}'
 script scribe '{"text": "{\"topic\": \"cats\", \"people\": [], \"places\": [\"mat\"], \"dates\": [], \"facts\": [\"a cat sat\"]}"}'
 script liar '{"text": "{\"title\": \"no topic here\"}"}'
 script carrier '{"text": "{\"topic\": {{last_user:json}}, \"people\": [], \"places\": [], \"dates\": [], \"facts\": []}"}'
+script carder '{"text": "{\"title\": \"Cats\", \"tags\": [\"cats\"], \"one_line\": {{last_user:json}}}"}'
 
 mkdir -p "$APOGEE_HOME/config"
 CONFIG="$APOGEE_HOME/config/config.yaml"
@@ -61,7 +62,7 @@ export APOGEE_CONFIG="$CONFIG"
 {
     echo "# PRESERVE-ME: a comment the editor keeps"
     echo "backends:"
-    for name in root helper other scribe liar carrier; do
+    for name in root helper other scribe liar carrier carder; do
         echo "  $name:"
         echo "    type: mock"
         echo "    model_path: $WORK_DIR/scripts/$name.json"
@@ -87,6 +88,11 @@ export APOGEE_CONFIG="$CONFIG"
     echo "      chat: root"
     echo "      utility: helper"
     echo "      extraction: carrier"
+    echo "  carded:"
+    echo "    members:"
+    echo "      chat: root"
+    echo "      utility: helper"
+    echo "      extraction: carder"
 } > "$CONFIG"
 "$APOGEE_BIN" check --fix </dev/null >"$WORK_DIR/fix.txt" 2>&1 || fail "check --fix: $(cat "$WORK_DIR/fix.txt")"
 
@@ -105,6 +111,31 @@ printf 'stages:\n  - {name: echo, role: chat, prompt: "Echo {{input}}"}\n' \
 LIST=$("$APOGEE_BIN" symphonies list </dev/null 2>&1) || fail "list: $LIST"
 echo "$LIST" | grep -Eq '^summarize-verify +utility → chat +shipped ' || fail "list: no shipped starter: $LIST"
 echo "$LIST" | grep -Eq '^mine +chat +file ' || fail "list: the spec file is not listed as one: $LIST"
+# The seven starters (40b): each listed as shipped, each copied by --from.
+[ "$(echo "$LIST" | grep -Ec ' shipped ')" = "7" ] || fail "list: not seven shipped starters: $LIST"
+# The config as it was, put back after: a create and its delete leave an
+# empty symphonies: key, which the editor's own inverse check below counts.
+cp "$CONFIG" "$WORK_DIR/config.starters"
+for starter in redact-text extract-actions critique-revise digest; do
+    echo "$LIST" | grep -Eq "^$starter +.* shipped " || fail "list: $starter is not listed: $LIST"
+    "$APOGEE_BIN" symphonies create "copy-$starter" --from "$starter" </dev/null >/dev/null 2>"$WORK_DIR/err.txt" ||
+        fail "create --from $starter: $(cat "$WORK_DIR/err.txt")"
+    "$APOGEE_BIN" symphonies show "copy-$starter" </dev/null >/dev/null 2>&1 || fail "show copy-$starter"
+    "$APOGEE_BIN" symphonies delete "copy-$starter" </dev/null >/dev/null 2>&1 || fail "delete copy-$starter"
+done
+cp "$WORK_DIR/config.starters" "$CONFIG"
+# The shipped chain: summarize-verify recursed on the same turn, every line
+# naming its position, then the card held to its schema over its output.
+"$APOGEE_BIN" symphonies play digest --suite carded --input "The cat sat on the mat on 4 May." \
+    </dev/null >"$WORK_DIR/out.txt" 2>"$WORK_DIR/err.txt" || fail "play digest: $(cat "$WORK_DIR/err.txt")"
+for line in '^digest → summarize-verify, stage 1/2 summarize — asking utility (helper): ' \
+    '^digest → summarize-verify, stage 2/2 verify — asking chat (root): ' \
+    '^digest, stage 2/2 card — asking extraction (carder): Here is a summary'; do
+    grep -q "$line" "$WORK_DIR/err.txt" || fail "play digest: no '$line': $(cat "$WORK_DIR/err.txt")"
+done
+python3 -c 'import json, sys; card = json.load(open(sys.argv[1])); assert card["title"] == "Cats", card; assert "ROOT<" in card["one_line"], card' \
+    "$WORK_DIR/out.txt" || fail "play digest: the card is not the extraction member's, over verify's output: $(cat "$WORK_DIR/out.txt")"
+
 SHOW=$("$APOGEE_BIN" symphonies show extract-facts </dev/null 2>&1) || fail "show: $SHOW"
 echo "$SHOW" | grep -q 'answer held to its schema:' || fail "show: no schema contract: $SHOW"
 echo "$SHOW" | grep -q 'input: The text to read.' || fail "show: no input contract: $SHOW"
@@ -299,7 +330,7 @@ for verb in list show create edit delete play; do
     echo "$OFFERED" | grep -qx "$verb" || fail "completion: verb $verb not offered: $OFFERED"
 done
 OFFERED=$("$APOGEE_BIN" __complete symphonies play "" </dev/null 2>/dev/null)
-for name in summarize-verify extract-facts describe-answer mine; do
+for name in summarize-verify extract-facts describe-answer redact-text extract-actions critique-revise digest mine; do
     echo "$OFFERED" | grep -qx "$name" || fail "completion: $name not offered: $OFFERED"
 done
 # What each verb takes, and nothing it refuses: `delete` a config entry alone,

@@ -248,3 +248,30 @@ TEST_CASE("model_ready is emitted once, on the first sign the model answered",
     }
     CHECK(ready == 1);
 }
+
+TEST_CASE("the todo is a meta-frame on a stream that asked for events, and nothing otherwise",
+          "[httpserver][sse][reporter][todo]") {
+    const apogee::harness::TodoList todo{
+        {.text = "Fix it", .state = apogee::harness::TodoState::Active}};
+    {
+        Captured captured;
+        const apogee::harness::CancellationToken token;
+        SseWriter writer{captured.writer(), token};
+        SseReporter reporter{writer, identity(), SseReporter::Options{.emit_events = true}};
+        reporter.on_todo(todo);
+        REQUIRE(captured.frames.size() == 1);
+        const nlohmann::json& frame = captured.frames.front();
+        CHECK(frame["choices"][0]["delta"]["content"] == "");
+        CHECK(frame["meta"] ==
+              nlohmann::json::parse(
+                  R"({"type":"todo","items":[{"text":"Fix it","state":"active"}]})"));
+    }
+    {
+        Captured captured;
+        const apogee::harness::CancellationToken token;
+        SseWriter writer{captured.writer(), token};
+        SseReporter reporter{writer, identity(), SseReporter::Options{.emit_events = false}};
+        reporter.on_todo(todo);
+        CHECK(captured.frames.empty());
+    }
+}

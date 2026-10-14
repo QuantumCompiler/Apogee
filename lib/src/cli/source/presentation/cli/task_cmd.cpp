@@ -2,6 +2,7 @@
 
 #include <CLI/CLI.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -42,6 +43,7 @@
 #include "platform/platform.h"
 #include "tasks/ledger.h"
 #include "tasks/policy.h"
+#include "tasks/recipe.h"
 #include "tasks/runner.h"
 #include "tasks/task.h"
 #include "tasks/unattended.h"
@@ -89,6 +91,13 @@ struct TaskFlags {
     OutputFormat output_format = OutputFormat::Text;
     /// `status` and `list`: the human view, or one JSON document (27j).
     ReadFormat read_format = ReadFormat::Text;
+    /// `run --recipe` (40c): the recipe the goal and checks expand from --
+    /// the ledger's provenance once expanded. `recipes show`'s name too.
+    std::string recipe;
+    /// `--input`: the recipe's `{{input}}`; unset when not given.
+    std::optional<std::string> input;
+    /// `--rounds`, so a recipe's own budget yields only to a typed one.
+    CLI::Option* rounds_option = nullptr;
 };
 
 /// The folder as a comparison sees it: its real path when it has one.
@@ -424,6 +433,53 @@ void print_status(std::ostream& out, const tasks::Task& task, const tasks::TaskV
     return agent;
 }
 
+/// `flags` with the recipe they name expanded into them (40c): the goal
+/// rendered from its template, its checks before the typed ones, `--tools`,
+/// its budget unless `--rounds` was typed, its agent unless `--agent` was,
+/// and its suggested grants -- each consented through `consent`, never
+/// assumed. What `drive` then runs is the hand-typed twin, the recipe's name
+/// riding along as provenance.
+[[nodiscard]] TaskFlags expand_recipe(const TaskFlags& flags, const RecipeConsent& consent) {
+    if (!flags.goal.empty()) {
+        fail_user("--recipe '" + flags.recipe +
+                  "' gives the goal -- drop the typed goal, or the recipe (its input is --input)");
+    }
+    const tasks::RecipeBook book = tasks::recipe_book(harness::recipes_dir());
+    for (const std::string& problem : book.problems) {
+        std::cerr << "[recipe] skipped: " << problem << "\n";
+    }
+    const tasks::RecipeEntry* entry = book.find(flags.recipe);
+    if (entry == nullptr) {
+        fail_user("no recipe named '" + flags.recipe + "'" +
+                  (book.recipes.empty() ? std::string{} : " (there are: " + book.names() + ")") +
+                  " -- 'apogee task recipes' lists them");
+    }
+    const tasks::Recipe& recipe = entry->recipe;
+    std::string error;
+    TaskFlags out = flags;
+    out.goal = tasks::expand_goal(recipe, flags.input, error);
+    if (!error.empty()) {
+        fail_user(error);
+    }
+    out.require = recipe.require;
+    out.require.insert(out.require.end(), flags.require.begin(), flags.require.end());
+    out.require_files = recipe.require_files;
+    out.require_files.insert(out.require_files.end(), flags.require_files.begin(),
+                             flags.require_files.end());
+    out.tools = flags.tools || recipe.tools;
+    if (recipe.rounds.has_value() &&
+        (flags.rounds_option == nullptr || flags.rounds_option->count() == 0)) {
+        out.rounds = *recipe.rounds;
+    }
+    if (out.agent.empty()) {
+        out.agent = recipe.agent;
+    }
+    for (std::string& granted : consent_to_recipe_grants(recipe, flags.allow, consent)) {
+        out.allow.push_back(std::move(granted));
+    }
+    return out;
+}
+
 /// What a run or a resume needs to know, beyond the flags.
 struct Drive {
     std::optional<tasks::Task> existing;
@@ -463,7 +519,8 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
         policy = what.existing->policy;
     } else {
         if (flags.goal.empty()) {
-            fail_user("a task needs a goal: apogee task run \"<goal>\"");
+            fail_user(
+                "a task needs a goal: apogee task run \"<goal>\", or a recipe's: --recipe <name>");
         }
         for (const std::string& text : flags.require) {
             if (text.empty()) {
@@ -529,6 +586,7 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
         }
     } else {
         task.id = task_id;
+        task.recipe = flags.recipe;
         // The goal and the text a round must contain are kept as text: the
         // ledger is a strict JSON dump, and a round's answer is UTF-8 (the
         // Harness's), so a check against the bytes as typed could never pass.
@@ -928,6 +986,78 @@ std::string stop_refusal(const tasks::Task& task, const std::string& verb) {
            verb;
 }
 
+/// `task recipes` (40c): every recipe, a row each -- or the book as one
+/// JSON document.
+void list_recipes(const TaskFlags& flags) {
+    const tasks::RecipeBook book = tasks::recipe_book(harness::recipes_dir());
+    if (flags.read_format == ReadFormat::Json) {
+        write_document(std::cout, tasks::to_json(book));
+        return;
+    }
+    for (const std::string& problem : book.problems) {
+        std::cerr << "[recipe] skipped: " << problem << "\n";
+    }
+    if (book.recipes.empty()) {
+        std::cout << "no recipes -- 'apogee check --fix' seeds the shipped ones\n";
+        return;
+    }
+    std::size_t width = 4;
+    for (const tasks::RecipeEntry& entry : book.recipes) {
+        width = std::max(width, entry.recipe.name.size());
+    }
+    const auto row = [&](std::string_view name, std::string_view source, std::string_view input,
+                         std::string_view description) {
+        std::cout << name << std::string(width + 2 - name.size(), ' ') << source
+                  << std::string(9 - source.size(), ' ') << input
+                  << std::string(7 - input.size(), ' ') << description << "\n";
+    };
+    row("NAME", "SOURCE", "INPUT", "DESCRIPTION");
+    for (const tasks::RecipeEntry& entry : book.recipes) {
+        row(entry.recipe.name, tasks::to_string(entry.source),
+            entry.recipe.takes_input() ? "yes" : "no", entry.recipe.description);
+    }
+}
+
+/// `task recipes show <name>` (40c): one recipe whole, or its JSON document.
+void show_recipe(const TaskFlags& flags) {
+    const tasks::RecipeBook book = tasks::recipe_book(harness::recipes_dir());
+    const tasks::RecipeEntry* entry = book.find(flags.recipe);
+    if (entry == nullptr) {
+        fail_user("no recipe named '" + flags.recipe + "'" +
+                  (book.recipes.empty() ? std::string{} : " (there are: " + book.names() + ")"));
+    }
+    if (flags.read_format == ReadFormat::Json) {
+        write_document(std::cout, tasks::to_json(*entry));
+        return;
+    }
+    const tasks::Recipe& recipe = entry->recipe;
+    const auto join = [](const std::vector<std::string>& items, std::string_view prefix) {
+        std::string out;
+        for (const std::string& item : items) {
+            out += (out.empty() ? "" : ", ") + std::string{prefix} + item;
+        }
+        return out.empty() ? std::string{"(none)"} : out;
+    };
+    std::cout << recipe.name << "  " << tasks::to_string(entry->source)
+              << (entry->path.empty() ? std::string{} : "  " + entry->path.string()) << "\n";
+    if (!recipe.description.empty()) {
+        std::cout << recipe.description << "\n";
+    }
+    std::cout << "\ninput:     " << (recipe.input.empty() ? "(none)" : recipe.input) << "\n"
+              << "tools:     " << (recipe.tools ? "yes" : "no") << "\n"
+              << "rounds:    " << recipe.rounds.value_or(tasks::kDefaultRounds) << "\n"
+              << "require:   " << join(recipe.require, "") << "\n"
+              << "files:     " << join(recipe.require_files, "") << "\n"
+              << "suggests:  " << join(recipe.allow, "--allow ")
+              << (recipe.allow.empty() ? "" : " -- asked at launch, never assumed") << "\n"
+              << "agent:     " << (recipe.agent.empty() ? "(none)" : recipe.agent) << "\n"
+              << "\ngoal:\n";
+    std::istringstream lines{recipe.goal};
+    for (std::string line; std::getline(lines, line);) {
+        std::cout << "  " << line << "\n";
+    }
+}
+
 /// `task halt` and `task cancel`: asked of the running process, or -- for a
 /// task no process runs -- written to its ledger under the lock.
 void stop_task(const TaskFlags& flags, tasks::Request request) {
@@ -976,6 +1106,37 @@ void add_read_format(CLI::App* command, const std::shared_ptr<TaskFlags>& flags)
 
 }  // namespace
 
+std::vector<std::string> consent_to_recipe_grants(const tasks::Recipe& recipe,
+                                                  const std::vector<std::string>& typed,
+                                                  const RecipeConsent& consent) {
+    std::vector<std::string> granted;
+    const std::vector<std::string> given = tasks::normalized_grants(typed);
+    for (const std::string& tool : recipe.allow) {
+        if (std::ranges::find(given, tool) != given.end()) {
+            continue;  // the line gave it already
+        }
+        std::ostream& out = consent.out != nullptr ? *consent.out : std::cerr;
+        if (!consent.can_ask || consent.in == nullptr) {
+            out << "[recipe] " << recipe.name << " suggests --allow " << tool
+                << " -- not granted: nobody is at the terminal to say yes, so only a grant "
+                   "typed on the line is given (add --allow "
+                << tool << " to grant it)\n";
+            continue;
+        }
+        out << "[recipe] " << recipe.name << " suggests granting " << tool
+            << " for this task's life, as --allow " << tool
+            << " would: it runs without asking, every use recorded. Grant it? [y/N] " << std::flush;
+        std::string answer;
+        std::getline(*consent.in, answer);
+        if (answer == "y" || answer == "Y" || answer == "yes") {
+            granted.push_back(tool);
+        } else {
+            out << "[recipe] " << tool << " not granted -- a call to it asks, as without a grant\n";
+        }
+    }
+    return granted;
+}
+
 TaskCommand::TaskCommand(MachineBudgetSource machine) : machine_{std::move(machine)} {}
 
 std::string_view TaskCommand::name() const noexcept {
@@ -999,7 +1160,15 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
         "the budget is spent. With nobody at the terminal a tool that would ask is denied "
         "unless granted (--allow), and a question ends the task unless an answer is declared "
         "(--on-question); at a terminal, the person there is asked");
-    run->add_option("goal", run_flags->goal, "What the task is to achieve")->required();
+    run->add_option("goal", run_flags->goal, "What the task is to achieve (or --recipe)");
+    run->add_option("--recipe", run_flags->recipe,
+                    "Run a recipe: its goal, checks and tools, and its suggested grants asked "
+                    "for at the terminal, never assumed ('task recipes' lists them)")
+        ->type_name(kRecipeValue);
+    run->add_option_function<std::string>(
+           "--input", [run_flags](const std::string& value) { run_flags->input = value; },
+           "The recipe's input, read into its goal where it says {{input}}")
+        ->type_name("TEXT");
     run->add_option("--require", run_flags->require,
                     "Text the answer must contain for the task to be done (repeatable)")
         ->expected(1)
@@ -1011,11 +1180,12 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
         ->expected(1)
         ->allow_extra_args(false)
         ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
-    run->add_option("--rounds", run_flags->rounds,
-                    "The round budget: at most this many rounds after the plan (default " +
-                        std::to_string(tasks::kDefaultRounds) + ", at most " +
-                        std::to_string(tasks::kMaxRounds) + ")")
-        ->check(CLI::Range(1, tasks::kMaxRounds));
+    run_flags->rounds_option =
+        run->add_option("--rounds", run_flags->rounds,
+                        "The round budget: at most this many rounds after the plan (default " +
+                            std::to_string(tasks::kDefaultRounds) + ", at most " +
+                            std::to_string(tasks::kMaxRounds) + ")")
+            ->check(CLI::Range(1, tasks::kMaxRounds));
     run->add_option("-m,--model", run_flags->model, "Backend or model to use")
         ->type_name(kBackendValue);
     run->add_option("--suite", run_flags->suite,
@@ -1050,7 +1220,21 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
                   "Show answers' Markdown as written instead of rendering it on the terminal");
     add_run_format(run, run_flags);
     run->callback([&context, run_flags, machine = machine_]() {
-        drive(context, machine, *run_flags, Drive{});
+        if (run_flags->recipe.empty()) {
+            if (run_flags->input.has_value()) {
+                fail_user("--input is a recipe's input -- give --recipe <name> with it");
+            }
+            drive(context, machine, *run_flags, Drive{});
+            return;
+        }
+        // Someone can say yes only at a terminal, and never in machine mode,
+        // whose run reads no input.
+        const RecipeConsent consent{
+            .can_ask = run_flags->output_format != OutputFormat::StreamJson &&
+                       platform::is_terminal(platform::StandardStream::In) && !stdin_is_piped(),
+            .in = &std::cin,
+            .out = &std::cerr};
+        drive(context, machine, expand_recipe(*run_flags, consent), Drive{});
     });
 
     // ---- resume ------------------------------------------------------------------
@@ -1129,6 +1313,26 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
             std::cout << "... " << listed.total - listed.shown.size()
                       << " more -- --all lists them\n";
         }
+    });
+
+    // ---- recipes (40c) -------------------------------------------------------------
+    auto recipes_flags = std::make_shared<TaskFlags>();
+    CLI::App* recipes = cmd->add_subcommand(
+        "recipes",
+        "The task recipes -- named goals with their checks baked in, shipped and your own; "
+        "'task run --recipe <name>' runs one");
+    add_read_format(recipes, recipes_flags);
+    auto show_flags = std::make_shared<TaskFlags>();
+    CLI::App* show = recipes->add_subcommand(
+        "show", "One recipe whole: its goal, its input, its checks and the grants it suggests");
+    show->add_option("name", show_flags->recipe, "The recipe")->type_name(kRecipeValue)->required();
+    add_read_format(show, show_flags);
+    show->callback([show_flags]() { show_recipe(*show_flags); });
+    recipes->callback([recipes_flags, show]() {
+        if (show->parsed()) {
+            return;  // `recipes show` answered
+        }
+        list_recipes(*recipes_flags);
     });
 
     // ---- halt / cancel -------------------------------------------------------------

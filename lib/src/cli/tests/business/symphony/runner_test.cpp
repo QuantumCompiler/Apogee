@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <nlohmann/json.hpp>
 
 #include <cstdint>
 #include <initializer_list>
@@ -828,4 +829,137 @@ stages:
                    "stage 1 (seen): plays 'describe-answer', which takes an image, and the stage "
                    "does not pass it on"));
     CHECK(eye->requests().size() == 1);
+}
+
+// ---- The starters of 40b ------------------------------------------------------
+
+namespace {
+
+/// A shipped starter's definition, as the catalog finds it.
+SymphonySpec starter(std::string_view name) {
+    const apogee::harness::BundledSymphony* found = apogee::harness::find_bundled_symphony(name);
+    REQUIRE(found != nullptr);
+    return apogee::harness::parse_symphony_spec(found->text, "starter", name);
+}
+
+constexpr std::string_view kFound =
+    R"({"found": [{"category": "email", "text": "ana@example.com"}, )"
+    R"({"category": "person", "text": "Ana"}]})";
+
+}  // namespace
+
+TEST_CASE("redact-text: the utility member's list held to its schema, the chat member rewriting",
+          "[symphony][runner][starters]") {
+    const SymphonySpec redact = starter("redact-text");
+    SECTION("a list that holds is threaded into the rewrite as the member wrote it") {
+        Members members{
+            {{"helper", {std::string{kFound}}}, {"root", {"Write to [PERSON] at [EMAIL]."}}}};
+        std::vector<SideCall> said;
+        const PlayResult result = played(
+            members.harness, redact, PlayInput{.text = "Write to Ana at ana@example.com."}, &said);
+        REQUIRE(result.ok());
+        CHECK(result.output == "Write to [PERSON] at [EMAIL].");
+        const ChatRequest& listed = members.mocks["helper"]->requests().front();
+        CHECK(listed.transient.response_schema == redact.stages[0].schema);
+        CHECK_THAT(brief_of(listed),
+                   Catch::Matchers::EndsWith("Text:\nWrite to Ana at ana@example.com.\n"));
+        CHECK_THAT(brief_of(members.mocks["root"]->requests().front()),
+                   Catch::Matchers::ContainsSubstring("Private details:\n" + std::string{kFound}));
+        CHECK(started(said) == std::vector<std::string>{"stage 1/2 find", "stage 2/2 redact"});
+    }
+    SECTION("a category outside the schema's list stops the walk before the rewrite") {
+        Members members{{{"helper", {R"({"found": [{"category": "pet", "text": "Rex"}]})"}}}};
+        const PlayResult result = played(members.harness, redact, PlayInput{.text = "Rex"});
+        CHECK_FALSE(result.ok());
+        CHECK_THAT(result.failure,
+                   Catch::Matchers::ContainsSubstring("outside the stage's schema"));
+        CHECK(members.mocks["root"]->requests().empty());
+    }
+}
+
+TEST_CASE("extract-actions: one schema stage, its JSON the whole output",
+          "[symphony][runner][starters]") {
+    constexpr std::string_view kActions =
+        R"({"actions": [{"owner": "Ana", "action": "Send the draft", "due": "Friday"}, )"
+        R"({"owner": "unassigned", "action": "Book the room", "due": "not stated"}]})";
+    Members members{{{"scribe", {std::string{kActions}}}}};
+    const SymphonySpec actions = starter("extract-actions");
+    const PlayResult result = played(members.harness, actions, PlayInput{.text = "notes"});
+    REQUIRE(result.ok());
+    CHECK(result.calls == 1);
+    CHECK(nlohmann::json::parse(result.output) == nlohmann::json::parse(kActions));
+    CHECK(members.mocks["scribe"]->requests().front().transient.response_schema ==
+          actions.stages[0].schema);
+    // A missing due date is an answer outside the schema, not a guess filled in.
+    Members missing{{{"scribe", {R"({"actions": [{"owner": "Ana", "action": "Go"}]})"}}}};
+    CHECK_FALSE(played(missing.harness, actions, PlayInput{.text = "notes"}).ok());
+}
+
+TEST_CASE("critique-revise: the critique threaded into the revision beside the draft",
+          "[symphony][runner][starters]") {
+    Members members{{{"helper", {"1. The ending is missing."}}, {"root", {"The revised draft."}}}};
+    const PlayResult result =
+        played(members.harness, starter("critique-revise"), PlayInput{.text = "A draft."});
+    REQUIRE(result.ok());
+    CHECK(result.output == "The revised draft.");
+    const std::string revise = brief_of(members.mocks["root"]->requests().front());
+    CHECK_THAT(revise, Catch::Matchers::ContainsSubstring("Draft:\nA draft.\n"));
+    CHECK_THAT(revise,
+               Catch::Matchers::ContainsSubstring("Critique:\n1. The ending is missing.\n"));
+}
+
+TEST_CASE(
+    "digest, the first shipped chain: summarize-verify recursed on the same turn, then carded",
+    "[symphony][runner][starters][chain]") {
+    constexpr std::string_view kCard =
+        R"({"title": "A cat on a mat", "tags": ["cats", "mats", "may"], )"
+        R"("one_line": "A cat sat on the mat on 4 May."})";
+    Members members{{{"helper", {"A cat sat."}},
+                     {"root", {"A cat sat on the mat on 4 May."}},
+                     {"scribe", {std::string{kCard}}}}};
+    const apogee::symphony::Catalog catalog = catalog_of({});
+    const SymphonySpec digest = starter("digest");
+    // Within the caps: the static walk the loader and a play's start ask.
+    CHECK(apogee::symphony::validate(digest, catalog).empty());
+    std::vector<SideCall> said;
+    const PlayResult result = chained(members.harness, digest, catalog,
+                                      PlayInput{.text = "The cat sat on the mat on 4 May."}, &said);
+    REQUIRE(result.ok());
+    CHECK(nlohmann::json::parse(result.output) == nlohmann::json::parse(kCard));
+    // One budget across the walk: summarize-verify's two calls and the card's.
+    CHECK(result.calls == 3);
+    CHECK(members.sent() == 3);
+    CHECK(started(said) == std::vector<std::string>{
+                               "digest → summarize-verify, stage 1/2 summarize",
+                               "digest → summarize-verify, stage 2/2 verify",
+                               "digest, stage 2/2 card",
+                           });
+    // The card stage reads summarize-verify's output, held to its schema.
+    const ChatRequest& card = members.mocks["scribe"]->requests().front();
+    CHECK(card.transient.response_schema == digest.stages[1].schema);
+    CHECK_THAT(brief_of(card),
+               Catch::Matchers::ContainsSubstring("Summary:\nA cat sat on the mat on 4 May.\n"));
+    REQUIRE(result.stages.size() == 2);
+    CHECK(result.stages[0].play == "summarize-verify");
+    CHECK(result.stages[0].stages.size() == 2);
+
+    SECTION("a budget too small for the walk stops it where it crosses, with no answer") {
+        Members short_of{{{"helper", {"A cat sat."}}, {"root", {"A cat sat."}}}};
+        const PlayResult stopped = chained(short_of.harness, digest, catalog,
+                                           PlayInput{.text = "x"}, nullptr, {.per_turn = 2});
+        CHECK_FALSE(stopped.ok());
+        CHECK(stopped.budget_spent);
+        CHECK(stopped.output.empty());
+        CHECK(short_of.mocks["scribe"]->requests().empty());
+    }
+    SECTION("with the depth cap at one, the chain is refused before any call") {
+        const Members refused;
+        const apogee::symphony::Catalog shallow = catalog_of({}, 1);
+        const PlayResult result_shallow =
+            chained(refused.harness, digest, shallow, PlayInput{.text = "x"});
+        CHECK_FALSE(result_shallow.ok());
+        CHECK_THAT(result_shallow.failure,
+                   Catch::Matchers::ContainsSubstring("symphony_caps.depth"));
+        CHECK(refused.sent() == 0);
+    }
 }

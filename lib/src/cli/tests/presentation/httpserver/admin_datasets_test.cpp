@@ -229,11 +229,14 @@ TEST_CASE("get and delete answer honest 404s, and delete removes the file",
 TEST_CASE("the kits route lists the seeded kits", "[httpserver][admin][datasets][kits]") {
     Fixture fixture;
     const nlohmann::json kits = parsed(apogee::httpserver::admin_list_kits(fixture.context()));
-    REQUIRE(kits["data"].size() == 4);
-    CHECK(kits["data"][0]["name"] == "instruction-following");
-    CHECK(kits["data"][1]["name"] == "reasoning");
-    CHECK(kits["data"][1]["eval_items"] == 8);
-    CHECK_FALSE(kits["data"][1].contains("error"));
+    REQUIRE(kits["data"].size() == 8);
+    CHECK(kits["data"][0]["name"] == "extraction-fidelity");
+    CHECK(kits["data"][1]["name"] == "instruction-following");
+    CHECK(kits["data"][3]["name"] == "reasoning");
+    CHECK(kits["data"][3]["eval_items"] == 24);
+    CHECK_FALSE(kits["data"][3].contains("error"));
+    CHECK(kits["data"][6]["name"] == "tool-calling");
+    CHECK(kits["data"][6]["eval_items"] == 32);
 }
 
 TEST_CASE(
@@ -320,7 +323,7 @@ TEST_CASE("the datasets routes are gated and the literal paths are never dataset
     kits.headers["authorization"] = "Bearer secret";
     const HttpResponse listed = mux.dispatch(kits);
     CHECK(listed.status == 200);
-    CHECK(parsed(listed)["data"].size() == 4);
+    CHECK(parsed(listed)["data"].size() == 8);
 
     HttpRequest synth = kits;
     synth.method = "POST";

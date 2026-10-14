@@ -1,11 +1,14 @@
 #include "tools/fs.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <random>
+#include <set>
 #include <string>
 
 #include "agent/tool.h"
@@ -190,6 +193,35 @@ TEST_CASE("list_directory puts directories first and search_files skips hidden o
     CHECK(
         box.run("search_files", R"({"pattern":"*.zzz"})").content.starts_with("No files matching"));
     CHECK(box.run("search_files", R"({})").is_error);
+}
+
+TEST_CASE("each filesystem tool declares the parameters it reads, and no other's",
+          "[tools][fs][schema]") {
+    // delete_file and list_directory once declared read_file's offset and
+    // limit -- lines, which neither reads -- and every model was told so.
+    const Sandbox box;
+    const std::map<std::string, std::set<std::string>> reads{
+        {"read_file", {"path", "offset", "limit"}},
+        {"write_file", {"path", "content"}},
+        {"edit_file", {"path", "old_string", "new_string", "replace_all"}},
+        {"delete_file", {"path"}},
+        {"list_directory", {"path"}},
+        {"search_files", {"pattern", "root"}},
+        {"grep_files", {"pattern", "path", "glob", "ignore_case"}}};
+    REQUIRE(box.registry.names().size() == reads.size());
+    for (const auto& [name, parameters] : reads) {
+        INFO(name);
+        const apogee::agent::Tool* tool = box.registry.find(name);
+        REQUIRE(tool != nullptr);
+        const nlohmann::json schema = nlohmann::json::parse(tool->parameters_schema);
+        std::set<std::string> declared;
+        for (const auto& [parameter, spec] : schema.at("properties").items()) {
+            declared.insert(parameter);
+        }
+        CHECK(declared == parameters);
+    }
+    CHECK(nlohmann::json::parse(box.registry.find("delete_file")->parameters_schema)["required"] ==
+          nlohmann::json::array({"path"}));
 }
 
 TEST_CASE("wildcard_match covers the shell's file patterns", "[tools][fs]") {

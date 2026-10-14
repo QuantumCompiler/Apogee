@@ -3,6 +3,7 @@
 #include <string_view>
 
 #include "agentloop/side_call.h"
+#include "contracts/todo.h"
 
 /// Everything the loop wants to say, said through here.
 ///
@@ -95,6 +96,15 @@ public:
     virtual void on_recall(int chats, int decisions) {
         (void)chats;
         (void)decisions;
+    }
+
+    /// The session's todo, whole, after `todo_write` changed it -- or, at a
+    /// resumed session's opening, as it was saved (41d). Every surface draws
+    /// the same list: the terminal a block below the status, the shell a
+    /// fold above the input, machine mode a `todo` event, a served stream a
+    /// meta-frame. Empty means cleared.
+    virtual void on_todo(const harness::TodoList& todo) {
+        (void)todo;
     }
 
     /// Erase any transient status indicator. Called once immediately before the

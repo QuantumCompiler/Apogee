@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DocDriftReport",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "Two to four sentences: what the change alters that a reader would notice, and whether the documentation still matches."
+    },
+    "docs_source": {
+      "type": "string",
+      "enum": ["retrieved_excerpts", "repository_files", "both", "none"],
+      "description": "What the report rests on: excerpts retrieved from a collection, documentation files read from the repository, both, or none at all."
+    },
+    "drifts": {
+      "type": "array",
+      "description": "Statements the change made untrue, most misleading first. Empty when there are none.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "document": { "type": "string", "description": "The document the statement is in: a path, or the excerpt's source name." },
+          "statement": { "type": "string", "description": "The stale statement, quoted as written." },
+          "why_stale": { "type": "string", "description": "What in the change makes it untrue." },
+          "suggested_edit": { "type": "string", "description": "The wording that would make it true again." },
+          "kind": {
+            "type": "string",
+            "enum": ["stale", "missing"],
+            "description": "stale = a statement the change made untrue; missing = something new that no document mentions."
+          }
+        },
+        "required": ["document", "statement", "why_stale", "suggested_edit", "kind"]
+      }
+    },
+    "human_summary": {
+      "type": "string",
+      "description": "Written LAST. A note for the author in Markdown: what was checked against (or that nothing was, and how to fix that), then each stale statement and its fix."
+    }
+  },
+  "required": ["summary", "docs_source", "drifts", "human_summary"]
+}

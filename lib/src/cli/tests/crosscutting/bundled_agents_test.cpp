@@ -50,12 +50,19 @@ TEST_CASE("every bundled prompt states the nothing-found rule and ends with the 
         CHECK(prompt.find("complete, valid result") != std::string::npos);
         CHECK(prompt.find("human_summary") != std::string::npos);
         CHECK(prompt.find("OUTPUT FORMAT") != std::string::npos);
-        // Refs come from flags: the prompt tells the model to call the git
-        // tools with no refs, never to parse a branch out of the input.
-        CHECK(prompt.find("--branch/--base") != std::string::npos);
-        // Re-authored for the owned loop: no forwarded vendor machinery.
-        CHECK(prompt.find("Atlassian") == std::string::npos);
-        CHECK(prompt.find("native-Claude") == std::string::npos);
+        // Refs come from flags: a prompt that reaches for the git tools tells
+        // the model to call them with no refs, never to parse a branch out of
+        // the input. (`meeting-minutes` reads a transcript and no git.)
+        if (prompt.find("git_diff") != std::string::npos) {
+            CHECK(prompt.find("--branch/--base") != std::string::npos);
+        }
+        // Re-authored for the owned loop: no forwarded vendor machinery, and
+        // model-agnostic -- no vendor or family a brief would lean on (40a).
+        for (const std::string_view vendor : {"Atlassian", "native-Claude", "Claude", "Anthropic",
+                                              "OpenAI", "GPT", "Gemini", "Llama", "Qwen"}) {
+            INFO(vendor);
+            CHECK(prompt.find(vendor) == std::string::npos);
+        }
     }
 }
 
@@ -67,6 +74,15 @@ TEST_CASE("a minimal nothing-found report conforms to each bundled schema",
         R"({"title":"t","range":"main..HEAD","summary":"s","features":[],"fixes":[],"breaking_changes":[],"other":[],"human_summary":"h"})");
     const nlohmann::json merge = nlohmann::json::parse(
         R"({"mode":"peer","walkthrough":"w","acceptance_criteria":{"criteria":[],"summary":"none given","notes":"no criteria"},"adr_review":{"adrs_consulted":[],"compliance":[],"notes":"no collection"},"verdict":"approve","verdict_rationale":"clean","human_summary":"h"})");
+    // The four added in 40a.
+    const nlohmann::json review = nlohmann::json::parse(
+        R"({"summary":"s","findings":[],"verdict":"approve","verdict_rationale":"r","human_summary":"h"})");
+    const nlohmann::json gaps =
+        nlohmann::json::parse(R"({"summary":"s","tests_read":[],"gaps":[],"human_summary":"h"})");
+    const nlohmann::json drift = nlohmann::json::parse(
+        R"({"summary":"s","docs_source":"none","drifts":[],"human_summary":"h"})");
+    const nlohmann::json minutes = nlohmann::json::parse(
+        R"({"summary":"s","decisions":[],"action_items":[],"open_questions":[],"human_summary":"h"})");
     const auto check = [](std::string_view name, const nlohmann::json& instance) {
         const nlohmann::json schema =
             nlohmann::json::parse(apogee::harness::find_bundled_agent(name)->schema);
@@ -78,4 +94,43 @@ TEST_CASE("a minimal nothing-found report conforms to each bundled schema",
     check("security-review", security);
     check("release-notes", notes);
     check("merge-request", merge);
+    check("code-review", review);
+    check("test-gaps", gaps);
+    check("doc-drift", drift);
+    check("meeting-minutes", minutes);
+}
+
+TEST_CASE("a full report conforms to each added schema, and a stray field does not",
+          "[bundled][agents][schema]") {
+    // Each item object is closed and flat (40a: no nesting a small model
+    // fumbles): one populated report per schema conforms, and the same report
+    // with an unknown field in an item is refused.
+    const auto check = [](std::string_view name, nlohmann::json instance, std::string_view array) {
+        INFO(name);
+        const nlohmann::json schema =
+            nlohmann::json::parse(apogee::harness::find_bundled_agent(name)->schema);
+        CHECK(apogee::agentloop::validate_against(schema, instance).ok);
+        instance[std::string{array}][0]["stray"] = "x";
+        CHECK_FALSE(apogee::agentloop::validate_against(schema, instance).ok);
+    };
+    check(
+        "code-review",
+        nlohmann::json::parse(
+            R"({"summary":"s","findings":[{"severity":"high","kind":"correctness","file":"a.cpp","location":"12-14","claim":"c","suggested_fix":"f","confidence":"high"}],"verdict":"changes_requested","verdict_rationale":"r","human_summary":"h"})"),
+        "findings");
+    check(
+        "test-gaps",
+        nlohmann::json::parse(
+            R"({"summary":"s","tests_read":["t.cpp"],"gaps":[{"priority":"medium","file":"a.cpp","location":"the total function","behavior":"b","suggested_test":"an empty list totals zero"}],"human_summary":"h"})"),
+        "gaps");
+    check(
+        "doc-drift",
+        nlohmann::json::parse(
+            R"({"summary":"s","docs_source":"both","drifts":[{"document":"README.md","statement":"st","why_stale":"w","suggested_edit":"e","kind":"stale"}],"human_summary":"h"})"),
+        "drifts");
+    check(
+        "meeting-minutes",
+        nlohmann::json::parse(
+            R"({"summary":"s","decisions":[{"decision":"d","reason":"not stated"}],"action_items":[{"owner":"unassigned","task":"t","due":"not stated"}],"open_questions":[{"question":"q","raised_by":"Ana"}],"human_summary":"h"})"),
+        "action_items");
 }

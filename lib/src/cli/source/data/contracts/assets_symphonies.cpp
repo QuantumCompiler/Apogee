@@ -14,7 +14,42 @@ namespace apogee::harness {
 // clang-format off
 namespace {
 
-constexpr std::array<BundledSymphony, 3> kSymphonies{{
+constexpr std::array<BundledSymphony, 7> kSymphonies{{
+    {.name = "critique-revise", .text = R"SYMPHONY(# A shipped symphony (40b): a draft critiqued by the suite's utility member
+# against what it says it is for, then revised by its chat member to answer
+# the critique -- the generic quality loop.
+# What it shows: a second opinion threaded into the rewrite -- stage two reads
+# the critique as {{critique}}, beside the draft as {{input}}.
+#
+#   apogee symphonies play critique-revise --input "$(cat draft.md)"
+#   apogee symphonies create my-editor --from critique-revise
+name: critique-revise
+description: Critique a draft against what it is meant to do, then revise it to answer the critique.
+input:
+  description: The draft, opening with a line that says what it is for when that is not obvious.
+stages:
+  - name: critique
+    role: utility
+    answer_tokens: 600
+    prompt: |
+      Below is a draft. Work out what it is meant to do -- from its first line when that says so, otherwise from the draft itself. Then list, most important first, at most five specific ways it falls short of that: something unclear, missing, wrong, out of order or longer than it needs to be. Quote the part each point is about. When it does its job, say so and list nothing.
+
+      Draft:
+      {{input}}
+  - name: revise
+    role: chat
+    answer_tokens: 2000
+    prompt: |
+      Here is a draft and a critique of it.
+
+      Draft:
+      {{input}}
+
+      Critique:
+      {{critique}}
+
+      Revise the draft so it answers every point in the critique, keeping its purpose, its facts and its voice. Change only what the critique calls for. Reply with the revised draft only.
+)SYMPHONY"},
     {.name = "describe-answer", .text = R"SYMPHONY(# A shipped symphony (27q): an image described by the suite's vision member,
 # then a question about it answered from that description by its chat
 # member -- so a chat model that cannot see still answers about a picture.
@@ -46,6 +81,85 @@ stages:
       Question: {{input}}
 
       Answer the question from the description alone. If the description does not say, reply that the description of the image does not say.
+)SYMPHONY"},
+    {.name = "digest", .text = R"SYMPHONY(# A shipped symphony (40b): a passage summarized and checked by playing the
+# summarize-verify starter, then given a title, tags and a one-line summary
+# by the suite's extraction member, held to a schema.
+# What it shows: a chain (27r) -- stage one plays another symphony on the
+# same turn, its stages narrated in place, and its output threads on as
+# {{summary}}, inside the depth and budget caps.
+#
+#   apogee symphonies play digest --input "$(cat article.txt)"
+#   apogee symphonies create my-digest --from digest
+name: digest
+description: Summarize and check a passage by playing summarize-verify, then card it with a title, tags and a one-line summary.
+input:
+  description: The passage to digest.
+stages:
+  - name: summary
+    play: summarize-verify
+  - name: card
+    role: extraction
+    answer_tokens: 300
+    prompt: |
+      Here is a summary of a passage. Give it a short title, three to five lower-case tags, and a one-line summary of at most twenty words, all drawn from the summary itself.
+
+      Summary:
+      {{summary}}
+    schema: |
+      {
+        "type": "object",
+        "properties": {
+          "title": {"type": "string"},
+          "tags": {"type": "array", "items": {"type": "string"}},
+          "one_line": {"type": "string"}
+        },
+        "required": ["title", "tags", "one_line"],
+        "additionalProperties": false
+      }
+)SYMPHONY"},
+    {.name = "extract-actions", .text = R"SYMPHONY(# A shipped symphony (40b): the action items in a set of notes, pulled out by
+# the suite's extraction member as one JSON document held to its schema --
+# extract-facts' sibling on a different document.
+# What it shows: one schema stage whose answer is the whole output, written
+# so an unstated owner or date is said, never invented.
+#
+#   apogee symphonies play extract-actions --input "$(cat notes.txt)"
+#   apogee symphonies create my-actions --from extract-actions
+name: extract-actions
+description: Pull the action items out of notes -- who does what, by when -- as one JSON document, held to its schema.
+input:
+  description: The notes to read.
+stages:
+  - name: extract
+    role: extraction
+    answer_tokens: 800
+    prompt: |
+      Read the notes below and list every action item: something a person agreed or was asked to do. For each, record who will do it, the action starting with a verb, and when it is due. Write "unassigned" when no one took it and "not stated" when no date was given -- never guess either. Leave the list empty when the notes hold no action items.
+
+      Notes:
+      {{input}}
+    schema: |
+      {
+        "type": "object",
+        "properties": {
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "owner": {"type": "string"},
+                "action": {"type": "string"},
+                "due": {"type": "string"}
+              },
+              "required": ["owner", "action", "due"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["actions"],
+        "additionalProperties": false
+      }
 )SYMPHONY"},
     {.name = "extract-facts", .text = R"SYMPHONY(# A shipped symphony (27q): one stage on the suite's extraction member, its
 # answer held to a JSON Schema -- on a local member by a grammar (26f), so it
@@ -79,6 +193,64 @@ stages:
         "required": ["topic", "people", "places", "dates", "facts"],
         "additionalProperties": false
       }
+)SYMPHONY"},
+    {.name = "redact-text", .text = R"SYMPHONY(# A shipped symphony (40b): the private details in a text listed by the
+# suite's utility member, held to a schema, then the text rewritten by its
+# chat member with a placeholder in each one's place -- a privacy pass a
+# local suite runs without the text leaving the machine.
+# What it shows: a schema stage feeding a prose stage -- stage two reads
+# stage one's JSON list as {{find}}, beside the input as {{input}}.
+#
+#   apogee symphonies play redact-text --input "$(cat notes.txt)"
+#   apogee symphonies create my-redact --from redact-text
+name: redact-text
+description: List the personal details and secrets in a text, then rewrite it with placeholders in their place.
+input:
+  description: The text to redact.
+stages:
+  - name: find
+    role: utility
+    answer_tokens: 800
+    prompt: |
+      List every private detail in the text below, each exactly as it is written there, with its category:
+      email (an email address), phone (a phone number), person (a person's name), address (a postal or street address), credential (a password, API key, token or other secret), id (an account, card, passport or other identifying number).
+      List each detail once. Leave the list empty when the text has none.
+
+      Text:
+      {{input}}
+    schema: |
+      {
+        "type": "object",
+        "properties": {
+          "found": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "category": {"type": "string", "enum": ["email", "phone", "person", "address", "credential", "id"]},
+                "text": {"type": "string"}
+              },
+              "required": ["category", "text"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["found"],
+        "additionalProperties": false
+      }
+  - name: redact
+    role: chat
+    answer_tokens: 1500
+    prompt: |
+      Here is a text and a list of the private details found in it.
+
+      Text:
+      {{input}}
+
+      Private details:
+      {{find}}
+
+      Rewrite the text with each listed detail replaced by its category in capitals and brackets: [EMAIL], [PHONE], [PERSON], [ADDRESS], [CREDENTIAL] or [ID]. Replace any other detail of those kinds the list missed the same way. Change nothing else. Reply with the rewritten text only.
 )SYMPHONY"},
     {.name = "summarize-verify", .text = R"SYMPHONY(# A shipped symphony (27q): a passage summarized by the suite's utility
 # member, then checked against the passage and corrected by its chat member.

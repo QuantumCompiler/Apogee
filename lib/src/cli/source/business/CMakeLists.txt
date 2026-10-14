@@ -152,6 +152,10 @@ apogee_add_module(tools
     tools/git.cpp
     tools/notes.h
     tools/notes.cpp
+    tools/todo.h
+    tools/todo.cpp
+    tools/delegate.h
+    tools/delegate.cpp
     tools/rag_query.h
     tools/rag_query.cpp
     tools/graph_nav.h
@@ -243,6 +247,8 @@ apogee_add_module(training
     training/pipeline.cpp
     training/regime.h
     training/regime.cpp
+    training/regime_specs.h
+    training/regime_specs.cpp
     training/cycle.h
     training/cycle.cpp
 )
@@ -252,7 +258,8 @@ target_link_libraries(apogee_business_training PUBLIC nlohmann_json::nlohmann_js
 # The task runner (27h): the record and its transitions, the ledger and the
 # one-task lock, the autonomy policy and its ceiling (27i), what a turn does
 # with nobody present, and the outer loop -- a turn arrives as a closure, so
-# it never names a backend or a surface.
+# it never names a backend or a surface. Since 40c the recipes: a named goal
+# template, read from YAML (the read path only, as the kits are).
 apogee_add_module(tasks
     tasks/task.h
     tasks/task.cpp
@@ -266,8 +273,11 @@ apogee_add_module(tasks
     tasks/runner.cpp
     tasks/view.h
     tasks/view.cpp
+    tasks/recipe.h
+    tasks/recipe.cpp
 )
-target_link_libraries(apogee_business_tasks PUBLIC nlohmann_json::nlohmann_json)
+target_link_libraries(apogee_business_tasks PUBLIC nlohmann_json::nlohmann_json
+                      PRIVATE yaml-cpp::yaml-cpp)
 
 # Symphonies (27q): a definition's sources and its validation, the stage
 # walk over the one member call, and the view every surface renders -- a

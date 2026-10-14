@@ -1,0 +1,34 @@
+# A shipped symphony (40b): a draft critiqued by the suite's utility member
+# against what it says it is for, then revised by its chat member to answer
+# the critique -- the generic quality loop.
+# What it shows: a second opinion threaded into the rewrite -- stage two reads
+# the critique as {{critique}}, beside the draft as {{input}}.
+#
+#   apogee symphonies play critique-revise --input "$(cat draft.md)"
+#   apogee symphonies create my-editor --from critique-revise
+name: critique-revise
+description: Critique a draft against what it is meant to do, then revise it to answer the critique.
+input:
+  description: The draft, opening with a line that says what it is for when that is not obvious.
+stages:
+  - name: critique
+    role: utility
+    answer_tokens: 600
+    prompt: |
+      Below is a draft. Work out what it is meant to do -- from its first line when that says so, otherwise from the draft itself. Then list, most important first, at most five specific ways it falls short of that: something unclear, missing, wrong, out of order or longer than it needs to be. Quote the part each point is about. When it does its job, say so and list nothing.
+
+      Draft:
+      {{input}}
+  - name: revise
+    role: chat
+    answer_tokens: 2000
+    prompt: |
+      Here is a draft and a critique of it.
+
+      Draft:
+      {{input}}
+
+      Critique:
+      {{critique}}
+
+      Revise the draft so it answers every point in the critique, keeping its purpose, its facts and its voice. Change only what the critique calls for. Reply with the revised draft only.

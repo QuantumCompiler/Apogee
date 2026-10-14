@@ -613,3 +613,19 @@ TEST_CASE("a suite since deleted is dropped with a warning, never fatal",
     REQUIRE(odd.warnings.size() == 2);  // the shape, and the missing schema
     CHECK(odd.warnings.front().kind == WarningKind::FieldDropped);
 }
+
+TEST_CASE("a session's todo is saved and read back, and one without writes no key",
+          "[chat][session][todo]") {
+    Session original = sample();
+    CHECK(apogee::logger::serialize(original).find("\"todo\"") == std::string::npos);
+    original.todo = {{.text = "Read it", .state = apogee::harness::TodoState::Done},
+                     {.text = "Fix it", .state = apogee::harness::TodoState::Active}};
+    const auto loaded = deserialize(apogee::logger::serialize(original), {});
+    CHECK(loaded.session.todo == original.todo);
+    CHECK(loaded.warnings.empty());
+    // A malformed entry is left out, never fatal: the session still loads.
+    nlohmann::json edited = nlohmann::json::parse(apogee::logger::serialize(original));
+    edited["todo"].push_back({{"text", "bad"}, {"state", "doing"}});
+    const auto degraded = deserialize(edited.dump(), {});
+    CHECK(degraded.session.todo == original.todo);
+}

@@ -86,9 +86,12 @@ inline constexpr const char* kSymphonyValue = "SYMPHONY";
 inline constexpr const char* kSymphonyNameValue = "SYMPHONY_NAME";
 /// A `symphonies:` config entry -- what `symphonies delete` removes.
 inline constexpr const char* kSymphonyEntryValue = "SYMPHONY_ENTRY";
+/// A task recipe (40c): a shipped one, or a file under `recipes/`.
+inline constexpr const char* kRecipeValue = "RECIPE";
 /// A `training.pipelines` entry, or a spec path.
 inline constexpr const char* kPipelineValue = "PIPELINE";
-/// A `training.regimes` entry, or a spec path.
+/// A regime by name -- a `training.regimes` entry, a spec under
+/// `training/regimes/`, a shipped one (42a) -- or a spec path.
 inline constexpr const char* kRegimeValue = "REGIME";
 /// A model in the store, or one set of its weights (`<model>/<format>/<id>`).
 inline constexpr const char* kModelValue = "MODEL";
@@ -131,7 +134,7 @@ inline constexpr const char* kAllowedHostValue = "ALLOWED_HOST";
 
 /// Every name kind above, for the protocol to recognise and a test to hold
 /// each to a source.
-inline constexpr std::array<std::string_view, 40> kNameValues{kCollectionValue,
+inline constexpr std::array<std::string_view, 41> kNameValues{kCollectionValue,
                                                               kCollectionListValue,
                                                               kGraphValue,
                                                               kNamedGraphValue,
@@ -170,7 +173,8 @@ inline constexpr std::array<std::string_view, 40> kNameValues{kCollectionValue,
                                                               kAllowedHostValue,
                                                               kSymphonyValue,
                                                               kSymphonyNameValue,
-                                                              kSymphonyEntryValue};
+                                                              kSymphonyEntryValue,
+                                                              kRecipeValue};
 
 /// `{a,b}`: a set of words, as a type name spells it.
 template <typename Words>

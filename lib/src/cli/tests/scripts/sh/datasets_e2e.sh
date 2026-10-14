@@ -37,7 +37,9 @@ DATASETS="$APOGEE_HOME/training/datasets"
 
 # --- the seeded kits ---------------------------------------------------------
 "$APOGEE_BIN" datasets kits >"$WORK_DIR/kits.txt" || fail "datasets kits"
-for kit in instruction-following reasoning structured-output summarization; do
+# The four general kits, and the four role-chore kits (42b).
+for kit in instruction-following reasoning structured-output summarization \
+    utility-chores extraction-fidelity tool-calling knowledge-capture; do
     grep -q "^$kit " "$WORK_DIR/kits.txt" || fail "kit $kit not listed: $(cat "$WORK_DIR/kits.txt")"
 done
 grep -q "tool-use" "$WORK_DIR/kits.txt" && fail "the deferred tool kit was listed"
@@ -99,7 +101,7 @@ assert listed["object"] == "list", listed
 names = [row["name"] for row in listed["data"]]
 assert "maths" in names and "raw" in names, listed
 assert info["name"] == "maths" and info["lines"] == 2, info
-assert kits["object"] == "list" and kits["data"], kits' "$WORK_DIR/list.json" "$WORK_DIR/info.json" "$WORK_DIR/kits.json" \
+assert kits["object"] == "list" and len(kits["data"]) == 8, kits' "$WORK_DIR/list.json" "$WORK_DIR/info.json" "$WORK_DIR/kits.json" \
     || fail "a dataset read's document was wrong: $(cat "$WORK_DIR/list.json")"
 "$APOGEE_BIN" datasets delete maths -y >/dev/null || fail "datasets delete"
 [ ! -f "$DATASETS/maths.jsonl" ] || fail "delete left the file"

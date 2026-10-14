@@ -255,9 +255,14 @@ TEST_CASE("orchestration offers each symphony it can play here, and says why not
     apogee::agent::ToolRegistry registry;
     const OrchestraOffer offer =
         apogee::symphony::register_play_tools(registry, world.harness, catalog, world.context());
-    CHECK(offer.offered == std::vector<std::string>{"extract-facts", "summarize-verify", "digest"});
-    CHECK(play_tools(registry) ==
-          std::vector<std::string>{"play_digest", "play_extract-facts", "play_summarize-verify"});
+    // The config's `digest` stands in the shipped one's slot (40b).
+    CHECK(offer.offered == std::vector<std::string>{"critique-revise", "digest", "extract-actions",
+                                                    "extract-facts", "redact-text",
+                                                    "summarize-verify"});
+    CHECK(play_tools(registry) == std::vector<std::string>{"play_critique-revise", "play_digest",
+                                                           "play_extract-actions",
+                                                           "play_extract-facts", "play_redact-text",
+                                                           "play_summarize-verify"});
     REQUIRE(offer.withheld.size() == 1);
     CHECK(offer.withheld.front().symphony == "describe-answer");
     CHECK(offer.withheld.front().structural);
@@ -265,7 +270,7 @@ TEST_CASE("orchestration offers each symphony it can play here, and says why not
                Catch::Matchers::StartsWith("it takes an image, which a tool call cannot give"));
     // Registering again adds nothing.
     (void)apogee::symphony::register_play_tools(registry, world.harness, catalog, world.context());
-    CHECK(play_tools(registry).size() == 3);
+    CHECK(play_tools(registry).size() == 6);
 
     // No suite active: absent.
     world.harness.set_active_suite("");
@@ -275,11 +280,12 @@ TEST_CASE("orchestration offers each symphony it can play here, and says why not
     CHECK(none.empty());
 
     // A suite whose utility member bills per call: whatever reaches it is not
-    // offered, naming the stage, the role and the backend; extract-facts --
-    // its extraction falling back to the conversation -- still is.
+    // offered, naming the stage, the role and the backend; extract-facts and
+    // extract-actions -- their extraction falling back to the conversation --
+    // still are.
     world.harness.set_active_suite("billed");
     const OrchestraOffer billed = apogee::symphony::orchestra_offer(world.harness, catalog, "root");
-    CHECK(billed.offered == std::vector<std::string>{"extract-facts"});
+    CHECK(billed.offered == std::vector<std::string>{"extract-actions", "extract-facts"});
     const auto withheld = [&](std::string_view name) {
         const auto found = std::ranges::find_if(
             billed.withheld,
@@ -299,7 +305,7 @@ TEST_CASE("orchestration offers each symphony it can play here, and says why not
     // so it is not offered, and the chain neither.
     world.harness.set_active_suite("tight");
     const OrchestraOffer tight = apogee::symphony::orchestra_offer(world.harness, catalog, "root");
-    CHECK(tight.offered == std::vector<std::string>{"extract-facts"});
+    CHECK(tight.offered == std::vector<std::string>{"extract-actions", "extract-facts"});
 
     // Nothing to offer: no tool, no framing.
     world.harness.set_active_suite("duo");

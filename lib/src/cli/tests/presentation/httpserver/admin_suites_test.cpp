@@ -415,7 +415,7 @@ TEST_CASE("a suite's orchestration over HTTP is byte-identical to the CLI's",
     const HttpResponse moved = admin_set_suite_member(
         billing, "research", with_body("PUT", {{"role", "utility"}, {"member", "embedder"}}));
     CHECK(moved.status == 400);
-    CHECK(moved.body.find("orchestrate: 'summarize-verify' reaches utility ('embedder')") !=
+    CHECK(moved.body.find("orchestrate: 'critique-revise' reaches utility ('embedder')") !=
           std::string::npos);
     CHECK(apogee::httpserver::admin_set_suite_orchestrate(context, "research",
                                                           with_body("PUT", {{"orchestrate", "on"}}))

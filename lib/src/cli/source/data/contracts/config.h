@@ -856,6 +856,8 @@ struct PipelineSpec {
 /// From flags, a `training.regimes:` entry, or a spec file; flags win.
 struct RegimeSpec {
     std::string name;
+    /// What it trains, for a person (42a): `train regime list` shows it.
+    std::string description;
     std::string teacher;
     std::string student;
     /// Ordered kit names; each becomes one stage.

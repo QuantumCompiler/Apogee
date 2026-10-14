@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <random>
+#include <set>
 #include <span>
 #include <sstream>
 #include <string>
@@ -38,11 +39,12 @@ std::string read(const std::filesystem::path& path) {
 
 TEST_CASE("the compiled-in prompts and schemas byte-match the shipped files",
           "[harness][assets][template]") {
-    // The config template's drift test, for six more files: the literal in
-    // the binary and the file under assets/ are the same bytes, or the build
+    // The config template's drift test, for fourteen more files: the literal
+    // in the binary and the file under assets/ are the same bytes, or the build
     // fails -- so an edit to one cannot silently leave the other behind.
+    // scripts/generate_agent_assets.py writes the literals (40a).
     const std::filesystem::path assets{APOGEE_ASSETS_DIR};
-    REQUIRE(bundled_agents().size() == 3);
+    REQUIRE(bundled_agents().size() == 7);
     for (const apogee::harness::BundledAgent& agent : bundled_agents()) {
         INFO(agent.name);
         CHECK(read(assets / "prompts" / (std::string{agent.name} + ".txt")) == agent.prompt);
@@ -53,7 +55,24 @@ TEST_CASE("the compiled-in prompts and schemas byte-match the shipped files",
     CHECK(find_bundled_agent("security-review") != nullptr);
     CHECK(find_bundled_agent("release-notes") != nullptr);
     CHECK(find_bundled_agent("merge-request") != nullptr);
+    CHECK(find_bundled_agent("code-review") != nullptr);
+    CHECK(find_bundled_agent("test-gaps") != nullptr);
+    CHECK(find_bundled_agent("doc-drift") != nullptr);
+    CHECK(find_bundled_agent("meeting-minutes") != nullptr);
     CHECK(find_bundled_agent("nope") == nullptr);
+    // Every prompt and schema file shipped is a bundled agent's: a file the
+    // generator was never told about would be seeded by nothing.
+    for (const char* const dir : {"prompts", "schemas"}) {
+        for (const std::filesystem::directory_entry& entry :
+             std::filesystem::directory_iterator{assets / dir}) {
+            std::string name = entry.path().stem().string();
+            if (name.ends_with("-output")) {
+                name.resize(name.size() - std::string_view{"-output"}.size());
+            }
+            INFO(entry.path().string());
+            CHECK(find_bundled_agent(name) != nullptr);
+        }
+    }
 }
 
 TEST_CASE("seeding writes absent files only: an edit survives a re-seed",
@@ -61,11 +80,13 @@ TEST_CASE("seeding writes absent files only: an edit survives a re-seed",
     const apogee::testing::TempDir root{"assets-seed-" + std::to_string(std::random_device{}())};
     const apogee::harness::AssetSeedResult first = seed_bundled_assets(root.path());
     REQUIRE(first.ok());
-    // Six agent files, four kits, three symphony starters (27q), three
-    // training drivers, the two mlx drivers, the vendored converter.
+    // Fourteen agent files (40a), eight kits (42b), three training regimes
+    // (42a, 42b), seven symphony starters (27q, 40b), three task recipes
+    // (40c), three training drivers, the two mlx drivers, the vendored
+    // converter.
     CHECK(first.created.size() == apogee::harness::bundled_files().size());
     CHECK(first.created.size() ==
-          6 + 4 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
+          14 + 8 + 3 + 7 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
     for (const apogee::harness::BundledSymphony& starter : apogee::harness::bundled_symphonies()) {
         CHECK(read(root.path() / "symphonies" / (std::string{starter.name} + ".yaml")) ==
               starter.text);
@@ -133,15 +154,20 @@ TEST_CASE("a config entry of the same name overrides a bundled agent; unknown na
     CHECK(bundled != nullptr);  // still reported, for the compiled-in fallback
 
     const std::vector<apogee::harness::NamedAgent> agents = all_agents(config);
-    REQUIRE(agents.size() == 4);
+    REQUIRE(agents.size() == 8);
     CHECK(agents[0].name == "security-review");
     CHECK(agents[0].overrides_bundled);
     CHECK_FALSE(agents[0].bundled);
     CHECK(agents[1].name == "release-notes");
     CHECK(agents[1].bundled);
     CHECK(agents[2].name == "merge-request");
-    CHECK(agents[3].name == "zeta");
-    CHECK_FALSE(agents[3].bundled);
+    CHECK(agents[3].name == "code-review");
+    CHECK(agents[4].name == "test-gaps");
+    CHECK(agents[5].name == "doc-drift");
+    CHECK(agents[6].name == "meeting-minutes");
+    CHECK(agents[6].bundled);
+    CHECK(agents[7].name == "zeta");
+    CHECK_FALSE(agents[7].bundled);
 }
 
 TEST_CASE("agent paths resolve against the data directory, absolute paths as they are",
@@ -171,12 +197,126 @@ TEST_CASE("an unedited bundled file is Apogee's, an edited one is the user's",
     CHECK_FALSE(apogee::harness::is_unmodified_bundled_asset(root.path(), root.path() / "nope"));
 }
 
+TEST_CASE("the compiled-in personas byte-match the shipped files, every one compiled in",
+          "[harness][assets][personas]") {
+    // The coder persona (41c), compiled in by scripts/generate_agent_assets.py
+    // and never seeded: what a project session carries when no -s is given.
+    const std::filesystem::path dir = std::filesystem::path{APOGEE_ASSETS_DIR} / "personas";
+    std::set<std::string> files;
+    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator{dir}) {
+        files.insert(entry.path().filename().string());
+    }
+    std::set<std::string> compiled;
+    for (const apogee::harness::BundledPersona& persona : apogee::harness::bundled_personas()) {
+        INFO(persona.name);
+        compiled.insert(std::string{persona.name} + ".txt");
+        CHECK(read(dir / (std::string{persona.name} + ".txt")) == persona.text);
+        // Model-agnostic: no vendor or family a small local model would trip
+        // over, and short enough to ride every request.
+        for (const std::string_view vendor :
+             {"Claude", "Anthropic", "OpenAI", "GPT", "Gemini", "Llama", "Qwen", "Apogee"}) {
+            CHECK(persona.text.find(vendor) == std::string_view::npos);
+        }
+        CHECK(persona.text.size() < 4096);
+    }
+    CHECK(files == compiled);
+    CHECK(apogee::harness::find_bundled_persona("coder") != nullptr);
+    CHECK(apogee::harness::find_bundled_persona("nope") == nullptr);
+}
+
+TEST_CASE("the compiled-in task recipes byte-match the shipped files, every one compiled in",
+          "[harness][assets][recipes]") {
+    const std::filesystem::path dir = std::filesystem::path{APOGEE_ASSETS_DIR} / "recipes";
+    std::set<std::string> files;
+    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator{dir}) {
+        files.insert(entry.path().filename().string());
+    }
+    std::set<std::string> compiled;
+    REQUIRE(apogee::harness::bundled_recipes().size() == 3);
+    for (const apogee::harness::BundledRecipe& recipe : apogee::harness::bundled_recipes()) {
+        INFO(recipe.name);
+        compiled.insert(std::string{recipe.name} + ".yaml");
+        CHECK(read(dir / (std::string{recipe.name} + ".yaml")) == recipe.text);
+        CHECK(apogee::harness::find_bundled_recipe(recipe.name) == &recipe);
+    }
+    // scripts/generate_recipe_assets.py compiles every file, and nothing else.
+    CHECK(files == compiled);
+    CHECK(apogee::harness::find_bundled_recipe("nope") == nullptr);
+
+    // Seeded with the rest, under the layout's recipes row, skip-if-present.
+    const apogee::testing::TempDir root{"assets-recipes-" + std::to_string(std::random_device{}())};
+    REQUIRE(seed_bundled_assets(root.path()).ok());
+    for (const apogee::harness::BundledRecipe& recipe : apogee::harness::bundled_recipes()) {
+        CHECK(read(root.path() / "recipes" / (std::string{recipe.name} + ".yaml")) == recipe.text);
+    }
+}
+
+TEST_CASE(
+    "the compiled-in training regimes byte-match the shipped files, every one compiled in, "
+    "and none names a backend",
+    "[harness][assets][training][regimes]") {
+    const std::filesystem::path dir =
+        std::filesystem::path{APOGEE_ASSETS_DIR} / "training" / "regimes";
+    std::set<std::string> files;
+    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator{dir}) {
+        files.insert(entry.path().filename().string());
+    }
+    std::set<std::string> compiled;
+    REQUIRE(apogee::harness::bundled_regimes().size() == 3);
+    CHECK(apogee::harness::bundled_regimes()[0].name == "foundation");
+    CHECK(apogee::harness::bundled_regimes()[1].name == "harness-helpers");
+    CHECK(apogee::harness::bundled_regimes()[2].name == "knowledge");
+    for (const apogee::harness::BundledRegime& regime : apogee::harness::bundled_regimes()) {
+        INFO(regime.name);
+        compiled.insert(std::string{regime.name} + ".yaml");
+        CHECK(read(dir / (std::string{regime.name} + ".yaml")) == regime.text);
+        CHECK(apogee::harness::find_bundled_regime(regime.name) == &regime);
+        CHECK(apogee::harness::bundled_regime_relative_path(regime.name) ==
+              "training/regimes/" + std::string{regime.name} + ".yaml");
+        // Install-agnostic by construction (42a): kits and tuning only --
+        // the teacher, the student and the promoted name are the user's.
+        const apogee::harness::RegimeSpec spec = apogee::harness::parse_regime_spec(
+            std::string{regime.text}, "shipped", std::string{regime.name});
+        CHECK(spec.name == regime.name);
+        CHECK_FALSE(spec.description.empty());
+        CHECK(spec.teacher.empty());
+        CHECK(spec.student.empty());
+        CHECK(spec.promote_as.empty());
+        REQUIRE_FALSE(spec.kits.empty());
+        for (const std::string& kit : spec.kits) {
+            INFO(kit);
+            CHECK(std::ranges::any_of(apogee::harness::bundled_kits(),
+                                      [&kit](const apogee::harness::BundledKit& bundled) {
+                                          return bundled.name == kit;
+                                      }));
+        }
+    }
+    // scripts/generate_training_assets.py compiles every file, and nothing else.
+    CHECK(files == compiled);
+    CHECK(apogee::harness::find_bundled_regime("nope") == nullptr);
+
+    // Seeded with the rest, under the layout's training row, skip-if-present.
+    const apogee::testing::TempDir root{"assets-regimes-" + std::to_string(std::random_device{}())};
+    REQUIRE(seed_bundled_assets(root.path()).ok());
+    for (const apogee::harness::BundledRegime& regime : apogee::harness::bundled_regimes()) {
+        CHECK(read(root.path() / "training" / "regimes" / (std::string{regime.name} + ".yaml")) ==
+              regime.text);
+    }
+}
+
 TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
           "[harness][assets][training]") {
     const std::filesystem::path assets{APOGEE_ASSETS_DIR};
-    REQUIRE(apogee::harness::bundled_kits().size() == 4);
+    REQUIRE(apogee::harness::bundled_kits().size() == 8);
+    std::set<std::string> kit_files;
+    for (const std::filesystem::directory_entry& entry :
+         std::filesystem::directory_iterator{assets / "training" / "kits"}) {
+        kit_files.insert(entry.path().filename().string());
+    }
+    std::set<std::string> compiled_kits;
     for (const apogee::harness::BundledKit& kit : apogee::harness::bundled_kits()) {
         INFO(kit.name);
+        compiled_kits.insert(std::string{kit.name} + ".yaml");
         CHECK(read(assets / "training" / "kits" / (std::string{kit.name} + ".yaml")) == kit.text);
         CHECK(apogee::harness::bundled_kit_relative_path(kit.name) ==
               "training/kits/" + std::string{kit.name} + ".yaml");
@@ -184,6 +324,8 @@ TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
     REQUIRE(apogee::harness::bundled_training_scripts().size() == 3);
     const apogee::harness::BundledScript& script = apogee::harness::bundled_training_scripts()[0];
     CHECK(script.name == "prepare_dataset.py");
+    // scripts/generate_training_assets.py compiles every kit file, and nothing else.
+    CHECK(kit_files == compiled_kits);
     CHECK(apogee::harness::bundled_training_scripts()[1].name == "train_mlx.py");
     CHECK(apogee::harness::bundled_training_scripts()[2].name == "train_peft.py");
     for (const apogee::harness::BundledScript& driver :
@@ -194,7 +336,7 @@ TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
     CHECK(apogee::harness::bundled_script_relative_path(script.name) ==
           "training/scripts/prepare_dataset.py");
     CHECK(apogee::harness::bundled_files().size() ==
-          6 + 4 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
+          14 + 8 + 3 + 7 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
 }
 
 TEST_CASE("the compiled-in mlx drivers byte-match the shipped files and seed beside the trainers",

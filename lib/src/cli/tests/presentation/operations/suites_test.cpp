@@ -226,7 +226,7 @@ TEST_CASE("orchestrate is written only when every member a symphony reaches is l
     SuiteConfig billed = suite;
     billed.members["utility"] = {.backend = "paid"};
     CHECK(validate_suite(config, "s", billed, paid_billed, &symphonies) ==
-          "orchestrate: 'summarize-verify' reaches utility ('paid') through its summarize stage "
+          "orchestrate: 'critique-revise' reaches utility ('paid') through its critique stage "
           "(utility), and 'paid' is billed per call -- a play the model starts runs on its "
           "initiative, which never spends: only a suite whose symphonies reach local, unmetered "
           "members can orchestrate");

@@ -26,6 +26,7 @@
 #include "cli/tui_workbench.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
+#include "contracts/todo.h"
 #include "events/bus.h"
 #include "harness/harness.h"
 #include "httpserver/admin_auth_routes.h"
@@ -190,6 +191,14 @@ TEST_CASE("a stored key reaches no listing, report, response, event or log", "[s
                  apogee::operations::agents_document(world.config).dump());
     expect_clean("mcp list --output-format json",
                  apogee::operations::mcp_servers_document(world.config).dump());
+    // The session todo's renders (41d): what the model wrote, and nothing of
+    // the store or the environment beside it.
+    const apogee::harness::TodoList todo{
+        {.text = "Check the stored backend", .state = apogee::harness::TodoState::Active}};
+    for (const std::string& line : apogee::harness::describe_todo(todo)) {
+        expect_clean("todo line", line);
+    }
+    expect_clean("todo event", apogee::harness::todo_to_json(todo).dump());
 
     // Every admin response: the listing, a PUT's echo, a DELETE's, and the
     // backend view.

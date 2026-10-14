@@ -33,6 +33,7 @@
 #include "logger/operational.h"
 #include "mcp/registry.h"
 #include "operations/suites.h"
+#include "tools/todo.h"
 
 namespace apogee::commands {
 namespace {
@@ -264,6 +265,9 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
                 .mcp_status = [](std::string_view line) { std::cerr << line << "\n"; },
                 .mcp_server_log =
                     [](std::string_view bytes) { std::cerr << bytes << std::flush; }});
+            // The session todo (41d): each request's board is its own
+            // conversation's, set where the request runs.
+            tools::register_todo_tool(registry);
             // Nobody is attached to a served request: the config's levels
             // decide, and ask is deny.
             options.permission = make_permission_checker(config, nullptr);

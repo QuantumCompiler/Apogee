@@ -9,6 +9,7 @@
 #include <string_view>
 
 #include "contracts/cancellation.h"
+#include "contracts/todo.h"
 #include "contracts/types.h"
 #include "httpserver/http_types.h"
 
@@ -49,6 +50,11 @@ struct StreamIdentity {
 /// -- a meta-frame with content would print status text into an answer.
 [[nodiscard]] nlohmann::json meta_chunk(const StreamIdentity& identity,
                                         const harness::StatusEvent& event);
+
+/// A `todo` meta-frame (41d): the same chunk shape, its `meta` the
+/// session's todo whole -- `{"type": "todo", "items": [{text, state}]}`.
+[[nodiscard]] nlohmann::json todo_chunk(const StreamIdentity& identity,
+                                        const harness::TodoList& todo);
 
 /// One `text_completion` chunk for the legacy completions endpoint.
 [[nodiscard]] nlohmann::json completion_chunk(const StreamIdentity& identity, std::string_view text,

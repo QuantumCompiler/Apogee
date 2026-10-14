@@ -37,10 +37,12 @@
 #include "cli/embed.h"
 #include "cli/helpers.h"
 #include "cli/permissions.h"
+#include "cli/project_context.h"
 #include "cli/provider_offer.h"
 #include "cli/session_output.h"
 #include "cli/suite_residency.h"
 #include "cli/symphonies_cmd.h"
+#include "contracts/assets.h"
 #include "contracts/config.h"
 #include "contracts/errors.h"
 #include "contracts/layout.h"
@@ -61,7 +63,9 @@
 #include "platform/platform.h"
 #include "symphony/tools.h"
 #include "tools/consult.h"
+#include "tools/delegate.h"
 #include "tools/git.h"
+#include "tools/todo.h"
 #include "views/ask_prompt.h"
 #include "views/cli_reporter.h"
 #include "views/input_gate.h"
@@ -543,18 +547,27 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             fail_user(mode, "--suite: " + refused);
         }
     }
-    // Execute is a session opened with a suite (27s): never off, and never a
-    // plain chat for want of one -- said before anything is built when no
-    // suite is named, none is the default and no session is resumed.
+    // Execute opens on three rungs (41a): a suite -- named, or the default
+    // -- else bare on one model, `-m`'s or `models.default`, suite-less
+    // through the role resolver's own chain exactly as `chat` runs. Refused
+    // before anything is built only with none of them and no session to
+    // resume; `--orchestrate` is a suite's, refused without one.
     if (mode == SessionMode::Execute) {
         if (flags->suite == harness::kSuiteOff) {
             fail_user(mode,
-                      "--suite off names no suite, and execute opens a session with one -- "
-                      "'apogee chat --suite off' is a session without");
+                      "--suite off names no suite, and execute opens a session with one or bare "
+                      "on a model -- leave --suite out, or 'apogee execute -m <backend>' opens "
+                      "it bare");
         }
-        if (flags->suite.empty() && config.models.default_suite.empty() && flags->resume.empty() &&
-            !flags->cont) {
+        const bool suite = !flags->suite.empty() || !config.models.default_suite.empty();
+        // What it would open on bare, asked of the one resolver: `-m`, else
+        // the chat role's rungs down to `models.default`.
+        if (!suite && harness::resolve_chat_backend(config, flags->model).empty() &&
+            flags->resume.empty() && !flags->cont) {
             fail_user(mode, execute_suite_refusal(config));
+        }
+        if (!suite && flags->orchestrate && flags->resume.empty() && !flags->cont) {
+            fail_user(mode, execute_orchestrate_refusal(config));
         }
     }
     // `--graph` is how the launch's own attaches are indexed (27p): with
@@ -694,9 +707,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         }
     }
     // A resumed session that had no suite, under a config with no default,
-    // gives execute none to run under (27s).
-    if (mode == SessionMode::Execute && config.models.default_suite.empty()) {
-        fail_user(mode, execute_suite_refusal(config));
+    // runs bare (41a) -- unless it was asked to orchestrate, which only a
+    // suite can.
+    if (mode == SessionMode::Execute && config.models.default_suite.empty() && flags->orchestrate) {
+        fail_user(mode, execute_orchestrate_refusal(config));
     }
     // A member naming nothing is refused before a turn could fall back to
     // models.default and answer from a model nobody chose.
@@ -747,6 +761,11 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         config, harness::RoleRequest{.role = harness::ModelRole::Chat,
                                      .override = flags->model,
                                      .entry_backend = session.backend});
+    // A bare execute (41a) with nothing to open on: a resumed session that
+    // named no backend, under a config with no default.
+    if (mode == SessionMode::Execute && model.empty()) {
+        fail_user(mode, execute_suite_refusal(config));
+    }
     session.backend = model;
     // The chat's roster pin (33): the launch's; else, unless -m named a
     // backend, the one the chat was left on -- pinned again when the chat
@@ -866,6 +885,12 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 std::cerr << bytes << std::flush;
             }}
                                              : mcp::StderrTail::Sink{}});
+        // The session todo (41d): the plan, kept by the model, drawn by
+        // every front end; its board is this session's, set below.
+        tools::register_todo_tool(registry);
+        // The delegate (41e): a bounded sub-session, re-entering the loop
+        // under this session's gate; its context is each turn's.
+        tools::register_delegate_tool(registry);
     }
     // What the chat's backend is offered: every registered tool, or the
     // toolset the active suite pins on that backend (27d), and the
@@ -1033,6 +1058,39 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         }
     }
 
+    // Execute's project opening (41b): opened in a project -- a git
+    // repository, or a folder holding a context file -- it reads AGENTS.md
+    // (else CLAUDE.md) into every request as standing context, and attaches
+    // the folder through the one attach driver unless `--attach` says
+    // otherwise. Chat opens as it always has.
+    ProjectOpening project;
+    if (mode == SessionMode::Execute) {
+        std::error_code here_error;
+        project = read_project_opening(std::filesystem::current_path(here_error));
+    }
+    // The coder persona (41c): a project session's way of working, carried
+    // ahead of the project's own file so the file, closer to the
+    // conversation, wins where they differ. `-s` -- given now, or saved with
+    // a resumed session -- replaces it whole.
+    std::vector<std::string> standing;
+    std::optional<std::string> persona_line;
+    if (mode == SessionMode::Execute && project.project) {
+        if (session.params.system_prompt.empty()) {
+            standing.emplace_back(harness::find_bundled_persona("coder")->text);
+            persona_line =
+                "persona: coder, the shipped coding prompt, in every request -- -s "
+                "replaces it";
+        } else {
+            persona_line = "persona: your -s prompt, in place of the coder persona";
+        }
+    }
+    if (project.context.has_value()) {
+        standing.push_back(project_context_note(*project.context));
+    }
+    const std::vector<std::string> launch_attaches =
+        mode == SessionMode::Execute ? opening_attaches(flags->attach, project.project)
+                                     : flags->attach;
+
     if (decorate) {
         // A base model is said in the banner and the spinner, all session
         // (26r) -- never on an answer. Under execute the banner counts what
@@ -1147,6 +1205,15 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 .tools = tools_on(),
                 .ask = flags->tools},
             next_turn);
+        // The todo's board (41d): this conversation's list, each change an
+        // event; a resumed list is said as the session opens.
+        const tools::TodoScope todo_scope{tools::TodoBoard{
+            .list = &session.todo, .changed = [&machine_reporter](const harness::TodoList& todo) {
+                machine_reporter.on_todo(todo);
+            }}};
+        if (!session.todo.empty()) {
+            machine_reporter.on_todo(session.todo);
+        }
         // The driver's lines, read while a turn runs, so a `cancel` reaches
         // it (28f); the loop, a question and the permission prompt all take
         // their lines from this one reader.
@@ -1191,7 +1258,18 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         for (const std::string& spec : flags->images) {
             (void)attached.attach(spec, working_directory);
         }
-        for (const std::string& spec : flags->attach) {
+        // The project opening said as the banner says it (41b), before the
+        // folder's own attach lines.
+        if (persona_line.has_value()) {
+            machine_reporter.on_notice(*persona_line);
+        }
+        if (project.context.has_value()) {
+            machine_reporter.on_notice(project_context_line(*project.context));
+        }
+        if (!project.unreadable.empty()) {
+            machine_reporter.on_notice("project context: " + project.unreadable);
+        }
+        for (const std::string& spec : launch_attaches) {
             (void)attached.attach(spec, working_directory, attached.graph_method(launch_graph));
         }
         bool first_line = true;
@@ -1308,7 +1386,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                                       : agent::ConfirmFn{},
                          approvals},
                 machine_reporter, machine_notice, rag_settings, review_note, &attached, &recall,
-                got->turn);
+                got->turn, /*summarize_reasoning=*/false, standing);
             if (outcome.cancelled) {
                 cancelled_result();
                 close_turn();
@@ -1378,8 +1456,26 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     for (const std::string& spec : flags->images) {
         (void)attached.attach(spec, working_directory);
     }
-    for (const std::string& spec : flags->attach) {
+    if (persona_line.has_value()) {
+        out.print_line(style.tag(ansi::Role::Apogee) + " " + *persona_line);
+    }
+    if (project.context.has_value()) {
+        out.print_line(style.tag(ansi::Role::Apogee) + " " +
+                       project_context_line(*project.context));
+    }
+    if (!project.unreadable.empty()) {
+        out.print_line(style.tag(ansi::Role::Warning) + " project context: " + project.unreadable);
+    }
+    for (const std::string& spec : launch_attaches) {
         (void)attached.attach(spec, working_directory, attached.graph_method(launch_graph));
+    }
+    // The todo's board (41d): this conversation's list, each change drawn
+    // where this front end draws it; a resumed list shown as it was left.
+    const tools::TodoScope todo_scope{tools::TodoBoard{
+        .list = &session.todo,
+        .changed = [&out](const harness::TodoList& todo) { out.reporter().on_todo(todo); }}};
+    if (!session.todo.empty()) {
+        out.reporter().on_todo(session.todo);
     }
 
     // Once, immediately before the first prompt -- never between turns.
@@ -2136,6 +2232,20 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     }
                     break;
                 }
+                case ChatVerb::Todo: {
+                    const std::vector<std::string> lines = harness::describe_todo(session.todo);
+                    if (lines.empty()) {
+                        out.print_line(style.tag(ansi::Role::Apogee) +
+                                       (flags->tools ? " no todo yet -- the model keeps one with "
+                                                       "todo_write when a task has steps"
+                                                     : " no todo -- a session with --tools keeps "
+                                                       "one"));
+                    }
+                    for (const std::string& line : lines) {
+                        out.print_line(style.tag(ansi::Role::Apogee) + " " + line);
+                    }
+                    break;
+                }
                 case ChatVerb::Detach: {
                     attached.settle();
                     const std::string name = unquoted(argument);
@@ -2251,7 +2361,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     // one (26n): never inside its rows.
                     out.keep_line(style.tag(ansi::Role::Warning) + " " + message);
                 },
-                rag_settings, review_note, &attached, &recall, turn.token, summarizing());
+                rag_settings, review_note, &attached, &recall, turn.token, summarizing(), standing);
         }
         title.start_if_due(session);
         if (session.compactions != saved_compactions) {
@@ -2296,16 +2406,29 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
 }
 
 std::string execute_suite_refusal(const harness::Config& config) {
+    // The suite half as it was (27s); the bare door (41a) after it.
+    const std::string bare =
+        " -- or open it bare on one model: apogee execute -m <backend>, or with a default "
+        "backend set (apogee config set-default <backend>)";
     if (config.suite_names().empty()) {
         return "execute opens a session with a suite, and none is configured -- add one: "
                "apogee config add-suite <name> --chat <backend> [--utility <backend> ...], then "
                "run it with --suite <name>, or make it the default: apogee config "
-               "set-default-suite <name>";
+               "set-default-suite <name>" +
+               bare;
     }
     return "execute opens a session with a suite, and none is named or the default -- run one "
            "with --suite <name> (" +
            known_suites(config) +
-           "), or make one the default: apogee config set-default-suite <name>";
+           "), or make one the default: apogee config set-default-suite <name>" + bare;
+}
+
+std::string execute_orchestrate_refusal(const harness::Config& config) {
+    const std::string suites =
+        config.suite_names().empty() ? std::string{} : " (" + known_suites(config) + ")";
+    return "--orchestrate offers a suite's symphonies to its chat model, and this session runs "
+           "under none -- run one with --suite <name>" +
+           suites + ", or make one the default: apogee config set-default-suite <name>";
 }
 
 std::string orchestration_count(std::size_t offered) {
@@ -2321,6 +2444,10 @@ std::string session_banner(SessionMode mode, std::string_view model, bool base_m
     }
     banner += banner_suite(suite, forced);
     if (mode == SessionMode::Execute) {
+        // Bare (41a): said, where a suite would be named.
+        if (suite.empty()) {
+            banner += "  ·  no suite";
+        }
         banner += "  ·  " + symphony_count(symphonies);
         if (orchestrated.has_value()) {
             banner += "  ·  " + orchestration_count(*orchestrated);

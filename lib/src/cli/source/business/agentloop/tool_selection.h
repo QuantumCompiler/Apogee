@@ -64,8 +64,13 @@ inline constexpr std::string_view kFindToolsName = "find_tools";
 /// designates members, the user's own opt-in, and a call a local model's
 /// grammar -- built over the offered tools -- cannot even parse while it is
 /// ranked out of the offer (Llama 3.1 8B named it from its history, and the
-/// call came back as text).
+/// call came back as text). And `todo_write` (41d): a plan a model keeps
+/// only while the ranking happens to offer it is no plan. And `delegate`
+/// (41e), the way a long job stays inside its window.
 [[nodiscard]] const std::vector<std::string>& core_tools();
+
+/// The delegate's tool (41e), which the core keeps and its own kit leaves out.
+inline constexpr std::string_view kDelegateToolName = "delegate";
 
 /// Whether `name` is offered whenever it is registered: one of `core_tools()`,
 /// or a symphony's tool (`play_<symphony>`, 27t) -- every one of them, since

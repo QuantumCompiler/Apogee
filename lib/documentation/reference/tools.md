@@ -9,7 +9,9 @@ and beside it **validation**, the same member checking the others' work;
 tools.
 
 The native toolsets (files, the shell, git, notes, document search, graph
-navigation) and `fetch_url` need no setup beyond that. `apogee check` lists each one's permission level
+navigation) and `fetch_url` need no setup beyond that, and nor do the
+session's own two: `todo_write`, the plan the model keeps where you can see
+it (`/todo` prints it), and **`delegate`**, below. `apogee check` lists each one's permission level
 and the folder the file tools start in; `permissions:` and `tools:` in the
 config are where both are changed.
 
@@ -213,6 +215,42 @@ consultable. `config add-suite`/`set-suite` (and their admin twins) ask the
 member's provider and refuse it with the reason; a config edited by hand to
 name one fails in `apogee check`, and the tool does not offer it. There is no
 permission prompt: a consult reads nothing and writes nothing.
+
+## Delegating a piece of the job
+
+`delegate` lets the model hand a self-contained piece of a longer job -- reading
+through many files, a search across the project, a side investigation -- to a
+fresh sub-session, and keep only its conclusion (41e). It takes `brief`, the
+whole task, and optionally `role`. It is offered wherever `--tools` is, in
+`chat` and `execute`, with no suite needed.
+
+The sub-session sees **the brief and nothing else** of the conversation, so the
+model is told to put everything the task needs into it. It gets:
+
+- **your tools, less `delegate`** -- one level deep, never a delegate of a
+  delegate;
+- **the session's own model**, or with `role` that role's model through the
+  same resolver every member call uses;
+- **the session's own gate, whole**: your permissions and the session's
+  answers and mode -- a prompt reaches you where the session's would, with
+  nobody to ask it is a deny, and a plan-mode session's delegate plans too;
+- the session's project context, and its cancellation: Ctrl-C stops it
+  mid-step.
+
+### The bounds
+
+| Bound | Value | Over it |
+|---|---|---|
+| Model calls | 8 | It answers without tools, and its result says it stopped at the cap. |
+| An answer's length | 4,096 tokens per call | Cut there. |
+| A role's model | never one billed per call | Refused with the reason, as `consult` refuses one: a delegation is the model's initiative, so it never spends money. |
+
+You watch it in the thinking block as one line --
+`delegate — a sub-session on <model>: <brief>` -- with its tool lines inside
+it; machine mode says them as `tool_status`. Its result is its answer and a
+one-line account of what it spent, such as `[delegate on root: 3 model calls,
+tools read_file ×2, 1,840 tokens]`. That result, in the session's own record,
+is all that is kept: no second chat appears in `chats list`.
 
 ## Navigating a knowledge graph
 

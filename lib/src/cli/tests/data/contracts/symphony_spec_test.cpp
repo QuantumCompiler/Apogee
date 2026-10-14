@@ -595,7 +595,7 @@ TEST_CASE("the shipped starters are compiled in byte for byte, and each parses",
         files.insert(entry.path().filename().string());
     }
     std::set<std::string> compiled;
-    REQUIRE(apogee::harness::bundled_symphonies().size() == 3);
+    REQUIRE(apogee::harness::bundled_symphonies().size() == 7);
     for (const apogee::harness::BundledSymphony& starter : apogee::harness::bundled_symphonies()) {
         INFO(starter.name);
         compiled.insert(std::string{starter.name} + ".yaml");
@@ -619,5 +619,26 @@ TEST_CASE("the shipped starters are compiled in byte for byte, and each parses",
     CHECK_FALSE(spec_of("extract-facts").stages.front().schema.empty());
     CHECK(spec_of("describe-answer").input.image);
     CHECK(spec_of("describe-answer").stages.front().role == "vision");
+    // The four of 40b: a schema stage feeding a prose stage, one schema stage
+    // as the whole output, a critique threaded into a rewrite, and the first
+    // shipped chain -- summarize-verify played, then a schema stage over its
+    // output.
+    CHECK_FALSE(spec_of("redact-text").stages.front().schema.empty());
+    CHECK(spec_of("redact-text").stages.back().schema.empty());
+    CHECK(spec_of("extract-actions").stages.size() == 1);
+    CHECK_FALSE(spec_of("extract-actions").stages.front().schema.empty());
+    CHECK(spec_of("critique-revise").stages.size() == 2);
+    CHECK(spec_of("digest").stages.front().play == "summarize-verify");
+    CHECK_FALSE(spec_of("digest").stages.back().schema.empty());
+    // Every role stage of every starter is capped, and no starter takes audio
+    // or names a backend: a role stage names a role the parser accepted.
+    for (const apogee::harness::BundledSymphony& starter : apogee::harness::bundled_symphonies()) {
+        INFO(starter.name);
+        for (const apogee::harness::SymphonyStage& stage : spec_of(starter.name).stages) {
+            if (!stage.plays()) {
+                CHECK(stage.answer_tokens.has_value());
+            }
+        }
+    }
     CHECK(apogee::harness::find_bundled_symphony("nope") == nullptr);
 }

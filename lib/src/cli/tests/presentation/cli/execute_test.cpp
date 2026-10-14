@@ -18,6 +18,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 #include "agentloop/member_call.h"
@@ -27,6 +28,7 @@
 #include "cli/chat_play.h"
 #include "cli/chat_session.h"
 #include "cli/chat_turn.h"
+#include "contracts/assets.h"
 #include "contracts/config.h"
 #include "harness/harness.h"
 #include "logger/session.h"
@@ -143,49 +145,137 @@ constexpr std::string_view kPlayed = "ROOT<Two: HELPER<One: hello>>";
 
 // --- suite-first -------------------------------------------------------------
 
-TEST_CASE("execute with no suite named and none the default refuses, naming the way to one",
-          "[execute][suites]") {
+TEST_CASE("execute opens on three rungs: a suite, else bare on -m or the default backend",
+          "[execute][suites][bare]") {
+    // No suite named and none the default: bare on models.default -- the
+    // session chat would open, as chat opens it.
+    const Home home;
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"execute"}, &out, &err, "hi\n") == 0);
+    CHECK(out == "ROOT<hi>\n");
+    std::vector<apogee::logger::Session> sessions = home.sessions();
+    REQUIRE(sessions.size() == 1);
+    CHECK(sessions.front().backend == "root");
+    CHECK_FALSE(sessions.front().suite.has_value());
+    // -m names the model it opens on.
+    REQUIRE(home.run({"execute", "-m", "helper"}, &out, &err, "hi\n") == 0);
+    CHECK(out == "HELPER<hi>\n");
+    // Bare input is chat's own turn, byte for byte.
+    const Home chat_home;
+    const Home execute_home;
+    std::string chat_out;
+    std::string chat_err;
+    REQUIRE(chat_home.run({"chat"}, &chat_out, &chat_err, "hello\nand then\n") == 0);
+    REQUIRE(execute_home.run({"execute"}, &out, &err, "hello\nand then\n") == 0);
+    CHECK(out == chat_out);
+    CHECK(transcript(execute_home.sessions().front()) == transcript(chat_home.sessions().front()));
+}
+
+TEST_CASE("execute is refused only with nothing to open on, naming every way in",
+          "[execute][suites][bare]") {
+    const std::string bare =
+        " -- or open it bare on one model: apogee execute -m <backend>, or with a default backend "
+        "set (apogee config set-default <backend>)\n";
     {
-        const Home home;
+        // Suites configured, none the default, and no default backend.
+        CliHome home{
+            "backends:\n  root:\n    type: mock\nsuites:\n  duo:\n    members:\n"
+            "      chat: root\n"};
         std::string out;
         std::string err;
-        CHECK(home.run({"execute"}, &out, &err, "hi\n") == 1);
+        CHECK(home.run({"execute"}, &out, &err) == 1);
         CHECK(out.empty());
         CHECK(err ==
-              "apogee execute: execute opens a session with a suite, and none is named or the "
-              "default -- run one with --suite <name> (configured: duo, fast, strict), or make "
-              "one the default: apogee config set-default-suite <name>\n");
-        CHECK(home.sessions().empty());
+              "apogee execute: execute opens a session with a suite, and none is named or "
+              "the default -- run one with --suite <name> (configured: duo), or make one "
+              "the default: apogee config set-default-suite <name>" +
+                  bare);
+        // -m opens it all the same.
+        CHECK(home.run({"execute", "-m", "root"}, &out, &err) == 0);
     }
     {
-        // With no suite at all: how to add one -- never a plain chat.
-        CliHome bare{"backends:\n  root:\n    type: mock\nmodels:\n  default: root\n"};
+        // No suite at all and no default backend: how to add one, then bare.
+        CliHome home{"backends:\n  root:\n    type: mock\n"};
         std::string out;
         std::string err;
-        CHECK(bare.run({"execute"}, &out, &err) == 1);
-        CHECK(out.empty());
+        CHECK(home.run({"execute"}, &out, &err) == 1);
         CHECK(err ==
-              "apogee execute: execute opens a session with a suite, and none is configured -- "
-              "add one: apogee config add-suite <name> --chat <backend> [--utility <backend> "
-              "...], then run it with --suite <name>, or make it the default: apogee config "
-              "set-default-suite <name>\n");
+              "apogee execute: execute opens a session with a suite, and none is "
+              "configured -- add one: apogee config add-suite <name> --chat <backend> "
+              "[--utility <backend> ...], then run it with --suite <name>, or make it the "
+              "default: apogee config set-default-suite <name>" +
+                  bare);
     }
 }
 
-TEST_CASE("execute never runs under no suite: --suite off and a missing suite are refused",
-          "[execute][suites]") {
+TEST_CASE("execute's --orchestrate is a suite's: refused bare, naming the way to one",
+          "[execute][suites][bare][orchestrate]") {
+    const Home home;
+    std::string out;
+    std::string err;
+    CHECK(home.run({"execute", "--orchestrate"}, &out, &err, "hi\n") == 1);
+    CHECK(out.empty());
+    CHECK(err ==
+          "apogee execute: --orchestrate offers a suite's symphonies to its chat model, and "
+          "this session runs under none -- run one with --suite <name> (configured: duo, "
+          "fast, strict), or make one the default: apogee config set-default-suite "
+          "<name>\n");
+    CHECK(home.sessions().empty());
+    // A resumed bare session asked to orchestrate is refused the same way.
+    REQUIRE(home.run({"execute"}, &out, &err, "hi\n") == 0);
+    CHECK(home.run({"execute", "-c", "--orchestrate"}, &out, &err, "again\n") == 1);
+    CHECK_THAT(err, Catch::Matchers::StartsWith("apogee execute: --orchestrate offers a suite's"));
+}
+
+TEST_CASE("execute never takes --suite off, and a missing suite is refused", "[execute][suites]") {
     const Home home{"  default_suite: duo\n"};
     std::string out;
     std::string err;
     CHECK(home.run({"execute", "--suite", "off"}, &out, &err, "hi\n") == 1);
     CHECK(out.empty());
     CHECK(err ==
-          "apogee execute: --suite off names no suite, and execute opens a session with one -- "
-          "'apogee chat --suite off' is a session without\n");
+          "apogee execute: --suite off names no suite, and execute opens a session with "
+          "one or bare on a model -- leave --suite out, or 'apogee execute -m <backend>' "
+          "opens it bare\n");
     CHECK(home.run({"execute", "--suite", "nope"}, &out, &err, "hi\n") == 1);
     CHECK(err ==
           "apogee execute: --suite: no suite named 'nope' (configured: duo, fast, strict)\n");
     CHECK(home.sessions().empty());
+}
+
+TEST_CASE("a bare session's /play resolves each stage's role through the one chain",
+          "[execute][play][bare]") {
+    // No suite: the utility stage has no member and no role pointer, so it
+    // falls to the conversation's own backend; the chat stage takes the
+    // chat role's pointer, models.default -- as any member call does.
+    const Home home;
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"execute"}, &out, &err, "/play echo2 hello\n") == 0);
+    CHECK(out == "ROOT<Two: ROOT<One: hello>>\n");
+    // On -m, the helper stage asks the model the session opened on; the
+    // chat stage still the chat role's own, with no new rung for a bare
+    // session (41a).
+    const Home pinned;
+    REQUIRE(pinned.run({"execute", "-m", "helper"}, &out, &err, "/play echo2 hello\n") == 0);
+    CHECK(out == "ROOT<Two: HELPER<One: hello>>\n");
+    CHECK(transcript(pinned.sessions().front()) ==
+          std::vector<std::string>{"user: /play echo2 hello",
+                                   "assistant: ROOT<Two: HELPER<One: hello>>"});
+}
+
+TEST_CASE("machine mode carries a bare execute session in the events it already has",
+          "[execute][machine][bare]") {
+    const Home home;
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"execute", "--output-format", "stream-json"}, &out, &err,
+                     "{\"type\":\"user\",\"text\":\"hi\"}\n") == 0);
+    CHECK(event_types(out) == std::vector<std::string>{"session", "thinking", "answer_start",
+                                                       "answer_delta", "answer_end", "result"});
+    const nlohmann::json session = nlohmann::json::parse(out.substr(0, out.find('\n')));
+    CHECK(session.at("model") == "root");
 }
 
 TEST_CASE("execute with no suite named runs under the config's default", "[execute][suites]") {
@@ -200,20 +290,20 @@ TEST_CASE("execute with no suite named runs under the config's default", "[execu
     CHECK(sessions.front().suite == std::optional<std::string>{"duo"});
 }
 
-TEST_CASE("a resumed session's suite is execute's when none is named; one with none is refused",
+TEST_CASE("a resumed session's suite is execute's when none is named; one with none runs bare",
           "[execute][suites]") {
     const Home home;
     std::string out;
     std::string err;
-    // A chat under fast, then turned off: execute takes neither "off" nor
-    // nothing -- with no default it refuses; named, it runs.
+    // A chat under fast, then turned off: execute takes no "off" -- with no
+    // default suite it resumes bare on the chat's backend (41a); named, it
+    // runs under the suite.
     REQUIRE(home.run({"chat", "--suite", "fast"}, &out, &err, "hi\n") == 0);
     REQUIRE(home.run({"execute", "-c"}, &out, &err, "again\n") == 0);
     CHECK(out == "HELPER<again>\n");
     REQUIRE(home.run({"chat", "-c"}, &out, &err, "/suite off\n") == 0);
-    CHECK(home.run({"execute", "-c"}, &out, &err, "more\n") == 1);
-    CHECK_THAT(err, Catch::Matchers::StartsWith(
-                        "apogee execute: execute opens a session with a suite, and none is named"));
+    REQUIRE(home.run({"execute", "-c"}, &out, &err, "more\n") == 0);
+    CHECK(out == "HELPER<more>\n");
     REQUIRE(home.run({"execute", "-c", "--suite", "duo"}, &out, &err, "more\n") == 0);
     CHECK(out == "ROOT<more>\n");
 }
@@ -740,6 +830,7 @@ TEST_CASE("execute's /help, golden", "[execute][completer]") {
             "  /attach <path>                   Attach a file, folder or glob: inlined when it "
             "fits, retrieved when not (then --graph=code|off)",
             "  /attachments                     List what is attached",
+            "  /todo                            Show the plan the model keeps for this session",
             "  /detach <name>                   Detach an attachment",
             "  /recall [on|off]                 Show or set whether turns recall earlier chats",
             "  /private                         Never summarise this chat for recall",
@@ -844,8 +935,14 @@ std::string scenario(const Home& home, const std::vector<std::string>& args,
 std::string battery() {
     std::string out;
     {
+        // Bare (41a): a session of its own, so the `-c` below resumes the
+        // one it means and not whichever of two same-second sessions sorts
+        // first.
         const Home home;
         out += scenario(home, {"execute"}, "hi\n");
+    }
+    {
+        const Home home;
         out += scenario(home, {"execute", "--suite", "off"}, "hi\n");
         out += scenario(home, {"execute", "--suite", "duo"},
                         "/help\n/symphonies\nhello\n/play echo2 hello\n/play\n/play nope x\n"
@@ -922,7 +1019,9 @@ TEST_CASE("without orchestration a session registers no symphony tool, as 27s sh
     // `/suite` moves the offer with the suite: on under orch, off again under duo.
     REQUIRE(home.run({"execute", "--suite", "duo"}, &out, &err,
                      "hi\n/suite orch\nhi\n/suite duo\nhi\n") == 0);
-    CHECK(out == "TOOLS<>\nTOOLS<play_echo2,play_extract-facts,play_summarize-verify>\nTOOLS<>\n");
+    CHECK(out ==
+          "TOOLS<>\nTOOLS<play_critique-revise,play_digest,play_echo2,play_extract-actions,play_"
+          "extract-facts,play_redact-text,play_summarize-verify>\nTOOLS<>\n");
     // And the flag is execute's alone.
     CHECK(home.run({"chat", "--suite", "duo", "--orchestrate"}, &out, &err, "hi\n") != 0);
     CHECK(err.find("--orchestrate") != std::string::npos);
@@ -937,7 +1036,9 @@ TEST_CASE("orchestrating, the root is offered each symphony it can play, framed 
     // The flag, with no --tools: orchestration is its own consent. The vision
     // starter takes an image, so it is not offered -- said under --verbose.
     REQUIRE(home.run({"execute", "--suite", "duo", "--orchestrate"}, &out, &err, "hi\n") == 0);
-    CHECK(out == "TOOLS<play_echo2,play_extract-facts,play_summarize-verify>\n");
+    CHECK(out ==
+          "TOOLS<play_critique-revise,play_digest,play_echo2,play_extract-actions,play_extract-"
+          "facts,play_redact-text,play_summarize-verify>\n");
     CHECK(err.find("orchestrate:") == std::string::npos);
     REQUIRE(home.run({"execute", "--suite", "duo", "--orchestrate", "--verbose"}, &out, &err,
                      "hi\n") == 0);
@@ -946,7 +1047,9 @@ TEST_CASE("orchestrating, the root is offered each symphony it can play, framed 
     // The suite's own `orchestrate: true`: no consult without --tools, the
     // consent every other tool asks for.
     REQUIRE(home.run({"execute", "--suite", "orch"}, &out, &err, "hi\n") == 0);
-    CHECK(out == "TOOLS<play_echo2,play_extract-facts,play_summarize-verify>\n");
+    CHECK(out ==
+          "TOOLS<play_critique-revise,play_digest,play_echo2,play_extract-actions,play_extract-"
+          "facts,play_redact-text,play_summarize-verify>\n");
     // With the native tools and consult beside.
     REQUIRE(home.run({"execute", "--suite", "orch", "--tools"}, &out, &err, "hi\n") == 0);
     CHECK(out.find("play_echo2") != std::string::npos);
@@ -1044,4 +1147,239 @@ TEST_CASE("execute's whole surface, golden", "[execute][golden]") {
         slurp(std::filesystem::path{APOGEE_TEST_FIXTURES} / "cli" / "execute_session.golden");
     REQUIRE(golden.has_value());
     CHECK(actual == *golden);
+}
+
+// --- the project opening (41b) ---------------------------------------------------
+
+namespace {
+
+/// Moves the working directory for the life of the object.
+class WorkingDirectory {
+public:
+    explicit WorkingDirectory(const std::filesystem::path& to)
+        : previous_{std::filesystem::current_path()} {
+        std::filesystem::current_path(to);
+    }
+
+    ~WorkingDirectory() {
+        std::error_code ignored;
+        std::filesystem::current_path(previous_, ignored);
+    }
+
+    WorkingDirectory(const WorkingDirectory&) = delete;
+    WorkingDirectory& operator=(const WorkingDirectory&) = delete;
+    WorkingDirectory(WorkingDirectory&&) = delete;
+    WorkingDirectory& operator=(WorkingDirectory&&) = delete;
+
+private:
+    std::filesystem::path previous_;
+};
+
+/// A home whose root echoes every system message it was sent, and a project
+/// folder beside it: a repository holding `AGENTS.md` and one file.
+struct ProjectHome : Home {
+    std::filesystem::path project = home.home() / "project";
+
+    ProjectHome() {
+        std::ofstream{home.home() / "scripts" / "root.json", std::ios::trunc}
+            << R"({"turns": [{"text": "SYS<<{{system}}>>"}]})";
+        std::filesystem::create_directories(project / ".git");
+        std::ofstream{project / "AGENTS.md"} << "Use tabs.\nRun make test before done.\n";
+        std::ofstream{project / "notes.md"} << "The build is make.\n";
+    }
+
+    /// The saved session file of the newest session, as text.
+    [[nodiscard]] std::string session_file() const {
+        const apogee::testing::EnvGuard guard{"APOGEE_HOME", home.home().string()};
+        std::ifstream in{apogee::logger::session_path(sessions().front().chat_id)};
+        return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    }
+};
+
+}  // namespace
+
+TEST_CASE("execute in a project reads AGENTS.md into every request, says it, never saves it",
+          "[execute][project]") {
+    const ProjectHome home;
+    const WorkingDirectory here{home.project};
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"execute", "--attach", ""}, &out, &err, "hi\nagain\n") == 0);
+    // Both turns carry it, as transient system context.
+    std::size_t carried = 0;
+    for (std::size_t at = out.find("Project context, from AGENTS.md"); at != std::string::npos;
+         at = out.find("Project context, from AGENTS.md", at + 1)) {
+        ++carried;
+    }
+    CHECK(carried == 2);
+    CHECK_THAT(out, Catch::Matchers::ContainsSubstring("Run make test before done."));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring(
+                        "project context: AGENTS.md, 7 words, in every request"));
+    // Never the conversation's: the saved file holds the turns and no word of
+    // it but what the model's own echo quoted back.
+    const apogee::logger::Session saved = home.sessions().front();
+    for (const apogee::harness::ChatMessage& message : saved.messages) {
+        if (message.role != apogee::harness::Role::Assistant) {
+            CHECK(message.content.plain_text().find("Use tabs.") == std::string::npos);
+        }
+    }
+    CHECK(saved.params.system_prompt.empty());
+    CHECK(saved.attachments.empty());  // --attach "" skipped the folder
+}
+
+TEST_CASE("the opening attaches the project folder; an explicit --attach replaces it",
+          "[execute][project]") {
+    {
+        const ProjectHome home;
+        const WorkingDirectory here{home.project};
+        std::string out;
+        std::string err;
+        REQUIRE(home.run({"execute"}, &out, &err, "hi\n") == 0);
+        const apogee::logger::Session saved = home.sessions().front();
+        REQUIRE(saved.attachments.size() == 1);
+        CHECK(saved.attachments.front().name == ".");
+    }
+    {
+        const ProjectHome home;
+        const WorkingDirectory here{home.project};
+        std::string out;
+        std::string err;
+        REQUIRE(home.run({"execute", "--attach", "notes.md"}, &out, &err, "hi\n") == 0);
+        const apogee::logger::Session saved = home.sessions().front();
+        REQUIRE(saved.attachments.size() == 1);
+        CHECK(saved.attachments.front().name == "notes.md");
+    }
+}
+
+TEST_CASE("outside a project execute opens as before, and chat never reads the file",
+          "[execute][project]") {
+    const ProjectHome home;
+    std::string out;
+    std::string err;
+    {
+        // A folder with neither a repository nor a context file.
+        const std::filesystem::path elsewhere = home.home.home() / "elsewhere";
+        std::filesystem::create_directories(elsewhere);
+        const WorkingDirectory here{elsewhere};
+        REQUIRE(home.run({"execute"}, &out, &err, "hi\n") == 0);
+        CHECK(out.find("Project context") == std::string::npos);
+        CHECK(err.find("project context") == std::string::npos);
+        CHECK(home.sessions().front().attachments.empty());
+    }
+    {
+        // Chat in the project: unchanged, no context and no attach.
+        const WorkingDirectory here{home.project};
+        REQUIRE(home.run({"chat"}, &out, &err, "hi\n") == 0);
+        CHECK(out.find("Project context") == std::string::npos);
+        CHECK(err.find("project context") == std::string::npos);
+    }
+}
+
+TEST_CASE("machine mode says the project opening in the notices it already has",
+          "[execute][project][machine]") {
+    const ProjectHome home;
+    const WorkingDirectory here{home.project};
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"execute", "--attach", "", "--output-format", "stream-json"}, &out, &err,
+                     "{\"type\":\"user\",\"text\":\"hi\"}\n") == 0);
+    bool said = false;
+    std::istringstream lines{out};
+    for (std::string line; std::getline(lines, line);) {
+        const nlohmann::json event = nlohmann::json::parse(line);
+        said =
+            said || (event.at("type") == "notice" &&
+                     event.at("text") == "project context: AGENTS.md, 7 words, in every request");
+    }
+    CHECK(said);
+    CHECK_THAT(out, Catch::Matchers::ContainsSubstring("Project context, from AGENTS.md"));
+}
+
+// --- the coder persona (41c) -----------------------------------------------------
+
+TEST_CASE("execute in a project carries the coder persona, ahead of the project's own file",
+          "[execute][project][persona]") {
+    const std::string_view persona = apogee::harness::find_bundled_persona("coder")->text;
+    const std::string opening{persona.substr(0, persona.find('.'))};
+    {
+        const ProjectHome home;
+        const WorkingDirectory here{home.project};
+        std::string out;
+        std::string err;
+        REQUIRE(home.run({"execute", "--attach", ""}, &out, &err, "hi\n") == 0);
+        CHECK_THAT(out, Catch::Matchers::ContainsSubstring(opening));
+        // The persona first: the project's file, closer to the conversation,
+        // wins where they differ.
+        CHECK(out.find(opening) < out.find("Project context, from AGENTS.md"));
+        CHECK_THAT(err, Catch::Matchers::ContainsSubstring(
+                            "persona: coder, the shipped coding prompt, in every request -- -s "
+                            "replaces it"));
+        // Never the conversation's.
+        const apogee::logger::Session saved = home.sessions().front();
+        CHECK(saved.params.system_prompt.empty());
+        for (const apogee::harness::ChatMessage& message : saved.messages) {
+            if (message.role != apogee::harness::Role::Assistant) {
+                CHECK(message.content.plain_text().find(opening) == std::string::npos);
+            }
+        }
+    }
+    {
+        // -s replaces it whole, said; the project's file still rides.
+        const ProjectHome home;
+        const WorkingDirectory here{home.project};
+        std::string out;
+        std::string err;
+        REQUIRE(home.run({"execute", "--attach", "", "-s", "MY RULES"}, &out, &err, "hi\n") == 0);
+        CHECK(out.find(opening) == std::string::npos);
+        CHECK_THAT(out, Catch::Matchers::ContainsSubstring("MY RULES"));
+        CHECK_THAT(out, Catch::Matchers::ContainsSubstring("Project context, from AGENTS.md"));
+        CHECK_THAT(err, Catch::Matchers::ContainsSubstring(
+                            "persona: your -s prompt, in place of the coder persona"));
+        // A resumed session keeps its own -s: the persona stays out.
+        REQUIRE(home.run({"execute", "-c", "--attach", ""}, &out, &err, "again\n") == 0);
+        CHECK(out.find(opening) == std::string::npos);
+        CHECK_THAT(out, Catch::Matchers::ContainsSubstring("MY RULES"));
+    }
+    {
+        // Outside a project: no persona, no line; and chat never carries it.
+        const ProjectHome home;
+        std::filesystem::create_directories(home.home.home() / "elsewhere");
+        const WorkingDirectory here{home.home.home() / "elsewhere"};
+        std::string out;
+        std::string err;
+        REQUIRE(home.run({"execute"}, &out, &err, "hi\n") == 0);
+        CHECK(out.find(opening) == std::string::npos);
+        CHECK(err.find("persona:") == std::string::npos);
+        const WorkingDirectory in_project{home.project};
+        REQUIRE(home.run({"chat"}, &out, &err, "hi\n") == 0);
+        CHECK(out.find(opening) == std::string::npos);
+    }
+}
+
+TEST_CASE("a turn's standing context is injected, so the budget counts it, never history",
+          "[execute][persona][budget]") {
+    Members members;
+    apogee::logger::Session session;
+    session.chat_id = "test-standing";
+    session.backend = "root";
+    apogee::agentloop::NullReporter reporter;
+    const c::RagSettings rag{.config_path = members.config_path};
+    const c::ChatTurnResult turn =
+        c::run_chat_turn(*members.harness, session, "hi", nullptr, nullptr, nullptr, {},
+                         c::ToolGate{}, reporter, [](const std::string&) {}, rag, {}, nullptr,
+                         nullptr, {}, false, {"PERSONA TEXT", "PROJECT TEXT"});
+    REQUIRE(turn.completed);
+    const apogee::harness::ChatRequest& asked = members.mocks["root"]->requests().back();
+    // Both inside the request's injected range -- what the budget assembles,
+    // counts and, past the window, trims -- in their order.
+    REQUIRE(asked.transient.length >= 2);
+    const auto& first = asked.messages.at(asked.transient.start);
+    const auto& second = asked.messages.at(asked.transient.start + 1);
+    CHECK(first.role == apogee::harness::Role::System);
+    CHECK(first.content.plain_text() == "PERSONA TEXT");
+    CHECK(second.content.plain_text() == "PROJECT TEXT");
+    // And never the saved history.
+    for (const apogee::harness::ChatMessage& message : session.messages) {
+        CHECK(message.content.plain_text().find("PERSONA TEXT") == std::string::npos);
+    }
 }

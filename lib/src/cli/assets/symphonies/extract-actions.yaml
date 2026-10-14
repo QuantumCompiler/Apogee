@@ -1,0 +1,42 @@
+# A shipped symphony (40b): the action items in a set of notes, pulled out by
+# the suite's extraction member as one JSON document held to its schema --
+# extract-facts' sibling on a different document.
+# What it shows: one schema stage whose answer is the whole output, written
+# so an unstated owner or date is said, never invented.
+#
+#   apogee symphonies play extract-actions --input "$(cat notes.txt)"
+#   apogee symphonies create my-actions --from extract-actions
+name: extract-actions
+description: Pull the action items out of notes -- who does what, by when -- as one JSON document, held to its schema.
+input:
+  description: The notes to read.
+stages:
+  - name: extract
+    role: extraction
+    answer_tokens: 800
+    prompt: |
+      Read the notes below and list every action item: something a person agreed or was asked to do. For each, record who will do it, the action starting with a verb, and when it is due. Write "unassigned" when no one took it and "not stated" when no date was given -- never guess either. Leave the list empty when the notes hold no action items.
+
+      Notes:
+      {{input}}
+    schema: |
+      {
+        "type": "object",
+        "properties": {
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "owner": {"type": "string"},
+                "action": {"type": "string"},
+                "due": {"type": "string"}
+              },
+              "required": ["owner", "action", "due"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["actions"],
+        "additionalProperties": false
+      }

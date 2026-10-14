@@ -156,6 +156,7 @@ indicator. The vocabulary is the same one the terminal status line shows.
 | `thinking` | `start` | — | The model is working: the top of each loop iteration. |
 | `thinking_budget` | `done` | — | The model's reasoning reached its thinking budget and was ended there; the answer that follows had no more thought than that. |
 | `tool_call` | `start` / `done` | `name` = tool | A server-side tool call. |
+| `todo` | — | `items`, an array of `{text, state}` (`pending`, `active`, `done`) | The session's todo, whole, each time the model rewrites it with `todo_write` (41d): a served request with tools keeps it on its session, saved there, and a stateless one only for its turn. Draw it in place of the last. |
 | `token_count` | `done` | `tokens`, `tokens_per_second`, `detail: "estimated"` when estimated | After the answer. |
 
 ### `POST /v1/completions`
@@ -387,7 +388,7 @@ registered from the terminal.
 Every agent `apogee analyze --agent` can run, as a view: `{name, description,
 model, prompts, schemas, output_format, tools, mcp, questions, collection,
 save_dir, save_filename, save_subdir, bundled, overrides_bundled}`. The
-bundled three appear with `bundled: true` unless a config entry of the same
+bundled seven appear with `bundled: true` unless a config entry of the same
 name overrides them, in which case the entry is listed with
 `overrides_bundled: true`. `tools` is the agent's permission model:
 `read-only` (never prompts), `all` (gated like `chat`), or `none`.
@@ -1113,7 +1114,7 @@ job and writes nothing.
 
 ### `GET /v1/admin/datasets/kits`
 
-The training kits installed under `training/kits/` -- the four bundled ones
+The training kits installed under `training/kits/` -- the eight bundled ones
 and any the user added: `200 {"object": "list", "data": [{name, path,
 description, eval_items[, error]}]}`, sorted by name; a kit that does not
 parse or validate carries `error` rather than being hidden.

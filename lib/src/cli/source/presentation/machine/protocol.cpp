@@ -62,6 +62,15 @@ constexpr std::array<FieldSpec, 2> kMemory{{
     {"decisions", "integer", true, "Knowledge records recalled for this turn.", {}, {}},
 }};
 
+constexpr std::array<FieldSpec, 2> kTodoItem{{
+    {"text", "string", true, "What is to be done, in a short line.", {}, {}},
+    {"state", "string", true, "pending, active (being done now) or done.", {}, {}},
+}};
+
+constexpr std::array<FieldSpec, 1> kTodo{{
+    {"items", "array", true, "The whole list, in order; empty when cleared.", kTodoItem, {}},
+}};
+
 constexpr std::array<FieldSpec, 2> kUsage{{
     {"input_tokens", "integer", true, "Tokens sent.", {}, {}},
     {"output_tokens", "integer", true, "Tokens generated.", {}, {}},
@@ -192,7 +201,7 @@ constexpr std::array<FieldSpec, 2> kHelloLine{{
 
 // --- the lines -----------------------------------------------------------------
 
-constexpr std::array<LineSpec, 17> kOutbound{{
+constexpr std::array<LineSpec, 18> kOutbound{{
     LineSpec{"session",
              "Once, first, unprompted: the protocol version, the model, the session's "
              "capabilities.",
@@ -203,6 +212,7 @@ constexpr std::array<LineSpec, 17> kOutbound{{
     LineSpec{"memory", "What a turn was handed from earlier conversations.", kMemory},
     LineSpec{"tool_status", "A tool running, or another model call the turn makes.", kText},
     LineSpec{"notice", "A line for the user that is neither progress nor an error.", kText},
+    LineSpec{"todo", "The session's todo, whole, as the model last wrote it.", kTodo},
     LineSpec{"answer_start", "An answer begins.", {}},
     LineSpec{"answer_delta", "A chunk of answer text.", kText},
     LineSpec{"answer_end", "The answer ended.", {}},

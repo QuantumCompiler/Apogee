@@ -1,7 +1,9 @@
 #include "views/cli_reporter.h"
 
 #include <optional>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "agentloop/recall.h"
 #include "platform/platform.h"
@@ -182,6 +184,17 @@ void CliReporter::on_recall(int chats, int decisions) {
         return;
     }
     keep_line(options_.style.dim("[memory] " + agentloop::describe_recall(chats, decisions)));
+}
+
+void CliReporter::on_todo(const harness::TodoList& todo) {
+    const std::vector<std::string> lines = harness::describe_todo(todo);
+    if (lines.empty()) {
+        keep_line(options_.style.dim("todo · cleared"));
+        return;
+    }
+    for (const std::string& line : lines) {
+        keep_line(options_.style.dim(line));
+    }
 }
 
 void CliReporter::keep_line(std::string_view line) {

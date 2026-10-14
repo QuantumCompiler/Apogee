@@ -429,3 +429,23 @@ TEST_CASE("summarised, the terminal draws the reasoning's line in its place, raw
     CHECK(h.progress.str().find("the reasoning itself") != std::string::npos);
     CHECK(count_of(h.progress.str(), "reasoning shown in full") >= 1);
 }
+
+TEST_CASE("the todo is a kept, dim block on stderr, the same lines every surface draws",
+          "[ux][reporter][todo]") {
+    Harness h;
+    CliReporter reporter = h.make();
+    reporter.on_todo({{.text = "Read it", .state = apogee::harness::TodoState::Done},
+                      {.text = "Fix it", .state = apogee::harness::TodoState::Active}});
+    CHECK(h.answer.str().empty());
+    // Each a kept line of its own, in order, below whatever the status held.
+    const std::string said = h.progress.str();
+    const std::size_t heading = said.find("todo · 1 of 2 done\n");
+    const std::size_t read = said.find("  [x] Read it\n");
+    const std::size_t fix = said.find("  [>] Fix it\n");
+    REQUIRE(heading != std::string::npos);
+    CHECK(heading < read);
+    CHECK(read < fix);
+    CHECK(fix != std::string::npos);
+    reporter.on_todo({});
+    CHECK(h.progress.str().find("todo · cleared\n") != std::string::npos);
+}

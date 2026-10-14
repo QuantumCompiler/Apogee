@@ -27,7 +27,7 @@ Apogee presents the same harness through four front-ends, in rough order of inte
 
 1. **`apogee complete`** — one-shot prompt → answer; scriptable and pipeable.
 2. **`apogee chat`** — interactive multi-turn session: persistent, resumable, mid-session model switching, context-window monitoring.
-3. **`apogee execute`** *(added 2026-10-04; built 2026-10-06 for v0.1.4, 27s)* — chat's sibling opened with a **suite** instead of a model: the same session core, symphonies playable (`/play`), the Orchestrator over them opt-in. A CLI surface like chat, not a screen.
+3. **`apogee execute`** *(added 2026-10-04; built 2026-10-06 for v0.1.4, 27s)* — chat's sibling opened with a **suite** instead of a model: the same session core, symphonies playable (`/play`), the Orchestrator over them opt-in. A CLI surface like chat, not a screen. *Revised 2026-10-13 (41a, the coding mode's front door): with no suite named and none the default, it opens **bare** on one model and its tools -- `-m` or `models.default` -- suite-less as chat runs; the Orchestrator stays a suite's.*
 4. **`apogee serve`** — OpenAI-compatible HTTP server (`/v1/chat/completions`, `/v1/completions`, …), later joined by a bearer-gated `/v1/admin` control plane. **Server deployments only** *(decided 2026-08-24)*: serve applies when the executable runs on a server and a client — a mobile or desktop app — makes REST calls (POST/GET) to it over the network. A local front-end never talks to a localhost port.
 
 Around those sit capability and lifecycle commands (models, config, check, …) as the capability areas land — the full map is the [`backlog/`](../backlog/README.md).

@@ -355,6 +355,7 @@ RegimeSpec parse_regime_node(const YAML::Node& node, std::string_view origin,
     if (spec.name.empty()) {
         spec.name = std::string{fallback_name};
     }
+    spec.description = scalar(node["description"], origin, where + ".description");
     spec.teacher = scalar(node["teacher"], origin, where + ".teacher");
     spec.student = expand_env_and_home(scalar(node["student"], origin, where + ".student"));
     spec.kits = string_list(node["kits"], origin, where + ".kits", false);

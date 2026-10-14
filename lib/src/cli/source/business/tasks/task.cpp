@@ -548,23 +548,27 @@ nlohmann::json task_to_json(const Task& task) {
     for (const Transition& transition : task.transitions) {
         transitions.push_back(transition_to_json(transition));
     }
-    return nlohmann::json{{"schema_version", task.schema_version},
-                          {"id", task.id},
-                          {"goal", task.goal},
-                          {"checks", std::move(checks)},
-                          {"rounds_budget", task.rounds_budget},
-                          {"working_directory", task.working_directory},
-                          {"session_id", task.session_id},
-                          {"tools", task.tools},
-                          {"policy", policy_to_json(task.policy)},
-                          {"status", task.status},
-                          {"reason", task.reason},
-                          {"plan", task.plan},
-                          {"rounds", std::move(rounds)},
-                          {"no_progress", task.no_progress},
-                          {"created_at", task.created_at},
-                          {"updated_at", task.updated_at},
-                          {"transitions", std::move(transitions)}};
+    nlohmann::json out{{"schema_version", task.schema_version},
+                       {"id", task.id},
+                       {"goal", task.goal},
+                       {"checks", std::move(checks)},
+                       {"rounds_budget", task.rounds_budget},
+                       {"working_directory", task.working_directory},
+                       {"session_id", task.session_id},
+                       {"tools", task.tools},
+                       {"policy", policy_to_json(task.policy)},
+                       {"status", task.status},
+                       {"reason", task.reason},
+                       {"plan", task.plan},
+                       {"rounds", std::move(rounds)},
+                       {"no_progress", task.no_progress},
+                       {"created_at", task.created_at},
+                       {"updated_at", task.updated_at},
+                       {"transitions", std::move(transitions)}};
+    if (!task.recipe.empty()) {
+        out["recipe"] = task.recipe;
+    }
+    return out;
 }
 
 Task task_from_json(const nlohmann::json& json) {
@@ -578,6 +582,7 @@ Task task_from_json(const nlohmann::json& json) {
         throw std::runtime_error("task ledger: no id");
     }
     task.goal = json.value("goal", std::string{});
+    task.recipe = json.value("recipe", std::string{});
     task.rounds_budget = std::clamp(json.value("rounds_budget", kDefaultRounds), 1, kMaxRounds);
     task.working_directory = json.value("working_directory", std::string{});
     task.session_id = json.value("session_id", std::string{});

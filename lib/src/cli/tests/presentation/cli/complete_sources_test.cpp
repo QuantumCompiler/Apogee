@@ -233,7 +233,7 @@ TEST_CASE("delete offers backends whose model is stored; add-backend the stored 
     CHECK(home.names(c::kNewBackendValue).names == std::vector<std::string>{"m-Q4_K_M"});
 }
 
-TEST_CASE("collections, datasets, kits and runs complete from the data directory",
+TEST_CASE("collections, datasets, kits, regimes, recipes and runs complete from the data directory",
           "[commands][completion][sources]") {
     const Home home;
     {
@@ -253,6 +253,22 @@ TEST_CASE("collections, datasets, kits and runs complete from the data directory
     for (const apogee::harness::BundledKit& kit : apogee::harness::bundled_kits()) {
         CHECK(has(kits, kit.name));
     }
+
+    // The shipped regimes likewise (42a), and a spec of the user's beside them.
+    write_file(apogee::harness::training_regimes_dir() / "quick.yaml", "kits: [reasoning]\n");
+    const c::NameList regimes = home.names(c::kRegimeValue);
+    CHECK(has(regimes.names, "foundation"));
+    CHECK(has(regimes.names, "quick"));
+    CHECK(regimes.paths);  // a spec file's path is a regime too
+
+    // The task recipes likewise (40c): the shipped ones before seeding has
+    // put them anywhere, and a recipe of the user's beside them.
+    const c::NameList shipped = home.names(c::kRecipeValue);
+    for (const apogee::harness::BundledRecipe& recipe : apogee::harness::bundled_recipes()) {
+        CHECK(has(shipped.names, recipe.name));
+    }
+    write_file(apogee::harness::recipes_dir() / "standup.yaml", "goal: Write today's standup.\n");
+    CHECK(has(home.names(c::kRecipeValue).names, "standup"));
 
     apogee::training::RunManifest run;
     run.run_id = "20260924-090000";
