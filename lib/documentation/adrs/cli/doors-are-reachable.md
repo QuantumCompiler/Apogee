@@ -29,4 +29,10 @@ The law was green over a missing door, because it tests classification, not reac
 
 ## Enforcement
 
-- **Pending, 2026-10-14.** A real-terminal case walks every `View` row's door on a fresh install and asserts each recorded condition's refusal against its wording. It refuses to pass on an empty row list, and must see the execute door specifically. It lands with track 44's **44d**, the reachability law, in the [backlog](../../backlog/README.md). Until then the classification test is this record's only check, and it cannot see an absent door.
+- **Since 2026-10-14 (44d)** each `View` row names its door: a `ShellDoor` with the view's title, what that view shows for this door and, for a deliberately conditional door, the condition, `seen` then being the words that say it. The law (`shell_law_violations`) names a view with no door, a condition with nothing said where the door is absent, and a door on a row that is no view. `tui_parity_test` plants each and requires it named.
+- **`cli.tui_doors`** (`tests/scripts/py/pty_door_check.py`) walks the doors on a real terminal:
+  - it reads the view rows from the source the binary is built from, so a row added is walked with nothing to remember;
+  - it seeds a data directory with `apogee check --fix` and nothing else;
+  - in one boot, it reaches every door's view through the Go-to menu and requires what the row says it shows to be there.
+
+  It fails on a view whose door it cannot read, on a table with no views, and on a table without the execute door. A planted conditional execute door failed it naming the row: "the Session view never showed 'Execute' on a fresh install".

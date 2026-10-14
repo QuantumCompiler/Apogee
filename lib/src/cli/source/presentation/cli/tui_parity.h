@@ -33,11 +33,29 @@ enum class ShellSurfaceKind : std::uint8_t {
     CarvedOut,
 };
 
+/// How a `View` row's door is reached on a fresh install (ADR 0012, 44d):
+/// its view, by the title the shell's keys reach it by -- the Go-to menu, or
+/// its number -- and what that view shows for this door. `cli.tui_doors`
+/// walks every one on a real terminal, reading this table.
+struct ShellDoor {
+    /// The view's title, as the tab strip and the Go-to menu name it.
+    std::string_view view;
+    /// What must be on that view for this door, beyond its title: a
+    /// picker's row (`New chat`, `Execute`). Empty: the view is the door.
+    std::string_view seen;
+    /// Where the door is deliberately conditional, the condition -- `seen`
+    /// is then the words the shell says it in where the door is absent.
+    /// Empty: the door stands on what a fresh install has.
+    std::string_view condition;
+};
+
 /// One root subcommand's classification.
 struct ShellSurface {
     std::string_view command;
     ShellSurfaceKind kind;
     std::string_view detail;
+    /// A view's door (44d); empty for every other class.
+    ShellDoor door{};
 };
 
 /// Every root subcommand, classified -- today's truth, flipped by each item
@@ -63,8 +81,15 @@ struct ShellRefusal {
 /// What breaks the law over `root`'s registered subcommands, one line each,
 /// naming the command: an unclassified subcommand, a row naming none that
 /// exists, a refusal naming words no command answers to, a classification
-/// with nothing said. Empty when the law holds; a root with no subcommands at
+/// with nothing said -- and since 44d (ADR 0012) a view with no door to reach
+/// it by, a recorded condition with nothing said for it, a door on a row
+/// that is no view. Empty when the law holds; a root with no subcommands at
 /// all is itself a violation, so the check never passes vacuously.
 [[nodiscard]] std::vector<std::string> shell_law_violations(const CLI::App& root);
+
+/// The same law over `surfaces` in place of the table: how a planted row is
+/// shown to be named.
+[[nodiscard]] std::vector<std::string> shell_law_violations(const CLI::App& root,
+                                                            std::span<const ShellSurface> surfaces);
 
 }  // namespace apogee::commands

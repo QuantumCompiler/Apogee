@@ -7315,6 +7315,33 @@ Decisions taken while building, for veto:
 
 **Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) ran 3,287 tests, one skipped for want of `pdftotext`. One failed: `lifecycle_test`'s free-text audit named `tui -s`, `tui --system` and `tui --allow-host`, the session table's three untagged arguments, now on `tui` as they are on `execute`. They joined its reviewed list, and that case was rerun green in the same build. `cli.tui_shell`'s launch case passed on a real terminal, and `make format-check` is clean for every file touched.
 
+### 2026-10-14 — `tui-reachability-law` (backlog item 44d): every classified door, proven on a fresh install
+
+**Why.** The disparity audit's quietest finding was the one that let the others recur: **the parity law tested classification, not reachability.** `execute` was classified a view whose door a fresh install did not show, and the law stayed green. [ADR 0012](../adrs/cli/doors-are-reachable.md) (44a) states the rule. 44b made the door true and 44c the launch, and this item makes the rule's breach a failing check.
+
+- [x] **Every view names its door** (`cli/tui_parity`, `ShellDoor`): the view's title as the tab strip and the Go-to menu name it, and what that view shows for this door. The Session view's picker shows `New chat` for `chat` and `Execute` for `execute`; for the rest, the view is the door. A deliberately conditional door records its condition, and `seen` is then the words the shell says it in. No door is conditional today.
+- [x] **The law knows doors** (`shell_law_violations`), naming each of:
+  - a view with no door to reach it by;
+  - a condition with nothing said where the door is absent;
+  - a door on a row that is no view.
+
+  It takes a table of surfaces in place of its own, so `tui_parity_test` plants each case (the execute door gone, a condition unsaid, a door on `serve`) and requires it named, alone.
+- [x] **`cli.tui_doors`** (`tests/scripts/py/pty_door_check.py`), ADR 0012's teeth:
+  - it reads the view rows from `cli/tui_parity.cpp` itself, so a row added is walked with nothing to remember;
+  - it seeds a data directory with `apogee check --fix` and nothing else;
+  - it opens `apogee` once on a real terminal and walks every door in the table's order: the view reached through the Go-to menu until the tab strip's bracket names it, then what the row says it shows, seen there;
+  - then Ctrl-D, the alternate screen left and the modes restored.
+
+  It fails on a view whose door it cannot read, on a table with no views, and on one without the execute door. All twenty doors walk in about 21 seconds.
+- [x] **The planted regression** (the house's planted-violation idiom), verified once in a throwaway build. The execute door was made conditional again: the picker drops it when nothing can open. `cli.tui_doors` failed naming the row: `FAIL [execute]: the Session view never showed 'Execute' on a fresh install -- the door this row classifies is not there`. The build was then restored.
+- [x] **ADR 0012's Enforcement names the live check**, dated, as ADR 0011's names its goldens. Track 44 is complete.
+
+Decisions taken while building, for veto:
+- **A sibling script reads the table from source**, rather than a hidden verb printing it: the house's conformance checks already read their tables from source (`mux.cpp`, `cmake/modules.cmake`). A new hidden verb would itself need classifying. The cost is a spelling rule: each row is written `ShellSurface{...}` with its `ShellDoor{.view = ...}` spelled out, said in the table's comment. A row the script cannot read fails rather than being skipped.
+- **A view is reached through the Go-to menu by its title**, the one key path that reaches every view from anywhere. A view's number is only meaningful within its category.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,289 tests, one skipped for want of `pdftotext`, `cli.tui_doors` among them. `make format-check` is clean for every file touched. It also caught 44c's comment inside `lifecycle_test`'s free-text list, which made clang-format repack the whole list; the comment is gone and the list is one entry a line as before.
+
 ## Milestone AI — Effort and permission modes
 
 **Goal.** Claude Code gives a session two controls the person reaches for constantly: how hard the model thinks (five effort levels) and how much it may do without asking (a permission mode, cycled with Shift+Tab). Apogee had the pieces of both -- `/think on|off|auto` with a raw token budget, and per-tool answers over one permission gate -- but not the controls. Track 39 (the user's call, 2026-10-11) gives `apogee chat`, `apogee execute` and the full-screen shell Claude Code's two, set mid-session in either front end and Tab-completed in both.

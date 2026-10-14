@@ -10,31 +10,41 @@ using enum ShellSurfaceKind;
 
 /// THE table: every root subcommand of `apogee`, today's truth (2026-10-10,
 /// the parity spike). A backfill names the track-37 item that draws it; that
-/// item flips its row to a view when it ships.
+/// item flips its row to a view when it ships. Since 44d each view names its
+/// door (ADR 0012): the view's title, and what it shows for this door -- read
+/// by `cli.tui_doors` (`pty_door_check.py`) as well as compiled, so each row
+/// stays one `ShellSurface{...}` with its `ShellDoor{.view = ...}` spelled
+/// out.
 constexpr std::array kSurfaces{
     // --- views: drawn on the shell today --------------------------------------
-    ShellSurface{"chat", View, "Session"},
-    ShellSurface{"chats", View, "Chats"},
-    ShellSurface{"models", View, "Models"},
-    ShellSurface{"config", View, "Config (and Suites)"},
-    ShellSurface{"version", View, "Home"},
-    ShellSurface{"tui", View, "the shell itself -- the door it is opened by"},
-    ShellSurface{"system", View, "System (and the monitor bar)"},
-    ShellSurface{"check", View, "Check"},
-    ShellSurface{"providers", View, "Providers"},
-    ShellSurface{"knowledge", View, "Knowledge"},
-    ShellSurface{"embed", View, "Collections"},
-    ShellSurface{"graph", View, "Graph"},
-    ShellSurface{"execute", View, "Session (the picker's execute door)"},
-    ShellSurface{"symphonies", View, "Symphonies"},
-    ShellSurface{"task", View, "Tasks (a run narrated through the progress seam)"},
-    ShellSurface{"train", View, "Train (a run narrated through the progress seam)"},
-    ShellSurface{"datasets", View, "Datasets"},
-    ShellSurface{"agents", View, "Agents (edit stays the $EDITOR's, refused below)"},
-    ShellSurface{"mcp", View, "MCP"},
+    ShellSurface{"chat", View, "Session", ShellDoor{.view = "Session", .seen = "New chat"}},
+    ShellSurface{"chats", View, "Chats", ShellDoor{.view = "Chats"}},
+    ShellSurface{"models", View, "Models", ShellDoor{.view = "Models"}},
+    ShellSurface{"config", View, "Config (and Suites)", ShellDoor{.view = "Config"}},
+    ShellSurface{"version", View, "Home", ShellDoor{.view = "Home"}},
+    ShellSurface{"tui", View, "the shell itself -- the door it is opened by",
+                 ShellDoor{.view = "Session"}},
+    ShellSurface{"system", View, "System (and the monitor bar)", ShellDoor{.view = "System"}},
+    ShellSurface{"check", View, "Check", ShellDoor{.view = "Check"}},
+    ShellSurface{"providers", View, "Providers", ShellDoor{.view = "Providers"}},
+    ShellSurface{"knowledge", View, "Knowledge", ShellDoor{.view = "Knowledge"}},
+    ShellSurface{"embed", View, "Collections", ShellDoor{.view = "Collections"}},
+    ShellSurface{"graph", View, "Graph", ShellDoor{.view = "Graph"}},
+    ShellSurface{"execute", View, "Session (the picker's execute door)",
+                 ShellDoor{.view = "Session", .seen = "Execute"}},
+    ShellSurface{"symphonies", View, "Symphonies", ShellDoor{.view = "Symphonies"}},
+    ShellSurface{"task", View, "Tasks (a run narrated through the progress seam)",
+                 ShellDoor{.view = "Tasks"}},
+    ShellSurface{"train", View, "Train (a run narrated through the progress seam)",
+                 ShellDoor{.view = "Train"}},
+    ShellSurface{"datasets", View, "Datasets", ShellDoor{.view = "Datasets"}},
+    ShellSurface{"agents", View, "Agents (edit stays the $EDITOR's, refused below)",
+                 ShellDoor{.view = "Agents"}},
+    ShellSurface{"mcp", View, "MCP", ShellDoor{.view = "MCP"}},
     ShellSurface{"auth", View,
                  "Auth, metadata only (a key is stored at a real prompt: add's secret input "
-                 "never enters the shell)"},
+                 "never enters the shell)",
+                 ShellDoor{.view = "Auth"}},
     // --- backfills: track 37 draws them -- none left since 37g -----------------
     // --- runner-covered: one-shot scripting surfaces, the exec line's (37h) ---
     ShellSurface{"complete", RunnerCovered,
@@ -109,6 +119,15 @@ std::span<const ShellRefusal> shell_refusals() noexcept {
 }
 
 std::vector<std::string> shell_law_violations(const CLI::App& root) {
+    return shell_law_violations(root, kSurfaces);
+}
+
+std::vector<std::string> shell_law_violations(const CLI::App& root,
+                                              std::span<const ShellSurface> surfaces) {
+    const auto find_surface = [surfaces](std::string_view command) -> const ShellSurface* {
+        const auto found = std::ranges::find(surfaces, command, &ShellSurface::command);
+        return found == surfaces.end() ? nullptr : &*found;
+    };
     std::vector<std::string> violations;
     std::vector<std::string> commands;
     for (const CLI::App* command : root.get_subcommands({})) {
@@ -119,7 +138,7 @@ std::vector<std::string> shell_law_violations(const CLI::App& root) {
         return violations;
     }
     for (const std::string& command : commands) {
-        const ShellSurface* surface = find_shell_surface(command);
+        const ShellSurface* surface = find_surface(command);
         if (surface == nullptr) {
             violations.push_back("'" + command +
                                  "' has no shell classification -- draw it in a view, name the "
@@ -128,7 +147,7 @@ std::vector<std::string> shell_law_violations(const CLI::App& root) {
             violations.push_back("'" + command + "' is classified with nothing said");
         }
     }
-    for (const ShellSurface& surface : kSurfaces) {
+    for (const ShellSurface& surface : surfaces) {
         if (std::ranges::find(commands, surface.command) == commands.end()) {
             violations.push_back("the table classifies '" + std::string{surface.command} +
                                  "', which no longer exists");
@@ -146,8 +165,26 @@ std::vector<std::string> shell_law_violations(const CLI::App& root) {
                                  "' with no reason");
         }
     }
+    // A view is reachable (ADR 0012): it names the door a fresh install is
+    // walked to, and a conditional one what is said where it is absent.
+    for (const ShellSurface& surface : surfaces) {
+        const std::string named = "'" + std::string{surface.command} + "'";
+        if (surface.kind == View && surface.door.view.empty()) {
+            violations.push_back(named +
+                                 " is classified as a view with no door to reach it by -- name "
+                                 "the view, and what it shows for it (ADR 0012)");
+        }
+        if (surface.kind != View && !surface.door.view.empty()) {
+            violations.push_back(named + " names a door, and is no view");
+        }
+        if (!surface.door.condition.empty() && surface.door.seen.empty()) {
+            violations.push_back(named + "'s door is conditional on " +
+                                 std::string{surface.door.condition} +
+                                 ", with nothing said where it is absent");
+        }
+    }
     // A carve-out is a refusal: the exec line must say why.
-    for (const ShellSurface& surface : kSurfaces) {
+    for (const ShellSurface& surface : surfaces) {
         if (surface.kind == CarvedOut &&
             std::ranges::find(kRefusals, surface.command, &ShellRefusal::words) ==
                 kRefusals.end()) {

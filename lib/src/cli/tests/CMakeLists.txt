@@ -1020,6 +1020,18 @@ if(UNIX)
         )
         set_tests_properties(cli.tui_shell PROPERTIES TIMEOUT 180)
 
+        # Every classified door reached on a fresh install (44d, ADR 0012): the
+        # parity table's view rows, read from the source the binary is built
+        # from, each walked to through the Go-to menu on a real terminal over
+        # a data directory `check --fix` seeded and nothing else.
+        add_test(NAME cli.tui_doors
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_door_check.py"
+                $<TARGET_FILE:apogee>
+                "${PROJECT_SOURCE_DIR}/source/presentation/cli/tui_parity.cpp"
+        )
+        set_tests_properties(cli.tui_doors PROPERTIES TIMEOUT 300)
+
         add_test(NAME cli.chat_typeahead_and_crash_safety
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_chat_check.py"

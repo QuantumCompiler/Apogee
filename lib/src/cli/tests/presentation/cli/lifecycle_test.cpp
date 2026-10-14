@@ -1068,7 +1068,6 @@ const std::vector<std::string> kFreeText{"agents create name",
                                          "symphonies create --stage",
                                          "symphonies create --play",
                                          "symphonies play --input",
-                                         // `tui` takes the session table (44c): execute's.
                                          "tui -s",
                                          "tui --system",
                                          "tui --allow-host"};
