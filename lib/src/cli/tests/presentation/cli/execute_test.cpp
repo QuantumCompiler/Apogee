@@ -1,3 +1,5 @@
+#include "cli/execute.h"
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <nlohmann/json.hpp>
@@ -170,6 +172,48 @@ TEST_CASE("execute opens on three rungs: a suite, else bare on -m or the default
     REQUIRE(execute_home.run({"execute"}, &out, &err, "hello\nand then\n") == 0);
     CHECK(out == chat_out);
     CHECK(transcript(execute_home.sessions().front()) == transcript(chat_home.sessions().front()));
+}
+
+TEST_CASE("execute's doors are its own rungs: each suite, and the bare door with no default",
+          "[execute][suites][bare][door]") {
+    // What a front end's picker offers (44b, ADR 0011): exactly what `apogee
+    // execute` opens on, read off the config as the command reads it.
+    const auto doors_of = [](const std::string& text) {
+        std::vector<std::string> out;
+        for (const c::ExecuteDoor& door :
+             c::execute_doors(apogee::harness::parse_config(text, "test"))) {
+            out.push_back(door.label + " -> " + (door.suite.empty() ? "<bare>" : door.suite));
+        }
+        return out;
+    };
+    const std::string backends = R"("backends": {"root": {"type": "mock", "model_path": "r.json"},)"
+                                 R"( "helper": {"type": "mock", "model_path": "h.json"}})";
+    const std::string suites = R"("suites": {"solo": {"members": {"chat": "helper"}},)"
+                               R"( "duo": {"members": {"chat": "root", "utility": "helper"}}})";
+    // No suite, a default backend: the bare door alone.
+    CHECK(doors_of("{" + backends + R"(, "models": {"default": "root"}})") ==
+          std::vector<std::string>{"Execute on root (no suite) -> <bare>"});
+    // Suites, none the default: each suite, then the bare door -- `apogee
+    // execute` with nothing named opens bare there too.
+    CHECK(doors_of("{" + backends + ", " + suites + R"(, "models": {"default": "root"}})") ==
+          std::vector<std::string>{"Execute under suite duo -> duo",
+                                   "Execute under suite solo -> solo",
+                                   "Execute on root (no suite) -> <bare>"});
+    // A default suite: it first, and no bare door -- execute opens under it.
+    CHECK(doors_of("{" + backends + ", " + suites +
+                   R"(, "models": {"default": "root", "default_suite": "solo"}})") ==
+          std::vector<std::string>{"Execute under suite solo (default) -> solo",
+                                   "Execute under suite duo -> duo"});
+    // Nothing to open on: the door still stands (ADR 0012), its opening
+    // execute's own refusal.
+    CHECK(doors_of("{" + backends + "}") ==
+          std::vector<std::string>{"Execute (no suite or default backend yet) -> <bare>"});
+    CHECK(doors_of("{}") ==
+          std::vector<std::string>{"Execute (no suite or default backend yet) -> <bare>"});
+    // Suites with no default and no default backend: the suites alone.
+    CHECK(doors_of("{" + backends + ", " + suites + "}") ==
+          std::vector<std::string>{"Execute under suite duo -> duo",
+                                   "Execute under suite solo -> solo"});
 }
 
 TEST_CASE("execute is refused only with nothing to open on, naming every way in",

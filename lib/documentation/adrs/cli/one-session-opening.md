@@ -40,4 +40,7 @@ These are one drift class: **a front end composing its own second opening of a m
 
 ## Enforcement
 
-- **Pending, 2026-10-14.** The door goldens hold a session opened by a front end's door byte-equal to the command's own opening on the same state: its saved record, its banner, and a scripted turn's request. They land with track 44 in the [backlog](../../backlog/README.md): **44b** for the picker's doors and **44c** for `apogee tui` speaking the table. Until then this record has no mechanical teeth, and the per-change checklist in [CLAUDE.md](../../assistant/CLAUDE.md) names it.
+- **The picker's doors, since 2026-10-14 (44b).** `open_execute_session` and `open_chat_session` are the commands' openings, and the shell's driver opens every session through them. `execute_doors` reads the picker's execute rows off execute's own rungs. Two tests hold them:
+  - `tui_session_test`'s "a door-opened execute session is apogee execute's own opening" opens one session with `apogee execute --tools` and one through the picker's bare door, in the same fixture repository on the same home. It requires the same transcript, suite, backend, system prompt and attached folder, with the coder persona and `AGENTS.md` in the request.
+  - `execute_test`'s "execute's doors are its own rungs" pins the rows for each shape of config.
+- **Pending, 2026-10-14.** The launch golden, `apogee tui` speaking the table, lands with track 44's **44c** in the [backlog](../../backlog/README.md). The per-change checklist in [CLAUDE.md](../../assistant/CLAUDE.md) names the rule.

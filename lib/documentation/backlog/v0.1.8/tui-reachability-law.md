@@ -25,4 +25,4 @@
 - [ ] Deliberately conditional rows carry their condition in the table and the refusal's wording is asserted against it.
 - [ ] ADR 0012's Enforcement names the live test, dated; the full suite is green.
 
-**Scope note.** Earmarked for v0.1.8; gated on [44b](tui-execute-door.md) and [44c](tui-session-launch.md) (the truth it pins is theirs). Out of scope: new doors, any classification change beyond the condition field, Windows PTY coverage.
+**Scope note.** Earmarked for v0.1.8; gated on 44b (shipped 2026-10-14) and [44c](tui-session-launch.md) (the truth it pins is theirs). Out of scope: new doors, any classification change beyond the condition field, Windows PTY coverage.

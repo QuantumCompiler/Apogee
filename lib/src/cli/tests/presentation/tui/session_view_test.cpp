@@ -229,10 +229,11 @@ TEST_CASE("the picker offers a new chat first, then the saved ones, and opens th
     CHECK(stage.shell.quit_requested());
 }
 
-TEST_CASE("the picker's doors sit between the new chat and the saved ones, each opening itself",
+TEST_CASE("the picker's doors follow the new chat and the saved ones, each opening itself",
           "[tui][session]") {
-    // 37d: the execute door, one per suite -- chosen, it opens; a saved chat
-    // below the doors is still picked by its id.
+    // 37d, 44b: the execute doors -- one per suite, and the bare one -- after
+    // the saved chats, the new chat still first and preselected; chosen, a
+    // door opens; a saved chat above them is still picked by its id.
     Stage stage;
     std::vector<std::string> picked;
     std::vector<std::string> opened;
@@ -244,10 +245,13 @@ TEST_CASE("the picker's doors sit between the new chat and the saved ones, each 
          {.label = "Execute under suite solo",
           .open = [&opened]() { opened.emplace_back("solo"); }}});
     const std::string frame = stage.frame();
-    CHECK(frame.find(" › New chat\n") < frame.find("   Execute under suite duo (default)\n"));
-    CHECK(frame.find("   Execute under suite solo\n") < frame.find("   planning  ·"));
-    (void)stage.shell.press(Key::named(Key::Name::Down));
-    (void)stage.shell.press(Key::named(Key::Name::Down));
+    CHECK(frame.find(" › New chat\n") < frame.find("   planning  ·"));
+    CHECK(frame.find("   planning  ·") < frame.find("   Execute under suite duo (default)\n"));
+    CHECK(frame.find("   Execute under suite duo (default)\n") <
+          frame.find("   Execute under suite solo\n"));
+    for (int i = 0; i < 3; ++i) {
+        (void)stage.shell.press(Key::named(Key::Name::Down));
+    }
     CHECK(has(stage.frame(), " › Execute under suite solo"));
     (void)stage.shell.press(Key::named(Key::Name::Return));
     CHECK(opened == std::vector<std::string>{"solo"});
@@ -262,6 +266,8 @@ TEST_CASE("the picker's doors sit between the new chat and the saved ones, each 
     for (int i = 0; i < 5; ++i) {  // past the end stays on the last
         (void)stage.shell.press(Key::named(Key::Name::Down));
     }
+    CHECK(has(stage.frame(), " › Execute under suite duo"));
+    (void)stage.shell.press(Key::named(Key::Name::Up));
     CHECK(has(stage.frame(), " › planning"));
     (void)stage.shell.press(Key::named(Key::Name::Return));
     CHECK(picked == std::vector<std::string>{"c1"});

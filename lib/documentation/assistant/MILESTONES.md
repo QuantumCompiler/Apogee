@@ -7265,6 +7265,30 @@ Decisions taken while building, for veto:
 
 **Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,278 tests, one skipped for want of `pdftotext`, `harness.layer_context` among them with the card's pointer and the ADR index's two new rows. No source or test file changed. The link sweep over the documentation, the skills and the layer cards found nothing new broken.
 
+### 2026-10-14 — `tui-execute-door` (backlog item 44b): the execute door, always there, through the one opening
+
+**Why.** Execute was hard to reach from the shell. A fresh shell went straight into a chat, since the picker appeared only once a chat was saved, so a new install had no execute entry anywhere. The picker's execute rows were its own decision: a row per suite, and a bare row only when no suite was configured at all, where `apogee execute` opens bare whenever no suite is the default. And every shell session was opened from an argv the shell spelled itself. [ADR 0011](../adrs/cli/one-session-opening.md), written first (44a), names the class: a front end composing its own second opening of a mode.
+
+- [x] **One opening per mode** (`cli/execute`, `cli/chat`):
+  - `open_execute_session` and `open_chat_session` are what the commands' callbacks run and what the shell's driver calls: the session core in its mode over flags parsed through the command's own table;
+  - which suite, which model, the project opening, the persona and admission are decided once, in there.
+- [x] **The doors are execute's own rungs** (`execute_doors`). One per configured suite, the default first and marked, each `--suite`'s. Then the bare door, `Execute on <backend> (no suite)`, whenever no suite is the default and a backend answers for the chat role, suites configured or not. Never empty: with nothing to open on, `Execute (no suite or default backend yet)` still stands, and choosing it runs execute's own opening, which refuses in the command's words (`execute opens a session with a suite, and none is configured -- … apogee execute -m <backend> …`).
+- [x] **The picker on every start** (`TuiSessionDriver::start`): New chat preselected and one key away, then the saved chats, then the execute doors (the order confirmed at grooming), where the doors used to come before the saved chats. `open_execute` with an empty suite opens on execute's own rungs.
+- [x] **The tests**:
+  - **ADR 0011's golden** (`tui_session_test`): in a fixture repository holding `AGENTS.md`, one session is opened by `apogee execute --tools` and one by the picker's bare door, on the same home. Both hold the same transcript, suite, backend, system prompt and attached folder, with the coder persona and `AGENTS.md` in the request the mock echoed. The banner's two lines are said in the shell as on the terminal.
+  - A fresh shell starts on the picker with the bare door below New chat, and Enter is a chat.
+  - The door with nothing to open on is refused in execute's words, and the picker comes back.
+  - `execute_test` pins `execute_doors` for each shape of config.
+  - `session_view_test` holds the new row order.
+  - `cli.tui_shell`'s session case presses Enter on the picker's new chat. Its new **door** case opens the execute door on a real terminal, on the install that case left with a chat saved, and sees execute's banner.
+
+Decisions taken while building, for veto:
+- **The execute door stands even with nothing to open on.** The document's rule shows the bare row whenever the CLI's bare door would open. On a truly fresh install (no backend, no suite) that rule shows no row, while its acceptance and ADR 0012 require a door on a fresh install. So one row stays, worded `Execute (no suite or default backend yet)`. Choosing it runs execute's own opening, so the refusal is the command's, never the shell's. This is the same pattern New chat has always had on such an install.
+- **The bare row keeps 41a's wording**, `Execute on <backend> (no suite)`, rather than the document's illustrative `Execute — <backend> (no suite)`. It already speaks the banner's `no suite`, and tests pinned it.
+- **The audit's third wall was not a behavior gap.** 41b's and 41c's ritual lives in `run_session`, which the shell's door has always called, so it reached a shell-opened session before this item. This item changed which function the door calls (the command's own) and added the test that holds it, not what the core does.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,282 tests, one skipped for want of `pdftotext`, `cli.tui_shell` with its door case on a real terminal among them. `make format-check` is clean for every file this item touched. The two files it flags, `embed.cpp` and `runner_view.h`, were flagged before.
+
 ## Milestone AI — Effort and permission modes
 
 **Goal.** Claude Code gives a session two controls the person reaches for constantly: how hard the model thinks (five effort levels) and how much it may do without asking (a permission mode, cycled with Shift+Tab). Apogee had the pieces of both -- `/think on|off|auto` with a raw token budget, and per-tool answers over one permission gate -- but not the controls. Track 39 (the user's call, 2026-10-11) gives `apogee chat`, `apogee execute` and the full-screen shell Claude Code's two, set mid-session in either front end and Tab-completed in both.

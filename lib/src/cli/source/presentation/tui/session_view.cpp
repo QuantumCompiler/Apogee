@@ -394,12 +394,12 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
             std::string line = i == picked ? " › " : "   ";
             if (i == 0) {
                 line += "New chat";
-            } else if (i <= doors.size()) {
-                line += doors.at(i - 1).label;
-            } else {
-                const PickerEntry& entry = picker.at(i - 1 - doors.size());
+            } else if (i <= picker.size()) {
+                const PickerEntry& entry = picker.at(i - 1);
                 line += entry.name + "  ·  " + entry.updated + "  ·  " +
                         std::to_string(entry.turns) + (entry.turns == 1 ? " turn" : " turns");
+            } else {
+                line += doors.at(i - 1 - picker.size()).label;
             }
             Element row = text(std::move(line));
             if (i == picked) {
@@ -868,8 +868,8 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
             picked = std::min(picked + 1, doors.size() + picker.size());
             return true;
         }
-        if (event == ftxui::Event::Return && picked > 0 && picked <= doors.size()) {
-            const std::function<void()> open = doors.at(picked - 1).open;
+        if (event == ftxui::Event::Return && picked > picker.size()) {
+            const std::function<void()> open = doors.at(picked - 1 - picker.size()).open;
             mode = Mode::Empty;
             if (open) {
                 open();
@@ -877,8 +877,7 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
             return true;
         }
         if (event == ftxui::Event::Return && pick) {
-            const std::string id =
-                picked == 0 ? std::string{} : picker.at(picked - 1 - doors.size()).id;
+            const std::string id = picked == 0 ? std::string{} : picker.at(picked - 1).id;
             const std::function<void(std::string)> chosen = pick;
             mode = Mode::Empty;
             chosen(id);

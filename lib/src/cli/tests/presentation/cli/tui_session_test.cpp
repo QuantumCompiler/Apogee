@@ -21,9 +21,11 @@
 
 #include "backends/model_roster.h"
 #include "cli/chat_session.h"
+#include "cli/execute.h"
 #include "cli/permissions.h"
 #include "cli/tui_symphonies.h"
 #include "cli/tui_workbench.h"
+#include "contracts/assets.h"
 #include "logger/session.h"
 #include "machine/driver_input.h"
 #include "machine/json_reporter.h"
@@ -821,4 +823,161 @@ TEST_CASE("a play is never offered outside execute: a chat open says why",
     CHECK(driver.play("echo2", "hello").sent);
     chat.until([&chat]() { return has(chat.frame(), std::string{kPlayed}); }, "the play's output");
     driver.stop();
+}
+
+// --- the execute door, always there, through the one opening (44b) -----------
+
+namespace {
+
+/// Moves the working directory for the life of the object.
+class WorkingDirectory {
+public:
+    explicit WorkingDirectory(const fs::path& to) : previous_{fs::current_path()} {
+        fs::current_path(to);
+    }
+
+    ~WorkingDirectory() {
+        std::error_code ignored;
+        fs::current_path(previous_, ignored);
+    }
+
+    WorkingDirectory(const WorkingDirectory&) = delete;
+    WorkingDirectory& operator=(const WorkingDirectory&) = delete;
+    WorkingDirectory(WorkingDirectory&&) = delete;
+    WorkingDirectory& operator=(WorkingDirectory&&) = delete;
+
+private:
+    fs::path previous_;
+};
+
+/// Presses Down until the picker's marker is on the row starting `label`.
+void pick_row(Conversation& chat, const std::string& label) {
+    for (int i = 0; i < 20 && !has(chat.frame(), " › " + label); ++i) {
+        (void)chat.shell.press(Key::named(Key::Name::Down));
+    }
+    REQUIRE(has(chat.frame(), " › " + label));
+}
+
+}  // namespace
+
+TEST_CASE("a fresh shell starts on the picker: a new chat one key away, execute's door below",
+          "[cli][tui][session][execute][door]") {
+    const nlohmann::json script = {{"turns", {{{"text", "answer to {{last_user}}"}}}}};
+    Conversation chat{script};
+    apogee::commands::TuiSessionDriver driver{chat.view, chat.pump, chat.context,
+                                              []() { return apogee::models::MachineBudget{}; }};
+    // Nothing saved, a default backend: the picker anyway, where it once went
+    // straight into a chat with no execute entry anywhere.
+    driver.start();
+    chat.until([&chat]() { return has(chat.frame(), " › New chat"); }, "the picker");
+    const std::string picker = chat.frame();
+    CHECK(has(picker, "   Execute on local (no suite)"));
+    CHECK(picker.find(" › New chat") < picker.find("   Execute on local (no suite)"));
+    // Enter: a chat, as before.
+    (void)chat.shell.press(Key::named(Key::Name::Return));
+    chat.until([&chat]() { return chat.view.waiting_for_line(); }, "the chat reading");
+    const std::string opened = chat.frame();
+    CHECK(has(opened, "/help for commands"));
+    CHECK_FALSE(has(opened, "no suite"));  // chat's banner, not execute's
+    driver.stop();
+}
+
+TEST_CASE("with nothing to open on, the execute door still stands and says why in execute's words",
+          "[cli][tui][session][execute][door]") {
+    const nlohmann::json script = {{"turns", {{{"text", "unused"}}}}};
+    Conversation chat{script};
+    std::ofstream{chat.home.config_path(), std::ios::binary | std::ios::trunc}
+        << R"({"backends": {"local": {"type": "mock", "model_path": "unused.json"}}})" << "\n";
+    apogee::commands::TuiSessionDriver driver{chat.view, chat.pump, chat.context,
+                                              []() { return apogee::models::MachineBudget{}; }};
+    driver.start();
+    chat.until([&chat]() { return has(chat.frame(), "Execute (no suite or default backend yet)"); },
+               "the door");
+    std::ostringstream said;
+    std::streambuf* old_err = std::cerr.rdbuf(said.rdbuf());
+    pick_row(chat, "Execute (no suite or default backend yet)");
+    (void)chat.shell.press(Key::named(Key::Name::Return));
+    // The opening refused, the picker back with the new chat marked again.
+    chat.until([&chat]() { return has(chat.frame(), " › New chat"); }, "the picker again");
+    driver.stop();
+    std::cerr.rdbuf(old_err);
+    CHECK(has(said.str(),
+              "apogee execute: execute opens a session with a suite, and none is configured"));
+    CHECK(has(said.str(), "apogee execute -m <backend>"));
+}
+
+TEST_CASE("a door-opened execute session is apogee execute's own opening, project and persona too",
+          "[cli][tui][session][execute][door][project]") {
+    // ADR 0011's golden: the same home and folder, the session opened once by
+    // `apogee execute --tools` (the shell's sessions carry tools) and once by
+    // the picker's bare door -- the same record, and the same request: the
+    // root echoes every system message it is sent.
+    const nlohmann::json script = {{"turns", {{{"text", "SYS<<{{system}}>>"}}}}};
+    Conversation chat{script};
+    std::ofstream{chat.home.config_path(), std::ios::binary | std::ios::trunc}
+        << nlohmann::json{{"backends",
+                           {{"root",
+                             {{"type", "mock"},
+                              {"model_path",
+                               (chat.home.home() / "script.json").generic_string()}}}}},
+                          {"models", {{"default", "root"}}},
+                          {"memory", {{"recall", false}}}}
+               .dump(2)
+        << "\n";
+    const fs::path project = chat.home.home() / "project";
+    fs::create_directories(project / ".git");
+    std::ofstream{project / "AGENTS.md"} << "Use tabs.\nRun make test before done.\n";
+    std::ofstream{project / "notes.md"} << "The build is make.\n";
+    const WorkingDirectory here{project};
+
+    {
+        const std::istringstream fed{"hi\n"};
+        std::streambuf* old_in = std::cin.rdbuf(fed.rdbuf());
+        std::string out;
+        std::string err;
+        const int code = chat.home.run({"execute", "--tools"}, &out, &err);
+        std::cin.rdbuf(old_in);
+        std::cin.clear();
+        INFO(out << err);
+        REQUIRE(code == 0);
+    }
+
+    apogee::commands::TuiSessionDriver driver{chat.view, chat.pump, chat.context,
+                                              []() { return apogee::models::MachineBudget{}; }};
+    driver.start();
+    chat.until([&chat]() { return has(chat.frame(), "Execute on root (no suite)"); }, "the door");
+    pick_row(chat, "Execute on root (no suite)");
+    (void)chat.shell.press(Key::named(Key::Name::Return));
+    chat.until([&chat]() { return chat.view.waiting_for_line(); }, "execute reading");
+    // Said as the command says it.
+    CHECK(has(chat.frame(), "project context: AGENTS.md, 7 words, in every request"));
+    CHECK(has(chat.frame(), "persona: coder"));
+    chat.send("hi");
+    // The answer echoes the whole request, longer than the screen: its end,
+    // and the input reading again.
+    chat.until(
+        [&chat]() {
+            return chat.view.waiting_for_line() && has(chat.frame(), "Run make test before done.");
+        },
+        "the answer");
+    driver.stop();
+
+    const std::vector<apogee::logger::Session> saved = apogee::logger::list_sessions();
+    REQUIRE(saved.size() == 2);
+    const apogee::logger::Session& shell = saved.at(0);
+    const apogee::logger::Session& command = saved.at(1);
+    CHECK(transcript(shell) == transcript(command));
+    REQUIRE(transcript(shell).size() == 2);
+    const std::string request = transcript(shell).at(1);
+    const std::string_view persona = apogee::harness::find_bundled_persona("coder")->text;
+    CHECK(has(request, std::string{persona.substr(0, persona.find('.'))}));
+    CHECK(has(request, "Project context, from AGENTS.md"));
+    CHECK(shell.suite == command.suite);
+    CHECK_FALSE(shell.suite.has_value());
+    CHECK(shell.backend == command.backend);
+    CHECK(shell.params.system_prompt == command.params.system_prompt);
+    REQUIRE(shell.attachments.size() == command.attachments.size());
+    REQUIRE(shell.attachments.size() == 1);
+    CHECK(shell.attachments.front().name == ".");
+    CHECK(command.attachments.front().name == ".");
 }
