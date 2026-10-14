@@ -22,6 +22,7 @@
 #include "contracts/config.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "operations/backend_names.h"
 #include "support/channel_guard.h"
 #include "support/env_guard.h"
 
@@ -215,10 +216,14 @@ backends:
     request.current = "codex:gpt-5.6";
     CHECK(completion_candidates(request, config, commands()) ==
           std::vector<std::string>{"codex:gpt-5.6-terra"});
+    // An empty word is the map (45a): the keys, then the roster's `codex:`
+    // -- no pair, and no bare roster id until one is typed.
     request.current = "";
-    const std::vector<std::string> bare = completion_candidates(request, config, commands());
-    CHECK(contains(bare, "gpt-5.5"));
-    CHECK_FALSE(contains(bare, "codex:gpt-5.5"));
+    CHECK(completion_candidates(request, config, commands()) ==
+          std::vector<std::string>{"codex", "local-ollama", "codex:"});
+    request.current = "gpt";
+    CHECK(completion_candidates(request, config, commands()) ==
+          std::vector<std::string>{"gpt-5.5", "gpt-5.6-terra"});
     // An entry whose type has no roster offers nothing after its colon.
     request.current = "local-ollama:";
     CHECK(completion_candidates(request, config, commands()).empty());
@@ -1270,4 +1275,88 @@ TEST_CASE("completion offers the names in the root the line's flag chose",
 
     // The answer's flag lasted as long as the answer.
     CHECK_FALSE(apogee::harness::root_flag().has_value());
+}
+
+TEST_CASE("a model word is the map before the territory: keys, each roster behind its colon",
+          "[commands][completion][namespaces]") {
+    // 45a: the first Tab offers the configured keys and one `<key>:` per
+    // roster; past a colon, that shelf; a typed word, everything -- each
+    // band in the one order, every final candidate one the parser accepts.
+    const apogee::testing::TempDir home{"namespaces-" + std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    apogee::backends::RosterCache cache;
+    cache.rosters["anthropic"] = apogee::backends::ProviderRoster{
+        {{"claude-sonnet-5-5", "Sonnet"}, {"claude-opus-5-5", "Opus"}, {"shared-1", "Shared"}},
+        "2026-10-14"};
+    cache.rosters["codex-cli"] = apogee::backends::ProviderRoster{
+        {{"gpt-5.5", "GPT-5.5"}, {"shared-1", "Shared"}}, "2026-10-14"};
+    REQUIRE(apogee::backends::save_roster_cache(cache).empty());
+    const apogee::harness::Config config = apogee::harness::parse_config(R"(
+backends:
+  work:
+    type: anthropic
+    model: claude-opus-5-5
+  claude:
+    type: anthropic
+    model: claude-sonnet-5-5
+  codex:
+    type: codex-cli
+  Llama:
+    type: mock
+  glm:
+    type: mock
+)",
+                                                                         "test");
+    CompletionRequest request;
+    request.words = {"complete", "-m"};
+
+    // The map: keys case-insensitively, then the shelves -- no roster id.
+    request.current = "";
+    const std::vector<std::string> map = completion_candidates(request, config, commands());
+    CHECK(map == std::vector<std::string>{"claude", "codex", "glm", "Llama", "work",
+                                          "claude:", "codex:", "work:"});
+
+    // A typed word matches everything, bands kept: keys, shelves, ids.
+    request.current = "c";
+    CHECK(completion_candidates(request, config, commands()) ==
+          std::vector<std::string>{"claude", "codex", "claude:", "codex:", "claude-opus-5-5",
+                                   "claude-sonnet-5-5"});
+    // An id two configured types list is no bare word -- it runs on neither
+    // alone -- and stays behind each shelf.
+    request.current = "sh";
+    CHECK(completion_candidates(request, config, commands()).empty());
+    request.current = "codex:";
+    CHECK(completion_candidates(request, config, commands()) ==
+          std::vector<std::string>{"codex:gpt-5.5", "codex:shared-1"});
+    request.current = "work:claude-o";
+    CHECK(completion_candidates(request, config, commands()) ==
+          std::vector<std::string>{"work:claude-opus-5-5"});
+
+    // Insertion validity: every final candidate, typed, is one the session
+    // resolves; every shelf leads to some.
+    std::vector<std::string> finals;
+    for (const std::string& word : {"", "c", "g", "w", "L", "claude:", "codex:", "work:"}) {
+        request.current = word;
+        for (const std::string& candidate : completion_candidates(request, config, commands())) {
+            finals.push_back(candidate);
+        }
+    }
+    for (const std::string& candidate : finals) {
+        INFO(candidate);
+        if (candidate.ends_with(':')) {
+            request.current = candidate;
+            CHECK_FALSE(completion_candidates(request, config, commands()).empty());
+            continue;
+        }
+        const apogee::commands::SessionModel resolved =
+            apogee::commands::resolve_session_model(config, candidate);
+        CHECK(resolved.refusal.empty());
+        CHECK_FALSE(resolved.backend.empty());
+    }
+
+    // The wire is as it was: `:values`, then a bare candidate a line.
+    request.current = "";
+    CHECK(apogee::commands::render_completion(
+              apogee::commands::complete_words(request, config, commands()), true) ==
+          ":values\nclaude\ncodex\nglm\nLlama\nwork\nclaude:\ncodex:\nwork:\n");
 }

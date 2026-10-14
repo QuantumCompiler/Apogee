@@ -573,12 +573,17 @@ TEST_CASE(
     sources.roster_models = {{"claude-opus-5-5", "anthropic's roster"},
                              {"claude", "anthropic's roster"},
                              {"claude-sonnet-5-5", "anthropic's roster"}};
+    // An empty word is the map (45a): the backends -- the roster stays behind
+    // what is typed, a name already a backend once.
     const Suggestions model = suggest_chat_input("/model ", sources);
-    // The backends first, then the roster -- a name already a backend once.
-    CHECK(texts(model) == std::vector<std::string>{"claude", "local", "mock", "claude-opus-5-5",
-                                                   "claude-sonnet-5-5"});
+    CHECK(texts(model) == std::vector<std::string>{"claude", "local", "mock"});
     CHECK(model.candidates[0].description == "anthropic · claude-sonnet-5");
-    CHECK(model.candidates[3].description == "anthropic's roster");
+    // Typed, everything that starts with it: the backend first, then the
+    // roster's, in the one order.
+    const Suggestions typed = suggest_chat_input("/model claude", sources);
+    CHECK(texts(typed) ==
+          std::vector<std::string>{"claude", "claude-opus-5-5", "claude-sonnet-5-5"});
+    CHECK(typed.candidates[1].description == "anthropic's roster");
     CHECK(texts(suggest_chat_input("/model claude-s", sources)) ==
           std::vector<std::string>{"claude-sonnet-5-5"});
     // A reranker is a configured entry's job, never a roster pin's.

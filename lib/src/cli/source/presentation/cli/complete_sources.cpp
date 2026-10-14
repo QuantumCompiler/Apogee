@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "cli/config_cmd.h"
@@ -69,29 +70,58 @@ namespace {
                 : std::filesystem::path{harness::expand_env_and_home(config.paths.hf_dir)}};
 }
 
+/// One format's models and their handles (`<model>/<format>/<id>`), each
+/// model before its handles, the models in the one order (45a).
+void push_format(std::vector<std::string>& out,
+                 std::vector<std::pair<std::string, std::string>> found) {
+    std::vector<std::string> models;
+    for (const auto& [model, handle] : found) {
+        models.push_back(model);
+    }
+    order_names(models);
+    for (const std::string& model : models) {
+        out.push_back(model);
+        std::vector<std::string> handles;
+        for (const auto& [owner, handle] : found) {
+            if (owner == model) {
+                handles.push_back(handle);
+            }
+        }
+        order_names(handles);
+        out.insert(out.end(), handles.begin(), handles.end());
+    }
+}
+
 /// Models in the store, and each set of their weights by handle
-/// (`<model>/<format>/<id>`), for the formats asked.
+/// (`<model>/<format>/<id>`), for the formats asked -- by format, then name
+/// (45a), the formats in `models list`'s order: SafeTensors, GGUF, MLX.
 [[nodiscard]] std::vector<std::string> stored_models(const models::StoreRoots& roots, bool ggufs,
                                                      bool snapshots, bool mlx = false) {
     std::vector<std::string> out;
-    if (mlx) {
-        for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
-            out.push_back(stored.model);
-            out.push_back(models::weights_handle(stored.model, models::kMlxFormat, stored.id));
+    if (snapshots) {
+        std::vector<std::pair<std::string, std::string>> found;
+        for (const models::StoredSnapshot& stored : models::list_store_snapshots(roots)) {
+            found.emplace_back(
+                stored.model,
+                stored.model + "/" + std::string{models::kSafetensorsFormat} + "/" + stored.id);
         }
+        push_format(out, std::move(found));
     }
     if (ggufs) {
+        std::vector<std::pair<std::string, std::string>> found;
         for (const models::StoredGguf& stored : models::list_store_ggufs(roots)) {
-            out.push_back(stored.model);
-            out.push_back(stored.model + "/" + std::string{models::kGgufFormat} + "/" + stored.id);
+            found.emplace_back(stored.model, stored.model + "/" + std::string{models::kGgufFormat} +
+                                                 "/" + stored.id);
         }
+        push_format(out, std::move(found));
     }
-    if (snapshots) {
-        for (const models::StoredSnapshot& stored : models::list_store_snapshots(roots)) {
-            out.push_back(stored.model);
-            out.push_back(stored.model + "/" + std::string{models::kSafetensorsFormat} + "/" +
-                          stored.id);
+    if (mlx) {
+        std::vector<std::pair<std::string, std::string>> found;
+        for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
+            found.emplace_back(stored.model,
+                               models::weights_handle(stored.model, models::kMlxFormat, stored.id));
         }
+        push_format(out, std::move(found));
     }
     return out;
 }
@@ -247,6 +277,7 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
             }
         }
         list.none = "no saved conversations yet";
+        list.as_listed = true;  // newest first (45a), never alphabetical
     } else if (kind == kServerValue) {
         list.names = config.mcp_server_names();
         list.none = "no MCP servers configured -- 'apogee mcp create'";
@@ -345,31 +376,30 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
     } else if (kind == kModelValue) {
         list.names = stored_models(store_roots(config), true, true, true);
         list.none = "the model store is empty -- 'apogee models pull'";
+        list.as_listed = true;  // by format, then name (45a)
     } else if (kind == kSnapshotValue) {
         list.names = stored_models(store_roots(config), false, true);
         list.paths = true;
+        list.as_listed = true;
     } else if (kind == kGgufValue) {
         list.names = stored_models(store_roots(config), true, false);
         list.paths = true;
+        list.as_listed = true;
     } else if (kind == kBackendOrWeightsValue) {
+        // The configured first, then the store's weights by format (45a).
         list.names = config.backend_names();
-        const models::StoreRoots roots = store_roots(config);
-        for (const models::StoredGguf& stored : models::list_store_ggufs(roots)) {
-            list.names.push_back(
-                models::weights_handle(stored.model, models::kGgufFormat, stored.id));
-        }
-        for (const models::StoredSnapshot& stored : models::list_store_snapshots(roots)) {
-            list.names.push_back(
-                models::weights_handle(stored.model, models::kSafetensorsFormat, stored.id));
-        }
-        for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
-            list.names.push_back(
-                models::weights_handle(stored.model, models::kMlxFormat, stored.id));
+        order_names(list.names);
+        for (const std::string& name : stored_models(store_roots(config), true, true, true)) {
+            if (name.find('/') != std::string::npos) {
+                list.names.push_back(name);  // a handle; a bare model name is no weights
+            }
         }
         list.none = "no backends configured and the model store is empty";
+        list.as_listed = true;
     } else if (kind == kModelOrBackendValue) {
+        // The configured backends that point into the store first, then the
+        // store by format (45a).
         const models::StoreRoots roots = store_roots(config);
-        list.names = stored_models(roots, true, true, true);
         const std::vector<models::StoredGguf> ggufs = models::list_store_ggufs(roots);
         const std::vector<models::StoredMlx> mlx = models::list_store_mlx(roots);
         for (const auto& [name, backend] : config.backends) {
@@ -382,7 +412,12 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
                 list.names.push_back(name);
             }
         }
+        order_names(list.names);
+        for (std::string& name : stored_models(roots, true, true, true)) {
+            list.names.push_back(std::move(name));
+        }
         list.none = "the model store is empty -- 'apogee models pull'";
+        list.as_listed = true;
     } else if (kind == kNewBackendValue) {
         list.names = unregistered_gguf_names(config);
     } else if (kind == kSnapshotIdValue) {

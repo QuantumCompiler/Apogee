@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -14,6 +15,7 @@
 #include "agentloop/retriever.h"
 #include "ansi/text_width.h"
 #include "backends/model_roster.h"
+#include "cli/complete_protocol.h"
 #include "cli/permissions.h"
 #include "knowledge/record.h"
 
@@ -388,6 +390,56 @@ Suggestions complete_path(std::string_view before, std::size_t from,
     return out;
 }
 
+/// The model namespaces over the sources (45a): the protocol's own bands
+/// (`model_bands`), each described -- a backend by its type and model, a
+/// shelf by whose roster it is and how many it holds, a bare id by its
+/// roster. With `map`, the map alone: the keys and the shelves.
+[[nodiscard]] std::vector<NamedChoice> model_choices(const ChatCompletionSources& sources,
+                                                     bool map) {
+    ModelShelves shelves;
+    for (const NamedChoice& backend : sources.backends) {
+        shelves.keys.push_back(backend.name);
+    }
+    for (const auto& [key, models] : sources.backend_rosters) {
+        if (!models.empty()) {
+            std::vector<std::string>& shelf = shelves.shelves[key];
+            for (const NamedChoice& model : models) {
+                shelf.push_back(model.name);
+            }
+        }
+    }
+    // A bare id runs on its sole owner (33): one listed twice is no bare word.
+    std::map<std::string, int> listed;
+    for (const NamedChoice& model : sources.roster_models) {
+        ++listed[model.name];
+    }
+    for (const auto& [id, count] : listed) {
+        if (count == 1 && std::ranges::find(shelves.keys, id) == shelves.keys.end()) {
+            shelves.roster_ids.push_back(id);
+        }
+    }
+    std::vector<NamedChoice> out;
+    for (const std::string& name : map ? model_candidates(shelves, {}) : model_bands(shelves)) {
+        NamedChoice choice{name, {}};
+        if (const auto backend = std::ranges::find(sources.backends, name, &NamedChoice::name);
+            backend != sources.backends.end()) {
+            choice.description = backend->description;
+        } else if (name.ends_with(':')) {
+            const auto shelf = sources.backend_rosters.find(name.substr(0, name.size() - 1));
+            if (shelf != sources.backend_rosters.end() && !shelf->second.empty()) {
+                choice.description = shelf->second.front().description + " -- " +
+                                     std::to_string(shelf->second.size()) + " models";
+            }
+        } else if (const auto model =
+                       std::ranges::find(sources.roster_models, name, &NamedChoice::name);
+                   model != sources.roster_models.end()) {
+            choice.description = model->description;
+        }
+        out.push_back(std::move(choice));
+    }
+    return out;
+}
+
 std::vector<NamedChoice> argument_choices(ArgumentValues values,
                                           const ChatCompletionSources& sources) {
     std::vector<NamedChoice> choices;
@@ -720,6 +772,26 @@ std::vector<DirectoryEntry> list_directory(const std::filesystem::path& director
     return entries;
 }
 
+namespace {
+
+/// `choices` in the one order (45a), by name.
+void order_choices(std::vector<NamedChoice>& choices) {
+    std::vector<std::string> names;
+    for (const NamedChoice& choice : choices) {
+        names.push_back(choice.name);
+    }
+    order_names(names);
+    std::vector<NamedChoice> ordered;
+    ordered.reserve(choices.size());
+    for (const std::string& name : names) {
+        const auto found = std::ranges::find(choices, name, &NamedChoice::name);
+        ordered.push_back(*found);
+    }
+    choices = std::move(ordered);
+}
+
+}  // namespace
+
 ChatCompletionSources chat_completion_sources(const harness::Config& config,
                                               std::filesystem::path working_directory) {
     ChatCompletionSources sources;
@@ -764,6 +836,9 @@ ChatCompletionSources chat_completion_sources(const harness::Config& config,
         const harness::SuiteConfig* suite = config.find_suite(name);
         sources.suites.push_back({name, suite != nullptr ? suite->description : std::string{}});
     }
+    // The one order (45a): case-insensitive, as every completion offers.
+    order_choices(sources.backends);
+    order_choices(sources.suites);
     sources.working_directory = std::move(working_directory);
     sources.list = list_directory;
     return sources;
@@ -858,15 +933,35 @@ Suggestions suggest_chat_input(std::string_view before_cursor,
         if (const std::size_t colon = typed.find(':'); colon != std::string_view::npos) {
             if (const auto listed = sources.backend_rosters.find(typed.substr(0, colon));
                 listed != sources.backend_rosters.end()) {
-                for (const NamedChoice& model : listed->second) {
-                    std::string pinned = listed->first + ":" + model.name;
+                std::vector<NamedChoice> models = listed->second;
+                std::vector<std::string> order;
+                for (const NamedChoice& model : models) {
+                    order.push_back(model.name);
+                }
+                order_names(order);
+                for (const std::string& name : order) {
+                    std::string pinned = listed->first + ":" + name;
                     if (pinned.starts_with(typed)) {
-                        out.candidates.push_back({std::move(pinned), {}, model.description});
+                        const auto model = std::ranges::find(models, name, &NamedChoice::name);
+                        out.candidates.push_back({std::move(pinned), {}, model->description});
                     }
                 }
                 return out;
             }
         }
+        // The namespaces (45a): the map for an empty word -- the keys and
+        // each roster's `<key>:` -- and everything, in the one order, for a
+        // typed one.
+        std::vector<std::pair<int, Suggestion>> ranked;
+        for (NamedChoice& choice : model_choices(sources, typed.empty())) {
+            if (const std::optional<int> tier = match_tier(choice.name, typed, sources.loose);
+                tier.has_value()) {
+                ranked.emplace_back(*tier,
+                                    Suggestion{choice.name, {}, std::move(choice.description)});
+            }
+        }
+        out.candidates = by_tier(std::move(ranked));
+        return out;
     }
     std::vector<std::pair<int, Suggestion>> ranked;
     for (NamedChoice& choice : argument_choices(spec->values, sources)) {

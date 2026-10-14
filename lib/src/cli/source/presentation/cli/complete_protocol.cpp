@@ -3,8 +3,10 @@
 #include <CLI/CLI.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string_view>
@@ -121,9 +123,12 @@ namespace {
             found = {};  // silent, as every completion failure is
         }
     }
-    std::ranges::sort(found.names);
-    const auto [duplicates, end] = std::ranges::unique(found.names);
-    found.names.erase(duplicates, end);
+    // The one order (45a), unless the source's own is the order.
+    if (found.as_listed) {
+        drop_repeats(found.names);
+    } else {
+        order_names(found.names);
+    }
     completion.candidates = offer_items(found.names, value, current);
     if (!completion.candidates.empty()) {
         return completion;
@@ -147,40 +152,15 @@ namespace {
         case ValueKind::Names:
             return offer_names(value, sources, context, current);
         case ValueKind::Backend: {
-            std::vector<std::string> names = config.backend_names();
-            if (names.empty()) {
+            if (config.backend_names().empty()) {
                 completion.hint =
                     value.hint + " -- no backends configured yet ('apogee config add-backend')";
             }
-            // The cached vendor rosters (M13): every model a configured
-            // provider type's roster lists completes beside the backend
-            // keys -- read from the disposable cache, never fetched here.
-            const backends::RosterCache rosters = backends::known_rosters();
-            for (const auto& [type, roster] : rosters.rosters) {
-                const bool configured_type =
-                    std::any_of(config.backends.begin(), config.backends.end(),
-                                [&type = type](const auto& entry) {
-                                    return harness::to_string(entry.second.type) == type;
-                                });
-                if (!configured_type) {
-                    continue;
-                }
-                for (const backends::RosterModel& model : roster.models) {
-                    names.push_back(model.id);
-                }
-                // Past an entry's colon, its roster as `<backend>:<model>`
-                // (34) -- offered only once the colon is typed.
-                if (const std::size_t colon = current.find(':'); colon != std::string_view::npos) {
-                    if (const auto entry = config.backends.find(current.substr(0, colon));
-                        entry != config.backends.end() &&
-                        harness::to_string(entry->second.type) == type) {
-                        for (const backends::RosterModel& model : roster.models) {
-                            names.push_back(entry->first + ":" + model.id);
-                        }
-                    }
-                }
-            }
-            completion.candidates = filter_prefix(names, current);
+            // The namespaces (45a): the configured keys and each roster's
+            // `<key>:` first, a shelf behind its colon, a typed word
+            // matching everything -- the cached rosters read (M13), never
+            // fetched here.
+            completion.candidates = model_candidates(model_shelves(config), current);
             break;
         }
         case ValueKind::Choice: {
@@ -274,6 +254,109 @@ std::vector<std::string> filter_prefix(const std::vector<std::string>& candidate
         }
     }
     return matched;
+}
+
+void order_names(std::vector<std::string>& names) {
+    const auto folded = [](const std::string& name) {
+        std::string out = name;
+        std::ranges::transform(out, out.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return out;
+    };
+    std::ranges::sort(names, [&folded](const std::string& a, const std::string& b) {
+        const std::string left = folded(a);
+        const std::string right = folded(b);
+        return left != right ? left < right : a < b;
+    });
+    const auto [duplicates, end] = std::ranges::unique(names);
+    names.erase(duplicates, end);
+}
+
+void drop_repeats(std::vector<std::string>& names) {
+    std::vector<std::string> kept;
+    kept.reserve(names.size());
+    for (std::string& name : names) {
+        if (std::ranges::find(kept, name) == kept.end()) {
+            kept.push_back(std::move(name));
+        }
+    }
+    names = std::move(kept);
+}
+
+ModelShelves model_shelves(const harness::Config& config) {
+    ModelShelves out;
+    out.keys = config.backend_names();
+    // How many configured types list each id: a bare id runs only on a sole
+    // owner (33), so only those are offered bare.
+    std::map<std::string, int> owners;
+    for (const auto& [type, roster] : backends::known_rosters().rosters) {
+        bool configured = false;
+        for (const auto& [name, entry] : config.backends) {
+            if (harness::to_string(entry.type) != type) {
+                continue;
+            }
+            configured = true;
+            if (harness::names_its_model(entry.type) && !roster.models.empty()) {
+                std::vector<std::string>& shelf = out.shelves[name];
+                for (const backends::RosterModel& model : roster.models) {
+                    shelf.push_back(model.id);
+                }
+            }
+        }
+        if (configured) {
+            for (const backends::RosterModel& model : roster.models) {
+                ++owners[model.id];
+            }
+        }
+    }
+    for (const auto& [id, count] : owners) {
+        if (count == 1 && std::ranges::find(out.keys, id) == out.keys.end()) {
+            out.roster_ids.push_back(id);
+        }
+    }
+    return out;
+}
+
+std::vector<std::string> model_bands(const ModelShelves& shelves) {
+    std::vector<std::string> keys = shelves.keys;
+    order_names(keys);
+    std::vector<std::string> prefixes;
+    for (const auto& [key, models] : shelves.shelves) {
+        prefixes.push_back(key + ":");
+    }
+    order_names(prefixes);
+    std::vector<std::string> ids = shelves.roster_ids;
+    order_names(ids);
+    std::vector<std::string> out = std::move(keys);
+    out.insert(out.end(), prefixes.begin(), prefixes.end());
+    out.insert(out.end(), ids.begin(), ids.end());
+    drop_repeats(out);
+    return out;
+}
+
+std::vector<std::string> model_candidates(const ModelShelves& shelves, std::string_view typed) {
+    // Past a shelf's colon: that shelf, as `<key>:<model>` (34).
+    if (const std::size_t colon = typed.find(':'); colon != std::string_view::npos) {
+        if (const auto shelf = shelves.shelves.find(std::string{typed.substr(0, colon)});
+            shelf != shelves.shelves.end()) {
+            std::vector<std::string> pinned;
+            for (const std::string& model : shelf->second) {
+                pinned.push_back(shelf->first + ":" + model);
+            }
+            order_names(pinned);
+            return filter_prefix(pinned, typed);
+        }
+    }
+    std::vector<std::string> bands = model_bands(shelves);
+    if (typed.empty()) {
+        // The map: the keys and the shelves, the territory behind them.
+        std::erase_if(bands, [&shelves](const std::string& name) {
+            return std::ranges::find(shelves.roster_ids, name) != shelves.roster_ids.end() &&
+                   std::ranges::find(shelves.keys, name) == shelves.keys.end();
+        });
+        return bands;
+    }
+    return filter_prefix(bands, typed);
 }
 
 CommandSpec specs_from_app(const CLI::App& app) {

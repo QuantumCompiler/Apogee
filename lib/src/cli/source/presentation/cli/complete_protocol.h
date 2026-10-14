@@ -143,6 +143,10 @@ struct NameList {
     /// Said instead when there is none to offer, e.g. "none yet -- 'apogee
     /// embed ingest' makes one".
     std::string none;
+    /// The source's order is the order (45a): chats newest first, the model
+    /// store by format, then name. Otherwise the one ordering rule
+    /// (`order_names`) decides.
+    bool as_listed = false;
 };
 
 /// Lists a name kind (`kNameValues`). Injected, so the protocol stays pure and
@@ -197,6 +201,45 @@ inline constexpr const char* kCompletionProtocolVar = "APOGEE_COMPLETION_PROTOCO
 /// Filters `candidates` to those starting with `prefix`.
 [[nodiscard]] std::vector<std::string> filter_prefix(const std::vector<std::string>& candidates,
                                                      std::string_view prefix);
+
+/// The one ordering rule (45a), for every list of names a completion offers:
+/// case-insensitively -- `Llama` beside `glm` by its letter, never exiled
+/// behind the lowercase ones -- the bytes breaking a tie so the order is
+/// total, and repeats dropped.
+void order_names(std::vector<std::string>& names);
+
+/// `names` with repeats dropped, the first of each kept: for a source whose
+/// order is the order (`NameList::as_listed`).
+void drop_repeats(std::vector<std::string>& names);
+
+/// Where a model word's candidates come from (45a): the configured backend
+/// keys; each shelf -- a key whose entry names its model, with the roster
+/// its type lists in the cache, offered as `<key>:` and completed as
+/// `<key>:<model>` (34's spelling); and the roster ids a bare word runs,
+/// each listed by exactly one configured type, so every one of them
+/// resolves when typed (33).
+struct ModelShelves {
+    std::vector<std::string> keys;
+    std::map<std::string, std::vector<std::string>> shelves;
+    std::vector<std::string> roster_ids;
+};
+
+/// The shelves `config` and the cached rosters make -- the cache read, never
+/// fetched.
+[[nodiscard]] ModelShelves model_shelves(const harness::Config& config);
+
+/// Everything a model word can be, in the one order (45a): the configured
+/// keys, then each shelf's `<key>:`, then the bare roster ids -- each band
+/// in `order_names`' order.
+[[nodiscard]] std::vector<std::string> model_bands(const ModelShelves& shelves);
+
+/// A model word's candidates (45a), the map before the territory: for an
+/// empty word the configured keys and each shelf's `<key>:`; past a shelf's
+/// colon that shelf, as `<key>:<model>`; any other typed word, everything
+/// starting with it (`model_bands`), so a bare roster id still completes
+/// once typed.
+[[nodiscard]] std::vector<std::string> model_candidates(const ModelShelves& shelves,
+                                                        std::string_view typed);
 
 class CompleteProtocolCommand final : public Command {
 public:

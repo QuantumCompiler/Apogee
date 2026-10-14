@@ -3455,6 +3455,39 @@ So, **by the user's call**, the item builds on what is installed: no `apogee com
 
 One deliberate non-feature, recorded: no per-model confirmation -- `config scan` without `--register` is the preview, exactly the providers verb's split.
 
+### 2026-10-14 — `completion-namespaces` (backlog item 45a): the map before the territory
+
+**Why.** Tab on `--model` dumped the whole world as one flat wall. The completion-presentation spike measured some sixty candidates on the user's install, spanning backend keys, three vendors' rosters and every local quant, in case-sensitive order that exiled `Llama` and `Qwen` behind the lowercase names. The cause was in the one core: every source's union, emitted as bare strings, which every surface drew flat. Of the four concepts the spike mocked, the user chose two: **A**, namespace-first shaping in the core, here, and **D**, a real menu on the surfaces Apogee owns (45b). **B**, groups on the wire, and **C**, curated tiers, are out.
+
+- [x] **The one order** (`order_names`, `cli/complete_protocol`): case-insensitive, the bytes breaking a tie so the order is total, repeats dropped. It applies to every name kind's list. A source whose own order is the order says so (`NameList::as_listed`):
+  - chats are newest first, never alphabetical;
+  - the model store goes by format, then name, the formats in `models list`'s order (SafeTensors, GGUF, MLX), each model before its handles;
+  - `models info`'s and `models delete`'s configured backends come before the store.
+
+  A fixed choice set keeps its declared order, as flags keep theirs.
+- [x] **The model namespaces** (`model_shelves`, `model_bands`, `model_candidates`), the one shaping every model word gets:
+  - **an empty word** is the map: the configured keys, then one `<key>:` for each entry that names its model and has its type's roster cached;
+  - **past a shelf's colon**, that shelf as `<key>:<model>` (34's spelling);
+  - **a typed word** is everything starting with it, in bands: keys, shelves, then the bare roster ids, so muscle memory and scripts keep working.
+
+  `ValueKind::Backend` answers through it, so bash, zsh, fish, PowerShell and the shell's exec line all get it with the wire untouched. Chat's `/model` gets it through `model_choices`, the same bands described: a shelf by whose roster it is and how many models it holds, matched loosely as before.
+- [x] **Every candidate is a valid insertion.** A roster id two configured types list runs on neither alone (33 refuses it), so it is offered only behind each shelf, never bare.
+- [x] **The tests**:
+  - the namespaces through the protocol: the map, keys case-insensitively and then `claude:` `codex:` `work:`; a typed word's bands; the shared id never bare; each shelf behind its colon;
+  - **insertion validity**: every final candidate across the map, typed words and shelves is resolved by `resolve_session_model`, and every shelf leads somewhere;
+  - the wire's bytes, `:values` and a bare candidate a line;
+  - the sources' orders: chats newest first with names after ids, the store by format then name, `order_names` over a mixed-case list;
+  - chat's `/model`: the map, then a typed word's everything.
+
+  Two earlier tests changed deliberately, since an empty word no longer offers bare roster ids: `lifecycle_test`'s roster pins and `chat_completer_test`'s roster case.
+
+Decisions taken while building, for veto:
+- **There is no `local:` shelf.** The document built it on "the shipped 34 spelling", but no `local:` spelling exists: 34 shipped `<backend>:<model>` for an entry that names its model, and a local entry runs the weights at its path. Its own rule settles it, since only a spelling the parser already accepts may be inserted. The stored models a person runs are configured keys, so they stand in the map's first band. A `local:` grammar would be a new spelling, and a separate decision.
+- **Fixed choice sets keep their declared order** (`--effort low|medium|high|xhigh|max`, the output formats) rather than the alphabetical one. The order carries meaning there, as the parser's flag order does, and the table's "the ordering rule only" was read as the rule for lists of names.
+- **A shelf is offered only with models in it**: an entry whose type has no cached roster gives a `<key>:` that leads nowhere, so it is left out.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,291 tests, one skipped for want of `pdftotext`. The shells' completion checks (`cli.complete_e2e` and the rest of the 91 completion cases) are among them. `make format-check` is clean for every file touched.
+
 ## Milestone O — Local multimodal
 
 **Goal.** Make `VisionCapable` tell the truth on the local backend: wire llama.cpp's `mtmd`, add `mmproj_path`, and close the cross-surface guard gap that let one surface accept a picture the other refused.
