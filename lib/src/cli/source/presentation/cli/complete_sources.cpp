@@ -1,6 +1,7 @@
 #include "cli/complete_sources.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <sstream>
@@ -21,6 +22,7 @@
 #include "knowledge/store.h"
 #include "logger/session.h"
 #include "models/source_ollama.h"
+#include "modelstore/kv_cache.h"
 #include "modelstore/store.h"
 #include "operations/knowledge_core.h"
 #include "platform/child_process.h"
@@ -89,6 +91,32 @@ void push_format(std::vector<std::string>& out,
         }
         order_names(handles);
         out.insert(out.end(), handles.begin(), handles.end());
+    }
+}
+
+/// What a menu shows beside the store's names (45b): each under its format,
+/// a GGUF handle by its file -- the family and quantization its name carries
+/// -- and its size.
+void note_store(const models::StoreRoots& roots, NameList& list) {
+    const auto size_of = [](const std::filesystem::path& file) {
+        std::error_code code;
+        const std::uintmax_t bytes = std::filesystem::file_size(file, code);
+        return code ? std::string{} : " · " + models::mib(static_cast<std::int64_t>(bytes));
+    };
+    for (const models::StoredSnapshot& stored : models::list_store_snapshots(roots)) {
+        list.notes.try_emplace(stored.model, CandidateNote{.group = "SafeTensors"});
+        list.notes[models::weights_handle(stored.model, models::kSafetensorsFormat, stored.id)] = {
+            .group = "SafeTensors", .description = "a SafeTensors set"};
+    }
+    for (const models::StoredGguf& stored : models::list_store_ggufs(roots)) {
+        list.notes.try_emplace(stored.model, CandidateNote{.group = "GGUF"});
+        list.notes[models::weights_handle(stored.model, models::kGgufFormat, stored.id)] = {
+            .group = "GGUF", .description = stored.file.filename().string() + size_of(stored.file)};
+    }
+    for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
+        list.notes.try_emplace(stored.model, CandidateNote{.group = "MLX"});
+        list.notes[models::weights_handle(stored.model, models::kMlxFormat, stored.id)] = {
+            .group = "MLX", .description = "an MLX directory"};
     }
 }
 
@@ -270,10 +298,18 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         }
     } else if (kind == kChatValue) {
         for (const logger::Session& session : logger::list_sessions()) {
+            // What `chats list` shows of it, for a menu (45b).
+            const std::string said = session.updated_at.substr(0, 10) + " · " +
+                                     std::to_string(session.turns) +
+                                     (session.turns == 1 ? " turn" : " turns");
             list.names.push_back(session.chat_id);
+            list.notes[session.chat_id] = {.group = {},
+                                           .description = session.display_name() + " · " + said};
             // A name with a space cannot be one word on a command line.
             if (!session.custom_name.empty() && !has_space(session.custom_name)) {
                 list.names.push_back(session.custom_name);
+                list.notes[session.custom_name] = {.group = {},
+                                                   .description = session.chat_id + " · " + said};
             }
         }
         list.none = "no saved conversations yet";
@@ -377,14 +413,17 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         list.names = stored_models(store_roots(config), true, true, true);
         list.none = "the model store is empty -- 'apogee models pull'";
         list.as_listed = true;  // by format, then name (45a)
+        note_store(store_roots(config), list);
     } else if (kind == kSnapshotValue) {
         list.names = stored_models(store_roots(config), false, true);
         list.paths = true;
         list.as_listed = true;
+        note_store(store_roots(config), list);
     } else if (kind == kGgufValue) {
         list.names = stored_models(store_roots(config), true, false);
         list.paths = true;
         list.as_listed = true;
+        note_store(store_roots(config), list);
     } else if (kind == kBackendOrWeightsValue) {
         // The configured first, then the store's weights by format (45a).
         list.names = config.backend_names();

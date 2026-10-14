@@ -7375,6 +7375,46 @@ Decisions taken while building, for veto:
 
 **Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,289 tests, one skipped for want of `pdftotext`, `cli.tui_doors` among them. `make format-check` is clean for every file touched. It also caught 44c's comment inside `lifecycle_test`'s free-text list, which made clang-format repack the whole list; the comment is gone and the list is one entry a line as before.
 
+### 2026-10-14 — `completion-menu` (backlog item 45b): a real picker where the shell owns the pixels
+
+**Why.** The shells render completion however their nature allows, but two completion surfaces are entirely Apogee's: the shell's exec line and the conversation's input. The exec line still drew Tab's candidates as one flat row, twelve at most. The input's menu (2026-10-11) had a choice and a description column, but no groups. This is the user's **Concept D** from the completion-presentation spike: a real menu on the owned surfaces, grouped and described, with the groups and descriptions carried in the program only. **Concept B**, groups on the wire with per-shell renderings, stays out.
+
+- [x] **One menu** (`tui/completion_menu`, `tui/menu_item.h`): `MenuItem`, with its text, a label, its group and one line of description, plus the rows both surfaces draw:
+  - a window of items with the chosen one marked `›`;
+  - each group's heading where its rows begin in the window, repeated when the window starts inside a group;
+  - the descriptions in one column;
+  - `↑ N more` / `↓ N more`.
+
+  The session's menu now draws through it, byte for byte as before when no group is set: every existing session-view test is unchanged.
+- [x] **The exec line's menu** (`tui/runner_view`):
+  - Tab over several candidates extends the line to what they share, as before, and opens the menu, eight rows like the session's;
+  - a second Tab or ↑/↓ moves the choice, wrapping, and typing or Backspace narrows the menu, closing it when nothing is left;
+  - Enter fills the choice and runs nothing: a word is ended with a space, except a folder's `/`, a `key=` or a shelf's `key:`;
+  - Esc closes the menu before the line;
+  - one candidate is still taken whole with no menu, and ↑/↓ with the menu closed is still the history.
+- [x] **The notes, in the process only** (`cli/complete_protocol`): `CandidateNote` beside each candidate (`Completion::notes`, and `NameList::notes` by name), which `render_completion` never prints, so `__complete`'s bytes are as they were. They come from what the public reads already render:
+  - **models** (`model_notes`): a key's type and model or file, under `configured`, or `local` for weights on this machine (llamacpp, MLX); a shelf, a pin or a bare roster id under its roster, with the day it was fetched (or reviewed, for a carried list), by the vendor's name for it;
+  - **chats**: the name, date and turns;
+  - **the store**: each name under its format, a GGUF handle by its file and size.
+
+  `menu_order` puts the groups in one order: configured, the rosters as each first appears, local, then the ungrouped. `exec_menu_items` is the exec line's completion, and `exec_candidates` stays the wire's bare strings.
+- [x] **The conversation's input** (`cli/chat_completer`): for the shell alone (`ChatCompletionSources::menu`), `/model`'s rows carry their groups (`Suggestions::groups`) in the same order, each roster under its heading with its date (`roster_headings`). The terminal's rows are 45a's, ungrouped, since replxx draws no menu.
+- [x] **The tests**:
+  - the exec line's menu through the shell, headless (`tui_runner_test`): grouped and described, Tab and the arrows wrapping, typing narrowing, Enter filling `claude:` with no space and running nothing, one candidate taken whole, Esc's order;
+  - `exec_menu_items` over a real config: the wire's candidates in the menu's group order, described publicly, a shelf's models by the vendor's names, no key on any row;
+  - the session menu's headings (`session_view_test`);
+  - `/model`'s groups in the shell and none on the terminal (`chat_completer_test`);
+  - the leak test with the menu's rows registered for models, chats, stored models and backends, with the key in every rung;
+  - `cli.tui_shell`'s new **menu** case on a real terminal: Tab over `chats list --output-format`'s two values, ↓, Enter filling `json` and running nothing, the modes restored.
+
+Decisions taken while building, for veto:
+- **A second Tab moves the choice, and Enter fills it.** The confirmed interaction said both that a second Tab cycles and that Enter and Tab fill. Tab filling the chosen row would make cycling impossible. So Tab fills when it has one candidate, and moves the choice when the menu is open.
+- **Groups are drawn together, in one order, in the menu only.** The wire keeps 45a's order. The menu regroups in the process (`menu_order`), so a group's rows are contiguous under one heading: configured, the rosters, then local, the doc's grouping, and local last as the menu's own order.
+- **The session input regroups only in the shell** (`menu`, set where `loose` is). The terminal's completion is exactly 45a's.
+- **The headings take rows outside the window's eight items**, as the counts above and below already did.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,296 tests, one skipped for want of `pdftotext`, `cli.tui_shell`'s menu case and the leak test's menu rows among them. `make format-check` is clean for every file touched, `runner_view.h` included, which it flagged before this change.
+
 ## Milestone AI — Effort and permission modes
 
 **Goal.** Claude Code gives a session two controls the person reaches for constantly: how hard the model thinks (five effort levels) and how much it may do without asking (a permission mode, cycled with Shift+Tab). Apogee had the pieces of both -- `/think on|off|auto` with a raw token budget, and per-tool answers over one permission gate -- but not the controls. Track 39 (the user's call, 2026-10-11) gives `apogee chat`, `apogee execute` and the full-screen shell Claude Code's two, set mid-session in either front end and Tab-completed in both.

@@ -21,8 +21,13 @@ struct ExecLineState {
     /// The words prefixed to what is typed (the view's group), or empty.
     std::string scope;
     std::string text;
-    /// What Tab offered for the word under the cursor, shown under the line.
-    std::vector<std::string> candidates;
+    /// What Tab offered for the word under the cursor, shown above the line
+    /// as a menu while `menu` (45b).
+    std::vector<MenuItem> candidates;
+    bool menu = false;
+    /// The menu's choice, and the first item its window shows.
+    std::size_t chosen = 0;
+    std::size_t top = 0;
     /// What the last Enter said: that it runs, or why not.
     std::string said;
     std::vector<std::string> history;

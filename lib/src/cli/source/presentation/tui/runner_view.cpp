@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <utility>
 
+#include "tui/completion_menu.h"
 #include "tui/progress.h"
 #include "tui/runner_view_state.h"
 
@@ -13,8 +14,9 @@ namespace {
 /// How many of a run's newest lines the line shows above itself.
 constexpr std::size_t kOutputRows = 12;
 
-/// How many of Tab's candidates are shown.
-constexpr std::size_t kShownCandidates = 12;
+/// How many of the menu's items its window shows (45b): the session's
+/// menu's count.
+constexpr std::size_t kMenuRows = 8;
 
 /// Where the word under the cursor begins: after the last blank.
 [[nodiscard]] std::size_t word_start(const std::string& text) {
@@ -23,14 +25,15 @@ constexpr std::size_t kShownCandidates = 12;
 }
 
 /// The longest start every candidate shares.
-[[nodiscard]] std::string common_prefix(const std::vector<std::string>& candidates) {
+[[nodiscard]] std::string common_prefix(const std::vector<MenuItem>& candidates) {
     if (candidates.empty()) {
         return {};
     }
-    std::string prefix = candidates.front();
-    for (const std::string& candidate : candidates) {
+    std::string prefix = candidates.front().text;
+    for (const MenuItem& candidate : candidates) {
         std::size_t same = 0;
-        while (same < prefix.size() && same < candidate.size() && prefix[same] == candidate[same]) {
+        while (same < prefix.size() && same < candidate.text.size() &&
+               prefix[same] == candidate.text[same]) {
             ++same;
         }
         prefix.resize(same);
@@ -38,27 +41,75 @@ constexpr std::size_t kShownCandidates = 12;
     return prefix;
 }
 
+/// The word under the cursor replaced by `chosen`, a word ended unless it
+/// goes on -- a folder, a `key=`, a shelf's `key:`.
+void fill(ExecLineState& line, const std::string& chosen) {
+    line.text = line.text.substr(0, word_start(line.text)) + chosen;
+    if (!chosen.ends_with("/") && !chosen.ends_with("=") && !chosen.ends_with(":")) {
+        line.text += " ";
+    }
+}
+
+void close_menu(ExecLineState& line) {
+    line.menu = false;
+    line.candidates.clear();
+    line.chosen = 0;
+    line.top = 0;
+}
+
+/// The menu's choice moved by `step`, wrapping, its window following.
+void move_choice(ExecLineState& line, bool down) {
+    const std::size_t count = line.candidates.size();
+    line.chosen = down ? (line.chosen + 1) % count : (line.chosen + count - 1) % count;
+    line.top = menu_window(line.chosen, line.top, kMenuRows, count);
+}
+
 /// Tab: the one candidate taken whole, a word ended; several extended to
-/// what they share and listed.
+/// what they share and offered in the menu (45b); with the menu open, its
+/// choice moved on.
 void complete(ExecLineState& line) {
+    if (line.menu && !line.candidates.empty()) {
+        move_choice(line, true);
+        return;
+    }
     if (!line.options.complete) {
         return;
     }
     line.candidates = line.options.complete(line.scope, line.text);
     const std::size_t start = word_start(line.text);
     if (line.candidates.size() == 1) {
-        const std::string& only = line.candidates.front();
-        line.text = line.text.substr(0, start) + only;
-        if (!only.ends_with("/") && !only.ends_with("=")) {
-            line.text += " ";
-        }
-        line.candidates.clear();
+        fill(line, line.candidates.front().text);
+        close_menu(line);
+        return;
+    }
+    if (line.candidates.empty()) {
+        close_menu(line);
         return;
     }
     const std::string shared = common_prefix(line.candidates);
     if (shared.size() > line.text.size() - start) {
         line.text = line.text.substr(0, start) + shared;
     }
+    line.menu = true;
+    line.chosen = 0;
+    line.top = 0;
+}
+
+/// The line edited with the menu open: its items narrowed to what the line
+/// now completes to -- and closed when that is nothing.
+void refilter(ExecLineState& line) {
+    if (!line.menu) {
+        line.candidates.clear();
+        return;
+    }
+    line.candidates =
+        line.options.complete ? line.options.complete(line.scope, line.text) : line.candidates;
+    if (line.candidates.empty()) {
+        close_menu(line);
+        return;
+    }
+    line.chosen = 0;
+    line.top = 0;
 }
 
 }  // namespace
@@ -67,13 +118,17 @@ void open_exec_line(ExecLineState& line, std::string scope) {
     line.open = true;
     line.scope = std::move(scope);
     line.text.clear();
-    line.candidates.clear();
+    close_menu(line);
     line.said.clear();
     line.history_at.reset();
 }
 
 bool exec_line_key(ExecLineState& line, const ftxui::Event& event) {
     if (event == ftxui::Event::Escape) {
+        if (line.menu) {
+            close_menu(line);  // the menu first, the line on the next
+            return true;
+        }
         line.open = false;  // a run goes on behind it
         return true;
     }
@@ -89,6 +144,12 @@ bool exec_line_key(ExecLineState& line, const ftxui::Event& event) {
         return true;
     }
     if (event == ftxui::Event::Return) {
+        // With the menu open, Enter fills its choice; it runs nothing yet.
+        if (line.menu && !line.candidates.empty()) {
+            fill(line, line.candidates.at(line.chosen).text);
+            close_menu(line);
+            return true;
+        }
         if (line.text.find_first_not_of(" \t") == std::string::npos) {
             return true;
         }
@@ -96,7 +157,7 @@ bool exec_line_key(ExecLineState& line, const ftxui::Event& event) {
         line.history_at.reset();
         line.said = line.options.run ? line.options.run(line.scope, line.text) : std::string{};
         line.text.clear();
-        line.candidates.clear();
+        close_menu(line);
         return true;
     }
     if (event == ftxui::Event::Tab) {
@@ -112,10 +173,15 @@ bool exec_line_key(ExecLineState& line, const ftxui::Event& event) {
         if (!line.text.empty()) {
             line.text.pop_back();
         }
-        line.candidates.clear();
+        refilter(line);
         return true;
     }
     if (event == ftxui::Event::ArrowUp || event == ftxui::Event::ArrowDown) {
+        // The menu's choice while it is open; the history otherwise.
+        if (line.menu && !line.candidates.empty()) {
+            move_choice(line, event == ftxui::Event::ArrowDown);
+            return true;
+        }
         if (line.history.empty()) {
             return true;
         }
@@ -133,13 +199,13 @@ bool exec_line_key(ExecLineState& line, const ftxui::Event& event) {
     }
     if (event.is_character()) {
         line.text += event.character();
-        line.candidates.clear();
+        refilter(line);  // typing narrows the menu (45b)
         return true;
     }
     return false;
 }
 
-ftxui::Element draw_exec_line(const ExecLineState& line, const Theme& /*theme*/) {
+ftxui::Element draw_exec_line(const ExecLineState& line, const Theme& theme) {
     using namespace ftxui;  // NOLINT(google-build-using-namespace): the DOM's vocabulary
     Elements rows;
     rows.push_back(separator());
@@ -157,15 +223,10 @@ ftxui::Element draw_exec_line(const ExecLineState& line, const Theme& /*theme*/)
     if (!line.said.empty()) {
         rows.push_back(text(" " + line.said) | dim);
     }
-    if (!line.candidates.empty()) {
-        std::string offered;
-        for (std::size_t i = 0; i < line.candidates.size() && i < kShownCandidates; ++i) {
-            offered += (offered.empty() ? "" : "  ") + line.candidates.at(i);
+    if (line.menu) {
+        for (Element& row : menu_rows(line.candidates, line.chosen, line.top, kMenuRows, theme)) {
+            rows.push_back(std::move(row));
         }
-        if (line.candidates.size() > kShownCandidates) {
-            offered += "  … " + std::to_string(line.candidates.size() - kShownCandidates) + " more";
-        }
-        rows.push_back(text(" " + offered) | dim);
     }
     rows.push_back(
         text(" :" + (line.scope.empty() ? std::string{} : line.scope + " ") + line.text + "▏") |

@@ -440,6 +440,44 @@ Suggestions complete_path(std::string_view before, std::size_t from,
     return out;
 }
 
+/// A model's candidates grouped for the shell's menu (45b): a backend under
+/// `configured` -- or `local`, for weights on this machine -- a shelf, a pin
+/// and a roster id under their roster's heading, the groups in the menu's
+/// one order (`menu_order`).
+void group_models(Suggestions& out, const ChatCompletionSources& sources) {
+    const auto heading = [&sources](const std::string& roster) {
+        const auto found = sources.roster_headings.find(roster);
+        return found == sources.roster_headings.end() ? roster : found->second;
+    };
+    std::vector<std::string> groups;
+    for (const Suggestion& candidate : out.candidates) {
+        std::string group;
+        if (const auto backend =
+                std::ranges::find(sources.backends, candidate.text, &NamedChoice::name);
+            backend != sources.backends.end()) {
+            const bool local = backend->description.starts_with("llamacpp") ||
+                               backend->description.starts_with("mlx");
+            group = local ? "local" : "configured";
+        } else if (const std::size_t colon = candidate.text.find(':'); colon != std::string::npos) {
+            const auto shelf = sources.backend_rosters.find(candidate.text.substr(0, colon));
+            if (shelf != sources.backend_rosters.end() && !shelf->second.empty()) {
+                group = heading(shelf->second.front().description);
+            }
+        } else if (const auto model =
+                       std::ranges::find(sources.roster_models, candidate.text, &NamedChoice::name);
+                   model != sources.roster_models.end()) {
+            group = heading(model->description);
+        }
+        groups.push_back(std::move(group));
+    }
+    Suggestions grouped{.from = out.from, .candidates = {}, .groups = {}};
+    for (const std::size_t i : menu_order(groups)) {
+        grouped.candidates.push_back(std::move(out.candidates.at(i)));
+        grouped.groups.push_back(groups.at(i));
+    }
+    out = std::move(grouped);
+}
+
 std::vector<NamedChoice> argument_choices(ArgumentValues values,
                                           const ChatCompletionSources& sources) {
     std::vector<NamedChoice> choices;
@@ -821,6 +859,9 @@ ChatCompletionSources chat_completion_sources(const harness::Config& config,
         for (const backends::RosterModel& model : roster.models) {
             sources.roster_models.push_back({model.id, type + "'s roster"});
         }
+        sources.roster_headings[type + "'s roster"] = type + "'s roster · " +
+                                                      (roster.built_in ? "reviewed " : "fetched ") +
+                                                      roster.fetched_at;
         // Each entry of the type, for `<backend>:` (34).
         for (const auto& [name, entry] : config.backends) {
             if (harness::to_string(entry.type) != type) {
@@ -961,6 +1002,9 @@ Suggestions suggest_chat_input(std::string_view before_cursor,
             }
         }
         out.candidates = by_tier(std::move(ranked));
+        if (sources.menu) {
+            group_models(out, sources);
+        }
         return out;
     }
     std::vector<std::pair<int, Suggestion>> ranked;

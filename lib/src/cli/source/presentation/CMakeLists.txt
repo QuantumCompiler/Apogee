@@ -163,6 +163,9 @@ apogee_add_module(tui
     tui/styled_text.cpp
     tui/session_view.h
     tui/session_view.cpp
+    tui/menu_item.h
+    tui/completion_menu.h
+    tui/completion_menu.cpp
     tui/list_view.h
     tui/list_view.cpp
     tui/progress.h

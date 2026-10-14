@@ -481,6 +481,49 @@ TEST_CASE("the menu scrolls a window over a long list, saying how many more", "[
     CHECK_FALSE(has(frame, "/c11 "));
 }
 
+TEST_CASE("the menu draws each group under its heading, again when its window starts inside one",
+          "[tui][session][menu]") {
+    // 45b: the completer's groups, a heading before each group's first row
+    // in the window -- the same rows the exec line's menu draws.
+    Stage stage;
+    stage.view.begin_session();
+    stage.view.set_completion([](std::string_view before) {
+        apogee::commands::Suggestions offered;
+        if (before != "/model ") {
+            return offered;
+        }
+        offered.from = before.size();
+        for (int i = 0; i < 6; ++i) {
+            const std::string name = "key" + std::to_string(i);
+            offered.candidates.push_back({.text = name, .label = {}, .description = "mock"});
+            offered.groups.emplace_back("configured");
+        }
+        for (const char* model : {"claude:", "claude-opus-5-5", "claude-sonnet-5-5"}) {
+            offered.candidates.push_back({.text = model, .label = {}, .description = "roster"});
+            offered.groups.emplace_back("anthropic's roster · fetched 2026-10-14");
+        }
+        return offered;
+    });
+    (void)stage.frame(72, 32);
+    stage.type("/model ");
+    std::string frame = stage.frame(72, 32);
+    INFO(frame);
+    CHECK(frame.find(" configured\n") < frame.find(" › key0"));
+    CHECK(frame.find("   key5") < frame.find(" anthropic's roster · fetched 2026-10-14\n"));
+    CHECK(frame.find(" anthropic's roster · fetched 2026-10-14\n") < frame.find("   claude:"));
+    CHECK(has(frame, "   ↓ 1 more\n"));
+    // Down to the last: the window starts inside the configured group and
+    // inside the roster's, each heading drawn where its rows begin.
+    for (int i = 0; i < 8; ++i) {
+        (void)stage.shell.press(Key::named(Key::Name::Down));
+    }
+    frame = stage.frame(72, 32);
+    CHECK(has(frame, " › claude-sonnet-5-5"));
+    CHECK(has(frame, "   ↑ 1 more\n"));
+    CHECK(frame.find(" configured\n") < frame.find("   key1"));
+    CHECK_FALSE(has(frame, "key0"));
+}
+
 TEST_CASE(
     "Enter takes the chosen command: run when it is whole, its argument next when it "
     "takes one",

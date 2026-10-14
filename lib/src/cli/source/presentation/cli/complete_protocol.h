@@ -112,10 +112,21 @@ struct CommandSpec {
     std::vector<CommandSpec> subcommands;
 };
 
+/// What a menu shows beside one candidate (45b): its heading and one line,
+/// from the reads that already render publicly. In the process only -- the
+/// wire (`render_completion`) never prints it.
+struct CandidateNote {
+    std::string group;
+    std::string description;
+};
+
 /// What to offer for one word, and what the shell should do when that is
 /// nothing.
 struct Completion {
     std::vector<std::string> candidates;
+    /// Each candidate's note, parallel to `candidates` -- or empty, for a
+    /// kind that has none to give (45b).
+    std::vector<CandidateNote> notes;
     /// The word is a path: the shell's own file completion is the answer.
     bool files = false;
     /// What the word is, when nothing can be offered for it.
@@ -147,6 +158,9 @@ struct NameList {
     /// store by format, then name. Otherwise the one ordering rule
     /// (`order_names`) decides.
     bool as_listed = false;
+    /// The note each name has for a menu (45b), by name; a name with none
+    /// shows bare.
+    std::map<std::string, CandidateNote> notes;
 };
 
 /// Lists a name kind (`kNameValues`). Injected, so the protocol stays pure and
@@ -240,6 +254,19 @@ struct ModelShelves {
 /// once typed.
 [[nodiscard]] std::vector<std::string> model_candidates(const ModelShelves& shelves,
                                                         std::string_view typed);
+
+/// What a menu shows beside each model candidate (45b), from the public
+/// reads: a configured key's type and model or file, under `configured` --
+/// or `local`, for weights on this machine; a shelf, a pin and a bare id
+/// under their roster with the day it was fetched, a pin or an id by its
+/// vendor's name for it. The cache read, never fetched.
+[[nodiscard]] std::vector<CandidateNote> model_notes(const harness::Config& config,
+                                                     const std::vector<std::string>& candidates);
+
+/// The order a menu draws its groups in (45b): `configured` first, `local`
+/// last, the rosters between as each first appears, the ungrouped after all
+/// -- as a permutation of `groups`' indices, stable within a group.
+[[nodiscard]] std::vector<std::size_t> menu_order(const std::vector<std::string>& groups);
 
 class CompleteProtocolCommand final : public Command {
 public:

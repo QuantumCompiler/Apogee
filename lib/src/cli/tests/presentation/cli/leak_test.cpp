@@ -340,6 +340,26 @@ TEST_CASE("the exec line's output region draws no key, wherever it was stored",
     }
 }
 
+TEST_CASE("the completion menu's rows draw no key, wherever it was stored",
+          "[secrets][leak][tui][menu]") {
+    // 45b: a menu row's group and description come from the public reads --
+    // a backend's type and model, a roster's name and date, a chat's title --
+    // so with the key in every rung, none of the menus on its names says it.
+    const World world;
+    apogee::commands::RootContext context;
+    context.config_path = world.config_path.string();
+    for (const char* line : {"complete -m ", "complete -m c", "chat --resume ", "models info ",
+                             "config delete-backend ", "auth remove "}) {
+        std::string drawn;
+        for (const apogee::tui::MenuItem& item :
+             apogee::commands::exec_menu_items(context, "", line)) {
+            drawn += item.group + " | " + item.text + " | " + item.label + " | " +
+                     item.description + "\n";
+        }
+        expect_clean(std::string{"the exec line's menu for "} + line, drawn);
+    }
+}
+
 TEST_CASE("a task's declared answer is found only where it belongs", "[tasks][leak][policy]") {
     apogee::testing::CliHome home{""};
     const std::filesystem::path script = home.home() / "script.json";

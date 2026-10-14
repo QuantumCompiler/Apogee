@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -130,6 +131,13 @@ namespace {
         order_names(found.names);
     }
     completion.candidates = offer_items(found.names, value, current);
+    // Each candidate's note for a menu (45b), when the source gave any.
+    if (!found.notes.empty()) {
+        for (const std::string& candidate : completion.candidates) {
+            const auto note = found.notes.find(candidate);
+            completion.notes.push_back(note == found.notes.end() ? CandidateNote{} : note->second);
+        }
+    }
     if (!completion.candidates.empty()) {
         return completion;
     }
@@ -161,6 +169,7 @@ namespace {
             // matching everything -- the cached rosters read (M13), never
             // fetched here.
             completion.candidates = model_candidates(model_shelves(config), current);
+            completion.notes = model_notes(config, completion.candidates);
             break;
         }
         case ValueKind::Choice: {
@@ -357,6 +366,109 @@ std::vector<std::string> model_candidates(const ModelShelves& shelves, std::stri
         return bands;
     }
     return filter_prefix(bands, typed);
+}
+
+namespace {
+
+/// A roster's heading: whose it is, and the day it was fetched -- or, for a
+/// list carried in the binary, the day it was checked (ADR 0009).
+[[nodiscard]] std::string roster_heading(std::string_view type,
+                                         const backends::ProviderRoster& roster) {
+    return std::string{type} + "'s roster · " + (roster.built_in ? "reviewed " : "fetched ") +
+           roster.fetched_at;
+}
+
+/// The vendor's name for `id` on `roster`, else the id.
+[[nodiscard]] std::string roster_name(const backends::ProviderRoster& roster, std::string_view id) {
+    const auto found = std::ranges::find(roster.models, id, &backends::RosterModel::id);
+    return found == roster.models.end() ? std::string{id} : found->name;
+}
+
+}  // namespace
+
+std::vector<CandidateNote> model_notes(const harness::Config& config,
+                                       const std::vector<std::string>& candidates) {
+    const backends::RosterCache rosters = backends::known_rosters();
+    std::vector<CandidateNote> notes;
+    notes.reserve(candidates.size());
+    for (const std::string& candidate : candidates) {
+        CandidateNote note;
+        if (const harness::BackendConfig* entry = config.find_backend(candidate)) {
+            // A key: its type and its model or file, as `config list` shows.
+            const bool local = entry->type == harness::BackendType::LlamaCpp ||
+                               entry->type == harness::BackendType::Mlx;
+            note.group = local ? "local" : "configured";
+            note.description = std::string{harness::to_string(entry->type)};
+            const std::string model =
+                !entry->model.empty()
+                    ? entry->model
+                    : std::filesystem::path{entry->model_path}.filename().string();
+            if (!model.empty()) {
+                note.description += " · " + model;
+            }
+        } else if (const std::size_t colon = candidate.find(':');
+                   colon != std::string::npos &&
+                   config.find_backend(candidate.substr(0, colon)) != nullptr) {
+            // A shelf, or a pin on it: under its roster.
+            const harness::BackendConfig* owner = config.find_backend(candidate.substr(0, colon));
+            const std::string type{harness::to_string(owner->type)};
+            if (const backends::ProviderRoster* roster = rosters.roster_for(type)) {
+                note.group = roster_heading(type, *roster);
+                note.description =
+                    colon + 1 == candidate.size()
+                        ? std::to_string(roster->models.size()) + " models"
+                        : roster_name(*roster, std::string_view{candidate}.substr(colon + 1));
+            }
+        } else {
+            // A bare roster id: under the one configured roster that lists it.
+            for (const auto& [type, roster] : rosters.rosters) {
+                const bool configured =
+                    std::ranges::any_of(config.backends, [&type = type](const auto& entry) {
+                        return harness::to_string(entry.second.type) == type;
+                    });
+                if (configured && std::ranges::any_of(roster.models, [&candidate](const auto& m) {
+                        return m.id == candidate;
+                    })) {
+                    note.group = roster_heading(type, roster);
+                    note.description = roster_name(roster, candidate);
+                    break;
+                }
+            }
+        }
+        notes.push_back(std::move(note));
+    }
+    return notes;
+}
+
+std::vector<std::size_t> menu_order(const std::vector<std::string>& groups) {
+    const auto rank = [](const std::string& group) {
+        if (group == "configured") {
+            return 0;
+        }
+        if (group.empty()) {
+            return 3;
+        }
+        return group == "local" ? 2 : 1;
+    };
+    // The groups in the order each first appears, ranked.
+    std::vector<std::string> order;
+    for (const std::string& group : groups) {
+        if (std::ranges::find(order, group) == order.end()) {
+            order.push_back(group);
+        }
+    }
+    std::ranges::stable_sort(
+        order, [&rank](const std::string& a, const std::string& b) { return rank(a) < rank(b); });
+    std::vector<std::size_t> out;
+    out.reserve(groups.size());
+    for (const std::string& group : order) {
+        for (std::size_t i = 0; i < groups.size(); ++i) {
+            if (groups.at(i) == group) {
+                out.push_back(i);
+            }
+        }
+    }
+    return out;
 }
 
 CommandSpec specs_from_app(const CLI::App& app) {

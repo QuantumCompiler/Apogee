@@ -669,3 +669,34 @@ backends:
     CHECK(sources.backend_rosters.at("work").front().name == "gpt-5.5");
     CHECK_FALSE(sources.backend_rosters.contains("local-ollama"));
 }
+
+TEST_CASE("/model's rows carry their menu groups in the shell, never on the terminal",
+          "[chat][completer][roster][menu]") {
+    // 45b: configured, then each roster with the day it was fetched, then
+    // the weights on this machine -- the shell's menu draws the headings;
+    // the terminal's rows are 45a's order, no group.
+    ChatCompletionSources sources = project();
+    sources.backends.push_back({"gemma", "llamacpp · gemma-Q4_K_M.gguf"});
+    sources.roster_models = {{"claude-opus-5-5", "anthropic's roster"},
+                             {"claude-sonnet-5-5", "anthropic's roster"}};
+    sources.backend_rosters["claude"] = sources.roster_models;
+    sources.roster_headings["anthropic's roster"] = "anthropic's roster · fetched 2026-10-14";
+
+    const Suggestions terminal = suggest_chat_input("/model ", sources);
+    CHECK(terminal.groups.empty());
+    CHECK(texts(terminal) ==
+          std::vector<std::string>{"claude", "gemma", "local", "mock", "claude:"});
+
+    sources.menu = true;
+    sources.loose = true;
+    const Suggestions shell = suggest_chat_input("/model ", sources);
+    // `local` and `gemma` run weights on this machine (llamacpp): the last group.
+    CHECK(texts(shell) == std::vector<std::string>{"claude", "mock", "claude:", "gemma", "local"});
+    CHECK(shell.groups == std::vector<std::string>{"configured", "configured",
+                                                   "anthropic's roster · fetched 2026-10-14",
+                                                   "local", "local"});
+    const Suggestions typed = suggest_chat_input("/model claude", sources);
+    CHECK(typed.groups.size() == typed.candidates.size());
+    CHECK(typed.groups.front() == "configured");
+    CHECK(typed.groups.back() == "anthropic's roster · fetched 2026-10-14");
+}

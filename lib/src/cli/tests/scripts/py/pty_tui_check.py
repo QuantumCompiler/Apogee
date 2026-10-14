@@ -15,6 +15,9 @@ records the terminal's modes (`stty -g`) before it and after it:
             terminal is still put back.
   views     Tab shows the next view and F1 the first: the tab strip's bracket
             follows.
+  menu      The exec line's completion menu (45b): Tab over several candidates
+            opens it, the first marked, ↓ moves the mark, Enter fills the
+            choice into the line and runs nothing -- then the shell quit.
   session   With a configured model (32c): the picker first (44b), Enter on its
             new chat, then the conversation on the screen -- a line sent, a
             tool's permission prompt answered `a`, the answer rendered, the
@@ -215,6 +218,25 @@ def main():
             session.send(b"q")
 
         screen_case(binary, env, "exec-line", exec_line, 0)
+
+        def menu(session):
+            session.send(b"\t")
+            session.wait_for(b"[2 Chats]", 5, "menu")
+            session.send(b"!")
+            session.wait_for(b" :", 5, "menu")
+            session.send(b"chats list --output-format \t")
+            session.wait_for("\u203a text".encode(), 5, "menu")  # › text, marked
+            session.send(b"\x1b[B")  # Down
+            session.read_for(0.3)
+            session.send(b"\r")      # Enter fills the choice
+            session.wait_for(b"--output-format json ", 5, "menu")
+            if b"exit 0" in session.output:
+                fail("menu", "Enter on the menu ran the line", session.output)
+            session.send(b"\x1b")  # Esc closes the line
+            session.read_for(0.5)
+            session.send(b"q")
+
+        screen_case(binary, env, "menu", menu, 0)
 
         def go_to(session):
             # The Go-to menu (38): Ctrl-G from the session, a letter to a
