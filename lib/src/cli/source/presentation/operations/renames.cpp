@@ -319,6 +319,9 @@ RenameOutcome rename_stored_model(const std::filesystem::path& config_path,
             pointing.push_back(name);
             if (const std::optional<std::string> level = derived_level(name, model)) {
                 const std::string renamed = model_base_name(new_model) + "-" + *level;
+                if (renamed == name) {
+                    continue;  // the new name keeps its base: it follows already
+                }
                 const bool taken =
                     std::ranges::any_of(
                         config->backend_names(),

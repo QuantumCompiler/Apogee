@@ -212,6 +212,24 @@ TEST_CASE(
     CHECK_THAT(err, ContainsSubstring("'org--gem' is being written"));
 }
 
+TEST_CASE("models rename to a name keeping the base leaves its backends, saying nothing of them",
+          "[renames][models]") {
+    // `org--gemma` to `gemma`: the base is `gemma` both before and after, so
+    // `gemma-Q4KM` already follows the model -- repointed, never reported as
+    // a name taken by itself.
+    const StoreHome store{{"gemma-Q4KM"}};
+    std::string out;
+    std::string err;
+    REQUIRE(run(store.home, {"models", "rename", "org--gemma", "gemma"}, &out, &err) == 0);
+    CHECK_THAT(out, ContainsSubstring("renamed stored model 'org--gemma' to 'gemma'"));
+    CHECK_THAT(out, ContainsSubstring("repointed 1 backend: gemma-Q4KM"));
+    CHECK(out.find("left backend") == std::string::npos);
+    CHECK(out.find("renamed backend") == std::string::npos);
+    const apogee::harness::Config config = apogee::harness::load_config(store.home.config_path());
+    REQUIRE(config.find_backend("gemma-Q4KM") != nullptr);
+    CHECK(config.find_backend("gemma-Q4KM")->model_path == store.at("gemma"));
+}
+
 TEST_CASE("the M3 spelling is read as M3 writes it", "[renames][coupling]") {
     using apogee::commands::derived_level;
     CHECK(apogee::commands::model_base_name("google--gemma-4-E2B") == "gemma-4-E2B");

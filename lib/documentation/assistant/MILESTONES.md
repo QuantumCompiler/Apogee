@@ -218,6 +218,15 @@ Decisions taken while building, for veto:
 
 **Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,311 tests, one skipped for want of `pdftotext`. `cli.config_lifecycle`, `cli.http_api_conformance`, the completion audits and `serve_test`'s route count (now 88) are among them. `make format-check` is clean for every file touched.
 
+### 2026-10-14 — a rename that keeps the base says nothing of the backends (the user's request)
+
+**Why.** Renaming a stored model to a name with the same base, such as `Qwen--Qwen3.8-27B` to `Qwen3.8-27B`, left its `Qwen3.8-27B-F16` and `-Q4KM` backends as they were, which was correct, since their names already follow it. But `models rename` said `left backend 'Qwen3.8-27B-F16' as it is -- 'Qwen3.8-27B-F16' is already a backend's name`, a conflict with itself that read as a failure. The check for a taken name found the backend itself.
+
+- [x] **A backend whose name already follows the model is skipped** (`operations/renames`, `rename_stored_model`): repointed as ever, neither renamed nor reported.
+- [x] **The test** (`renames_test`): `org--gemma` renamed to `gemma` repoints `gemma-Q4KM` and says nothing of renaming or leaving it.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,312 tests, one skipped for want of `pdftotext`. `make format-check` is clean for both files touched.
+
 ## Milestone C — The harness core
 
 **Goal.** The interface layer everything else is written against: one provider interface, one canonical message IR, one router. After this, "add a backend" means implementing an interface, and no surface, loop, or session file learns that a fifth vendor exists. Streaming, cancellation, multimodal content, and tool structures have to be in the interface on day one — adding any of them later means touching every implementation and every caller at once.
