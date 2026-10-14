@@ -23,6 +23,7 @@
 #include "cli/chat_session.h"
 #include "cli/execute.h"
 #include "cli/permissions.h"
+#include "cli/tui_cmd.h"
 #include "cli/tui_symphonies.h"
 #include "cli/tui_workbench.h"
 #include "contracts/assets.h"
@@ -980,4 +981,88 @@ TEST_CASE("a door-opened execute session is apogee execute's own opening, projec
     REQUIRE(shell.attachments.size() == 1);
     CHECK(shell.attachments.front().name == ".");
     CHECK(command.attachments.front().name == ".");
+}
+
+// --- launched into a session: apogee tui's flags (44c) ------------------------
+
+namespace {
+
+/// The flags `apogee tui <args>` hands the shell: parsed through the session
+/// table as `TuiCommand` binds it.
+[[nodiscard]] std::shared_ptr<apogee::commands::SessionFlags> tui_flags(
+    CLI::App& app, const std::vector<std::string>& args) {
+    auto flags = std::make_shared<apogee::commands::SessionFlags>();
+    apogee::commands::bind_session_flags(app, flags, apogee::commands::SessionMode::Execute);
+    std::vector<const char*> argv{"tui"};
+    for (const std::string& arg : args) {
+        argv.push_back(arg.c_str());
+    }
+    app.parse(static_cast<int>(argv.size()), argv.data());
+    return flags;
+}
+
+/// `apogee <args>` on `chat`'s home with `input` on stdin; its exit code.
+int run_with_input(const apogee::testing::CliHome& home, const std::vector<std::string>& args,
+                   const std::string& input) {
+    const std::istringstream fed{input};
+    std::streambuf* old_in = std::cin.rdbuf(fed.rdbuf());
+    std::string out;
+    std::string err;
+    const int code = home.run(args, &out, &err);
+    std::cin.rdbuf(old_in);
+    std::cin.clear();
+    INFO(out << err);
+    return code;
+}
+
+}  // namespace
+
+TEST_CASE("apogee tui's flags open that session first, as the same flags open it on the command",
+          "[cli][tui][session][launch]") {
+    // The launch golden (ADR 0011, from the other direction): the flags
+    // parsed through tui's table and opened by the shell, against the same
+    // flags on `apogee execute --tools` and `apogee chat --tools`, each on
+    // an install of its own.
+    const auto launched = [](const std::vector<std::string>& command,
+                             const std::vector<std::string>& args,
+                             apogee::commands::SessionMode expected) {
+        const nlohmann::json script = {{"turns", {{{"text", "unused"}}}}};
+        Conversation chat{script};
+        std::ofstream{chat.home.config_path(), std::ios::binary | std::ios::trunc}
+            << execute_config(chat.home.home() / "scripts", /*with_default=*/false);
+        REQUIRE(run_with_input(chat.home, command, "hi\n") == 0);
+        CLI::App app{"tui"};
+        const std::shared_ptr<apogee::commands::SessionFlags> flags = tui_flags(app, args);
+        CHECK(apogee::commands::launch_mode(*flags) == expected);
+        apogee::commands::TuiSessionDriver driver{chat.view, chat.pump, chat.context,
+                                                  []() { return apogee::models::MachineBudget{}; }};
+        driver.start(flags, apogee::commands::launch_mode(*flags));
+        chat.until([&chat]() { return chat.view.waiting_for_line(); }, "the launched session");
+        CHECK_FALSE(has(chat.frame(), "New chat"));  // straight in, no picker first
+        chat.send("hi");
+        chat.until([&chat]() { return chat.view.waiting_for_line() && has(chat.frame(), "<hi>"); },
+                   "the answer");
+        driver.stop();
+        return apogee::logger::list_sessions();
+    };
+
+    // Execute under a suite, an effort carried.
+    std::vector<apogee::logger::Session> saved =
+        launched({"execute", "--tools", "--suite", "duo", "--effort", "high"},
+                 {"--suite", "duo", "--effort", "high"}, apogee::commands::SessionMode::Execute);
+    REQUIRE(saved.size() == 2);
+    CHECK(transcript(saved.at(0)) == transcript(saved.at(1)));
+    CHECK(transcript(saved.at(0)) == std::vector<std::string>{"user: hi", "assistant: ROOT<hi>"});
+    CHECK(saved.at(0).suite == saved.at(1).suite);
+    CHECK(saved.at(0).suite == std::optional<std::string>{"duo"});
+    CHECK(saved.at(0).backend == saved.at(1).backend);
+
+    // A chat on a model.
+    saved = launched({"chat", "--tools", "-m", "helper"}, {"-m", "helper"},
+                     apogee::commands::SessionMode::Chat);
+    REQUIRE(saved.size() == 2);
+    CHECK(transcript(saved.at(0)) == transcript(saved.at(1)));
+    CHECK(transcript(saved.at(0)) == std::vector<std::string>{"user: hi", "assistant: HELPER<hi>"});
+    CHECK(saved.at(0).backend == "helper");
+    CHECK(saved.at(1).backend == "helper");
 }

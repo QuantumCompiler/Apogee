@@ -1067,7 +1067,11 @@ const std::vector<std::string> kFreeText{"agents create name",
                                          "symphonies create --input-description",
                                          "symphonies create --stage",
                                          "symphonies create --play",
-                                         "symphonies play --input"};
+                                         "symphonies play --input",
+                                         // `tui` takes the session table (44c): execute's.
+                                         "tui -s",
+                                         "tui --system",
+                                         "tui --allow-host"};
 
 /// The type names CLI11 gives a number: an untagged value of any other type
 /// is free text.

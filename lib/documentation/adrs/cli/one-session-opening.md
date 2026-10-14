@@ -43,4 +43,7 @@ These are one drift class: **a front end composing its own second opening of a m
 - **The picker's doors, since 2026-10-14 (44b).** `open_execute_session` and `open_chat_session` are the commands' openings, and the shell's driver opens every session through them. `execute_doors` reads the picker's execute rows off execute's own rungs. Two tests hold them:
   - `tui_session_test`'s "a door-opened execute session is apogee execute's own opening" opens one session with `apogee execute --tools` and one through the picker's bare door, in the same fixture repository on the same home. It requires the same transcript, suite, backend, system prompt and attached folder, with the coder persona and `AGENTS.md` in the request.
   - `execute_test`'s "execute's doors are its own rungs" pins the rows for each shape of config.
-- **Pending, 2026-10-14.** The launch golden, `apogee tui` speaking the table, lands with track 44's **44c** in the [backlog](../../backlog/README.md). The per-change checklist in [CLAUDE.md](../../assistant/CLAUDE.md) names the rule.
+- **The flag table, since 2026-10-14 (44c).** `apogee tui` binds the session table through the same `bind_session_flags` call the modes make. Two tests hold it:
+  - `tui_cmd_test`'s "apogee tui takes the session table" requires `tui`'s option spellings to equal `execute`'s, so a flag the modes grow is `tui`'s or the test fails.
+  - `tui_session_test`'s "apogee tui's flags open that session first" opens a session from flags parsed through `tui`'s table, and requires the same transcript, suite and backend as the same flags on `apogee execute --tools` and `apogee chat --tools`.
+- The per-change checklist in [CLAUDE.md](../../assistant/CLAUDE.md) names the rule.

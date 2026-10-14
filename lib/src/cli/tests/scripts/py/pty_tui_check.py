@@ -23,6 +23,8 @@ records the terminal's modes (`stty -g`) before it and after it:
   door      The same install, a chat now saved (44b): the picker's execute door
             below it -- execute's own opening, its banner saying no suite and
             what it can play -- then Ctrl-D, the terminal put back.
+  launch    `apogee tui -m local` (44c): the shell opened inside that chat, its
+            banner on screen with no key pressed -- then Ctrl-D.
   pipe      A pipe on stdout: no screen at all, the help as `--help` prints it.
   dumb      TERM=dumb: the refusal said, the help printed, no screen.
 
@@ -133,9 +135,9 @@ def modes_and_exit(name, output):
     return without_pendin(states[0]), without_pendin(states[-1]), int(status.group(1))
 
 
-def screen_case(binary, env, name, act, expect_exit, ready=b"New chat", cwd=None):
+def screen_case(binary, env, name, act, expect_exit, ready=b"New chat", cwd=None, args=""):
     move = f'cd "{cwd}" && ' if cwd else ""
-    session = Session(f'{move}stty -g; "{binary}"; echo "EXIT:$?"; stty -g', env)
+    session = Session(f'{move}stty -g; "{binary}"{args}; echo "EXIT:$?"; stty -g', env)
     # The session view first (32c): with no model configured its chat cannot
     # open, and it waits on the picker, where q and Ctrl-C are the shell's.
     session.wait_for(b"[1 Session]", 15, name)
@@ -285,6 +287,16 @@ def main():
             session.send(b"\x04")  # Ctrl-D
 
         screen_case(binary, env, "door", door, 0, ready=b"Execute on local (no suite)", cwd=work)
+
+        def launch(session):
+            # Straight into the chat the flags name: its banner, no key sent.
+            session.wait_for(b"/help for commands", 15, "launch")
+            if b"New chat" in session.output:
+                fail("launch", "the picker came first", session.output)
+            session.send(b"\x04")  # Ctrl-D
+
+        screen_case(binary, env, "launch", launch, 0, ready=b"[1 Session]", cwd=work,
+                    args=" tui -m local")
 
         help_text = subprocess.run([binary, "--help"], stdin=subprocess.DEVNULL,
                                    capture_output=True, env=env).stdout

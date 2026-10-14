@@ -254,7 +254,12 @@ namespace {
 
 }  // namespace
 
-void TuiSessionDriver::start() {
+void TuiSessionDriver::start(std::shared_ptr<const SessionFlags> launch, SessionMode mode) {
+    // Launched into a session (44c): that one first.
+    if (launch != nullptr) {
+        open(Opening{.mode = mode, .launch = std::move(launch)});
+        return;
+    }
     // The picker always (44b): New chat a keypress away, and execute's doors
     // there on a fresh install too (ADR 0012).
     show_picker();
@@ -408,8 +413,16 @@ void TuiSessionDriver::run(const Opening& opening) {
     try {
         CLI::App app{"the shell's conversation",
                      opening.mode == SessionMode::Execute ? "execute" : "chat"};
-        const std::shared_ptr<SessionFlags> flags =
-            shell_session_flags(app, opening.chat_id, opening.suite, opening.model, opening.mode);
+        std::shared_ptr<SessionFlags> flags;
+        if (opening.launch != nullptr) {
+            // Launched (44c): the flags as `apogee tui` parsed them, with the
+            // tools every shell session carries.
+            flags = std::make_shared<SessionFlags>(*opening.launch);
+            flags->tools = true;
+        } else {
+            flags = shell_session_flags(app, opening.chat_id, opening.suite, opening.model,
+                                        opening.mode);
+        }
         // Each mode through its command's own opening (ADR 0011).
         if (opening.mode == SessionMode::Execute) {
             open_execute_session(context_, *flags, machine_, &output);

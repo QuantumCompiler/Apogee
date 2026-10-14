@@ -1,9 +1,11 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
 
+#include "cli/chat_completer.h"
 #include "cli/command.h"
 
 namespace CLI {
@@ -30,6 +32,22 @@ class Shell;
 /// never back into `cli/`.
 namespace apogee::commands {
 
+struct SessionFlags;
+
+/// What the shell opens first (44c): with `flags`, a session -- `apogee tui`
+/// given the session table's flags, parsed through the one table the modes
+/// share and opened through `mode`'s own opening (ADR 0011); without, the
+/// picker, as a bare `apogee` and a flagless `apogee tui` open it.
+struct ShellLaunch {
+    std::shared_ptr<const SessionFlags> flags;
+    SessionMode mode = SessionMode::Chat;
+};
+
+/// The mode session flags open (44c): execute when they name a suite (never
+/// `off`) or ask to orchestrate -- what only execute's opening does with a
+/// suite -- else chat.
+[[nodiscard]] SessionMode launch_mode(const SessionFlags& flags);
+
 /// How the shell is reached, each part replaceable in a test.
 struct ShellEntry {
     /// Whether this run is at an interactive terminal: stdin and stdout both
@@ -39,8 +57,9 @@ struct ShellEntry {
     /// Why the terminal cannot host the screen, or empty when it can
     /// (`platform::full_screen_refusal`).
     std::function<std::string()> refusal;
-    /// Builds the shell over `context` and runs it full screen; its exit code.
-    std::function<int(const RootContext&)> run;
+    /// Builds the shell over `context` and runs it full screen, its first
+    /// session `launch`'s; its exit code.
+    std::function<int(const RootContext&, const ShellLaunch&)> run;
 };
 
 /// The real doors: the platform's answers, and the terminal's loop.
@@ -56,7 +75,10 @@ void add_shell_views(tui::Shell& shell, const RootContext& context);
 /// after the terminal's refusal on stderr when that was the reason.
 [[nodiscard]] int open_bare(const ShellEntry& entry, const RootContext& context, CLI::App& app);
 
-/// `apogee tui`: the shell, or a refusal saying why not (exit 1).
+/// `apogee tui`: the shell, or a refusal saying why not (exit 1). Since 44c
+/// it takes the session table `chat` and `execute` share -- bound by the same
+/// call, so a flag the modes grow is `tui`'s with no change here -- and with
+/// any of them given opens the shell inside that session.
 class TuiCommand final : public Command {
 public:
     explicit TuiCommand(ShellEntry entry = default_shell_entry());

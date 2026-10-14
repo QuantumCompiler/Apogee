@@ -7289,6 +7289,32 @@ Decisions taken while building, for veto:
 
 **Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,282 tests, one skipped for want of `pdftotext`, `cli.tui_shell` with its door case on a real terminal among them. `make format-check` is clean for every file this item touched. The two files it flags, `embed.cpp` and `runner_view.h`, were flagged before.
 
+### 2026-10-14 — `tui-session-launch` (backlog item 44c): launching the shell into a session
+
+**Why.** The shell could not be opened *into* a session. `apogee tui --help` listed no option against `apogee execute`'s 40, so "the shell, in execute under suite X with this folder attached" had no spelling, though nearly every one of those knobs has a slash twin once a session exists. [ADR 0011](../adrs/cli/one-session-opening.md) asks for one flag table per mode that every door speaks.
+
+- [x] **The session table on `apogee tui`** (`cli/tui_cmd`). It is bound by the very call `chat` and `execute` make, `bind_session_flags`, with execute's superset, never a copy. A flag the modes grow is `tui`'s with no change there, its completion included.
+- [x] **The launch** (`ShellLaunch`, `launch_mode`):
+  - with any session flag given, the shell's entry carries the parsed flags and a mode to the driver's first session, which opens straight away through that mode's own opening, with the tools every shell session carries;
+  - the mode is the flags' own: a suite other than `off`, or `--orchestrate`, is execute, and anything else is chat;
+  - when that session ends, the picker.
+- [x] **Refusals**:
+  - a combination the table refuses is refused before any screen, in exactly the command's words (`--effort` with `--think-budget`, byte-equal to `execute`'s);
+  - a refusal inside the opening is said on the shell's notice row in the command's words, as a picker door's is;
+  - machine mode's formats (`--output-format`, `--input-format` other than text) are refused on `tui`, since the shell draws its own screen;
+  - off a terminal, the measured refusal stands, flags or none.
+- [x] **Flagless is unchanged**: a bare `apogee` and `apogee tui` open the picker as 44b left it (`cli.bare_help`, the PTY checks).
+- [x] **The tests**:
+  - `tui_cmd_test` requires `tui`'s option spellings to equal `execute`'s, with chat's within them. It also pins the flags reaching the launch as parsed and the mode for a suite, `-m`, `--orchestrate`, `--suite off` and none, the refusals' words, and `--suite` completing on `tui` exactly as on `execute`.
+  - **The launch golden** (`tui_session_test`): on an install of its own, flags parsed through `tui`'s table open straight into the session with no picker first. They hold the same transcript, suite and backend as the same flags on `apogee execute --tools` (a suite and an effort) and on `apogee chat --tools` (`-m`).
+  - `cli.tui_shell`'s new **launch** case runs `apogee tui -m local` on a real terminal and sees the chat's banner with no key pressed.
+
+Decisions taken while building, for veto:
+- **The mode rule.** The document said suite-implying flags open execute and everything else chat. Only two flags do something that is execute's alone: `--suite <name>` (execute insists on a suite or opens bare, and `--suite off` is chat's) and `--orchestrate`. `--warm` and `--force` serve `chat --suite` too, so they decide nothing.
+- **Machine mode's formats are refused on `tui`.** This is the one shell-specific refusal: a `stream-json` session drawn on a screen would write its events over the screen, and the modes themselves have no such combination to refuse.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) ran 3,287 tests, one skipped for want of `pdftotext`. One failed: `lifecycle_test`'s free-text audit named `tui -s`, `tui --system` and `tui --allow-host`, the session table's three untagged arguments, now on `tui` as they are on `execute`. They joined its reviewed list, and that case was rerun green in the same build. `cli.tui_shell`'s launch case passed on a real terminal, and `make format-check` is clean for every file touched.
+
 ## Milestone AI — Effort and permission modes
 
 **Goal.** Claude Code gives a session two controls the person reaches for constantly: how hard the model thinks (five effort levels) and how much it may do without asking (a permission mode, cycled with Shift+Tab). Apogee had the pieces of both -- `/think on|off|auto` with a raw token budget, and per-tool answers over one permission gate -- but not the controls. Track 39 (the user's call, 2026-10-11) gives `apogee chat`, `apogee execute` and the full-screen shell Claude Code's two, set mid-session in either front end and Tab-completed in both.

@@ -2,6 +2,7 @@
 
 #include <CLI/CLI.hpp>
 
+#include <algorithm>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -10,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "cli/chat_session.h"
 #include "cli/helpers.h"
 #include "cli/suite_residency.h"
 #include "cli/tui_agents.h"
@@ -22,6 +24,7 @@
 #include "cli/tui_training.h"
 #include "cli/tui_workbench.h"
 #include "cli/version_command.h"
+#include "contracts/config.h"
 #include "platform/platform.h"
 #include "platform/system_info.h"
 #include "tui/list_view.h"
@@ -47,7 +50,7 @@ namespace {
     return lines;
 }
 
-[[nodiscard]] int run_full_screen(const RootContext& context) {
+[[nodiscard]] int run_full_screen(const RootContext& context, const ShellLaunch& launch) {
     const tui::Theme theme = tui::detect_theme();
     tui::Shell shell{
         tui::ShellOptions{.title = "apogee " + std::string{version::semantic()}, .theme = theme}};
@@ -152,7 +155,7 @@ namespace {
     const auto command_run = std::make_shared<tui::Progress>(pump);
     shell.set_exec_line(exec_line_options(context, command_run, self));
     add_shell_views(shell, context);
-    driver.start();
+    driver.start(launch.flags, launch.mode);
     monitor.start();
     const int code = pump.run(shell);
     driver.stop();
@@ -162,13 +165,15 @@ namespace {
 }  // namespace
 
 ShellEntry default_shell_entry() {
-    return ShellEntry{.interactive =
-                          []() {
-                              return platform::is_terminal(platform::StandardStream::In) &&
-                                     platform::is_terminal(platform::StandardStream::Out);
-                          },
-                      .refusal = []() { return platform::full_screen_refusal(); },
-                      .run = [](const RootContext& context) { return run_full_screen(context); }};
+    return ShellEntry{
+        .interactive =
+            []() {
+                return platform::is_terminal(platform::StandardStream::In) &&
+                       platform::is_terminal(platform::StandardStream::Out);
+            },
+        .refusal = []() { return platform::full_screen_refusal(); },
+        .run = [](const RootContext& context,
+                  const ShellLaunch& launch) { return run_full_screen(context, launch); }};
 }
 
 void add_shell_views(tui::Shell& shell, const RootContext& context) {
@@ -195,7 +200,7 @@ int open_bare(const ShellEntry& entry, const RootContext& context, CLI::App& app
     if (entry.interactive && entry.interactive()) {
         const std::string refused = entry.refusal ? entry.refusal() : std::string{};
         if (refused.empty()) {
-            return entry.run(context);
+            return entry.run(context, ShellLaunch{});
         }
         std::cerr << "apogee: no full screen here -- " << refused << "\n";
     }
@@ -213,9 +218,35 @@ std::string_view TuiCommand::summary() const noexcept {
     return "Open the full-screen shell -- what a bare `apogee` opens at a terminal";
 }
 
+SessionMode launch_mode(const SessionFlags& flags) {
+    const bool suite = !flags.suite.empty() && flags.suite != harness::kSuiteOff;
+    return suite || flags.orchestrate ? SessionMode::Execute : SessionMode::Chat;
+}
+
 void TuiCommand::bind(CLI::App& root, const RootContext& context) {
     CLI::App* cmd = root.add_subcommand(std::string{name()}, std::string{summary()});
-    cmd->callback([this, &context]() {
+    // The session table (44c, ADR 0011): the very call `chat` and `execute`
+    // make -- execute's, the superset -- so the shell's first session is
+    // launched with the flags a mode takes, parsed as the mode parses them.
+    auto flags = std::make_shared<SessionFlags>();
+    bind_session_flags(*cmd, flags, SessionMode::Execute);
+    cmd->callback([this, &context, cmd, flags]() {
+        ShellLaunch launch;
+        const bool given =
+            std::ranges::any_of(cmd->get_options(), [cmd](const CLI::Option* option) {
+                return option != cmd->get_help_ptr() && option->count() > 0;
+            });
+        if (given) {
+            // The shell draws its own screen; machine mode is a pipe's.
+            if (flags->output_format != OutputFormat::Text ||
+                flags->input_format.value_or(InputFormat::Text) != InputFormat::Text) {
+                std::cerr << "apogee tui: --output-format and --input-format are machine mode's, "
+                             "for a pipe -- the shell draws its own screen; 'apogee chat' or "
+                             "'apogee execute' takes them\n";
+                throw CLI::RuntimeError(kUserError);
+            }
+            launch = ShellLaunch{.flags = flags, .mode = launch_mode(*flags)};
+        }
         if (!entry_.interactive || !entry_.interactive()) {
             std::cerr << "apogee tui: the shell needs an interactive terminal -- stdin and stdout "
                          "both one; every command runs without it\n";
@@ -226,7 +257,7 @@ void TuiCommand::bind(CLI::App& root, const RootContext& context) {
             std::cerr << "apogee tui: no full screen here -- " << refused << "\n";
             throw CLI::RuntimeError(kUserError);
         }
-        if (const int code = entry_.run(context); code != 0) {
+        if (const int code = entry_.run(context, launch); code != 0) {
             throw CLI::RuntimeError(code);
         }
     });

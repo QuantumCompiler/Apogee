@@ -110,8 +110,11 @@ public:
     TuiSessionDriver& operator=(TuiSessionDriver&&) = delete;
 
     /// The picker, always (44b): a new chat one key away, and execute's
-    /// doors there on a fresh install too.
-    void start();
+    /// doors there on a fresh install too -- or, given `launch` (44c:
+    /// `apogee tui` with the session table's flags), that session first,
+    /// opened through `mode`'s own opening; the picker when it ends.
+    void start(std::shared_ptr<const SessionFlags> launch = {},
+               SessionMode mode = SessionMode::Chat);
     /// The picker, whatever is saved: where a conversation that ended leaves
     /// the view.
     void show_picker();
@@ -164,6 +167,9 @@ private:
         SessionMode mode = SessionMode::Chat;
         /// A line it takes first, as if typed (37d: a play asked for).
         std::string first_line;
+        /// The flags it was launched with (44c), parsed through the session
+        /// table by `apogee tui`; the rest above unused when set.
+        std::shared_ptr<const SessionFlags> launch;
     };
 
     void open(Opening opening);
