@@ -12,6 +12,7 @@
 #include "contracts/host.h"
 #include "harness/roles.h"
 #include "operations/read_views.h"
+#include "operations/renames.h"
 #include "scaffold/mcp_server.h"
 #include "tools/toolsets.h"
 
@@ -360,6 +361,43 @@ HttpResponse admin_delete_backend(const AdminConfigContext& context, std::string
     }
     return json_response(200,
                          nlohmann::json{{"deleted", std::string{name}},
+                                        {"restart_required", drifted(context, *after.config)}});
+}
+
+HttpResponse admin_rename_backend(const AdminConfigContext& context, std::string_view name,
+                                  const HttpRequest& request) {
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, false);
+    if (body.is_discarded() || !body.is_object()) {
+        return error_response(400, "the request body must be a JSON object");
+    }
+    std::string error;
+    const std::string renamed = optional_string(body, "name", error).value_or("");
+    if (!error.empty()) {
+        return error_response(400, error);
+    }
+    if (renamed.empty()) {
+        return error_response(400, "name is required");
+    }
+    const Loaded loaded = load_now(context);
+    if (!loaded.config.has_value()) {
+        return loaded.failure;
+    }
+    if (loaded.config->find_backend(name) == nullptr) {
+        return error_response(404, "no backend named '" + std::string{name} + "'", kNotFoundError);
+    }
+    const commands::RenameOutcome outcome = commands::rename_backend_everywhere(
+        context.config_path, commands::store_roots_of(*loaded.config), name, renamed);
+    if (!outcome.refusal.empty()) {
+        return error_response(400, outcome.refusal);
+    }
+    const Loaded after = load_now(context);
+    if (!after.config.has_value()) {
+        return after.failure;
+    }
+    return json_response(200,
+                         nlohmann::json{{"renamed", std::string{name}},
+                                        {"to", renamed},
+                                        {"said", outcome.said},
                                         {"restart_required", drifted(context, *after.config)}});
 }
 

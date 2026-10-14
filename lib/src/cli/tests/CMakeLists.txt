@@ -298,6 +298,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/chat_attachments_test.cpp
     presentation/cli/attachment_graph_test.cpp
     presentation/operations/graph_sources_test.cpp
+    presentation/operations/renames_test.cpp
     presentation/cli/chat_completer_test.cpp
     presentation/cli/chat_roster_test.cpp
     presentation/cli/chat_session_test.cpp

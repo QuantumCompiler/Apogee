@@ -5,6 +5,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "contracts/todo.h"
@@ -257,6 +258,23 @@ void save(const Session& session);
 /// Throws std::runtime_error only when the session cannot be found or read at
 /// all -- every recoverable problem is a warning.
 [[nodiscard]] LoadedSession load(const std::string& name, const KnownDependencies& known);
+
+/// What renaming a backend did to the saved chats (46a).
+struct SessionSweep {
+    /// How many chats now name the new backend.
+    std::size_t renamed = 0;
+    /// The chats that named the old one and could not be rewritten: left as
+    /// they were, their resume the orphan path's (`BackendMissing`).
+    std::vector<std::string> failed;
+};
+
+/// Every saved chat that names backend `old_name` -- its backend, its rerank
+/// judge -- rewritten to `new_name`, each file atomically and its
+/// `updated_at` kept: a rename is no new turn, and the chats keep their
+/// order. A file that does not parse is never rewritten; one that cannot be
+/// written is counted in `failed`.
+[[nodiscard]] SessionSweep rename_session_backend(std::string_view old_name,
+                                                  std::string_view new_name);
 
 /// Every saved session, newest first; a tie in `updated_at` by `chat_id`,
 /// descending.

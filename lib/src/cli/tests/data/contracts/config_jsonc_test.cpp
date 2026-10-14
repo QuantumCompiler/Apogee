@@ -460,3 +460,76 @@ TEST_CASE("one verb means one thing in either format", "[config_edit][jsonc][par
         CHECK(json.models == yaml.models);
     }
 }
+
+// --- renaming a backend (46a) ----------------------------------------------
+
+namespace {
+
+constexpr std::string_view kRenameJsonc = R"({
+  // The backends.
+  "backends": {
+    // The local model, quantized.
+    "gemma": {  // the one we use
+      "type": "llamacpp",
+      "model_path": "/models/gemma.gguf"  // 12B
+    },
+    "gemma-old": {"type": "mock"},
+    "claude": {"type": "anthropic"}
+  },
+  "models": {
+    "default": "gemma",  // the chat
+    "default_utility": "gemma",
+    "default_vision": "claude"
+  },
+  "suites": {
+    "duo": {"members": {"chat": "gemma", "utility": {"backend": "gemma", "window": 8192}}}
+  },
+  "embeddings": {
+    "gemma": {"backend": "gemma", "rerank": "gemma", "graph": {"extract_backend": "gemma"}}
+  },
+  "mcp_servers": {
+    "gemma": {"command": "/bin/echo"}
+  },
+  "training": {
+    "judge_backend": "gemma",
+    "cycle": {
+      "backend": "gemma",
+      "sources": [{"type": "sessions", "log_consent": true, "backend": "gemma"}]
+    }
+  }
+}
+)";
+
+}  // namespace
+
+TEST_CASE("rename_backend in a JSONC config: the key where it stands, every reference in place",
+          "[config][jsonc][rename]") {
+    const std::string renamed =
+        apogee::harness::rename_backend(kRenameJsonc, "gemma", "gemma4-12b");
+    std::string expected{kRenameJsonc};
+    const auto swap = [&expected](std::string_view from, std::string_view to) {
+        const std::size_t at = expected.find(from);
+        REQUIRE(at != std::string::npos);
+        expected.replace(at, from.size(), to);
+    };
+    swap("\"gemma\": {  // the one we use", "\"gemma4-12b\": {  // the one we use");
+    swap("\"default\": \"gemma\",", "\"default\": \"gemma4-12b\",");
+    swap("\"default_utility\": \"gemma\"", "\"default_utility\": \"gemma4-12b\"");
+    swap("{\"chat\": \"gemma\", \"utility\": {\"backend\": \"gemma\"",
+         "{\"chat\": \"gemma4-12b\", \"utility\": {\"backend\": \"gemma4-12b\"");
+    swap(
+        "{\"backend\": \"gemma\", \"rerank\": \"gemma\", \"graph\": {\"extract_backend\": "
+        "\"gemma\"}}",
+        "{\"backend\": \"gemma4-12b\", \"rerank\": \"gemma4-12b\", \"graph\": "
+        "{\"extract_backend\": \"gemma4-12b\"}}");
+    swap("\"judge_backend\": \"gemma\"", "\"judge_backend\": \"gemma4-12b\"");
+    swap("\"backend\": \"gemma\",\n      \"sources\"",
+         "\"backend\": \"gemma4-12b\",\n      \"sources\"");
+    swap("\"log_consent\": true, \"backend\": \"gemma\"}",
+         "\"log_consent\": true, \"backend\": \"gemma4-12b\"}");
+    CHECK(renamed == expected);
+    CHECK(apogee::harness::rename_backend(renamed, "gemma4-12b", "gemma") == kRenameJsonc);
+    const apogee::harness::Config config = apogee::harness::parse_config(renamed, "renamed");
+    CHECK(config.find_backend("gemma4-12b") != nullptr);
+    CHECK(config.mcp_server_names() == std::vector<std::string>{"gemma"});
+}

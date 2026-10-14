@@ -26,6 +26,7 @@
 #include "graph/code_languages.h"
 #include "modelstore/store.h"
 #include "operations/graph_sources.h"
+#include "operations/renames.h"
 #include "tools/toolsets.h"
 
 namespace apogee::commands {
@@ -973,6 +974,36 @@ void bind_delete_backend(CLI::App& parent, const RootContext& context) {
     });
 }
 
+void bind_rename_backend(CLI::App& parent, const RootContext& context) {
+    auto old_name = std::make_shared<std::string>();
+    auto new_name = std::make_shared<std::string>();
+    CLI::App* cmd = parent.add_subcommand(
+        "rename-backend",
+        "Rename a backend and every reference to it -- the roles, the suites, the saved chats");
+    cmd->add_option("name", *old_name, "The backend to rename")
+        ->type_name(kBackendValue)
+        ->required();
+    cmd->add_option("new-name", *new_name, "Its new name")->required();
+    cmd->callback([&context, old_name, new_name]() {
+        // The one core the admin plane's twin calls too (46a).
+        const std::filesystem::path path = config_path_for(context);
+        harness::Config config;
+        try {
+            config = harness::load_config(path);
+        } catch (const std::exception& e) {
+            fail(e.what());
+        }
+        const RenameOutcome outcome =
+            rename_backend_everywhere(path, store_roots_of(config), *old_name, *new_name);
+        if (!outcome.refusal.empty()) {
+            fail(outcome.refusal);
+        }
+        for (const std::string& line : outcome.said) {
+            std::cout << line << "\n";
+        }
+    });
+}
+
 /// The `set-default*` commands differ only in which key they write.
 void bind_set_role(CLI::App& parent, const RootContext& context, const std::string& command_name,
                    const std::string& field, const std::string& description) {
@@ -1311,6 +1342,7 @@ void ConfigCommand::bind(CLI::App& root, const RootContext& context) {
     bind_add_backend(*cmd, context);
     bind_scan(*cmd, context);
     bind_delete_backend(*cmd, context);
+    bind_rename_backend(*cmd, context);
     bind_set_role(*cmd, context, "set-default", "default", "Set the default backend");
     bind_set_role(*cmd, context, "set-default-embedding", "default_embedding",
                   "Set the backend used for embeddings");

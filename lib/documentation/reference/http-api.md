@@ -307,6 +307,18 @@ One entry's view. `404` when unknown.
 The twin of `apogee config delete-backend`. `200 {deleted, restart_required}`;
 `404` when unknown.
 
+### `POST /v1/admin/backends/{id}/rename`
+
+The twin of `apogee config rename-backend`: `{"name": "<new>"}` renames the
+backend and every reference to it in one edit -- the role pointers, the
+suites' members, the collections, graphs, agents and training settings that
+name it -- comments kept, then rewrites the saved chats that name it, and
+moves its store directory with it when it alone runs that stored model and
+both names are the model's own (`<model>-<level>`). The config it leaves is
+byte for byte the CLI's. `200 {renamed, to, said, restart_required}`, `said`
+the lines the CLI prints; `404` when unknown; `400` naming why for a name
+that is taken or cannot name a backend.
+
 ### `POST /v1/admin/backends/default`
 
 The twin of `apogee config set-default`: `{"name": "<backend>"}` sets

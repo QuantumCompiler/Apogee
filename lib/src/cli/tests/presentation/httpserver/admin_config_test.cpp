@@ -38,6 +38,7 @@ using apogee::httpserver::admin_list_backends;
 using apogee::httpserver::admin_list_mcp_servers;
 using apogee::httpserver::admin_list_permissions;
 using apogee::httpserver::admin_put_permission;
+using apogee::httpserver::admin_rename_backend;
 using apogee::httpserver::admin_set_mcp_server_enabled;
 using apogee::httpserver::admin_set_role;
 using apogee::httpserver::AdminConfigContext;
@@ -586,4 +587,44 @@ TEST_CASE("the MCP server twins leave the same bytes the CLI leaves, and never l
     fixture.cli({"config", "delete-mcp-server", "ext"});
     CHECK(Fixture::bytes(fixture.http_config) == Fixture::bytes(fixture.cli_config));
     CHECK(admin_delete_mcp_server(fixture.context(), "ext").status == 404);
+}
+
+TEST_CASE("a backend renamed over HTTP is byte-identical to the CLI's, every reference with it",
+          "[httpserver][admin][parity][rename]") {
+    // 46a: the twin calls the CLI's one core -- the same edit, byte for byte.
+    const Fixture fixture;
+    fixture.cli({"config", "add-backend", "helper", "--type", "mock"});
+    fixture.cli({"config", "set-default-utility", "helper"});
+    REQUIRE(admin_create_backend(fixture.context(),
+                                 post(nlohmann::json{{"name", "helper"}, {"type", "mock"}}))
+                .status == 201);
+    REQUIRE(admin_set_role(fixture.context(), "default_utility",
+                           post(nlohmann::json{{"name", "helper"}}))
+                .status == 200);
+    REQUIRE(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
+
+    fixture.cli({"config", "rename-backend", "helper", "assistant"});
+    const HttpResponse renamed = admin_rename_backend(fixture.context(), "helper",
+                                                      post(nlohmann::json{{"name", "assistant"}}));
+    REQUIRE(renamed.status == 200);
+    const nlohmann::json body = parsed(renamed);
+    CHECK(body.at("renamed") == "helper");
+    CHECK(body.at("to") == "assistant");
+    CHECK(body.at("said").at(0).get<std::string>().starts_with(
+        "renamed backend 'helper' to 'assistant'"));
+    CHECK(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
+    CHECK(Fixture::bytes(fixture.http_config).find("\"default_utility\": \"assistant\"") !=
+          std::string::npos);
+
+    // Unknown is 404; a name that cannot be is 400, said, and nothing moved.
+    CHECK(admin_rename_backend(fixture.context(), "nope", post(nlohmann::json{{"name", "x"}}))
+              .status == 404);
+    const std::string before = Fixture::bytes(fixture.http_config);
+    const HttpResponse refused = admin_rename_backend(fixture.context(), "assistant",
+                                                      post(nlohmann::json{{"name", "two words"}}));
+    CHECK(refused.status == 400);
+    CHECK(refused.body.find("cannot name a backend") != std::string::npos);
+    CHECK(Fixture::bytes(fixture.http_config) == before);
+    CHECK(admin_rename_backend(fixture.context(), "assistant", post(nlohmann::json::object()))
+              .status == 400);
 }

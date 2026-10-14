@@ -1073,6 +1073,8 @@ const std::vector<std::string> kFreeText{"agents create name",
                                          "symphonies create --stage",
                                          "symphonies create --play",
                                          "symphonies play --input",
+                                         "config rename-backend new-name",
+                                         "models rename new-name",
                                          "tui -s",
                                          "tui --system",
                                          "tui --allow-host"};

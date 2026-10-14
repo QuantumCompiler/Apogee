@@ -149,6 +149,27 @@ public:
 [[nodiscard]] std::string set_backend_mmproj_path(std::string_view content, std::string_view name,
                                                   std::string_view path);
 
+/// Renames backend `old_name` to `new_name` (46a), and every reference to
+/// it, in one edit: the entry's key where it stands -- its fields, its
+/// comments and its place in the file kept -- and each value naming it at
+/// one of `backend_reference_paths()`, replaced where it stands. Nothing
+/// else in the file moves.
+///
+/// Throws ConfigEditError when `old_name` is no backend, `new_name` is taken
+/// (folded, as `append_backend` refuses a name -- a change of case to the
+/// backend's own allowed) or cannot name one, or the two are the same.
+[[nodiscard]] std::string rename_backend(std::string_view content, std::string_view old_name,
+                                         std::string_view new_name);
+
+/// Where a backend's name is referenced in the config (46a), each a path of
+/// keys with `*` for any entry or item: the role pointers under `models:`,
+/// every suite member (a key, or a mapping's `backend`), a collection's
+/// `backend`, `rerank` and graph `extract_backend`, a named graph's
+/// `extract_backend`, an agent's `model`, a regime's `teacher`, the training
+/// judge and the cycle's backend, judge and session sources. What
+/// `rename_backend` rewrites.
+[[nodiscard]] std::vector<std::vector<std::string>> backend_reference_paths();
+
 /// Field names accepted by set_models_role.
 [[nodiscard]] std::vector<std::string_view> models_role_fields();
 

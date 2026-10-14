@@ -56,6 +56,7 @@ public:
     [[nodiscard]] HttpResponse create_backend(const HttpRequest& request);
     [[nodiscard]] HttpResponse get_backend(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse delete_backend(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse rename_backend(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse set_default(const HttpRequest& request);
     [[nodiscard]] HttpResponse set_default_embedding(const HttpRequest& request);
     [[nodiscard]] HttpResponse set_default_extraction(const HttpRequest& request);

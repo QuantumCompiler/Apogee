@@ -33,6 +33,10 @@ HttpResponse AdminHandler::delete_backend(const HttpRequest& /*request*/, std::s
     return admin_delete_backend(config_context(), name);
 }
 
+HttpResponse AdminHandler::rename_backend(const HttpRequest& request, std::string_view name) {
+    return admin_rename_backend(config_context(), name, request);
+}
+
 HttpResponse AdminHandler::list_agents(const HttpRequest&) {
     return admin_list_agents(config_context());
 }

@@ -119,6 +119,13 @@ struct AdminConfigContext {
 [[nodiscard]] HttpResponse admin_delete_backend(const AdminConfigContext& context,
                                                 std::string_view name);
 
+/// `POST /v1/admin/backends/{name}/rename` -- the `config rename-backend`
+/// twin (46a): `{"name": "<new>"}`, through the one core -- the key and every
+/// reference in one edit, the saved chats swept, the store moved where the
+/// coupling holds -- byte-identical to the CLI's. What it did, a line each.
+[[nodiscard]] HttpResponse admin_rename_backend(const AdminConfigContext& context,
+                                                std::string_view name, const HttpRequest& request);
+
 /// `POST /v1/admin/config/format` -- the `config format` twin: whitespace
 /// tidied, content untouched.
 [[nodiscard]] HttpResponse admin_format_config(const AdminConfigContext& context);

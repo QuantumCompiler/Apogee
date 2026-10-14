@@ -72,6 +72,8 @@ apogee_add_module(operations
     operations/knowledge_core.h
     operations/knowledge_core.cpp
     operations/read_views.h
+    operations/renames.h
+    operations/renames.cpp
     operations/read_views.cpp
     operations/retrieval.h
     operations/retrieval.cpp

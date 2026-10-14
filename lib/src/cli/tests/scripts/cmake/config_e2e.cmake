@@ -235,6 +235,24 @@ endforeach()
 apogee_run(1 config set-default no-such-backend)
 apogee_run(1 config set-default-utility no-such-backend)
 
+# A rename (46a): the key and every role pointer move in one edit, and back
+# again is the file it was, byte for byte -- every comment the template
+# teaches with kept.
+file(READ "${CONFIG_FILE}" BEFORE_RENAME)
+apogee_run(0 config rename-backend claude sonnet)
+apogee_run(0 config get models.default)
+expect_equal("${APOGEE_OUT}" "sonnet" "models.default followed the rename")
+apogee_run(0 config get models.default_utility)
+expect_equal("${APOGEE_OUT}" "sonnet" "models.default_utility followed the rename")
+apogee_run(0 config get backends.sonnet.model)
+expect_equal("${APOGEE_OUT}" "claude-sonnet-5" "the entry kept its fields")
+apogee_run(1 config rename-backend no-such-backend other)
+apogee_run(0 config rename-backend sonnet claude)
+file(READ "${CONFIG_FILE}" AFTER_RENAME)
+if(NOT AFTER_RENAME STREQUAL BEFORE_RENAME)
+    message(FATAL_ERROR "a rename and its reverse did not leave the file as it was")
+endif()
+
 # --- auto_rag: injection with no flag, reported, and switchable off --------
 apogee_run(0 config add-backend mock --type mock --model mock-1)
 file(READ "${CONFIG_FILE}" BEFORE_AUTO_RAG)

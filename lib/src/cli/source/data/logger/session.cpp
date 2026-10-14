@@ -431,6 +431,46 @@ LoadedSession load(const std::string& name, const KnownDependencies& known) {
     return deserialize(buffer.str(), known);
 }
 
+SessionSweep rename_session_backend(std::string_view old_name, std::string_view new_name) {
+    SessionSweep sweep;
+    std::error_code ec;
+    const std::filesystem::path directory = sessions_dir();
+    if (!std::filesystem::exists(directory, ec)) {
+        return sweep;
+    }
+    for (const auto& entry : std::filesystem::directory_iterator{directory, ec}) {
+        if (ec || !entry.is_regular_file() || entry.path().extension() != ".json") {
+            continue;
+        }
+        std::ifstream in(entry.path(), std::ios::binary);
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+        Session session;
+        try {
+            session = deserialize(buffer.str(), {}).session;
+        } catch (const std::exception&) {
+            continue;  // not ours to rewrite: a corrupt file stays as it is
+        }
+        if (session.backend != old_name && session.rerank != old_name) {
+            continue;
+        }
+        if (session.backend == old_name) {
+            session.backend = std::string{new_name};
+        }
+        if (session.rerank == old_name) {
+            session.rerank = std::string{new_name};
+        }
+        try {
+            // `serialize`, never `save`: `updated_at` is the last turn's.
+            harness::write_file_atomically(entry.path(), serialize(session));
+            ++sweep.renamed;
+        } catch (const std::exception&) {
+            sweep.failed.push_back(session.chat_id);
+        }
+    }
+    return sweep;
+}
+
 std::vector<Session> list_sessions() {
     std::vector<Session> sessions;
 

@@ -2130,6 +2130,271 @@ std::string format_config(std::string_view content) {
     return join_lines(out);
 }
 
+// ---- renaming a backend (46a) ----------------------------------------------
+
+namespace {
+
+/// A scalar token's text: a quoted one unquoted (a double-quoted one's `\"`
+/// and `\\` read), a plain one as it stands.
+std::string token_text_of(std::string_view token) {
+    if (token.size() >= 2 && token.front() == '\'' && token.back() == '\'') {
+        std::string out;
+        for (std::size_t i = 1; i + 1 < token.size(); ++i) {
+            out += token[i];
+            if (token[i] == '\'' && i + 2 < token.size() && token[i + 1] == '\'') {
+                ++i;  // '' is one quote
+            }
+        }
+        return out;
+    }
+    if (token.size() >= 2 && token.front() == '"' && token.back() == '"') {
+        std::string out;
+        for (std::size_t i = 1; i + 1 < token.size(); ++i) {
+            if (token[i] == '\\' && i + 2 < token.size()) {
+                ++i;
+            }
+            out += token[i];
+        }
+        return out;
+    }
+    return std::string{token};
+}
+
+/// Where the key that starts at `at` ends: past its closing quote, or at the
+/// `:` a plain key runs to (`: ` or `:` at the end); npos when there is none.
+std::size_t key_token_end(std::string_view line, std::size_t at) {
+    if (at < line.size() && (line[at] == '"' || line[at] == '\'')) {
+        const char quote = line[at];
+        for (std::size_t i = at + 1; i < line.size(); ++i) {
+            if (quote == '"' && line[i] == '\\') {
+                ++i;
+                continue;
+            }
+            if (line[i] == quote) {
+                return i + 1 < line.size() && line[i + 1] == ':' ? i + 1 : std::string_view::npos;
+            }
+        }
+        return std::string_view::npos;
+    }
+    for (std::size_t i = at; i < line.size(); ++i) {
+        if (line[i] == ':' && (i + 1 == line.size() || line[i + 1] == ' ' || line[i + 1] == '\t')) {
+            return i;
+        }
+        if (line[i] == '#' && i > at && (line[i - 1] == ' ' || line[i - 1] == '\t')) {
+            return std::string_view::npos;
+        }
+    }
+    return std::string_view::npos;
+}
+
+/// Where a value starting at `from` ends: before a ` #` comment outside its
+/// quotes and its trailing blanks.
+std::size_t value_token_end(std::string_view line, std::size_t from) {
+    char quote = 0;
+    std::size_t end = line.size();
+    for (std::size_t i = from; i < line.size(); ++i) {
+        const char c = line[i];
+        if (quote != 0) {
+            if (quote == '"' && c == '\\') {
+                ++i;
+            } else if (c == quote) {
+                quote = 0;
+            }
+            continue;
+        }
+        if ((c == '"' || c == '\'') && i == from) {
+            quote = c;
+        } else if (c == '#' && i > from && (line[i - 1] == ' ' || line[i - 1] == '\t')) {
+            end = i;
+            break;
+        }
+    }
+    while (end > from && (line[end - 1] == ' ' || line[end - 1] == '\t')) {
+        --end;
+    }
+    return end;
+}
+
+/// Whether `path` is one of `patterns`, `*` standing for any key or item.
+bool reference_path(const std::vector<std::string>& path,
+                    const std::vector<std::vector<std::string>>& patterns) {
+    return std::ranges::any_of(patterns, [&path](const std::vector<std::string>& pattern) {
+        if (pattern.size() != path.size()) {
+            return false;
+        }
+        for (std::size_t i = 0; i < path.size(); ++i) {
+            if (pattern[i] != "*" && pattern[i] != path[i]) {
+                return false;
+            }
+        }
+        return true;
+    });
+}
+
+/// A flow mapping's values naming `old_name` replaced, each at a reference
+/// path under `path` -- `{chat: root, utility: helper}` as a suite's members.
+std::string rename_in_flow_map(std::string_view flow, std::vector<std::string> path,
+                               const std::vector<std::vector<std::string>>& patterns,
+                               std::string_view old_name, std::string_view new_name) {
+    std::string out;
+    std::size_t at = 1;  // past `{`
+    out += '{';
+    while (at < flow.size()) {
+        // One `key: value` item, to the next top-level `,` or the `}`.
+        std::size_t end = at;
+        char quote = 0;
+        while (end < flow.size()) {
+            const char c = flow[end];
+            if (quote != 0) {
+                if (c == quote) {
+                    quote = 0;
+                }
+            } else if (c == '"' || c == '\'') {
+                quote = c;
+            } else if (c == ',' || c == '}') {
+                break;
+            }
+            ++end;
+        }
+        std::string item{flow.substr(at, end - at)};
+        if (const std::size_t colon = item.find(':'); colon != std::string::npos && colon > 0) {
+            const std::size_t key_from = item.find_first_not_of(" \t");
+            const std::string key = token_text_of(std::string_view{item}.substr(
+                key_from, item.find_last_not_of(" \t", colon - 1) + 1 - key_from));
+            const std::size_t from = item.find_first_not_of(" \t", colon + 1);
+            if (from != std::string::npos) {
+                const std::size_t last = item.find_last_not_of(" \t");
+                path.push_back(key);
+                if (reference_path(path, patterns) && token_text_of(std::string_view{item}.substr(
+                                                          from, last + 1 - from)) == old_name) {
+                    item = item.substr(0, from) + yaml_scalar(new_name) + item.substr(last + 1);
+                }
+                path.pop_back();
+            }
+        }
+        out += item;
+        if (end < flow.size()) {
+            out += flow[end];
+        }
+        at = end + 1;
+    }
+    return out;
+}
+
+}  // namespace
+
+std::string rename_backend(std::string_view content, std::string_view old_name,
+                           std::string_view new_name,
+                           const std::vector<std::vector<std::string>>& patterns) {
+    Lines lines = split_lines(content);
+    const SectionRange backends = find_section(lines, "backends");
+    if (!backends.found) {
+        throw ConfigEditError("no backend named '" + std::string{old_name} + "'");
+    }
+    // The entry's key line, a comment after it allowed; the key renamed
+    // where it stands, its fields and comments untouched.
+    std::optional<std::size_t> key_line;
+    for (std::size_t i = backends.begin; i < backends.end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line) || indent_of(line) != kEntryIndent) {
+            continue;
+        }
+        const std::size_t end = key_token_end(line, kEntryIndent);
+        if (end == std::string_view::npos) {
+            continue;
+        }
+        if (const std::size_t rest = line.find_first_not_of(" \t", end + 1);
+            rest != std::string_view::npos && line[rest] != '#') {
+            continue;  // a `key: value` line, no entry
+        }
+        if (token_text_of(line.substr(kEntryIndent, end - kEntryIndent)) == old_name) {
+            key_line = i;
+            break;
+        }
+    }
+    if (!key_line.has_value()) {
+        throw ConfigEditError("no backend named '" + std::string{old_name} + "'");
+    }
+    {
+        std::string& line = lines[*key_line];
+        const std::size_t end = key_token_end(body(line), kEntryIndent);
+        line = line.substr(0, kEntryIndent) + yaml_scalar(new_name) + line.substr(end);
+    }
+
+    // Every reference: a walk of the mappings by path, a value naming the old
+    // key at a reference path replaced where it stands.
+    struct Frame {
+        std::size_t indent;
+        std::string key;
+    };
+
+    std::vector<Frame> stack;
+    std::optional<std::size_t> block_indent;  // inside a `|` or `>` scalar
+    for (std::string& raw : lines) {
+        const std::string_view line = body(raw);
+        if (is_blank(line) || is_comment(line)) {
+            continue;
+        }
+        std::size_t at = indent_of(line);
+        if (block_indent.has_value()) {
+            if (at > *block_indent) {
+                continue;
+            }
+            block_indent.reset();
+        }
+        const auto pop_to = [&stack](std::size_t indent) {
+            while (!stack.empty() && stack.back().indent >= indent) {
+                stack.pop_back();
+            }
+        };
+        // `- ` items, each a level of its own -- under the key above, even
+        // when the list is written at that key's own indent.
+        while (at + 1 < line.size() && line[at] == '-' && line[at + 1] == ' ') {
+            while (!stack.empty() && (stack.back().indent > at ||
+                                      (stack.back().indent == at && stack.back().key == "*"))) {
+                stack.pop_back();
+            }
+            stack.push_back({at, "*"});
+            at += 2;
+            while (at < line.size() && line[at] == ' ') {
+                ++at;
+            }
+        }
+        pop_to(at);
+        const std::size_t end = key_token_end(line, at);
+        if (end == std::string_view::npos) {
+            continue;  // a list's scalar, or text
+        }
+        const std::string key = token_text_of(line.substr(at, end - at));
+        const std::size_t from = line.find_first_not_of(" \t", end + 1);
+        const std::size_t stop =
+            from == std::string_view::npos ? from : value_token_end(line, from);
+        if (from == std::string_view::npos || stop == from || line[from] == '#') {
+            stack.push_back({at, key});  // a mapping or a list follows
+            continue;
+        }
+        const std::string_view value = line.substr(from, stop - from);
+        std::vector<std::string> path;
+        for (const Frame& frame : stack) {
+            path.push_back(frame.key);
+        }
+        path.push_back(key);
+        if (value.front() == '|' || value.front() == '>') {
+            block_indent = at;
+            continue;
+        }
+        if (value.front() == '{') {
+            raw = raw.substr(0, from) +
+                  rename_in_flow_map(value, path, patterns, old_name, new_name) + raw.substr(stop);
+            continue;
+        }
+        if (reference_path(path, patterns) && token_text_of(value) == old_name) {
+            raw = raw.substr(0, from) + yaml_scalar(new_name) + raw.substr(stop);
+        }
+    }
+    return join_lines(lines);
+}
+
 }  // namespace yaml_text
 
 namespace {
@@ -2165,6 +2430,118 @@ std::string in_format(std::string_view content, Transform&& transform) {
 }
 
 }  // namespace
+
+std::vector<std::vector<std::string>> backend_reference_paths() {
+    std::vector<std::vector<std::string>> paths;
+    for (const std::string_view field : yaml_text::models_role_fields()) {
+        paths.push_back({"models", std::string{field}});
+    }
+    paths.push_back({"suites", "*", "members", "*"});
+    paths.push_back({"suites", "*", "members", "*", "backend"});
+    paths.push_back({"embeddings", "*", "backend"});
+    paths.push_back({"embeddings", "*", "rerank"});
+    paths.push_back({"embeddings", "*", "graph", "extract_backend"});
+    paths.push_back({"graphs", "*", "extract_backend"});
+    paths.push_back({"agents", "*", "model"});
+    paths.push_back({"training", "judge_backend"});
+    paths.push_back({"training", "regimes", "*", "teacher"});
+    paths.push_back({"training", "cycle", "backend"});
+    paths.push_back({"training", "cycle", "judge_backend"});
+    paths.push_back({"training", "cycle", "sources", "*", "backend"});
+    return paths;
+}
+
+namespace {
+
+/// The values naming `old_name` at `path`'s matches under `node`, replaced.
+void rename_references(nlohmann::ordered_json& node, const std::vector<std::string>& path,
+                       std::size_t at, std::string_view old_name, std::string_view new_name) {
+    if (at == path.size()) {
+        if (node.is_string() && node.get_ref<const std::string&>() == old_name) {
+            node = std::string{new_name};
+        }
+        return;
+    }
+    if (path[at] == "*") {
+        if (node.is_object() || node.is_array()) {
+            for (auto& child : node) {
+                rename_references(child, path, at + 1, old_name, new_name);
+            }
+        }
+        return;
+    }
+    if (node.is_object() && node.contains(path[at])) {
+        rename_references(node[path[at]], path, at + 1, old_name, new_name);
+    }
+}
+
+/// The JSONC half: the key renamed where it stands -- its member, its
+/// comments and its place kept -- then the references, as values spliced in
+/// place (`jsonc::patch`).
+std::string rename_backend_jsonc(std::string_view content, std::string_view old_name,
+                                 std::string_view new_name) {
+    jsonc::Value root;
+    try {
+        root = jsonc::parse(content);
+    } catch (const jsonc::JsoncError& e) {
+        throw ConfigEditError(std::string{"the config is not valid JSON: "} + e.what());
+    }
+    const auto backends_at = std::ranges::find(root.keys, "backends");
+    if (root.kind != jsonc::Kind::Object || backends_at == root.keys.end()) {
+        throw ConfigEditError("no backend named '" + std::string{old_name} + "'");
+    }
+    const jsonc::Value& backends =
+        root.children.at(static_cast<std::size_t>(backends_at - root.keys.begin()));
+    const auto entry = std::ranges::find(backends.keys, old_name);
+    if (backends.kind != jsonc::Kind::Object || entry == backends.keys.end()) {
+        throw ConfigEditError("no backend named '" + std::string{old_name} + "'");
+    }
+    const std::size_t begin =
+        backends.key_begins.at(static_cast<std::size_t>(entry - backends.keys.begin()));
+    std::size_t end = begin + 1;
+    while (end < content.size() && content[end] != '"') {
+        end += content[end] == '\\' ? 2 : 1;
+    }
+    std::string text = std::string{content.substr(0, begin)} +
+                       nlohmann::ordered_json(std::string{new_name}).dump() +
+                       std::string{content.substr(end + 1)};
+    nlohmann::ordered_json target = jsonc::parse_json(text);
+    for (const std::vector<std::string>& path : backend_reference_paths()) {
+        rename_references(target, path, 0, old_name, new_name);
+    }
+    try {
+        return jsonc::patch(text, target);
+    } catch (const jsonc::JsoncError& e) {
+        throw ConfigEditError(e.what());
+    }
+}
+
+}  // namespace
+
+std::string rename_backend(std::string_view content, std::string_view old_name,
+                           std::string_view new_name) {
+    if (new_name.empty() || new_name.find_first_of(" \t\r\n:") != std::string_view::npos) {
+        throw ConfigEditError("'" + std::string{new_name} +
+                              "' cannot name a backend -- a name is one word, no colon");
+    }
+    if (old_name == new_name) {
+        throw ConfigEditError("'" + std::string{old_name} + "' is already its name");
+    }
+    // A name taken -- the same folded, as add-backend refuses one -- unless it
+    // is this backend's own, a change of case.
+    for (const std::string& name : section_entry_names(content, "backends")) {
+        if (name != old_name && yaml_text::fold_collision({name}, new_name).has_value()) {
+            throw ConfigEditError("a backend named '" + name + "' already exists");
+        }
+        if (name == new_name) {
+            throw ConfigEditError("a backend named '" + name + "' already exists");
+        }
+    }
+    if (jsonc::looks_like_jsonc(content)) {
+        return rename_backend_jsonc(content, old_name, new_name);
+    }
+    return yaml_text::rename_backend(content, old_name, new_name, backend_reference_paths());
+}
 
 std::string yaml_scalar(std::string_view value) {
     return yaml_text::yaml_scalar(value);

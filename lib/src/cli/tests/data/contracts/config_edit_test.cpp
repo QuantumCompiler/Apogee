@@ -1664,3 +1664,131 @@ TEST_CASE("attachments.graph off its set, or on a line the editor cannot see int
     CHECK(apogee::harness::load_config(path).attachments.graph ==
           apogee::harness::AttachmentGraphMethod::Off);
 }
+
+// --- renaming a backend (46a) ----------------------------------------------
+
+namespace {
+
+/// Every way a backend is named in a config, around comments, with the
+/// traps a rename must leave alone: an MCP server and a collection of the
+/// same name, a prompt that says it, a name that only begins with it.
+constexpr std::string_view kRenameYaml = R"(# The config, with notes.
+backends:
+  # The local model, quantized.
+  gemma:   # the one we use
+    type: llamacpp
+    model_path: /models/gemma.gguf   # 12B
+  gemma-old:
+    type: mock
+  claude:
+    type: anthropic
+models:
+  default: gemma   # the chat
+  default_utility: "gemma"
+  default_vision: claude
+suites:
+  duo:
+    members:
+      chat: gemma
+      utility: {backend: gemma, window: 8192}
+  flow:
+    members: {chat: gemma, utility: claude}
+embeddings:
+  gemma:
+    backend: gemma
+    rerank: gemma
+    graph:
+      extract_backend: gemma
+graphs:
+  code:
+    extract_backend: gemma
+agents:
+  reviewer:
+    model: gemma
+mcp_servers:
+  gemma:
+    command: /bin/echo
+symphonies:
+  say:
+    description: Says gemma.
+    stages:
+      - name: one
+        role: chat
+        prompt: |
+          backend: gemma
+          model: gemma
+training:
+  judge_backend: gemma
+  regimes:
+    mine:
+      teacher: gemma
+      kits: [summarization]
+  cycle:
+    backend: gemma
+    judge_backend: claude
+    sources:
+    - type: sessions
+      log_consent: true
+      backend: gemma
+    - type: directory
+      path: /data
+)";
+
+}  // namespace
+
+TEST_CASE("rename_backend renames the key and every reference, and nothing else",
+          "[config_edit][rename]") {
+    const std::string renamed = apogee::harness::rename_backend(kRenameYaml, "gemma", "gemma4-12b");
+    std::string expected{kRenameYaml};
+    const auto swap = [&expected](std::string_view from, std::string_view to) {
+        const std::size_t at = expected.find(from);
+        REQUIRE(at != std::string::npos);
+        expected.replace(at, from.size(), to);
+    };
+    swap("  gemma:   # the one we use", "  gemma4-12b:   # the one we use");
+    swap("  default: gemma   # the chat", "  default: gemma4-12b   # the chat");
+    swap("  default_utility: \"gemma\"", "  default_utility: gemma4-12b");
+    swap("      chat: gemma\n", "      chat: gemma4-12b\n");
+    swap("{backend: gemma, window: 8192}", "{backend: gemma4-12b, window: 8192}");
+    swap("{chat: gemma, utility: claude}", "{chat: gemma4-12b, utility: claude}");
+    swap("    backend: gemma\n    rerank: gemma\n",
+         "    backend: gemma4-12b\n    rerank: gemma4-12b\n");
+    swap("      extract_backend: gemma\n", "      extract_backend: gemma4-12b\n");
+    swap("    extract_backend: gemma\nagents", "    extract_backend: gemma4-12b\nagents");
+    swap("    model: gemma\nmcp", "    model: gemma4-12b\nmcp");
+    swap("  judge_backend: gemma\n", "  judge_backend: gemma4-12b\n");
+    swap("      teacher: gemma\n", "      teacher: gemma4-12b\n");
+    swap("    backend: gemma\n    judge_backend: claude",
+         "    backend: gemma4-12b\n    judge_backend: claude");
+    swap("      backend: gemma\n    - type: directory",
+         "      backend: gemma4-12b\n    - type: directory");
+    CHECK(renamed == expected);
+    // It loads, the name moved and its references with it.
+    const apogee::harness::Config config = apogee::harness::parse_config(renamed, "renamed");
+    CHECK(config.find_backend("gemma4-12b") != nullptr);
+    CHECK(config.find_backend("gemma") == nullptr);
+    CHECK(config.models.default_backend == "gemma4-12b");
+    // Back again is the file it was -- but for the value written quoted, which
+    // the editor writes plain, as it writes every value YAML reads unchanged.
+    std::string back{kRenameYaml};
+    back.replace(back.find("default_utility: \"gemma\""), 24, "default_utility: gemma");
+    CHECK(apogee::harness::rename_backend(renamed, "gemma4-12b", "gemma") == back);
+}
+
+TEST_CASE("rename_backend refuses an unknown name, a taken one, and a name no key can be",
+          "[config_edit][rename]") {
+    using apogee::harness::ConfigEditError;
+    using apogee::harness::rename_backend;
+    CHECK_THROWS_WITH(rename_backend(kRenameYaml, "nope", "x"), "no backend named 'nope'");
+    CHECK_THROWS_WITH(rename_backend(kRenameYaml, "gemma", "claude"),
+                      "a backend named 'claude' already exists");
+    CHECK_THROWS_WITH(rename_backend(kRenameYaml, "gemma", "Claude"),
+                      "a backend named 'claude' already exists");
+    CHECK_THROWS_WITH(rename_backend(kRenameYaml, "gemma", "gemma"), "'gemma' is already its name");
+    CHECK_THROWS_WITH(rename_backend(kRenameYaml, "gemma", "two words"),
+                      "'two words' cannot name a backend -- a name is one word, no colon");
+    CHECK_THROWS_WITH(rename_backend(kRenameYaml, "gemma", "a:b"),
+                      "'a:b' cannot name a backend -- a name is one word, no colon");
+    // A change of case is the backend's own name: allowed.
+    CHECK_NOTHROW(rename_backend(kRenameYaml, "gemma", "Gemma"));
+}

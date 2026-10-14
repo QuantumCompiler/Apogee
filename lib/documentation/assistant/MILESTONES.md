@@ -131,6 +131,57 @@ yaml-cpp 0.8.0 opens with `cmake_minimum_required(VERSION 3.4)`, which CMake ≥
 
 ---
 
+### 2026-10-14 — `rename-propagation` (backlog item 46a): renames that propagate
+
+**Why.** There was no way to rename anything. `models`' nine verbs and `config`'s twenty-four held no rename and no edit, and both names are load-bearing:
+- **A backend's key** is named by `models.default`, the helper roles, every suite's members and every saved chat, so a hand edit left each of those dangling, the chats on the orphan path (`BackendMissing`).
+- **A stored model's name** is its store directory, which every pointing backend's `model_path` spells out, its records inside it.
+
+The user asked for both, with changes that "propagate immediately".
+
+- [x] **The editor's rename** (`contracts/config_edit`, `rename_backend`), one transform and one atomic write:
+  - **the key renamed where it stands**, its fields, comments and place kept: in JSONC by the key's own span, in YAML by its line, a comment after it allowed;
+  - **every value naming it at a reference path** (`backend_reference_paths`), replaced in place:
+    - the role pointers;
+    - every suite member, as a key or as a mapping's `backend`;
+    - a collection's `backend`, `rerank` and graph `extract_backend`, and a named graph's `extract_backend`;
+    - an agent's `model`;
+    - a regime's `teacher`;
+    - the training judge, and the cycle's backend, judge and session sources.
+  - **how each format is walked**: YAML's mappings by path, stepping over block scalars (a prompt that says the name stays) and reading flow mappings; JSONC's values spliced by `jsonc::patch`;
+  - **its refusals**: an unknown name, a taken one (folded, as `add-backend` folds it, a change of case allowed), or one that cannot name a backend.
+- [x] **`config rename-backend <name> <new-name>`** (`operations/renames`, `rename_backend_everywhere`):
+  - the edit above;
+  - then the saved chats swept (`logger::rename_session_backend`): every chat naming it, its backend and its rerank judge, rewritten atomically with its `updated_at` kept, since a rename is no new turn. A file that cannot be written is counted and said, its resume the orphan path's;
+  - and **the coupling**, the spike's rule (a):
+    - the store directory moves only when this backend alone runs that stored model and both names are its M3 spelling (`<base>-<level>`, the new name keeping the level). The new directory keeps the owner's prefix, the backend's own paths are repointed in the same edit, and a refused edit moves it back;
+    - otherwise the store stays, said with why: `store 'org--gemma' unchanged -- 'gemma-F16' still points at it`, or `-- 'local' is not named after it`.
+- [x] **`models rename <model> <new-name>`** (`rename_stored_model`):
+  - the model's directories moved, in each root that holds one, the records riding inside;
+  - every backend pointing into them repointed, the user's `~` or `${VAR}` kept since only the one path segment changes;
+  - the backends named the M3 way after it renamed to the new base in the same edit, their references with them, and their chats swept;
+  - a backend whose new name is taken is left and said, never suffixed;
+  - refused naming why: an unknown model, a taken name, a name no directory can have, a model being written (a `.partial` inside it).
+- [x] **Every mode** (ADR 0002):
+  - `POST /v1/admin/backends/{id}/rename` is `config rename-backend`'s twin through the one core, byte for byte, its lines returned as `said`. The HTTP parity table classifies it, and `http-api.md` documents it.
+  - `models rename` has no twin. The admin plane has no models slice, so its row is the models plane's backfill, skipped and said, as `models delete` and `models convert` are.
+  - The exec line runs both verbs (ADR 0010).
+  - The old names complete, the new ones are free text on the audit's list (ADR 0007).
+- [x] **The tests**:
+  - the editor's goldens over a YAML config naming a backend every way there is, beside the traps it must leave (a same-named MCP server and collection, a prompt that says the name, a name that only begins with it): the result is the input with exactly those spans swapped, and the JSONC twin is the same, back again byte for byte;
+  - `renames_test` through the real commands: the sweep, a chat resuming on the new name with nothing said about a missing backend, the three coupling cases, `models rename`'s moves, repoints, derived renames and a collision, every refusal, and the M3 spelling read as M3 writes it;
+  - the admin twin byte-identical to the CLI;
+  - `cli.config_lifecycle` on the real binary: a rename moving every role pointer, and its reverse leaving the template-seeded file exactly as it was.
+
+Decisions taken while building, for veto:
+- **Every reference, not only the listed three.** The document named the default, the role pointers and the suite members. The config also names a backend in collections, graphs, agents and training, and leaving those would be the silent half-rename the item forbids. So the reference paths are declared once, and the editor's test holds the loader to them.
+- **The cores live in `operations/`**, so the admin twin calls the same function as the CLI and neither includes the other. `operations` gains a link to `modelstore/` for the store's paths: one row of `cmake/modules.cmake`, a Presentation-to-Data edge the law allows.
+- **A YAML value written quoted comes back plain** when a rename passes over it, as every value the editor writes is plain where YAML reads it unchanged. JSONC keeps its quotes.
+- **A new backend name must be one word with no colon.** A colon reads as 34's `<backend>:<model>` pin.
+- **The swept chats keep their place in the list**, since `updated_at` is kept, and a rerank judge naming the old backend is swept too.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) ran 3,304 tests, one skipped for want of `pdftotext`. One failed: `serve_test`'s pinned count of admin routes, 86, which the rename twin made 87. It now names the route as well, and that case was rerun green in the same build. `cli.config_lifecycle`, `cli.http_api_conformance`, `harness.layering` (with `operations`' new link) and `harness.layer_context` all passed. `make format-check` is clean for every file touched.
+
 ## Milestone C — The harness core
 
 **Goal.** The interface layer everything else is written against: one provider interface, one canonical message IR, one router. After this, "add a backend" means implementing an interface, and no surface, loop, or session file learns that a fifth vendor exists. Streaming, cancellation, multimodal content, and tool structures have to be in the interface on day one — adding any of them later means touching every implementation and every caller at once.
