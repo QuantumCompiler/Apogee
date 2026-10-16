@@ -528,8 +528,11 @@ RenameOutcome rename_stored_model(const std::filesystem::path& config_path,
                 const bool taken =
                     std::ranges::any_of(
                         config->backend_names(),
-                        [&](const auto& key) {
-                            return key != name &&
+                        // `name` is a structured binding: CI's AppleClang 15
+                        // cannot capture one into a generic lambda, so it is
+                        // captured through a variable of its own.
+                        [&current = name, &renamed](const std::string& key) {
+                            return key != current &&
                                    harness::fold_collision({key}, renamed).has_value();
                         }) ||
                     config->find_backend(renamed) != nullptr;

@@ -1083,9 +1083,10 @@ void held_to_declaration(const nlohmann::json& event) {
             continue;
         }
         INFO("field: " << key);
-        CHECK(std::ranges::any_of(line->fields, [&key](const apogee::commands::FieldSpec& field) {
-            return field.name == key;
-        }));
+        CHECK(std::ranges::any_of(line->fields,
+                                  [&event_key = key](const apogee::commands::FieldSpec& field) {
+                                      return field.name == event_key;
+                                  }));
     }
     for (const apogee::commands::FieldSpec& field : line->fields) {
         if (field.required) {

@@ -102,9 +102,9 @@ void Registry::register_into(agent::ToolRegistry& registry) const {
                 info.description.empty() ? "(" + server + ") " + info.name : info.description;
             tool.parameters_schema = info.input_schema.dump();
             tool.writes = !(info.read_only_hint.has_value() && *info.read_only_hint);
-            tool.run = [client, name = info.name](std::string_view arguments) {
+            tool.run = [connection = client, name = info.name](std::string_view arguments) {
                 const ToolCallResult result =
-                    client->call_tool(name, arguments, harness::CancellationToken{});
+                    connection->call_tool(name, arguments, harness::CancellationToken{});
                 return agent::ToolOutcome{result.text, result.is_error};
             };
             tool.describe_target = [name = info.name](std::string_view arguments) {

@@ -543,8 +543,9 @@ TEST_CASE("query keeps the expansion's budget and caps", "[graph][navigate][quer
 
     for (const auto& [hops, entities] :
          std::vector<std::pair<int, int>>{{0, 8}, {3, 8}, {1, 0}, {1, 51}}) {
-        const Failure failure = failure_of(
-            [&] { (void)apogee::graph::query_graph(g.store, "own", "helper", hops, entities); });
+        const Failure failure = failure_of([&g, depth = hops, cap = entities] {
+            (void)apogee::graph::query_graph(g.store, "own", "helper", depth, cap);
+        });
         CHECK(failure.kind == Kind::InvalidArgument);
     }
     CHECK(failure_of([&] { (void)apogee::graph::query_graph(g.store, "own", "  ", 1, 8); }).kind ==
