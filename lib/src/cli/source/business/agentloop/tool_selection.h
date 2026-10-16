@@ -109,8 +109,8 @@ struct ToolEmbedding {
     EmbedFunc embed;
     /// Names the vector space: part of every cache key.
     std::string model;
-    std::function<std::optional<std::vector<float>>(const std::string& key)> load;
-    std::function<void(const ToolVectors& made)> store;
+    std::function<std::optional<std::vector<float>>(const std::string& key)> load{};
+    std::function<void(const ToolVectors& made)> store{};
 };
 
 /// One tool's place in a ranking.

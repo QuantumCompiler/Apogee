@@ -732,7 +732,7 @@ std::string render_map_card(std::string_view name, const std::vector<std::string
             directory = &directory->children[parts[i]];
             ++directory->files;
         }
-        here += parts.size() == common + 1 ? 1 : 0;
+        here += parts.size() == common + 1 ? 1U : 0U;
         const std::string& base = parts.back();
         const std::size_t dot = base.rfind('.');
         ++extensions[dot == std::string::npos || dot == 0 ? std::string{"(none)"}

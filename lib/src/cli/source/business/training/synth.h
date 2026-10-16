@@ -41,8 +41,8 @@ struct SynthExample {
 /// help (a rate limit, a transient failure) -- a refused key cannot.
 struct GenerateOutcome {
     bool ok = false;
-    std::string text;
-    std::string error;
+    std::string text{};
+    std::string error{};
     bool retryable = true;
 };
 

@@ -37,7 +37,7 @@ struct AdminConfigContext {
     /// consultable members (27f) -- the CLI's own probe, handed down by the
     /// composition root, which can build providers. Null tells nothing, and
     /// unknown is metered.
-    commands::MeteredProbe metered;
+    commands::MeteredProbe metered{};
 };
 
 /// A backend entry as the plane serializes it: every field but the key.

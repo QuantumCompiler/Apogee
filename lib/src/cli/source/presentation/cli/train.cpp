@@ -2092,13 +2092,13 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             }
             std::cout << "  " << pad("PIPELINE", 30) << pad("SPEC", 16) << pad("STATUS", 10)
                       << pad("STAGES", 8) << "STARTED\n";
-            for (const training::PipelineSummary& pipeline : pipelines) {
-                std::cout << "  " << pad(pipeline.id, 30) << pad(pipeline.spec_name, 16)
-                          << pad(pipeline.status, 10)
-                          << pad(std::to_string(pipeline.passed) + "/" +
-                                     std::to_string(pipeline.stages),
+            for (const training::PipelineSummary& summary : pipelines) {
+                std::cout << "  " << pad(summary.id, 30) << pad(summary.spec_name, 16)
+                          << pad(summary.status, 10)
+                          << pad(std::to_string(summary.passed) + "/" +
+                                     std::to_string(summary.stages),
                                  8)
-                          << pipeline.started_at << "\n";
+                          << summary.started_at << "\n";
             }
             return;
         }
@@ -2405,12 +2405,12 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         }
         const training::TrainingStore store{harness::training_dir()};
         const training::RunManifest final_stage = require_manifest(store, outcome.promote_run_id);
-        PromoteRequest promote;
-        promote.backend = spec.promote_as;
+        PromoteRequest promote_request;
+        promote_request.backend = spec.promote_as;
         std::cerr << "[regime] promoting " << outcome.promote_run_id << " as " << spec.promote_as
                   << "\n";
         const PromoteOutcome result = promote_run(
-            config, config_path, store, final_stage, *trainer, *convert, promote,
+            config, config_path, store, final_stage, *trainer, *convert, promote_request,
             [](std::string_view text) { std::cerr << "[promote] " << text << "\n"; },
             InterruptScope::token());
         if (result.cancelled) {
@@ -2516,10 +2516,10 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                 promotion.error = error;
                 return promotion;
             }
-            PromoteRequest promote;
-            promote.backend = settings.backend;
+            PromoteRequest promote_request;
+            promote_request.backend = settings.backend;
             const PromoteOutcome result = promote_run(
-                config, config_path, store, *manifest, *trainer, convert, promote,
+                config, config_path, store, *manifest, *trainer, convert, promote_request,
                 [](std::string_view text) { std::cerr << "[promote] " << text << "\n"; },
                 InterruptScope::token());
             promotion.ok = result.ok;

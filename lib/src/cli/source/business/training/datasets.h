@@ -112,10 +112,10 @@ struct SessionView {
 
 struct SessionFilter {
     /// Only sessions that ran on this backend; empty means any.
-    std::string backend;
+    std::string backend{};
     /// `YYYY-MM-DD`, inclusive both ends; empty means unbounded.
-    std::string since;
-    std::string until;
+    std::string since{};
+    std::string until{};
 };
 
 /// The filter's dates are well-formed. Empty when so.

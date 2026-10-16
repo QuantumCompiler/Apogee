@@ -161,15 +161,15 @@ public:
 private:
     /// A conversation to open: what `chat` or `execute` is given.
     struct Opening {
-        std::string chat_id;
-        std::string suite;
-        std::string model;
+        std::string chat_id{};
+        std::string suite{};
+        std::string model{};
         SessionMode mode = SessionMode::Chat;
         /// A line it takes first, as if typed (37d: a play asked for).
-        std::string first_line;
+        std::string first_line{};
         /// The flags it was launched with (44c), parsed through the session
         /// table by `apogee tui`; the rest above unused when set.
-        std::shared_ptr<const SessionFlags> launch;
+        std::shared_ptr<const SessionFlags> launch{};
     };
 
     void open(Opening opening);

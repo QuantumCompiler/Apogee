@@ -37,7 +37,7 @@ struct Question {
     /// Short label for the question, for a compact UI.
     std::string header;
     std::string question;
-    std::vector<QuestionOption> options;
+    std::vector<QuestionOption> options{};
     /// Whether several options may be chosen.
     bool multi_select = false;
 };

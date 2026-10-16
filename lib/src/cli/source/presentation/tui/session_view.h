@@ -57,7 +57,7 @@ struct PickerDoor {
 struct Choice {
     std::string key;
     std::string label;
-    std::string description;
+    std::string description{};
 };
 
 /// Something the session asks the person: a permission, a question, a yes or
@@ -66,7 +66,7 @@ struct Prompt {
     /// What is asked, a line each -- as the core styled them for a terminal.
     std::vector<std::string> lines;
     /// The answers on offer, each picked by its key.
-    std::vector<Choice> choices;
+    std::vector<Choice> choices{};
     /// Whether the person may type an answer of their own instead (a
     /// question's free text): typed and entered, it is the answer.
     bool free_text = false;

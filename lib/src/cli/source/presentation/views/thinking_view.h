@@ -36,7 +36,7 @@ public:
         /// When set, asked for the width at every repaint instead: a terminal
         /// resized mid-turn otherwise wraps rows painted for the old width,
         /// and the erase arithmetic goes wrong with them.
-        std::function<std::size_t()> measure;
+        std::function<std::size_t()> measure{};
         /// Whether to render at all. False on a pipe -- a non-TTY run emits no
         /// thinking, no escape codes, and no summary line.
         bool active = true;
@@ -44,7 +44,7 @@ public:
         /// movement and no collapse. Someone debugging a model wants every
         /// word, and the collapsed view is actively hostile to that.
         bool verbose = false;
-        ansi::Style style;
+        ansi::Style style{};
     };
 
     ThinkingView(TerminalWriter& writer, Options options);

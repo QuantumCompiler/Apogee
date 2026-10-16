@@ -64,8 +64,10 @@ struct World {
                  {"root", std::move(root)}, {"helper", std::move(helper)}, {"paid", {}}}) {
             MockProvider::Options options;
             options.backend_name = name;
-            options.turns =
-                turns.empty() ? std::vector<MockTurn>{MockTurn{.text = name + " says hi"}} : turns;
+            options.turns = turns;
+            if (options.turns.empty()) {
+                options.turns.push_back(MockTurn{.text = name + " says hi"});
+            }
             options.metered = name == "paid";
             mocks[name] = std::make_shared<MockProvider>(std::move(options));
             harness.register_provider(name, mocks[name]);

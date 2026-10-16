@@ -121,7 +121,7 @@ struct Segment {
 /// left out of the list and said in `problems`.
 struct Catalog {
     std::vector<Definition> definitions;
-    std::vector<std::string> problems;
+    std::vector<std::string> problems{};
     /// How deep a play may nest (27r): the config's `symphony_caps.depth`.
     std::int64_t max_depth = harness::kSymphonyDepth;
 

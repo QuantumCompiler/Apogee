@@ -233,10 +233,10 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
             {
                 // A model call of its own, said inside the turn (26n).
                 // The resolver ran a vector half only with an embedder in hand.
-                const Embedder& embedder = turn.embedder.value();
+                const Embedder& embedding_model = turn.embedder.value();
                 const SideCallScope said{turn.on_side_call, "embedding",
-                                         "the question → " + embedder.backend};
-                vectors = embedder.embed({turn.question}, turn.cancellation);
+                                         "the question → " + embedding_model.backend};
+                vectors = embedding_model.embed({turn.question}, turn.cancellation);
             }
             if (vectors.size() != 1) {
                 throw std::runtime_error("the embedder returned no vector for the question");

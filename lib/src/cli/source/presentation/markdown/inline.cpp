@@ -24,9 +24,9 @@ namespace {
 /// One piece of the line before emphasis is resolved: literal text, or a run
 /// of `*`, `_` or `~~` that may open or close emphasis.
 struct Node {
-    std::string text;
+    std::string text{};
     ansi::TextAttributes attributes;
-    std::string link;
+    std::string link{};
     /// `*`, `_` or `~` for a delimiter run; 0 for text.
     char delimiter = 0;
     /// Characters of the run still unmatched, shown as written at the end.
@@ -301,8 +301,8 @@ private:
         std::size_t opens = 0;
         std::size_t closes = 0;
         for (std::size_t k = i; k < end; ++k) {
-            opens += text_[k] == '(' ? 1 : 0;
-            closes += text_[k] == ')' ? 1 : 0;
+            opens += text_[k] == '(' ? 1U : 0U;
+            closes += text_[k] == ')' ? 1U : 0U;
         }
         while (end > i) {
             const char last = text_[end - 1];

@@ -45,7 +45,7 @@ class ChatRecall;
 /// path rather than a loaded value.
 struct RagSettings {
     bool flag_given = false;
-    std::string flag_value;
+    std::string flag_value{};
     int limit = 4;
     std::filesystem::path config_path;
 };

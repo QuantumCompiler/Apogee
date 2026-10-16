@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -144,12 +145,12 @@ TEST_CASE("a partially vectorised store is demoted wholesale, never searched as 
 
 TEST_CASE("an explicit vector flag with nothing to run it against is a hard error naming lexical",
           "[agentloop][retrieval][explicit]") {
-    for (const auto& [embedder, store] : std::vector<std::pair<EmbedderFacts, StoreFacts>>{
+    for (const auto& [embedder, store] : std::to_array<std::pair<EmbedderFacts, StoreFacts>>({
              {none(), vector_store("m")},
              {local(), lexical_store()},
              {local(), vector_store("someone-else")},
              {local(), partial_store("local-embed")},
-         }) {
+         })) {
         const TurnRetrieval got = resolve_turn_retriever("vector", "", embedder, store);
         CHECK_FALSE(got.error.empty());
         CHECK(got.error.find("--retriever lexical") != std::string::npos);
@@ -198,12 +199,12 @@ TEST_CASE("hybrid runs when the vector half qualifies and is REPORTED lexical wh
     CHECK(both.note.empty());
 
     // Honest degradation: never partial, never an error.
-    for (const auto& [embedder, store] : std::vector<std::pair<EmbedderFacts, StoreFacts>>{
+    for (const auto& [embedder, store] : std::to_array<std::pair<EmbedderFacts, StoreFacts>>({
              {none(), vector_store("m")},
              {local(), lexical_store()},
              {local(), vector_store("someone-else")},
              {local(), partial_store("local-embed")},
-         }) {
+         })) {
         const TurnRetrieval got = resolve_turn_retriever("hybrid", "", embedder, store);
         CHECK(got.error.empty());
         CHECK_FALSE(got.excluded);

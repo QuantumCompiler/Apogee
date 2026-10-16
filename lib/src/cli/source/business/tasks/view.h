@@ -46,7 +46,7 @@ struct CheckView {
     bool ran = false;
     bool passed = false;
     /// Why, in a few words; empty before it ran.
-    std::string detail;
+    std::string detail{};
 };
 
 /// A gated call let through or refused, and on whose authority.

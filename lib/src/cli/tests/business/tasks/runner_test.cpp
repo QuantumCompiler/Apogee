@@ -33,17 +33,17 @@ using apogee::harness::ChatMessage;
 
 /// One scripted turn.
 struct Step {
-    std::string answer;
+    std::string answer{};
     /// Wait for the cancellation token, then end cancelled.
     bool wait_for_cancel = false;
-    std::string question;
-    std::string error;
-    std::vector<t::ToolUse> tools;
-    std::vector<t::Denial> denied;
-    std::vector<t::Permit> allowed;
-    std::vector<t::Answered> answered;
+    std::string question{};
+    std::string error{};
+    std::vector<t::ToolUse> tools{};
+    std::vector<t::Denial> denied{};
+    std::vector<t::Permit> allowed{};
+    std::vector<t::Answered> answered{};
     /// Run first: what another process -- or Ctrl-C -- does meanwhile.
-    std::function<void()> before;
+    std::function<void()> before{};
 };
 
 /// The turn the command hands the runner, played from a script: a

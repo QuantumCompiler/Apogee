@@ -378,6 +378,11 @@ foreach(target IN LISTS APOGEE_TEST_TARGETS)
         APOGEE_TESTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         # The vendored converter, byte-matched to its compiled-in copy.
         APOGEE_THIRD_PARTY_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../third_party"
+        # Catch2 names each test case's hidden function by __COUNTER__, which
+        # clang 22 under -Wpedantic reports as a C2y extension at every
+        # TEST_CASE. Standard __LINE__ names them just as uniquely here: no
+        # file holds two test cases on one line.
+        CATCH_CONFIG_NO_COUNTER
     )
 
     # So tests can `#include "support/fake_command.h"` the same way source files

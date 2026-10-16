@@ -132,8 +132,9 @@ TEST_CASE("/help lines up its descriptions", "[chat][completer]") {
     const std::vector<std::string> help = chat_help_lines();
     const std::size_t column = help.front().find("List these commands");
     REQUIRE(column != std::string::npos);
+    const auto specs = chat_commands();
     for (std::size_t i = 0; i < help.size(); ++i) {
-        const ChatCommandSpec& spec = chat_commands()[i];
+        const ChatCommandSpec& spec = specs[i];
         CHECK(help[i].find(std::string{spec.description}) == column);
     }
     CHECK(help[1] == "  /model [backend|model]" + std::string(column - 24, ' ') +

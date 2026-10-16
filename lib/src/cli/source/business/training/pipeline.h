@@ -117,21 +117,21 @@ struct PipelineRunManifest {
 /// A stage's inputs as the caller resolved them from the spec's names: the
 /// dataset file and the suite's items. The core never resolves a name.
 struct ResolvedStage {
-    std::filesystem::path dataset;
+    std::filesystem::path dataset{};
     std::vector<EvalItem> suite;
     /// Where the suite came from, for the record.
-    std::string suite_label;
+    std::string suite_label{};
 };
 
 /// One progress event: a stage's phase, a training tick, or a message.
 struct PipelineProgress {
     int stage_index = 0;
-    std::string stage_name;
+    std::string stage_name{};
     /// `training`, `evaluating`, `fusing`.
-    std::string phase;
+    std::string phase{};
     /// Set for a training tick.
     const ProgressEvent* training = nullptr;
-    std::string message;
+    std::string message{};
 };
 
 struct PipelineRequest {

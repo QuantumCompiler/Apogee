@@ -79,14 +79,14 @@ struct CodeSyncResult {
 struct CodeFileState {
     std::string collection;
     std::string file;
-    std::string content_hash;
+    std::string content_hash{};
     /// The extractor that read it (`code_extractor_id`): a different one
     /// means re-parse.
-    std::string extractor;
+    std::string extractor{};
     /// The cached facts, JSON.
-    std::string facts;
+    std::string facts{};
     /// RFC 3339, UTC.
-    std::string parsed_at;
+    std::string parsed_at{};
 };
 
 /// A code mention as read back: where a node is stated.

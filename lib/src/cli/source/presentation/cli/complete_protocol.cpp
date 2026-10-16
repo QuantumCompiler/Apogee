@@ -442,8 +442,8 @@ std::vector<CandidateNote> model_notes(const harness::Config& config,
             // A bare roster id: under the one configured roster that lists it.
             for (const auto& [type, roster] : rosters.rosters) {
                 const bool configured =
-                    std::ranges::any_of(config.backends, [&type = type](const auto& entry) {
-                        return harness::to_string(entry.second.type) == type;
+                    std::ranges::any_of(config.backends, [&roster_type = type](const auto& keyed) {
+                        return harness::to_string(keyed.second.type) == roster_type;
                     });
                 if (configured && std::ranges::any_of(roster.models, [&candidate](const auto& m) {
                         return m.id == candidate;

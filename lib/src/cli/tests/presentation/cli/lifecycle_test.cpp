@@ -1346,7 +1346,7 @@ backends:
     // Insertion validity: every final candidate, typed, is one the session
     // resolves; every shelf leads to some.
     std::vector<std::string> finals;
-    for (const std::string& word : {"", "c", "g", "w", "L", "claude:", "codex:", "work:"}) {
+    for (const std::string word : {"", "c", "g", "w", "L", "claude:", "codex:", "work:"}) {
         request.current = word;
         for (const std::string& candidate : completion_candidates(request, config, commands())) {
             finals.push_back(candidate);

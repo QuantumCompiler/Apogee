@@ -28,18 +28,18 @@ struct VersionEntry {
     /// The MLX model directory an mlx backend runs (27c): the fused weights
     /// themselves, registered with no conversion. Set for an MLX version,
     /// empty for a GGUF one -- never both.
-    std::string mlx_path;
+    std::string mlx_path{};
     std::string promoted_at;
     /// Absent when no eval ran before the promotion (`--force`).
-    std::optional<double> eval_score;
-    std::optional<bool> eval_passed;
+    std::optional<double> eval_score{};
+    std::optional<bool> eval_passed{};
     /// Set when retention removed the file; the entry stays as history, so
     /// a rollback can name what it can no longer reach.
     /// The fine-tuned SafeTensors weights this version was converted from,
     /// when `--keep-fused` kept them -- in the model store beside the base
     /// model. Empty when they were dropped.
-    std::string fused_path;
-    std::string pruned_at;
+    std::string fused_path{};
+    std::string pruned_at{};
 
     [[nodiscard]] bool pruned() const noexcept {
         return !pruned_at.empty();
@@ -62,7 +62,7 @@ struct VersionLedger {
     /// The version `model_path` points at; 0 with no versions.
     int active_version = 0;
     /// Ascending by version.
-    std::vector<VersionEntry> versions;
+    std::vector<VersionEntry> versions{};
 
     [[nodiscard]] const VersionEntry* find(int version) const noexcept;
     [[nodiscard]] const VersionEntry* active() const noexcept;

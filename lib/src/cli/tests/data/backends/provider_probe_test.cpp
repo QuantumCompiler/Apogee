@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -69,7 +70,7 @@ struct ScriptedRunner {
         };
     }
 
-    [[nodiscard]] long count(std::string_view prefix) const {
+    [[nodiscard]] std::ptrdiff_t count(std::string_view prefix) const {
         return std::ranges::count_if(
             calls, [prefix](const std::string& call) { return call.starts_with(prefix); });
     }

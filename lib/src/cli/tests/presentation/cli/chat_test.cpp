@@ -1131,7 +1131,7 @@ TEST_CASE("recall stops for a run, for a session, and for good when the chat is 
     HelperChat chat{texts({"Noted.", "Fine."}), {"Title", "The project uses Postgres 16."}};
     const std::string first = first_chat(chat);
     const std::string question = "Which Postgres version does the project use?\n";
-    const auto recalled_in_last = [&chat] {
+    const auto recalled_in_last = [] {
         const auto sessions = apogee::logger::list_sessions();
         for (const auto& session : sessions) {
             for (const std::string& reply : replies(session)) {

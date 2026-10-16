@@ -154,7 +154,7 @@ TEST_CASE("a helper role falls back to the conversation's backend, then models.d
     config.models.default_transcription = "hears";
     config.models.default_utility = "helps";
 
-    for (const auto [role, pointer] :
+    for (const auto& [role, pointer] :
          {std::pair{ModelRole::Vision, "sees"}, std::pair{ModelRole::Transcription, "hears"},
           std::pair{ModelRole::Utility, "helps"}}) {
         CAPTURE(pointer);

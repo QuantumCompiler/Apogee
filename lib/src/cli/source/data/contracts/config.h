@@ -269,11 +269,11 @@ struct SuiteMember {
     std::string backend;
     /// The window the backend runs at, in tokens: its `context_size` while
     /// the suite is active. Unset keeps the entry's own.
-    std::optional<std::int64_t> context_size;
+    std::optional<std::int64_t> context_size{};
     /// The toolsets the backend is offered when it runs a conversation's
     /// tools, words of `suite_toolset_names()`. Unset offers every
     /// registered tool; an empty list offers none.
-    std::optional<std::vector<std::string>> toolset;
+    std::optional<std::vector<std::string>> toolset{};
 
     /// Whether either knob is set -- the long form is written for it.
     [[nodiscard]] bool pins() const noexcept {
@@ -346,11 +346,11 @@ inline constexpr std::string_view kDefaultVerifier = "utility";
 struct ValidateConfig {
     /// The role whose member checks, one of `consultable_role_names()` with
     /// a member in the suite.
-    std::optional<std::string> verifier;
-    std::optional<bool> tool_args;
-    std::optional<bool> extraction;
+    std::optional<std::string> verifier{};
+    std::optional<bool> tool_args{};
+    std::optional<bool> extraction{};
     /// One of `answer_check_names()`.
-    std::optional<std::string> answers;
+    std::optional<std::string> answers{};
 
     /// Whether any is set -- the block is written for it.
     [[nodiscard]] bool any() const noexcept {
@@ -566,21 +566,21 @@ struct EmbeddingConfig {
 
     /// Which backend embeds this collection. Empty means the embedding role
     /// (`models.default_embedding`, then `models.default`).
-    std::string backend;
+    std::string backend{};
 
     /// How this collection is searched when no flag says: `lexical`, `vector`,
     /// `hybrid`, or empty/`auto`. A pin, not a preference: a `vector` pin is
     /// never searched lexically, and is excluded with a note when its vectors
     /// do not qualify. Validated by `apogee check`, so a typo cannot silently
     /// mean auto.
-    std::string retriever;
+    std::string retriever{};
 
     /// The backend that reranks this collection's hits with one generation
     /// call, or `off`. Empty means no reranking.
-    std::string rerank;
+    std::string rerank{};
 
     /// The knowledge graph over this collection, when one is configured.
-    GraphConfig graph;
+    GraphConfig graph{};
 };
 
 /// One entry under `graphs:` -- a **named knowledge graph spanning several

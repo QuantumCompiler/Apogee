@@ -47,20 +47,20 @@ struct Block {
     enum class Kind : std::uint8_t { User, Line, Thinking, Answer };
     Kind kind = Kind::Line;
     /// User: what was entered. Line: the line, as the core styled it.
-    std::string text;
+    std::string text{};
     // Thinking: the turn's reasoning and its side calls, until the answer;
     // and its one-line summary (43), unless it is drawn raw after all.
-    std::string reasoning;
-    std::vector<std::string> notes;
-    std::string summary;
+    std::string reasoning{};
+    std::vector<std::string> notes{};
+    std::string summary{};
     bool raw = false;
     bool open = true;
     bool budget = false;
     Clock::time_point started{};
     long long seconds = 0;
     // Answer: the rows `markdown/` committed, and its open area.
-    std::vector<markdown::Row> rows;
-    std::vector<markdown::Row> open_rows;
+    std::vector<markdown::Row> rows{};
+    std::vector<markdown::Row> open_rows{};
 };
 
 [[nodiscard]] markdown::Span span(std::string text, ansi::TextAttributes look = {}) {

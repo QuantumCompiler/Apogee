@@ -107,7 +107,7 @@ private:
 /// A callable offered to the model. OpenAI function-calling compatible.
 struct Tool {
     std::string name;
-    std::string description;
+    std::string description{};
     /// JSON Schema for the arguments, as a JSON object. Held as text because
     /// it is passed through verbatim to every provider and never inspected
     /// here -- parsing it would only create a place to lose fidelity.
@@ -145,13 +145,13 @@ struct ChatMessage {
     MessageContent content;
 
     /// Set when role == Assistant and the model asked to call tools.
-    std::vector<ToolCall> tool_calls;
+    std::vector<ToolCall> tool_calls{};
 
     /// Set when role == Tool: the call this message answers.
-    std::string tool_call_id;
+    std::string tool_call_id{};
 
     /// Optional tool name, for role == Tool.
-    std::string name;
+    std::string name{};
 
     [[nodiscard]] static ChatMessage system(MessageContent content);
     [[nodiscard]] static ChatMessage user(MessageContent content);
@@ -197,11 +197,11 @@ struct Thinking {
     ThinkingMode mode = ThinkingMode::On;
     /// The most tokens it may spend reasoning before it must answer. Unset
     /// for none: a budget changes answers, so it is chosen, never implied.
-    std::optional<std::int64_t> budget;
+    std::optional<std::int64_t> budget{};
     /// The level chosen instead of a budget (39a): a backend with an effort
     /// control of its own spends it there, any other as `effort_budget`. The
     /// session holds one of the two, never both.
-    std::optional<Effort> effort;
+    std::optional<Effort> effort{};
 
     /// The budget to spend: the one chosen, else the level's, else none.
     [[nodiscard]] std::optional<std::int64_t> tokens() const noexcept {

@@ -86,7 +86,7 @@ struct EvalResults {
 struct JudgeReply {
     bool ok = false;
     std::string text;
-    std::string error;
+    std::string error{};
 };
 
 /// One judge call: the prompt and the two answers, the reply's text. The

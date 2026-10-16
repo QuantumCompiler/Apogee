@@ -24,7 +24,7 @@ inline constexpr ansi::Color kCodeColor = ansi::Color::Magenta;
 struct InlineOptions {
     /// What every span starts from: a heading's bold and colour, a table
     /// header's bold.
-    ansi::TextAttributes base;
+    ansi::TextAttributes base{};
     /// Links as OSC 8 hyperlinks (the text alone, underlined), or as the text
     /// followed by the address, dimmed, where the terminal has no links.
     bool hyperlinks = false;

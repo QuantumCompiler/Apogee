@@ -241,7 +241,13 @@ The standing upkeep queue *(created 2026-10-03, the user's call)* — release-ag
 
 ## Up next
 
-*Nothing is queued past v0.1.8 yet.*
+### v0.1.9 — Desktop-parity capabilities
+
+Opened 2026-10-16 (the user's call, from that day's built-in-MCP parity spike — track **47**): the capabilities that make Claude Desktop and ChatGPT feel ahead, shipped Apogee's way. The spike's reframe, measured: MCP servers are provider-neutral (the host already translates per vendor; Apogee itself answers the MCP handshake with 17 tools), so the provider-specific work is the vendors' **server-side tools** — and that is wire work in the backends, settled by the user the same day as **allowed, default-off, per entry** (the dated SPEC principle). In build order:
+
+- [ ] **Vendor server-side tools** *([47a](../backlog/v0.1.9/vendor-server-tools.md))* — each cloud vendor's own request-block tools (web search, code execution — Anthropic's first, OpenAI's and Google's where their APIs carry them) behind a per-backend-entry switch that defaults off: enabling one is recorded consent for that vendor to browse or execute on your behalf under your key, the host gate's law unchanged for every call Apogee itself makes; capability facts as plain data, every use narrated as a tool line in all four front ends, the carried vendor lists reviewed ADR-0009-style.
+- [ ] **The code-execution server** *([47b](../backlog/v0.1.9/code-exec-server.md))* — the biggest honest gap to ChatGPT closed generically: one bundled Python stdio MCP server serving every provider alike (a per-vendor server would have nothing vendor-specific to say) — a throwaway, network-less, session-scoped sandbox, bounded output and wall clock, artifacts returned as paths, `run_python` gated as a `writes` tool, the script seeded and byte-identity-held on the training drivers' precedent.
+- [ ] **MCP presets** *([47c](../backlog/v0.1.9/mcp-presets.md))* — a fresh install stops saying nothing: `apogee mcp presets` lists what the box can register (with a JSON document), `mcp create <name> --from <preset>` registers it byte-identically to the hand-typed twin; the first presets are `code-exec` and the informational `self` (Apogee's own 17-tool server, listed for other hosts, refused into itself); `mcp list`'s empty state names it, and tools.md gains the chapter with the SearXNG pointer — search stays user-owned.
 
 ## Unspecced ideas
 

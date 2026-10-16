@@ -141,7 +141,7 @@ struct InlineAttachment {
     /// What the chat model reads natively -- the picture, the sound, a clip's
     /// frames -- on the turn the attachment is attached (26e), ahead of the
     /// text. Empty on every later turn, when the text stands in for it.
-    std::vector<harness::ContentPart> parts;
+    std::vector<harness::ContentPart> parts{};
 };
 
 /// What a request's pictures and sounds take of the window, by allowance:

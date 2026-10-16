@@ -704,7 +704,7 @@ void bind_scan(CLI::App& parent, const RootContext& context) {
         }
         std::size_t registerable = 0;
         for (const StoreScanRow& row : rows) {
-            registerable += scan_registerable(row) ? 1 : 0;
+            registerable += scan_registerable(row) ? 1U : 0U;
         }
         if (!*register_flag) {
             if (registerable > 0) {

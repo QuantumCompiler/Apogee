@@ -270,8 +270,8 @@ TEST_CASE("a side request never joins the conversation's thread", "[backends][co
 TEST_CASE("the event stream parses identically at every chunk size", "[backends][codex][replay]") {
     // The family framing guardrail. This CLI emits real JSONL, so the shared
     // framer applies and the whole class of split-line bugs is covered here.
-    for (const std::string& name : {"simple_text.jsonl", "multiline_answer.jsonl",
-                                    "structured_output.jsonl", "resumed_thread.jsonl"}) {
+    for (const std::string name : {"simple_text.jsonl", "multiline_answer.jsonl",
+                                   "structured_output.jsonl", "resumed_thread.jsonl"}) {
         INFO("fixture: " << name);
         const std::string bytes = read_fixture(name);
 

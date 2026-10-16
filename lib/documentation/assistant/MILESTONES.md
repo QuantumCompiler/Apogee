@@ -43,6 +43,61 @@ When a backlog item ships, **fold** it into the matching milestone here (extend 
 
 Two things this milestone deliberately did **not** do: wire libcurl (above), and enable llama.cpp on the per-push path — its Metal/CUDA build is slow, and a separate non-blocking job catches a pin that stops compiling without taxing every change.
 
+### 2026-10-16 — every CI compiler builds without a warning of ours (the user's request)
+
+**Why.** DEVELOPER.md held a clean `build/default` as the bar, and Apple clang nearly met it, with 92 warnings in v0.1.7's pull-request run. CI's other compilers were far from it. From our own sources, in both the executable and the test binary, they printed:
+
+- about 1,850 distinct warnings on Linux (GCC 13.3) and on Windows x64 (MinGW GCC 16.2);
+- about 4,850 on Windows arm64 (clang 22.1.8).
+
+The user's call: fix them, not suppress them, on every platform.
+
+- [x] **A member an initializer may leave out has a default** (247 members in 73 files). Nearly every warning was `-Wmissing-field-initializers` (GCC), or clang 22's `-Wmissing-designated-field-initializers`, on a designated initializer naming only the fields it sets. Each omitted member that had no default member initializer now has `{}`, the value it was already given. A member with a default never warned. Recorded under CLAUDE.md -> Code Style.
+- [x] **Catch2 names a test case by its line** (`CATCH_CONFIG_NO_COUNTER` on the test targets). Clang 22 reports `__COUNTER__` as a C2y extension under `-Wpedantic`, once per `TEST_CASE`: 4,094 of Windows arm64's warnings. Two test cases on one line of a file would now collide, and the build would say so (DEVELOPER.md -> the test traps).
+- [x] **Names that hid another are renamed** (`-Wshadow`, 22 sites):
+  - chat's REPL loops no longer reuse `line`, the name of the line typed;
+  - `task resume|status|list` name the tasks directory `tasks_root`, not the command's `root`;
+  - the loop's tool-argument ruling is no longer a second `decided`;
+  - a summary's side call reuses the loop's own `side` sink rather than a lambda redeclaring it;
+  - the rest are single locals and lambda parameters.
+- [x] **Sign and width conversions** (`-Wsign-conversion`, 19; `-Wconversion` and `-Wshorten-64-to-32`, 1):
+  - counting ternaries added to a `std::size_t` (`? 1 : 0`) now count in unsigned;
+  - an iterator offset is cast to `std::ptrdiff_t`, as the codebase does elsewhere;
+  - a test probe's count is `std::ptrdiff_t`, not `long`, which is 32 bits on Windows.
+- [x] **Range loops** (`-Wrange-loop-construct`, 14):
+  - a `const std::string&` bound to a temporary made from a `const char*` is a value;
+  - a pair copied on each pass is a reference.
+- [x] **GCC 16's flow warnings on Windows** (`-Wdangling-pointer`, `-Wfree-nonheap-object`; `-Wdangling-reference` on GCC 13):
+  - a vector built from an initializer list inside a conditional is now an `if`;
+  - a table of test cases held in a temporary vector is a `std::to_array`;
+  - `chat_commands()` is held once rather than indexed as a temporary.
+- [x] **A field read on every platform**: `platform::EchoPause` gained `paused()`, as `TypeaheadGuard` has `active()`. On Windows its field was written and read by nothing (`-Wunused-private-field`). A new test pins that neither guard hides nor pauses echo when standard input is no terminal.
+- [x] **An unused lambda capture is dropped** (`-Wunused-lambda-capture`).
+
+**Not fixed, and why.** Two GCC `-Wshadow` warnings remain in llama.cpp's own headers (`ggml-backend.h`'s `ggml_backend_graph_copy`, `mtmd.h`'s `bitmap`). They are printed wherever GCC builds with llama.cpp in it: CI's Linux and Windows x64 build jobs. They are upstream's to fix.
+
+Marking llama.cpp's `llama`, `ggml` and `mtmd` targets `SYSTEM`, as `llama-common` already is, was tried and reverted. CMake then ordered their include directories after `/opt/homebrew/include`, seen in the compile database. On a Mac with Homebrew's llama.cpp installed (this one), its `llama.h` would have been compiled against instead of the pin.
+
+**How it was measured.** First the v0.1.7 run's job logs. Then each CI compiler was run over every first-party translation unit, with the flags in the build trees' compile databases:
+
+| Compiler | Stands in for | Before | After |
+|---|---|---|---|
+| Apple clang 21 | CI's macOS runner | 89 | 0 |
+| Homebrew clang 22.1.3, for macOS | Windows arm64 | 4,962 | 0 |
+| Homebrew clang 22.1.3, for `x86_64-w64-mingw32` through MinGW's headers | Windows arm64's Windows-only paths | -- | 0 |
+| GCC 13.3, in the Linux CI container (`linux-ci.Dockerfile`) | Linux | 1,920 | 0 |
+| MinGW GCC 16.2 | Windows x64 | 1,910 | 2, llama.cpp's |
+
+The two GCCs ran with code generation, so their flow-based warnings show.
+
+**Verified.**
+
+- `lib/scripts/cicd.sh --test` (macOS, llama.cpp on) builds with no warning and passes all 3,318 tests; one is skipped for want of `pdftotext`.
+- `make linux-tests` (GCC 13.3 in the CI container) passes all 3,261 Catch2 cases, 16 of them skipped.
+- `make cross-windows` (MinGW GCC 16.2) compiles and links `apogee.exe` and `apogee_tests.exe` with no warning but llama.cpp's two.
+- Windows arm64 was not built here. Clang 22.1.3, for macOS and for `x86_64-w64-mingw32`, stood in for its compiler; building and testing it is left to CI.
+- `make format-check` is clean for every file touched. Its one failure, `embed.cpp`, predates this change.
+
 ---
 
 ## Milestone B — The config engine

@@ -22,8 +22,8 @@ struct SideCall {
     /// False when it starts; true when it is over.
     bool done = false;
     /// What it took, each only when truly known -- never estimated.
-    std::optional<double> seconds;
-    std::optional<std::int64_t> tokens;
+    std::optional<double> seconds{};
+    std::optional<std::int64_t> tokens{};
 };
 
 using SideCallSink = std::function<void(const SideCall&)>;

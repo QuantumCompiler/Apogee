@@ -412,7 +412,7 @@ TEST_CASE("the exec line's menu items are the core's candidates, grouped and des
     CHECK(shelf.at(0).text == "claude:claude-opus-5-5");
     CHECK(shelf.at(0).description == "Claude Opus 5.5");
     // A key never rides a menu row (the leak test's rule, 45b).
-    for (const std::string& line : {"complete -m ", "complete -m c", "complete -m claude:"}) {
+    for (const std::string line : {"complete -m ", "complete -m c", "complete -m claude:"}) {
         for (const apogee::tui::MenuItem& item :
              apogee::commands::exec_menu_items(context, "", line)) {
             CHECK_FALSE(has(item.text + item.label + item.group + item.description, "sk-planted"));

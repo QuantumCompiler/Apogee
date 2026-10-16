@@ -1255,8 +1255,9 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
                      "Show answers' Markdown as written instead of rendering it on the terminal");
     add_run_format(resume, resume_flags);
     resume->callback([&context, resume_flags, machine = machine_]() {
-        const fs::path root = harness::tasks_dir();
-        const tasks::Task task = resolve_task(root, resume_flags->id, /*prefer_running=*/false);
+        const fs::path tasks_root = harness::tasks_dir();
+        const tasks::Task task =
+            resolve_task(tasks_root, resume_flags->id, /*prefer_running=*/false);
         drive(context, machine, *resume_flags, Drive{.existing = task});
     });
 
@@ -1269,11 +1270,12 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
     status->add_option("task", status_flags->id, "The task")->type_name(kTaskValue);
     add_read_format(status, status_flags);
     status->callback([status_flags]() {
-        const fs::path root = harness::tasks_dir();
-        const tasks::Task task = resolve_task(root, status_flags->id, /*prefer_running=*/true);
+        const fs::path tasks_root = harness::tasks_dir();
+        const tasks::Task task =
+            resolve_task(tasks_root, status_flags->id, /*prefer_running=*/true);
         // One view, rendered for a person or as the document a host reads --
         // the body `GET /v1/admin/tasks/{id}` serves.
-        const tasks::TaskView view = tasks::make_task_view(task, tasks::lock_holder(root));
+        const tasks::TaskView view = tasks::make_task_view(task, tasks::lock_holder(tasks_root));
         if (status_flags->read_format == ReadFormat::Json) {
             write_document(std::cout, tasks::to_json(view));
             return;
@@ -1288,9 +1290,9 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
                    "Every task, not only the newest " + std::to_string(tasks::kListLimit));
     add_read_format(list, list_flags);
     list->callback([list_flags]() {
-        const fs::path root = harness::tasks_dir();
+        const fs::path tasks_root = harness::tasks_dir();
         std::vector<std::string> problems;
-        const std::vector<tasks::Task> all = tasks::list_tasks(root, &problems);
+        const std::vector<tasks::Task> all = tasks::list_tasks(tasks_root, &problems);
         for (const std::string& problem : problems) {
             std::cerr << "[task] skipped: " << problem << "\n";
         }

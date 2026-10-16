@@ -57,7 +57,7 @@ struct Relation {
     std::string source;
     std::string target;
     std::string relation;
-    std::string description;
+    std::string description{};
 };
 
 struct ExtractResult {

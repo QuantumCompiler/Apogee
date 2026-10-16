@@ -166,7 +166,7 @@ struct Denial {
     std::string tool;
     std::string target;
     /// `config`, `nobody` or `person`; empty in a ledger written before 27i.
-    std::string by;
+    std::string by{};
 };
 
 /// A gated call the gate let through, and on whose authority (27i): the
@@ -193,26 +193,26 @@ struct Round {
     int index = 0;
     /// `plan`, `execute` or `correct`.
     std::string kind;
-    std::string started_at;
-    std::string ended_at;
+    std::string started_at{};
+    std::string ended_at{};
     /// The session's completed turns when the round started: a restart that
     /// finds more knows the round's turn finished, and takes its answer from
     /// the session rather than asking again.
     int session_turns_before = 0;
     /// `completed`, `interrupted`, or empty while in flight.
-    std::string outcome;
+    std::string outcome{};
     /// Whether the round's answer was found in the session after a restart.
     bool adopted = false;
     /// The self-report, as `to_string(SelfReport)`; empty for the plan.
-    std::string self_report;
+    std::string self_report{};
     /// One per task check, in order; empty for the plan.
-    std::vector<CheckResult> checks;
-    std::vector<ToolUse> tools;
-    std::vector<Denial> denied;
+    std::vector<CheckResult> checks{};
+    std::vector<ToolUse> tools{};
+    std::vector<Denial> denied{};
     /// Every gated call the gate let through, with its authority (27i).
-    std::vector<Permit> allowed;
+    std::vector<Permit> allowed{};
     /// Every question answered, and by whom (27i).
-    std::vector<Answered> answered;
+    std::vector<Answered> answered{};
     std::int64_t tokens = 0;
     bool tokens_estimated = false;
     /// A check passed that had never passed before, or a tool call ran that

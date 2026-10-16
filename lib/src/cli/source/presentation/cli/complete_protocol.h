@@ -68,9 +68,9 @@ enum class ValueKind : std::uint8_t {
 struct ValueSpec {
     ValueKind kind = ValueKind::Text;
     /// The accepted values, for `ValueKind::Choice`.
-    std::vector<std::string> choices;
+    std::vector<std::string> choices{};
     /// Which names, for `ValueKind::Names`: the declared type name.
-    std::string source;
+    std::string source{};
     /// A comma-separated list -- a type ending `,...` (`kCollectionListValue`,
     /// `word_list_value`), or split by the parser (`->delimiter(',')`): only
     /// the word after the last comma is completed, and what the list already
@@ -79,13 +79,13 @@ struct ValueSpec {
     /// What follows a `KEY=` choice's `=`, a comma-separated list of these
     /// (`--toolset chat=fs,git`): a second set after the keys, declared with
     /// `keyed_words_value`. Empty for every other value.
-    std::vector<std::string> key_values;
+    std::vector<std::string> key_values{};
     /// The declared type name as written -- `TEXT`, `INT`, `COLLECTION` --
     /// so a test can tell free text from a number.
-    std::string type;
+    std::string type{};
     /// What the word is -- `--model TEXT: Model name` -- for a shell that can
     /// show it when there is nothing to offer.
-    std::string hint;
+    std::string hint{};
 };
 
 /// What the parser knows about one command: its verbs, its flags, and what
@@ -103,17 +103,17 @@ struct CommandSpec {
     std::vector<std::string> flags;
     /// The spellings that consume the next word, and what that word is. A flag
     /// not here takes no value, so the next word is never mistaken for one.
-    std::map<std::string, ValueSpec> values;
+    std::map<std::string, ValueSpec> values{};
     /// The positionals, in order.
-    std::vector<ValueSpec> positionals;
+    std::vector<ValueSpec> positionals{};
     /// Whether the last positional takes any number of words.
     bool last_positional_repeats = false;
     /// Other names the parser accepts (`kn` for `knowledge`). Recognised on the
     /// line, never offered: offering both would double every list.
-    std::vector<std::string> aliases;
+    std::vector<std::string> aliases{};
     /// Visible subcommands. Hidden ones (`group("")`) are left out at every
     /// depth -- they are protocols, not features.
-    std::vector<CommandSpec> subcommands;
+    std::vector<CommandSpec> subcommands{};
 };
 
 /// What a menu shows beside one candidate (45b): its heading and one line,
@@ -121,20 +121,20 @@ struct CommandSpec {
 /// wire (`render_completion`) never prints it.
 struct CandidateNote {
     std::string group;
-    std::string description;
+    std::string description{};
 };
 
 /// What to offer for one word, and what the shell should do when that is
 /// nothing.
 struct Completion {
-    std::vector<std::string> candidates;
+    std::vector<std::string> candidates{};
     /// Each candidate's note, parallel to `candidates` -- or empty, for a
     /// kind that has none to give (45b).
-    std::vector<CandidateNote> notes;
+    std::vector<CandidateNote> notes{};
     /// The word is a path: the shell's own file completion is the answer.
     bool files = false;
     /// What the word is, when nothing can be offered for it.
-    std::string hint;
+    std::string hint{};
 };
 
 /// What the words before the cursor already say, for a list that depends on

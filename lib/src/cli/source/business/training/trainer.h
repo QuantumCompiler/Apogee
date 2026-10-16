@@ -103,7 +103,7 @@ struct TrainOutcome {
 struct CandidateReply {
     bool ok = false;
     std::string text;
-    std::string error;
+    std::string error{};
 };
 
 /// Adapter-only inference for eval: the base plus the adapter answers one

@@ -29,28 +29,28 @@ struct Table {
         const std::vector<std::string> labels{"pull org/model's full weights", "convert to F16",
                                               "quantize to Q4_K_M", "register 2 backends"};
         for (int index = 0; std::cmp_less(index, labels.size()); ++index) {
-            out.push_back(
-                {labels[index], [this, index, failing, label = labels[index]](ChainLog& log) {
-                     ran.push_back(label);
-                     if (index == failing) {
-                         throw CLI::RuntimeError(index == 2 ? 130 : 1);
-                     }
-                     if (index == 0) {
-                         log.resume =
-                             "apogee models convert org--model/safetensors/a "
-                             "--register-with Q4_K_M";
-                     }
-                     if (index == 1) {
-                         log.note("note: a base model");
-                     }
-                     if (index == 2) {
-                         log.note("note: a base model");  // said once, all the same
-                     }
-                     if (index == 3) {
-                         log.ready = {"model-F16", "model-Q4_K_M"};
-                         log.next = "chat with one:  apogee chat -m model-Q4_K_M";
-                     }
-                 }});
+            const std::string& label = labels[static_cast<std::size_t>(index)];
+            out.push_back({label, [this, index, failing, label](ChainLog& log) {
+                               ran.push_back(label);
+                               if (index == failing) {
+                                   throw CLI::RuntimeError(index == 2 ? 130 : 1);
+                               }
+                               if (index == 0) {
+                                   log.resume =
+                                       "apogee models convert org--model/safetensors/a "
+                                       "--register-with Q4_K_M";
+                               }
+                               if (index == 1) {
+                                   log.note("note: a base model");
+                               }
+                               if (index == 2) {
+                                   log.note("note: a base model");  // said once, all the same
+                               }
+                               if (index == 3) {
+                                   log.ready = {"model-F16", "model-Q4_K_M"};
+                                   log.next = "chat with one:  apogee chat -m model-Q4_K_M";
+                               }
+                           }});
         }
         return out;
     }

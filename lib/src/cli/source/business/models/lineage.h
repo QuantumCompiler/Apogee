@@ -59,7 +59,7 @@ struct Origin {
     std::string from;
     /// For a pull, the source (`huggingface`, `ollama`); for a quantization,
     /// its level; for a fine-tune, its run.
-    std::string detail;
+    std::string detail{};
     /// Taken from the store's shape rather than read from any record.
     bool inferred = false;
 };
@@ -100,7 +100,7 @@ struct Consumption {
     /// The handles of the GGUFs whose chain reaches it -- its conversion, and
     /// what was quantized from that. Only those every link of which is
     /// recorded, when there are any.
-    std::vector<std::string> by;
+    std::vector<std::string> by{};
 };
 
 /// The lineage of everything in one store.

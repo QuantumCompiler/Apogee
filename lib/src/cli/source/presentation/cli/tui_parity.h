@@ -42,11 +42,11 @@ struct ShellDoor {
     std::string_view view;
     /// What must be on that view for this door, beyond its title: a
     /// picker's row (`New chat`, `Execute`). Empty: the view is the door.
-    std::string_view seen;
+    std::string_view seen{};
     /// Where the door is deliberately conditional, the condition -- `seen`
     /// is then the words the shell says it in where the door is absent.
     /// Empty: the door stands on what a fresh install has.
-    std::string_view condition;
+    std::string_view condition{};
 };
 
 /// One root subcommand's classification.

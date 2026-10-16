@@ -54,10 +54,10 @@ inline constexpr std::string_view kRecallHeader =
 /// One chat as the index holds it.
 struct RecallEntry {
     std::string chat_id;
-    std::string title;
+    std::string title{};
     /// The chat's `updated_at` when it was summarised: a chat updated since
     /// is summarised again.
-    std::string updated_at;
+    std::string updated_at{};
     std::string summary;
 };
 

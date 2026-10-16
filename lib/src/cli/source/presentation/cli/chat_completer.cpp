@@ -356,9 +356,9 @@ Suggestions complete_path(std::string_view before, std::size_t from,
                                     : sources.working_directory / std::filesystem::path{folder});
     std::sort(entries.begin(), entries.end(), [](const DirectoryEntry& a, const DirectoryEntry& b) {
         const auto folded = [](std::string_view s) {
-            std::string out{s};
-            std::transform(out.begin(), out.end(), out.begin(), lower);
-            return out;
+            std::string lowered{s};
+            std::transform(lowered.begin(), lowered.end(), lowered.begin(), lower);
+            return lowered;
         };
         const std::string fa = folded(a.name);
         const std::string fb = folded(b.name);

@@ -660,7 +660,7 @@ TEST_CASE("the store's MLX models complete as its GGUFs do, by name, handle and 
         INFO(name);
         CHECK(run_apogee({"--config", config_path.string(), "models", "info", name, "-q"}) == 0);
     }
-    for (const std::string& name : {"Llama-3.2-1B-Instruct-4bit", "m-8bit"}) {
+    for (const std::string name : {"Llama-3.2-1B-Instruct-4bit", "m-8bit"}) {
         INFO(name);
         std::string said;
         CHECK(run_apogee({"--config", config_path.string(), "config", "add-backend", name},

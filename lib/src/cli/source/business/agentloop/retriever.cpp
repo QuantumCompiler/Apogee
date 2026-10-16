@@ -275,7 +275,7 @@ WordCoverage word_coverage(std::string_view question, std::string_view text) {
     WordCoverage coverage;
     coverage.asked = asked.size();
     for (const std::string& word : asked) {
-        coverage.found += held.contains(word) ? 1 : 0;
+        coverage.found += held.contains(word) ? 1U : 0U;
     }
     return coverage;
 }

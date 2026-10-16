@@ -75,8 +75,8 @@ struct RecipeConsent {
 /// What a run from the shell asks for (37e): a new task's goal, or the task
 /// to resume.
 struct TaskRunRequest {
-    std::string goal;
-    std::string resume;
+    std::string goal{};
+    std::string resume{};
 };
 
 /// A task run as machine mode runs it (37e): `apogee task run "<goal>"

@@ -70,9 +70,11 @@ struct World {
         for (const char* name : {"root", "helper", "scribe", "paid"}) {
             MockProvider::Options options;
             options.backend_name = name;
-            options.turns = std::string_view{name} == "root"
-                                ? root_turns
-                                : std::vector<MockTurn>{MockTurn{.text = "MARMALADE-7"}};
+            if (std::string_view{name} == "root") {
+                options.turns = root_turns;
+            } else {
+                options.turns.push_back(MockTurn{.text = "MARMALADE-7"});
+            }
             options.metered = std::string_view{name} == "paid";
             mocks[name] = std::make_shared<MockProvider>(std::move(options));
             harness.register_provider(name, mocks[name]);

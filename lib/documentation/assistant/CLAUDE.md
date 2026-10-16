@@ -296,10 +296,12 @@ _TODO:_ further project-specific checklist items accrete here as invariants and 
 
 ## Code Style
 
-*(The two rules below are user decisions, 2026-08-24. They applied from the first line of code and are lint-enforced as of 2026-08-25 — see [⚠ Smart pointers, never owning raw pointers](#-smart-pointers-never-owning-raw-pointers) above. Formatting is settled in `.clang-format` and is never a review topic: run `make -C lib/src/cli format`.)*
+*(The first two rules below are user decisions, 2026-08-24. They applied from the first line of code and are lint-enforced as of 2026-08-25 — see [⚠ Smart pointers, never owning raw pointers](#-smart-pointers-never-owning-raw-pointers) above. Formatting is settled in `.clang-format` and is never a review topic: run `make -C lib/src/cli format`.)*
 
 - **Header/implementation split.** Every class/module ships as a `.h`/`.cpp` pair when applicable — declarations in the header, definitions in the `.cpp`. Header-only is the recorded exception, reserved for templates and trivial data-only structs. The backlog documents' **Seam + files** sections already name files as `foo.h/.cpp` pairs; follow them.
 - **Smart pointers, never traditional pointers.** No raw `new`/`delete` and no owning raw pointers anywhere. `std::unique_ptr` is the default ownership type; `std::shared_ptr` only where ownership is genuinely shared (`std::weak_ptr` to break cycles); construct via `std::make_unique`/`std::make_shared`. For non-owning access, prefer references (or `std::string_view`/`std::span`) over pointers. C APIs (llama.cpp, SQLite, libcurl) hand out raw handles — wrap each in a `std::unique_ptr` with a custom deleter at the boundary class, and never let the raw handle escape it.
+- **A member an initializer may leave out has a default.** A struct's data member carries a default member initializer -- `{}` where its empty value is the default -- so a designated initializer names only what it sets: GCC and clang 22 warn (`-Wmissing-field-initializers`) on every omitted member without one, and the default says the omission is meant (2026-10-16).
+- **Every CI compiler builds without a warning of ours** -- Apple clang, GCC 13, MinGW GCC 16, clang 22 (DEVELOPER.md -> Dependencies). A compiler warning is fixed where it is raised, never silenced with a flag or a pragma; third-party code alone is compiled quietly (the user's call, 2026-10-16: fix, not suppress).
 - _TODO:_ further naming conventions, error-handling idioms, and shared-helper locations accrete here as the first modules land.
 - Match the surrounding code's conventions; when in doubt, find the closest existing analogue and follow it.
 

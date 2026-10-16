@@ -27,7 +27,7 @@ namespace {
 [[nodiscard]] std::size_t first_verb(const std::vector<std::string>& words) {
     std::size_t at = 0;
     while (at < words.size() && words.at(at).starts_with("-")) {
-        at += takes_value(words.at(at)) && words.at(at).find('=') == std::string::npos ? 2 : 1;
+        at += takes_value(words.at(at)) && words.at(at).find('=') == std::string::npos ? 2U : 1U;
     }
     return at;
 }

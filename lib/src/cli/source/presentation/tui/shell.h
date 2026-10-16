@@ -55,7 +55,7 @@ struct Key {
         Alt,
     };
     Name name = Name::Text;
-    std::string text;
+    std::string text{};
     int number = 0;
 
     [[nodiscard]] static Key character(std::string_view text);

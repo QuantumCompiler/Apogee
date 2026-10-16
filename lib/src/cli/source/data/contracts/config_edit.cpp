@@ -2006,7 +2006,7 @@ void read_flow_items(HostList& list, std::string_view line) {
             const char quote = line[i];
             ++i;
             while (i < line.size() && line[i] != quote) {
-                i += (quote == '"' && line[i] == '\\') ? 2 : 1;
+                i += (quote == '"' && line[i] == '\\') ? 2U : 1U;
             }
             ++i;
         } else {
@@ -2571,7 +2571,7 @@ std::string rename_backend_jsonc(std::string_view content, std::string_view old_
         backends.key_begins.at(static_cast<std::size_t>(entry - backends.keys.begin()));
     std::size_t end = begin + 1;
     while (end < content.size() && content[end] != '"') {
-        end += content[end] == '\\' ? 2 : 1;
+        end += content[end] == '\\' ? 2U : 1U;
     }
     std::string text = std::string{content.substr(0, begin)} +
                        nlohmann::ordered_json(std::string{new_name}).dump() +

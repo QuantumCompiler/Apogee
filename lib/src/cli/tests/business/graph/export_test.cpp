@@ -556,7 +556,7 @@ TEST_CASE("the page embeds one data block of 27l's cards, its cap note, and no e
     std::size_t parsed = 0;
     for (const apogee::embedstore::GraphEdge& edge : fixture.work.all_edges()) {
         expected += edge.source_id != edge.target_id ? 1 : 0;
-        parsed += edge.origin == "extracted" ? 1 : 0;
+        parsed += edge.origin == "extracted" ? 1U : 0U;
     }
     CHECK(data["edges"].size() == expected);
     CHECK(page.relations == expected);
@@ -565,7 +565,7 @@ TEST_CASE("the page embeds one data block of 27l's cards, its cap note, and no e
         CHECK(edge[0].get<std::size_t>() < ranked.size());
         CHECK(edge[1].get<std::size_t>() < ranked.size());
         CHECK(edge[2].get<std::size_t>() < data["relations"].size());
-        marked += edge[3].get<int>() == 1 ? 1 : 0;
+        marked += edge[3].get<int>() == 1 ? 1U : 0U;
     }
     // Each edge says whether it was parsed: the page draws a model's dashed.
     CHECK(marked == parsed);

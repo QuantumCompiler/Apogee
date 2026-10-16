@@ -149,7 +149,7 @@ struct GraphSelection {
     /// The graph that covers a collection: a built named graph listing it,
     /// else its own -- the retrieval precedence rule, decided once in
     /// `agentloop::named_graph_covering`.
-    std::string collection;
+    std::string collection{};
 };
 
 /// One graph's database and its members, resolved and not yet opened. A

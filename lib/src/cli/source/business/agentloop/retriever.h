@@ -84,7 +84,7 @@ struct StoreFacts {
     bool exists = false;
     std::int64_t chunk_count = 0;
     /// The model recorded at vector ingest; empty when none.
-    std::string recorded_model;
+    std::string recorded_model{};
     /// Vector width, 0 when the store holds no vectors.
     std::int64_t dimension = 0;
     /// Chunks with no vector.
@@ -141,7 +141,7 @@ struct MatchStrength {
     bool floored = false;
     /// What it was read by, for the line: `98% of RRF's ceiling`, `2 of 3
     /// question words`; empty for cosine, which the score itself is.
-    std::string measure;
+    std::string measure{};
 };
 
 /// The floors, named (26s, defaults confirmed, tuned by tests): a hybrid
@@ -179,9 +179,9 @@ struct MatchEvidence {
     /// The best hit's score, on that retriever's scale.
     double score = 0.0;
     /// The question's words the best hit holds.
-    WordCoverage words;
+    WordCoverage words{};
     /// A hybrid hit's cosine in the vector half, when it was in it.
-    std::optional<double> cosine;
+    std::optional<double> cosine{};
 };
 
 /// The band and the floor for `evidence`. A hybrid match is floored under a

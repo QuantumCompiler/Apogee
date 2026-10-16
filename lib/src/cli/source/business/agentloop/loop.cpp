@@ -660,17 +660,17 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
                 if (check_tools) {
                     if (const agent::Tool* tool = options.tools->find(call.name);
                         tool != nullptr && agent::gated(*tool)) {
-                        const ToolArgChecks::Decision decided = tool_checks.check(
+                        const ToolArgChecks::Decision ruling = tool_checks.check(
                             call.name, call.arguments, tool_structure(*tool, call.arguments),
                             verifier.has_value() ? &*verifier : nullptr, [&]() {
                                 return tool_args_brief(last_user_text(history), call.name,
                                                        tool->description, call.arguments);
                             });
-                        for (const std::string& line : decided.said) {
+                        for (const std::string& line : ruling.said) {
                             reporter.on_notice(line);
                         }
-                        if (decided.result.has_value()) {
-                            append_result(history, call, *decided.result);
+                        if (ruling.result.has_value()) {
+                            append_result(history, call, *ruling.result);
                             continue;
                         }
                     }
@@ -686,8 +686,7 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
                     // The utility model reads it first, so the chat model
                     // reads a summary instead of the whole of it (26b).
                     std::optional<SideCallScope> said;
-                    said.emplace([&reporter](const SideCall& side) { reporter.on_side_call(side); },
-                                 "utility",
+                    said.emplace(side, "utility",
                                  "summarising " + call.name + "'s " +
                                      std::to_string((content.size() + 1023) / 1024) +
                                      " KB result with " + options.summary_model);

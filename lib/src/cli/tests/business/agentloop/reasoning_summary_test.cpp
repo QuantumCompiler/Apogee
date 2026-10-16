@@ -230,7 +230,9 @@ TEST_CASE(
     const std::size_t asked = world.helper->requests().size();
     REQUIRE(asked >= 2);
     REQUIRE(asked <= lines.size());
-    CHECK(heard.summaries == std::vector<std::string>(lines.begin(), lines.begin() + asked));
+    CHECK(heard.summaries ==
+          std::vector<std::string>(lines.begin(),
+                                   lines.begin() + static_cast<std::ptrdiff_t>(asked)));
     for (const apogee::harness::ChatRequest& request : world.helper->requests()) {
         CHECK(request.transient.side_request);
     }

@@ -66,12 +66,12 @@ struct ToolDialect {
 /// family's published default. Each field unset where that rung says nothing,
 /// so the next one down is asked.
 struct SamplingRung {
-    std::optional<double> temperature;
-    std::optional<double> top_p;
-    std::optional<std::int64_t> top_k;
-    std::optional<double> min_p;
-    std::optional<double> repeat_penalty;
-    std::optional<double> presence_penalty;
+    std::optional<double> temperature{};
+    std::optional<double> top_p{};
+    std::optional<std::int64_t> top_k{};
+    std::optional<double> min_p{};
+    std::optional<double> repeat_penalty{};
+    std::optional<double> presence_penalty{};
 };
 
 /// One family's behaviour.
@@ -101,14 +101,14 @@ struct ModelProfile {
     /// family's own template writes when thinking is switched off. Empty when
     /// the family has no such switch, and then a request asking to skip
     /// reasoning gets it anyway.
-    std::string skip_reasoning;
+    std::string skip_reasoning{};
 
     /// Control-token **headers** this family leaks into its own answer.
     ///
     /// Not reasoning wrappers, and the distinction is the design: a wrapper
     /// encloses content and routes it somewhere, a header is a bare marker
     /// naming a section and carries nothing. See `markup_filter.h`.
-    std::vector<HeaderMarker> headers;
+    std::vector<HeaderMarker> headers{};
 
     ToolDialect tools;
 
@@ -123,10 +123,10 @@ struct ModelProfile {
     /// on and with it off -- the same for a family that does not split them.
     /// Below a model file's own `general.sampling.*` keys, above greedy; unset
     /// where the card says nothing.
-    SamplingRung sampling_thinking;
-    SamplingRung sampling_answering;
+    SamplingRung sampling_thinking{};
+    SamplingRung sampling_answering{};
     /// Where those values come from, the card named. Shown by `models info`.
-    std::string sampling_source;
+    std::string sampling_source{};
 };
 
 /// Every profile this build knows.

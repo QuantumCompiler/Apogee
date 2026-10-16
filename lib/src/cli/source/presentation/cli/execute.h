@@ -44,7 +44,7 @@ struct ExecuteDoor {
     std::string label;
     /// The suite it opens under (`--suite`), or empty: `apogee execute` with
     /// nothing named, on its own rungs.
-    std::string suite;
+    std::string suite{};
 };
 
 /// The doors execute opens on `config` (44b): one per configured suite, the

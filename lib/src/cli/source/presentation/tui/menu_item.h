@@ -12,12 +12,12 @@ struct MenuItem {
     /// What choosing it puts in place of the word being completed.
     std::string text;
     /// What the row shows; empty means `text`.
-    std::string label;
+    std::string label{};
     /// The heading it sits under -- `configured`, a roster with the day it
     /// was fetched, `local` -- or empty for none.
-    std::string group;
+    std::string group{};
     /// One line beside it, from what the public reads already show.
-    std::string description;
+    std::string description{};
 };
 
 /// `items` with each group's together, the groups in the order each first

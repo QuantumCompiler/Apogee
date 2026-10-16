@@ -186,17 +186,17 @@ constexpr std::size_t kNumberedViews = 9;
     std::size_t first = selected;
     std::size_t last = selected;
     const auto window = [&compact, &first, &last, count]() {
-        std::vector<std::string> shown;
+        std::vector<std::string> window_rows;
         if (first > 0) {
-            shown.emplace_back(" … ");
+            window_rows.emplace_back(" … ");
         }
         for (std::size_t i = first; i <= last; ++i) {
-            shown.push_back(compact.at(i));
+            window_rows.push_back(compact.at(i));
         }
         if (last + 1 < count) {
-            shown.emplace_back(" … ");
+            window_rows.emplace_back(" … ");
         }
-        return shown;
+        return window_rows;
     };
     for (bool grew = true; grew;) {
         grew = false;

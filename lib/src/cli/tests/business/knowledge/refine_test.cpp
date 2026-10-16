@@ -31,8 +31,8 @@ std::string read_asset(const std::string& relative) {
 
 struct FakeClerk {
     std::string text;
-    std::vector<std::string> systems;
-    std::vector<std::string> users;
+    std::vector<std::string> systems{};
+    std::vector<std::string> users{};
     int calls = 0;
 
     [[nodiscard]] apogee::knowledge::ClerkFn fn() {
