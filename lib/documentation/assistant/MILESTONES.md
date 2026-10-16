@@ -273,6 +273,8 @@ Decisions taken while building, for veto:
 
 **Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,311 tests, one skipped for want of `pdftotext`. `cli.config_lifecycle`, `cli.http_api_conformance`, the completion audits and `serve_test`'s route count (now 88) are among them. `make format-check` is clean for every file touched.
 
+**Found at the pre-merge docs pass, 2026-10-16.** `--mode` shipped as free text, though a vendor CLI's mode is a closed set: `subscription` or `bare`, `bare` for claude-cli alone. Tab offered nothing, and a typo was written to the file, then refused only when the backend was built. It now carries the two words as a choice set beside the clearing `""`, as `--thinking` and `--cache-type` do, and leaves `lifecycle_test`'s free-text list. `backend_fields_test` holds both words completed in their declared order, a typo refused with the file untouched, and `bare` set then cleared.
+
 ### 2026-10-14 — a rename that keeps the base says nothing of the backends (the user's request)
 
 **Why.** Renaming a stored model to a name with the same base, such as `Qwen--Qwen3.8-27B` to `Qwen3.8-27B`, left its `Qwen3.8-27B-F16` and `-Q4KM` backends as they were, which was correct, since their names already follow it. But `models rename` said `left backend 'Qwen3.8-27B-F16' as it is -- 'Qwen3.8-27B-F16' is already a backend's name`, a conflict with itself that read as a failure. The check for a taken name found the backend itself.
@@ -6920,6 +6922,12 @@ A CLI that learns to list its models gets `CatalogListing` and loses its carried
 - an audit step in the pre-MR docs skill, and a gate check in the release-roll skill, which reports and never edits.
 
 The roster test now holds that each reviewed date is a real date.
+
+**Reviewed 2026-10-16, at v0.1.8's pre-merge docs pass**, since that branch touched the backends and completion. Both lists were current, and no row changed:
+- Anthropic's models overview lists four current models (Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 5.5) and nine legacy ones still available, the thirteen ids carried. Claude Mythos 5.1, named only in a pricing note there, is in neither list, so it is not carried.
+- The installed Gemini CLI, still 0.46.0, aliases `pro`, `flash` and `flash-lite` beside `auto`.
+
+Both `...Reviewed` dates moved to 2026-10-16.
 
 ### 2026-10-10 — `models-list-sections` (backlog item 36): cloud by provider, local by format
 

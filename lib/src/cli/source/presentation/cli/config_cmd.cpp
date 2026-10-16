@@ -1032,7 +1032,10 @@ void bind_set_backend(CLI::App& parent, const RootContext& context) {
         {"thinking", "", "Whether a reasoning model thinks first", {"on", "off", "auto"}},
         {"thinking_budget", "INT", "The most tokens a reasoning model may think for"},
         {"binary", kPathValue, "The vendor CLI's executable"},
-        {"mode", "", "The vendor CLI's mode"},
+        {"mode",
+         "",
+         "The vendor CLI's mode: subscription, or bare (claude-cli alone)",
+         {"subscription", "bare"}},
         {"host", "", "The host the backend reaches"},
         {"idle_unload_seconds", "INT", "Seconds idle before a local model is unloaded"}};
     for (const FieldFlag& flag : flags) {

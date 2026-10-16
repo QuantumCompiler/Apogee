@@ -54,7 +54,7 @@ This skill is chosen precisely when successive items should complete with nobody
 
 ## 5. End of the run
 
-- A version table that empties is **not** a release: the roll (VERSION bump, ROADMAP state swap, table retirement) is `/apogee-cli-maintenance-update-release`'s job, on the user's word. Maintenance and Architecture tables persist empty — they are permanent fixtures.
+- A version table that empties is **not** a release: the emptied table stays in the index until the pre-merge docs pass retires it (`/apogee-cli-maintenance-update-documents`), and the roll (VERSION bump, ROADMAP state swap) is `/apogee-cli-maintenance-update-release`'s job, on the user's word. Maintenance and Architecture tables persist empty — they are permanent fixtures.
 - Run the standard index validation (rows ↔ docs, sequences, gates, links) — the run deleted rows and documents in step pairs, and the sweep proves it stayed consistent.
 
 ## 6. Report

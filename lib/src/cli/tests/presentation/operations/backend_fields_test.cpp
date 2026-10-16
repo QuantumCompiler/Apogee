@@ -116,6 +116,25 @@ TEST_CASE("set-backend edits exactly the fields named, in place, and clears with
     CHECK(out.find("sk-planted") == std::string::npos);
 }
 
+TEST_CASE("set-backend completes a field's closed set and refuses a word outside it",
+          "[set-backend][cli][completion]") {
+    // `mode` takes `subscription` or `bare`, nothing else (found free text at
+    // v0.1.8's pre-merge docs pass, 2026-10-16): Tab offers both, a typo is
+    // refused before the file is touched, and "" still clears it.
+    const apogee::testing::CliHome home{std::string{kConfig}};
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"__complete", "config", "set-backend", "claude", "--mode", ""}, &out, &err) ==
+            0);
+    CHECK(out == "subscription\nbare\n");  // as declared: the default first
+    CHECK(home.run({"config", "set-backend", "claude", "--mode", "wizard"}, &out, &err) != 0);
+    CHECK(slurp(home.config_path()) == kConfig);
+    REQUIRE(home.run({"config", "set-backend", "claude", "--mode", "bare"}, &out, &err) == 0);
+    CHECK_THAT(slurp(home.config_path()), ContainsSubstring("mode: bare"));
+    REQUIRE(home.run({"config", "set-backend", "claude", "--mode", ""}, &out, &err) == 0);
+    CHECK(slurp(home.config_path()) == kConfig);
+}
+
 TEST_CASE("set-backend in a JSONC config: the field in place, its comments kept",
           "[set-backend][cli][jsonc]") {
     const apogee::testing::CliHome home{
