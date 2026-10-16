@@ -954,10 +954,11 @@ The largest of those is `cli.config_lifecycle`, driven by [`tests/scripts/cmake/
 
 **Tests must stay hermetic:** no network, no models, no writes outside the test's own temp directory. A test that needs a live provider is not a unit test. Fixtures go through the injectable seams — that discipline starts at the first interface because retrofitting it later is far more painful.
 
-Four traps worth knowing:
+Five traps worth knowing:
 
 - **Test names must not begin with `-`.** ctest invokes each case by passing its name as an argument, and Catch2's own parser would read it as a flag.
 - **CI's macOS compiler is older than yours.** The `macos-14` runner builds with AppleClang 15 (Xcode 15.4), which refuses a structured binding captured into a generic lambda (`[&](const auto& x) { ... name ... }` with `name` from `for (const auto& [name, v] : ...)`), while a current Apple clang, GCC and clang 22 all take it -- the v0.1.8 pull request's first run failed on one (2026-10-16). Capture the binding through an init-capture, `[&current = name]`. Every captured binding in the tree is listed by compiling with `-Wpre-c++20-compat` and keeping its "captured structured bindings" lines.
+- **A file is closed before it is replaced.** `write_file_atomically` lands its write with `std::filesystem::rename`, and Windows refuses to replace a file this process still holds open, where POSIX allows it. The chat sweep behind `config rename-backend` read each chat through an `std::ifstream` still open at its rewrite, and on both Windows runners every chat it should have renamed kept the old name (2026-10-16). Read into a string in a scope of its own, then write.
 - **Two test cases never share a line.** The test targets define `CATCH_CONFIG_NO_COUNTER` (2026-10-16): Catch2 names each case's hidden function by `__LINE__` rather than `__COUNTER__`, which clang 22 under `-Wpedantic` reports as a C2y extension at every `TEST_CASE`. Two on one line of one file would collide, and the build says so.
 - **`#` is not a comment inside `.clang-tidy`'s `Checks:` block.** It is a YAML folded scalar; a `#` line silently becomes a bogus check name and breaks every entry after it. Rationale goes above the block.
 

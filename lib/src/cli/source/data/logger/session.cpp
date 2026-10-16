@@ -442,12 +442,18 @@ SessionSweep rename_session_backend(std::string_view old_name, std::string_view 
         if (ec || !entry.is_regular_file() || entry.path().extension() != ".json") {
             continue;
         }
-        std::ifstream in(entry.path(), std::ios::binary);
-        std::ostringstream buffer;
-        buffer << in.rdbuf();
+        std::string text;
+        {
+            // Closed before the rewrite below: Windows refuses to replace a
+            // file this process still holds open.
+            std::ifstream in(entry.path(), std::ios::binary);
+            std::ostringstream buffer;
+            buffer << in.rdbuf();
+            text = buffer.str();
+        }
         Session session;
         try {
-            session = deserialize(buffer.str(), {}).session;
+            session = deserialize(text, {}).session;
         } catch (const std::exception&) {
             continue;  // not ours to rewrite: a corrupt file stays as it is
         }
