@@ -41,8 +41,8 @@ struct CpuInfo {
     /// The two kinds of core a hybrid CPU has, where the OS says cheaply
     /// (Apple silicon's performance levels); empty on a CPU with one kind,
     /// or where nothing says.
-    std::optional<int> performance_cores;
-    std::optional<int> efficiency_cores;
+    std::optional<int> performance_cores{};
+    std::optional<int> efficiency_cores{};
 };
 
 /// The run queue averaged over one, five and fifteen minutes (POSIX's
@@ -58,8 +58,8 @@ struct LoadAverage {
 /// memory, macOS's free and inactive pages -- not the narrower "free", which
 /// on every one of them leaves out the cache the OS gives back on demand.
 struct MemoryInfo {
-    std::optional<std::int64_t> total;
-    std::optional<std::int64_t> available;
+    std::optional<std::int64_t> total{};
+    std::optional<std::int64_t> available{};
 
     /// `total - available`, when both are known.
     [[nodiscard]] std::optional<std::int64_t> used() const noexcept;
@@ -69,12 +69,12 @@ struct MemoryInfo {
 struct GpuInfo {
     /// The device, where the OS names it: Apple silicon's GPU is the chip's
     /// own, named by the chip.
-    std::optional<std::string> name;
+    std::optional<std::string> name{};
     /// It shares the machine's memory with the CPU (Apple silicon), so its
     /// memory is the system's -- the model budget beside it says how much.
     bool unified_memory = false;
     /// Why `name` is unknown, for a person; empty when it is not.
-    std::string unknown;
+    std::string unknown{};
 };
 
 /// A volume's space, as `std::filesystem::space` reads it: its size, and

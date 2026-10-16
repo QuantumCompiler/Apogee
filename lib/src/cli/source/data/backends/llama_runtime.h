@@ -81,7 +81,7 @@ struct SamplingSettings {
     };
 
     /// Unset for none; set only where the format names its tags.
-    std::optional<ReasoningBudget> reasoning_budget;
+    std::optional<ReasoningBudget> reasoning_budget{};
 
     [[nodiscard]] bool greedy() const noexcept {
         return temperature <= 0.0;

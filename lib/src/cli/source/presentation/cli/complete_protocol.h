@@ -52,8 +52,12 @@ enum class ValueKind : std::uint8_t {
     /// One of a fixed set the parser validates (`CLI::IsMember`), read from
     /// that validator: `config add-backend --type`.
     Choice,
-    /// A configured backend's name -- declared `kBackendValue`.
+    /// A configured backend's name -- declared `kBackendValue`: the keys
+    /// alone, as `models list`'s BACKEND column shows them.
     Backend,
+    /// What a session runs -- declared `kBackendOrModelValue`: the keys, each
+    /// roster's `<key>:` shelf, a roster id once typed (45a's namespaces).
+    Model,
     /// The name of something that exists -- a collection, a chat, a model,
     /// a run -- declared with one of `kNameValues`, listed by a
     /// `CompletionSources`.
@@ -64,9 +68,9 @@ enum class ValueKind : std::uint8_t {
 struct ValueSpec {
     ValueKind kind = ValueKind::Text;
     /// The accepted values, for `ValueKind::Choice`.
-    std::vector<std::string> choices;
+    std::vector<std::string> choices{};
     /// Which names, for `ValueKind::Names`: the declared type name.
-    std::string source;
+    std::string source{};
     /// A comma-separated list -- a type ending `,...` (`kCollectionListValue`,
     /// `word_list_value`), or split by the parser (`->delimiter(',')`): only
     /// the word after the last comma is completed, and what the list already
@@ -75,13 +79,13 @@ struct ValueSpec {
     /// What follows a `KEY=` choice's `=`, a comma-separated list of these
     /// (`--toolset chat=fs,git`): a second set after the keys, declared with
     /// `keyed_words_value`. Empty for every other value.
-    std::vector<std::string> key_values;
+    std::vector<std::string> key_values{};
     /// The declared type name as written -- `TEXT`, `INT`, `COLLECTION` --
     /// so a test can tell free text from a number.
-    std::string type;
+    std::string type{};
     /// What the word is -- `--model TEXT: Model name` -- for a shell that can
     /// show it when there is nothing to offer.
-    std::string hint;
+    std::string hint{};
 };
 
 /// What the parser knows about one command: its verbs, its flags, and what
@@ -99,27 +103,38 @@ struct CommandSpec {
     std::vector<std::string> flags;
     /// The spellings that consume the next word, and what that word is. A flag
     /// not here takes no value, so the next word is never mistaken for one.
-    std::map<std::string, ValueSpec> values;
+    std::map<std::string, ValueSpec> values{};
     /// The positionals, in order.
-    std::vector<ValueSpec> positionals;
+    std::vector<ValueSpec> positionals{};
     /// Whether the last positional takes any number of words.
     bool last_positional_repeats = false;
     /// Other names the parser accepts (`kn` for `knowledge`). Recognised on the
     /// line, never offered: offering both would double every list.
-    std::vector<std::string> aliases;
+    std::vector<std::string> aliases{};
     /// Visible subcommands. Hidden ones (`group("")`) are left out at every
     /// depth -- they are protocols, not features.
-    std::vector<CommandSpec> subcommands;
+    std::vector<CommandSpec> subcommands{};
+};
+
+/// What a menu shows beside one candidate (45b): its heading and one line,
+/// from the reads that already render publicly. In the process only -- the
+/// wire (`render_completion`) never prints it.
+struct CandidateNote {
+    std::string group;
+    std::string description{};
 };
 
 /// What to offer for one word, and what the shell should do when that is
 /// nothing.
 struct Completion {
-    std::vector<std::string> candidates;
+    std::vector<std::string> candidates{};
+    /// Each candidate's note, parallel to `candidates` -- or empty, for a
+    /// kind that has none to give (45b).
+    std::vector<CandidateNote> notes{};
     /// The word is a path: the shell's own file completion is the answer.
     bool files = false;
     /// What the word is, when nothing can be offered for it.
-    std::string hint;
+    std::string hint{};
 };
 
 /// What the words before the cursor already say, for a list that depends on
@@ -143,6 +158,13 @@ struct NameList {
     /// Said instead when there is none to offer, e.g. "none yet -- 'apogee
     /// embed ingest' makes one".
     std::string none;
+    /// The source's order is the order (45a): chats newest first, the model
+    /// store by format, then name. Otherwise the one ordering rule
+    /// (`order_names`) decides.
+    bool as_listed = false;
+    /// The note each name has for a menu (45b), by name; a name with none
+    /// shows bare.
+    std::map<std::string, CandidateNote> notes;
 };
 
 /// Lists a name kind (`kNameValues`). Injected, so the protocol stays pure and
@@ -197,6 +219,58 @@ inline constexpr const char* kCompletionProtocolVar = "APOGEE_COMPLETION_PROTOCO
 /// Filters `candidates` to those starting with `prefix`.
 [[nodiscard]] std::vector<std::string> filter_prefix(const std::vector<std::string>& candidates,
                                                      std::string_view prefix);
+
+/// The one ordering rule (45a), for every list of names a completion offers:
+/// case-insensitively -- `Llama` beside `glm` by its letter, never exiled
+/// behind the lowercase ones -- the bytes breaking a tie so the order is
+/// total, and repeats dropped.
+void order_names(std::vector<std::string>& names);
+
+/// `names` with repeats dropped, the first of each kept: for a source whose
+/// order is the order (`NameList::as_listed`).
+void drop_repeats(std::vector<std::string>& names);
+
+/// Where a model word's candidates come from (45a): the configured backend
+/// keys; each shelf -- a key whose entry names its model, with the roster
+/// its type lists in the cache, offered as `<key>:` and completed as
+/// `<key>:<model>` (34's spelling); and the roster ids a bare word runs,
+/// each listed by exactly one configured type, so every one of them
+/// resolves when typed (33).
+struct ModelShelves {
+    std::vector<std::string> keys;
+    std::map<std::string, std::vector<std::string>> shelves;
+    std::vector<std::string> roster_ids;
+};
+
+/// The shelves `config` and the cached rosters make -- the cache read, never
+/// fetched.
+[[nodiscard]] ModelShelves model_shelves(const harness::Config& config);
+
+/// Everything a model word can be, in the one order (45a): the configured
+/// keys, then each shelf's `<key>:`, then the bare roster ids -- each band
+/// in `order_names`' order.
+[[nodiscard]] std::vector<std::string> model_bands(const ModelShelves& shelves);
+
+/// A model word's candidates (45a), the map before the territory: for an
+/// empty word the configured keys and each shelf's `<key>:`; past a shelf's
+/// colon that shelf, as `<key>:<model>`; any other typed word, everything
+/// starting with it (`model_bands`), so a bare roster id still completes
+/// once typed.
+[[nodiscard]] std::vector<std::string> model_candidates(const ModelShelves& shelves,
+                                                        std::string_view typed);
+
+/// What a menu shows beside each model candidate (45b), from the public
+/// reads: a configured key's type and model or file, under `configured` --
+/// or `local`, for weights on this machine; a shelf, a pin and a bare id
+/// under their roster with the day it was fetched, a pin or an id by its
+/// vendor's name for it. The cache read, never fetched.
+[[nodiscard]] std::vector<CandidateNote> model_notes(const harness::Config& config,
+                                                     const std::vector<std::string>& candidates);
+
+/// The order a menu draws its groups in (45b): `configured` first, `local`
+/// last, the rosters between as each first appears, the ungrouped after all
+/// -- as a permutation of `groups`' indices, stable within a group.
+[[nodiscard]] std::vector<std::size_t> menu_order(const std::vector<std::string>& groups);
 
 class CompleteProtocolCommand final : public Command {
 public:

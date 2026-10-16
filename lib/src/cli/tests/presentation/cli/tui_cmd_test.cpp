@@ -3,12 +3,15 @@
 #include <CLI/CLI.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <iostream>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include "cli/chat_session.h"
 #include "cli/registry.h"
 #include "cli/root.h"
 #include "support/cli_home.h"
@@ -26,13 +29,17 @@ struct Doors {
     std::string refusal;
     int opened = 0;
     int code = 0;
+    /// What the shell was last opened with (44c).
+    apogee::commands::ShellLaunch launch;
 
     [[nodiscard]] ShellEntry entry() {
         return ShellEntry{.interactive = [this]() { return interactive; },
                           .refusal = [this]() { return refusal; },
                           .run =
-                              [this](const apogee::commands::RootContext& /*context*/) {
+                              [this](const apogee::commands::RootContext& /*context*/,
+                                     const apogee::commands::ShellLaunch& given) {
                                   ++opened;
+                                  launch = given;
                                   return code;
                               }};
     }
@@ -162,4 +169,113 @@ TEST_CASE("tui completes, and its help says what it opens", "[cli][tui][completi
     out.clear();
     REQUIRE(home.run({"tui", "--help"}, &out, &err) == 0);
     CHECK(out.find("full-screen shell") != std::string::npos);
+}
+
+// --- the session table on apogee tui (44c) ------------------------------------
+
+namespace {
+
+/// Every spelling of every option `name` takes, help aside.
+[[nodiscard]] std::set<std::string> option_spellings(const CLI::App& root,
+                                                     const std::string& name) {
+    std::set<std::string> out;
+    const CLI::App* sub = root.get_subcommand(name);
+    for (const CLI::Option* option : sub->get_options()) {
+        if (option == sub->get_help_ptr()) {
+            continue;
+        }
+        for (const std::string& spelling : option->get_lnames()) {
+            out.insert("--" + spelling);
+        }
+        for (const std::string& spelling : option->get_snames()) {
+            out.insert("-" + spelling);
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("apogee tui takes the session table: every flag execute takes, nothing of its own",
+          "[cli][tui][launch]") {
+    // One table (ADR 0011): bound by the call the modes make, so a flag
+    // added there is tui's with no change here.
+    const apogee::commands::RootCommand root;
+    const std::set<std::string> tui = option_spellings(root.app(), "tui");
+    CHECK(tui == option_spellings(root.app(), "execute"));
+    CHECK(tui.contains("--suite"));
+    CHECK(tui.contains("--attach"));
+    CHECK(tui.contains("--effort"));
+    CHECK(tui.contains("--orchestrate"));
+    CHECK(std::ranges::includes(tui, option_spellings(root.app(), "chat")));
+}
+
+TEST_CASE("apogee tui's flags open the shell inside that session, the mode the flags' own",
+          "[cli][tui][launch]") {
+    Doors doors;
+    // A suite: execute's opening, every flag carried as parsed.
+    REQUIRE(run(doors, {"tui", "--suite", "duo", "--attach", ".", "--effort", "high"}).code == 0);
+    REQUIRE(doors.launch.flags != nullptr);
+    CHECK(doors.launch.mode == apogee::commands::SessionMode::Execute);
+    CHECK(doors.launch.flags->suite == "duo");
+    CHECK(doors.launch.flags->attach == std::vector<std::string>{"."});
+    CHECK(doors.launch.flags->effort == "high");
+    // A model alone: chat's.
+    REQUIRE(run(doors, {"tui", "-m", "mocky"}).code == 0);
+    REQUIRE(doors.launch.flags != nullptr);
+    CHECK(doors.launch.mode == apogee::commands::SessionMode::Chat);
+    CHECK(doors.launch.flags->model == "mocky");
+    // Orchestrating is execute's; a suite turned off is chat's.
+    REQUIRE(run(doors, {"tui", "--orchestrate"}).code == 0);
+    CHECK(doors.launch.mode == apogee::commands::SessionMode::Execute);
+    REQUIRE(run(doors, {"tui", "--suite", "off"}).code == 0);
+    CHECK(doors.launch.mode == apogee::commands::SessionMode::Chat);
+    // No flags: the picker, as a bare apogee opens it.
+    REQUIRE(run(doors, {"tui"}).code == 0);
+    CHECK(doors.launch.flags == nullptr);
+    REQUIRE(run(doors, {}).code == 0);
+    CHECK(doors.launch.flags == nullptr);
+    CHECK(doors.opened == 6);
+}
+
+TEST_CASE("apogee tui refuses what the modes refuse in their words, and machine mode's formats",
+          "[cli][tui][launch]") {
+    Doors doors;
+    // A combination the table refuses: the same words as execute's, before
+    // any screen.
+    const Run tui = run(doors, {"tui", "--effort", "high", "--think-budget", "100"});
+    const Run execute = run(doors, {"execute", "--effort", "high", "--think-budget", "100"});
+    CHECK(tui.code != 0);
+    CHECK(tui.code == execute.code);
+    CHECK(tui.err == execute.err);
+    CHECK(doors.opened == 0);
+    // The shell draws its own screen: machine mode's formats are a pipe's.
+    const Run json = run(doors, {"tui", "--output-format", "stream-json"});
+    CHECK(json.code == 1);
+    CHECK(json.err.find("--output-format and --input-format are machine mode's") !=
+          std::string::npos);
+    CHECK(doors.opened == 0);
+    // Off a terminal, flags or none, the measured refusal.
+    doors.interactive = false;
+    const Run piped = run(doors, {"tui", "--suite", "duo"});
+    CHECK(piped.code == 1);
+    CHECK(piped.err.find("needs an interactive terminal") != std::string::npos);
+    CHECK(doors.opened == 0);
+}
+
+TEST_CASE("apogee tui's session flags complete as the modes' do",
+          "[cli][tui][launch][completion]") {
+    const apogee::testing::CliHome home{
+        "backends:\n  local:\n    type: mock\n    model_path: s.json\nsuites:\n  duo:\n"
+        "    members:\n      chat: local\n"};
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"__complete", "tui", "--sui"}, &out, &err) == 0);
+    CHECK(out.find("--suite") != std::string::npos);
+    out.clear();
+    REQUIRE(home.run({"__complete", "tui", "--suite", ""}, &out, &err) == 0);
+    std::string execute;
+    REQUIRE(home.run({"__complete", "execute", "--suite", ""}, &execute, &err) == 0);
+    CHECK(out == execute);
+    CHECK(out.find("duo") != std::string::npos);
 }

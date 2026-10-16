@@ -111,6 +111,25 @@ TEST_CASE("a standard stream given another buffer is not a terminal", "[platform
     CHECK_FALSE(err_terminal);
 }
 
+TEST_CASE("echo is neither hidden nor paused when standard input is no terminal",
+          "[platform][terminal]") {
+    // A pipe's bytes are the input, not typeahead: nothing to silence, so
+    // a question asked over it has no echo to turn back on.
+    std::istringstream in;
+    std::streambuf* const old_in = std::cin.rdbuf(in.rdbuf());
+    bool hidden = false;
+    bool paused = false;
+    {
+        const apogee::platform::TypeaheadGuard quiet;
+        const apogee::platform::EchoPause visible;
+        hidden = quiet.active();
+        paused = visible.paused();
+    }
+    std::cin.rdbuf(old_in);
+    CHECK_FALSE(hidden);
+    CHECK_FALSE(paused);
+}
+
 TEST_CASE("a terminal that cannot place the cursor is refused a full screen, with why",
           "[platform][terminal]") {
     if (apogee::platform::host_os() == apogee::platform::OperatingSystem::Windows) {

@@ -174,8 +174,8 @@ TEST_CASE("every surface that takes --image goes through the attachment path",
 TEST_CASE("the guard has exactly one definition", "[commands][attachments][parity]") {
     // The structural half: a second implementation is how the two surfaces
     // drifted the first time. `helpers.cpp` owns it; no command may define it.
-    for (const std::string& surface : {"complete.cpp", "chat.cpp", "chat_session.cpp",
-                                       "execute.cpp", "chat_play.cpp", "chat_attachments.cpp"}) {
+    for (const std::string surface : {"complete.cpp", "chat.cpp", "chat_session.cpp", "execute.cpp",
+                                      "chat_play.cpp", "chat_attachments.cpp"}) {
         INFO("surface: " << surface);
         const std::string source = read_source(surface);
         CHECK(source.find("std::string attachment_refusal(") == std::string::npos);
@@ -187,9 +187,8 @@ TEST_CASE("no surface reaches vision through a type test", "[commands][attachmen
     // CLAUDE.md -> "Capability probes never leak a cast". The Harness asks the
     // provider; a command that reached for the concrete type would be correct
     // today and wrong the moment a second backend gained vision.
-    for (const std::string& surface :
-         {"complete.cpp", "chat.cpp", "chat_session.cpp", "execute.cpp", "chat_play.cpp",
-          "helpers.cpp", "chat_attachments.cpp"}) {
+    for (const std::string surface : {"complete.cpp", "chat.cpp", "chat_session.cpp", "execute.cpp",
+                                      "chat_play.cpp", "helpers.cpp", "chat_attachments.cpp"}) {
         INFO("surface: " << surface);
         const std::string source = read_source(surface);
         CHECK(source.find("dynamic_cast") == std::string::npos);

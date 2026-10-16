@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -1663,4 +1664,266 @@ TEST_CASE("attachments.graph off its set, or on a line the editor cannot see int
         path, [](std::string_view c) { return set_attachments_graph(c, "off"); });
     CHECK(apogee::harness::load_config(path).attachments.graph ==
           apogee::harness::AttachmentGraphMethod::Off);
+}
+
+// --- renaming a backend (46a) ----------------------------------------------
+
+namespace {
+
+/// Every way a backend is named in a config, around comments, with the
+/// traps a rename must leave alone: an MCP server and a collection of the
+/// same name, a prompt that says it, a name that only begins with it.
+constexpr std::string_view kRenameYaml = R"(# The config, with notes.
+backends:
+  # The local model, quantized.
+  gemma:   # the one we use
+    type: llamacpp
+    model_path: /models/gemma.gguf   # 12B
+  gemma-old:
+    type: mock
+  claude:
+    type: anthropic
+models:
+  default: gemma   # the chat
+  default_utility: "gemma"
+  default_vision: claude
+suites:
+  duo:
+    members:
+      chat: gemma
+      utility: {backend: gemma, window: 8192}
+  flow:
+    members: {chat: gemma, utility: claude}
+embeddings:
+  gemma:
+    backend: gemma
+    rerank: gemma
+    graph:
+      extract_backend: gemma
+graphs:
+  code:
+    extract_backend: gemma
+agents:
+  reviewer:
+    model: gemma
+mcp_servers:
+  gemma:
+    command: /bin/echo
+symphonies:
+  say:
+    description: Says gemma.
+    stages:
+      - name: one
+        role: chat
+        prompt: |
+          backend: gemma
+          model: gemma
+training:
+  judge_backend: gemma
+  regimes:
+    mine:
+      teacher: gemma
+      kits: [summarization]
+  cycle:
+    backend: gemma
+    judge_backend: claude
+    sources:
+    - type: sessions
+      log_consent: true
+      backend: gemma
+    - type: directory
+      path: /data
+)";
+
+}  // namespace
+
+TEST_CASE("rename_backend renames the key and every reference, and nothing else",
+          "[config_edit][rename]") {
+    const std::string renamed = apogee::harness::rename_backend(kRenameYaml, "gemma", "gemma4-12b");
+    std::string expected{kRenameYaml};
+    const auto swap = [&expected](std::string_view from, std::string_view to) {
+        const std::size_t at = expected.find(from);
+        REQUIRE(at != std::string::npos);
+        expected.replace(at, from.size(), to);
+    };
+    swap("  gemma:   # the one we use", "  gemma4-12b:   # the one we use");
+    swap("  default: gemma   # the chat", "  default: gemma4-12b   # the chat");
+    swap("  default_utility: \"gemma\"", "  default_utility: gemma4-12b");
+    swap("      chat: gemma\n", "      chat: gemma4-12b\n");
+    swap("{backend: gemma, window: 8192}", "{backend: gemma4-12b, window: 8192}");
+    swap("{chat: gemma, utility: claude}", "{chat: gemma4-12b, utility: claude}");
+    swap("    backend: gemma\n    rerank: gemma\n",
+         "    backend: gemma4-12b\n    rerank: gemma4-12b\n");
+    swap("      extract_backend: gemma\n", "      extract_backend: gemma4-12b\n");
+    swap("    extract_backend: gemma\nagents", "    extract_backend: gemma4-12b\nagents");
+    swap("    model: gemma\nmcp", "    model: gemma4-12b\nmcp");
+    swap("  judge_backend: gemma\n", "  judge_backend: gemma4-12b\n");
+    swap("      teacher: gemma\n", "      teacher: gemma4-12b\n");
+    swap("    backend: gemma\n    judge_backend: claude",
+         "    backend: gemma4-12b\n    judge_backend: claude");
+    swap("      backend: gemma\n    - type: directory",
+         "      backend: gemma4-12b\n    - type: directory");
+    CHECK(renamed == expected);
+    // It loads, the name moved and its references with it.
+    const apogee::harness::Config config = apogee::harness::parse_config(renamed, "renamed");
+    CHECK(config.find_backend("gemma4-12b") != nullptr);
+    CHECK(config.find_backend("gemma") == nullptr);
+    CHECK(config.models.default_backend == "gemma4-12b");
+    // Back again is the file it was -- but for the value written quoted, which
+    // the editor writes plain, as it writes every value YAML reads unchanged.
+    std::string back{kRenameYaml};
+    back.replace(back.find("default_utility: \"gemma\""), 24, "default_utility: gemma");
+    CHECK(apogee::harness::rename_backend(renamed, "gemma4-12b", "gemma") == back);
+}
+
+TEST_CASE("rename_backend refuses an unknown name, a taken one, and a name no key can be",
+          "[config_edit][rename]") {
+    using apogee::harness::ConfigEditError;
+    using apogee::harness::rename_backend;
+    CHECK_THROWS_WITH(rename_backend(kRenameYaml, "nope", "x"), "no backend named 'nope'");
+    CHECK_THROWS_WITH(rename_backend(kRenameYaml, "gemma", "claude"),
+                      "a backend named 'claude' already exists");
+    CHECK_THROWS_WITH(rename_backend(kRenameYaml, "gemma", "Claude"),
+                      "a backend named 'claude' already exists");
+    CHECK_THROWS_WITH(rename_backend(kRenameYaml, "gemma", "gemma"), "'gemma' is already its name");
+    CHECK_THROWS_WITH(rename_backend(kRenameYaml, "gemma", "two words"),
+                      "'two words' cannot name a backend -- a name is one word, no colon");
+    CHECK_THROWS_WITH(rename_backend(kRenameYaml, "gemma", "a:b"),
+                      "'a:b' cannot name a backend -- a name is one word, no colon");
+    // A change of case is the backend's own name: allowed.
+    CHECK_NOTHROW(rename_backend(kRenameYaml, "gemma", "Gemma"));
+}
+
+// --- editing a backend in place (46b) ---------------------------------------
+
+namespace {
+
+constexpr std::string_view kFieldsYaml = R"(backends:
+  # The local model.
+  gemma:
+    type: llamacpp   # in process
+    model_path: /models/gemma.gguf   # 12B
+    mmproj_path: /models/gemma-mmproj.gguf
+  claude:
+    type: anthropic
+    model: claude-sonnet-5   # the default model
+models:
+  default: gemma
+)";
+
+}  // namespace
+
+TEST_CASE("set_backend_field touches exactly its field: in place, inserted, or cleared",
+          "[config_edit][set-backend]") {
+    using apogee::harness::set_backend_field;
+    // In place: the value token, the comment after it kept.
+    std::string expected{kFieldsYaml};
+    expected.replace(expected.find("model: claude-sonnet-5"), 22, "model: claude-opus-5-5");
+    CHECK(set_backend_field(kFieldsYaml, "claude", "model", "claude-opus-5-5") == expected);
+    // A field the entry lacks: after `type:`.
+    expected = kFieldsYaml;
+    expected.insert(expected.find("    model_path: /models/gemma.gguf"),
+                    "    context_size: 32768\n");
+    CHECK(set_backend_field(kFieldsYaml, "gemma", "context_size", "32768") == expected);
+    // Cleared: its line, and nothing else.
+    expected = kFieldsYaml;
+    expected.erase(expected.find("    mmproj_path: /models/gemma-mmproj.gguf\n"), 43);
+    CHECK(set_backend_field(kFieldsYaml, "gemma", "mmproj_path", "") == expected);
+    // A field it lacks, cleared: the file as it was.
+    CHECK(set_backend_field(kFieldsYaml, "claude", "seed", "") == kFieldsYaml);
+    // Composed: each its own span.
+    const std::string both = set_backend_field(
+        set_backend_field(kFieldsYaml, "claude", "temperature", "0.2"), "claude", "model", "x");
+    const apogee::harness::Config config = apogee::harness::parse_config(both, "edited");
+    CHECK(config.find_backend("claude")->model == "x");
+    CHECK(config.find_backend("claude")->temperature == 0.2);
+    CHECK(config.find_backend("gemma")->mmproj_path == "/models/gemma-mmproj.gguf");
+}
+
+TEST_CASE("set_backend_field refuses a key, a field no backend has, and a cleared type",
+          "[config_edit][set-backend]") {
+    using apogee::harness::set_backend_field;
+    CHECK_THROWS_WITH(set_backend_field(kFieldsYaml, "claude", "api_key", "sk-x"),
+                      "a key is never taken on the command line -- store it with 'apogee auth "
+                      "add' (asked with echo off, or --stdin, or --from-env)");
+    CHECK_THROWS_WITH(set_backend_field(kFieldsYaml, "claude", "colour", "x"),
+                      "'colour' is no field of a backend");
+    CHECK_THROWS_WITH(set_backend_field(kFieldsYaml, "claude", "type", ""),
+                      "a backend's type cannot be cleared -- name the type it is");
+    CHECK_THROWS_WITH(set_backend_field(kFieldsYaml, "nope", "model", "x"),
+                      "backend 'nope' not found in config");
+}
+
+TEST_CASE("the editable fields are the loader's, and every one add-backend writes",
+          "[config_edit][set-backend][enumeration]") {
+    // 46b's tie, both ways. Each editable field set through the transform is
+    // read back by the loader -- a name it does not know would leave the
+    // entry as it was -- and every field add-backend's writer writes is
+    // editable, so a field the writer learns fails here until it has a flag.
+    constexpr std::string_view kBase = "backends:\n  all:\n    type: llamacpp\n";
+    const std::map<std::string_view, std::string> samples{{"type", "mlx"},
+                                                          {"model", "m"},
+                                                          {"model_path", "/m.gguf"},
+                                                          {"mmproj_path", "/p.gguf"},
+                                                          {"embedding_model", "e"},
+                                                          {"system_prompt", "s"},
+                                                          {"context_size", "4096"},
+                                                          {"cache_type", "q4_0"},
+                                                          {"max_tokens", "64"},
+                                                          {"temperature", "0.5"},
+                                                          {"top_p", "0.9"},
+                                                          {"top_k", "40"},
+                                                          {"min_p", "0.05"},
+                                                          {"repeat_penalty", "1.1"},
+                                                          {"presence_penalty", "0.2"},
+                                                          {"seed", "7"},
+                                                          {"thinking", "off"},
+                                                          {"thinking_budget", "128"},
+                                                          {"binary", "/bin/x"},
+                                                          {"mode", "m"},
+                                                          {"host", "h"},
+                                                          {"idle_unload_seconds", "30"}};
+    const std::string base_json = [&]() {
+        const apogee::harness::Config base = apogee::harness::parse_config(kBase, "base");
+        return apogee::harness::append_backend("", "all", *base.find_backend("all"), false);
+    }();
+    std::string all{kBase};
+    for (const std::string_view field : apogee::harness::backend_editable_fields()) {
+        INFO(field);
+        REQUIRE(samples.contains(field));  // every field has a sample here
+        const std::string edited =
+            apogee::harness::set_backend_field(kBase, "all", field, samples.at(field));
+        const apogee::harness::Config config = apogee::harness::parse_config(edited, "edited");
+        // The writer shows what the loader read -- but for the four it never
+        // writes, checked by name below.
+        const bool hand_written = field == "binary" || field == "mode" || field == "host" ||
+                                  field == "idle_unload_seconds";
+        const bool read = apogee::harness::append_backend("", "all", *config.find_backend("all"),
+                                                          false) != base_json;
+        CHECK((read || hand_written));
+        all = apogee::harness::set_backend_field(all, "all", field, samples.at(field));
+    }
+    CHECK(samples.size() == apogee::harness::backend_editable_fields().size());
+    // Every field the writer writes is one of them.
+    const apogee::harness::Config config = apogee::harness::parse_config(all, "all");
+    const std::string written =
+        apogee::harness::append_backend("", "all", *config.find_backend("all"), false);
+    std::istringstream lines{written};
+    const std::vector<std::string_view> editable = apogee::harness::backend_editable_fields();
+    std::size_t seen = 0;
+    for (std::string line; std::getline(lines, line);) {
+        if (line.starts_with("    ") && line.find(':') != std::string::npos) {
+            const std::string key = line.substr(4, line.find(':') - 4);
+            INFO(key);
+            CHECK(std::ranges::find(editable, key) != editable.end());
+            ++seen;
+        }
+    }
+    CHECK(seen == 18);  // the writer's fields: all but the four written by hand
+    // The four the writer never writes are read by the loader all the same.
+    const apogee::harness::BackendConfig& entry = *config.find_backend("all");
+    CHECK(entry.binary == "/bin/x");
+    CHECK(entry.mode == "m");
+    CHECK(entry.host == "h");
+    CHECK(entry.idle_unload_seconds == 30);
 }

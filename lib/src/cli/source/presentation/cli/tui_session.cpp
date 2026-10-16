@@ -6,7 +6,9 @@
 #include <utility>
 #include <vector>
 
+#include "cli/chat.h"
 #include "cli/chat_session.h"
+#include "cli/execute.h"
 #include "cli/tui_common.h"
 #include "contracts/config.h"
 #include "harness/roles.h"
@@ -252,50 +254,42 @@ namespace {
 
 }  // namespace
 
-void TuiSessionDriver::start() {
-    if (saved_chats().empty()) {
-        open({});
+void TuiSessionDriver::start(std::shared_ptr<const SessionFlags> launch, SessionMode mode) {
+    // Launched into a session (44c): that one first.
+    if (launch != nullptr) {
+        open(Opening{.mode = mode, .launch = std::move(launch)});
         return;
     }
+    // The picker always (44b): New chat a keypress away, and execute's doors
+    // there on a fresh install too (ADR 0012).
     show_picker();
 }
 
 void TuiSessionDriver::show_picker() {
-    // The execute door (37d): a session under each configured suite, the
-    // default first -- and with no suite configured, since 41a, one door
-    // bare on the default backend, the rungs `apogee execute` opens on;
-    // absent, rather than refusing, with neither. Each opens through
-    // execute's own session, the one door logic.
-    std::vector<tui::PickerDoor> doors;
+    // The execute door (37d, 44b): the doors `apogee execute` itself opens
+    // on -- a session under each configured suite, the default first, and
+    // the bare door whenever no suite is the default -- each opening
+    // through execute's own opening (ADR 0011). With nothing to open on, or
+    // a config that will not load, the door still stands, and the opening
+    // says why in the command's words.
+    std::vector<ExecuteDoor> execute;
     try {
         if (const std::optional<harness::Config> config = config_if_any(config_file(context_));
             config.has_value()) {
-            const std::string& fallback = config->models.default_suite;
-            std::vector<std::string> suites;
-            for (const auto& [name, suite] : config->suites) {
-                if (name == fallback) {
-                    suites.insert(suites.begin(), name);
-                } else {
-                    suites.push_back(name);
-                }
-            }
-            for (const std::string& name : suites) {
-                doors.push_back(tui::PickerDoor{
-                    .label = "Execute under suite " + name + (name == fallback ? " (default)" : ""),
-                    .open = [this, name]() {
-                        open(Opening{.suite = name, .mode = SessionMode::Execute});
-                    }});
-            }
-            // Bare on what the one resolver answers for the chat role.
-            if (const std::string bare = harness::resolve_chat_backend(*config, {});
-                suites.empty() && !bare.empty()) {
-                doors.push_back(tui::PickerDoor{
-                    .label = "Execute on " + bare + " (no suite)",
-                    .open = [this]() { open(Opening{.mode = SessionMode::Execute}); }});
-            }
+            execute = execute_doors(*config);
         }
     } catch (const std::exception&) {
-        // A config that will not load offers no door; the session says why.
+        execute.clear();
+    }
+    if (execute.empty()) {
+        execute.push_back(unconfigured_execute_door());
+    }
+    std::vector<tui::PickerDoor> doors;
+    for (ExecuteDoor& door : execute) {
+        doors.push_back(tui::PickerDoor{
+            .label = std::move(door.label), .open = [this, suite = std::move(door.suite)]() {
+                open(Opening{.suite = suite, .mode = SessionMode::Execute});
+            }});
     }
     view_.show_picker(
         saved_chats(),
@@ -332,16 +326,18 @@ std::string TuiSessionDriver::open_chat(const std::string& chat_id) {
 
 std::string TuiSessionDriver::open_execute(const std::string& suite) {
     const Opening opening{.suite = suite, .mode = SessionMode::Execute};
+    const std::string what = suite.empty() ? std::string{"an execute session"}
+                                           : "an execute session under suite " + suite;
     if (!open_) {
         open(opening);
-        return "an execute session under suite " + suite;
+        return what;
     }
     if (!view_.waiting_for_line()) {
         return "not now: the conversation is busy -- Ctrl-C there stops a turn";
     }
     pending_ = opening;
     (void)view_.enter("/exit");
-    return "an execute session under suite " + suite;
+    return what;
 }
 
 TuiSessionDriver::Handed TuiSessionDriver::play(const std::string& symphony,
@@ -417,9 +413,22 @@ void TuiSessionDriver::run(const Opening& opening) {
     try {
         CLI::App app{"the shell's conversation",
                      opening.mode == SessionMode::Execute ? "execute" : "chat"};
-        const std::shared_ptr<SessionFlags> flags =
-            shell_session_flags(app, opening.chat_id, opening.suite, opening.model, opening.mode);
-        run_session(context_, *flags, machine_, opening.mode, &output);
+        std::shared_ptr<SessionFlags> flags;
+        if (opening.launch != nullptr) {
+            // Launched (44c): the flags as `apogee tui` parsed them, with the
+            // tools every shell session carries.
+            flags = std::make_shared<SessionFlags>(*opening.launch);
+            flags->tools = true;
+        } else {
+            flags = shell_session_flags(app, opening.chat_id, opening.suite, opening.model,
+                                        opening.mode);
+        }
+        // Each mode through its command's own opening (ADR 0011).
+        if (opening.mode == SessionMode::Execute) {
+            open_execute_session(context_, *flags, machine_, &output);
+        } else {
+            open_chat_session(context_, *flags, machine_, &output);
+        }
     } catch (const CLI::RuntimeError&) {
         // The session said why it could not go on, on stderr -- the shell's
         // notice row while it holds the screen.

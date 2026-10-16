@@ -15,10 +15,19 @@ records the terminal's modes (`stty -g`) before it and after it:
             terminal is still put back.
   views     Tab shows the next view and F1 the first: the tab strip's bracket
             follows.
-  session   With a configured model (32c): the conversation on the screen --
-            a line sent, a tool's permission prompt answered `a`, the answer
-            rendered, the config holding `always`'s one edit and the tool's
-            file written -- then Ctrl-D, the terminal put back.
+  menu      The exec line's completion menu (45b): Tab over several candidates
+            opens it, the first marked, ↓ moves the mark, Enter fills the
+            choice into the line and runs nothing -- then the shell quit.
+  session   With a configured model (32c): the picker first (44b), Enter on its
+            new chat, then the conversation on the screen -- a line sent, a
+            tool's permission prompt answered `a`, the answer rendered, the
+            config holding `always`'s one edit and the tool's file written --
+            then Ctrl-D, the terminal put back.
+  door      The same install, a chat now saved (44b): the picker's execute door
+            below it -- execute's own opening, its banner saying no suite and
+            what it can play -- then Ctrl-D, the terminal put back.
+  launch    `apogee tui -m local` (44c): the shell opened inside that chat, its
+            banner on screen with no key pressed -- then Ctrl-D.
   pipe      A pipe on stdout: no screen at all, the help as `--help` prints it.
   dumb      TERM=dumb: the refusal said, the help printed, no screen.
 
@@ -129,8 +138,9 @@ def modes_and_exit(name, output):
     return without_pendin(states[0]), without_pendin(states[-1]), int(status.group(1))
 
 
-def screen_case(binary, env, name, act, expect_exit, ready=b"New chat"):
-    session = Session(f'stty -g; "{binary}"; echo "EXIT:$?"; stty -g', env)
+def screen_case(binary, env, name, act, expect_exit, ready=b"New chat", cwd=None, args=""):
+    move = f'cd "{cwd}" && ' if cwd else ""
+    session = Session(f'{move}stty -g; "{binary}"{args}; echo "EXIT:$?"; stty -g', env)
     # The session view first (32c): with no model configured its chat cannot
     # open, and it waits on the picker, where q and Ctrl-C are the shell's.
     session.wait_for(b"[1 Session]", 15, name)
@@ -209,6 +219,25 @@ def main():
 
         screen_case(binary, env, "exec-line", exec_line, 0)
 
+        def menu(session):
+            session.send(b"\t")
+            session.wait_for(b"[2 Chats]", 5, "menu")
+            session.send(b"!")
+            session.wait_for(b" :", 5, "menu")
+            session.send(b"chats list --output-format \t")
+            session.wait_for("\u203a text".encode(), 5, "menu")  # › text, marked
+            session.send(b"\x1b[B")  # Down
+            session.read_for(0.3)
+            session.send(b"\r")      # Enter fills the choice
+            session.wait_for(b"--output-format json ", 5, "menu")
+            if b"exit 0" in session.output:
+                fail("menu", "Enter on the menu ran the line", session.output)
+            session.send(b"\x1b")  # Esc closes the line
+            session.read_for(0.5)
+            session.send(b"q")
+
+        screen_case(binary, env, "menu", menu, 0)
+
         def go_to(session):
             # The Go-to menu (38): Ctrl-G from the session, a letter to a
             # view in another category, Enter there.
@@ -241,6 +270,9 @@ def main():
         env.pop("NO_COLOR", None)
 
         def converse(session):
+            # The picker always (44b): its new chat, marked, one key away.
+            session.wait_for(b"New chat", 15, "session")
+            session.send(b"\r")
             session.wait_for(b"/help for commands", 15, "session")
             # The machine on the bottom bar (32e), sampled on the shell's tick.
             session.wait_for(b"mem ", 15, "session")
@@ -260,6 +292,33 @@ def main():
             if note.read() != "hi":
                 fail("session", "the tool's file was not written")
         print("ok   session: a permission-prompted turn on screen, always written once")
+
+        def door(session):
+            # New chat, the chat just saved, then execute's door (44b).
+            session.send(b"\x1b[B\x1b[B")
+            session.read_for(0.3)
+            mark = len(session.output)
+            session.send(b"\r")
+            deadline = time.time() + 15
+            while b"symphonies" not in session.output[mark:]:
+                if time.time() > deadline or session.closed:
+                    fail("door", "the execute door did not open execute's session",
+                         session.output)
+                session.read_for(0.1)
+            session.wait_for(b"no suite", 5, "door")
+            session.send(b"\x04")  # Ctrl-D
+
+        screen_case(binary, env, "door", door, 0, ready=b"Execute on local (no suite)", cwd=work)
+
+        def launch(session):
+            # Straight into the chat the flags name: its banner, no key sent.
+            session.wait_for(b"/help for commands", 15, "launch")
+            if b"New chat" in session.output:
+                fail("launch", "the picker came first", session.output)
+            session.send(b"\x04")  # Ctrl-D
+
+        screen_case(binary, env, "launch", launch, 0, ready=b"[1 Session]", cwd=work,
+                    args=" tui -m local")
 
         help_text = subprocess.run([binary, "--help"], stdin=subprocess.DEVNULL,
                                    capture_output=True, env=env).stdout

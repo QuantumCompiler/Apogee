@@ -36,6 +36,7 @@
 #include "modelstore/mlx_info.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
+#include "operations/renames.h"
 #include "platform/platform.h"
 #include "training/convert.h"
 #include "training/mlx_convert.h"
@@ -283,8 +284,7 @@ void print_backend_hint(const std::filesystem::path& model_file,
 /// A model's short name for the files made from it: the repository part of
 /// `owner--repo`, else the name as it is.
 [[nodiscard]] std::string display_name(const std::string& model) {
-    const std::size_t separator = model.rfind("--");
-    return separator == std::string::npos ? model : model.substr(separator + 2);
+    return model_base_name(model);  // the base its backends are named after (46a reads it too)
 }
 
 /// What `pull --safetensors` stored, or found already stored.
@@ -1852,6 +1852,33 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
 
 void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_dir,
                           const RootContext& context) {
+    // `models rename` (46a): a model by the name its backends share -- every
+    // quantization renamed together, the directory following -- or by its
+    // stored directory, through the one core.
+    auto rename_old = std::make_shared<std::string>();
+    auto rename_new = std::make_shared<std::string>();
+    CLI::App* rename = models.add_subcommand(
+        "rename",
+        "Rename a model -- every quantization's backend, and the stored directory they run from");
+    rename
+        ->add_option("model", *rename_old,
+                     "The model: its backends' name without the level (-F16, -Q4KM), or its "
+                     "stored directory")
+        ->type_name(kModelNameValue)
+        ->required();
+    rename->add_option("new-name", *rename_new, "Its new name")->required();
+    rename->callback([&context, models_dir, rename_old, rename_new]() {
+        const RenameOutcome outcome = rename_stored_model(
+            harness::resolve_config_path(context.config_path),
+            store_roots(models_dir, context.config_path), *rename_old, *rename_new);
+        if (!outcome.refusal.empty()) {
+            fail(outcome.refusal);
+        }
+        for (const std::string& line : outcome.said) {
+            std::cout << line << "\n";
+        }
+    });
+
     // ---- pull ---------------------------------------------------------------
     auto pull_ref = std::make_shared<std::string>();
     auto pull_yes = std::make_shared<bool>(false);

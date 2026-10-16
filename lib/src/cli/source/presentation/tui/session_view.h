@@ -45,9 +45,9 @@ struct PickerEntry {
     int turns = 0;
 };
 
-/// A door the picker offers between the new chat and the saved ones (37d:
-/// an execute session under a suite): what it says, and what choosing it
-/// does, on the shell's thread.
+/// A door the picker offers after the new chat and the saved ones (37d, 44b:
+/// an execute session, under a suite or bare): what it says, and what
+/// choosing it does, on the shell's thread.
 struct PickerDoor {
     std::string label;
     std::function<void()> open;
@@ -57,7 +57,7 @@ struct PickerDoor {
 struct Choice {
     std::string key;
     std::string label;
-    std::string description;
+    std::string description{};
 };
 
 /// Something the session asks the person: a permission, a question, a yes or
@@ -66,7 +66,7 @@ struct Prompt {
     /// What is asked, a line each -- as the core styled them for a terminal.
     std::vector<std::string> lines;
     /// The answers on offer, each picked by its key.
-    std::vector<Choice> choices;
+    std::vector<Choice> choices{};
     /// Whether the person may type an answer of their own instead (a
     /// question's free text): typed and entered, it is the answer.
     bool free_text = false;
@@ -87,10 +87,10 @@ public:
 
     // --- any thread -------------------------------------------------------
 
-    /// The picker: a new chat first, then `doors`, then `entries`, newest
-    /// first. Enter on a saved chat or the new one calls `pick`, on the
-    /// shell's thread, with its id -- empty for the new chat; on a door, the
-    /// door's own `open`.
+    /// The picker: a new chat first, preselected, then `entries`, newest
+    /// first, then `doors` (44b). Enter on a saved chat or the new one calls
+    /// `pick`, on the shell's thread, with its id -- empty for the new chat;
+    /// on a door, the door's own `open`.
     void show_picker(std::vector<PickerEntry> entries, std::function<void(std::string)> pick,
                      std::vector<PickerDoor> doors = {});
 

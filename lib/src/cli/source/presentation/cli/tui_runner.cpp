@@ -27,7 +27,7 @@ namespace {
 [[nodiscard]] std::size_t first_verb(const std::vector<std::string>& words) {
     std::size_t at = 0;
     while (at < words.size() && words.at(at).starts_with("-")) {
-        at += takes_value(words.at(at)) && words.at(at).find('=') == std::string::npos ? 2 : 1;
+        at += takes_value(words.at(at)) && words.at(at).find('=') == std::string::npos ? 2U : 1U;
     }
     return at;
 }
@@ -87,11 +87,15 @@ ExecWords exec_words(const std::string& scope, const std::string& line) {
     return out;
 }
 
-std::vector<std::string> exec_candidates(const RootContext& context, const std::string& scope,
+namespace {
+
+/// The completion core's answer for `line` under `scope`, as `__complete`
+/// gives it.
+[[nodiscard]] Completion exec_completion(const RootContext& context, const std::string& scope,
                                          const std::string& line) {
     const LineTokens split = line_tokens(scope + (scope.empty() ? "" : " ") + line);
     if (!split.error.empty()) {
-        return {};
+        return Completion{};
     }
     CompletionRequest request;
     request.words = split.words;
@@ -109,7 +113,35 @@ std::vector<std::string> exec_candidates(const RootContext& context, const std::
     } catch (const std::exception&) {
         // A config that will not load completes nothing it would name.
     }
-    return complete_words(request, config, command_tree(), default_completion_sources()).candidates;
+    return complete_words(request, config, command_tree(), default_completion_sources());
+}
+
+}  // namespace
+
+std::vector<std::string> exec_candidates(const RootContext& context, const std::string& scope,
+                                         const std::string& line) {
+    return exec_completion(context, scope, line).candidates;
+}
+
+std::vector<tui::MenuItem> exec_menu_items(const RootContext& context, const std::string& scope,
+                                           const std::string& line) {
+    const Completion completion = exec_completion(context, scope, line);
+    std::vector<std::string> groups;
+    for (std::size_t i = 0; i < completion.candidates.size(); ++i) {
+        groups.push_back(i < completion.notes.size() ? completion.notes.at(i).group
+                                                     : std::string{});
+    }
+    std::vector<tui::MenuItem> items;
+    items.reserve(completion.candidates.size());
+    for (const std::size_t i : menu_order(groups)) {
+        items.push_back(tui::MenuItem{.text = completion.candidates.at(i),
+                                      .label = {},
+                                      .group = groups.at(i),
+                                      .description = i < completion.notes.size()
+                                                         ? completion.notes.at(i).description
+                                                         : std::string{}});
+    }
+    return items;
 }
 
 tui::ExecLineOptions exec_line_options(const RootContext& context,
@@ -118,7 +150,7 @@ tui::ExecLineOptions exec_line_options(const RootContext& context,
     tui::ExecLineOptions options;
     options.output = output;
     options.complete = [&context](const std::string& scope, const std::string& line) {
-        return exec_candidates(context, scope, line);
+        return exec_menu_items(context, scope, line);
     };
     options.run = [&context, output, binary](const std::string& scope, const std::string& line) {
         ExecWords run = exec_words(scope, line);

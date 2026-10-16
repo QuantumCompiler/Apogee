@@ -82,10 +82,10 @@ struct SessionModel {
     std::string pinned;
     /// Whose roster `pinned` is on: its owner's type -- empty for a pin named
     /// `<backend>:<model>`, which no roster need list.
-    std::string roster;
+    std::string roster{};
     /// Why the name is refused: a roster model two configured types list, or
     /// a model pinned on an entry that runs a file rather than a name.
-    std::string refusal;
+    std::string refusal{};
 };
 
 /// Resolves `name` as launch `-m`, `/model` and `complete -m` all take it --

@@ -49,7 +49,7 @@ struct MlxModelSpec {
     /// 0: not quantized (the shards still carry `format: mlx`).
     int bits = 4;
     int group_size = 64;
-    std::string mode;
+    std::string mode{};
     /// 0: `config.json` declares no window.
     std::int64_t window = 131072;
     std::string model_type = "llama";

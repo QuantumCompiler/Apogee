@@ -18,6 +18,7 @@
 #include "contracts/errors.h"
 #include "markdown/layout.h"
 #include "markdown/stream_renderer.h"
+#include "tui/completion_menu.h"
 #include "tui/paint.h"
 #include "tui/styled_text.h"
 #include "tui/view_body.h"
@@ -46,20 +47,20 @@ struct Block {
     enum class Kind : std::uint8_t { User, Line, Thinking, Answer };
     Kind kind = Kind::Line;
     /// User: what was entered. Line: the line, as the core styled it.
-    std::string text;
+    std::string text{};
     // Thinking: the turn's reasoning and its side calls, until the answer;
     // and its one-line summary (43), unless it is drawn raw after all.
-    std::string reasoning;
-    std::vector<std::string> notes;
-    std::string summary;
+    std::string reasoning{};
+    std::vector<std::string> notes{};
+    std::string summary{};
     bool raw = false;
     bool open = true;
     bool budget = false;
     Clock::time_point started{};
     long long seconds = 0;
     // Answer: the rows `markdown/` committed, and its open area.
-    std::vector<markdown::Row> rows;
-    std::vector<markdown::Row> open_rows;
+    std::vector<markdown::Row> rows{};
+    std::vector<markdown::Row> open_rows{};
 };
 
 [[nodiscard]] markdown::Span span(std::string text, ansi::TextAttributes look = {}) {
@@ -394,12 +395,12 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
             std::string line = i == picked ? " › " : "   ";
             if (i == 0) {
                 line += "New chat";
-            } else if (i <= doors.size()) {
-                line += doors.at(i - 1).label;
-            } else {
-                const PickerEntry& entry = picker.at(i - 1 - doors.size());
+            } else if (i <= picker.size()) {
+                const PickerEntry& entry = picker.at(i - 1);
                 line += entry.name + "  ·  " + entry.updated + "  ·  " +
                         std::to_string(entry.turns) + (entry.turns == 1 ? " turn" : " turns");
+            } else {
+                line += doors.at(i - 1 - picker.size()).label;
             }
             Element row = text(std::move(line));
             if (i == picked) {
@@ -455,44 +456,20 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
     /// marked, the descriptions in one column, and how many more there are
     /// above and below.
     [[nodiscard]] ftxui::Elements draw_menu() {
-        using namespace ftxui;  // NOLINT(google-build-using-namespace): the DOM's vocabulary
         const commands::Suggestions offered = open_menu();
-        Elements rows;
-        if (offered.candidates.empty()) {
-            return rows;
-        }
-        const std::size_t count = offered.candidates.size();
-        const std::size_t end = std::min(count, menu_top + kMenuRows);
-        const auto label_of = [](const commands::Suggestion& candidate) {
-            return candidate.label.empty() ? candidate.text : candidate.label;
-        };
-        std::size_t widest = 0;
-        for (std::size_t i = menu_top; i < end; ++i) {
-            widest = std::max(widest, ansi::display_width(label_of(offered.candidates.at(i))));
-        }
-        if (menu_top > 0) {
-            rows.push_back(text("   ↑ " + std::to_string(menu_top) + " more") | dim);
-        }
-        for (std::size_t i = menu_top; i < end; ++i) {
+        // The one menu's rows (45b), each candidate under its group's
+        // heading when the completer gave it one.
+        std::vector<MenuItem> items;
+        items.reserve(offered.candidates.size());
+        for (std::size_t i = 0; i < offered.candidates.size(); ++i) {
             const commands::Suggestion& candidate = offered.candidates.at(i);
-            const std::string label = label_of(candidate);
-            std::string row = (i == menu_chosen ? " › " : "   ") + label;
-            if (!candidate.description.empty()) {
-                row += std::string(widest - ansi::display_width(label) + 2, ' ') +
-                       candidate.description;
-            }
-            Element line = text(std::move(row));
-            if (i == menu_chosen) {
-                line = theme.color ? line | bold | color(Color::Cyan) : line | bold;
-            } else {
-                line = line | dim;
-            }
-            rows.push_back(std::move(line));
+            items.push_back(
+                MenuItem{.text = candidate.text,
+                         .label = candidate.label,
+                         .group = i < offered.groups.size() ? offered.groups.at(i) : std::string{},
+                         .description = candidate.description});
         }
-        if (end < count) {
-            rows.push_back(text("   ↓ " + std::to_string(count - end) + " more") | dim);
-        }
-        return rows;
+        return menu_rows(items, menu_chosen, menu_top, kMenuRows, theme);
     }
 
     /// The permission mode's row under the input (39b), as Claude Code's
@@ -868,8 +845,8 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
             picked = std::min(picked + 1, doors.size() + picker.size());
             return true;
         }
-        if (event == ftxui::Event::Return && picked > 0 && picked <= doors.size()) {
-            const std::function<void()> open = doors.at(picked - 1).open;
+        if (event == ftxui::Event::Return && picked > picker.size()) {
+            const std::function<void()> open = doors.at(picked - 1 - picker.size()).open;
             mode = Mode::Empty;
             if (open) {
                 open();
@@ -877,8 +854,7 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
             return true;
         }
         if (event == ftxui::Event::Return && pick) {
-            const std::string id =
-                picked == 0 ? std::string{} : picker.at(picked - 1 - doors.size()).id;
+            const std::string id = picked == 0 ? std::string{} : picker.at(picked - 1).id;
             const std::function<void(std::string)> chosen = pick;
             mode = Mode::Empty;
             chosen(id);

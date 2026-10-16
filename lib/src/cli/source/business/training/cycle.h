@@ -53,19 +53,19 @@ inline constexpr std::string_view kGateSkipped = "skipped";
 
 /// One `cycle run`.
 struct CycleRunRecord {
-    std::string run_at;
+    std::string run_at{};
     /// `directory`, `sessions`, or `directory+sessions`.
-    std::string source;
+    std::string source{};
     int dataset_rows = 0;
-    std::string pipeline_id;
+    std::string pipeline_id{};
     /// `pass`, `fail` or `skipped`.
     std::string gate;
-    std::string gate_reason;
+    std::string gate_reason{};
     double cycle_score = 0.0;
     double prev_score = 0.0;
     double anchor_score = 0.0;
     int promoted_version = 0;
-    std::string note;
+    std::string note{};
 };
 
 /// `training/cycle/history.json`.
@@ -198,9 +198,9 @@ bool trip_breaker(CycleHistory& history, int k);
 /// MLX version's directory -- or why not.
 struct CyclePromotion {
     bool ok = false;
-    std::string error;
+    std::string error{};
     int version = 0;
-    std::string weights_path;
+    std::string weights_path{};
 };
 
 /// The promote path, arriving as a closure: it edits the config, which

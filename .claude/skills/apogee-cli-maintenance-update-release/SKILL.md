@@ -30,7 +30,7 @@ In one pass, oldest-truth first:
 1. **`lib/release/VERSION`** — the new number, bare (`0.1.4`), no `v`.
 2. **`lib/src/cli/CMakeLists.txt`** — the project `VERSION` line, kept byte-equal in meaning with the file above.
 3. **ROADMAP.md** — the finished release's `### v0.1.<n>` section moves from **In progress** to **Shipped releases** (release date and `[release notes](…/releases/tag/v0.1.<n>)` link in its header, checkboxes resolved — unfinished lines move with their items, they don't vanish); the next release's **Up next** section is promoted to **In progress**.
-4. **Backlog README** — the shipped version's (now empty) table and its directory go away; the next version's table is now the earliest, which makes it the bare-"Continue" queue. The format spec and preambles need no change for a roll — that is the point of the standing rules.
+4. **Backlog README** — the shipped version's (now empty) table and its directory go away, if the pre-merge docs pass has not already retired them (`/apogee-cli-maintenance-update-documents` retires the in-development table once it empties); the next version's table is now the earliest, which makes it the bare-"Continue" queue. The shipped-tracks paragraph above the tables, which that pass left naming the version's tracks as complete in it and in development, now names the release with its release-notes link and its date, as the earlier releases there read. The format spec and the other preambles need no change for a roll — that is the point of the standing rules.
 5. **Root `README.md`** — the status paragraph ("… are out, and `v0.1.<n>` is in development on its branch") gains the shipped release in its list and names the new in-development version.
 6. **The rest by survey, not memory:** grep the old number across `lib/documentation`, `README.md`, `lib/scripts` and `.github` and judge each hit — **live-state mentions** (in-development wording, install/CI references to the current version) update; **historical mentions** (MILESTONES records, Shipped sections, dated decisions, backlog documents' "earmarked for" of *future* versions) stay exactly as written. Versioned directory names under `backlog/` are queue state, not history — they follow rule 4, nothing else.
 
@@ -47,7 +47,7 @@ Never blind-replace the bare number: `0.1.3` lives inside dates, decisions and s
 
 Scripted, never by eye:
 
-- `lib/release/VERSION` == CMakeLists' `VERSION` == ROADMAP's **In progress** header == the backlog's earliest version table — one number, four places.
+- `lib/release/VERSION` == CMakeLists' `VERSION` == ROADMAP's **In progress** header == the backlog's earliest version table — one number, four places. (Between the pre-merge docs pass and the roll the in-development table is already retired, so the earliest table is the next version's; after the roll the four agree again.)
 - The old number survives only in historical contexts (Shipped sections, MILESTONES, dated decisions) — grep and judge every remaining hit.
 - The backlog index still validates (rows ↔ docs, Version cells match directories, sequences ascend, gates resolve) and the full link sweep passes (the two illustrative MILESTONES lines are known false positives).
 

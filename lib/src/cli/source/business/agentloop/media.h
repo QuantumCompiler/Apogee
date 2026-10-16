@@ -115,14 +115,14 @@ struct MediaJob {
 
 /// A medium's text form, as it is indexed.
 struct MediaText {
-    std::string text;
+    std::string text{};
     /// `vision: <backend>`, `transcription: <backend>`, or `timeline: <the
     /// backends that built it>`.
-    std::string reader;
+    std::string reader{};
     /// Why it was not read, when it was not.
     std::string reason;
     /// Worth saying: a video's sound left untranscribed, a frame that failed.
-    std::vector<std::string> notes;
+    std::vector<std::string> notes{};
     /// The clip's length, when it has one.
     double duration = 0.0;
 };

@@ -361,9 +361,9 @@ void check_suites(CheckReport& report, const harness::Config& config, const back
             std::string validate;
             if (suite.validate.any()) {
                 std::string seams;
-                const auto seam = [&seams](bool on, std::string_view name) {
+                const auto seam = [&seams](bool on, std::string_view seam_name) {
                     if (on) {
-                        seams += (seams.empty() ? "" : ", ") + std::string{name};
+                        seams += (seams.empty() ? "" : ", ") + std::string{seam_name};
                     }
                 };
                 seam(policy.tool_args, "tool_args");
@@ -1405,7 +1405,7 @@ void check_attachments(CheckReport& report, const CheckInputs& inputs) {
         for (const auto& entry : std::filesystem::directory_iterator(folder, code)) {
             if (entry.is_regular_file(code)) {
                 bytes += entry.file_size(code);
-                indexes += entry.path().extension() == ".db" ? 1 : 0;
+                indexes += entry.path().extension() == ".db" ? 1U : 0U;
             }
         }
     }

@@ -21,7 +21,7 @@ class FakeTransport final : public backends::HttpTransport {
 public:
     struct Reply {
         long status = 200;
-        std::string body;
+        std::string body{};
         /// Deliver the body in chunks of this size. 0 sends it whole.
         ///
         /// The parameter that matters: an SSE frame split across chunks is the
@@ -33,18 +33,18 @@ public:
         bool transport_error = false;
         std::string error_message = "simulated transport failure";
         /// Sent as the `retry-after` header value.
-        std::optional<std::chrono::milliseconds> retry_after;
+        std::optional<std::chrono::milliseconds> retry_after{};
         /// Deliver this many bytes to the sink, then raise a transport error.
         ///
         /// The mid-stream connection drop: the caller has already seen part of
         /// an answer when the socket dies. It is the case the no-retry-after-
         /// delivery guard exists for, and it cannot be provoked on demand
         /// against a live endpoint.
-        std::optional<std::size_t> fail_after_bytes;
+        std::optional<std::size_t> fail_after_bytes{};
         /// Sent as the `Location` header value.
-        std::string location;
+        std::string location{};
         /// Sent as the `Content-Type` header value.
-        std::string content_type;
+        std::string content_type{};
     };
 
     /// Replies are served in order; the last one repeats once exhausted.

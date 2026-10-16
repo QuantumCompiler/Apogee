@@ -378,8 +378,8 @@ TEST_CASE("gemini: the event stream parses identically at every chunk size",
     // The family framing guardrail. This CLI emits real deltas, so a split line
     // here loses part of an ANSWER rather than one whole message -- which makes
     // the adversarial replay matter more on this backend than on codex.
-    for (const std::string& name : {"simple_text.jsonl", "streamed_deltas.jsonl",
-                                    "resumed_session.jsonl", "tool_use_plan_mode.jsonl"}) {
+    for (const std::string name : {"simple_text.jsonl", "streamed_deltas.jsonl",
+                                   "resumed_session.jsonl", "tool_use_plan_mode.jsonl"}) {
         INFO("fixture: " << name);
         const std::string bytes = read_fixture(name);
 

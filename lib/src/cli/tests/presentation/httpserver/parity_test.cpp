@@ -81,6 +81,8 @@ const std::map<std::string, Classification>& table() {
                    "writes a remote client writes through the add-backend twin (M12, the "
                    "providers-scan precedent)")},
         {"config delete-backend", twin("DELETE", "/v1/admin/backends/{id}")},
+        {"config rename-backend", twin("POST", "/v1/admin/backends/{id}/rename")},
+        {"config set-backend", twin("PATCH", "/v1/admin/backends/{id}")},
         {"config set-default", twin("POST", "/v1/admin/backends/default")},
         {"config set-default-embedding", twin("POST", "/v1/admin/backends/default-embedding")},
         {"config set-default-extraction", twin("POST", "/v1/admin/backends/default-extraction")},
@@ -132,6 +134,7 @@ const std::map<std::string, Classification>& table() {
         {"models quantize", backfill("models: the models plane, an async job")},
         {"models convert", backfill("models: the models plane, an async job")},
         {"models migrate", backfill("models: the models plane")},
+        {"models rename", backfill("models: the models plane")},
         {"datasets prepare",
          backfill("training: the datasets plane, a server-side conversion, an async job")},
         {"datasets pull", backfill("training: the datasets plane, an async job")},

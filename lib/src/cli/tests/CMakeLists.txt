@@ -298,6 +298,8 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/chat_attachments_test.cpp
     presentation/cli/attachment_graph_test.cpp
     presentation/operations/graph_sources_test.cpp
+    presentation/operations/renames_test.cpp
+    presentation/operations/backend_fields_test.cpp
     presentation/cli/chat_completer_test.cpp
     presentation/cli/chat_roster_test.cpp
     presentation/cli/chat_session_test.cpp
@@ -376,6 +378,11 @@ foreach(target IN LISTS APOGEE_TEST_TARGETS)
         APOGEE_TESTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         # The vendored converter, byte-matched to its compiled-in copy.
         APOGEE_THIRD_PARTY_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../third_party"
+        # Catch2 names each test case's hidden function by __COUNTER__, which
+        # clang 22 under -Wpedantic reports as a C2y extension at every
+        # TEST_CASE. Standard __LINE__ names them just as uniquely here: no
+        # file holds two test cases on one line.
+        CATCH_CONFIG_NO_COUNTER
     )
 
     # So tests can `#include "support/fake_command.h"` the same way source files
@@ -1019,6 +1026,18 @@ if(UNIX)
                 $<TARGET_FILE:apogee>
         )
         set_tests_properties(cli.tui_shell PROPERTIES TIMEOUT 180)
+
+        # Every classified door reached on a fresh install (44d, ADR 0012): the
+        # parity table's view rows, read from the source the binary is built
+        # from, each walked to through the Go-to menu on a real terminal over
+        # a data directory `check --fix` seeded and nothing else.
+        add_test(NAME cli.tui_doors
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_door_check.py"
+                $<TARGET_FILE:apogee>
+                "${PROJECT_SOURCE_DIR}/source/presentation/cli/tui_parity.cpp"
+        )
+        set_tests_properties(cli.tui_doors PROPERTIES TIMEOUT 300)
 
         add_test(NAME cli.chat_typeahead_and_crash_safety
             COMMAND "${Python3_EXECUTABLE}"

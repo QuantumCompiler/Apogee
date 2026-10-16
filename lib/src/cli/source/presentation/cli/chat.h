@@ -18,6 +18,13 @@
 /// `apogee execute` became its second consumer.
 namespace apogee::commands {
 
+/// Chat's opening (ADR 0011): what `apogee chat` runs, and what every front
+/// end's door calls -- the session core in chat mode over `flags` parsed
+/// through chat's own table. `front` is where the session writes when it is
+/// not the terminal: the full-screen shell's session view.
+void open_chat_session(const RootContext& context, const SessionFlags& flags,
+                       const MachineBudgetSource& machine, SessionOutput* front = nullptr);
+
 /// `apogee chat` — a persistent, resumable conversation.
 class ChatCommand final : public Command {
 public:

@@ -153,11 +153,11 @@ struct UpsertResult {
 /// on a row stamped before it was recorded; the planner then compares the
 /// count only, so an upgrade never forces a rebuild.
 struct SourceState {
-    std::string source;
+    std::string source{};
     std::int64_t chunk_count = 0;
     std::int64_t max_chunk_id = 0;
     /// RFC 3339, UTC.
-    std::string extracted_at;
+    std::string extracted_at{};
     std::string model;
 };
 

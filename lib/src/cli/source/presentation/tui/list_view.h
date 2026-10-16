@@ -25,7 +25,7 @@ namespace apogee::tui {
 /// words them.
 struct ListRow {
     std::string key;
-    std::vector<std::string> cells;
+    std::vector<std::string> cells{};
     enum class Look : std::uint8_t { Plain, Dim, Attention, Active };
     Look look = Look::Plain;
 };
@@ -37,10 +37,10 @@ struct ListAction {
     /// What the hint bar calls it: `make default`.
     std::string label;
     /// Whether it applies to `row`; null: every row.
-    std::function<bool(const ListRow&)> applies;
+    std::function<bool(const ListRow&)> applies{};
     /// The question asked first, answered `y` or anything else, no; null
     /// runs it at once.
-    std::function<std::string(const ListRow&)> confirm;
+    std::function<std::string(const ListRow&)> confirm{};
     /// Runs it, on the view's worker thread, and returns what to say -- a
     /// line on the notice row, or several, drawn whole under the table until
     /// Esc (37b: a fix pass's report); a throw is said as the reason it was
@@ -66,11 +66,11 @@ struct ListAsk {
     std::function<std::string(const ListRow& row, const std::string& text)> ask;
     /// What the input row opens with when nothing was asked on this key yet
     /// (37f: a command's own words, `run `, for its arguments); null, empty.
-    std::function<std::string(const ListRow& row)> prefill;
+    std::function<std::string(const ListRow& row)> prefill{};
     /// The question put before it is asked, answered `y` or anything else,
     /// no (37e: a task's goal and its policy, before the run spends model
     /// turns); null asks at once.
-    std::function<std::string(const ListRow& row, const std::string& text)> confirm;
+    std::function<std::string(const ListRow& row, const std::string& text)> confirm{};
     /// The question is about the selected row (the collection searched, the
     /// graph a node is in): offered only with one.
     bool needs_row = false;

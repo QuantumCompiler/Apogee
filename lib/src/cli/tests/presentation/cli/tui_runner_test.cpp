@@ -13,6 +13,7 @@
 #include <thread>
 #include <vector>
 
+#include "backends/model_roster.h"
 #include "cli/command.h"
 #include "support/cli_home.h"
 #include "tui/progress.h"
@@ -147,8 +148,14 @@ TEST_CASE("the shell's : opens the line scoped, ! unscoped; it takes the keys wh
     std::vector<std::pair<std::string, std::string>> ran;
     apogee::tui::ExecLineOptions options;
     options.complete = [](const std::string& /*scope*/, const std::string& line) {
-        return line.ends_with("pu") ? std::vector<std::string>{"pull"}
-                                    : std::vector<std::string>{"list", "info", "pull"};
+        const auto items = [](std::initializer_list<const char*> words) {
+            std::vector<apogee::tui::MenuItem> out;
+            for (const char* word : words) {
+                out.push_back(apogee::tui::MenuItem{.text = word});
+            }
+            return out;
+        };
+        return line.ends_with("pu") ? items({"pull"}) : items({"list", "info", "pull"});
     };
     options.run = [&ran](const std::string& scope, const std::string& line) {
         ran.emplace_back(scope, line);
@@ -181,8 +188,14 @@ TEST_CASE("the shell's : opens the line scoped, ! unscoped; it takes the keys wh
     stage.shell.activate(1);
     (void)stage.shell.press(Key::character("!"));
     CHECK(has(stage.frame(), " :▏"));
+    // Tab with several opens the menu (45b), the first chosen; Esc closes
+    // the menu, the line staying.
     (void)stage.shell.press(Key::named(Key::Name::Tab));
-    CHECK(has(stage.frame(), " list  info  pull"));
+    CHECK(has(stage.frame(), " › list\n"));
+    CHECK(has(stage.frame(), "   info\n"));
+    (void)stage.shell.press(Key::named(Key::Name::Escape));
+    CHECK_FALSE(has(stage.frame(), " › list"));
+    CHECK(has(stage.frame(), " :▏"));
     // Ctrl-C with nothing running closes the line, and never quits.
     (void)stage.shell.press(Key::named(Key::Name::CtrlC));
     CHECK_FALSE(stage.shell.quit_requested());
@@ -280,4 +293,129 @@ TEST_CASE("Ctrl-C stops a slow command from the exec line, and the shell goes on
     const std::string last = output->lines().back();
     CHECK((last == "exit 130" || last == "stopped by a signal"));
     CHECK_FALSE(stage.shell.quit_requested());
+}
+
+// --- the completion menu (45b) ----------------------------------------------
+
+TEST_CASE(
+    "the exec line's menu: grouped, described, moved by Tab and the arrows, narrowed by typing",
+    "[cli][tui][runner][menu]") {
+    const std::vector<apogee::tui::MenuItem> all{
+        {.text = "claude", .group = "configured", .description = "anthropic · claude-sonnet-5"},
+        {.text = "codex", .group = "configured", .description = "codex-cli"},
+        {.text = "claude:",
+         .group = "anthropic's roster · fetched 2026-10-14",
+         .description = "2 models"},
+        {.text = "Gemma4", .group = "local", .description = "llamacpp · gemma.gguf"}};
+    apogee::tui::ExecLineOptions options;
+    options.complete = [&all](const std::string& /*scope*/, const std::string& line) {
+        const std::string word = line.substr(line.find_last_of(' ') + 1);
+        std::vector<apogee::tui::MenuItem> out;
+        for (const apogee::tui::MenuItem& item : all) {
+            if (item.text.starts_with(word)) {
+                out.push_back(item);
+            }
+        }
+        return out;
+    };
+    options.run = [](const std::string&, const std::string&) { return std::string{"ran"}; };
+    ShellStage stage{options};
+    stage.shell.activate(1);
+    (void)stage.shell.press(Key::character("!"));
+    stage.type("complete -m ");
+    (void)stage.shell.press(Key::named(Key::Name::Tab));
+    std::string frame = stage.frame();
+    // Each group under its heading, in order; the first chosen, described.
+    CHECK(frame.find(" configured\n") < frame.find(" anthropic's roster · fetched 2026-10-14\n"));
+    CHECK(frame.find(" anthropic's roster · fetched 2026-10-14\n") < frame.find(" local\n"));
+    CHECK(has(frame, " › claude   anthropic · claude-sonnet-5\n"));
+    CHECK(has(frame, "   Gemma4   llamacpp · gemma.gguf\n"));
+    // A second Tab moves the choice on; the arrows move it, wrapping.
+    (void)stage.shell.press(Key::named(Key::Name::Tab));
+    CHECK(has(stage.frame(), " › codex"));
+    (void)stage.shell.press(Key::named(Key::Name::Down));
+    CHECK(has(stage.frame(), " › claude:"));
+    (void)stage.shell.press(Key::named(Key::Name::Down));
+    (void)stage.shell.press(Key::named(Key::Name::Down));
+    CHECK(has(stage.frame(), " › claude "));  // wrapped to the first
+    // Typing narrows it: the local model and its heading gone.
+    stage.type("c");
+    frame = stage.frame();
+    CHECK_FALSE(has(frame, "Gemma4"));
+    CHECK_FALSE(has(frame, " local\n"));
+    CHECK(has(frame, " › claude "));
+    // Enter fills the choice -- a shelf's colon ends no word -- and runs nothing.
+    (void)stage.shell.press(Key::named(Key::Name::Down));
+    (void)stage.shell.press(Key::named(Key::Name::Down));
+    (void)stage.shell.press(Key::named(Key::Name::Return));
+    frame = stage.frame();
+    CHECK(has(frame, " :complete -m claude:▏"));
+    CHECK_FALSE(has(frame, " ran"));
+    CHECK_FALSE(has(frame, " › "));
+    // One candidate is taken whole, a word ended, with no menu.
+    (void)stage.shell.press(Key::named(Key::Name::Escape));
+    (void)stage.shell.press(Key::character("!"));
+    stage.type("complete -m G");
+    (void)stage.shell.press(Key::named(Key::Name::Tab));
+    frame = stage.frame();
+    CHECK(has(frame, " :complete -m Gemma4 ▏"));
+    CHECK_FALSE(has(frame, " › "));
+    // Esc closes the menu first, then the line.
+    stage.type("c");
+    (void)stage.shell.press(Key::named(Key::Name::Tab));
+    CHECK(has(stage.frame(), " › claude"));
+    (void)stage.shell.press(Key::named(Key::Name::Escape));
+    frame = stage.frame();
+    CHECK(has(frame, " :complete -m Gemma4 c"));
+    CHECK_FALSE(has(frame, " › "));
+    (void)stage.shell.press(Key::named(Key::Name::Escape));
+    CHECK_FALSE(has(stage.frame(), " :complete"));
+}
+
+TEST_CASE("the exec line's menu items are the core's candidates, grouped and described publicly",
+          "[cli][tui][runner][menu]") {
+    const apogee::testing::CliHome home{
+        "backends:\n"
+        "  claude:\n    type: anthropic\n    model: claude-sonnet-5\n"
+        "    api_key: sk-planted-menu-key-0000\n"
+        "  zlocal:\n    type: llamacpp\n    model_path: /models/gemma-Q4_K_M.gguf\n"};
+    apogee::backends::RosterCache cache;
+    cache.rosters["anthropic"] = apogee::backends::ProviderRoster{
+        {{"claude-opus-5-5", "Claude Opus 5.5"}, {"claude-sonnet-5-5", "Claude Sonnet 5.5"}},
+        "2026-10-14"};
+    REQUIRE(apogee::backends::save_roster_cache(cache).empty());
+    apogee::commands::RootContext context;
+    context.config_path = home.config_path().string();
+    // The same candidates as the wire, in the menu's group order.
+    const std::vector<apogee::tui::MenuItem> items =
+        apogee::commands::exec_menu_items(context, "", "complete -m ");
+    std::vector<std::string> texts;
+    for (const apogee::tui::MenuItem& item : items) {
+        texts.push_back(item.text);
+    }
+    CHECK(texts == std::vector<std::string>{"claude", "claude:", "zlocal"});
+    std::vector<std::string> wire = apogee::commands::exec_candidates(context, "", "complete -m ");
+    std::ranges::sort(wire);
+    std::ranges::sort(texts);
+    CHECK(wire == texts);
+    REQUIRE(items.size() == 3);
+    CHECK(items.at(0).group == "configured");
+    CHECK(items.at(0).description == "anthropic · claude-sonnet-5");
+    CHECK(items.at(1).group == "anthropic's roster · fetched 2026-10-14");
+    CHECK(items.at(1).description == "2 models");
+    CHECK(items.at(2).group == "local");
+    CHECK(items.at(2).description == "llamacpp · gemma-Q4_K_M.gguf");
+    // Past the colon, the roster's models by the vendor's names.
+    const std::vector<apogee::tui::MenuItem> shelf =
+        apogee::commands::exec_menu_items(context, "", "complete -m claude:");
+    REQUIRE(shelf.size() == 2);
+    CHECK(shelf.at(0).text == "claude:claude-opus-5-5");
+    CHECK(shelf.at(0).description == "Claude Opus 5.5");
+    // A key never rides a menu row (the leak test's rule, 45b).
+    for (const std::string line : {"complete -m ", "complete -m c", "complete -m claude:"}) {
+        for (const apogee::tui::MenuItem& item :
+             apogee::commands::exec_menu_items(context, "", line)) {
+            CHECK_FALSE(has(item.text + item.label + item.group + item.description, "sk-planted"));
+        }
+    }
 }

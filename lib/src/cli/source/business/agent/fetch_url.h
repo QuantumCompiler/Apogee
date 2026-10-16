@@ -36,10 +36,10 @@ struct FetchResult {
     /// Where a redirect points (its `Location`), as sent. The fetcher must
     /// NOT follow redirects itself: the tool follows them one hop at a time,
     /// so each new host goes through the permission gate like a direct fetch.
-    std::string location;
+    std::string location{};
     /// The `Content-Type`, as sent: what the reader does with the body --
     /// HTML extracted, text passed through, anything else refused by name.
-    std::string content_type;
+    std::string content_type{};
 };
 
 /// Fetches ONE URL, without following redirects.

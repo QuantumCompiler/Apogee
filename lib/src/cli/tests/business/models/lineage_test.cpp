@@ -97,7 +97,7 @@ struct Store {
 /// missing) per link -- one table shape for every case below.
 struct LinkRow {
     OriginKind kind;
-    std::string from;
+    std::string from{};
     bool inferred = false;
     bool missing = false;
 

@@ -29,7 +29,7 @@ namespace apogee::commands {
 /// asked; unknown is metered.
 struct MeteredAnswer {
     bool metered = true;
-    std::string unknown;
+    std::string unknown{};
 };
 
 using MeteredProbe =

@@ -226,6 +226,11 @@ public:
     EchoPause(EchoPause&&) = delete;
     EchoPause& operator=(EchoPause&&) = delete;
 
+    /// Whether this pause turned echo back on (and will hide it again).
+    [[nodiscard]] bool paused() const noexcept {
+        return paused_;
+    }
+
 private:
     bool paused_ = false;
 };

@@ -109,7 +109,11 @@ constexpr std::string_view kReplacement = "\xEF\xBF\xBD";  // U+FFFD
 
 /// A row of `count` plain spaces; empty for none.
 [[nodiscard]] Row spaces(std::size_t count) {
-    return count == 0 ? Row{} : Row{Span{std::string(count, ' '), {}, {}}};
+    Row row;
+    if (count > 0) {
+        row.push_back(Span{std::string(count, ' '), {}, {}});
+    }
+    return row;
 }
 
 [[nodiscard]] std::string repeat(std::string_view piece, std::size_t count) {

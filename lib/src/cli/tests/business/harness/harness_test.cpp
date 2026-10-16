@@ -141,7 +141,7 @@ backends:
     harness.register_provider("Qwen3.5", mock("Qwen3.5", "qwen3:5b"));
     harness.use_default_router();
 
-    for (const std::string& spelling :
+    for (const std::string spelling :
          {"Qwen3.5", "qwen3.5", "qwen3-5", "QWEN3-5", "qwen3:5b", "qwen3-5b"}) {
         INFO("spelling: " << spelling);
         CHECK(harness.route(spelling).backend_name() == "Qwen3.5");

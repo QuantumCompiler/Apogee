@@ -86,8 +86,8 @@ struct GrantScope {
     const harness::PermissionsConfig* permissions = nullptr;
     /// The agent the task runs under, and its policy word, for the refusal;
     /// empty for none.
-    std::string agent;
-    std::string agent_tools;
+    std::string agent{};
+    std::string agent_tools{};
 };
 
 /// **The ceiling**: why `grants` would take a task past what the config and

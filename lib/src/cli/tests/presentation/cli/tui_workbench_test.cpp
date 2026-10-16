@@ -56,8 +56,7 @@ suites:
 struct Bench {
     Bench(const apogee::testing::CliHome& home,
           apogee::tui::ListOptions (*make)(const apogee::commands::RootContext&))
-        : Bench(home, [&](const apogee::commands::RootContext& context) { return make(context); }) {
-    }
+        : Bench(home, [&](const apogee::commands::RootContext& root) { return make(root); }) {}
 
     template <typename Make>
     Bench(const apogee::testing::CliHome& home, Make make) {

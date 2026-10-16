@@ -31,7 +31,7 @@ struct EvalItem {
     /// The whole prompt, its prefix's text included.
     std::string prompt;
     /// A substring the answer must contain; empty means a judge decides.
-    std::string expected;
+    std::string expected{};
 };
 
 /// A fixed text a kit's prompts begin with, by name.

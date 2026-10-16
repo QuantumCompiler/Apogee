@@ -23,6 +23,14 @@ namespace apogee::commands {
 /// `config add-backend --model` (a vendor model id) and nothing for `--judge`.
 inline constexpr const char* kBackendValue = "BACKEND";
 
+/// What a session runs (34, 45a): a configured backend, a provider's roster
+/// model pinned on one as `<backend>:<model>`, or a roster id a sole
+/// configured owner runs. Declared only where the value is resolved as a
+/// session's model -- `-m` on `chat`, `execute`, `tui` and `complete` --
+/// so the provider shelves complete there and nowhere a backend's name alone
+/// is taken (`BACKEND`).
+inline constexpr const char* kBackendOrModelValue = "BACKEND_OR_MODEL";
+
 /// The type name that registers an option's value as a filesystem path --
 /// wherever a path is one accepted form, "a kit name or path" included -- so
 /// completion offers the shell's file names there and nowhere else. An
@@ -95,6 +103,11 @@ inline constexpr const char* kPipelineValue = "PIPELINE";
 inline constexpr const char* kRegimeValue = "REGIME";
 /// A model in the store, or one set of its weights (`<model>/<format>/<id>`).
 inline constexpr const char* kModelValue = "MODEL";
+/// A model by the name its backends share (46a, the user's request): the
+/// backends' name without the `-F16`/`-Q4KM` level, as `models list` shows
+/// them -- and a stored model no backend runs, by its directory -- what
+/// `models rename` takes.
+inline constexpr const char* kModelNameValue = "MODEL_NAME";
 /// A model with SafeTensors weights, one set of them, or a snapshot directory.
 inline constexpr const char* kSnapshotValue = "SNAPSHOT";
 /// A model with a GGUF, one GGUF of it, or a `.gguf` path.
@@ -134,7 +147,7 @@ inline constexpr const char* kAllowedHostValue = "ALLOWED_HOST";
 
 /// Every name kind above, for the protocol to recognise and a test to hold
 /// each to a source.
-inline constexpr std::array<std::string_view, 41> kNameValues{kCollectionValue,
+inline constexpr std::array<std::string_view, 42> kNameValues{kCollectionValue,
                                                               kCollectionListValue,
                                                               kGraphValue,
                                                               kNamedGraphValue,
@@ -156,6 +169,7 @@ inline constexpr std::array<std::string_view, 41> kNameValues{kCollectionValue,
                                                               kPipelineValue,
                                                               kRegimeValue,
                                                               kModelValue,
+                                                              kModelNameValue,
                                                               kSnapshotValue,
                                                               kGgufValue,
                                                               kBackendOrWeightsValue,

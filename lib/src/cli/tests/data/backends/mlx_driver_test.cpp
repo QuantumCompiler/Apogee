@@ -231,7 +231,7 @@ std::vector<json> of_type(const std::vector<json>& events, const std::string& ty
 std::size_t count(const std::vector<std::string>& lines, const std::string& prefix) {
     std::size_t n = 0;
     for (const std::string& line : lines) {
-        n += line.starts_with(prefix) ? 1 : 0;
+        n += line.starts_with(prefix) ? 1U : 0U;
     }
     return n;
 }

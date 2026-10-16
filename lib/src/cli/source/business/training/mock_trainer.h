@@ -40,11 +40,11 @@ struct MockTrainerOptions {
     /// A pause per iteration, so a cancellation test can land mid-stream.
     std::chrono::milliseconds delay{0};
     /// When set, `train` fails with this after the first iteration.
-    std::string error;
+    std::string error{};
     /// When set, `fuse` fails with this.
-    std::string fuse_error;
+    std::string fuse_error{};
     /// When set, the trained candidate answers this to every prompt.
-    std::string answer;
+    std::string answer{};
 };
 
 class MockTrainer final : public Trainer {

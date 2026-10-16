@@ -32,18 +32,19 @@ namespace apogee::commands {
 /// What the workbench asks of the session view beside it.
 struct WorkbenchHooks {
     /// Opens a saved chat in the session; returns what was done or why not.
-    std::function<std::string(const std::string& chat_id)> open_chat;
+    std::function<std::string(const std::string& chat_id)> open_chat{};
     /// Moves the session to a suite; returns what was done or why not.
-    std::function<std::string(const std::string& suite)> use_suite;
+    std::function<std::string(const std::string& suite)> use_suite{};
     /// Moves the session onto a backend or a model one runs (35), as `/model`
     /// takes it; returns what was done or why not.
-    std::function<std::string(const std::string& model)> use_model;
+    std::function<std::string(const std::string& model)> use_model{};
     /// Shows the session view.
-    std::function<void()> show_session;
+    std::function<void()> show_session{};
     /// Plays a symphony through the session's own `/play` (37d), its input
     /// as typed; returns what was done or why not, the session shown when the
     /// line reached it.
-    std::function<std::string(const std::string& symphony, const std::string& input)> play_symphony;
+    std::function<std::string(const std::string& symphony, const std::string& input)>
+        play_symphony{};
 };
 
 /// Each view's options, over the config `context` names -- the reads and

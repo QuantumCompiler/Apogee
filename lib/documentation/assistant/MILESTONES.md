@@ -43,6 +43,61 @@ When a backlog item ships, **fold** it into the matching milestone here (extend 
 
 Two things this milestone deliberately did **not** do: wire libcurl (above), and enable llama.cpp on the per-push path — its Metal/CUDA build is slow, and a separate non-blocking job catches a pin that stops compiling without taxing every change.
 
+### 2026-10-16 — every CI compiler builds without a warning of ours (the user's request)
+
+**Why.** DEVELOPER.md held a clean `build/default` as the bar, and Apple clang nearly met it, with 92 warnings in v0.1.7's pull-request run. CI's other compilers were far from it. From our own sources, in both the executable and the test binary, they printed:
+
+- about 1,850 distinct warnings on Linux (GCC 13.3) and on Windows x64 (MinGW GCC 16.2);
+- about 4,850 on Windows arm64 (clang 22.1.8).
+
+The user's call: fix them, not suppress them, on every platform.
+
+- [x] **A member an initializer may leave out has a default** (247 members in 73 files). Nearly every warning was `-Wmissing-field-initializers` (GCC), or clang 22's `-Wmissing-designated-field-initializers`, on a designated initializer naming only the fields it sets. Each omitted member that had no default member initializer now has `{}`, the value it was already given. A member with a default never warned. Recorded under CLAUDE.md -> Code Style.
+- [x] **Catch2 names a test case by its line** (`CATCH_CONFIG_NO_COUNTER` on the test targets). Clang 22 reports `__COUNTER__` as a C2y extension under `-Wpedantic`, once per `TEST_CASE`: 4,094 of Windows arm64's warnings. Two test cases on one line of a file would now collide, and the build would say so (DEVELOPER.md -> the test traps).
+- [x] **Names that hid another are renamed** (`-Wshadow`, 22 sites):
+  - chat's REPL loops no longer reuse `line`, the name of the line typed;
+  - `task resume|status|list` name the tasks directory `tasks_root`, not the command's `root`;
+  - the loop's tool-argument ruling is no longer a second `decided`;
+  - a summary's side call reuses the loop's own `side` sink rather than a lambda redeclaring it;
+  - the rest are single locals and lambda parameters.
+- [x] **Sign and width conversions** (`-Wsign-conversion`, 19; `-Wconversion` and `-Wshorten-64-to-32`, 1):
+  - counting ternaries added to a `std::size_t` (`? 1 : 0`) now count in unsigned;
+  - an iterator offset is cast to `std::ptrdiff_t`, as the codebase does elsewhere;
+  - a test probe's count is `std::ptrdiff_t`, not `long`, which is 32 bits on Windows.
+- [x] **Range loops** (`-Wrange-loop-construct`, 14):
+  - a `const std::string&` bound to a temporary made from a `const char*` is a value;
+  - a pair copied on each pass is a reference.
+- [x] **GCC 16's flow warnings on Windows** (`-Wdangling-pointer`, `-Wfree-nonheap-object`; `-Wdangling-reference` on GCC 13):
+  - a vector built from an initializer list inside a conditional is now an `if`;
+  - a table of test cases held in a temporary vector is a `std::to_array`;
+  - `chat_commands()` is held once rather than indexed as a temporary.
+- [x] **A field read on every platform**: `platform::EchoPause` gained `paused()`, as `TypeaheadGuard` has `active()`. On Windows its field was written and read by nothing (`-Wunused-private-field`). A new test pins that neither guard hides nor pauses echo when standard input is no terminal.
+- [x] **An unused lambda capture is dropped** (`-Wunused-lambda-capture`).
+
+**Not fixed, and why.** Two GCC `-Wshadow` warnings remain in llama.cpp's own headers (`ggml-backend.h`'s `ggml_backend_graph_copy`, `mtmd.h`'s `bitmap`). They are printed wherever GCC builds with llama.cpp in it: CI's Linux and Windows x64 build jobs. They are upstream's to fix.
+
+Marking llama.cpp's `llama`, `ggml` and `mtmd` targets `SYSTEM`, as `llama-common` already is, was tried and reverted. CMake then ordered their include directories after `/opt/homebrew/include`, seen in the compile database. On a Mac with Homebrew's llama.cpp installed (this one), its `llama.h` would have been compiled against instead of the pin.
+
+**How it was measured.** First the v0.1.7 run's job logs. Then each CI compiler was run over every first-party translation unit, with the flags in the build trees' compile databases:
+
+| Compiler | Stands in for | Before | After |
+|---|---|---|---|
+| Apple clang 21 | CI's macOS runner | 89 | 0 |
+| Homebrew clang 22.1.3, for macOS | Windows arm64 | 4,962 | 0 |
+| Homebrew clang 22.1.3, for `x86_64-w64-mingw32` through MinGW's headers | Windows arm64's Windows-only paths | -- | 0 |
+| GCC 13.3, in the Linux CI container (`linux-ci.Dockerfile`) | Linux | 1,920 | 0 |
+| MinGW GCC 16.2 | Windows x64 | 1,910 | 2, llama.cpp's |
+
+The two GCCs ran with code generation, so their flow-based warnings show.
+
+**Verified.**
+
+- `lib/scripts/cicd.sh --test` (macOS, llama.cpp on) builds with no warning and passes all 3,318 tests; one is skipped for want of `pdftotext`.
+- `make linux-tests` (GCC 13.3 in the CI container) passes all 3,261 Catch2 cases, 16 of them skipped.
+- `make cross-windows` (MinGW GCC 16.2) compiles and links `apogee.exe` and `apogee_tests.exe` with no warning but llama.cpp's two.
+- Windows arm64 was not built here. Clang 22.1.3, for macOS and for `x86_64-w64-mingw32`, stood in for its compiler; building and testing it is left to CI.
+- `make format-check` is clean for every file touched. Its one failure, `embed.cpp`, predates this change.
+
 ---
 
 ## Milestone B — The config engine
@@ -130,6 +185,127 @@ yaml-cpp 0.8.0 opens with `cmake_minimum_required(VERSION 3.4)`, which CMake ≥
 **Left for the owner.** The readings above, each a one-place change if vetoed — above all the bridge (one set of transforms) over a second JSONC-native editor, the notice's scope, and an empty section migrating to `{}`. Retiring the YAML read stays a later, deliberate item; a user's own `config.yaml` is migrated only when they run `apogee config migrate`.
 
 ---
+
+### 2026-10-14 — `rename-propagation` (backlog item 46a): renames that propagate
+
+**Why.** There was no way to rename anything. `models`' nine verbs and `config`'s twenty-four held no rename and no edit, and both names are load-bearing:
+- **A backend's key** is named by `models.default`, the helper roles, every suite's members and every saved chat, so a hand edit left each of those dangling, the chats on the orphan path (`BackendMissing`).
+- **A stored model's name** is its store directory, which every pointing backend's `model_path` spells out, its records inside it.
+
+The user asked for both, with changes that "propagate immediately".
+
+- [x] **The editor's rename** (`contracts/config_edit`, `rename_backend`), one transform and one atomic write:
+  - **the key renamed where it stands**, its fields, comments and place kept: in JSONC by the key's own span, in YAML by its line, a comment after it allowed;
+  - **every value naming it at a reference path** (`backend_reference_paths`), replaced in place:
+    - the role pointers;
+    - every suite member, as a key or as a mapping's `backend`;
+    - a collection's `backend`, `rerank` and graph `extract_backend`, and a named graph's `extract_backend`;
+    - an agent's `model`;
+    - a regime's `teacher`;
+    - the training judge, and the cycle's backend, judge and session sources.
+  - **how each format is walked**: YAML's mappings by path, stepping over block scalars (a prompt that says the name stays) and reading flow mappings; JSONC's values spliced by `jsonc::patch`;
+  - **its refusals**: an unknown name, a taken one (folded, as `add-backend` folds it, a change of case allowed), or one that cannot name a backend.
+- [x] **`config rename-backend <name> <new-name>`** (`operations/renames`, `rename_backend_everywhere`):
+  - the edit above;
+  - then the saved chats swept (`logger::rename_session_backend`): every chat naming it, its backend and its rerank judge, rewritten atomically with its `updated_at` kept, since a rename is no new turn. A file that cannot be written is counted and said, its resume the orphan path's;
+  - and **the coupling**, the spike's rule (a):
+    - the store directory moves only when this backend alone runs that stored model and both names are its M3 spelling (`<base>-<level>`, the new name keeping the level). The new directory keeps the owner's prefix, the backend's own paths are repointed in the same edit, and a refused edit moves it back;
+    - otherwise the store stays, said with why: `store 'org--gemma' unchanged -- 'gemma-F16' still points at it`, or `-- 'local' is not named after it`.
+- [x] **`models rename <model> <new-name>`** (`rename_stored_model`):
+  - the model's directories moved, in each root that holds one, the records riding inside;
+  - every backend pointing into them repointed, the user's `~` or `${VAR}` kept since only the one path segment changes;
+  - the backends named the M3 way after it renamed to the new base in the same edit, their references with them, and their chats swept;
+  - a backend whose new name is taken is left and said, never suffixed;
+  - refused naming why: an unknown model, a taken name, a name no directory can have, a model being written (a `.partial` inside it).
+- [x] **Every mode** (ADR 0002):
+  - `POST /v1/admin/backends/{id}/rename` is `config rename-backend`'s twin through the one core, byte for byte, its lines returned as `said`. The HTTP parity table classifies it, and `http-api.md` documents it.
+  - `models rename` has no twin. The admin plane has no models slice, so its row is the models plane's backfill, skipped and said, as `models delete` and `models convert` are.
+  - The exec line runs both verbs (ADR 0010).
+  - The old names complete, the new ones are free text on the audit's list (ADR 0007).
+- [x] **The tests**:
+  - the editor's goldens over a YAML config naming a backend every way there is, beside the traps it must leave (a same-named MCP server and collection, a prompt that says the name, a name that only begins with it): the result is the input with exactly those spans swapped, and the JSONC twin is the same, back again byte for byte;
+  - `renames_test` through the real commands: the sweep, a chat resuming on the new name with nothing said about a missing backend, the three coupling cases, `models rename`'s moves, repoints, derived renames and a collision, every refusal, and the M3 spelling read as M3 writes it;
+  - the admin twin byte-identical to the CLI;
+  - `cli.config_lifecycle` on the real binary: a rename moving every role pointer, and its reverse leaving the template-seeded file exactly as it was.
+
+Decisions taken while building, for veto:
+- **Every reference, not only the listed three.** The document named the default, the role pointers and the suite members. The config also names a backend in collections, graphs, agents and training, and leaving those would be the silent half-rename the item forbids. So the reference paths are declared once, and the editor's test holds the loader to them.
+- **The cores live in `operations/`**, so the admin twin calls the same function as the CLI and neither includes the other. `operations` gains a link to `modelstore/` for the store's paths: one row of `cmake/modules.cmake`, a Presentation-to-Data edge the law allows.
+- **A YAML value written quoted comes back plain** when a rename passes over it, as every value the editor writes is plain where YAML reads it unchanged. JSONC keeps its quotes.
+- **A new backend name must be one word with no colon.** A colon reads as 34's `<backend>:<model>` pin.
+- **The swept chats keep their place in the list**, since `updated_at` is kept, and a rerank judge naming the old backend is swept too.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) ran 3,304 tests, one skipped for want of `pdftotext`. One failed: `serve_test`'s pinned count of admin routes, 86, which the rename twin made 87. It now names the route as well, and that case was rerun green in the same build. `cli.config_lifecycle`, `cli.http_api_conformance`, `harness.layering` (with `operations`' new link) and `harness.layer_context` all passed. `make format-check` is clean for every file touched.
+
+**Found by the pull request's first CI run, 2026-10-16.** `rename_stored_model` captured the loop's structured binding `name` into a generic lambda (`[&](const auto& key)`, inside `std::ranges::any_of`). The `macos-14` runner's AppleClang 15 (Xcode 15.4) refuses that, so the macOS unit-test job failed to compile `operations/renames.cpp`, while Apple clang 21, GCC and clang 22 all accept it. The binding now reaches a non-generic lambda through an init-capture (`[&current = name, &renamed](const std::string& key)`). Compiling with `-Wpre-c++20-compat` lists every captured binding: four older ones, each in a non-generic lambda that AppleClang 15 accepts, were made init-captures too, so the tree holds none and the rule is one line in CLAUDE.md → Code Style. The rule: a binding reaches a lambda through an init-capture. The next run's Windows jobs (x64 and arm64) then failed `renames_test`'s sweep case: each chat the rename should have rewritten was reported "could not be rewritten" and kept `helper`. `rename_session_backend` held each chat open in an `std::ifstream` while `write_file_atomically` renamed the new text over it, which Windows refuses and POSIX allows. The read now closes before the write.
+
+### 2026-10-14 — `edit-backend` (backlog item 46b): `config set-backend`, an entry edited in place
+
+**Why.** A backend's fields could not be changed. `config`'s verbs were add, delete, set-default and scan, so the only edit was delete-and-re-add, which lost the entry's comments and its place, and orphaned every reference while the key was gone. The editor already half-knew how: `set_backend_model_path` and `set_backend_mmproj_path` each touched exactly their field, with comments kept.
+
+- [x] **One transform per field** (`contracts/config_edit`, `set_backend_field`):
+  - one field of an entry set in place: the value token replaced where it stands, a comment after it kept, or the field written after `type:` when the entry lacks it;
+  - an empty value removes the field's line;
+  - the fields (`backend_editable_fields`) are every one the loader reads, but the key and `api_key`;
+  - refused: `api_key`, with the secrets rule ("a key is never taken on the command line -- store it with 'apogee auth add'"), a field no backend has, and a cleared `type`.
+- [x] **`config set-backend <name>`** over one core (`operations/backend_fields`, `set_backend_fields`):
+  - **the flags**: one per field, spelled as `add-backend` spells them, typed for completion (`INT`, `FLOAT`, a path, a choice set that also takes the `""` that clears);
+  - **the edit**: every named field in one edit, each its own transform, re-parsed before it lands;
+  - **the checks**: a new type checked as `add-backend` checks one, the rest of a value's shape the loader's (`--context-size lots` refused naming the field);
+  - **the key**: `--api-key` exists only to refuse, hidden from `--help` and from completion, naming `auth add`;
+  - **the result line**: the fields it set and cleared, and the file.
+- [x] **Every mode** (ADR 0002):
+  - `PATCH /v1/admin/backends/{id}` is the twin: a JSON object of fields, strings or numbers, through the same core, byte for byte, never a key. The HTTP parity table classifies it, and `http-api.md` documents it;
+  - the exec line runs the verb (ADR 0010);
+  - completion offers the backends and each flag's values (ADR 0007). An option hidden from `--help` is now hidden from completion too, as a hidden subcommand always was.
+- [x] **The tests**:
+  - the transform's goldens: a value in place with its comment, a field inserted, one cleared with its line, a missing one cleared leaving the file, two composed;
+  - the enumeration tie, both ways:
+    - every editable field, set through the transform, is read back by the loader, so a name it does not know fails;
+    - every field `add-backend`'s writer writes is editable;
+    - `set-backend`'s flags are exactly the editable fields, with every field `add-backend` takes among them;
+  - the verb end to end: a YAML config with every other byte kept, a JSONC one with its comments kept, and each refusal, a key never written or said;
+  - the twin byte-identical to the CLI;
+  - `cli.config_lifecycle` on the real binary: an edit read back, its reverse leaving the template-seeded file as it was, no field and a key both refused.
+
+Decisions taken while building, for veto:
+- **The tie is to the loader and to `add-backend`'s writer, not a list in a test.** The writer never writes four fields a person writes by hand (`binary`, `mode`, `host`, `idle_unload_seconds`), so "every field add-backend writes" alone would not have reached them. Each is editable, read back by the loader, and named in the test.
+- **`--mmproj-path`, as `add-backend` spells it**, rather than the document's illustrative `--mmproj`: one spelling per field across the two verbs.
+- **No `--unset-*` family**: the empty value clears, as confirmed at grooming. A choice set takes it beside its values, a typed number refuses it, and `type` can never be cleared.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,311 tests, one skipped for want of `pdftotext`. `cli.config_lifecycle`, `cli.http_api_conformance`, the completion audits and `serve_test`'s route count (now 88) are among them. `make format-check` is clean for every file touched.
+
+**Found at the pre-merge docs pass, 2026-10-16.** `--mode` shipped as free text, though a vendor CLI's mode is a closed set: `subscription` or `bare`, `bare` for claude-cli alone. Tab offered nothing, and a typo was written to the file, then refused only when the backend was built. It now carries the two words as a choice set beside the clearing `""`, as `--thinking` and `--cache-type` do, and leaves `lifecycle_test`'s free-text list. `backend_fields_test` holds both words completed in their declared order, a typo refused with the file untouched, and `bare` set then cleared.
+
+### 2026-10-14 — a rename that keeps the base says nothing of the backends (the user's request)
+
+**Why.** Renaming a stored model to a name with the same base, such as `Qwen--Qwen3.8-27B` to `Qwen3.8-27B`, left its `Qwen3.8-27B-F16` and `-Q4KM` backends as they were, which was correct, since their names already follow it. But `models rename` said `left backend 'Qwen3.8-27B-F16' as it is -- 'Qwen3.8-27B-F16' is already a backend's name`, a conflict with itself that read as a failure. The check for a taken name found the backend itself.
+
+- [x] **A backend whose name already follows the model is skipped** (`operations/renames`, `rename_stored_model`): repointed as ever, neither renamed nor reported.
+- [x] **The test** (`renames_test`): `org--gemma` renamed to `gemma` repoints `gemma-Q4KM` and says nothing of renaming or leaving it.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,312 tests, one skipped for want of `pdftotext`. `make format-check` is clean for both files touched.
+
+### 2026-10-14 — a model is the name its backends share (the user's request)
+
+**Why.** After the day's renames, the user's names had drifted apart. `models list`'s BACKEND column read `Gemma4-12B-Assistant-F16` and `-Q4KM`, while the folder they run from was still `google--gemma-4-12B-it-assistant`. `models rename <TAB>` offered those folders and every `<folder>/gguf/<id>` handle, none of them names the user had ever typed, and the config verbs offered things no config verb takes. The user's rule: the names offered are the BACKEND column's, and a model with several quantizations is renamed by its base name.
+
+- [x] **`models rename` takes a model by the name its backends share** (`operations/renames`, `rename_model_family`):
+  - a model is identified by its stored backends named `<name>-<level>`, the level read as M3 spells it (`quant_level`: `F16`, `BF16`, `F32`, `Q4KM`, `Q80`, `IQ4XS`);
+  - `apogee models rename Gemma4-12B-Assistant Gemma4-12B-Helper` renames every one of them `Gemma4-12B-Helper-<level>` in one edit, their references and saved chats with them;
+  - the folder they run from moves to `Gemma4-12B-Helper` when they alone run it. Another backend running from it, a name already stored, a model being written, or weights spread over several folders leave it where it is, said with why;
+  - renaming a model to the name it already has brings a drifted folder into line, and when nothing is left to do it says `'X' is already its name`;
+  - a stored folder name still works as before.
+- [x] **`models rename` completes the models by that name** (`MODEL_NAME`, `model_names`): each stored backend family's base, plus any stored model no family runs, by its folder. Never a `<model>/<format>/<id>` handle.
+- [x] **A backend's name completes as the BACKEND column shows it.** This fixes a 45a gap. `BACKEND` (`ValueKind::Backend`) now offers the configured keys alone, never a provider shelf or a roster id, for the roughly thirty arguments that take a backend's name: `config rename-backend`, `set-backend`, `set-default` and `delete-backend`, a suite's members, `--teacher`, `--judge` and the rest. 45a had proven only `-m` valid, the one place a model to run is taken. The two that resolve a session's model, `-m` on `chat`, `execute` and `tui` and on `complete`, are declared `BACKEND_OR_MODEL` (`ValueKind::Model`) and keep the shelves. Their `--help` names the new type, and the chat and execute help goldens move with it.
+- [x] **The tests** (`renames_test`):
+  - a family renamed with its folder following, from a folder whose name had drifted;
+  - a drifted folder brought into line by renaming a model to its own name, then refused as already its name;
+  - a folder another backend runs from left and said;
+  - the quantization level read as M3 writes it;
+  - completion on a live install: `models rename` offering the family's base and an unrun folder, `config rename-backend` and `set-default` offering the backends alone with a roster cached, and `chat -m` still offering the shelf.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,317 tests, one skipped for want of `pdftotext`, the chat and execute help goldens among them with `-m`'s new type. `make format-check` is clean for every file touched.
 
 ## Milestone C — The harness core
 
@@ -3455,6 +3631,39 @@ So, **by the user's call**, the item builds on what is installed: no `apogee com
 
 One deliberate non-feature, recorded: no per-model confirmation -- `config scan` without `--register` is the preview, exactly the providers verb's split.
 
+### 2026-10-14 — `completion-namespaces` (backlog item 45a): the map before the territory
+
+**Why.** Tab on `--model` dumped the whole world as one flat wall. The completion-presentation spike measured some sixty candidates on the user's install, spanning backend keys, three vendors' rosters and every local quant, in case-sensitive order that exiled `Llama` and `Qwen` behind the lowercase names. The cause was in the one core: every source's union, emitted as bare strings, which every surface drew flat. Of the four concepts the spike mocked, the user chose two: **A**, namespace-first shaping in the core, here, and **D**, a real menu on the surfaces Apogee owns (45b). **B**, groups on the wire, and **C**, curated tiers, are out.
+
+- [x] **The one order** (`order_names`, `cli/complete_protocol`): case-insensitive, the bytes breaking a tie so the order is total, repeats dropped. It applies to every name kind's list. A source whose own order is the order says so (`NameList::as_listed`):
+  - chats are newest first, never alphabetical;
+  - the model store goes by format, then name, the formats in `models list`'s order (SafeTensors, GGUF, MLX), each model before its handles;
+  - `models info`'s and `models delete`'s configured backends come before the store.
+
+  A fixed choice set keeps its declared order, as flags keep theirs.
+- [x] **The model namespaces** (`model_shelves`, `model_bands`, `model_candidates`), the one shaping every model word gets:
+  - **an empty word** is the map: the configured keys, then one `<key>:` for each entry that names its model and has its type's roster cached;
+  - **past a shelf's colon**, that shelf as `<key>:<model>` (34's spelling);
+  - **a typed word** is everything starting with it, in bands: keys, shelves, then the bare roster ids, so muscle memory and scripts keep working.
+
+  `ValueKind::Backend` answers through it, so bash, zsh, fish, PowerShell and the shell's exec line all get it with the wire untouched. Chat's `/model` gets it through `model_choices`, the same bands described: a shelf by whose roster it is and how many models it holds, matched loosely as before.
+- [x] **Every candidate is a valid insertion.** A roster id two configured types list runs on neither alone (33 refuses it), so it is offered only behind each shelf, never bare.
+- [x] **The tests**:
+  - the namespaces through the protocol: the map, keys case-insensitively and then `claude:` `codex:` `work:`; a typed word's bands; the shared id never bare; each shelf behind its colon;
+  - **insertion validity**: every final candidate across the map, typed words and shelves is resolved by `resolve_session_model`, and every shelf leads somewhere;
+  - the wire's bytes, `:values` and a bare candidate a line;
+  - the sources' orders: chats newest first with names after ids, the store by format then name, `order_names` over a mixed-case list;
+  - chat's `/model`: the map, then a typed word's everything.
+
+  Two earlier tests changed deliberately, since an empty word no longer offers bare roster ids: `lifecycle_test`'s roster pins and `chat_completer_test`'s roster case.
+
+Decisions taken while building, for veto:
+- **There is no `local:` shelf.** The document built it on "the shipped 34 spelling", but no `local:` spelling exists: 34 shipped `<backend>:<model>` for an entry that names its model, and a local entry runs the weights at its path. Its own rule settles it, since only a spelling the parser already accepts may be inserted. The stored models a person runs are configured keys, so they stand in the map's first band. A `local:` grammar would be a new spelling, and a separate decision.
+- **Fixed choice sets keep their declared order** (`--effort low|medium|high|xhigh|max`, the output formats) rather than the alphabetical one. The order carries meaning there, as the parser's flag order does, and the table's "the ordering rule only" was read as the rule for lists of names.
+- **A shelf is offered only with models in it**: an entry whose type has no cached roster gives a `<key>:` that leads nowhere, so it is left out.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,291 tests, one skipped for want of `pdftotext`. The shells' completion checks (`cli.complete_e2e` and the rest of the 91 completion cases) are among them. `make format-check` is clean for every file touched.
+
 ## Milestone O — Local multimodal
 
 **Goal.** Make `VisionCapable` tell the truth on the local backend: wire llama.cpp's `mtmd`, add `mmproj_path`, and close the cross-surface guard gap that let one surface accept a picture the other refused.
@@ -6716,6 +6925,12 @@ A CLI that learns to list its models gets `CatalogListing` and loses its carried
 
 The roster test now holds that each reviewed date is a real date.
 
+**Reviewed 2026-10-16, at v0.1.8's pre-merge docs pass**, since that branch touched the backends and completion. Both lists were current, and no row changed:
+- Anthropic's models overview lists four current models (Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 5.5) and nine legacy ones still available, the thirteen ids carried. Claude Mythos 5.1, named only in a pricing note there, is in neither list, so it is not carried.
+- The installed Gemini CLI, still 0.46.0, aliases `pro`, `flash` and `flash-lite` beside `auto`.
+
+Both `...Reviewed` dates moved to 2026-10-16.
+
 ### 2026-10-10 — `models-list-sections` (backlog item 36): cloud by provider, local by format
 
 **Why.** With item 35's rows in place, the user's `models list` was one table of 50 rows: local GGUFs, three vendor CLIs and their sub-models, sorted together by name. Their ask was cloud backends tabled by provider, adaptable to any number of providers and backends, and local backends split by format: SafeTensors, GGUF, then MLX.
@@ -7240,6 +7455,147 @@ Decisions taken while building, for veto:
 - Each new job's skip path reports a skip, never a pass: a VM too small, no Docker daemon, no MinGW.
 - The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,201 tests, one skipped for want of `pdftotext`.
 - Nothing here can run a Windows binary, so the Windows test runs stay CI's.
+
+### 2026-10-14 — `door-adrs` (backlog item 44a): one opening, and every door reachable
+
+**Why.** The day's CLI↔TUI disparity audit drove the installed binary on a real terminal against sandboxed homes. Mid-session the shell measured strong, with some forty slash twins in the one command table. Every wall it found was at a session's opening, and all were one drift class: **a front end composing its own second opening of a mode.**
+- A fresh shell opens straight into a chat, since `TuiSessionDriver::start()` shows the picker only once a saved chat exists.
+- The picker decides its own execute rows: a row per suite, and a bare row only when no suite is configured at all.
+- The suite door is a function of its own (`open_execute`, suite-only), and every shell session is opened from an argv the shell spells itself (`shell_session_flags`).
+- `apogee tui` takes no option, against `apogee execute`'s 40.
+
+Meanwhile the parity law classified `execute` as a view whose door was often absent, and stayed green. Track 44 (44a–44d, the user's placement) fixes the class, and **the records come first** (the user's call): the fixes build under them.
+
+- [x] **[ADR 0011](../adrs/cli/one-session-opening.md), a mode is opened by its command's own path.** One open function and one flag table per mode (`run_session` and `bind_session_flags` today), and every front end's door calls that function with that table. A front end owns presentation only. A door offered by a picker follows the command's own rules, worded in its vocabulary. A second composition of an opening is the defect.
+- [x] **[ADR 0012](../adrs/cli/doors-are-reachable.md), a classified door is reachable.** A `View` classification asserts a door reachable on a fresh install: a data directory as `check --fix` seeds it, with no suite and no saved chat. A genuinely conditional door either becomes unconditional or its row records the condition, which the shell says where the door is absent.
+- [x] **Each record's enforcement is pending, and says so**, dated. ADR 0011's door goldens land with 44b and 44c, ADR 0012's real-terminal walk with 44d. Neither record claims teeth it does not yet have.
+- [x] **The pointers**:
+  - ADR 0002 and ADR 0010 each gained one dated line pointing forward (ADRs are append-only);
+  - the ADR index has its two rows;
+  - CLAUDE.md's per-change checklist has the rule, and its map row lists every record's topic;
+  - the presentation layer card points at both, its wording tightened to stay under its 3,000-byte limit.
+
+Decisions taken while building, for veto:
+- **The audit's third wall is stated as found in the code, not as the audit worded it.** The audit read "zero references to 41b's project opening or 41c's persona" in `tui_session.cpp` as the shell's sessions lacking them. Both actually live inside `run_session`, keyed on the mode and the process's working directory, which the shell's door also calls. So ADR 0011 records them as reaching the shell **by where they happen to sit**, with no test holding a shell-opened session to them. That is the class the record closes, without claiming a wall that was not measured. 44b's golden settles it either way.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,278 tests, one skipped for want of `pdftotext`, `harness.layer_context` among them with the card's pointer and the ADR index's two new rows. No source or test file changed. The link sweep over the documentation, the skills and the layer cards found nothing new broken.
+
+### 2026-10-14 — `tui-execute-door` (backlog item 44b): the execute door, always there, through the one opening
+
+**Why.** Execute was hard to reach from the shell. A fresh shell went straight into a chat, since the picker appeared only once a chat was saved, so a new install had no execute entry anywhere. The picker's execute rows were its own decision: a row per suite, and a bare row only when no suite was configured at all, where `apogee execute` opens bare whenever no suite is the default. And every shell session was opened from an argv the shell spelled itself. [ADR 0011](../adrs/cli/one-session-opening.md), written first (44a), names the class: a front end composing its own second opening of a mode.
+
+- [x] **One opening per mode** (`cli/execute`, `cli/chat`):
+  - `open_execute_session` and `open_chat_session` are what the commands' callbacks run and what the shell's driver calls: the session core in its mode over flags parsed through the command's own table;
+  - which suite, which model, the project opening, the persona and admission are decided once, in there.
+- [x] **The doors are execute's own rungs** (`execute_doors`). One per configured suite, the default first and marked, each `--suite`'s. Then the bare door, `Execute on <backend> (no suite)`, whenever no suite is the default and a backend answers for the chat role, suites configured or not. Never empty: with nothing to open on, `Execute (no suite or default backend yet)` still stands, and choosing it runs execute's own opening, which refuses in the command's words (`execute opens a session with a suite, and none is configured -- … apogee execute -m <backend> …`).
+- [x] **The picker on every start** (`TuiSessionDriver::start`): New chat preselected and one key away, then the saved chats, then the execute doors (the order confirmed at grooming), where the doors used to come before the saved chats. `open_execute` with an empty suite opens on execute's own rungs.
+- [x] **The tests**:
+  - **ADR 0011's golden** (`tui_session_test`): in a fixture repository holding `AGENTS.md`, one session is opened by `apogee execute --tools` and one by the picker's bare door, on the same home. Both hold the same transcript, suite, backend, system prompt and attached folder, with the coder persona and `AGENTS.md` in the request the mock echoed. The banner's two lines are said in the shell as on the terminal.
+  - A fresh shell starts on the picker with the bare door below New chat, and Enter is a chat.
+  - The door with nothing to open on is refused in execute's words, and the picker comes back.
+  - `execute_test` pins `execute_doors` for each shape of config.
+  - `session_view_test` holds the new row order.
+  - `cli.tui_shell`'s session case presses Enter on the picker's new chat. Its new **door** case opens the execute door on a real terminal, on the install that case left with a chat saved, and sees execute's banner.
+
+Decisions taken while building, for veto:
+- **The execute door stands even with nothing to open on.** The document's rule shows the bare row whenever the CLI's bare door would open. On a truly fresh install (no backend, no suite) that rule shows no row, while its acceptance and ADR 0012 require a door on a fresh install. So one row stays, worded `Execute (no suite or default backend yet)`. Choosing it runs execute's own opening, so the refusal is the command's, never the shell's. This is the same pattern New chat has always had on such an install.
+- **The bare row keeps 41a's wording**, `Execute on <backend> (no suite)`, rather than the document's illustrative `Execute — <backend> (no suite)`. It already speaks the banner's `no suite`, and tests pinned it.
+- **The audit's third wall was not a behavior gap.** 41b's and 41c's ritual lives in `run_session`, which the shell's door has always called, so it reached a shell-opened session before this item. This item changed which function the door calls (the command's own) and added the test that holds it, not what the core does.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,282 tests, one skipped for want of `pdftotext`, `cli.tui_shell` with its door case on a real terminal among them. `make format-check` is clean for every file this item touched. The two files it flags, `embed.cpp` and `runner_view.h`, were flagged before.
+
+### 2026-10-14 — `tui-session-launch` (backlog item 44c): launching the shell into a session
+
+**Why.** The shell could not be opened *into* a session. `apogee tui --help` listed no option against `apogee execute`'s 40, so "the shell, in execute under suite X with this folder attached" had no spelling, though nearly every one of those knobs has a slash twin once a session exists. [ADR 0011](../adrs/cli/one-session-opening.md) asks for one flag table per mode that every door speaks.
+
+- [x] **The session table on `apogee tui`** (`cli/tui_cmd`). It is bound by the very call `chat` and `execute` make, `bind_session_flags`, with execute's superset, never a copy. A flag the modes grow is `tui`'s with no change there, its completion included.
+- [x] **The launch** (`ShellLaunch`, `launch_mode`):
+  - with any session flag given, the shell's entry carries the parsed flags and a mode to the driver's first session, which opens straight away through that mode's own opening, with the tools every shell session carries;
+  - the mode is the flags' own: a suite other than `off`, or `--orchestrate`, is execute, and anything else is chat;
+  - when that session ends, the picker.
+- [x] **Refusals**:
+  - a combination the table refuses is refused before any screen, in exactly the command's words (`--effort` with `--think-budget`, byte-equal to `execute`'s);
+  - a refusal inside the opening is said on the shell's notice row in the command's words, as a picker door's is;
+  - machine mode's formats (`--output-format`, `--input-format` other than text) are refused on `tui`, since the shell draws its own screen;
+  - off a terminal, the measured refusal stands, flags or none.
+- [x] **Flagless is unchanged**: a bare `apogee` and `apogee tui` open the picker as 44b left it (`cli.bare_help`, the PTY checks).
+- [x] **The tests**:
+  - `tui_cmd_test` requires `tui`'s option spellings to equal `execute`'s, with chat's within them. It also pins the flags reaching the launch as parsed and the mode for a suite, `-m`, `--orchestrate`, `--suite off` and none, the refusals' words, and `--suite` completing on `tui` exactly as on `execute`.
+  - **The launch golden** (`tui_session_test`): on an install of its own, flags parsed through `tui`'s table open straight into the session with no picker first. They hold the same transcript, suite and backend as the same flags on `apogee execute --tools` (a suite and an effort) and on `apogee chat --tools` (`-m`).
+  - `cli.tui_shell`'s new **launch** case runs `apogee tui -m local` on a real terminal and sees the chat's banner with no key pressed.
+
+Decisions taken while building, for veto:
+- **The mode rule.** The document said suite-implying flags open execute and everything else chat. Only two flags do something that is execute's alone: `--suite <name>` (execute insists on a suite or opens bare, and `--suite off` is chat's) and `--orchestrate`. `--warm` and `--force` serve `chat --suite` too, so they decide nothing.
+- **Machine mode's formats are refused on `tui`.** This is the one shell-specific refusal: a `stream-json` session drawn on a screen would write its events over the screen, and the modes themselves have no such combination to refuse.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) ran 3,287 tests, one skipped for want of `pdftotext`. One failed: `lifecycle_test`'s free-text audit named `tui -s`, `tui --system` and `tui --allow-host`, the session table's three untagged arguments, now on `tui` as they are on `execute`. They joined its reviewed list, and that case was rerun green in the same build. `cli.tui_shell`'s launch case passed on a real terminal, and `make format-check` is clean for every file touched.
+
+### 2026-10-14 — `tui-reachability-law` (backlog item 44d): every classified door, proven on a fresh install
+
+**Why.** The disparity audit's quietest finding was the one that let the others recur: **the parity law tested classification, not reachability.** `execute` was classified a view whose door a fresh install did not show, and the law stayed green. [ADR 0012](../adrs/cli/doors-are-reachable.md) (44a) states the rule. 44b made the door true and 44c the launch, and this item makes the rule's breach a failing check.
+
+- [x] **Every view names its door** (`cli/tui_parity`, `ShellDoor`): the view's title as the tab strip and the Go-to menu name it, and what that view shows for this door. The Session view's picker shows `New chat` for `chat` and `Execute` for `execute`; for the rest, the view is the door. A deliberately conditional door records its condition, and `seen` is then the words the shell says it in. No door is conditional today.
+- [x] **The law knows doors** (`shell_law_violations`), naming each of:
+  - a view with no door to reach it by;
+  - a condition with nothing said where the door is absent;
+  - a door on a row that is no view.
+
+  It takes a table of surfaces in place of its own, so `tui_parity_test` plants each case (the execute door gone, a condition unsaid, a door on `serve`) and requires it named, alone.
+- [x] **`cli.tui_doors`** (`tests/scripts/py/pty_door_check.py`), ADR 0012's teeth:
+  - it reads the view rows from `cli/tui_parity.cpp` itself, so a row added is walked with nothing to remember;
+  - it seeds a data directory with `apogee check --fix` and nothing else;
+  - it opens `apogee` once on a real terminal and walks every door in the table's order: the view reached through the Go-to menu until the tab strip's bracket names it, then what the row says it shows, seen there;
+  - then Ctrl-D, the alternate screen left and the modes restored.
+
+  It fails on a view whose door it cannot read, on a table with no views, and on one without the execute door. All twenty doors walk in about 21 seconds.
+- [x] **The planted regression** (the house's planted-violation idiom), verified once in a throwaway build. The execute door was made conditional again: the picker drops it when nothing can open. `cli.tui_doors` failed naming the row: `FAIL [execute]: the Session view never showed 'Execute' on a fresh install -- the door this row classifies is not there`. The build was then restored.
+- [x] **ADR 0012's Enforcement names the live check**, dated, as ADR 0011's names its goldens. Track 44 is complete.
+
+Decisions taken while building, for veto:
+- **A sibling script reads the table from source**, rather than a hidden verb printing it: the house's conformance checks already read their tables from source (`mux.cpp`, `cmake/modules.cmake`). A new hidden verb would itself need classifying. The cost is a spelling rule: each row is written `ShellSurface{...}` with its `ShellDoor{.view = ...}` spelled out, said in the table's comment. A row the script cannot read fails rather than being skipped.
+- **A view is reached through the Go-to menu by its title**, the one key path that reaches every view from anywhere. A view's number is only meaningful within its category.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,289 tests, one skipped for want of `pdftotext`, `cli.tui_doors` among them. `make format-check` is clean for every file touched. It also caught 44c's comment inside `lifecycle_test`'s free-text list, which made clang-format repack the whole list; the comment is gone and the list is one entry a line as before.
+
+### 2026-10-14 — `completion-menu` (backlog item 45b): a real picker where the shell owns the pixels
+
+**Why.** The shells render completion however their nature allows, but two completion surfaces are entirely Apogee's: the shell's exec line and the conversation's input. The exec line still drew Tab's candidates as one flat row, twelve at most. The input's menu (2026-10-11) had a choice and a description column, but no groups. This is the user's **Concept D** from the completion-presentation spike: a real menu on the owned surfaces, grouped and described, with the groups and descriptions carried in the program only. **Concept B**, groups on the wire with per-shell renderings, stays out.
+
+- [x] **One menu** (`tui/completion_menu`, `tui/menu_item.h`): `MenuItem`, with its text, a label, its group and one line of description, plus the rows both surfaces draw:
+  - a window of items with the chosen one marked `›`;
+  - each group's heading where its rows begin in the window, repeated when the window starts inside a group;
+  - the descriptions in one column;
+  - `↑ N more` / `↓ N more`.
+
+  The session's menu now draws through it, byte for byte as before when no group is set: every existing session-view test is unchanged.
+- [x] **The exec line's menu** (`tui/runner_view`):
+  - Tab over several candidates extends the line to what they share, as before, and opens the menu, eight rows like the session's;
+  - a second Tab or ↑/↓ moves the choice, wrapping, and typing or Backspace narrows the menu, closing it when nothing is left;
+  - Enter fills the choice and runs nothing: a word is ended with a space, except a folder's `/`, a `key=` or a shelf's `key:`;
+  - Esc closes the menu before the line;
+  - one candidate is still taken whole with no menu, and ↑/↓ with the menu closed is still the history.
+- [x] **The notes, in the process only** (`cli/complete_protocol`): `CandidateNote` beside each candidate (`Completion::notes`, and `NameList::notes` by name), which `render_completion` never prints, so `__complete`'s bytes are as they were. They come from what the public reads already render:
+  - **models** (`model_notes`): a key's type and model or file, under `configured`, or `local` for weights on this machine (llamacpp, MLX); a shelf, a pin or a bare roster id under its roster, with the day it was fetched (or reviewed, for a carried list), by the vendor's name for it;
+  - **chats**: the name, date and turns;
+  - **the store**: each name under its format, a GGUF handle by its file and size.
+
+  `menu_order` puts the groups in one order: configured, the rosters as each first appears, local, then the ungrouped. `exec_menu_items` is the exec line's completion, and `exec_candidates` stays the wire's bare strings.
+- [x] **The conversation's input** (`cli/chat_completer`): for the shell alone (`ChatCompletionSources::menu`), `/model`'s rows carry their groups (`Suggestions::groups`) in the same order, each roster under its heading with its date (`roster_headings`). The terminal's rows are 45a's, ungrouped, since replxx draws no menu.
+- [x] **The tests**:
+  - the exec line's menu through the shell, headless (`tui_runner_test`): grouped and described, Tab and the arrows wrapping, typing narrowing, Enter filling `claude:` with no space and running nothing, one candidate taken whole, Esc's order;
+  - `exec_menu_items` over a real config: the wire's candidates in the menu's group order, described publicly, a shelf's models by the vendor's names, no key on any row;
+  - the session menu's headings (`session_view_test`);
+  - `/model`'s groups in the shell and none on the terminal (`chat_completer_test`);
+  - the leak test with the menu's rows registered for models, chats, stored models and backends, with the key in every rung;
+  - `cli.tui_shell`'s new **menu** case on a real terminal: Tab over `chats list --output-format`'s two values, ↓, Enter filling `json` and running nothing, the modes restored.
+
+Decisions taken while building, for veto:
+- **A second Tab moves the choice, and Enter fills it.** The confirmed interaction said both that a second Tab cycles and that Enter and Tab fill. Tab filling the chosen row would make cycling impossible. So Tab fills when it has one candidate, and moves the choice when the menu is open.
+- **Groups are drawn together, in one order, in the menu only.** The wire keeps 45a's order. The menu regroups in the process (`menu_order`), so a group's rows are contiguous under one heading: configured, the rosters, then local, the doc's grouping, and local last as the menu's own order.
+- **The session input regroups only in the shell** (`menu`, set where `loose` is). The terminal's completion is exactly 45a's.
+- **The headings take rows outside the window's eight items**, as the counts above and below already did.
+
+**Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,296 tests, one skipped for want of `pdftotext`, `cli.tui_shell`'s menu case and the leak test's menu rows among them. `make format-check` is clean for every file touched, `runner_view.h` included, which it flagged before this change.
 
 ## Milestone AI — Effort and permission modes
 

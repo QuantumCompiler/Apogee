@@ -44,7 +44,7 @@ struct GraphToolsOptions {
     /// What a scoped set's descriptions say it reads, in place of "Reads the
     /// graph '<name>'." -- a chat's attached folders by their roots (27o),
     /// so the tools rank against a question about that code (26g).
-    std::string scope_note;
+    std::string scope_note{};
 };
 
 void register_graph_tools(agent::ToolRegistry& registry, const GraphToolsOptions& options);

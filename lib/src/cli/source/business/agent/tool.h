@@ -44,7 +44,7 @@ struct GateRequest {
     std::string_view target;
     /// Shown beside the target, never decided on: `fetch_url`'s whole URL,
     /// so the person asked can see what would leave the machine in it.
-    std::string_view detail;
+    std::string_view detail{};
     /// The tool sends data off the machine (`Tool::outbound`). Its answers
     /// are per host rather than per tool: allowing one website is not
     /// allowing the next.
@@ -199,9 +199,9 @@ struct DispatchContext {
     PermissionChecker permission;
     ConfirmFn confirm;
     /// Why a refusal happened, said to the model with it. Optional.
-    RefusalNote refusal;
+    RefusalNote refusal{};
     /// Reports progress. Optional.
-    std::function<void(std::string_view)> on_status;
+    std::function<void(std::string_view)> on_status{};
 };
 
 /// Runs one tool call.

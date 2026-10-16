@@ -99,9 +99,9 @@ struct SessionApprovals {
 /// tool's name -- `--deny` a website's too -- and `--allow-host` a website.
 /// Each is the `session` answer, given before the prompt would ask.
 struct PermissionPresets {
-    std::vector<std::string> allow;
-    std::vector<std::string> deny;
-    std::vector<std::string> allow_hosts;
+    std::vector<std::string> allow{};
+    std::vector<std::string> deny{};
+    std::vector<std::string> allow_hosts{};
 
     [[nodiscard]] bool empty() const noexcept {
         return allow.empty() && deny.empty() && allow_hosts.empty();
@@ -119,7 +119,7 @@ struct PermissionPresets {
 struct GatedName {
     std::string key;
     bool host = false;
-    std::string error;
+    std::string error{};
 };
 
 [[nodiscard]] GatedName name_gated(std::string_view name, const std::vector<std::string>& gated,
@@ -200,7 +200,7 @@ struct ToolGate {
     agent::ConfirmFn confirm;
     /// The session's answers and mode (39b), for plan mode's note and a
     /// refusal's reason; null where no session holds any.
-    std::shared_ptr<const SessionApprovals> approvals;
+    std::shared_ptr<const SessionApprovals> approvals{};
 };
 
 }  // namespace apogee::commands

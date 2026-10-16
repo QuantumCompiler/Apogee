@@ -149,6 +149,42 @@ public:
 [[nodiscard]] std::string set_backend_mmproj_path(std::string_view content, std::string_view name,
                                                   std::string_view path);
 
+/// Renames backend `old_name` to `new_name` (46a), and every reference to
+/// it, in one edit: the entry's key where it stands -- its fields, its
+/// comments and its place in the file kept -- and each value naming it at
+/// one of `backend_reference_paths()`, replaced where it stands. Nothing
+/// else in the file moves.
+///
+/// Throws ConfigEditError when `old_name` is no backend, `new_name` is taken
+/// (folded, as `append_backend` refuses a name -- a change of case to the
+/// backend's own allowed) or cannot name one, or the two are the same.
+[[nodiscard]] std::string rename_backend(std::string_view content, std::string_view old_name,
+                                         std::string_view new_name);
+
+/// Where a backend's name is referenced in the config (46a), each a path of
+/// keys with `*` for any entry or item: the role pointers under `models:`,
+/// every suite member (a key, or a mapping's `backend`), a collection's
+/// `backend`, `rerank` and graph `extract_backend`, a named graph's
+/// `extract_backend`, an agent's `model`, a regime's `teacher`, the training
+/// judge and the cycle's backend, judge and session sources. What
+/// `rename_backend` rewrites.
+[[nodiscard]] std::vector<std::vector<std::string>> backend_reference_paths();
+
+/// A backend entry's fields `config set-backend` edits (46b): every field the
+/// entry's schema reads, but its key and its `api_key` -- a key is stored
+/// with `auth add` alone. One flag each, held to `add-backend`'s by a test.
+[[nodiscard]] std::vector<std::string_view> backend_editable_fields();
+
+/// Sets `backends.<name>.<field>` to `value` in place (46b): the value token
+/// replaced where it stands, a comment after it kept, or the field written
+/// after `type:` when the entry has none -- every other byte as it was. An
+/// empty `value` removes the field's line (`type` cannot be cleared).
+/// Throws ConfigEditError for a field no backend has, `api_key` (the
+/// secrets rule: a key is never taken on the command line), or a backend
+/// not in the config.
+[[nodiscard]] std::string set_backend_field(std::string_view content, std::string_view name,
+                                            std::string_view field, std::string_view value);
+
 /// Field names accepted by set_models_role.
 [[nodiscard]] std::vector<std::string_view> models_role_fields();
 

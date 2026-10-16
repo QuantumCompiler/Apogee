@@ -71,11 +71,11 @@ using ClerkFn =
 /// What the user said on the command line (or the body), each winning over
 /// the clerk's inference for its field. Empty means "the clerk decides".
 struct Overrides {
-    std::string status;
-    std::string discipline;
-    std::string source;
-    std::string link;
-    std::string supersedes;
+    std::string status{};
+    std::string discipline{};
+    std::string source{};
+    std::string link{};
+    std::string supersedes{};
 };
 
 /// A record as a store would accept it, minus what only persistence mints

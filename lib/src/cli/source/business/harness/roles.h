@@ -97,15 +97,15 @@ struct RoleRequest {
 
     /// An explicit choice by the caller: `-m` on the CLI, `model` on a request.
     /// Wins over everything.
-    std::string_view override;
+    std::string_view override{};
 
     /// A backend pinned by the feature being run — a collection's `backend:`,
     /// a named graph's entry. Empty when the feature pins none.
-    std::string_view entry_backend;
+    std::string_view entry_backend{};
 
     /// The backend the conversation is on, where there is one. A helper role
     /// with no pointer of its own falls back to it; the other roles ignore it.
-    std::string_view conversation;
+    std::string_view conversation{};
 };
 
 /// Which rung of the chain produced an answer.

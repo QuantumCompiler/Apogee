@@ -74,10 +74,10 @@ struct BuiltInToolOptions {
     /// For the RAG tools' embedder; null means lexical-only searches.
     const harness::Harness* harness = nullptr;
     /// The review defaults `git_diff` and `git_log` fall back to, set by flags.
-    tools::ReviewDefaults review;
+    tools::ReviewDefaults review{};
     /// A live review the git tools read at call time instead (chat's
     /// `/branch`); see `tools::GitOptions::live_review`.
-    std::shared_ptr<const tools::ReviewDefaults> live_review;
+    std::shared_ptr<const tools::ReviewDefaults> live_review{};
 
     /// **The agent's permission model.** `ReadOnly` keeps only tools that
     /// declare no `writes` -- MCP tools included, which are read-only exactly
@@ -90,23 +90,23 @@ struct BuiltInToolOptions {
     /// (the interactive surfaces), a list means only those (an agent names
     /// what it needs). A name that matches no entry is reported through
     /// `mcp_status` and skipped.
-    std::optional<std::vector<std::string>> mcp_servers;
+    std::optional<std::vector<std::string>> mcp_servers{};
 
     /// When set, every enabled `mcp_servers:` entry is connected on this
     /// registry and its tools registered as `mcp__<server>__<tool>`. The
     /// caller owns it: the connections live as long as this object does.
-    std::shared_ptr<mcp::Registry> mcp;
+    std::shared_ptr<mcp::Registry> mcp{};
     /// Where `[mcp] connecting: …` and the connection results go.
-    std::function<void(std::string_view)> mcp_status;
+    std::function<void(std::string_view)> mcp_status{};
     /// Where a server's raw stderr goes; null discards it (the bounded tail
     /// is kept either way). `--verbose` points it at the terminal, `serve`
     /// at its own stderr.
-    mcp::StderrTail::Sink mcp_server_log;
+    mcp::StderrTail::Sink mcp_server_log{};
     /// How a server's transport is made; null means a real child. A test
     /// hands in the scripted fleet.
     std::function<std::unique_ptr<mcp::Transport>(const mcp::ServerSpec&, mcp::StderrTail::Sink,
                                                   std::string&)>
-        mcp_spawn;
+        mcp_spawn{};
 };
 
 /// The status callback for an interactive surface: progress repaints the one

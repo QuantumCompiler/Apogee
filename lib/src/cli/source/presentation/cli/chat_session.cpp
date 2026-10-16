@@ -354,7 +354,7 @@ void bind_session_flags(CLI::App& command, const std::shared_ptr<SessionFlags>& 
     CLI::App* cmd = &command;
 
     cmd->add_option("-m,--model", flags->model, "Backend or model to use")
-        ->type_name(kBackendValue);
+        ->type_name(kBackendOrModelValue);
     cmd->add_option("-s,--system", flags->system_prompt, "System prompt for the session");
     flags->rag_option =
         cmd->add_option("--rag", flags->rag,
@@ -1506,6 +1506,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // The shell draws its menu rows whole, so it can match loosely; the
     // terminal's replxx rows need prefixes (2026-10-11).
     completion.loose = !out.terminal();
+    completion.menu = !out.terminal();
     if (mode == SessionMode::Execute) {
         completion.symphonies = [&harness, config_path] {
             return symphony_choices(session_catalog(harness.config(), config_path));
@@ -1730,9 +1731,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     }
                     break;
                 case ChatVerb::Permissions:
-                    for (const std::string& line :
+                    for (const std::string& row :
                          describe_permissions(config, *approvals, gated, edits)) {
-                        out.print_line("  " + line);
+                        out.print_line("  " + row);
                     }
                     break;
                 case ChatVerb::PermissionMode: {
@@ -1785,9 +1786,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 case ChatVerb::Revoke: {
                     if (argument.empty()) {
                         // Alone, `/allow` lists: listing beats an error.
-                        for (const std::string& line :
+                        for (const std::string& row :
                              describe_permissions(config, *approvals, gated)) {
-                            out.print_line("  " + line);
+                            out.print_line("  " + row);
                         }
                         break;
                     }
@@ -1847,8 +1848,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         out.print_line(backend == session.backend ? "* " + model_label(session)
                                                                   : "  " + backend);
                         if (const auto listed = owned.find(backend); listed != owned.end()) {
-                            for (const std::string& model : listed->second) {
-                                out.print_line(style.dim("      " + backend + ":" + model));
+                            for (const std::string& roster_id : listed->second) {
+                                out.print_line(style.dim("      " + backend + ":" + roster_id));
                             }
                         }
                     }
@@ -2098,20 +2099,21 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         thinking_display = *chosen;
                         out.set_thinking_summarized(summarizing());
                     }
-                    std::string line =
+                    std::string status =
                         "thinking display: " + std::string{harness::to_string(thinking_display)};
                     if (thinking_display == harness::ThinkingDisplay::Raw) {
-                        line += " -- the reasoning as it streams";
+                        status += " -- the reasoning as it streams";
                     } else {
                         const agentloop::SummaryRoute route = agentloop::route_summary(
                             harness, session.backend, named_utility(harness.config()));
-                        line += route.vendor ? " -- this model's reasoning is its vendor's own "
-                                               "summary, shown as it is"
-                                : !route.model.empty()
-                                    ? " -- a line of what it is doing, written by " + route.model
-                                    : " -- but the reasoning shows as it streams: " + route.why_not;
+                        status +=
+                            route.vendor ? " -- this model's reasoning is its vendor's own "
+                                           "summary, shown as it is"
+                            : !route.model.empty()
+                                ? " -- a line of what it is doing, written by " + route.model
+                                : " -- but the reasoning shows as it streams: " + route.why_not;
                     }
-                    out.print_line(style.tag(ansi::Role::Apogee) + " " + line +
+                    out.print_line(style.tag(ansi::Role::Apogee) + " " + status +
                                    (argument.empty() ? " (summary or raw)" : ""));
                     break;
                 }
@@ -2241,8 +2243,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                                                      : " no todo -- a session with --tools keeps "
                                                        "one"));
                     }
-                    for (const std::string& line : lines) {
-                        out.print_line(style.tag(ansi::Role::Apogee) + " " + line);
+                    for (const std::string& row : lines) {
+                        out.print_line(style.tag(ansi::Role::Apogee) + " " + row);
                     }
                     break;
                 }
@@ -2295,10 +2297,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     }
                     out.reporter().on_clear_status();
                     const bool agreed = checked.result == agentloop::Validated::Result::Passed;
-                    for (const std::string& line : agentloop::answer_lines(checked)) {
+                    for (const std::string& row : agentloop::answer_lines(checked)) {
                         out.print_line(
                             style.tag(agreed ? ansi::Role::Apogee : ansi::Role::Warning) + " " +
-                            line);
+                            row);
                     }
                     break;
                 }

@@ -83,9 +83,9 @@ struct AttachmentText {
     /// `transcription: <model>` or `timeline: <models>`.
     std::string reader;
     /// Why the file was not read, when it was not.
-    std::string reason;
+    std::string reason{};
     /// Worth saying though it was read: a video's sound left untranscribed.
-    std::vector<std::string> notes;
+    std::vector<std::string> notes{};
 
     [[nodiscard]] bool ok() const noexcept {
         return reason.empty();
@@ -200,7 +200,7 @@ public:
     /// What adding one file did.
     struct Added {
         /// Set when it was indexed, or already was.
-        std::optional<logger::AttachedFile> file;
+        std::optional<logger::AttachedFile> file{};
         /// Why it was not.
         std::string skip;
         /// Copied from another chat's index rather than read and embedded.
@@ -211,7 +211,7 @@ public:
         /// Its chunks were embedded (or copied with their vectors).
         bool vectorised = false;
         /// Worth saying: why it is lexical-only when vectors were expected.
-        std::string note;
+        std::string note{};
     };
 
     /// Progress through one file: chunks embedded so far, of all.

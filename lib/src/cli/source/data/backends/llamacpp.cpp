@@ -1146,7 +1146,7 @@ void LlamaCppProvider::report_media(const harness::StreamOptions& options,
     std::size_t sounds = 0;
     for (const MediaInput& item : media) {
         frames += item.frame ? 1 : 0;
-        sounds += item.bytes.starts_with("RIFF") ? 1 : 0;
+        sounds += item.bytes.starts_with("RIFF") ? 1U : 0U;
     }
     const std::size_t images = media.size() - frames - sounds;
     std::string what;

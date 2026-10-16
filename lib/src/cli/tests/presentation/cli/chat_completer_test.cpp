@@ -132,8 +132,9 @@ TEST_CASE("/help lines up its descriptions", "[chat][completer]") {
     const std::vector<std::string> help = chat_help_lines();
     const std::size_t column = help.front().find("List these commands");
     REQUIRE(column != std::string::npos);
+    const auto specs = chat_commands();
     for (std::size_t i = 0; i < help.size(); ++i) {
-        const ChatCommandSpec& spec = chat_commands()[i];
+        const ChatCommandSpec& spec = specs[i];
         CHECK(help[i].find(std::string{spec.description}) == column);
     }
     CHECK(help[1] == "  /model [backend|model]" + std::string(column - 24, ' ') +
@@ -573,12 +574,17 @@ TEST_CASE(
     sources.roster_models = {{"claude-opus-5-5", "anthropic's roster"},
                              {"claude", "anthropic's roster"},
                              {"claude-sonnet-5-5", "anthropic's roster"}};
+    // An empty word is the map (45a): the backends -- the roster stays behind
+    // what is typed, a name already a backend once.
     const Suggestions model = suggest_chat_input("/model ", sources);
-    // The backends first, then the roster -- a name already a backend once.
-    CHECK(texts(model) == std::vector<std::string>{"claude", "local", "mock", "claude-opus-5-5",
-                                                   "claude-sonnet-5-5"});
+    CHECK(texts(model) == std::vector<std::string>{"claude", "local", "mock"});
     CHECK(model.candidates[0].description == "anthropic · claude-sonnet-5");
-    CHECK(model.candidates[3].description == "anthropic's roster");
+    // Typed, everything that starts with it: the backend first, then the
+    // roster's, in the one order.
+    const Suggestions typed = suggest_chat_input("/model claude", sources);
+    CHECK(texts(typed) ==
+          std::vector<std::string>{"claude", "claude-opus-5-5", "claude-sonnet-5-5"});
+    CHECK(typed.candidates[1].description == "anthropic's roster");
     CHECK(texts(suggest_chat_input("/model claude-s", sources)) ==
           std::vector<std::string>{"claude-sonnet-5-5"});
     // A reranker is a configured entry's job, never a roster pin's.
@@ -663,4 +669,35 @@ backends:
     CHECK(sources.backend_rosters.at("codex").front().name == "gpt-5.5");
     CHECK(sources.backend_rosters.at("work").front().name == "gpt-5.5");
     CHECK_FALSE(sources.backend_rosters.contains("local-ollama"));
+}
+
+TEST_CASE("/model's rows carry their menu groups in the shell, never on the terminal",
+          "[chat][completer][roster][menu]") {
+    // 45b: configured, then each roster with the day it was fetched, then
+    // the weights on this machine -- the shell's menu draws the headings;
+    // the terminal's rows are 45a's order, no group.
+    ChatCompletionSources sources = project();
+    sources.backends.push_back({"gemma", "llamacpp · gemma-Q4_K_M.gguf"});
+    sources.roster_models = {{"claude-opus-5-5", "anthropic's roster"},
+                             {"claude-sonnet-5-5", "anthropic's roster"}};
+    sources.backend_rosters["claude"] = sources.roster_models;
+    sources.roster_headings["anthropic's roster"] = "anthropic's roster · fetched 2026-10-14";
+
+    const Suggestions terminal = suggest_chat_input("/model ", sources);
+    CHECK(terminal.groups.empty());
+    CHECK(texts(terminal) ==
+          std::vector<std::string>{"claude", "gemma", "local", "mock", "claude:"});
+
+    sources.menu = true;
+    sources.loose = true;
+    const Suggestions shell = suggest_chat_input("/model ", sources);
+    // `local` and `gemma` run weights on this machine (llamacpp): the last group.
+    CHECK(texts(shell) == std::vector<std::string>{"claude", "mock", "claude:", "gemma", "local"});
+    CHECK(shell.groups == std::vector<std::string>{"configured", "configured",
+                                                   "anthropic's roster · fetched 2026-10-14",
+                                                   "local", "local"});
+    const Suggestions typed = suggest_chat_input("/model claude", sources);
+    CHECK(typed.groups.size() == typed.candidates.size());
+    CHECK(typed.groups.front() == "configured");
+    CHECK(typed.groups.back() == "anthropic's roster · fetched 2026-10-14");
 }

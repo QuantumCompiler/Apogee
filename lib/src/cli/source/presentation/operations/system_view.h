@@ -25,9 +25,9 @@ struct StoreDisk {
     std::filesystem::path root;
     /// Every file under `root` in all; 0 when there is no store yet, empty
     /// when it could not be walked.
-    std::optional<std::int64_t> bytes;
+    std::optional<std::int64_t> bytes{};
     /// The volume `root` is on -- or, with no store yet, the one it would be.
-    platform::VolumeInfo volume;
+    platform::VolumeInfo volume{};
 };
 
 /// The store at `root`, its files summed (symlinks not followed, so a

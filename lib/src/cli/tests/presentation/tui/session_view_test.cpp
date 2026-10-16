@@ -229,10 +229,11 @@ TEST_CASE("the picker offers a new chat first, then the saved ones, and opens th
     CHECK(stage.shell.quit_requested());
 }
 
-TEST_CASE("the picker's doors sit between the new chat and the saved ones, each opening itself",
+TEST_CASE("the picker's doors follow the new chat and the saved ones, each opening itself",
           "[tui][session]") {
-    // 37d: the execute door, one per suite -- chosen, it opens; a saved chat
-    // below the doors is still picked by its id.
+    // 37d, 44b: the execute doors -- one per suite, and the bare one -- after
+    // the saved chats, the new chat still first and preselected; chosen, a
+    // door opens; a saved chat above them is still picked by its id.
     Stage stage;
     std::vector<std::string> picked;
     std::vector<std::string> opened;
@@ -244,10 +245,13 @@ TEST_CASE("the picker's doors sit between the new chat and the saved ones, each 
          {.label = "Execute under suite solo",
           .open = [&opened]() { opened.emplace_back("solo"); }}});
     const std::string frame = stage.frame();
-    CHECK(frame.find(" › New chat\n") < frame.find("   Execute under suite duo (default)\n"));
-    CHECK(frame.find("   Execute under suite solo\n") < frame.find("   planning  ·"));
-    (void)stage.shell.press(Key::named(Key::Name::Down));
-    (void)stage.shell.press(Key::named(Key::Name::Down));
+    CHECK(frame.find(" › New chat\n") < frame.find("   planning  ·"));
+    CHECK(frame.find("   planning  ·") < frame.find("   Execute under suite duo (default)\n"));
+    CHECK(frame.find("   Execute under suite duo (default)\n") <
+          frame.find("   Execute under suite solo\n"));
+    for (int i = 0; i < 3; ++i) {
+        (void)stage.shell.press(Key::named(Key::Name::Down));
+    }
     CHECK(has(stage.frame(), " › Execute under suite solo"));
     (void)stage.shell.press(Key::named(Key::Name::Return));
     CHECK(opened == std::vector<std::string>{"solo"});
@@ -262,6 +266,8 @@ TEST_CASE("the picker's doors sit between the new chat and the saved ones, each 
     for (int i = 0; i < 5; ++i) {  // past the end stays on the last
         (void)stage.shell.press(Key::named(Key::Name::Down));
     }
+    CHECK(has(stage.frame(), " › Execute under suite duo"));
+    (void)stage.shell.press(Key::named(Key::Name::Up));
     CHECK(has(stage.frame(), " › planning"));
     (void)stage.shell.press(Key::named(Key::Name::Return));
     CHECK(picked == std::vector<std::string>{"c1"});
@@ -473,6 +479,49 @@ TEST_CASE("the menu scrolls a window over a long list, saying how many more", "[
     CHECK(has(frame, "   ↑ 2 more\n"));
     CHECK(has(frame, "   ↓ 2 more\n"));
     CHECK_FALSE(has(frame, "/c11 "));
+}
+
+TEST_CASE("the menu draws each group under its heading, again when its window starts inside one",
+          "[tui][session][menu]") {
+    // 45b: the completer's groups, a heading before each group's first row
+    // in the window -- the same rows the exec line's menu draws.
+    Stage stage;
+    stage.view.begin_session();
+    stage.view.set_completion([](std::string_view before) {
+        apogee::commands::Suggestions offered;
+        if (before != "/model ") {
+            return offered;
+        }
+        offered.from = before.size();
+        for (int i = 0; i < 6; ++i) {
+            const std::string name = "key" + std::to_string(i);
+            offered.candidates.push_back({.text = name, .label = {}, .description = "mock"});
+            offered.groups.emplace_back("configured");
+        }
+        for (const char* model : {"claude:", "claude-opus-5-5", "claude-sonnet-5-5"}) {
+            offered.candidates.push_back({.text = model, .label = {}, .description = "roster"});
+            offered.groups.emplace_back("anthropic's roster · fetched 2026-10-14");
+        }
+        return offered;
+    });
+    (void)stage.frame(72, 32);
+    stage.type("/model ");
+    std::string frame = stage.frame(72, 32);
+    INFO(frame);
+    CHECK(frame.find(" configured\n") < frame.find(" › key0"));
+    CHECK(frame.find("   key5") < frame.find(" anthropic's roster · fetched 2026-10-14\n"));
+    CHECK(frame.find(" anthropic's roster · fetched 2026-10-14\n") < frame.find("   claude:"));
+    CHECK(has(frame, "   ↓ 1 more\n"));
+    // Down to the last: the window starts inside the configured group and
+    // inside the roster's, each heading drawn where its rows begin.
+    for (int i = 0; i < 8; ++i) {
+        (void)stage.shell.press(Key::named(Key::Name::Down));
+    }
+    frame = stage.frame(72, 32);
+    CHECK(has(frame, " › claude-sonnet-5-5"));
+    CHECK(has(frame, "   ↑ 1 more\n"));
+    CHECK(frame.find(" configured\n") < frame.find("   key1"));
+    CHECK_FALSE(has(frame, "key0"));
 }
 
 TEST_CASE(

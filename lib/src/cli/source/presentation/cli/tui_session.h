@@ -90,11 +90,12 @@ private:
     CLI::App& app, const std::string& chat_id, const std::string& suite = {},
     const std::string& model = {}, SessionMode mode = SessionMode::Chat);
 
-/// The session view's driver: the picker over the saved conversations --
-/// straight into a new chat when there are none -- and a chosen one run as
-/// chat's session on a thread of its own, back to the picker when it ends.
-/// Since 37d the picker's execute door: one per configured suite, the default
-/// first, each opening execute's session under it.
+/// The session view's driver: the picker -- a new chat, the saved
+/// conversations, then execute's doors -- and a chosen one run on a thread
+/// of its own through its command's own opening (ADR 0011), back to the
+/// picker when it ends. The execute doors (37d, 44b) are the ones `apogee
+/// execute` itself opens on: one per configured suite, the default first,
+/// and the bare door whenever no suite is the default.
 class TuiSessionDriver {
 public:
     /// `held` hears what each conversation holds in memory (the monitor bar).
@@ -108,8 +109,12 @@ public:
     TuiSessionDriver(TuiSessionDriver&&) = delete;
     TuiSessionDriver& operator=(TuiSessionDriver&&) = delete;
 
-    /// The picker, or a new chat when nothing is saved.
-    void start();
+    /// The picker, always (44b): a new chat one key away, and execute's
+    /// doors there on a fresh install too -- or, given `launch` (44c:
+    /// `apogee tui` with the session table's flags), that session first,
+    /// opened through `mode`'s own opening; the picker when it ends.
+    void start(std::shared_ptr<const SessionFlags> launch = {},
+               SessionMode mode = SessionMode::Chat);
     /// The picker, whatever is saved: where a conversation that ended leaves
     /// the view.
     void show_picker();
@@ -132,8 +137,10 @@ public:
     /// done, or why not. The shell's thread.
     [[nodiscard]] std::string use_model(const std::string& model);
     /// Opens execute's session under suite `suite` (37d), as `apogee execute
-    /// --suite` opens one -- the conversation open now ended first, as
-    /// `/exit` ends it. Returns what was done, or why not. The shell's thread.
+    /// --suite` opens one -- or with `suite` empty, as `apogee execute` with
+    /// nothing named does, on its own rungs (44b) -- the conversation open
+    /// now ended first, as `/exit` ends it. Returns what was done, or why
+    /// not. The shell's thread.
     [[nodiscard]] std::string open_execute(const std::string& suite);
 
     /// What handing a play to the session came to.
@@ -154,12 +161,15 @@ public:
 private:
     /// A conversation to open: what `chat` or `execute` is given.
     struct Opening {
-        std::string chat_id;
-        std::string suite;
-        std::string model;
+        std::string chat_id{};
+        std::string suite{};
+        std::string model{};
         SessionMode mode = SessionMode::Chat;
         /// A line it takes first, as if typed (37d: a play asked for).
-        std::string first_line;
+        std::string first_line{};
+        /// The flags it was launched with (44c), parsed through the session
+        /// table by `apogee tui`; the rest above unused when set.
+        std::shared_ptr<const SessionFlags> launch{};
     };
 
     void open(Opening opening);

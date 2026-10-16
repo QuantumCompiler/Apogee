@@ -57,6 +57,8 @@ apogee_add_module(machine
 target_link_libraries(apogee_presentation_machine PUBLIC nlohmann_json::nlohmann_json)
 
 apogee_add_module(operations
+    operations/backend_fields.h
+    operations/backend_fields.cpp
     operations/backend_names.h
     operations/backend_names.cpp
     operations/collections.h
@@ -72,6 +74,8 @@ apogee_add_module(operations
     operations/knowledge_core.h
     operations/knowledge_core.cpp
     operations/read_views.h
+    operations/renames.h
+    operations/renames.cpp
     operations/read_views.cpp
     operations/retrieval.h
     operations/retrieval.cpp
@@ -163,6 +167,9 @@ apogee_add_module(tui
     tui/styled_text.cpp
     tui/session_view.h
     tui/session_view.cpp
+    tui/menu_item.h
+    tui/completion_menu.h
+    tui/completion_menu.cpp
     tui/list_view.h
     tui/list_view.cpp
     tui/progress.h

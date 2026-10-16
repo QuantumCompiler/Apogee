@@ -224,6 +224,12 @@ struct ChatCompletionSources {
     /// replxx draws a row as the typed span and then the rest of its label,
     /// which only a prefix keeps whole.
     bool loose = false;
+    /// A model's candidates carry their menu groups and come grouped (45b):
+    /// the shell's input, which draws a menu; never the terminal's rows.
+    bool menu = false;
+    /// Each roster's heading by its description (`<type>'s roster`): whose
+    /// it is and the day it was fetched -- what the menu groups it under.
+    std::map<std::string, std::string, std::less<>> roster_headings;
     /// The symphonies `/play` takes, described (27s). Empty offers none.
     std::function<std::vector<NamedChoice>()> symphonies;
 };

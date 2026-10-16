@@ -57,14 +57,14 @@ struct PlayInput {
     std::string text;
     /// The input's image, as the parts a member reads (`ContentPart`s with a
     /// `data:` URI), for the stages marked `image: true`. Empty for none.
-    std::vector<harness::ContentPart> image;
+    std::vector<harness::ContentPart> image{};
 };
 
 /// How a play runs.
 struct PlayOptions {
     /// The conversation's backend: a helper role with no member and no
     /// pointer falls back to it, as the one chain says. Empty for none.
-    std::string conversation;
+    std::string conversation{};
     /// Refuse a member billed per call. Off for a play the user starts --
     /// the user's initiative spends; on for one a model would start (27t's
     /// business), where the model's initiative never does.
@@ -85,11 +85,11 @@ struct PlayOptions {
 struct StageResult {
     std::string name;
     /// The role it played; empty for a stage that played a symphony.
-    std::string role;
+    std::string role{};
     /// The symphony it played (27r); empty for a role stage.
-    std::string play;
+    std::string play{};
     /// The backend that answered, or would have; empty for a play stage.
-    std::string backend;
+    std::string backend{};
     /// A play stage's is the played symphony's output.
     std::string answer;
     /// The answer reached the stage's cap and was cut there (a play stage:
@@ -100,7 +100,7 @@ struct StageResult {
     /// A play stage's: its stages' together.
     double seconds = 0.0;
     /// A play stage's: the played symphony's stages, in order (27r).
-    std::vector<StageResult> stages;
+    std::vector<StageResult> stages{};
 };
 
 /// A play's outcome.

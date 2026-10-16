@@ -13,7 +13,7 @@ struct Span {
     std::string text;
     ansi::TextAttributes attributes;
     /// Where the text links to, painted as an OSC 8 hyperlink; empty for none.
-    std::string link;
+    std::string link{};
 
     bool operator==(const Span&) const = default;
 };

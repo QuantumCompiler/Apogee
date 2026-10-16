@@ -2,6 +2,8 @@
 
 **Status:** Accepted · **Date:** 2026-10-10
 
+*2026-10-14: a `View` classification asserts a door reachable on a fresh install ([ADR 0012](doors-are-reachable.md)), and that door opens through its command's own path ([ADR 0011](one-session-opening.md)).*
+
 ## Context
 
 [ADR 0002](mode-parity.md) opens "The CLI is driven three ways": a terminal, the HTTP admin plane, machine mode. On 2026-10-10 a fourth door shipped: the full-screen shell (bare `apogee` at a terminal, `apogee tui`, [Milestone AH](../../assistant/MILESTONES.md#milestone-ah--the-full-screen-tui)), with seven views — Session, Models, Chats, Suites, Config, Home, Keys. The same day's parity spike counted, off the installed binary in a sandboxed home:

@@ -307,6 +307,31 @@ One entry's view. `404` when unknown.
 The twin of `apogee config delete-backend`. `200 {deleted, restart_required}`;
 `404` when unknown.
 
+### `PATCH /v1/admin/backends/{id}`
+
+The twin of `apogee config set-backend`: a JSON object of the entry's fields
+to their values -- `{"model": "claude-opus-5-5", "context_size": 32768}` --
+each set in place with every comment and every other field as it was, and
+`""` clearing an optional one. The fields are the entry's own (`type`,
+`model`, `model_path`, `mmproj_path`, the sampling and cache settings, and
+the rest `config set-backend --help` lists); never `api_key`, which is
+stored through the credential routes alone. The config it leaves is byte
+for byte the CLI's. `200 {edited, said, restart_required}`; `404` when
+unknown; `400` naming why for a field no backend has, a value its field
+cannot hold, or a key.
+
+### `POST /v1/admin/backends/{id}/rename`
+
+The twin of `apogee config rename-backend`: `{"name": "<new>"}` renames the
+backend and every reference to it in one edit -- the role pointers, the
+suites' members, the collections, graphs, agents and training settings that
+name it -- comments kept, then rewrites the saved chats that name it, and
+moves its store directory with it when it alone runs that stored model and
+both names are the model's own (`<model>-<level>`). The config it leaves is
+byte for byte the CLI's. `200 {renamed, to, said, restart_required}`, `said`
+the lines the CLI prints; `404` when unknown; `400` naming why for a name
+that is taken or cannot name a backend.
+
 ### `POST /v1/admin/backends/default`
 
 The twin of `apogee config set-default`: `{"name": "<backend>"}` sets

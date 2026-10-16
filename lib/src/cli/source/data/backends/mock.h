@@ -45,7 +45,7 @@ struct MockTurn {
     /// names, comma-separated in the request's order (27o). `{{model}}` is
     /// the model the provider was built to run -- its entry's `model:`, or a
     /// roster model pinned on it (33).
-    std::string text;
+    std::string text{};
 
     /// Tool calls to attach to the response.
     std::vector<harness::ToolCall> tool_calls{};

@@ -17,9 +17,9 @@ struct HfRef {
     std::string owner;
     std::string repo;
     /// Empty when the ref named no file, which means "resolve it".
-    std::string file;
+    std::string file{};
     /// Empty means the default branch.
-    std::string revision;
+    std::string revision{};
 
     [[nodiscard]] std::string repo_id() const {
         return owner + "/" + repo;

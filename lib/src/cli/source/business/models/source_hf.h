@@ -85,7 +85,7 @@ struct HfFile {
     /// The sha256 Hugging Face publishes for an LFS-stored file, hex; empty
     /// for a small file stored in git, whose oid is a git blob hash and not
     /// a digest of the bytes.
-    std::string sha256;
+    std::string sha256{};
 };
 
 struct HfTree {

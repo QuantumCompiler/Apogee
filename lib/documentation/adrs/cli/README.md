@@ -22,3 +22,5 @@ The standing rules of the CLI's architecture, each written once, dated, and kept
 | [0008](module-map.md) | The module map is the layer law's one declaration |
 | [0009](built-in-model-lists.md) | Model lists Apogee carries are kept current with their vendors |
 | [0010](the-shell-is-a-mode.md) | The shell is a mode: every subcommand's place in it is classified |
+| [0011](one-session-opening.md) | A mode is opened by its command's own path, every front end's door included |
+| [0012](doors-are-reachable.md) | A classified door is reachable on a fresh install |

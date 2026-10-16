@@ -47,8 +47,8 @@ const std::string kAnswer =
 /// A fake clerk that answers with `text` and records what it was asked.
 struct FakeClerk {
     std::string text;
-    std::vector<std::string> systems;
-    std::vector<std::string> users;
+    std::vector<std::string> systems{};
+    std::vector<std::string> users{};
     int calls = 0;
 
     [[nodiscard]] ClerkFn fn() {
@@ -310,7 +310,7 @@ namespace {
 /// repeated), as FakeClerk does.
 struct SequenceClerk {
     std::vector<std::string> texts;
-    std::vector<std::string> users;
+    std::vector<std::string> users{};
 
     [[nodiscard]] ClerkFn fn() {
         return [this](std::string_view system, std::string_view user) {
@@ -324,7 +324,7 @@ struct SequenceClerk {
 /// A scripted verifier counting what it was sent.
 struct ScriptedVerifier {
     std::vector<std::string> replies;
-    std::vector<std::string> briefs;
+    std::vector<std::string> briefs{};
 
     [[nodiscard]] apogee::agentloop::Verifier verifier() {
         apogee::agentloop::Verifier out;

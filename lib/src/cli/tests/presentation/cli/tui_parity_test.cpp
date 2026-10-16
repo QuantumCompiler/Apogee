@@ -94,3 +94,46 @@ TEST_CASE("the table is today's truth: the views, no backfill left, the exec lin
                                                    "symphonies edit", "reset", "uninstall",
                                                    "serve"});
 }
+
+TEST_CASE("every view names its door; a door missing, unsaid or misplaced is named",
+          "[cli][tui][parity][door]") {
+    // ADR 0012 (44d): a view is a promise a fresh install keeps, so each
+    // names the view it is reached by -- `cli.tui_doors` walks them all.
+    std::vector<std::string> doorless;
+    for (const apogee::commands::ShellSurface& surface : apogee::commands::shell_surfaces()) {
+        if (surface.kind == ShellSurfaceKind::View && surface.door.view.empty()) {
+            doorless.emplace_back(surface.command);
+        }
+    }
+    CHECK(doorless.empty());
+    const apogee::commands::ShellSurface* execute = apogee::commands::find_shell_surface("execute");
+    REQUIRE(execute != nullptr);
+    CHECK(execute->door.view == "Session");
+    CHECK(execute->door.seen == "Execute");
+    CHECK(execute->door.condition.empty());  // unconditional since 44b
+
+    const apogee::commands::RootCommand root{apogee::commands::default_registry()};
+    std::vector<apogee::commands::ShellSurface> planted(apogee::commands::shell_surfaces().begin(),
+                                                        apogee::commands::shell_surfaces().end());
+    const auto row = [&planted](std::string_view command) -> apogee::commands::ShellSurface& {
+        return *std::ranges::find(planted, command, &apogee::commands::ShellSurface::command);
+    };
+    // The regression that motivated it: the execute door gone from the row.
+    row("execute").door = {};
+    std::vector<std::string> found = apogee::commands::shell_law_violations(root.app(), planted);
+    REQUIRE(found.size() == 1);
+    CHECK(found.front().starts_with("'execute' is classified as a view with no door"));
+    // A condition with nothing said where the door is absent.
+    row("execute").door = {.view = "Session", .condition = "a suite or a default backend"};
+    found = apogee::commands::shell_law_violations(root.app(), planted);
+    REQUIRE(found.size() == 1);
+    CHECK(found.front() ==
+          "'execute''s door is conditional on a suite or a default backend, with nothing said "
+          "where it is absent");
+    // A door on a row that is no view.
+    row("execute").door = {.view = "Session", .seen = "Execute"};
+    row("serve").door = {.view = "Session"};
+    found = apogee::commands::shell_law_violations(root.app(), planted);
+    REQUIRE(found.size() == 1);
+    CHECK(found.front() == "'serve' names a door, and is no view");
+}

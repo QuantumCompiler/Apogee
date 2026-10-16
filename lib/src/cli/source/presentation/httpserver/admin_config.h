@@ -37,7 +37,7 @@ struct AdminConfigContext {
     /// consultable members (27f) -- the CLI's own probe, handed down by the
     /// composition root, which can build providers. Null tells nothing, and
     /// unknown is metered.
-    commands::MeteredProbe metered;
+    commands::MeteredProbe metered{};
 };
 
 /// A backend entry as the plane serializes it: every field but the key.
@@ -118,6 +118,21 @@ struct AdminConfigContext {
 /// `DELETE /v1/admin/backends/{name}` -- the `config delete-backend` twin.
 [[nodiscard]] HttpResponse admin_delete_backend(const AdminConfigContext& context,
                                                 std::string_view name);
+
+/// `POST /v1/admin/backends/{name}/rename` -- the `config rename-backend`
+/// twin (46a): `{"name": "<new>"}`, through the one core -- the key and every
+/// reference in one edit, the saved chats swept, the store moved where the
+/// coupling holds -- byte-identical to the CLI's. What it did, a line each.
+[[nodiscard]] HttpResponse admin_rename_backend(const AdminConfigContext& context,
+                                                std::string_view name, const HttpRequest& request);
+
+/// `PATCH /v1/admin/backends/{name}` -- the `config set-backend` twin (46b):
+/// a JSON object of fields to their values, a string or a number, `""`
+/// clearing one -- through the one core, byte-identical to the CLI's. Never
+/// `api_key`: a key is stored through the credential routes alone.
+[[nodiscard]] HttpResponse admin_set_backend_fields(const AdminConfigContext& context,
+                                                    std::string_view name,
+                                                    const HttpRequest& request);
 
 /// `POST /v1/admin/config/format` -- the `config format` twin: whitespace
 /// tidied, content untouched.

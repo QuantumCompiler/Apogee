@@ -45,6 +45,10 @@ struct Suggestions {
     std::size_t from = 0;
     /// In the order they are shown; Tab takes the first.
     std::vector<Suggestion> candidates;
+    /// The heading each candidate sits under in the shell's menu (45b),
+    /// parallel to `candidates` -- or empty: none. The terminal's rows never
+    /// draw it.
+    std::vector<std::string> groups;
 };
 
 /// The text before the cursor in, what could complete it out. The one

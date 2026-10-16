@@ -56,12 +56,12 @@ struct ResolvedSampling {
 
 /// The ladder's rungs, top to bottom.
 struct SamplingLadder {
-    SamplingRung request;
-    SamplingRung config;
-    SamplingRung model_file;
-    SamplingRung family;
-    std::string family_source;
-    std::optional<std::uint32_t> seed;
+    SamplingRung request{};
+    SamplingRung config{};
+    SamplingRung model_file{};
+    SamplingRung family{};
+    std::string family_source{};
+    std::optional<std::uint32_t> seed{};
 };
 
 /// Resolves every knob down the ladder.

@@ -46,6 +46,13 @@ struct ExecWords {
                                                        const std::string& scope,
                                                        const std::string& line);
 
+/// `exec_candidates` with what a menu shows beside each (45b): its group and
+/// description from the core's notes, the groups in the menu's order
+/// (`menu_order`) -- in the process, never on the wire.
+[[nodiscard]] std::vector<tui::MenuItem> exec_menu_items(const RootContext& context,
+                                                         const std::string& scope,
+                                                         const std::string& line);
+
 /// The exec line's options: completing and running as above, a run streamed
 /// into `output`, the child `binary`.
 [[nodiscard]] tui::ExecLineOptions exec_line_options(const RootContext& context,

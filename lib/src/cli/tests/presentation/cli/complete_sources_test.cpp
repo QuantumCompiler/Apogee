@@ -26,6 +26,7 @@
 #include "contracts/layout.h"
 #include "embedstore/store.h"
 #include "knowledge/record.h"
+#include "logger/session.h"
 #include "machine/json_reporter.h"
 #include "models/quantize.h"
 #include "modelstore/store.h"
@@ -659,11 +660,57 @@ TEST_CASE("the store's MLX models complete as its GGUFs do, by name, handle and 
         INFO(name);
         CHECK(run_apogee({"--config", config_path.string(), "models", "info", name, "-q"}) == 0);
     }
-    for (const std::string& name : {"Llama-3.2-1B-Instruct-4bit", "m-8bit"}) {
+    for (const std::string name : {"Llama-3.2-1B-Instruct-4bit", "m-8bit"}) {
         INFO(name);
         std::string said;
         CHECK(run_apogee({"--config", config_path.string(), "config", "add-backend", name},
                          &said) == 0);
         CHECK(said.find("filled from the store") != std::string::npos);
     }
+}
+
+TEST_CASE("chats complete newest first, the store by format then name, the rest in the one order",
+          "[commands][completion][sources][order]") {
+    // The per-kind treatment table (45a).
+    const Home home;
+    apogee::logger::Session older;
+    older.chat_id = "20260101-000000-aaaa";
+    older.custom_name = "alpha";
+    older.backend = "claude";
+    apogee::logger::save(older);
+    apogee::logger::Session newer;
+    newer.chat_id = "20260102-000000-zzzz";
+    newer.custom_name = "Zed";
+    newer.backend = "claude";
+    apogee::logger::save(newer);
+    // Chats: the saved order -- never alphabetical, where `alpha` would lead.
+    const c::Completion chats =
+        c::complete_words({.words = {"chat", "--resume"}, .current = ""}, home.config,
+                          c::specs_from_app(c::RootCommand{c::default_registry()}.app()),
+                          c::default_completion_sources());
+    const std::vector<apogee::logger::Session> saved = apogee::logger::list_sessions();
+    REQUIRE(saved.size() == 2);
+    std::vector<std::string> expected;
+    for (const apogee::logger::Session& session : saved) {
+        expected.push_back(session.chat_id);
+        expected.push_back(session.custom_name);
+    }
+    CHECK(chats.candidates == expected);
+
+    // The store: SafeTensors, then GGUF; within each, case-insensitively.
+    const std::filesystem::path models = home.home / "models";
+    write_file(models / "org--Zeta" / "gguf" / "111111111111" / "z.gguf");
+    write_file(models / "org--alpha" / "gguf" / "222222222222" / "a.gguf");
+    write_file(models / "org--Mid" / "safetensors" / "333333333333" / "config.json", "{}");
+    write_file(models / "org--Mid" / "safetensors" / "333333333333" / "model.safetensors");
+    const c::NameList store = home.names(c::kModelValue);
+    CHECK(store.as_listed);
+    CHECK(store.names == std::vector<std::string>{"org--Mid", "org--Mid/safetensors/333333333333",
+                                                  "org--alpha", "org--alpha/gguf/222222222222",
+                                                  "org--Zeta", "org--Zeta/gguf/111111111111"});
+
+    // Everything else in the one order: case-insensitive, `Llama` by its letter.
+    std::vector<std::string> names{"qwen", "Llama", "glm", "Gemma", "alpha"};
+    c::order_names(names);
+    CHECK(names == std::vector<std::string>{"alpha", "Gemma", "glm", "Llama", "qwen"});
 }

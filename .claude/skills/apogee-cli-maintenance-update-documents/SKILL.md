@@ -26,6 +26,10 @@ Work through the system in this order (read [`CLAUDE.md`](../../../lib/documenta
    - Any item this branch **started** → index row marked in progress.
    - Any **gate the branch satisfied** → downstream items' status lines updated.
    - Any decision made while building → a dated entry in the affected item's **Decisions made** (and `[default:]` calls that were exercised recorded as decisions).
+   - **The in-development version's table, once empty, is retired here** — every item it held shipped or moved (the version is `lib/release/VERSION`, the branch's name). The merge *is* the release ([CLAUDE.md](../../../lib/documentation/assistant/CLAUDE.md) → Versioning), so a release's table never outlives its pull request (the user's call, 2026-10-16).
+     - Remove its `### v<x.y.z>` heading, its track preambles and the empty table from the index; its directory is gone with its last document.
+     - The shipped-tracks paragraph above the tables then names its tracks as complete in that version — in development on its branch, released when the branch merges into `stable` — and names the earliest table still open. The release roll later adds the release's link and date (`/apogee-cli-maintenance-update-release`).
+     - A table with rows still standing is never retired: report the rows; moving them is `/apogee-cli-backlog-swap-item`'s, on the user's word. The standing **Architecture** and **Maintenance** tables are never retired, however empty.
 2. **[MILESTONES.md](../../../lib/documentation/assistant/MILESTONES.md)** — shipped work folded into the right lettered milestone (goal, what was built, trade-offs), or a new milestone for a genuinely new area.
 3. **[ROADMAP.md](../../../lib/documentation/assistant/ROADMAP.md)** — checkboxes for shipped themes; the "decisions needed" list still accurate; nothing shipped still listed as pending.
 4. **[CLAUDE.md](../../../lib/documentation/assistant/CLAUDE.md)** — the Codebase Map covers every file/package the branch added, moved, or deleted; Stack & environment still true; new hard rules earned on this branch promoted into Invariants (`## ⚠` once test-locked); Code Style additions recorded.
@@ -46,9 +50,10 @@ After the edits, verify the whole system (script it — don't eyeball):
 
 - every relative `.md` link in `lib/documentation/`, `.claude/skills/` and the eight layer cards (`lib/src/cli/{source,tests}/<layer>/CLAUDE.md`) resolves, and `harness.layer_context` passes -- the cards, the ADR index and ADRs 0001/0008 agree with `cmake/modules.cmake`;
 - the backlog index rows exactly match the documents on disk, numbering is sequential, and every gate names an existing item earlier in the order;
+- no version table is left empty — the in-development version's emptied table was retired above — and every version table's directory matches its rows;
 - every open call in every item is tagged `[user]` / `[default: …]` / `(consumed decision)`;
 - no template markers or `_TODO:_` placeholders were newly introduced without being deliberate.
 
 ## 4. Report
 
-Summarize for the MR description: which docs changed and why, which backlog items were completed/started/re-gated, any decisions recorded, and — explicitly — anything found that needs the **user** (an unanswered `[user]` call the branch stepped around, a SPEC-shape change made without a recorded decision, and — when the branch changed the pipeline's jobs — that `lib/scripts/required-checks.py --pr <N> --apply` must run after the pull request's CI passes and before it merges, which only they should run). Remind that `lib/scripts/cicd.sh --test` should be green before the MR is opened — this skill covers the docs half of "done", not the build half.
+Summarize for the MR description: which docs changed and why, which backlog items were completed/started/re-gated, whether the in-development version's table was retired (or why not), any decisions recorded, and — explicitly — anything found that needs the **user** (an unanswered `[user]` call the branch stepped around, a SPEC-shape change made without a recorded decision, and — when the branch changed the pipeline's jobs — that `lib/scripts/required-checks.py --pr <N> --apply` must run after the pull request's CI passes and before it merges, which only they should run). Remind that `lib/scripts/cicd.sh --test` should be green before the MR is opened — this skill covers the docs half of "done", not the build half.

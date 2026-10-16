@@ -268,7 +268,7 @@ ClaudeCliProvider::TurnOutcome ClaudeCliProvider::pump_turn(platform::ChildProce
         }
     };
 
-    const auto consume = [&](CliEvent&& event) {
+    const auto consume = [&](CliEvent&& next) {
         std::visit(
             [&](auto&& event) {
                 using T = std::decay_t<decltype(event)>;
@@ -318,7 +318,7 @@ ClaudeCliProvider::TurnOutcome ClaudeCliProvider::pump_turn(platform::ChildProce
                     }
                 }
             },
-            std::move(event));
+            std::move(next));
     };
 
     const auto drain_pending = [&] {

@@ -64,9 +64,9 @@ namespace {
     // Asked through the resolver rather than compared against the raw config
     // values, so this column cannot disagree with what a run would actually do
     // -- which is the entire point of there being one resolver.
-    for (const auto [role, label] : {std::pair{harness::ModelRole::Chat, "chat"},
-                                     std::pair{harness::ModelRole::Embedding, "embedding"},
-                                     std::pair{harness::ModelRole::Extraction, "extraction"}}) {
+    for (const auto& [role, label] : {std::pair{harness::ModelRole::Chat, "chat"},
+                                      std::pair{harness::ModelRole::Embedding, "embedding"},
+                                      std::pair{harness::ModelRole::Extraction, "extraction"}}) {
         if (harness::resolve_backend_key(config, harness::RoleRequest{.role = role}) == key) {
             note(label);
         }
@@ -375,7 +375,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
     std::vector<std::pair<std::size_t, std::filesystem::path>> snapshot_rows;
     std::size_t reads = stored_ggufs.size() + stored_snapshots.size();
     for (const models::StoredMlx& stored : stored_mlx) {
-        reads += is_configured(stored.dir) ? 0 : 1;
+        reads += is_configured(stored.dir) ? 0U : 1U;
     }
     for (const auto& [key, backend] : config.backends) {
         if ((is_local(backend.type) || backend.type == harness::BackendType::Mlx) &&
@@ -1526,12 +1526,12 @@ std::string render_role_status(const harness::Config& config, const BusyProgress
         out << "suite: " << suite_name
             << (suite->description.empty() ? "" : "   (" + suite->description + ")") << "\n";
     }
-    for (const auto [role, label] : {std::pair{harness::ModelRole::Chat, "chat"},
-                                     std::pair{harness::ModelRole::Embedding, "embedding"},
-                                     std::pair{harness::ModelRole::Extraction, "extraction"},
-                                     std::pair{harness::ModelRole::Vision, "vision"},
-                                     std::pair{harness::ModelRole::Transcription, "transcription"},
-                                     std::pair{harness::ModelRole::Utility, "utility"}}) {
+    for (const auto& [role, label] : {std::pair{harness::ModelRole::Chat, "chat"},
+                                      std::pair{harness::ModelRole::Embedding, "embedding"},
+                                      std::pair{harness::ModelRole::Extraction, "extraction"},
+                                      std::pair{harness::ModelRole::Vision, "vision"},
+                                      std::pair{harness::ModelRole::Transcription, "transcription"},
+                                      std::pair{harness::ModelRole::Utility, "utility"}}) {
         const harness::Resolution resolved =
             harness::resolve_backend(config, harness::RoleRequest{.role = role});
         const std::string& key = resolved.key;

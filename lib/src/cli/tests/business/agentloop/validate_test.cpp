@@ -35,11 +35,11 @@ using apogee::agentloop::Verifier;
 /// A scripted verifier: each reply in turn (the last repeated), every brief
 /// it was sent kept.
 struct Script {
-    std::vector<std::string> replies;
-    std::vector<std::string> briefs;
+    std::vector<std::string> replies{};
+    std::vector<std::string> briefs{};
     std::string backend = "l3b";
-    std::string refused;
-    std::string failed;
+    std::string refused{};
+    std::string failed{};
 
     [[nodiscard]] Verifier verifier(std::string role = "utility") {
         Verifier out;

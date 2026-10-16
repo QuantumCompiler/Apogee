@@ -24,20 +24,20 @@ namespace apogee::tools {
 
 struct ToolsetOptions {
     /// The filesystem sandbox. Empty means the folder Apogee was started in.
-    std::filesystem::path fs_root;
+    std::filesystem::path fs_root{};
     /// Where the shell runs and where the git walk starts. Empty means the
     /// process's working directory.
-    std::filesystem::path working_directory;
+    std::filesystem::path working_directory{};
     /// Empty means the layout's `notes/`.
-    std::filesystem::path notes_dir;
+    std::filesystem::path notes_dir{};
     std::chrono::milliseconds shell_timeout{30000};
     std::chrono::milliseconds git_timeout{30000};
     std::size_t read_limit = 64 * 1024;
     /// The review defaults for `git_diff` and `git_log`, set by flags.
-    ReviewDefaults review;
+    ReviewDefaults review{};
     /// A live review the git tools read at call time instead; see
     /// `GitOptions::live_review`.
-    std::shared_ptr<const ReviewDefaults> live_review;
+    std::shared_ptr<const ReviewDefaults> live_review{};
     /// For the RAG tools' embedder. Null means lexical-only searches.
     const harness::Harness* harness = nullptr;
     /// The RAG tools' collections and the graph tools' graphs (27l) -- must

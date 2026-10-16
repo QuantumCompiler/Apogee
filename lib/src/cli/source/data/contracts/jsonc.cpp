@@ -374,7 +374,7 @@ std::string decode_string(std::string_view text, std::size_t begin) {
     std::string_view rest = text.substr(begin);
     std::size_t close = 1;
     while (close < rest.size() && rest[close] != '"') {
-        close += rest[close] == '\\' ? 2 : 1;
+        close += rest[close] == '\\' ? 2U : 1U;
     }
     const Json decoded = Json::parse(rest.substr(0, close + 1));
     return decoded.get<std::string>();

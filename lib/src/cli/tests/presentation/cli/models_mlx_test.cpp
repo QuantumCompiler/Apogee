@@ -70,14 +70,14 @@ public:
         bool digests = true;
         std::string library = "mlx";
         /// This file's download drops mid-body.
-        std::string drop;
+        std::string drop{};
         /// This file is served with other bytes than its digest names.
-        std::string corrupt;
+        std::string corrupt{};
         /// This file is served cut short -- its size and digest agreeing.
-        std::string truncate;
+        std::string truncate{};
         /// This file's download meets a Ctrl-C: the token is cancelled.
-        std::string cancel;
-        apogee::harness::CancellationToken token;
+        std::string cancel{};
+        apogee::harness::CancellationToken token{};
     };
 
     FixtureSource(std::string repo, std::filesystem::path dir, Options options)
@@ -129,7 +129,7 @@ public:
     [[nodiscard]] std::size_t downloads() const {
         std::size_t n = 0;
         for (const std::string& url : urls) {
-            n += url.find("/resolve/") != std::string::npos ? 1 : 0;
+            n += url.find("/resolve/") != std::string::npos ? 1U : 0U;
         }
         return n;
     }
@@ -263,7 +263,7 @@ TEST_CASE("a pull of an MLX repository lands under mlx/ by its weights' hash, ve
     const std::filesystem::path dir = pull.roots.models / "mlx-community--M-4bit" / "mlx" / id;
     REQUIRE(std::filesystem::is_directory(dir));
     CHECK(apogee::models::read_mlx_info(dir).complete);
-    for (const std::string& name : {"config.json", "model-00002-of-00002.safetensors"}) {
+    for (const std::string name : {"config.json", "model-00002-of-00002.safetensors"}) {
         CHECK(read_file(dir / name) == read_file(pull.repo / name));
     }
     // Which checks ran, and which could not.

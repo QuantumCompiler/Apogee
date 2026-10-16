@@ -378,7 +378,7 @@ TEST_CASE("a turn offers the core, the question's top eight, and find_tools",
     REQUIRE(offer.active);
     CHECK(offer.ranked.size() == apogee::agentloop::kSelectedTools);
     CHECK(offer.ranked.front() == "git_log");
-    for (const std::string& core : {"read_file", "list_directory", "run_command", "find_tools"}) {
+    for (const std::string core : {"read_file", "list_directory", "run_command", "find_tools"}) {
         CHECK(offer.names.contains(core));
     }
     for (const std::string& ranked : offer.ranked) {
@@ -478,7 +478,7 @@ TEST_CASE("selection only narrows what the registry holds", "[agentloop][tool_se
         tool.run = [](std::string_view) { return ToolOutcome{"ok"}; };
         registry.add(std::move(tool));
     }
-    for (const std::string& name : {"mcp__wiki__read_page", "mcp__wiki__search_pages"}) {
+    for (const std::string name : {"mcp__wiki__read_page", "mcp__wiki__search_pages"}) {
         Tool tool;
         tool.name = name;
         tool.description = "Read the team wiki";
