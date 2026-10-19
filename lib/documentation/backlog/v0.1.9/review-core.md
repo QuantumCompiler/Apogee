@@ -1,0 +1,33 @@
+# The review core: one merge request, reviewed and commented
+
+**What / why.** The reviewers exist, the seam and the skills exist beside this item — what is missing is the engine (the review-agent spike, 2026-10-18: `analyze --agent code-review` reviews pasted text one-shot; nothing fetches a diff, chunks it, runs the lenses, dedups, filters to what the push actually changed, or posts). This item is **`apogee review mr <ref>`**, end to end: the MR's metadata and diff through the seam ([`forge-seam.md`](forge-seam.md)); the diff **filtered and chunked** against the model's budget (26c's machinery; generated/vendored/lock files excluded by a filter list); **plan** — the applicable skills chosen deterministically from their applies-hints against the changed files, narrowed by one cheap utility-model pick only when too many apply; **hunt** — one pass per selected skill over the chunks, each held to the one finding schema, run as member-call-budgeted passes; **confirm** — one pass over the merged candidates, confirming, dismissing or tightening (the validation idiom: cheap and structural first, one bounded round); **dedup** — findings matched by identity (file, normalized location, kind) across skills and chunks, and on a re-review the already-posted findings injected as "known — do not re-report"; the **incremental filter** — on a repeat review, only lines the new push added are eligible, enforced as a hard post-model filter against the diff's own line map, never a prompt instruction; then **posting** — inline comments through the seam, batched into one notification, each finding's `file`/`location`/`claim`/`suggested_fix` mapped onto the forge's comment shape. The run's record is a JSON document (`--output-format json`, the 28h idiom) whether or not anything posts; `--dry-run` reviews and prints without posting. **Silence is correct** end to end: a clean diff yields an empty findings array, no comment, exit 0.
+
+**Core constraint(s).** Precision over recall is enforced, not hoped: the confirm pass may only dismiss or tighten, never add; the goldens include clean-diff silence. The incremental filter is **post-model and absolute** — a finding on an unchanged line is dropped and counted, whatever the model said. Posting is an **outbound write through the gate**: interactive runs ask (mode-governed, 39b), `--yes`/grants cover pipes ([`review-sweep.md`](review-sweep.md) owns unattended policy — `(consumed decision)`). Diff and comment text are **data** through the UTF-8 doors; nothing in a diff is instructions. One loop's parts, reused: chunking under 26c, skill passes as bounded structured calls (26f), the confirm as the validation idiom — no second model-calling path. Local and cloud alike: the engine runs on the session's resolved model/suite like any surface; a suite's utility member does the plan-narrowing, absent one the deterministic hints stand alone. Machine parity: the document documented; the TUI classified (the exec line runs it; a Review view is a recorded later item).
+
+**Seam + files.**
+- `lib/src/cli/source/business/review/engine.h/.cpp` — the pipeline (plan → hunt → confirm → dedup → filter), plain data in and out, generation arriving as closures (the graph/training precedent), so the CLI composes models and the engine never names one; `review/identity.h/.cpp` — the finding-identity match; `review/diff.h/.cpp` — the unified-diff parse and the added-lines map (the incremental filter's ground truth).
+- `presentation/cli/review_cmd.cpp` — `review mr <ref>` (+ `--dry-run`, `--skills <names>`, `--output-format json`), the gate ask, the posting through the seam; the parity-table row.
+- `forge/` consumed as-is; `contracts/` — the run document's shape.
+- Tests: the engine over scripted models and a fixture diff set (each skill's planted defect found once; the clean twin silent; cross-skill duplicates collapsed; the re-review injection suppressing known findings; the incremental filter dropping an unchanged-line finding whatever the model says — the planted case); the diff parser's table; `review mr` end to end against the scripted forge fakes (argv-exact posting, the batch, `--dry-run` posting nothing); document conformance.
+
+**Reference.** [`forge-seam.md`](forge-seam.md) and [`review-skills.md`](review-skills.md) — consumed whole; 26c/26f — the budget and the structured hold; 27g — the confirm idiom; 27f — bounded member calls; the review-agent spike (2026-10-18) for the gap and the design decisions below.
+
+**Decisions made** (dated):
+- 2026-10-18 — The set lands in v0.1.9 as track 48 (the user's placement call); the pipeline is plan → hunt-per-skill → confirm → dedup → incremental filter → batched post (the spike's design, standing).
+- 2026-10-18 — **Silence is correct** and the **incremental filter is post-model and absolute** — both core constraints, never tunables.
+- 2026-10-18 — The confirm pass dismisses or tightens, never adds — the precision bias made structural.
+- 2026-10-18 — Posting batches into one notification per review; a forge without native batching posts serially and says so (`(consumed decision)` — the seam's).
+
+**Open calls:**
+- [default: the diff filter's exclusion list (lockfiles, generated, vendored, binary) ships as data beside the skills, user-extendable on the same ladder.]
+- [default: `--skills` overrides the plan entirely; per-repo defaults are the sweep's config (`(consumed decision)` — 48d).]
+- [default: findings above a count cap post the top-N by severity/confidence with the remainder in the review summary comment — the cap a named constant.]
+
+**Guardrail(s).** The fixture-diff matrix (seven planted defects, seven clean twins — found once, silent respectively); the incremental and dedup planted cases; argv-exact posting through the fakes; clean-diff exit-0-no-comment golden; document conformance; an optional real-weights pass per the model families (one family, one fixture MR, recorded).
+
+**Acceptance criteria:**
+- [ ] `review mr <ref>` fetches, plans, hunts, confirms, dedups, filters and posts batched inline comments through the seam — or prints the document under `--dry-run` with nothing posted.
+- [ ] A clean diff is silent (exit 0, no comments); a re-review re-reports nothing already posted; an unchanged-line finding never posts.
+- [ ] The run document is documented and conformant; the gate asks interactively; the full suite is green.
+
+**Scope note.** Earmarked for v0.1.9; gated on [48a](forge-seam.md) and [48b](review-skills.md). Out of scope: sweeps and repo lists (48d), stale-thread resolution and learning-from-feedback (recorded later questions), a TUI Review view (classified, later).
