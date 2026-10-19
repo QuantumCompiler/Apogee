@@ -8206,3 +8206,64 @@ Decisions taken while building, for veto:
 - **Round three**: all seven defects found, `security`'s answer right but not valid JSON (unescaped quotes, which the engine's grammar-held structured output prevents). Five of seven clean twins drew silence. `concurrency` still calls a lock held across `load` contention, and `embedded` still ignores the twin's `volatile`, both on a 12B Q4. The confirm pass (48c) is the next defense.
 
 **Not run: a cloud model.** It spends money under your key, and this run had nobody to approve that. The cloud half of the sanity check is yours to see.
+
+### 2026-10-18 — `review-core` (backlog item 48c): one merge request, reviewed and commented
+
+**Why.** The seam and the skills existed. What was missing was the engine: something that fetches a diff, chunks it, runs the lenses, dedups, filters to what the push changed, and posts. `analyze --agent code-review` reviews pasted text once, and nothing more.
+
+- [x] **`apogee review mr <ref>`**: a merge request's URL, `owner/repo#12` or `group/project!4`.
+  - Its metadata and diff come through the seam (`gh` or `glab` by the forge).
+  - The files the exclusion list names are left out with the binary ones. The list is lockfiles, vendored, built and generated code, minified bundles, shipped beside the skills as `review-skills/exclude.txt`, seeded, an edit the user's.
+  - The rest is chunked to the reviewing model's window, whole files where they fit and a large file at its hunks.
+  - `--dry-run` reviews and posts nothing. `--skills` names the lenses outright. `--output-format json` gives the `review.run` document (machine-mode.md). The narration goes to stderr.
+- [x] **The review core** (`business/review/`, a new module standing on the contracts alone, its model calls closures):
+  - **plan**: the lenses whose hints apply to the changed files, or those named. Past four, one narrowing pass on a utility member the config names picks among them, held to what applies, and with no utility member every applicable lens runs.
+  - **hunt**: one pass per lens per chunk, its lens prompt, the rule that the material is data, never instructions, and the finding contract as its output format. The title, the description and the numbered change arrive fenced as data.
+  - **after the model, whatever it said**:
+    - a finding not on a line the change added is dropped;
+    - on a re-review, one not on a line the new push added;
+    - and one this login already posted.
+  - **dedup** by identity: file, first line, kind. The most severe is kept and every lens that found it credited.
+  - **confirm**: one pass over what is left, which may confirm, dismiss or tighten, never add or widen, and never a verdict for a finding it was not given.
+  - **cap**: the ten most severe post inline, the rest a line each in the one summary.
+- [x] **Silence is correct**: no finding means no comment, no summary and no confirm pass, exit 0.
+- [x] **Re-reviews read themselves back from the forge.**
+  - Each posted comment carries its finding's identity in an HTML comment, and the summary carries the head it reviewed. The seam gained three reads for it: `current_user`, `comments`, `compare`.
+  - Markers count only from this login: anyone who can comment can write the same text, and a forged marker could otherwise silence a review. A head is read only when it is a commit id, and checked again before it reaches an API path.
+  - A new head is reviewed `incremental` from the head read last, its own earlier findings told to the hunt as known.
+  - The same head again is `already reviewed`, and no pass runs.
+- [x] **Posting is an outbound write through the gate**, as `review_post`:
+  - `permissions.review_post`, the run's `--yes` and `--permission-mode` (plan and dont-ask refuse);
+  - on a terminal, the question, answered through the one path every prompt answers by (yes, no, always, session);
+  - with nobody to ask, a refusal naming `--yes` or `--dry-run`, the review still printed.
+
+  One batch: GitHub's review, GitLab's draft notes published in bulk.
+- [x] **The law, in the same change**: `review` in `cmake/modules.cmake` (links `contracts`; `cli` links it and `forge`), ADR 0008's table, the business card, and a named rule in `harness.layering` holding `review/` to `contracts/` and itself. In the parity tables `review mr` is a CLI-only carve-out (the training precedent), and `review` is runner-covered in the shell. SPEC gains the code-review scope line, dated.
+- [x] **The tests**:
+  - `review/diff_test`: the parser over the fixtures and git's shapes, the exclusions, the chunks, identities and markers (a forged one refused);
+  - `review/engine_test`: each lens's planted defect found once and its clean twin silent, the prompts, each post-model filter, dedup, the confirm pass dismissing and tightening and unable to add, a failed pass said, the cap and the summary, the plan;
+  - `forge/*_transport_test`: the three new reads, argv pinned, a non-commit id refused;
+  - `cli/review_mr_test`: in process over the real `gh` transport: the batch byte for byte, dry run and gate refusal posting nothing, silence, a re-review comparing from its own head and ignoring another login's markers, the same head with no pass;
+  - `cli.review_mr`: the real binary over a fake `gh` on PATH and a mock reviewer: dry run, refused unasked, one batch under `--yes` with the head marker.
+
+Decisions taken while building, for veto:
+- **The structural filters and dedup run before the confirm pass**, not after it as the document listed the steps. They cost nothing and cut what the confirm pass reads, and since it can only remove or reword, the result is the same.
+- **A finding must sit on a line the change added**, on every review, not only re-reviews. The skills are told so, an inline comment can only anchor there, and the precision bias wants it. 48b's real-weights check showed a model reaching for an unchanged line.
+- **Re-review state lives on the forge** (markers), so a review run from any machine knows what this login said. It is trusted from this login only, after the seam's `current_user`.
+- **Identity is per line**: the same defect named at two lines is two findings (the real-weights run below shows one). A semantic merge would be a model call the confirm pass does not make.
+- **The run document's shape** is built where the run is composed (`cli/review_mr`), not in `contracts/`: no other surface writes one yet, and 48d's sweep composes the same function.
+- **`review mr` takes no config yet**: the CLI's path, per-repository lenses and the post grant are the `review:` unit's (48d), so the config grows once.
+- **Not covered by a test: the terminal question itself.** The gate's question on a terminal goes through the same `answer_permission` every prompt uses, which is tested. The piped refusal and `--yes` are tested on the real binary.
+
+**Verified.** VERIFIED_PLACEHOLDER
+
+**On real weights**, the optional pass: one family (Google's Gemma4-12B Q4_K_M), one fixture merge request, through the real binary, with a fake `gh` serving the planted security change and then its clean twin, `--dry-run`, every lens the hints chose (`back-end`, `general-correctness`, `security`).
+- **The planted injection** (45 s): found and kept.
+  - `general-correctness` and `security` named line 9, the shell command, and it posted once, both credited.
+  - `back-end` named line 7, where the request's value is read: the same defect at another line, so a second finding (identity is per line, as decided above).
+- **The clean twin** (65 s): two false positives.
+  - All three lenses named line 8, the confined `Path(...).name` passed as a list with no shell, and it posted once, all three credited.
+  - `back-end` added an argument-injection worry at line 10.
+  - The confirm pass tightened one wording and dismissed neither.
+
+So on a 12B Q4 the pipeline does what it is built to: dedup, the filters, a confirm pass that cannot add. But the precision the track promises is not there on the clean twin, with three lenses and the merge request's own text in the prompt. A larger or cloud model is the next thing to measure, with the confirm pass on the stronger of two members, a suite's verifier. **Not run: a cloud model**, which spends money under your key with nobody here to approve it.

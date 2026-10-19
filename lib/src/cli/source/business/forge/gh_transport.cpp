@@ -80,6 +80,65 @@ std::string GhTransport::diff(const MergeRequestRef& ref) {
     return harness::valid_utf8(api(ref, {"-H", "Accept: application/vnd.github.diff", pulls(ref)}));
 }
 
+std::string GhTransport::current_user(const MergeRequestRef& ref) {
+    const nlohmann::json json = nlohmann::json::parse(api(ref, {"user"}), nullptr, false);
+    const std::string login = json.is_object() ? text_at(json, {"login"}) : std::string{};
+    if (login.empty()) {
+        throw ForgeError{ForgeError::Kind::Malformed,
+                         "gh did not say which login it acts as on " + ref.host, ""};
+    }
+    return login;
+}
+
+std::vector<PostedComment> GhTransport::comments(const MergeRequestRef& ref) {
+    require_forge(ref);
+    std::vector<PostedComment> out;
+    const auto pages = [&](const std::string& endpoint) {
+        const std::optional<nlohmann::json> items =
+            concatenated_arrays(api(ref, {"--paginate", endpoint}));
+        if (!items.has_value()) {
+            throw ForgeError{ForgeError::Kind::Malformed,
+                             "gh answered for " + to_string(ref) +
+                                 " with something that is not a list of comments",
+                             ""};
+        }
+        return *items;
+    };
+    for (const nlohmann::json& item : pages(pulls(ref) + "/comments")) {
+        PostedComment comment;
+        comment.body = text_at(item, {"body"});
+        comment.author = text_at(item, {"user", "login"});
+        comment.path = text_at(item, {"path"});
+        if (item.contains("line") && item["line"].is_number_unsigned()) {
+            comment.line = item["line"].get<std::uint32_t>();
+        }
+        out.push_back(std::move(comment));
+    }
+    for (const nlohmann::json& item : pages(pulls(ref) + "/reviews")) {
+        PostedComment comment;
+        comment.body = text_at(item, {"body"});
+        comment.author = text_at(item, {"user", "login"});
+        if (!comment.body.empty()) {
+            out.push_back(std::move(comment));
+        }
+    }
+    return out;
+}
+
+std::string GhTransport::compare(const MergeRequestRef& ref, std::string_view from,
+                                 std::string_view to) {
+    require_forge(ref);
+    if (!is_commit_id(from) || !is_commit_id(to)) {
+        throw ForgeError{ForgeError::Kind::Malformed,
+                         "a comparison takes two commit ids, not '" + std::string{from} +
+                             "' and '" + std::string{to} + "'",
+                         ""};
+    }
+    return harness::valid_utf8(api(
+        ref, {"-H", "Accept: application/vnd.github.diff",
+              "repos/" + ref.project + "/compare/" + std::string{from} + "..." + std::string{to}}));
+}
+
 void GhTransport::create_comment(const MergeRequest& request, const InlineComment& comment) {
     require_forge(request.ref);
     nlohmann::json body = comment_json(comment);

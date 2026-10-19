@@ -437,6 +437,29 @@ ReviewSkillBook review_skill_book(const std::filesystem::path& dir) {
     return book;
 }
 
+std::vector<std::string> review_exclusions(const std::filesystem::path& dir) {
+    const std::optional<std::string> file = read_file(dir / "exclude.txt");
+    const std::string text = file.value_or(std::string{bundled_review_exclusions()});
+    std::vector<std::string> globs;
+    std::size_t start = 0;
+    while (start <= text.size()) {
+        std::size_t end = text.find('\n', start);
+        if (end == std::string::npos) {
+            end = text.size();
+        }
+        std::string line = text.substr(start, end - start);
+        while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back())) != 0) {
+            line.pop_back();
+        }
+        const std::size_t first = line.find_first_not_of(" \t");
+        if (first != std::string::npos && line[first] != '#') {
+            globs.push_back(line.substr(first));
+        }
+        start = end + 1;
+    }
+    return globs;
+}
+
 const std::string& review_finding_schema_text() {
     static const std::string text = [] {
         const BundledAgent* agent = find_bundled_agent("code-review");

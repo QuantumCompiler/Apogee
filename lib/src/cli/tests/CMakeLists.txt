@@ -187,6 +187,8 @@ add_library(apogee_tests_business OBJECT
     business/forge/forge_test.cpp
     business/forge/gh_transport_test.cpp
     business/forge/glab_transport_test.cpp
+    business/review/diff_test.cpp
+    business/review/engine_test.cpp
     business/scaffold/mcp_server_test.cpp
     business/scaffold/agent_test.cpp
     business/scaffold/symphony_test.cpp
@@ -254,6 +256,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/read_documents_test.cpp
     presentation/cli/mcp_presets_cmd_test.cpp
     presentation/cli/review_cmd_test.cpp
+    presentation/cli/review_mr_test.cpp
     presentation/cli/system_cmd_test.cpp
     presentation/cli/tui_cmd_test.cpp
     presentation/cli/line_tokens_test.cpp
@@ -865,6 +868,18 @@ if(UNIX)
             ${CMAKE_CURRENT_SOURCE_DIR}/../assets
     )
     set_tests_properties(cli.code_exec_server PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+
+    # `review mr` (48c) on the real binary: a fake gh first on PATH answering
+    # from the planted fixtures, a scripted mock reviewer -- --dry-run posting
+    # nothing, a piped run refused posting and naming --yes, --yes posting one
+    # review with the finding and the head marker. Skips (77) without python3.
+    add_test(NAME cli.review_mr
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/review_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/review-e2e
+            ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+    )
+    set_tests_properties(cli.review_mr PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
 
     # `analyze` on the real binary: the bundled agents on the mock backend
     # against a fixture repository -- a ref reviewed without being checked out,

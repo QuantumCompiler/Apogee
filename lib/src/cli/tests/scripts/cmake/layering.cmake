@@ -146,7 +146,7 @@ endif()
 # ---- The named rules ------------------------------------------------------------
 
 set(GUARDED_PACKAGES harness agentloop agent secrets tools mcp knowledge graph training tasks
-                     symphony forge)
+                     symphony forge review)
 
 set(ALL_SOURCES "")
 foreach(package IN LISTS GUARDED_PACKAGES)
@@ -518,6 +518,30 @@ if(NOT VIOLATIONS STREQUAL "")
     string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
     message(FATAL_ERROR "the forge package includes more than its floor:\n${pretty}\n"
                         "forge/ may include only contracts/, platform/ and itself.")
+endif()
+
+# `review/` (48c) is the review core: plain data in and out, its model calls
+# arriving as closures and the forge reached by the command that composes it
+# -- so it stands on the contracts (the skills, the finding contract, SHA-256)
+# and nothing else.
+file(GLOB_RECURSE review_sources "${PACKAGE_DIR_review}/*.h" "${PACKAGE_DIR_review}/*.cpp")
+if(review_sources STREQUAL "")
+    message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_review} — "
+                        "this check would pass vacuously")
+endif()
+foreach(source IN LISTS review_sources)
+    file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+    foreach(line IN LISTS project_includes)
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(review|contracts)/")
+            get_filename_component(name "${source}" NAME)
+            list(APPEND VIOLATIONS "  review/${name} reaches past its floor: ${line}")
+        endif()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "the review package includes more than its floor:\n${pretty}\n"
+                        "review/ may include only contracts/ and itself.")
 endif()
 
 # The packages A1 carved, each held to the floor it was carved for.

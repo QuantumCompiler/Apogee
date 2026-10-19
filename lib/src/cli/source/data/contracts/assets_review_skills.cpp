@@ -220,12 +220,54 @@ Silence is correct. When the change carries no such defect, the answer is `{"fin
 )SKILL"},
 }};
 
+constexpr std::string_view kExclusions = R"SKILL(# Files a review leaves out of the diff it reads (48c): lockfiles, generated
+# code, vendored code, minified bundles. One glob a line over repository paths
+# -- `*` within a segment, `**` across segments -- and `#` starts a comment.
+# Binary files are always left out. Edit this file to add your own: an edited
+# copy is yours, and seeding never overwrites it.
+
+# Lockfiles
+**/package-lock.json
+**/yarn.lock
+**/pnpm-lock.yaml
+**/Cargo.lock
+**/go.sum
+**/poetry.lock
+**/Pipfile.lock
+**/uv.lock
+**/Gemfile.lock
+**/composer.lock
+**/*.lock
+
+# Vendored and installed code
+**/vendor/**
+**/node_modules/**
+**/third_party/**
+**/.venv/**
+
+# Build output and generated code
+**/dist/**
+**/build/**
+**/generated/**
+**/*.generated.*
+**/*.pb.go
+**/*_pb2.py
+**/*.min.js
+**/*.min.css
+**/*.map
+**/*.snap
+)SKILL";
+
 }  // namespace
 
 // clang-format on
 
 std::span<const BundledReviewSkill> bundled_review_skills() noexcept {
     return kReviewSkills;
+}
+
+std::string_view bundled_review_exclusions() noexcept {
+    return kExclusions;
 }
 
 }  // namespace apogee::harness

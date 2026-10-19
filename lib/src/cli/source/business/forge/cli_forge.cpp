@@ -3,11 +3,32 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <sstream>
 #include <system_error>
 
 #include "platform/child_process.h"
 
 namespace apogee::forge {
+
+std::optional<nlohmann::json> concatenated_arrays(const std::string& out) {
+    nlohmann::json all = nlohmann::json::array();
+    std::istringstream in{out};
+    while ((in >> std::ws) && in.peek() != std::char_traits<char>::eof()) {
+        nlohmann::json page;
+        try {
+            in >> page;
+        } catch (const nlohmann::json::exception&) {
+            return std::nullopt;
+        }
+        if (!page.is_array()) {
+            return std::nullopt;
+        }
+        for (nlohmann::json& item : page) {
+            all.push_back(std::move(item));
+        }
+    }
+    return all;
+}
 
 bool contains_folded(std::string_view haystack, std::string_view needle) {
     if (needle.empty()) {

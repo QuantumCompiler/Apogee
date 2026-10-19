@@ -128,6 +128,11 @@ struct ReviewSkillBook {
 /// (`review_skills_dir()`).
 [[nodiscard]] ReviewSkillBook review_skill_book(const std::filesystem::path& dir);
 
+/// The diff-exclusion globs (48c): `dir`'s `exclude.txt` when it is there --
+/// the seeded copy, or the user's edit -- else the compiled-in list; one glob
+/// a line, blank lines and `#` comments skipped.
+[[nodiscard]] std::vector<std::string> review_exclusions(const std::filesystem::path& dir);
+
 /// THE finding contract every skill's answer is held to, as JSON Schema
 /// text: `{"findings": [...]}`, each finding exactly the shipped
 /// `code-review` agent's -- `severity`, `kind`, `file`, `location`, `claim`,

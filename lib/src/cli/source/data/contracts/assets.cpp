@@ -159,6 +159,10 @@ std::string bundled_review_skill_relative_path(std::string_view name) {
     return "review-skills/" + std::string{name} + ".md";
 }
 
+std::string bundled_review_exclusions_relative_path() {
+    return "review-skills/exclude.txt";
+}
+
 std::string bundled_script_relative_path(std::string_view name) {
     return "training/scripts/" + std::string{name};
 }
@@ -377,6 +381,7 @@ std::vector<BundledFile> bundled_files() {
     for (const BundledReviewSkill& skill : bundled_review_skills()) {
         files.push_back({bundled_review_skill_relative_path(skill.name), skill.text});
     }
+    files.push_back({bundled_review_exclusions_relative_path(), bundled_review_exclusions()});
     for (const BundledScript& script : bundled_training_scripts()) {
         files.push_back({bundled_script_relative_path(script.name), script.text});
     }

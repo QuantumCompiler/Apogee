@@ -196,3 +196,42 @@ TEST_CASE("gh's refusals are its own words, each with the fix", "[forge][gh][ref
         CHECK(cli.commands.empty());
     }
 }
+
+TEST_CASE("gh reads the login, the comments already there, and a comparison", "[forge][gh]") {
+    ScriptedCli cli;
+    cli.replies = {
+        {R"({"login": "apogee-bot"})", "", 0},
+        // Two pages of inline comments, then the reviews: the one with a body
+        // is a general comment, the empty one is not.
+        {R"([{"body": "Off by one.", "user": {"login": "apogee-bot"}, "path": "a.py", "line": 7}])"
+         R"([{"body": "Nit.", "user": {"login": "dev"}, "path": "b.py", "line": 2}])",
+         "", 0},
+        {R"([{"body": "Two findings.", "user": {"login": "apogee-bot"}},
+             {"body": "", "user": {"login": "dev"}}])",
+         "", 0},
+        {"diff --git a/a.py b/a.py\n+x\n", "", 0},
+    };
+    GhTransport gh{cli.options()};
+    CHECK(gh.current_user(kRef) == "apogee-bot");
+    CHECK(cli.argv(0) == std::vector<std::string>{"/usr/local/bin/cli", "api", "user"});
+    const std::vector<apogee::forge::PostedComment> comments = gh.comments(kRef);
+    CHECK(cli.argv(1) == std::vector<std::string>{"/usr/local/bin/cli", "api", "--paginate",
+                                                  "repos/acme/widget/pulls/12/comments"});
+    CHECK(cli.argv(2) == std::vector<std::string>{"/usr/local/bin/cli", "api", "--paginate",
+                                                  "repos/acme/widget/pulls/12/reviews"});
+    REQUIRE(comments.size() == 3);
+    CHECK(comments[0].path == "a.py");
+    CHECK(comments[0].line == 7);
+    CHECK(comments[0].author == "apogee-bot");
+    CHECK(comments[1].author == "dev");
+    CHECK(comments[2].body == "Two findings.");
+    CHECK(comments[2].path.empty());
+
+    CHECK(gh.compare(kRef, "abc1234", "def5678") == "diff --git a/a.py b/a.py\n+x\n");
+    CHECK(cli.argv(3) == std::vector<std::string>{"/usr/local/bin/cli", "api", "-H",
+                                                  "Accept: application/vnd.github.diff",
+                                                  "repos/acme/widget/compare/abc1234...def5678"});
+    // A commit id read from a comment is checked before it reaches a path.
+    CHECK_THROWS_AS(gh.compare(kRef, "../../etc", "def5678"), ForgeError);
+    CHECK(cli.commands.size() == 4);
+}

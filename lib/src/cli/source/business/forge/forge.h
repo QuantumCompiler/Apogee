@@ -60,6 +60,10 @@ struct MergeRequestRef {
 /// `gitlab.com/group/project!4` -- what a watermark is keyed by.
 [[nodiscard]] std::string to_string(const MergeRequestRef& ref);
 
+/// Whether `text` is a commit id: 7 to 64 hexadecimal digits, nothing else
+/// -- checked before one read from a comment reaches an API path.
+[[nodiscard]] bool is_commit_id(std::string_view text) noexcept;
+
 /// A merge request's metadata, as the forge reported it.
 struct MergeRequest {
     MergeRequestRef ref;
@@ -92,6 +96,17 @@ struct InlineComment {
     std::optional<std::uint32_t> old_line;
 
     [[nodiscard]] bool operator==(const InlineComment&) const = default;
+};
+
+/// A comment already on a merge request, as the forge reports it: an
+/// inline one with its path and new-side line, or a general one (a review's
+/// body, a note) with neither.
+struct PostedComment {
+    std::string body;
+    std::string author;
+    /// Empty for a general comment.
+    std::string path;
+    std::uint32_t line = 0;
 };
 
 /// What a publish did.
@@ -157,6 +172,22 @@ public:
     /// The merge request's changes as one unified diff (`diff --git`
     /// headers, hunks), valid UTF-8.
     [[nodiscard]] virtual std::string diff(const MergeRequestRef& ref) = 0;
+
+    /// The login this CLI acts as on `ref`'s host (since 48c: a re-review
+    /// trusts only the markers its own login left -- anyone who can comment
+    /// can write the same text).
+    [[nodiscard]] virtual std::string current_user(const MergeRequestRef& ref) = 0;
+
+    /// Every comment already on the merge request, inline and general, in
+    /// the order the forge lists them (since 48c: what a re-review reads its
+    /// own earlier findings from).
+    [[nodiscard]] virtual std::vector<PostedComment> comments(const MergeRequestRef& ref) = 0;
+
+    /// The changes from commit `from` to commit `to` in the merge request's
+    /// repository, as one unified diff (since 48c: what a re-review limits
+    /// itself to -- the lines a new push added).
+    [[nodiscard]] virtual std::string compare(const MergeRequestRef& ref, std::string_view from,
+                                              std::string_view to) = 0;
 
     /// Posts one comment on its own, anchored to `request`'s head.
     virtual void create_comment(const MergeRequest& request, const InlineComment& comment) = 0;

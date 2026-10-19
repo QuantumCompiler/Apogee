@@ -567,6 +567,35 @@ finding contract, the shipped `code-review` agent's findings: `severity`,
 `kind`, `file`, `location`, `claim`, `suggested_fix`, `confidence`, and an
 empty list a complete answer.
 
+Since 48c a review's run is a document too, whether or not it posted:
+
+```bash
+apogee review mr <ref> --output-format json   # {"object":"review.run",…}
+```
+
+`ref` is a merge request's URL, `owner/repo#12` (GitHub) or `group/project!4`
+(GitLab). The document is `merge_request` (the canonical spelling,
+`github.com/owner/repo#12`), `url`, `title`, `head` (the commit reviewed),
+`mode` (`full`; `incremental` when this login reviewed an earlier head, with
+`since` that head; `already reviewed` when it read this head before), `model`
+(the backend that reviewed), `skills` (the lenses run) with `plan` (`named`,
+`hints`, `hints, narrowed`) and `left_out_skills`, `excluded_files` (the
+exclusion list's and binary files), `chunks`, and `findings` -- each the
+finding contract's fields plus `line` (where its comment anchors),
+`identity`, `found_by` (every lens that found it), `tightened` (the confirm
+pass reworded it) and `inline` (`false` past the cap, listed in the summary
+instead). `counts` says what each step left out: `candidates` (what the hunts
+returned), `off_change` (not on a line the change added), `not_new` (not on a
+line the new push added), `known` (posted before), `duplicates`, `dismissed`
+and `tightened` (the confirm pass). `posted` is `{"done": true, "comments",
+"summary", "batched"}`, or `{"done": false, "reason"}` -- nothing to say,
+`--dry-run`, or the gate's refusal (`nobody to ask -- run with --yes to post,
+or --dry-run`). `notes` says what a pass that did not answer cost. The
+narration (`[review] hunting with security`) goes to stderr; stdout carries
+the document alone. Posting goes through the gate as `review_post`: asked on
+a terminal, allowed by `--yes` or `permissions.review_post: allow`, governed
+by `--permission-mode`.
+
 Since 27l the graph navigation verbs are reads of the same kind:
 
 ```bash

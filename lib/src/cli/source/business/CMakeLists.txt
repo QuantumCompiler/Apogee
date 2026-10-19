@@ -306,7 +306,17 @@ apogee_add_module(forge
     forge/glab_transport.h
     forge/glab_transport.cpp
 )
-target_link_libraries(apogee_business_forge PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(apogee_business_forge PUBLIC nlohmann_json::nlohmann_json)
+
+apogee_add_module(review
+    review/diff.h
+    review/diff.cpp
+    review/identity.h
+    review/identity.cpp
+    review/engine.h
+    review/engine.cpp
+)
+target_link_libraries(apogee_business_review PUBLIC nlohmann_json::nlohmann_json)
 
 apogee_add_module(scaffold
     scaffold/mcp_server.h

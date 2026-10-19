@@ -247,6 +247,8 @@ apogee_add_module(cli
     cli/agents_cmd.cpp
     cli/review_cmd.h
     cli/review_cmd.cpp
+    cli/review_mr.h
+    cli/review_mr.cpp
     cli/symphonies_cmd.h
     cli/symphonies_cmd.cpp
     cli/system_cmd.h

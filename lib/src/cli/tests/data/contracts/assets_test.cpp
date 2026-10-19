@@ -85,8 +85,8 @@ TEST_CASE("seeding writes absent files only: an edit survives a re-seed",
     // (40c), three training drivers, the two mlx drivers, the code-execution
     // server (47b), seven review skills (48b), the vendored converter.
     CHECK(first.created.size() == apogee::harness::bundled_files().size());
-    CHECK(first.created.size() ==
-          14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + 7 + apogee::harness::bundled_converter_files().size());
+    CHECK(first.created.size() == 14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + 7 + 1 +
+                                      apogee::harness::bundled_converter_files().size());
     for (const apogee::harness::BundledSymphony& starter : apogee::harness::bundled_symphonies()) {
         CHECK(read(root.path() / "symphonies" / (std::string{starter.name} + ".yaml")) ==
               starter.text);
@@ -336,7 +336,8 @@ TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
     CHECK(apogee::harness::bundled_script_relative_path(script.name) ==
           "training/scripts/prepare_dataset.py");
     CHECK(apogee::harness::bundled_files().size() ==
-          14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + 7 + apogee::harness::bundled_converter_files().size());
+          14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + 7 + 1 +
+              apogee::harness::bundled_converter_files().size());
 }
 
 TEST_CASE("the compiled-in mlx drivers byte-match the shipped files and seed beside the trainers",

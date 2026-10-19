@@ -2,8 +2,6 @@
 
 #include <nlohmann/json.hpp>
 
-#include <sstream>
-
 #include "contracts/utf8.h"
 
 namespace apogee::forge {
@@ -40,29 +38,6 @@ namespace {
         ForgeError::Kind::Malformed,
         "glab answered for " + to_string(ref) + " with something that is not " + std::string{what},
         ""};
-}
-
-/// Every value in `out`, one after another: `--paginate` prints each page
-/// as its own JSON array.
-[[nodiscard]] nlohmann::json concatenated_arrays(const std::string& out,
-                                                 const MergeRequestRef& ref) {
-    nlohmann::json all = nlohmann::json::array();
-    std::istringstream in{out};
-    while ((in >> std::ws) && in.peek() != std::char_traits<char>::eof()) {
-        nlohmann::json page;
-        try {
-            in >> page;
-        } catch (const nlohmann::json::exception&) {
-            throw malformed(ref, "a list of file diffs");
-        }
-        if (!page.is_array()) {
-            throw malformed(ref, "a list of file diffs");
-        }
-        for (nlohmann::json& file : page) {
-            all.push_back(std::move(file));
-        }
-    }
-    return all;
 }
 
 /// Where a comment sits: the merge request's three commits and the line.
@@ -172,7 +147,66 @@ MergeRequest GlabTransport::merge_request(const MergeRequestRef& ref) {
 std::string GlabTransport::diff(const MergeRequestRef& ref) {
     require_forge(ref);
     const std::string out = api(ref, {"--paginate", merge_requests(ref) + "/diffs?per_page=100"});
-    return unified_diff(concatenated_arrays(out, ref));
+    const std::optional<nlohmann::json> files = concatenated_arrays(out);
+    if (!files.has_value()) {
+        throw malformed(ref, "a list of file diffs");
+    }
+    return unified_diff(*files);
+}
+
+std::string GlabTransport::current_user(const MergeRequestRef& ref) {
+    const nlohmann::json json = nlohmann::json::parse(api(ref, {"user"}), nullptr, false);
+    const std::string login = json.is_object() ? text_at(json, {"username"}) : std::string{};
+    if (login.empty()) {
+        throw ForgeError{ForgeError::Kind::Malformed,
+                         "glab did not say which login it acts as on " + ref.host, ""};
+    }
+    return login;
+}
+
+std::vector<PostedComment> GlabTransport::comments(const MergeRequestRef& ref) {
+    require_forge(ref);
+    const std::optional<nlohmann::json> notes =
+        concatenated_arrays(api(ref, {"--paginate", merge_requests(ref) + "/notes?per_page=100"}));
+    if (!notes.has_value()) {
+        throw malformed(ref, "a list of notes");
+    }
+    std::vector<PostedComment> out;
+    for (const nlohmann::json& note : *notes) {
+        if (flag_at(note, "system")) {
+            continue;  // "added 2 commits", "changed the description"
+        }
+        PostedComment comment;
+        comment.body = text_at(note, {"body"});
+        comment.author = text_at(note, {"author", "username"});
+        comment.path = text_at(note, {"position", "new_path"});
+        if (note.contains("position") && note["position"].is_object() &&
+            note["position"].contains("new_line") &&
+            note["position"]["new_line"].is_number_unsigned()) {
+            comment.line = note["position"]["new_line"].get<std::uint32_t>();
+        }
+        out.push_back(std::move(comment));
+    }
+    return out;
+}
+
+std::string GlabTransport::compare(const MergeRequestRef& ref, std::string_view from,
+                                   std::string_view to) {
+    require_forge(ref);
+    if (!is_commit_id(from) || !is_commit_id(to)) {
+        throw ForgeError{ForgeError::Kind::Malformed,
+                         "a comparison takes two commit ids, not '" + std::string{from} +
+                             "' and '" + std::string{to} + "'",
+                         ""};
+    }
+    const nlohmann::json json = nlohmann::json::parse(
+        api(ref, {"projects/" + encode_project(ref.project) +
+                  "/repository/compare?from=" + std::string{from} + "&to=" + std::string{to}}),
+        nullptr, false);
+    if (json.is_discarded() || !json.is_object() || !json.contains("diffs")) {
+        throw malformed(ref, "a comparison");
+    }
+    return unified_diff(json["diffs"]);
 }
 
 void GlabTransport::create_comment(const MergeRequest& request, const InlineComment& comment) {

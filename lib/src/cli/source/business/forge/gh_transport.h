@@ -12,6 +12,11 @@
 ///   batch     the same to …/pulls/<n>/reviews: one review, `event: COMMENT`,
 ///             its body the summary and its comments the inline ones --
 ///             GitHub's native batch, one notification
+///   login     gh api user
+///   comments  gh api --paginate …/pulls/<n>/comments, then …/pulls/<n>/reviews
+///             (each review's body a general comment)
+///   compare   gh api -H "Accept: application/vnd.github.diff"
+///                    repos/<owner>/<repo>/compare/<from>...<to>
 ///
 /// A GitHub Enterprise host adds `--hostname <host>` after `api`.
 namespace apogee::forge {
@@ -26,6 +31,10 @@ public:
 
     [[nodiscard]] MergeRequest merge_request(const MergeRequestRef& ref) override;
     [[nodiscard]] std::string diff(const MergeRequestRef& ref) override;
+    [[nodiscard]] std::string current_user(const MergeRequestRef& ref) override;
+    [[nodiscard]] std::vector<PostedComment> comments(const MergeRequestRef& ref) override;
+    [[nodiscard]] std::string compare(const MergeRequestRef& ref, std::string_view from,
+                                      std::string_view to) override;
     void create_comment(const MergeRequest& request, const InlineComment& comment) override;
     [[nodiscard]] PublishOutcome publish_batch(const MergeRequest& request,
                                                const std::vector<InlineComment>& comments,

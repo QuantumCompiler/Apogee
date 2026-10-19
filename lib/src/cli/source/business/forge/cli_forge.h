@@ -1,6 +1,9 @@
 #pragma once
 
+#include <nlohmann/json.hpp>
+
 #include <chrono>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -59,6 +62,10 @@ private:
     Cli cli_;
     CliTransportOptions options_;
 };
+
+/// Every element of every JSON array in `out`, one array after another --
+/// what `--paginate` prints, a page each; nullopt when `out` is not that.
+[[nodiscard]] std::optional<nlohmann::json> concatenated_arrays(const std::string& out);
 
 /// Whether `haystack` holds `needle`, letters compared without case.
 [[nodiscard]] bool contains_folded(std::string_view haystack, std::string_view needle);

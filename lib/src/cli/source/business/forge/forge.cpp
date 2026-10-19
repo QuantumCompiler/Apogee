@@ -184,6 +184,12 @@ std::string to_string(const MergeRequestRef& ref) {
            std::to_string(ref.number);
 }
 
+bool is_commit_id(std::string_view text) noexcept {
+    return text.size() >= 7 && text.size() <= 64 && std::ranges::all_of(text, [](char c) {
+               return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+           });
+}
+
 ForgeError::ForgeError(Kind kind, const std::string& message, std::string remedy)
     : std::runtime_error{message}, kind_{kind}, remedy_{std::move(remedy)} {}
 

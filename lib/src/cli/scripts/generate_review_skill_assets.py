@@ -6,7 +6,8 @@
 Reads every shipped review skill and rewrites the one generated translation
 unit:
 
-    assets/review-skills/*.md  ->  source/data/contracts/assets_review_skills.cpp
+    assets/review-skills/*.md          ->  source/data/contracts/assets_review_skills.cpp
+    assets/review-skills/exclude.txt   ->  (the same unit: the diff-exclusion list, 48c)
 
 The FILES are the source of truth: edit them, run this, and commit both.
 tests/data/contracts/assets_test.cpp fails the build the moment a literal
@@ -57,8 +58,13 @@ def generate() -> str:
         if len(text.encode("utf-8")) > LIMIT:
             raise SystemExit(f"{path}: over {LIMIT} bytes -- split it or chunk the literal")
         out.append(f'    {{.name = "{path.stem}", .text = R"{DELIMITER}({text}){DELIMITER}"}},')
+    exclusions = (SKILLS / "exclude.txt").read_text(encoding="utf-8")
+    if f"){DELIMITER}\"" in exclusions:
+        raise SystemExit("exclude.txt: contains the raw-string terminator")
     out += [
         "}};",
+        "",
+        f'constexpr std::string_view kExclusions = R"{DELIMITER}({exclusions}){DELIMITER}";',
         "",
         "}  // namespace",
         "",
@@ -66,6 +72,10 @@ def generate() -> str:
         "",
         "std::span<const BundledReviewSkill> bundled_review_skills() noexcept {",
         "    return kReviewSkills;",
+        "}",
+        "",
+        "std::string_view bundled_review_exclusions() noexcept {",
+        "    return kExclusions;",
         "}",
         "",
         "}  // namespace apogee::harness",

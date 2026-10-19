@@ -194,6 +194,10 @@ const std::map<std::string, Classification>& table() {
         {"task halt", carve_out("steers the task running on the host; task control is CLI-only")},
         {"task cancel",
          carve_out("ends the turn of the task running on the host; task control is CLI-only")},
+        {"review mr",
+         carve_out("reviews with the host's own models and posts through the host's own gh or "
+                   "glab login, on a user's act; review control is CLI-only, the training "
+                   "precedent")},
         {"symphonies play",
          carve_out("runs the host's own models, stage by stage, on a user's act; playing is "
                    "CLI-only, the training precedent -- the definitions are served under "

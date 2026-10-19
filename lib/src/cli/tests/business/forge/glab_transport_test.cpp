@@ -233,3 +233,35 @@ TEST_CASE("glab's refusals are its own words, each with the fix", "[forge][glab]
         }
     }
 }
+
+TEST_CASE("glab reads the login, the notes already there, and a comparison", "[forge][glab]") {
+    ScriptedCli cli;
+    cli.replies = {
+        {R"({"username": "apogee-bot"})", "", 0},
+        {R"([{"body": "added 2 commits", "system": true, "author": {"username": "dev"}},
+             {"body": "Off by one.", "system": false, "author": {"username": "apogee-bot"},
+              "position": {"new_path": "a.py", "new_line": 7}},
+             {"body": "One finding.", "system": false, "author": {"username": "apogee-bot"}}])",
+         "", 0},
+        {R"({"commits": [], "diffs": [{"old_path": "a.py", "new_path": "a.py",
+             "new_file": false, "renamed_file": false, "deleted_file": false,
+             "diff": "@@ -1 +1 @@\n-a\n+b\n"}]})",
+         "", 0},
+    };
+    GlabTransport glab{cli.options()};
+    CHECK(glab.current_user(kRef) == "apogee-bot");
+    CHECK(cli.argv(0) == argv({"api", "user"}));
+    const std::vector<apogee::forge::PostedComment> notes = glab.comments(kRef);
+    CHECK(cli.argv(1) == argv({"api", "--paginate", std::string{kBase} + "/notes?per_page=100"}));
+    REQUIRE(notes.size() == 2);  // the system note left out
+    CHECK(notes[0].path == "a.py");
+    CHECK(notes[0].line == 7);
+    CHECK(notes[1].path.empty());
+    CHECK(glab.compare(kRef, "abc1234", "def5678") ==
+          "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-a\n+b\n");
+    CHECK(cli.argv(2) == argv({"api",
+                               "projects/group%2Fsub%2Fproject/repository/"
+                               "compare?from=abc1234&to=def5678"}));
+    CHECK_THROWS_AS(glab.compare(kRef, "abc1234", "main&x=1"), ForgeError);
+    CHECK(cli.commands.size() == 3);
+}

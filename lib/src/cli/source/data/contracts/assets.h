@@ -319,6 +319,15 @@ struct BundledReviewSkill {
 /// `review-skills/<name>.md`, relative to the data directory.
 [[nodiscard]] std::string bundled_review_skill_relative_path(std::string_view name);
 
+/// The diff-exclusion list (48c): globs of the files a review leaves out --
+/// lockfiles, generated, vendored -- compiled in byte-identical to
+/// `assets/review-skills/exclude.txt` and seeded skip-if-present at
+/// `review-skills/exclude.txt`, where an edited copy is the user's.
+[[nodiscard]] std::string_view bundled_review_exclusions() noexcept;
+
+/// `review-skills/exclude.txt`, relative to the data directory.
+[[nodiscard]] std::string bundled_review_exclusions_relative_path();
+
 /// `training/kits/<name>.yaml` and `training/scripts/<name>`, relative to the
 /// data directory -- the paths seeding writes and the commands read.
 [[nodiscard]] std::string bundled_kit_relative_path(std::string_view name);
