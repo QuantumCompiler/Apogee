@@ -325,6 +325,10 @@ apogee_add_module(video
     video/runtime.cpp
     video/generation.h
     video/generation.cpp
+    video/work_dir.h
+    video/work_dir.cpp
+    video/voice.h
+    video/voice.cpp
 )
 target_link_libraries(apogee_business_video PUBLIC nlohmann_json::nlohmann_json)
 

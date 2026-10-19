@@ -189,6 +189,10 @@ struct BundledScript {
 /// `training/scripts/video_generate.py`, relative to the data directory.
 [[nodiscard]] std::string bundled_video_driver_relative_path();
 
+/// `training/scripts/voice_say.py` (50a), the speech driver -- one of
+/// `bundled_video_scripts`, seeded beside the video driver.
+[[nodiscard]] std::string bundled_voice_driver_relative_path();
+
 /// Every version of a seeded driver -- the trainers' and the MLX ones -- an
 /// earlier Apogee shipped and this one does not, as `<name> <sha256>` with
 /// the name as in `BundledScript::name`, sorted. From

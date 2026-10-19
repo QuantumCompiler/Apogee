@@ -22,10 +22,18 @@
 namespace apogee::commands {
 
 /// The question and the install, every stream and the environment given --
-/// what a test drives. `interactive` false refuses at once; a yes installs
-/// the set through the environment's own pip, saying what it installs; any
-/// other answer refuses. The refusal or the failure, or empty once
-/// installed.
+/// what a test drives: `set`, whose packages are `needs` ("torch and
+/// diffusers"), about `size`. `interactive` false refuses at once; a yes
+/// installs the set through the environment's own pip, saying what it
+/// installs; any other answer refuses. The refusal or the failure, or empty
+/// once installed.
+[[nodiscard]] std::string install_runtime_set(training::PythonEnv& env,
+                                              training::RequirementSet set, std::string_view needs,
+                                              std::string_view size, bool interactive,
+                                              std::istream& in, std::ostream& out,
+                                              std::string_view purpose);
+
+/// `install_runtime_set` for the `video` set: "torch and diffusers".
 [[nodiscard]] std::string install_video_set(training::PythonEnv& env, bool interactive,
                                             std::istream& in, std::ostream& out,
                                             std::string_view purpose);
@@ -37,6 +45,11 @@ namespace apogee::commands {
 /// The readiness the ladder ends at -- a later rung (the driver, ffmpeg) is
 /// the caller's to say.
 [[nodiscard]] video::VideoReadiness ready_video_runtime(const harness::Config& config,
+                                                        std::string_view purpose);
+
+/// The same for speech (50a): the environment, then the `voice` set when
+/// torch or kokoro is missing, then the voice ladder.
+[[nodiscard]] video::VideoReadiness ready_voice_runtime(const harness::Config& config,
                                                         std::string_view purpose);
 
 }  // namespace apogee::commands

@@ -37,6 +37,11 @@ enum class VideoRefusal : std::uint8_t {
     NoDriver,
     /// No `ffmpeg` on PATH to assemble the frames with.
     NoFfmpeg,
+    /// The voice runtime's own rungs (50a): kokoro not installed, no voice
+    /// model at the directory, or one that cannot load.
+    NoKokoro,
+    NoVoiceModel,
+    NotAVoiceModel,
 };
 
 [[nodiscard]] std::string_view to_string(VideoRefusal refusal) noexcept;
@@ -47,6 +52,8 @@ struct VideoHost {
     std::filesystem::path venv;
     /// `<home>/training/scripts/video_generate.py`, the seeded driver.
     std::filesystem::path driver;
+    /// `<home>/training/scripts/voice_say.py`, the speech driver (50a).
+    std::filesystem::path voice_driver;
     /// `ffmpeg` on PATH, or empty.
     std::string ffmpeg;
 
@@ -67,6 +74,8 @@ struct VideoReadiness {
     /// The installed versions, read from their distribution records.
     std::string torch_version{};
     std::string diffusers_version{};
+    /// The speech runtime's version, for a voice probe (50a).
+    std::string kokoro_version{};
 
     [[nodiscard]] bool ready() const noexcept {
         return refusal == VideoRefusal::None;
@@ -85,5 +94,16 @@ struct VideoReadiness {
 
 /// The fix every package rung names.
 inline constexpr std::string_view kVideoSetupRemedy = "apogee train setup --with video";
+
+/// The voice ladder (50a), the video one's environment rungs shared: the
+/// environment, torch, kokoro, then -- when `model` is given -- the voice
+/// model read whole (`read_voice_info`, `handle` naming it in the fix),
+/// then the speech driver. No ffmpeg: speech is written as WAV.
+[[nodiscard]] VideoReadiness probe_voice(const VideoHost& host,
+                                         const std::filesystem::path& model = {},
+                                         std::string_view handle = {});
+
+/// The fix the voice package rungs name.
+inline constexpr std::string_view kVoiceSetupRemedy = "apogee train setup --with voice";
 
 }  // namespace apogee::video

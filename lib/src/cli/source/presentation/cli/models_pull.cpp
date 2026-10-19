@@ -37,6 +37,7 @@
 #include "modelstore/pipeline_info.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
+#include "modelstore/voice_info.h"
 #include "operations/renames.h"
 #include "platform/platform.h"
 #include "training/convert.h"
@@ -501,6 +502,12 @@ DeletePlan plan_delete(const models::StoreRoots& roots, std::string_view name) {
             plan.removes.push_back(stored.dir);
         }
     }
+    for (const models::StoredVoice& stored : models::list_store_voices(roots, target.model)) {
+        if ((target.format.empty() || target.format == models::kVoiceFormat) &&
+            (target.id.empty() || target.id == stored.id)) {
+            plan.removes.push_back(stored.dir);
+        }
+    }
     if (plan.removes.empty()) {
         plan.error = "nothing stored under '" + std::string{name} + "'";
         return plan;
@@ -669,10 +676,11 @@ SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view
                        "' is an MLX model; this reads full-weight SafeTensors weights";
         return choice;
     }
-    if (target.format == models::kPipelineFormat) {
-        choice.error = "'" + std::string{given} +
-                       "' is a diffusion pipeline; this reads a language model's full-weight "
-                       "SafeTensors weights";
+    if (target.format == models::kPipelineFormat || target.format == models::kVoiceFormat) {
+        choice.error =
+            "'" + std::string{given} + "' is a " +
+            (target.format == models::kVoiceFormat ? "voice model" : "diffusion pipeline") +
+            "; this reads a language model's full-weight SafeTensors weights";
         return choice;
     }
     const std::string id = !target.id.empty() ? target.id : std::string{from_id};
@@ -742,8 +750,11 @@ GgufChoice choose_gguf(const models::StoreRoots& roots, std::string_view given,
                        "makes smaller GGUFs";
         return choice;
     }
-    if (target.format == models::kPipelineFormat) {
-        choice.error = "'" + std::string{given} + "' is a diffusion pipeline; quantize makes GGUFs";
+    if (target.format == models::kPipelineFormat || target.format == models::kVoiceFormat) {
+        choice.error =
+            "'" + std::string{given} + "' is a " +
+            (target.format == models::kVoiceFormat ? "voice model" : "diffusion pipeline") +
+            "; quantize makes GGUFs";
         return choice;
     }
     const std::string id = !target.id.empty() ? target.id : std::string{from_id};
@@ -1195,6 +1206,114 @@ PulledPipeline pull_pipeline(const std::string& ref, const models::StoreRoots& r
                   << "\n";
     }
     std::cout << "pipeline: " << pipeline_summary(pulled.info) << "\n";
+    return pulled;
+}
+
+std::string voice_summary(const models::VoiceInfo& info) {
+    return models::describe(info) + ", " +
+           format_progress_size(static_cast<std::int64_t>(info.bytes));
+}
+
+PulledVoice pull_voice(const std::string& ref, const models::StoreRoots& roots,
+                       backends::HttpClient& client,
+                       const harness::CancellationToken& cancellation) {
+    const std::optional<models::HfRef> parsed = models::parse_hf_ref(ref);
+    if (!parsed.has_value() || !parsed->file.empty()) {
+        fail("'" + ref + "' is not a Hugging Face repository (owner/repo[@revision])");
+    }
+    const std::string token = models::hf_token({});
+    const models::HfTree tree =
+        models::list_repo_tree(client, *parsed, models::HfRepoKind::Model, token, cancellation);
+    if (!tree.ok) {
+        fail(tree.error);
+    }
+    const std::vector<models::HfFile> wanted = models::voice_wanted(tree.files);
+    std::vector<models::SnapshotFile> published;
+    std::int64_t total = 0;
+    std::size_t packs = 0;
+    for (const models::HfFile& file : wanted) {
+        total += file.size;
+        packs += file.path.starts_with("voices/") ? 1U : 0U;
+        published.push_back({.path = file.path, .size = file.size, .sha256 = file.sha256});
+    }
+
+    PulledVoice pulled;
+    pulled.model = models::repo_directory_name(*parsed);
+    // The repository publishes every LFS file's sha256, so a voice model
+    // already here is found before a byte moves.
+    if (const std::string known = models::voice_weight_id(published); !known.empty()) {
+        const std::filesystem::path existing =
+            models::weights_dir(roots, models::kVoiceFormat, pulled.model, known);
+        std::error_code code;
+        if (std::filesystem::is_directory(existing, code)) {
+            std::cout << "already here -- these exact weights are at\n  " << existing.string()
+                      << "\n";
+            pulled.dir = existing;
+            pulled.existed = true;
+            pulled.info = models::read_voice_info(existing);
+            return pulled;
+        }
+    }
+
+    const std::filesystem::path staging =
+        models::incoming_path(roots, models::kVoiceFormat, pulled.model);
+    std::cout << "a voice model (" << packs << " voices): downloading " << wanted.size()
+              << " file(s), " << human_size(total) << ", into " << staging.parent_path().string()
+              << "\n";
+    std::vector<models::TreeItem> items;
+    std::vector<models::SourcePromise> promises;
+    promises.reserve(wanted.size());
+    for (const models::HfFile& file : wanted) {
+        promises.emplace_back();
+        models::TreeItem item;
+        item.relative = file.path;
+        item.source = models::http_source(client, *parsed, models::HfRepoKind::Model, file, token,
+                                          cancellation, promises.back());
+        item.promise = promises.back();
+        items.push_back(std::move(item));
+    }
+    DownloadProgress progress{std::cout, stdout_download_options()};
+    const models::AcquireTreeResult result = models::acquire_tree(
+        staging, items,
+        [&progress](std::size_t index, std::size_t count, std::string_view relative,
+                    std::int64_t written,
+                    std::int64_t size) { progress.file(index, count, relative, written, size); });
+    progress.finish();
+    if (cancellation.stop_requested()) {
+        cancelled_nothing_written(staging);
+    }
+    if (!result.ok) {
+        (void)models::remove_weights(staging);
+        fail(result.error);
+    }
+
+    // The last rung: a configuration, one checkpoint and every voice whole.
+    pulled.info = models::read_voice_info(staging);
+    if (!pulled.info.complete) {
+        (void)models::remove_weights(staging);
+        fail("what '" + parsed->repo_id() + "' holds is not a loadable voice model -- " +
+             pulled.info.problem + "; nothing was kept");
+    }
+    const models::StoredDirectory stored =
+        models::commit_voice(roots, pulled.model, staging, pulled_record(*parsed, wanted, result));
+    if (!stored.error.empty()) {
+        (void)models::remove_weights(staging);
+        fail(stored.error);
+    }
+    pulled.dir = stored.dir;
+    pulled.existed = stored.existed;
+    if (stored.existed) {
+        std::cout << "\nalready here -- these exact weights are at\n  " << stored.dir.string()
+                  << "\n";
+    } else {
+        std::cout << "\n"
+                  << stored.dir.string() << "\n"
+                  << pull_verification(result, "config.json, the checkpoint and " +
+                                                   std::to_string(pulled.info.voices.size()) +
+                                                   " voice(s) read whole")
+                  << "\n";
+    }
+    std::cout << "voice model: " << voice_summary(pulled.info) << "\n";
     return pulled;
 }
 
@@ -2142,6 +2261,13 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                     (void)pull_pipeline(ref, roots, *client, InterruptScope::token());
                     return;
                 }
+                // A voice model is a directory too, pulled whole when its
+                // files are laid out as one (50a).
+                if (listing.ok && listing.gguf_files.empty() && listing.voice()) {
+                    const InterruptScope interrupt;
+                    (void)pull_voice(ref, roots, *client, InterruptScope::token());
+                    return;
+                }
                 if (listing.ok && listing.gguf_files.empty() && listing.mlx()) {
                     const InterruptScope interrupt;
                     (void)pull_mlx(ref, roots, *client, InterruptScope::token());
@@ -2544,6 +2670,26 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                 const models::PipelineInfo info = models::read_pipeline_info(stored.dir);
                 std::cout << "files:    "
                           << (info.complete ? "whole -- " + pipeline_summary(info) : info.problem)
+                          << "\n";
+            }
+        }
+        // A voice model the same way (50a).
+        if (target.format.empty() || target.format == models::kVoiceFormat) {
+            for (const models::StoredVoice& stored :
+                 models::list_store_voices(roots, target.model)) {
+                if (!target.id.empty() && target.id != stored.id) {
+                    continue;
+                }
+                std::cout << (any ? "\n" : "") << "voice:    "
+                          << models::weights_handle(stored.model, models::kVoiceFormat, stored.id)
+                          << "\n";
+                any = true;
+                if (!repair_snapshot_in_place(stored.dir)) {
+                    throw CLI::RuntimeError(1);
+                }
+                const models::VoiceInfo info = models::read_voice_info(stored.dir);
+                std::cout << "files:    "
+                          << (info.complete ? "whole -- " + voice_summary(info) : info.problem)
                           << "\n";
             }
         }

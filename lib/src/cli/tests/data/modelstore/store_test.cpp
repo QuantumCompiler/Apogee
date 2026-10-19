@@ -19,6 +19,7 @@
 #include "support/file_time.h"
 #include "support/mlx_model.h"
 #include "support/pipeline_model.h"
+#include "support/voice_model.h"
 
 using apogee::models::StoreRoots;
 using apogee::models::StoreTarget;
@@ -767,7 +768,7 @@ TEST_CASE("a pipeline lands under its model's pipeline/ by id, named and removed
     // The one list of formats a verb walks, and the one question.
     const std::span<const std::string_view> formats = apogee::models::store_formats();
     CHECK(std::vector<std::string_view>(formats.begin(), formats.end()) ==
-          std::vector<std::string_view>{"gguf", "safetensors", "mlx", "pipeline"});
+          std::vector<std::string_view>{"gguf", "safetensors", "mlx", "pipeline", "voice"});
     CHECK(apogee::models::is_store_format("pipeline"));
     CHECK_FALSE(apogee::models::is_store_format("pipelines"));
 
@@ -848,4 +849,40 @@ TEST_CASE("a pipeline is committed by every component's shards, with every file 
     CHECK(twice.existed);
     CHECK(twice.dir == stored.dir);
     CHECK(apogee::models::list_store_pipelines(store.roots).size() == 1);
+}
+
+// ---- the voice/ row (50a) -----------------------------------------------------------
+
+TEST_CASE("a voice model lands under its model's voice/ by the digest over its weights",
+          "[models][store][voice]") {
+    const Store store;
+    const std::filesystem::path staging =
+        apogee::models::incoming_path(store.roots, apogee::models::kVoiceFormat, "hexgrad--K");
+    apogee::testing::write_voice_model(staging);
+    apogee::models::Snapshot record;
+    record.ref = "hexgrad/K";
+    record.source = "huggingface";
+    const apogee::models::StoredDirectory stored =
+        apogee::models::commit_voice(store.roots, "hexgrad--K", staging, record);
+    REQUIRE(stored.error.empty());
+    CHECK(stored.dir.parent_path() == store.roots.models / "hexgrad--K" / "voice");
+    const std::optional<apogee::models::Snapshot> written =
+        apogee::models::load_snapshot(stored.dir);
+    REQUIRE(written.has_value());
+    // The id is the checkpoint's and the voices' digest, never random.
+    CHECK(stored.dir.filename() == apogee::models::voice_weight_id(written->files));
+    CHECK(apogee::models::snapshot_weight_id(written->files).empty());
+
+    const std::vector<apogee::models::StoredVoice> voices =
+        apogee::models::list_store_voices(store.roots);
+    REQUIRE(voices.size() == 1);
+    CHECK(apogee::models::stored_voice_at(voices, stored.dir).has_value());
+    const StoreTarget by_id =
+        apogee::models::resolve_store_target(store.roots, stored.dir.filename().string());
+    CHECK(by_id.format == "voice");
+    CHECK(apogee::models::resolve_store_target(store.roots, "hexgrad/K").path ==
+          store.roots.models / "hexgrad--K");
+    CHECK(apogee::models::backend_type_for_format(apogee::models::kVoiceFormat).empty());
+    REQUIRE(apogee::models::remove_weights(stored.dir).empty());
+    CHECK(apogee::models::list_store_voices(store.roots).empty());
 }

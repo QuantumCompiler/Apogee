@@ -212,6 +212,9 @@ const std::map<std::string, Classification>& table() {
          carve_out("runs a diffusion pipeline on the host's own GPU for minutes, on a user's act, "
                    "writing the clip on the host; generating is CLI-only, the training "
                    "precedent")},
+        {"voice say",
+         carve_out("speaks with a voice model on the host, writing the WAV on the host, on a "
+                   "user's act; generating is CLI-only, the training precedent")},
         {"config set-default-video",
          carve_out("the pointer only video generate reads, which is CLI-only; set on the host "
                    "alone")},

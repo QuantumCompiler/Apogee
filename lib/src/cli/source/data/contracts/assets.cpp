@@ -362,6 +362,10 @@ std::string bundled_video_driver_relative_path() {
     return bundled_script_relative_path("video_generate.py");
 }
 
+std::string bundled_voice_driver_relative_path() {
+    return bundled_script_relative_path("voice_say.py");
+}
+
 std::string bundled_converter_relative_dir() {
     return "training/scripts/convert";
 }

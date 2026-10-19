@@ -15,6 +15,7 @@
 #include "modelstore/pipeline_info.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/store.h"
+#include "modelstore/voice_info.h"
 #include "training/mlx_convert.h"
 #include "transport/http_client.h"
 
@@ -205,6 +206,31 @@ struct PulledPipeline {
 [[nodiscard]] PulledPipeline pull_pipeline(const std::string& ref, const models::StoreRoots& roots,
                                            backends::HttpClient& client,
                                            const harness::CancellationToken& cancellation);
+
+// --- voice models (50a) -----------------------------------------------------------
+
+/// One line for a voice model: its checkpoint, its voices and their
+/// languages, and its size on disk.
+[[nodiscard]] std::string voice_summary(const models::VoiceInfo& info);
+
+/// What `models pull` of a voice model stored, or found stored.
+struct PulledVoice {
+    std::string model;
+    std::filesystem::path dir;
+    bool existed = false;
+    models::VoiceInfo info;
+};
+
+/// `models pull <owner>/<repo>` for a repository laid out as a voice model
+/// (`HfListing::voice`: `config.json` and a checkpoint at its root, packs
+/// under `voices/`) -- `voice_wanted`'s files through the tree ladder over
+/// `client`, each checked against the size and sha256 the repository
+/// publishes, into a staging directory this process claims; then read whole
+/// (`read_voice_info`) before it is committed as `<model>/voice/<id>`. A
+/// failure at any rung, a cancel included, leaves nothing behind.
+[[nodiscard]] PulledVoice pull_voice(const std::string& ref, const models::StoreRoots& roots,
+                                     backends::HttpClient& client,
+                                     const harness::CancellationToken& cancellation);
 
 /// What `models convert --mlx` stored, or found stored.
 struct ConvertedMlx {

@@ -34,6 +34,7 @@
 #include "cli/uninstall.h"
 #include "cli/version_command.h"
 #include "cli/video_cmd.h"
+#include "cli/voice_cmd.h"
 
 namespace apogee::commands {
 
@@ -98,6 +99,7 @@ CommandRegistry default_registry(ShellEntry shell) {
     registry.add(std::make_unique<ResetCommand>());
     registry.add(std::make_unique<ReviewCommand>());
     registry.add(std::make_unique<VideoCommand>());
+    registry.add(std::make_unique<VoiceCommand>());
     registry.add(std::make_unique<ServeCommand>());
     registry.add(std::make_unique<SymphoniesCommand>());
     registry.add(std::make_unique<SystemCommand>());

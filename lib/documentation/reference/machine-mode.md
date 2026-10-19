@@ -649,6 +649,25 @@ not installed) prints no document: one line on stderr naming the fix, exit
 `1`. A run from a record (`--from`) or continuing a clip (`--extend`) says
 first, on stderr, what came from the record and what the flags changed.
 
+Since 50a spoken text is a document too, whether or not it landed:
+
+```bash
+apogee voice say "<text>" -o hello.wav --output-format json   # {"object":"voice.speech",…}
+```
+
+It is `status` (`done`, `failed`, `cancelled`), `output` and `sidecar`
+(`<file>.json`, or null when nothing landed); `model` (`name` as given,
+`path`, `ref`, `revision`, `checkpoint`); `voice` and its `language` (by
+the voice's first letter, Kokoro's convention); `speed`; `text`;
+`segments` -- each its `text`, `seconds` (**measured from the WAV's own
+header**, never estimated) and `offset`, and its `sentences` (`text`,
+`seconds` counted from the samples spoken, `offset`); `seconds` and
+`sample_rate` for the whole file; `device` (`device` as torch reported it,
+`platform`); `versions` (`torch`, `kokoro`, `apogee`); `run_seconds`;
+`created_at`; and `error` when it did not land. Exit `1` on a failure, `130`
+on a cancel, the output untouched either way; a refusal before the run
+prints no document, one line on stderr naming the fix.
+
 Since 27l the graph navigation verbs are reads of the same kind:
 
 ```bash
@@ -748,7 +767,9 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   pipeline is a row of its own (`format` and `group` `pipeline`, `state`
   `pipeline` or `cannot load`, `architecture` its pipeline class) carrying two
   numbers no other row has: `components`, how many the pipeline's
-  `model_index.json` names, and `bytes`, what it holds on disk.
+  `model_index.json` names, and `bytes`, what it holds on disk. Since 50a a stored voice model is a row too (`format` and `group`
+  `voice`, `state` `voice` or `cannot load`, `architecture` its checkpoint),
+  with its `bytes`.
 - **`models info`** and **`models status`**: their `label: value` record as
   `fields`, in order, each label as printed and a value's indented continuation
   joined to it with a newline. The values are the same words the human view

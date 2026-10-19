@@ -9,6 +9,7 @@
 
 #include "support/env_guard.h"
 #include "support/pipeline_model.h"
+#include "support/voice_model.h"
 #include "training/python_env.h"
 
 /// The video runtime's ladder (49b), over installs built in the test: every
@@ -151,4 +152,48 @@ TEST_CASE("the ladder asks the environment first, the packages before the pipeli
     write(install.host.driver);
     CHECK(install.probe().refusal == VideoRefusal::NoFfmpeg);
     CHECK(apogee::video::to_string(VideoRefusal::NotAPipeline) == "cannot load");
+}
+
+TEST_CASE("the voice ladder: its own rungs, the environment's shared",
+          "[video][runtime][ladder][voice]") {
+    // 50a: torch and kokoro, the voice model read whole, the speech driver.
+    Install install;
+    install.package("kokoro", "0.9.4");
+    const std::filesystem::path model =
+        install.root.path() / "models" / "hexgrad--K" / "voice" / "aaaaaaaaaaaa";
+    apogee::testing::write_voice_model(model);
+    write(install.host.voice_driver, "# the speech driver\n");
+    const std::string handle = "hexgrad--K/voice/aaaaaaaaaaaa";
+    const auto probe = [&] { return apogee::video::probe_voice(install.host, model, handle); };
+    const VideoReadiness ready = probe();
+    INFO(ready.message());
+    REQUIRE(ready.ready());
+    CHECK(ready.kokoro_version == "0.9.4");
+    CHECK(ready.driver == install.host.voice_driver);
+    // No ffmpeg is asked for: speech is written as WAV.
+    install.host.ffmpeg.clear();
+    CHECK(probe().ready());
+
+    write(model / "voices" / "am_adam.pt", "not a save");
+    CHECK(probe().refusal == VideoRefusal::NotAVoiceModel);
+    CHECK(probe().message() == handle +
+                                   " cannot load: voices/am_adam.pt is truncated or not a PyTorch "
+                                   "save (no archive end record) -- apogee models repair " +
+                                   handle);
+    std::filesystem::remove_all(model);
+    CHECK(probe().message() == "there is no voice model at " + model.string() +
+                                   " -- apogee models pull hexgrad/Kokoro-82M");
+    std::filesystem::remove(install.host.voice_driver);
+    CHECK(apogee::video::probe_voice(install.host).message() ==
+          "the voice driver is missing: " + install.host.voice_driver.string() +
+              " -- apogee check --fix");
+    std::filesystem::remove_all(install.site / "kokoro");
+    CHECK(apogee::video::probe_voice(install.host).message() ==
+          "kokoro is not installed in the Python environment at " + install.host.venv.string() +
+              " -- apogee train setup --with voice");
+    std::filesystem::remove(apogee::training::PythonEnv{install.host.venv}.interpreter());
+    CHECK(apogee::video::probe_voice(install.host).message() ==
+          "there is no Python environment at " + install.host.venv.string() +
+              " -- speech runs kokoro there, never the system Python -- apogee train setup "
+              "--with voice");
 }

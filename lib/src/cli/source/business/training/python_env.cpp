@@ -14,8 +14,8 @@
 namespace apogee::training {
 namespace {
 
-constexpr std::array<std::string_view, 6> kSetNames{"prepare", "mlx",     "peft",
-                                                    "convert", "mlx-vlm", "video"};
+constexpr std::array<std::string_view, 7> kSetNames{"prepare", "mlx",   "peft", "convert",
+                                                    "mlx-vlm", "video", "voice"};
 
 constexpr std::array<std::string_view, 1> kPrepare{"datasets>=3.0"};
 constexpr std::array<std::string_view, 1> kMlx{"mlx-lm>=0.21"};
@@ -43,6 +43,11 @@ constexpr std::array<std::string_view, 6> kConvert{"torch>=2.11",        "transf
 constexpr std::array<std::string_view, 6> kVideo{"torch>=2.6",         "diffusers>=0.35",
                                                  "transformers>=4.46", "accelerate>=1.0",
                                                  "ftfy>=6.1",          "sentencepiece>=0.2"};
+
+// The voice driver's stack (50a): Kokoro, and misaki -- its grapheme to
+// phoneme layer -- with the English extra its English voices read through.
+constexpr std::array<std::string_view, 3> kVoice{"torch>=2.6", "kokoro>=0.9.4",
+                                                 "misaki[en]>=0.9.4"};
 
 std::string now_rfc3339() {
     const std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
@@ -109,6 +114,8 @@ std::span<const std::string_view> packages_for(RequirementSet set) noexcept {
             return kMlxVlm;
         case RequirementSet::Video:
             return kVideo;
+        case RequirementSet::Voice:
+            return kVoice;
     }
     return {};
 }

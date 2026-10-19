@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <system_error>
 #include <utility>
@@ -364,6 +366,63 @@ std::string decode_audio_wav(const std::filesystem::path& file, int rate, double
         return {};
     }
     return wav_file(ran.out, rate);
+}
+
+double WavAudio::seconds() const noexcept {
+    const int frame = channels * (bits / 8);
+    return rate > 0 && frame > 0 ? static_cast<double>(pcm.size()) / static_cast<double>(frame) /
+                                       static_cast<double>(rate)
+                                 : 0.0;
+}
+
+std::optional<WavAudio> read_wav(const std::filesystem::path& file, std::string& error) {
+    std::ifstream in{file, std::ios::binary};
+    const std::string bytes{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    const auto le = [&bytes](std::size_t at, std::size_t width) {
+        std::uint32_t value = 0;
+        for (std::size_t index = 0; index < width; ++index) {
+            value |= static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[at + index]))
+                     << (8U * index);
+        }
+        return value;
+    };
+    if (bytes.size() < 12 || bytes.compare(0, 4, "RIFF") != 0 || bytes.compare(8, 4, "WAVE") != 0) {
+        error = file.string() + " is not a WAV file";
+        return std::nullopt;
+    }
+    WavAudio audio;
+    bool format = false;
+    for (std::size_t at = 12; at + 8 <= bytes.size();) {
+        const std::string id = bytes.substr(at, 4);
+        const std::size_t size = le(at + 4, 4);
+        const std::size_t body = at + 8;
+        if (body + size > bytes.size()) {
+            if (id == "data") {
+                error = file.string() + " is cut short: its data chunk runs past its end";
+                return std::nullopt;
+            }
+            break;
+        }
+        if (id == "fmt " && size >= 16) {
+            if (le(body, 2) != 1) {
+                error = file.string() + " is not PCM";
+                return std::nullopt;
+            }
+            audio.channels = static_cast<int>(le(body + 2, 2));
+            audio.rate = static_cast<int>(le(body + 4, 4));
+            audio.bits = static_cast<int>(le(body + 14, 2));
+            format = true;
+        } else if (id == "data") {
+            audio.pcm = bytes.substr(body, size);
+            if (!format) {
+                break;
+            }
+            return audio;
+        }
+        at = body + size + (size % 2);
+    }
+    error = file.string() + " holds no PCM format and data";
+    return std::nullopt;
 }
 
 std::string wav_file(std::string_view pcm, int rate) {

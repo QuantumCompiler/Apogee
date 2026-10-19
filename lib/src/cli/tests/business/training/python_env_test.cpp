@@ -60,7 +60,10 @@ struct Fixture {
 }  // namespace
 
 TEST_CASE("requirement sets are named and carry packages", "[training][python]") {
-    CHECK(requirement_set_names().size() == 6);
+    CHECK(requirement_set_names().size() == 7);
+    // The speech driver's stack (50a).
+    CHECK(requirement_set_from_string("voice") == RequirementSet::Voice);
+    CHECK(packages_for(RequirementSet::Voice)[1] == "kokoro>=0.9.4");
     CHECK(requirement_set_from_string("prepare") == RequirementSet::Prepare);
     CHECK(requirement_set_from_string("convert") == RequirementSet::Convert);
     // The mlx backend's vision path, installed on demand (27c).

@@ -110,6 +110,24 @@ struct ExtractedFrame {
 /// A WAV file holding 16-bit mono `pcm` at `rate` Hz.
 [[nodiscard]] std::string wav_file(std::string_view pcm, int rate);
 
+/// A WAV file's audio (50a): its rate, channels and sample width as its
+/// header states them, and its sample bytes -- what a measured duration is
+/// read from.
+struct WavAudio {
+    int rate = 0;
+    int channels = 0;
+    int bits = 0;
+    std::string pcm;
+
+    /// The samples' length in seconds: what the file holds, never an
+    /// estimate.
+    [[nodiscard]] double seconds() const noexcept;
+};
+
+/// `file` read as a PCM WAV; nullopt with `error` filled for anything else.
+[[nodiscard]] std::optional<WavAudio> read_wav(const std::filesystem::path& file,
+                                               std::string& error);
+
 /// The `pts_time` of each `showinfo` line in `log`, in order.
 [[nodiscard]] std::vector<double> showinfo_times(std::string_view log);
 

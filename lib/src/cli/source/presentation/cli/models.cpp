@@ -35,6 +35,7 @@
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
+#include "modelstore/voice_info.h"
 #include "operations/backend_names.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
@@ -333,6 +334,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
     std::vector<models::RecordedSnapshot> stored_snapshots;
     std::vector<models::StoredMlx> stored_mlx;
     std::vector<models::StoredPipeline> stored_pipelines;
+    std::vector<models::StoredVoice> stored_voices;
     if (!models_dir.empty()) {
         for (models::StoredGguf& stored : models::list_store_ggufs(roots)) {
             recorded_ggufs.push_back({.stored = std::move(stored), .record = std::nullopt});
@@ -342,6 +344,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
         }
         stored_mlx = models::list_store_mlx(roots);
         stored_pipelines = models::list_store_pipelines(roots);
+        stored_voices = models::list_store_voices(roots);
     }
     // The SafeTensors sets `convert --mlx` made an MLX model of, by handle --
     // a conversion consumes its source as a GGUF's does (27b).
@@ -376,7 +379,8 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
 
     std::vector<GgufRow> gguf_rows;
     std::vector<std::pair<std::size_t, std::filesystem::path>> snapshot_rows;
-    std::size_t reads = stored_ggufs.size() + stored_snapshots.size() + stored_pipelines.size();
+    std::size_t reads = stored_ggufs.size() + stored_snapshots.size() + stored_pipelines.size() +
+                        stored_voices.size();
     for (const models::StoredMlx& stored : stored_mlx) {
         reads += is_configured(stored.dir) ? 0U : 1U;
     }
@@ -677,6 +681,31 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
             rows.push_back(std::move(row));
         }
 
+        // Voice models (50a) -- what `voice say` runs -- listed whole with
+        // their checkpoint, voices and size, or said why one cannot load.
+        for (const models::StoredVoice& stored : stored_voices) {
+            reading("reading voice models: ", stored.model);
+            ModelRow row;
+            row.backend = "(not configured)";
+            row.type = "-";
+            row.model = models::weights_handle(stored.model, models::kVoiceFormat, stored.id);
+            row.format = std::string{models::kVoiceFormat};
+            const std::optional<models::Snapshot> record = models::load_snapshot(stored.dir);
+            row.provenance =
+                record.has_value() && !record->source.empty() ? record->source : "local";
+            const models::VoiceInfo info = models::read_voice_info(stored.dir);
+            row.architecture = info.checkpoint.empty() ? "-" : info.checkpoint;
+            row.profile = "-";
+            row.state = info.complete ? "voice" : "cannot load";
+            row.verified = record.has_value()
+                               ? std::to_string(record->files.size()) + " file(s) on record"
+                               : "no record";
+            row.bytes = info.bytes;
+            row.attention = !info.complete;
+            row.note = info.complete ? voice_summary(info) : info.problem;
+            rows.push_back(std::move(row));
+        }
+
         // The flat layout this one replaced: shown, never used in place.
         const models::LegacyLayout legacy = models::find_legacy(roots);
         for (const models::LegacyGguf& gguf : legacy.ggufs) {
@@ -780,6 +809,9 @@ ModelGroup model_group(const ModelRow& row) {
     if (row.format == models::kPipelineFormat) {
         return local("pipeline", "Pipelines", kLocal + 3);
     }
+    if (row.format == models::kVoiceFormat) {
+        return local("voice", "Voices", kLocal + 4);
+    }
     // A provider by its row in the providers' table -- any number of them,
     // in that table's order. The Ollama CLI runs models on this machine.
     if (type.has_value()) {
@@ -788,7 +820,7 @@ ModelGroup model_group(const ModelRow& row) {
             std::string id{harness::to_string(*type)};
             std::string title{facts->label};
             if (*type == harness::BackendType::OllamaCli) {
-                return local(std::move(id), std::move(title), kLocal + 4);
+                return local(std::move(id), std::move(title), kLocal + 5);
             }
             return ModelGroup{
                 .section = "cloud",
@@ -797,7 +829,7 @@ ModelGroup model_group(const ModelRow& row) {
                 .order = static_cast<std::size_t>(facts - backends::provider_table().data())};
         }
     }
-    return local("other", "Other", kLocal + 5);
+    return local("other", "Other", kLocal + 6);
 }
 
 std::string render_model_table(const std::vector<ModelRow>& all_rows, const ansi::Style& style,
@@ -1370,6 +1402,45 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     return out.str();
 }
 
+/// `info` on one stored voice model (50a): where it came from, its
+/// checkpoint, and its voices by language -- the directory read whole, or
+/// said why it cannot load.
+[[nodiscard]] std::string render_stored_voice(const models::StoredVoice& stored,
+                                              const models::StoreRoots& roots) {
+    const std::string handle =
+        models::weights_handle(stored.model, models::kVoiceFormat, stored.id);
+    std::ostringstream out;
+    out << "weights:      " << handle << "\n";
+    out << "path:         " << stored.dir.string() << "\n";
+    out << "format:       voice -- a text-to-speech model, taken whole\n";
+    out << "lineage:      " << mlx_origin(models::load_snapshot(stored.dir), roots) << "\n";
+    const models::VoiceInfo info = models::read_voice_info(stored.dir);
+    out << "files:        "
+        << (info.complete
+                ? "whole -- config.json, " + info.checkpoint + " and " +
+                      std::to_string(info.voices.size()) + " voice(s), each a whole archive"
+                : info.problem)
+        << "\n";
+    // The voices, one continuation line per language.
+    bool first = true;
+    for (const std::string& language : info.languages()) {
+        std::string names;
+        for (const models::VoicePack& voice : info.voices) {
+            if (voice.language == language) {
+                names += (names.empty() ? "" : ", ") + voice.name;
+            }
+        }
+        out << (first ? "voices:       " : "              ") << language << ": " << names << "\n";
+        first = false;
+    }
+    out << "size:         " << format_progress_size(static_cast<std::int64_t>(info.bytes))
+        << " on disk\n";
+    if (!info.complete) {
+        out << "repair:       apogee models repair " << handle << "\n";
+    }
+    return out.str();
+}
+
 /// `info` on one set of weights in the store, by its handle or id (M4);
 /// empty when `name` names none.
 [[nodiscard]] std::string render_stored_weights(const harness::Config& config,
@@ -1405,6 +1476,14 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
              models::list_store_pipelines(roots, target.model)) {
             if (stored.id == target.id) {
                 return render_stored_pipeline(stored, roots);
+            }
+        }
+        return {};
+    }
+    if (target.format == models::kVoiceFormat) {
+        for (const models::StoredVoice& stored : models::list_store_voices(roots, target.model)) {
+            if (stored.id == target.id) {
+                return render_stored_voice(stored, roots);
             }
         }
         return {};
@@ -1848,6 +1927,13 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
                     if (target.format.empty() || target.format == models::kPipelineFormat) {
                         sets += "\n  " + models::weights_handle(stored.model,
                                                                 models::kPipelineFormat, stored.id);
+                    }
+                }
+                for (const models::StoredVoice& stored :
+                     models::list_store_voices(roots, target.model)) {
+                    if (target.format.empty() || target.format == models::kVoiceFormat) {
+                        sets += "\n  " + models::weights_handle(stored.model, models::kVoiceFormat,
+                                                                stored.id);
                     }
                 }
                 fail("'" + *info_name + "' is a model -- name one set of its weights:" + sets);

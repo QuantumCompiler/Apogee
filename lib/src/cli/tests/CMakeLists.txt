@@ -37,6 +37,7 @@ add_library(apogee_tests_infrastructure OBJECT
     support/gguf_builder.h
     support/mlx_model.h
     support/pipeline_model.h
+    support/voice_model.h
     support/terminal_model.h
     support/terminal_model.cpp
     support/embedding_fixtures.h
@@ -93,6 +94,7 @@ add_library(apogee_tests_data OBJECT
     data/modelstore/footprint_test.cpp
     data/modelstore/mlx_info_test.cpp
     data/modelstore/pipeline_info_test.cpp
+    data/modelstore/voice_info_test.cpp
     data/contracts/sha256_test.cpp
     data/modelstore/store_test.cpp
     data/modelstore/sidecar_test.cpp
@@ -196,6 +198,8 @@ add_library(apogee_tests_business OBJECT
     business/video/runtime_test.cpp
     business/video/generation_test.cpp
     business/video/video_driver_test.cpp
+    business/video/voice_test.cpp
+    business/video/voice_driver_test.cpp
     business/scaffold/mcp_server_test.cpp
     business/scaffold/agent_test.cpp
     business/scaffold/symphony_test.cpp
@@ -282,9 +286,11 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/models_convert_test.cpp
     presentation/cli/models_mlx_test.cpp
     presentation/cli/models_pipeline_test.cpp
+    presentation/cli/models_voice_test.cpp
     presentation/cli/video_runtime_test.cpp
     presentation/cli/video_generate_test.cpp
     presentation/cli/video_cmd_test.cpp
+    presentation/cli/voice_say_test.cpp
     presentation/cli/model_chain_test.cpp
     presentation/cli/complete_sources_test.cpp
     presentation/cli/models_test.cpp
@@ -899,8 +905,9 @@ if(UNIX)
     # an existing output refused, a failure and a real Ctrl-C leaving
     # nothing, no listener in the tree while the driver runs, a library's
     # print on neither stream, the loop (49d: a draft, its final over the
-    # same seed, a continuation, a clip with no record refused), and a
-    # missing runtime refused on a pipe.
+    # same seed, a continuation, a clip with no record refused), `voice
+    # say` (50a: one WAV, its sentences timed, no listener while the speech
+    # driver runs, Ctrl-C), and a missing runtime refused on a pipe.
     # Skips (77) without python3.
     add_test(NAME cli.video_lifecycle
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/video_e2e.sh"

@@ -14,8 +14,10 @@
 # listening socket anywhere in the tree while the driver runs; a library's
 # print on neither of apogee's streams; the loop (49d) -- a draft, the final
 # from it over the same seed and frame, a continuation from the final's last
-# frame, a clip with no record refused; and on a pipe, a missing runtime
-# refused naming the command that installs it.
+# frame, a clip with no record refused; `voice say` (50a) -- one WAV with its
+# sentences timed and its record, an unknown voice refused, no listener while
+# the speech driver runs, Ctrl-C leaving nothing; and on a pipe, a missing
+# runtime refused naming the command that installs it.
 #
 # POSIX only. Skips (77) without python3.
 set -eu
@@ -255,6 +257,78 @@ if pgrep -f "$APOGEE_HOME/training/scripts/video_generate.py" >/dev/null 2>&1; t
 fi
 
 echo "video generate: Ctrl-C mid-denoise leaves nothing; no listener in the tree - OK"
+
+# --- voice say (50a): a voice model, the stub kokoro, one WAV, its record ----
+cp -R "$STUBS/stub_voice/." "$SITE/"
+VOICE_MODEL="$APOGEE_HOME/models/hexgrad--Kokoro-82M/voice/cccccccccccc"
+python3 - "$VOICE_MODEL" <<'PY'
+import os, sys
+root = sys.argv[1]
+def save(path, size=96):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as out:
+        out.write(b"PK\x03\x04" + b"w" * size + b"PK\x05\x06" + b"\0" * 22)
+os.makedirs(root, exist_ok=True)
+with open(os.path.join(root, "config.json"), "w") as out:
+    out.write('{"plbert": {}}')
+save(os.path.join(root, "kokoro-v1_0.pth"), 256)
+for voice in ("af_heart", "bm_george"):
+    save(os.path.join(root, "voices", voice + ".pt"))
+PY
+set +e
+"$APOGEE_BIN" voice say "Hello there. How are you?" -o "$WORK_DIR/out/hello.wav" --output-format json \
+    </dev/null >"$WORK_DIR/voice.out" 2>"$WORK_DIR/voice.err"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 0 ] || fail "voice say failed ($STATUS): $(cat "$WORK_DIR/voice.err")"
+[ "$(field "$WORK_DIR/voice.out" '["object"]')" = "voice.speech" ] || fail "not a voice.speech document"
+[ "$(field "$WORK_DIR/voice.out" '["voice"]')" = "af_heart" ] || fail "the default voice"
+[ "$(field "$WORK_DIR/voice.out" '["segments"][0]["sentences"][1]["text"]')" = "How are you?" ] \
+    || fail "the sentences were not timed: $(cat "$WORK_DIR/voice.out")"
+python3 -c 'import sys, wave; w = wave.open(sys.argv[1]); assert w.getframerate() == 24000 and w.getnframes() > 0' \
+    "$WORK_DIR/out/hello.wav" || fail "the WAV is not one"
+[ -f "$WORK_DIR/out/hello.wav.json" ] || fail "no record beside the WAV"
+for stream in out err; do
+    if grep -q "chatter\|noise on stderr" "$WORK_DIR/voice.$stream"; then
+        fail "a library's output reached voice say's std$stream"
+    fi
+done
+set +e
+"$APOGEE_BIN" voice say "Hi." --voice zf_nobody -o "$WORK_DIR/out/nobody.wav" </dev/null >/dev/null 2>"$WORK_DIR/nobody.err"
+set -e
+grep -q "this model has no voice 'zf_nobody' -- its voices: af_heart, bm_george" "$WORK_DIR/nobody.err" \
+    || fail "an unknown voice was not refused naming the set: $(cat "$WORK_DIR/nobody.err")"
+# The tree sampled for a listener while the speech driver runs; then Ctrl-C.
+VOICE_RECORD="$WORK_DIR/voice-record.jsonl"
+STUB_VOICE_HANG=1 STUB_VOICE_RECORD="$VOICE_RECORD" "$APOGEE_BIN" voice say "A long one." \
+    -o "$WORK_DIR/out/stopped.wav" </dev/null >/dev/null 2>"$WORK_DIR/voice-stopped.err" &
+CHILD=$!
+tries=0
+until [ -s "$VOICE_RECORD" ] && grep -q '"say"' "$VOICE_RECORD"; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 300 ] || { kill -9 "$CHILD" 2>/dev/null || true; fail "the speech driver never started"; }
+    sleep 0.1
+done
+if command -v lsof >/dev/null 2>&1; then
+    SEEN=0
+    PIDS="$CHILD"
+    for pid in $(descendants "$CHILD"); do
+        PIDS="$PIDS,$pid"
+        if ps -o command= -p "$pid" 2>/dev/null | grep -q voice_say.py; then SEEN=1; fi
+    done
+    HIT="$(lsof -a -p "$PIDS" -i -sTCP:LISTEN -Fn 2>/dev/null || true)"
+    [ -z "$HIT" ] || { kill -9 "$CHILD" 2>/dev/null || true; fail "INVARIANT VIOLATED: speech's tree listens: $HIT"; }
+    [ "$SEEN" = 1 ] || { kill -9 "$CHILD" 2>/dev/null || true; fail "the sample never saw the speech driver"; }
+fi
+kill -INT "$CHILD"
+set +e
+wait "$CHILD"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 130 ] || fail "Ctrl-C mid-speech exited $STATUS: $(cat "$WORK_DIR/voice-stopped.err")"
+[ ! -e "$WORK_DIR/out/stopped.wav" ] || fail "a cancelled speech left a file"
+
+echo "voice say: one WAV, its sentences timed, its record; no listener; Ctrl-C - OK"
 
 # --- on a pipe, a missing runtime is refused naming its installer -----------
 rm -rf "$SITE/diffusers"

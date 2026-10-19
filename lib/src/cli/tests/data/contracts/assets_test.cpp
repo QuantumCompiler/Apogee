@@ -83,10 +83,10 @@ TEST_CASE("seeding writes absent files only: an edit survives a re-seed",
     // Fourteen agent files (40a), eight kits (42b), three training regimes
     // (42a, 42b), seven symphony starters (27q, 40b), three task recipes
     // (40c), three training drivers, the two mlx drivers, the code-execution
-    // server (47b), the video driver (49b), seven review skills (48b), the
-    // vendored converter.
+    // server (47b), the video and voice drivers (49b, 50a), seven review
+    // skills (48b), the vendored converter.
     CHECK(first.created.size() == apogee::harness::bundled_files().size());
-    CHECK(first.created.size() == 14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + 1 + 7 + 1 +
+    CHECK(first.created.size() == 14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + 2 + 7 + 1 +
                                       apogee::harness::bundled_converter_files().size());
     for (const apogee::harness::BundledSymphony& starter : apogee::harness::bundled_symphonies()) {
         CHECK(read(root.path() / "symphonies" / (std::string{starter.name} + ".yaml")) ==
@@ -337,7 +337,7 @@ TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
     CHECK(apogee::harness::bundled_script_relative_path(script.name) ==
           "training/scripts/prepare_dataset.py");
     CHECK(apogee::harness::bundled_files().size() ==
-          14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + 1 + 7 + 1 +
+          14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + 2 + 7 + 1 +
               apogee::harness::bundled_converter_files().size());
 }
 
@@ -441,7 +441,12 @@ TEST_CASE("the compiled-in video driver byte-matches the shipped file and seeds 
     // 49b: the drivers' rule -- the file is the source of truth, the literal
     // never drifts from it, and the seeded copy is the user's once edited.
     const std::filesystem::path assets{APOGEE_ASSETS_DIR};
-    REQUIRE(apogee::harness::bundled_video_scripts().size() == 1);
+    REQUIRE(apogee::harness::bundled_video_scripts().size() == 2);
+    // The speech driver (50a) beside it, held to its file the same way.
+    const apogee::harness::BundledScript& voice = apogee::harness::bundled_video_scripts()[1];
+    CHECK(voice.name == "voice_say.py");
+    CHECK(read(assets / "video" / "voice_say.py") == voice.text);
+    CHECK(apogee::harness::bundled_voice_driver_relative_path() == "training/scripts/voice_say.py");
     const apogee::harness::BundledScript& driver = apogee::harness::bundled_video_scripts()[0];
     CHECK(driver.name == "video_generate.py");
     CHECK(read(assets / "video" / "video_generate.py") == driver.text);

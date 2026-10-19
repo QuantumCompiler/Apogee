@@ -80,6 +80,17 @@ struct HfListing {
     [[nodiscard]] bool pipeline() const noexcept {
         return has_model_index;
     }
+
+    /// A voice model as Kokoro publishes one (50a): `config.json` and a
+    /// checkpoint (`*.pth`) at the root, voice packs under `voices/`. Files
+    /// the repository holds, never a guess from its name.
+    bool has_root_config = false;
+    bool has_root_checkpoint = false;
+    bool has_voice_packs = false;
+
+    [[nodiscard]] bool voice() const noexcept {
+        return has_root_config && has_root_checkpoint && has_voice_packs;
+    }
 };
 
 /// Which kind of repository a ref names. Models and datasets live under
@@ -130,6 +141,11 @@ struct HfTree {
 /// media does not spend them.
 [[nodiscard]] std::vector<HfFile> pipeline_wanted(const std::vector<HfFile>& tree,
                                                   const std::vector<std::string>& components);
+
+/// What a voice model pull takes of a repository's `tree` (50a): the root's
+/// `config.json` and checkpoint (`*.pth`), and every voice pack under
+/// `voices/` -- never the samples, the model card or anything else.
+[[nodiscard]] std::vector<HfFile> voice_wanted(const std::vector<HfFile>& tree);
 
 /// A small text file of the repository -- `model_index.json` -- read whole
 /// into memory and written nowhere: what a pipeline pull reads to know its

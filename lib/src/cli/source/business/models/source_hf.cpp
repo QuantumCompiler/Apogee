@@ -166,6 +166,19 @@ std::vector<HfFile> pipeline_wanted(const std::vector<HfFile>& tree,
     return out;
 }
 
+std::vector<HfFile> voice_wanted(const std::vector<HfFile>& tree) {
+    std::vector<HfFile> out;
+    for (const HfFile& file : tree) {
+        const bool root = file.path.find('/') == std::string::npos;
+        const bool pack = file.path.starts_with("voices/") && file.path.ends_with(".pt") &&
+                          file.path.find('/', 7) == std::string::npos;
+        if ((root && (file.path == "config.json" || file.path.ends_with(".pth"))) || pack) {
+            out.push_back(file);
+        }
+    }
+    return out;
+}
+
 HfText fetch_repo_text(backends::HttpClient& client, const HfRef& ref, HfRepoKind kind,
                        std::string_view path, std::string_view token,
                        const harness::CancellationToken& cancellation, std::size_t limit) {
@@ -278,6 +291,12 @@ HfListing list_gguf_files(backends::HttpClient& client, const HfRef& ref, std::s
             if (name == kModelIndex) {
                 listing.has_model_index = true;
             }
+            listing.has_root_config = listing.has_root_config || name == "config.json";
+            listing.has_root_checkpoint =
+                listing.has_root_checkpoint ||
+                (name.ends_with(".pth") && name.find('/') == std::string::npos);
+            listing.has_voice_packs =
+                listing.has_voice_packs || (name.starts_with("voices/") && name.ends_with(".pt"));
             if (name.size() > 5 && name.ends_with(".gguf")) {
                 listing.gguf_files.push_back(name);
             } else if (name.ends_with(".safetensors")) {

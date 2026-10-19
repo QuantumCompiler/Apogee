@@ -8490,3 +8490,51 @@ Decisions taken while building, for veto:
 **Verified.** `lib/scripts/cicd.sh --test`: all 3457 tests pass. This run also covers 49c: its two renamed cases pass inside it. The build is warning-free and the format clean.
 
 **Not run on real weights**: whether a 16-step draft previews the 50-step final well enough is the reference pipeline's to show, on the user's run.
+
+## Milestone AN — The composer
+
+**Goal.** One brief becoming a scripted, narrated, captioned, assembled video, edited afterwards by typed instruction (track 50, opened 2026-10-19 from that day's composer spike, which verified the market leader's reviewed feature set and measured the two gaps under track 49: no text-to-speech anywhere, and an ffmpeg seam with no concat, mix or caption burn). Everything is built over 49's pieces and the house's laws: local, never linked, every run a record.
+
+### 2026-10-19 — `voice-runtime` (backlog item 50a): speech in the box
+
+**Why.** A narrated video needs a voice, and Apogee had none: no text-to-speech anywhere in `source/`. This is the composer track's one genuinely new runtime, built on the video runtime's template whole.
+
+- [x] **The `voice/` store format** (`modelstore/store.h`, `modelstore/voice_info`).
+  - Kokoro-82M's repository holds a `.pth` checkpoint and `voices/*.pt` packs and no SafeTensors at all, so no existing kind fits. A minimal row was the grooming default for that case.
+  - The id is the SafeTensors digest rule over the checkpoint and the voices; the two id rules now share one digest.
+  - The reader is honest about wholeness: a PyTorch save is a zip archive, and a whole one ends in its end record, which a cut-short download never has.
+  - `models pull` recognises the layout by its files (a root `config.json` and `.pth`, packs under `voices/`) and moves those files only, never the samples or the card.
+  - List, `info` (voices by language), `check`, `delete`, `repair` and completion all learn it; `convert` and `quantize` refuse one by name.
+- [x] **The driver** (`assets/video/voice_say.py`), seeded beside `video_generate.py`.
+  - It loads the model from its own files and speaks each segment sentence by sentence. Sentences are split by a plain rule (an end mark then space), never by a model.
+  - It writes 16-bit mono WAVs through Python's own `wave`, and reports each sentence's seconds counted from its samples.
+  - The house guards are in place before anything is imported.
+- [x] **The voice ladder** (`video::probe_voice`): environment, torch, kokoro, the model read whole, the driver. The environment rungs are shared with the video ladder through one helper, grown rather than duplicated. The `voice` requirement set is installed by `train setup --with voice`, or on demand with consent: the consent flow is now `install_runtime_set`, with video its first use.
+- [x] **Speech** (`video::speak`): a working directory (the run helpers moved to `video/work_dir`, shared), the driver over the one script runner, and every segment read back and **measured from its own WAV header** before any is kept. `join_segments` puts the samples one after another into one WAV, renamed into place.
+- [x] **`apogee voice say "<text>" -o file.wav`** (`cli/voice_cmd`, composed in `cli/voice_say`).
+  - `--model`, else the store's one voice model.
+  - `--voice` from the model's own set, completed and refused naming the set. The default is `af_heart` (Kokoro's own recommendation) when the model has it.
+  - `--speed` 0.5-2.0, the text capped at 4000 characters, the file never written over.
+  - Its record is the `voice.speech` document (machine-mode.md): segments and sentences with their seconds and offsets. It is printed under `--output-format json` and kept beside the file.
+  - Classified as the exec line's in the shell, carved out of the HTTP parity table, and in the root help.
+- [x] **The doctor**: `voice runtime` (a skip naming the set until installed) and `voice driver` (the seeded copy).
+- [x] **The tests**, never weights:
+  - `voice_info_test`, plus the store and HF source cases;
+  - `models_voice_test`: the pull against a fixture source;
+  - `video/voice_test`: the core over a scripted driver writing real WAVs, and the WAV reader;
+  - `video/voice_driver_test`: the shipped driver under `python3` over stub `torch` and `kokoro`, covering the sentence rule, every sample counted and in the file, a library's print kept off the protocol, and each refusal with its code;
+  - the voice ladder in `runtime_test`;
+  - `cli/voice_say_test`: the verb in process and through the tree;
+  - `cli.video_lifecycle` grown: `voice say` on the real binary, its document and WAV, an unknown voice refused, and the process tree sampled with `lsof` while the speech driver runs (required to have seen it), then a Ctrl-C leaving nothing.
+
+Decisions taken while building, for veto:
+- **A `voice/` row**, recognised by the files Kokoro publishes. No existing kind takes a `.pth` checkpoint, and the grooming default was exactly this.
+- **No config pointer for voices.** `--model` names one; with none named the store's single voice model runs, and several are refused, naming them. The composer resolves the same way.
+- **CUDA when present, else the CPU, never MPS.** An 82M-parameter model speaks faster than real time on a CPU, and MPS's operator gaps are a cost with nothing to buy.
+- **The set is floors**: `torch>=2.6` (whose loads default to weights-only, which matters for a pickled checkpoint), `kokoro>=0.9.4`, `misaki[en]>=0.9.4`. One caveat for the first real run: misaki fetches spaCy's English model on first use, outside Apogee.
+- **Two kinds of duration.** A sentence's seconds are counted by the driver from the samples it wrote. A segment's seconds are measured by Apogee from the file's own header. The composer times captions from both.
+- **`voice say` speaks its text as one segment**, its sentences timed inside it.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3472 of 3473 -- `cli.mlx_lifecycle` failed once in the full run (its `check` row not stating the entry's window), then passed alone and three times under a parallel load of the other end-to-end scripts; this item touches none of the mlx rows. `cli.video_lifecycle` (with its voice phase) and the new unit cases passed in it.
+
+**Not run on real weights**: speech from the real Kokoro-82M, pulled by the user, is the user's run. No `kokoro` is installed here, so the driver's calls follow kokoro's documented `KModel`/`KPipeline` API and are exercised through the stub.

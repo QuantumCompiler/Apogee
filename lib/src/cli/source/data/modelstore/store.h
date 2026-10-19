@@ -22,6 +22,8 @@
 /// apogee-snapshot.json)
 /// <models>/<model>/pipeline/<id>/                   (model_index.json, one directory per
 /// component, apogee-snapshot.json)
+/// <models>/<model>/voice/<id>/                      (config.json, *.pth, voices/*.pt,
+/// apogee-snapshot.json)
 /// ```
 ///
 /// **Declared once, here.** Every command that writes, finds, lists or removes
@@ -56,6 +58,12 @@ inline constexpr std::string_view kMlxFormat = "mlx";
 /// generate` runs, so under the models directory; its id the SafeTensors
 /// rule's, a digest over every shard's sha256 across every component.
 inline constexpr std::string_view kPipelineFormat = "pipeline";
+/// A voice model (50a): a text-to-speech model taken whole as Kokoro
+/// publishes one -- its `config.json`, its checkpoint (`*.pth`) and its
+/// voices (`voices/*.pt`), no SafeTensors at all, so no other format fits.
+/// What `apogee voice say` runs, so under the models directory; its id a
+/// digest over the checkpoint's and every voice's sha256 (`voice_weight_id`).
+inline constexpr std::string_view kVoiceFormat = "voice";
 inline constexpr std::size_t kWeightIdLength = 12;
 
 /// Every format, in the order a listing names them -- the one list a verb
@@ -96,6 +104,10 @@ struct StoreRoots {
 /// `*.safetensors` entry, sorted by path. Empty when there is no shard or a
 /// shard has no digest -- the caller then hashes what landed, or falls back.
 [[nodiscard]] std::string snapshot_weight_id(const std::vector<SnapshotFile>& files);
+
+/// The id of a voice model: the SafeTensors rule's digest, over its
+/// checkpoint (`*.pth`) and its voices (`*.pt`) instead of shards (50a).
+[[nodiscard]] std::string voice_weight_id(const std::vector<SnapshotFile>& files);
 
 /// A random id of the same shape, for weights nothing can be hashed for.
 [[nodiscard]] std::string random_weight_id();
@@ -355,6 +367,32 @@ struct StoredPipeline {
 [[nodiscard]] StoredDirectory commit_pipeline(const StoreRoots& roots, std::string_view model,
                                               const std::filesystem::path& staging, Snapshot record,
                                               const HashProgress& progress = {});
+
+/// One stored voice model (50a): a whole directory, its voices never apart
+/// from its checkpoint.
+struct StoredVoice {
+    std::string model;
+    std::string id;
+    std::filesystem::path dir;
+    /// The record's `pulled_at`, when it has a record. For display.
+    std::string arrived;
+};
+
+/// Every stored voice model, by model then id, whole or not. `model`
+/// narrows to one.
+[[nodiscard]] std::vector<StoredVoice> list_store_voices(const StoreRoots& roots,
+                                                         std::string_view model = {});
+
+/// The stored voice model whose directory is `dir`; nullopt when none is.
+[[nodiscard]] std::optional<StoredVoice> stored_voice_at(const std::vector<StoredVoice>& stored,
+                                                         const std::filesystem::path& dir);
+
+/// A voice model directory just written into `staging`, committed (50a) by
+/// the whole-directory rule, its id `voice_weight_id`. The caller verifies
+/// it whole first (`read_voice_info`).
+[[nodiscard]] StoredDirectory commit_voice(const StoreRoots& roots, std::string_view model,
+                                           const std::filesystem::path& staging, Snapshot record,
+                                           const HashProgress& progress = {});
 
 /// Every stored SafeTensors set, by model then id, from both roots (new sets
 /// go under `paths.hf_dir`; ones pulled before it was set stay where they

@@ -103,6 +103,10 @@ inline constexpr const char* kReviewTargetValue = "REVIEW_TARGET";
 /// A stored diffusion pipeline (49c): `video generate --model` and `config
 /// set-default-video` -- the store's pipelines by model and handle.
 inline constexpr const char* kVideoPipelineValue = "VIDEO_PIPELINE";
+/// A stored voice model, and one of the voices the store's voice models
+/// carry (50a): `voice say --model` and `--voice`.
+inline constexpr const char* kVoiceModelValue = "VOICE_MODEL";
+inline constexpr const char* kVoiceValue = "VOICE";
 /// A `training.pipelines` entry, or a spec path.
 inline constexpr const char* kPipelineValue = "PIPELINE";
 /// A regime by name -- a `training.regimes` entry, a spec under
@@ -154,7 +158,7 @@ inline constexpr const char* kAllowedHostValue = "ALLOWED_HOST";
 
 /// Every name kind above, for the protocol to recognise and a test to hold
 /// each to a source.
-inline constexpr std::array<std::string_view, 45> kNameValues{kCollectionValue,
+inline constexpr std::array<std::string_view, 47> kNameValues{kCollectionValue,
                                                               kCollectionListValue,
                                                               kGraphValue,
                                                               kNamedGraphValue,
@@ -198,7 +202,9 @@ inline constexpr std::array<std::string_view, 45> kNameValues{kCollectionValue,
                                                               kRecipeValue,
                                                               kReviewSkillValue,
                                                               kReviewTargetValue,
-                                                              kVideoPipelineValue};
+                                                              kVideoPipelineValue,
+                                                              kVoiceModelValue,
+                                                              kVoiceValue};
 
 /// `{a,b}`: a set of words, as a type name spells it.
 template <typename Words>

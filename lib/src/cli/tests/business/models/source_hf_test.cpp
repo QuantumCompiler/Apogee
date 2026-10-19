@@ -438,3 +438,33 @@ TEST_CASE("a repository's small file is read whole, refused when it is not small
     CHECK_FALSE(large.ok);
     CHECK(large.error.ends_with("is larger than 16 bytes -- not the small file it should be"));
 }
+
+TEST_CASE("a voice model repository is the one laid out as Kokoro's, and only its weights move",
+          "[models][hf][voice]") {
+    // 50a: config.json and a checkpoint at the root, packs under voices/.
+    const auto listing_of = [](const std::vector<std::string>& files) {
+        const auto client = client_for({{.status = 200, .body = repo_json(files)}});
+        return apogee::models::list_gguf_files(*client, *parse_hf_ref("hexgrad/Kokoro-82M"), "",
+                                               {});
+    };
+    CHECK(listing_of({"config.json", "kokoro-v1_0.pth", "voices/af_heart.pt"}).voice());
+    CHECK_FALSE(listing_of({"config.json", "kokoro-v1_0.pth"}).voice());
+    CHECK_FALSE(listing_of({"config.json", "sub/model.pth", "voices/af_heart.pt"}).voice());
+    CHECK_FALSE(listing_of({"config.json", "model.safetensors"}).voice());
+
+    using apogee::models::HfFile;
+    std::vector<std::string> taken;
+    for (const HfFile& file : apogee::models::voice_wanted({
+             {.path = "config.json", .size = 1},
+             {.path = "kokoro-v1_0.pth", .size = 9},
+             {.path = "README.md", .size = 1},
+             {.path = "samples/HEARME.wav", .size = 5},
+             {.path = "voices/af_heart.pt", .size = 2},
+             {.path = "voices/nested/x.pt", .size = 2},
+             {.path = "eval/ArtificialAnalysis.png", .size = 2},
+         })) {
+        taken.push_back(file.path);
+    }
+    CHECK(taken ==
+          std::vector<std::string>{"config.json", "kokoro-v1_0.pth", "voices/af_heart.pt"});
+}

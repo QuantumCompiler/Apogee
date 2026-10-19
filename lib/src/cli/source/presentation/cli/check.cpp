@@ -51,6 +51,7 @@
 #include "modelstore/pipeline_info.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
+#include "modelstore/voice_info.h"
 #include "operations/code_exec_server.h"
 #include "operations/graph_sources.h"
 #include "operations/suites.h"
@@ -785,7 +786,9 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
     const std::vector<models::StoredSnapshot> snapshots = models::list_store_snapshots(roots);
     const std::vector<models::StoredMlx> mlx = models::list_store_mlx(roots);
     const std::vector<models::StoredPipeline> pipelines = models::list_store_pipelines(roots);
-    const std::size_t total = ggufs.size() + snapshots.size() + mlx.size() + pipelines.size();
+    const std::vector<models::StoredVoice> voices = models::list_store_voices(roots);
+    const std::size_t total =
+        ggufs.size() + snapshots.size() + mlx.size() + pipelines.size() + voices.size();
     std::size_t read = 0;
     for (const models::StoredGguf& stored : ggufs) {
         ++found;
@@ -850,6 +853,23 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
             add(report, Status::Ok, "Models", name,
                 info.class_name + ", " + std::to_string(info.components.size()) +
                     " components, files whole");
+        }
+    }
+    // A voice model the same way: the configuration, one checkpoint and
+    // every voice whole (50a).
+    for (const models::StoredVoice& stored : voices) {
+        ++found;
+        const std::string name =
+            models::weights_handle(stored.model, models::kVoiceFormat, stored.id);
+        say(inputs, "checking models: " + name, ++read, total);
+        const models::VoiceInfo info = models::read_voice_info(stored.dir);
+        if (!info.complete) {
+            add(report, Status::Fail, "Models", name, "voice model that " + info.problem,
+                "apogee models repair " + name);
+        } else {
+            add(report, Status::Ok, "Models", name,
+                info.checkpoint + ", " + std::to_string(info.voices.size()) +
+                    " voices, files whole");
         }
     }
 
@@ -1814,26 +1834,49 @@ void check_video(CheckReport& report, const CheckInputs& inputs) {
             break;
         }
     }
-    const std::string script = host.driver.filename().string();
-    switch (harness::inspect_seeded_script(inputs.home, script, inputs.retired_scripts)) {
-        case harness::SeededScript::Missing:
-            add(report, Status::Warn, "Video", "driver",
-                script + " is missing from " + host.driver.parent_path().string(),
-                "apogee check --fix");
+    // The speech runtime (50a): the same reading of files, its own set.
+    const video::VideoReadiness voice = video::probe_voice(host);
+    switch (voice.refusal) {
+        case video::VideoRefusal::NoEnvironment:
+        case video::VideoRefusal::NoTorch:
+        case video::VideoRefusal::NoKokoro:
+            add(report, Status::Skipped, "Video", "voice runtime", "not set up -- " + voice.reason,
+                std::string{video::kVoiceSetupRemedy});
             break;
-        case harness::SeededScript::Current:
-            add(report, Status::Ok, "Video", "driver", script + " matches the shipped copy");
+        default:
+            add(report, Status::Ok, "Video", "voice runtime",
+                "torch " +
+                    (voice.torch_version.empty() ? "(version unstated)" : voice.torch_version) +
+                    " and kokoro " +
+                    (voice.kokoro_version.empty() ? "(version unstated)" : voice.kokoro_version) +
+                    " in " + host.venv.string() + " (their files, not imported by check)");
             break;
-        case harness::SeededScript::Stale:
-            add(report, Status::Warn, "Video", "driver", stale_script_detail(script),
-                "apogee check --fix");
-            break;
-        case harness::SeededScript::Edited:
-            add(report, Status::Warn, "Video", "driver",
-                script +
-                    " differs from the shipped copy -- your edit is kept and runs; delete the file "
-                    "and run 'apogee check --fix' to restore the shipped one");
-            break;
+    }
+    // The two seeded drivers: the video one (49b) and the speech one (50a).
+    for (const auto& [label, file] :
+         {std::pair<std::string, std::filesystem::path>{"driver", host.driver},
+          std::pair<std::string, std::filesystem::path>{"voice driver", host.voice_driver}}) {
+        const std::string script = file.filename().string();
+        switch (harness::inspect_seeded_script(inputs.home, script, inputs.retired_scripts)) {
+            case harness::SeededScript::Missing:
+                add(report, Status::Warn, "Video", label,
+                    script + " is missing from " + file.parent_path().string(),
+                    "apogee check --fix");
+                break;
+            case harness::SeededScript::Current:
+                add(report, Status::Ok, "Video", label, script + " matches the shipped copy");
+                break;
+            case harness::SeededScript::Stale:
+                add(report, Status::Warn, "Video", label, stale_script_detail(script),
+                    "apogee check --fix");
+                break;
+            case harness::SeededScript::Edited:
+                add(report, Status::Warn, "Video", label,
+                    script +
+                        " differs from the shipped copy -- your edit is kept and runs; delete the "
+                        "file and run 'apogee check --fix' to restore the shipped one");
+                break;
+        }
     }
 }
 

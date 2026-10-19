@@ -299,6 +299,10 @@ apogee_add_module(cli
     cli/video_cmd.cpp
     cli/video_generate.h
     cli/video_generate.cpp
+    cli/voice_cmd.h
+    cli/voice_cmd.cpp
+    cli/voice_say.h
+    cli/voice_say.cpp
     cli/knowledge.h
     cli/knowledge.cpp
     cli/chat.h

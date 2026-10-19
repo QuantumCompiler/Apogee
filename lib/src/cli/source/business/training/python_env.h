@@ -54,6 +54,9 @@ enum class RequirementSet : std::uint8_t {
     /// demand -- asked for at a terminal, named on a pipe -- or by `train
     /// setup --with video`; several gigabytes, so never with anything else.
     Video,
+    /// `kokoro` and what it speaks through (50a): what `voice_say.py` runs a
+    /// voice model on. Installed on demand, as the video set is.
+    Voice,
 };
 
 [[nodiscard]] std::string_view to_string(RequirementSet set) noexcept;

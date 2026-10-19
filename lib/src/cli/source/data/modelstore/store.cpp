@@ -28,8 +28,8 @@ constexpr std::string_view kIncomingPrefix = ".incoming-";
     return name.empty() || name.front() == '.';
 }
 
-constexpr std::array<std::string_view, 4> kFormats{kGgufFormat, kSafetensorsFormat, kMlxFormat,
-                                                   kPipelineFormat};
+constexpr std::array<std::string_view, 5> kFormats{kGgufFormat, kSafetensorsFormat, kMlxFormat,
+                                                   kPipelineFormat, kVoiceFormat};
 
 [[nodiscard]] bool is_format(std::string_view text) noexcept {
     return std::ranges::find(kFormats, text) != kFormats.end();
@@ -157,10 +157,15 @@ std::string weight_id_from_digest(std::string_view sha256) {
     return id;
 }
 
-std::string snapshot_weight_id(const std::vector<SnapshotFile>& files) {
+namespace {
+
+/// The digest over every file `weights` takes: `<path>\t<sha256>\n` each,
+/// sorted by path -- the SafeTensors rule, for any kind of weights file.
+[[nodiscard]] std::string weights_digest(const std::vector<SnapshotFile>& files,
+                                         bool (*weights)(std::string_view path)) {
     std::vector<const SnapshotFile*> shards;
     for (const SnapshotFile& file : files) {
-        if (file.path.ends_with(".safetensors")) {
+        if (weights(file.path)) {
             if (weight_id_from_digest(file.sha256).empty()) {
                 return {};
             }
@@ -181,6 +186,24 @@ std::string snapshot_weight_id(const std::vector<SnapshotFile>& files) {
         hasher.update(shard->path + "\t" + digest + "\n");
     }
     return hasher.hex_digest().substr(0, kWeightIdLength);
+}
+
+[[nodiscard]] bool is_shard(std::string_view path) {
+    return path.ends_with(".safetensors");
+}
+
+[[nodiscard]] bool is_voice_weights(std::string_view path) {
+    return path.ends_with(".pth") || path.ends_with(".pt");
+}
+
+}  // namespace
+
+std::string snapshot_weight_id(const std::vector<SnapshotFile>& files) {
+    return weights_digest(files, is_shard);
+}
+
+std::string voice_weight_id(const std::vector<SnapshotFile>& files) {
+    return weights_digest(files, is_voice_weights);
 }
 
 std::string random_weight_id() {
@@ -546,6 +569,15 @@ std::optional<StoredPipeline> stored_pipeline_at(const std::vector<StoredPipelin
     return stored_directory_at(stored, dir);
 }
 
+std::vector<StoredVoice> list_store_voices(const StoreRoots& roots, std::string_view model) {
+    return list_whole_directories<StoredVoice>(roots, kVoiceFormat, model);
+}
+
+std::optional<StoredVoice> stored_voice_at(const std::vector<StoredVoice>& stored,
+                                           const std::filesystem::path& dir) {
+    return stored_directory_at(stored, dir);
+}
+
 std::string stored_mlx_name(const StoredMlx& stored) {
     const std::size_t separator = stored.model.rfind("--");
     std::string name =
@@ -580,7 +612,8 @@ namespace {
 /// to the digest over its shards.
 [[nodiscard]] StoredDirectory commit_whole_directory(
     const StoreRoots& roots, std::string_view format, std::string_view model,
-    const std::filesystem::path& staging, Snapshot record, const HashProgress& progress) {
+    const std::filesystem::path& staging, Snapshot record, const HashProgress& progress,
+    std::string (*weight_id)(const std::vector<SnapshotFile>&) = snapshot_weight_id) {
     StoredDirectory stored;
     std::error_code code;
     std::vector<std::filesystem::path> files;
@@ -626,7 +659,7 @@ namespace {
     if (record.pulled_at.empty()) {
         record.pulled_at = now_rfc3339();
     }
-    std::string id = snapshot_weight_id(record.files);
+    std::string id = weight_id(record.files);
     if (id.empty()) {
         id = random_weight_id();
     }
@@ -647,6 +680,13 @@ StoredDirectory commit_mlx(const StoreRoots& roots, std::string_view model,
                            const std::filesystem::path& staging, Snapshot record,
                            const HashProgress& progress) {
     return commit_whole_directory(roots, kMlxFormat, model, staging, std::move(record), progress);
+}
+
+StoredDirectory commit_voice(const StoreRoots& roots, std::string_view model,
+                             const std::filesystem::path& staging, Snapshot record,
+                             const HashProgress& progress) {
+    return commit_whole_directory(roots, kVoiceFormat, model, staging, std::move(record), progress,
+                                  voice_weight_id);
 }
 
 StoredDirectory commit_pipeline(const StoreRoots& roots, std::string_view model,
@@ -863,6 +903,14 @@ StoreTarget resolve_store_target(const StoreRoots& roots, std::string_view given
                                    .format = std::string{kPipelineFormat},
                                    .id = pipeline.id,
                                    .path = pipeline.dir});
+            }
+        }
+        for (const StoredVoice& voice : list_store_voices(roots)) {
+            if (voice.id == given) {
+                matches.push_back({.model = voice.model,
+                                   .format = std::string{kVoiceFormat},
+                                   .id = voice.id,
+                                   .path = voice.dir});
             }
         }
         if (matches.size() == 1) {
