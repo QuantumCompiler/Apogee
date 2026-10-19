@@ -977,8 +977,13 @@ TEST_CASE("a fixed set the parser splits at commas completes its last word",
     CHECK(complete_line(pull, "Q4_K_M,Q") ==
           std::vector<std::string>{"Q4_K_M,Q2_K", "Q4_K_M,Q3_K_M", "Q4_K_M,Q5_K_M", "Q4_K_M,Q6_K",
                                    "Q4_K_M,Q8_0"});
-    CHECK(complete_line({"models", "convert", "snap", "--register-with"}, "Q8_0,Q4") ==
-          std::vector<std::string>{"Q8_0,Q4_K_M"});
+    // convert's levels are each engine's own since M16, answered by the live
+    // sources rather than a fixed set -- and split at commas the same way.
+    const apogee::commands::CompletionSources live = apogee::commands::default_completion_sources();
+    CHECK(complete_full({"models", "convert", "snap", "--register-with"}, "Q8_0,Q4", live)
+              .candidates == std::vector<std::string>{"Q8_0,Q4_K_M"});
+    CHECK(complete_full({"models", "convert", "snap", "--mlx", "--register-with"}, "4bit,8", live)
+              .candidates == std::vector<std::string>{"4bit,8bit"});
     // A set that takes one word is not a list.
     CHECK(complete_line({"models", "convert", "snap", "--type"}, "f16,").empty());
 }

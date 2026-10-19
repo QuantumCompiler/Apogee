@@ -3786,6 +3786,37 @@ Decisions taken while building, for veto:
 
 **Not run on real weights**: converting the four Assistant models under the override is the user's run.
 
+### 2026-10-19 — `mlx-convert-register-chain` (maintenance item M16): convert-and-register covers MLX
+
+**Why.** M3's one command from SafeTensors to runnable backends was GGUF-only, a 27b design decision. The user hit both refusals the same hour -- `--register` with `--mlx`, and `--register-with` speaking GGUF levels alone -- and asked for it to work with `--mlx`. Every piece already existed: the verified `mlx/` conversion, the exact `config add-backend <name> --type mlx --model-path <dir>` line it printed, and M12's register core.
+
+- [x] **`models convert --mlx <model> --register`** converts once at `--type` (default `4bit`) and registers `<base>-<precision>` as an `mlx` backend. **`--register-with p1,p2,…`** takes `--type`'s own MLX precisions and runs one conversion per precision -- MLX quantizes as it converts -- each registered as its own backend. `--base-name` defaults to the model's name.
+- [x] **The hint executed, byte for byte** (`run_mlx_register_chain`, `register_mlx_backend`): each entry goes through the one config editor exactly as the printed `config add-backend … --type mlx --model-path <dir>` writes it, pinned by a twin home running that line.
+- [x] **M3's honesty, whole.**
+  - Each precision is two stages, its conversion (`convert_model_to_mlx`, the standalone core) then its registration, each said as `[i/n]`.
+  - A registration that would refuse at the end refuses before the first conversion (`check_registrations`, now told the engine's directory).
+  - A failure says where it stopped and the one command that resumes it, every finished build and entry kept. The resumed chain finds stored builds rather than converting again, and skips entries already registered on the same directory.
+  - A bare `--mlx` conversion still prints its hint, unchanged.
+- [x] **Each engine's levels are its own.**
+  - With `--mlx`, `--register-with` refuses a GGUF level by name, naming the MLX set; without it, an MLX precision is refused naming `--mlx`.
+  - `--type` beside `--register-with` under `--mlx` is refused, since the list names every precision.
+  - Completion answers per engine: a new name kind, `REGISTER_LEVEL`, reads `--mlx` earlier on the line, as `--type` already did.
+  - The flags' help tells both engines' stories.
+- [x] **The tests** (`cli/models_mlx_test`) over a scripted converter that writes each precision's own weights:
+  - `--register` registering the hand-typed line's bytes, then again finding and skipping both halves;
+  - `--register-with 4bit,8bit --base-name` failing at 8bit with the 4bit build and entry kept and the resume line said, then resumed converting only 8bit;
+  - the per-engine refusals before anything runs, and completion each way.
+
+Decisions taken while building, for veto:
+- **The suffix is the precision as `--type` spells it**: `-4bit`, `-8bit`, `-mxfp4`, `-bf16`. That matches `stored_mlx_name` for quantized builds. An unquantized build's stored label is its torch dtype, so the chain's `-bf16` differs there.
+- **`--register-with` under `--mlx` is exactly its list**, unlike GGUF, where the F16 is always made too, because every MLX precision is its own conversion.
+- **Two stages a precision**, so a failed conversion never strands an unregistered finished build and a failed registration says which.
+- **An MLX conversion under `--model-type` (M15) chains unchanged**, its flag carried into the resume line.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3550 of 3550, two skipped and said (the real caption burn without libass, and the existing pdftotext case). The first full run failed one case: the lifecycle suite completed `convert --register-with` from its fixed set, which is now a name kind; the test moved to the live sources, with an MLX case.
+
+**Not run on real weights**: a real multi-precision MLX run is the user's.
+
 ## Milestone O — Local multimodal
 
 **Goal.** Make `VisionCapable` tell the truth on the local backend: wire llama.cpp's `mtmd`, add `mmproj_path`, and close the cross-surface guard gap that let one surface accept a picture the other refused.

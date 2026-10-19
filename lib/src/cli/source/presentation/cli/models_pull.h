@@ -278,7 +278,48 @@ struct ConvertedMlx {
                                                 std::string_view given, std::string_view from,
                                                 const training::MlxPrecision& precision,
                                                 const training::MlxConverter& converter,
-                                                std::string_view model_type = {});
+                                                std::string_view model_type = {},
+                                                bool chained = false);
+
+/// `--register-with`'s precisions with `--mlx` (M16): `--type`'s own MLX
+/// set, each once, in the order given. Fails before anything runs on any
+/// other word -- a GGUF level named as one -- naming the set.
+[[nodiscard]] std::vector<std::string> register_mlx_precisions(
+    const std::vector<std::string>& given);
+
+/// A precision's converter: `mlx_lm.convert` in the owned environment, or a
+/// test's stand-in.
+using MlxConverterFor = std::function<training::MlxConverter(const training::MlxPrecision&)>;
+
+/// One command from SafeTensors to runnable `mlx` backends (M16).
+struct MlxRegisterRequest {
+    models::StoreRoots roots;
+    std::filesystem::path config_path;
+    /// The SafeTensors set, as `convert` takes it.
+    std::string snapshot;
+    std::string snapshot_from;
+    /// The MLX precisions: one conversion each -- MLX quantizes as it
+    /// converts -- and each its own backend.
+    std::vector<std::string> precisions;
+    /// What each backend's name begins with; empty: the model's own name.
+    std::string base_name;
+    /// `--model-type` (M15): every conversion made as that type.
+    std::string model_type;
+    /// Typed as `--register-with <list>` rather than `--register --type`:
+    /// the resume line says it the same way.
+    bool listed = false;
+};
+
+/// For each precision: convert the set with `models convert --mlx`'s own
+/// core -- a build already stored found, not made again -- and register it
+/// as `<base>-<precision>`, an `mlx` backend, through the one config editor:
+/// the very edit the hint's `config add-backend <name> --type mlx
+/// --model-path <dir>` makes. Refuses before the first conversion a
+/// registration that would refuse at the end; a failure says where it
+/// stopped and the command that resumes it, every finished build and entry
+/// kept (M3's chain, `cli/model_chain.h`).
+void run_mlx_register_chain(const MlxRegisterRequest& request,
+                            const MlxConverterFor& converter_for);
 
 /// Where a SafeTensors snapshot lands and is looked for: `paths.hf_dir`
 /// when the config sets it, else the models directory. The template

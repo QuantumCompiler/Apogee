@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -801,4 +802,146 @@ TEST_CASE("a vendor's model_type is refused with its door, then converted as the
     REQUIRE(home.run({"__complete", "models", "convert", "x", "--mlx", "--model-type", "gemma4"},
                      &out) == 0);
     CHECK(out == "gemma4\ngemma4_text\ngemma4_unified\n");
+}
+
+namespace {
+
+/// The MLX chain (M16) over `convert`'s store, `mlx_lm.convert` played by
+/// `make` -- one call a precision -- and its narration captured.
+int chain(Convert& convert, const std::vector<std::string>& precisions, bool listed,
+          const std::string& base_name,
+          const std::function<std::string(const apogee::training::MlxPrecision&)>& fails,
+          std::string* out) {
+    const std::ostringstream captured;
+    std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
+    std::streambuf* old_err = std::cerr.rdbuf(captured.rdbuf());
+    int code = 0;
+    try {
+        apogee::commands::run_mlx_register_chain(
+            apogee::commands::MlxRegisterRequest{.roots = convert.roots,
+                                                 .config_path = convert.home.config_path(),
+                                                 .snapshot = "org--m",
+                                                 .precisions = precisions,
+                                                 .base_name = base_name,
+                                                 .listed = listed},
+            [&convert, &fails](const apogee::training::MlxPrecision& precision) {
+                return [&convert, &fails, precision](const std::filesystem::path&,
+                                                     const std::filesystem::path& output,
+                                                     const apogee::training::MessageSink&,
+                                                     const apogee::harness::CancellationToken&) {
+                    ++convert.calls;
+                    if (std::string why = fails ? fails(precision) : std::string{}; !why.empty()) {
+                        return why;
+                    }
+                    // Each precision's own weights, as a real conversion's are.
+                    write_mlx_model(
+                        output, {.bits = precision.bits, .shards = precision.bits >= 8 ? 2 : 1});
+                    return std::string{};
+                };
+            });
+    } catch (const CLI::RuntimeError& e) {
+        code = e.get_exit_code();
+    }
+    std::cout.rdbuf(old_out);
+    std::cerr.rdbuf(old_err);
+    *out = captured.str();
+    return code;
+}
+
+[[nodiscard]] std::string config_text(const CliHome& home) {
+    return read_file(home.config_path());
+}
+
+}  // namespace
+
+TEST_CASE("convert --mlx --register converts once and registers what the hint would",
+          "[commands][models][mlx][convert][chain]") {
+    // M16: the printed `config add-backend … --type mlx` line, executed.
+    Convert convert;
+    std::string out;
+    REQUIRE(chain(convert, {"4bit"}, false, "", {}, &out) == 0);
+    INFO(out);
+    CHECK(convert.calls == 1);
+    const std::vector<apogee::models::StoredMlx> stored =
+        apogee::models::list_store_mlx(convert.roots, "org--m");
+    REQUIRE(stored.size() == 1);
+    CHECK(out.find("[1/2] convert to MLX 4bit") != std::string::npos);
+    CHECK(out.find("[2/2] register m-4bit") != std::string::npos);
+    CHECK(out.find("registered m-4bit") != std::string::npos);
+    CHECK(out.find("Use it by adding a backend") == std::string::npos);  // executed, not hinted
+
+    // Byte for byte the hand-typed line's edit, in a twin home.
+    CliHome twin{"backends:\n  m:\n    type: mock\n"};
+    std::string said;
+    REQUIRE(twin.run({"config", "add-backend", "m-4bit", "--type", "mlx", "--model-path",
+                      stored.front().dir.string()},
+                     &said) == 0);
+    CHECK(config_text(convert.home) == config_text(twin));
+
+    // Again: found, not made, and not registered twice.
+    REQUIRE(chain(convert, {"4bit"}, false, "", {}, &out) == 0);
+    CHECK(convert.calls == 1);
+    CHECK(out.find("already converted:") != std::string::npos);
+    CHECK(out.find("already registered: m-4bit") != std::string::npos);
+}
+
+TEST_CASE("convert --mlx --register-with converts once a precision, each its own backend",
+          "[commands][models][mlx][convert][chain]") {
+    Convert convert;
+    std::string out;
+    // A failure mid-chain: the first build and its entry stand, the resume
+    // command is said.
+    const auto eight_fails = [](const apogee::training::MlxPrecision& precision) {
+        return precision.name == "8bit" ? std::string{"ValueError: out of memory"} : std::string{};
+    };
+    CHECK(chain(convert, {"4bit", "8bit"}, true, "Gem", eight_fails, &out) != 0);
+    INFO(out);
+    CHECK(out.find("registered Gem-4bit") != std::string::npos);
+    CHECK(out.find("apogee models convert org--m/safetensors/aaaaaaaaaaaa --mlx "
+                   "--register-with 4bit,8bit --base-name Gem") != std::string::npos);
+    CHECK(apogee::models::list_store_mlx(convert.roots, "org--m").size() == 1);
+    CHECK(apogee::harness::load_config(convert.home.config_path()).backends.contains("Gem-4bit"));
+    CHECK(apogee::models::find_abandoned_staging(convert.roots).empty());
+
+    // Resumed: nothing made twice, the rest made.
+    convert.calls = 0;
+    REQUIRE(chain(convert, {"4bit", "8bit"}, true, "Gem", {}, &out) == 0);
+    CHECK(convert.calls == 1);  // 8bit alone
+    CHECK(out.find("already registered: Gem-4bit") != std::string::npos);
+    CHECK(out.find("registered Gem-8bit") != std::string::npos);
+    const apogee::harness::Config config = apogee::harness::load_config(convert.home.config_path());
+    REQUIRE(config.backends.contains("Gem-8bit"));
+    CHECK(config.backends.at("Gem-8bit").type == apogee::harness::BackendType::Mlx);
+    CHECK(apogee::models::list_store_mlx(convert.roots, "org--m").size() == 2);
+}
+
+TEST_CASE("each engine's levels are its own, refused by name before anything runs",
+          "[commands][models][mlx][convert][chain]") {
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    write_mlx_model(home.models() / "org--m" / "safetensors" / "aaaaaaaaaaaa",
+                    {.bits = 0, .format = "pt"});
+    std::string out;
+    std::string err;
+    CHECK(home.run({"models", "convert", "org--m", "--mlx", "--register-with", "Q4_K_M"}, &out,
+                   &err) != 0);
+    CHECK(err.find("--register-with with --mlx takes the MLX precisions (") != std::string::npos);
+    CHECK(err.find("'Q4_K_M' is a GGUF level") != std::string::npos);
+    CHECK(home.run({"models", "convert", "org--m", "--register-with", "4bit"}, &out, &err) != 0);
+    CHECK(err.find("'4bit' is an MLX precision -- add --mlx to register MLX builds") !=
+          std::string::npos);
+    CHECK(home.run(
+              {"models", "convert", "org--m", "--mlx", "--type", "8bit", "--register-with", "4bit"},
+              &out, &err) != 0);
+    CHECK(err.find("--register-with names every precision to convert -- drop --type") !=
+          std::string::npos);
+    CHECK(apogee::models::list_store_mlx(StoreRoots::at(home.models()), "org--m").empty());
+    // Completion answers per engine.
+    REQUIRE(home.run({"__complete", "models", "convert", "org--m", "--mlx", "--register-with", ""},
+                     &out) == 0);
+    CHECK(out.find("4bit\n") != std::string::npos);
+    CHECK(out.find("Q4_K_M") == std::string::npos);
+    REQUIRE(home.run({"__complete", "models", "convert", "org--m", "--register-with", ""}, &out) ==
+            0);
+    CHECK(out.find("Q4_K_M") != std::string::npos);
+    CHECK(out.find("4bit\n") == std::string::npos);
 }
