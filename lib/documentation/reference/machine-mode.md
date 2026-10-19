@@ -640,8 +640,11 @@ own, else `move` (`from`: a record run again; `extend`: a clip continued),
 `document` (the record read, or the continued clip's record), `clip` (the
 clip that record is beside, or the clip continued) and `continued` (the clip
 whose last frame the run started from, or null) -- and `preset` (`draft`,
-`final`, or null); and `error` when it did not land. The clip
-and its sidecar are written only on `done`; a failed run exits `1` and a
+`final`, or null); since 49e `loras` -- each LoRA the run applied, in the
+order given: `path` (the `.safetensors` file), `sha256` (the file as the run
+began, what a `--from` rerun verifies it against) and `scale` -- empty for
+none, with `versions` then naming `peft` too; and `error` when it did not
+land. The clip and its sidecar are written only on `done`; a failed run exits `1` and a
 cancelled one `130`, the output path untouched either way. The narration --
 the device and the scale to expect, then each step -- goes to stderr. A run
 refused before it starts (a cap, an existing output, no pipeline, a runtime

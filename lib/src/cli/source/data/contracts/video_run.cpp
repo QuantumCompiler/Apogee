@@ -53,6 +53,15 @@ nlohmann::json video_run_document(const VideoRun& run) {
                                     ? nlohmann::json(nullptr)
                                     : nlohmann::json(run.parent.continued.string())}};
     document["preset"] = run.preset.empty() ? nlohmann::json(nullptr) : nlohmann::json(run.preset);
+    nlohmann::json loras = nlohmann::json::array();
+    for (const VideoLora& lora : run.loras) {
+        loras.push_back(
+            {{"path", lora.path.string()}, {"sha256", lora.sha256}, {"scale", lora.scale}});
+    }
+    document["loras"] = std::move(loras);
+    if (!run.peft.empty()) {
+        document["versions"]["peft"] = run.peft;
+    }
     return document;
 }
 
@@ -117,6 +126,7 @@ std::optional<VideoRun> parse_video_run(const nlohmann::json& document, std::str
         run.torch = text_at(*versions, "torch");
         run.diffusers = text_at(*versions, "diffusers");
         run.apogee = text_at(*versions, "apogee");
+        run.peft = text_at(*versions, "peft");
     }
     run.codec = text_at(document, "codec");
     if (const auto seconds = document.find("seconds");
@@ -133,6 +143,18 @@ std::optional<VideoRun> parse_video_run(const nlohmann::json& document, std::str
         run.parent.continued = text_at(*parent, "continued");
     }
     run.preset = text_at(document, "preset");
+    if (const auto loras = document.find("loras"); loras != document.end() && loras->is_array()) {
+        for (const nlohmann::json& item : *loras) {
+            if (!item.is_object() || text_at(item, "path").empty()) {
+                continue;
+            }
+            const auto scale = item.find("scale");
+            run.loras.push_back(VideoLora{
+                .path = text_at(item, "path"),
+                .sha256 = text_at(item, "sha256"),
+                .scale = scale != item.end() && scale->is_number() ? scale->get<double>() : 1.0});
+        }
+    }
     return run;
 }
 

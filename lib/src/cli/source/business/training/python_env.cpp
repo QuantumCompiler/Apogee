@@ -40,9 +40,10 @@ constexpr std::array<std::string_view, 6> kConvert{"torch>=2.11",        "transf
 // tokenizers that need it), accelerate for the loading, and ftfy for the
 // prompt cleaning Wan's pipelines do. Floors, as every set's are; the
 // versions that ran go into each clip's document.
-constexpr std::array<std::string_view, 6> kVideo{"torch>=2.6",         "diffusers>=0.35",
-                                                 "transformers>=4.46", "accelerate>=1.0",
-                                                 "ftfy>=6.1",          "sentencepiece>=0.2"};
+// peft since 49e: what diffusers loads a LoRA through.
+constexpr std::array<std::string_view, 7> kVideo{
+    "torch>=2.6", "diffusers>=0.35",    "transformers>=4.46", "accelerate>=1.0",
+    "ftfy>=6.1",  "sentencepiece>=0.2", "peft>=0.13"};
 
 // The voice driver's stack (50a): Kokoro, and misaki -- its grapheme to
 // phoneme layer -- with the English extra its English voices read through.

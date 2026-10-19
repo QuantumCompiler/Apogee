@@ -332,6 +332,39 @@ set -e
 
 echo "voice say: one WAV, its sentences timed, its record; no listener; Ctrl-C - OK"
 
+# --- video generate --lora (49e): applied by the driver, hashed in the record ---
+mkdir -p "$WORK_DIR/loras"
+printf 'weights' >"$WORK_DIR/loras/style.safetensors"
+LORA_HASH="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$WORK_DIR/loras/style.safetensors")"
+export STUB_VIDEO_RECORD="$WORK_DIR/lora-record.jsonl"
+generate lora -o "$WORK_DIR/out/lora.mp4" --lora "$WORK_DIR/loras/style.safetensors:0.8" --output-format json
+unset STUB_VIDEO_RECORD
+[ "$STATUS" -eq 0 ] || fail "the LoRA run failed ($STATUS): $(cat "$WORK_DIR/lora.err")"
+[ "$(field "$WORK_DIR/lora.out" '["loras"][0]["sha256"]')" = "$LORA_HASH" ] || fail "the LoRA's hash was not recorded"
+[ "$(field "$WORK_DIR/lora.out" '["loras"][0]["scale"]')" = "0.8" ] || fail "the LoRA's strength was not recorded"
+grep -q '"adapters": \["lora1"\], "weights": \[0.8\]' "$WORK_DIR/lora-record.jsonl" \
+    || fail "the driver did not set the LoRA's strength: $(cat "$WORK_DIR/lora-record.jsonl")"
+grep -q "LoRAs: style.safetensors x0.8" "$WORK_DIR/lora.err" || fail "the LoRA was not said"
+# Run again from its record: held and verified; changed under it, refused by name.
+set +e
+"$APOGEE_BIN" video generate --from "$WORK_DIR/out/lora.mp4" -o "$WORK_DIR/out/lora2.mp4" \
+    </dev/null >/dev/null 2>"$WORK_DIR/lora2.err"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 0 ] || fail "the LoRA rerun failed: $(cat "$WORK_DIR/lora2.err")"
+grep -q "1 LoRA (held)" "$WORK_DIR/lora2.err" || fail "the LoRA was not held: $(cat "$WORK_DIR/lora2.err")"
+printf 'retrained' >"$WORK_DIR/loras/style.safetensors"
+set +e
+"$APOGEE_BIN" video generate --from "$WORK_DIR/out/lora.mp4" -o "$WORK_DIR/out/lora3.mp4" \
+    </dev/null >/dev/null 2>"$WORK_DIR/lora3.err"
+STATUS=$?
+set -e
+[ "$STATUS" -ne 0 ] || fail "a changed LoRA ran"
+grep -q "has changed since that run" "$WORK_DIR/lora3.err" || fail "the change was not named: $(cat "$WORK_DIR/lora3.err")"
+[ ! -e "$WORK_DIR/out/lora3.mp4" ] || fail "a refused run wrote a clip"
+
+echo "video generate --lora: applied, hashed, held on a rerun, a changed file refused - OK"
+
 # --- video compose (50c): planned on a mock, spoken, rendered, assembled -----
 # The planner's first answer is not JSON: the one correction is what lands.
 cat >"$WORK_DIR/plan.json" <<'JSON'

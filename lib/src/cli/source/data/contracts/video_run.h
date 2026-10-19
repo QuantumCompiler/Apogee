@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 /// A video generation's record (49c): what made one clip -- the pipeline,
 /// the prompt, every setting, the seed, the device and the versions that
@@ -47,6 +48,14 @@ struct VideoParent {
     /// or the one a record run again had continued -- so running it again
     /// continues the same clip. Empty for none.
     std::filesystem::path continued{};
+};
+
+/// A LoRA a run applied (49e): the safetensors file, its sha256 when the
+/// run began -- what a rerun verifies it against -- and its strength.
+struct VideoLora {
+    std::filesystem::path path;
+    std::string sha256;
+    double scale = 1.0;
 };
 
 struct VideoRun {
@@ -91,6 +100,10 @@ struct VideoRun {
     /// `final`), or empty.
     VideoParent parent{};
     std::string preset{};
+    /// The LoRAs applied, in the order they were given (49e), and the peft
+    /// that loaded them.
+    std::vector<VideoLora> loras{};
+    std::string peft{};
 };
 
 /// The `video.generation` document.

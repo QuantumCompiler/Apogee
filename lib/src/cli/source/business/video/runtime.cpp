@@ -1,7 +1,10 @@
 #include "video/runtime.h"
 
+#include <algorithm>
+#include <cctype>
 #include <initializer_list>
 #include <system_error>
+#include <vector>
 
 #include "contracts/assets.h"
 #include "contracts/paths.h"
@@ -138,6 +141,13 @@ VideoReadiness probe_video(const VideoHost& host, const std::filesystem::path& p
         }
     }
 
+    // What a LoRA loads through: recorded, never a rung.
+    if (const std::filesystem::path peft = training::find_site_package(host.venv, "peft");
+        !peft.empty()) {
+        readiness.peft = true;
+        readiness.peft_version = training::installed_package_version(peft);
+    }
+
     std::error_code code;
     if (!std::filesystem::is_regular_file(host.driver, code)) {
         return refused(std::move(readiness), VideoRefusal::NoDriver,
@@ -152,6 +162,48 @@ VideoReadiness probe_video(const VideoHost& host, const std::filesystem::path& p
     }
     readiness.ffmpeg = host.ffmpeg;
     return readiness;
+}
+
+std::string lora_file(const std::filesystem::path& given, std::filesystem::path& out) {
+    std::error_code code;
+    const auto safetensors = [](const std::filesystem::path& path) {
+        std::string extension = path.extension().string();
+        std::ranges::transform(extension, extension.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return extension == ".safetensors";
+    };
+    if (std::filesystem::is_regular_file(given, code)) {
+        if (!safetensors(given)) {
+            return "the LoRA " + given.string() +
+                   " is not a .safetensors file -- a LoRA is applied from its safetensors";
+        }
+        out = given;
+        return {};
+    }
+    if (std::filesystem::is_directory(given, code)) {
+        std::vector<std::filesystem::path> found;
+        for (const auto& entry : std::filesystem::directory_iterator(given, code)) {
+            std::error_code type;
+            if (entry.is_regular_file(type) && safetensors(entry.path())) {
+                found.push_back(entry.path());
+            }
+        }
+        if (found.empty()) {
+            return "the LoRA directory " + given.string() + " holds no .safetensors file";
+        }
+        if (found.size() > 1) {
+            std::ranges::sort(found);
+            std::string names;
+            for (const std::filesystem::path& file : found) {
+                names += (names.empty() ? "" : ", ") + file.filename().string();
+            }
+            return "the LoRA directory " + given.string() + " holds " +
+                   std::to_string(found.size()) + " .safetensors files (" + names + ") -- name one";
+        }
+        out = found.front();
+        return {};
+    }
+    return "there is no LoRA at " + given.string();
 }
 
 VideoReadiness probe_voice(const VideoHost& host, const std::filesystem::path& model,

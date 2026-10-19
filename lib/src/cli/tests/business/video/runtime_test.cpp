@@ -197,3 +197,49 @@ TEST_CASE("the voice ladder: its own rungs, the environment's shared",
               " -- speech runs kokoro there, never the system Python -- apogee train setup "
               "--with voice");
 }
+
+TEST_CASE("a LoRA is a .safetensors file, or a directory holding exactly one",
+          "[video][runtime][lora]") {
+    // 49e: file facts only -- Apogee never reads a LoRA's weights.
+    const apogee::testing::TempDir dir{"video-lora-" + std::to_string(std::random_device{}())};
+    const auto file = [&dir](const std::string& name) {
+        const std::filesystem::path path = dir.path() / name;
+        write(path, "weights");
+        return path;
+    };
+    std::filesystem::path out;
+    const std::filesystem::path style = file("style.safetensors");
+    CHECK(apogee::video::lora_file(style, out).empty());
+    CHECK(out == style);
+    const std::filesystem::path loud = file("LOUD.SAFETENSORS");
+    CHECK(apogee::video::lora_file(loud, out).empty());
+    const std::filesystem::path pickle = file("old.bin");
+    CHECK(apogee::video::lora_file(pickle, out) ==
+          "the LoRA " + pickle.string() +
+              " is not a .safetensors file -- a LoRA is applied from its safetensors");
+    const std::filesystem::path one = file("one/x.safetensors");
+    file("one/README.md");
+    CHECK(apogee::video::lora_file(dir.path() / "one", out).empty());
+    CHECK(out == one);
+    file("none/README.md");
+    CHECK(apogee::video::lora_file(dir.path() / "none", out) ==
+          "the LoRA directory " + (dir.path() / "none").string() + " holds no .safetensors file");
+    file("two/b.safetensors");
+    file("two/a.safetensors");
+    CHECK(apogee::video::lora_file(dir.path() / "two", out) ==
+          "the LoRA directory " + (dir.path() / "two").string() +
+              " holds 2 .safetensors files (a.safetensors, b.safetensors) -- name one");
+    CHECK(apogee::video::lora_file(dir.path() / "missing", out) ==
+          "there is no LoRA at " + (dir.path() / "missing").string());
+}
+
+TEST_CASE("the ladder notes peft, and never refuses for it", "[video][runtime][lora]") {
+    const Install install;
+    VideoReadiness ready = install.probe();
+    CHECK(ready.ready());
+    CHECK_FALSE(ready.peft);
+    install.package("peft", "0.17.1");
+    ready = install.probe();
+    CHECK(ready.peft);
+    CHECK(ready.peft_version == "0.17.1");
+}

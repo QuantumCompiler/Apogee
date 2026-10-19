@@ -384,6 +384,14 @@ void VideoCommand::bind(CLI::App& root, const RootContext& context) {
         "The full render: " + std::to_string(kFinalPreset.steps) +
             " steps -- with --from a draft, that draft's clip at full quality");
     draft->excludes(final_preset);
+    generate
+        ->add_option("--lora", flags->options.loras,
+                     "A LoRA to apply: a .safetensors file (or a directory holding one), its "
+                     "strength after a colon (default 1); give it again for more, at most " +
+                         std::to_string(kMaxVideoLoras) + " -- with --from, the record's replaced")
+        ->type_name(kPathValue);
+    generate->add_flag("--no-lora", flags->options.no_lora,
+                       "No LoRAs -- with --from, the record's cleared");
     add_read_format(generate, format);
     generate->callback([&context, flags, format, generate]() {
         flags->format = *format;

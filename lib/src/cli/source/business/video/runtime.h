@@ -76,6 +76,11 @@ struct VideoReadiness {
     std::string diffusers_version{};
     /// The speech runtime's version, for a voice probe (50a).
     std::string kokoro_version{};
+    /// Whether peft -- what diffusers loads a LoRA through (49e) -- is
+    /// installed, and its version when its record says one. Not a rung:
+    /// only a run asked for a LoRA needs it.
+    bool peft = false;
+    std::string peft_version{};
 
     [[nodiscard]] bool ready() const noexcept {
         return refusal == VideoRefusal::None;
@@ -94,6 +99,12 @@ struct VideoReadiness {
 
 /// The fix every package rung names.
 inline constexpr std::string_view kVideoSetupRemedy = "apogee train setup --with video";
+
+/// The LoRA file `given` names (49e), from file facts alone -- Apogee never
+/// reads a LoRA's weights: a `.safetensors` file, or a directory holding
+/// exactly one. The refusal names the path and what it is instead; empty
+/// means `out` is set.
+[[nodiscard]] std::string lora_file(const std::filesystem::path& given, std::filesystem::path& out);
 
 /// The voice ladder (50a), the video one's environment rungs shared: the
 /// environment, torch, kokoro, then -- when `model` is given -- the voice

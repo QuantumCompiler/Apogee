@@ -5,12 +5,14 @@
 
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <memory>
 #include <random>
 #include <string>
 #include <vector>
 
+#include "contracts/sha256.h"
 #include "contracts/video_run.h"
 #include "modelstore/snapshot.h"
 #include "support/env_guard.h"
@@ -645,4 +647,170 @@ TEST_CASE("a record reads back into the run it records, its parent and preset wi
     CHECK(error == "a video.generation record without its model, seed or settings");
     CHECK_FALSE(apogee::harness::parse_video_run(nlohmann::json::array(), error).has_value());
     CHECK(error == "not a video.generation record");
+}
+
+namespace {
+
+/// A LoRA file in the run's directory, its content its name.
+[[nodiscard]] std::filesystem::path lora(const Run& run, const std::string& name) {
+    const std::filesystem::path path = run.dir.path() / "loras" / name;
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream{path, std::ios::binary} << "weights of " << name;
+    return path;
+}
+
+}  // namespace
+
+TEST_CASE("a LoRA's strength is read after its last colon, and only a number is one",
+          "[cli][video][lora]") {
+    using apogee::commands::parse_lora;
+    std::filesystem::path path;
+    double scale = 0.0;
+    CHECK(parse_lora("style.safetensors", path, scale).empty());
+    CHECK(path == "style.safetensors");
+    CHECK(scale == 1.0);
+    CHECK(parse_lora("style.safetensors:0.8", path, scale).empty());
+    CHECK(path == "style.safetensors");
+    CHECK(scale == 0.8);
+    CHECK(parse_lora("C:\\loras\\style.safetensors", path, scale).empty());
+    CHECK(path == "C:\\loras\\style.safetensors");
+    CHECK(scale == 1.0);
+    CHECK(parse_lora("dir/a:b.safetensors", path, scale).empty());
+    CHECK(path == "dir/a:b.safetensors");
+    CHECK(parse_lora("style.safetensors:2", path, scale).empty());
+    CHECK(parse_lora("style.safetensors:3", path, scale) ==
+          "--lora style.safetensors:3: its strength 3 is outside (0, 2]");
+    CHECK(parse_lora("style.safetensors:0", path, scale) ==
+          "--lora style.safetensors:0: its strength 0 is outside (0, 2]");
+    CHECK(parse_lora("style.safetensors:-1", path, scale) ==
+          "--lora style.safetensors:-1: its strength -1 is outside (0, 2]");
+    CHECK(parse_lora(":0.5", path, scale) ==
+          "--lora takes <path>[:<scale>] -- name the LoRA's file");
+}
+
+TEST_CASE("video generate --lora hands each LoRA to the driver and records its hash",
+          "[cli][video][lora]") {
+    Run run;
+    run.ready.peft = true;
+    run.ready.peft_version = "0.17.1";
+    const std::filesystem::path style = lora(run, "style.safetensors");
+    const std::filesystem::path motion = lora(run, "motion/motion.safetensors");
+    run.options.loras = {style.string() + ":0.8", motion.parent_path().string()};
+    const VideoGenerateResult result = run.go();
+    INFO(result.error);
+    REQUIRE(result.exit_code == 0);
+    CHECK(run.request["loras"] ==
+          nlohmann::json::array({{{"path", style.string()}, {"scale", 0.8}},
+                                 {{"path", motion.string()}, {"scale", 1.0}}}));
+    CHECK(result.document["loras"] ==
+          nlohmann::json::array(
+              {{{"path", style.string()},
+                {"sha256", apogee::models::sha256_hex("weights of style.safetensors")},
+                {"scale", 0.8}},
+               {{"path", motion.string()},
+                {"sha256", apogee::models::sha256_hex("weights of motion/motion.safetensors")},
+                {"scale", 1.0}}}));
+    CHECK(result.document["versions"]["peft"] == "0.17.1");
+    CHECK(run.said.back().ends_with(", LoRAs: style.safetensors x0.8, motion.safetensors x1"));
+    // Read back, the record holds them.
+    std::string error;
+    const auto record = apogee::harness::parse_video_run(result.document, error);
+    REQUIRE(record.has_value());
+    REQUIRE(record->loras.size() == 2);
+    CHECK(record->loras[0].scale == 0.8);
+    CHECK(record->peft == "0.17.1");
+
+    // A run without LoRAs asks exactly what it asked before.
+    Run plain;
+    REQUIRE(plain.go().exit_code == 0);
+    CHECK_FALSE(plain.request.contains("loras"));
+}
+
+TEST_CASE("a LoRA is refused before anything runs, naming its fact and its fix",
+          "[cli][video][lora]") {
+    Run run;
+    run.ready.peft = true;
+    const std::filesystem::path style = lora(run, "style.safetensors");
+    const auto refused = [&run](const std::function<void(VideoGenerateOptions&)>& set) {
+        const VideoGenerateOptions kept = run.options;
+        set(run.options);
+        const VideoGenerateResult result = run.go();
+        run.options = kept;
+        CHECK(result.exit_code == 1);
+        return result.error;
+    };
+    CHECK(refused([&](VideoGenerateOptions& o) {
+              o.loras = std::vector<std::string>(5, style.string());
+          }) == "5 LoRAs is over the cap of 4 a run");
+    CHECK(refused([&](VideoGenerateOptions& o) {
+              o.loras = {(run.dir.path() / "none.safetensors").string()};
+          }) == "there is no LoRA at " + (run.dir.path() / "none.safetensors").string());
+    CHECK(refused([&](VideoGenerateOptions& o) { o.loras = {style.string() + ":9"}; }) ==
+          "--lora " + style.string() + ":9: its strength 9 is outside (0, 2]");
+    CHECK(refused([&](VideoGenerateOptions& o) {
+              o.loras = {style.string()};
+              o.no_lora = true;
+          }) == "--lora and --no-lora are two sets -- take one");
+    run.ready.peft = false;
+    CHECK(refused([&](VideoGenerateOptions& o) { o.loras = {style.string()}; }) ==
+          "a LoRA loads through peft, which the video runtime does not have yet -- apogee train "
+          "setup --with video");
+    CHECK_FALSE(run.spawned);
+}
+
+TEST_CASE("a run from a record holds its LoRAs, verified; --lora replaces and --no-lora clears",
+          "[cli][video][lora][from]") {
+    Run run;
+    run.ready.peft = true;
+    const std::filesystem::path style = lora(run, "style.safetensors");
+    run.options.loras = {style.string() + ":0.7"};
+    const std::filesystem::path clip = first_clip(run);
+    const auto again = [&run, &clip](const std::string& name,
+                                     const std::function<void(VideoGenerateOptions&)>& set) {
+        run.options = {};
+        run.options.from = clip;
+        run.options.output = run.dir.path() / "out" / name;
+        set(run.options);
+        run.said.clear();
+        run.request = nullptr;
+        return run.go();
+    };
+
+    // Held, as the seed is, and verified by its hash.
+    VideoGenerateResult result = again("held.mp4", [](VideoGenerateOptions&) {});
+    INFO(result.error);
+    REQUIRE(result.exit_code == 0);
+    CHECK_THAT(run.said.at(0), ContainsSubstring("seed 4242 (held), 1 LoRA (held)"));
+    CHECK(run.request["loras"] ==
+          nlohmann::json::array({{{"path", style.string()}, {"scale", 0.7}}}));
+    CHECK(result.document["loras"][0]["sha256"] ==
+          apogee::models::sha256_hex("weights of style.safetensors"));
+
+    // --no-lora clears them, said.
+    result = again("plain.mp4", [](VideoGenerateOptions& o) { o.no_lora = true; });
+    REQUIRE(result.exit_code == 0);
+    CHECK(run.said.at(1) == "changed: no LoRAs");
+    CHECK_FALSE(run.request.contains("loras"));
+    CHECK(result.document["loras"] == nlohmann::json::array());
+
+    // --lora replaces the whole set.
+    const std::filesystem::path other = lora(run, "other.safetensors");
+    result = again("other.mp4", [&other](VideoGenerateOptions& o) { o.loras = {other.string()}; });
+    REQUIRE(result.exit_code == 0);
+    CHECK(run.said.at(1) == "changed: 1 LoRA given");
+    CHECK(run.request["loras"] ==
+          nlohmann::json::array({{{"path", other.string()}, {"scale", 1.0}}}));
+
+    // A file changed since the run, or gone, is refused by name.
+    std::ofstream{style, std::ios::binary} << "retrained";
+    result = again("changed.mp4", [](VideoGenerateOptions&) {});
+    CHECK(result.exit_code == 1);
+    CHECK(result.error == "the record's LoRA " + style.string() +
+                              " has changed since that run (its sha256 is not the recorded one) "
+                              "-- --lora runs it as it is now, --no-lora runs without");
+    std::filesystem::remove(style);
+    result = again("gone.mp4", [](VideoGenerateOptions&) {});
+    CHECK(result.error == "the record's LoRA " + style.string() +
+                              " is gone -- --lora names the set to run with, --no-lora runs "
+                              "without");
 }

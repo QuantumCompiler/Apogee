@@ -48,6 +48,14 @@ nlohmann::json request_document(const VideoRequest& request,
     if (!request.variant.empty()) {
         document["variant"] = request.variant;
     }
+    // A run without LoRAs asks exactly what it asked before 49e.
+    if (!request.loras.empty()) {
+        nlohmann::json loras = nlohmann::json::array();
+        for (const LoraFile& lora : request.loras) {
+            loras.push_back({{"path", lora.file.string()}, {"scale", lora.scale}});
+        }
+        document["loras"] = std::move(loras);
+    }
     return document;
 }
 

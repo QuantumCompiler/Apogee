@@ -63,6 +63,10 @@ struct VideoPreset {
     int steps = 0;
 };
 
+/// The most LoRAs one run applies, and the strengths one may have (49e).
+inline constexpr std::size_t kMaxVideoLoras = 4;
+inline constexpr double kMaxLoraScale = 2.0;
+
 inline constexpr VideoPreset kDraftPreset{.name = "draft", .steps = 16};
 inline constexpr VideoPreset kFinalPreset{.name = "final", .steps = kDefaultVideoSteps};
 
@@ -88,7 +92,18 @@ struct VideoGenerateOptions {
     std::filesystem::path extend{};
     /// `--draft` or `--final` (49d): `draft`, `final`, or empty.
     std::string preset{};
+    /// `--lora <path>[:<scale>]` (49e), as given, in order: on a run from a
+    /// record, the whole set replaced. `--no-lora`: none, a record's
+    /// cleared.
+    std::vector<std::string> loras{};
+    bool no_lora = false;
 };
+
+/// `given` -- `<path>[:<scale>]` -- read: the path, and the strength after
+/// its last colon when that reads as a number (1 when there is none). The
+/// refusal, quoting the range, or empty.
+[[nodiscard]] std::string parse_lora(std::string_view given, std::filesystem::path& path,
+                                     double& scale);
 
 /// The settings `options` come to, the defaults filling what was not given
 /// -- or the refusal, quoting the cap it met.

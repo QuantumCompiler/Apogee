@@ -750,8 +750,11 @@ TEST_CASE("the compiled-in driver list names earlier versions, never this build'
     CHECK(std::ranges::is_sorted(retired));
     std::vector<std::string> names;
     std::vector<std::string> currents;
+    // Every driver the refresh walks: the trainers', the mlx backend's, the
+    // code-execution server and, since 49e retired its first copy, video's.
     for (const std::span<const apogee::harness::BundledScript> scripts :
-         {apogee::harness::bundled_training_scripts(), apogee::harness::bundled_mlx_scripts()}) {
+         {apogee::harness::bundled_training_scripts(), apogee::harness::bundled_mlx_scripts(),
+          apogee::harness::bundled_mcp_scripts(), apogee::harness::bundled_video_scripts()}) {
         for (const apogee::harness::BundledScript& script : scripts) {
             names.emplace_back(script.name);
             // A driver this build ships unchanged is not "retired": the

@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <random>
 #include <system_error>
@@ -101,6 +102,32 @@ private:
     return out;
 }
 
+/// What the driver is handed of `loras`: each file and its strength.
+[[nodiscard]] std::vector<video::LoraFile> lora_files(
+    const std::vector<harness::VideoLora>& loras) {
+    std::vector<video::LoraFile> out;
+    for (const harness::VideoLora& lora : loras) {
+        out.push_back(video::LoraFile{.file = lora.path, .scale = lora.scale});
+    }
+    return out;
+}
+
+/// `count` LoRAs, in words.
+[[nodiscard]] std::string lora_words(std::size_t count) {
+    return std::to_string(count) + " LoRA" + (count == 1 ? "" : "s");
+}
+
+/// The LoRAs as the plan line says them: `style.safetensors x0.8`.
+[[nodiscard]] std::string loras_said(const std::vector<harness::VideoLora>& loras) {
+    std::string out;
+    for (const harness::VideoLora& lora : loras) {
+        std::array<char, 32> scale{};
+        std::snprintf(scale.data(), scale.size(), "%g", lora.scale);
+        out += (out.empty() ? "" : ", ") + lora.path.filename().string() + " x" + scale.data();
+    }
+    return out;
+}
+
 /// The record `--from` names: the file itself, or the one beside a clip.
 [[nodiscard]] std::string read_from(const std::filesystem::path& given, harness::VideoRun& out,
                                     std::filesystem::path& document) {
@@ -130,7 +157,8 @@ private:
 /// from where. The refusal, or empty.
 [[nodiscard]] std::string seed_run(const VideoGenerateOptions& options, std::string_view platform,
                                    VideoGenerateOptions& effective, harness::VideoParent& parent,
-                                   std::vector<std::string>& told) {
+                                   std::vector<std::string>& told,
+                                   std::vector<harness::VideoLora>& held) {
     if (!options.from.empty() && !options.extend.empty()) {
         return "--from and --extend are two moves -- take one";
     }
@@ -188,6 +216,17 @@ private:
             taken.push_back("seed " + std::to_string(record.seed) + " (held)");
         } else {
             changed.push_back("seed " + std::to_string(*options.seed));
+        }
+        // The LoRAs, held as the seed is (49e): verified before the run.
+        if (!options.loras.empty()) {
+            changed.push_back(lora_words(options.loras.size()) + " given");
+        } else if (options.no_lora) {
+            if (!record.loras.empty()) {
+                changed.push_back("no LoRAs");
+            }
+        } else if (!record.loras.empty()) {
+            held = record.loras;
+            taken.push_back(lora_words(record.loras.size()) + " (held)");
         }
     };
 
@@ -266,6 +305,31 @@ private:
 }
 
 }  // namespace
+
+std::string parse_lora(std::string_view given, std::filesystem::path& path, double& scale) {
+    scale = 1.0;
+    std::string_view file = given;
+    if (const std::size_t colon = given.rfind(':'); colon != std::string_view::npos) {
+        const std::string tail{given.substr(colon + 1)};
+        char* end = nullptr;
+        const double value = tail.empty() ? 0.0 : std::strtod(tail.c_str(), &end);
+        // Only a number after the last colon is a strength: `C:\lora` and a
+        // name holding a colon stay paths.
+        if (!tail.empty() && end == tail.c_str() + tail.size()) {
+            if (!std::isfinite(value) || value <= 0.0 || value > kMaxLoraScale) {
+                return "--lora " + std::string{given} + ": its strength " + tail +
+                       " is outside (0, " + seconds_text(kMaxLoraScale) + "]";
+            }
+            scale = value;
+            file = given.substr(0, colon);
+        }
+    }
+    if (file.empty()) {
+        return "--lora takes <path>[:<scale>] -- name the LoRA's file";
+    }
+    path = std::filesystem::path{std::string{file}};
+    return {};
+}
 
 int video_frames(double duration, int fps) {
     const double frames = duration * static_cast<double>(fps);
@@ -415,7 +479,11 @@ VideoGenerateResult generate_clip(const harness::Config& config, const models::S
     VideoGenerateOptions effective = options;
     harness::VideoParent parent;
     std::vector<std::string> told;
-    if (std::string refused = seed_run(options, seams.platform, effective, parent, told);
+    std::vector<harness::VideoLora> held;
+    if (options.no_lora && !options.loras.empty()) {
+        return refuse("--lora and --no-lora are two sets -- take one");
+    }
+    if (std::string refused = seed_run(options, seams.platform, effective, parent, told, held);
         !refused.empty()) {
         return refuse(std::move(refused));
     }
@@ -447,6 +515,40 @@ VideoGenerateResult generate_clip(const harness::Config& config, const models::S
             return refuse("--image " + effective.image.string() + " is not a file");
         }
     }
+    // The LoRAs (49e): file facts before anything runs, each hashed for the
+    // record; a record's, verified against the hashes it kept.
+    if (options.loras.size() > kMaxVideoLoras) {
+        return refuse(std::to_string(options.loras.size()) + " LoRAs is over the cap of " +
+                      std::to_string(kMaxVideoLoras) + " a run");
+    }
+    std::vector<harness::VideoLora> loras;
+    for (const std::string& given : options.loras) {
+        std::filesystem::path named;
+        double scale = 1.0;
+        if (std::string refused = parse_lora(given, named, scale); !refused.empty()) {
+            return refuse(std::move(refused));
+        }
+        std::filesystem::path file;
+        if (std::string refused = video::lora_file(std::filesystem::absolute(named, code), file);
+            !refused.empty()) {
+            return refuse(std::move(refused));
+        }
+        loras.push_back(
+            harness::VideoLora{.path = file, .sha256 = models::file_sha256(file), .scale = scale});
+    }
+    for (const harness::VideoLora& lora : held) {
+        if (!std::filesystem::is_regular_file(lora.path, code)) {
+            return refuse("the record's LoRA " + lora.path.string() +
+                          " is gone -- --lora names the set to run with, --no-lora runs "
+                          "without");
+        }
+        if (models::file_sha256(lora.path) != lora.sha256) {
+            return refuse("the record's LoRA " + lora.path.string() +
+                          " has changed since that run (its sha256 is not the recorded one) -- "
+                          "--lora runs it as it is now, --no-lora runs without");
+        }
+        loras.push_back(lora);
+    }
     ResolvedPipeline pipeline;
     if (std::string refused =
             resolve_video_pipeline(roots, effective.model, config.models.default_video, pipeline);
@@ -459,6 +561,10 @@ VideoGenerateResult generate_clip(const harness::Config& config, const models::S
     const video::VideoReadiness ready = seams.ready(pipeline);
     if (!ready.ready()) {
         return refuse(ready.message());
+    }
+    if (!loras.empty() && !ready.peft) {
+        return refuse("a LoRA loads through peft, which the video runtime does not have yet -- " +
+                      std::string{video::kVideoSetupRemedy});
     }
     // A continuation's seed image: the clip's last frame, taken now and
     // gone when the run is.
@@ -504,6 +610,10 @@ VideoGenerateResult generate_clip(const harness::Config& config, const models::S
     run.torch = ready.torch_version;
     run.diffusers = ready.diffusers_version;
     run.created_at = models::now_rfc3339();
+    run.loras = loras;
+    if (!loras.empty()) {
+        run.peft = ready.peft_version;
+    }
 
     if (seams.say) {
         for (const std::string& line : told) {
@@ -513,7 +623,8 @@ VideoGenerateResult generate_clip(const harness::Config& config, const models::S
                   std::to_string(settings.width) + "x" + std::to_string(settings.height) + ", " +
                   std::to_string(settings.frames) + " frames (" + seconds_text(settings.duration) +
                   " s at " + std::to_string(settings.fps) + " fps), " +
-                  std::to_string(settings.steps) + " steps, seed " + std::to_string(run.seed));
+                  std::to_string(settings.steps) + " steps, seed " + std::to_string(run.seed) +
+                  (loras.empty() ? std::string{} : ", LoRAs: " + loras_said(loras)));
     }
     const video::VideoRequest request{.pipeline = pipeline.dir,
                                       .prompt = effective.prompt,
@@ -525,7 +636,8 @@ VideoGenerateResult generate_clip(const harness::Config& config, const models::S
                                       .steps = settings.steps,
                                       .guidance = settings.guidance,
                                       .variant = pipeline.variant,
-                                      .fps = settings.fps};
+                                      .fps = settings.fps,
+                                      .loras = lora_files(loras)};
     const video::VideoOutcome outcome = video::generate_video(
         ready, request, output, seams.work_root, seams.on_event, cancellation, seams.run);
     run.mode = outcome.ready.mode.empty() ? (image.empty() ? "t2v" : "i2v") : outcome.ready.mode;

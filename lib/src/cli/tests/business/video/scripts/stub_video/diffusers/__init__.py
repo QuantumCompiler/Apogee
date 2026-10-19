@@ -7,6 +7,7 @@ Steered by the environment:
   STUB_VIDEO_RECORD  a file each load and each call is appended to, as JSON
   STUB_VIDEO_ERROR   the call raises this
   STUB_VIDEO_HANG    the call never returns after its first step
+  STUB_LORA_ERROR    loading a LoRA raises this (49e)
 """
 
 import json
@@ -90,15 +91,32 @@ class _Pipeline:
         return _Result([_Image(width, height, index) for index in range(num_frames)])
 
 
-class WanPipeline(_Pipeline):
+class _Lora:
+    """diffusers' LoRA loader mixin, as a pipeline whose base model has one
+    carries it (49e)."""
+
+    def load_lora_weights(self, path, weight_name=None, adapter_name=None):
+        _record({"lora": path, "weight_name": weight_name, "adapter": adapter_name})
+        if os.environ.get("STUB_LORA_ERROR"):
+            raise ValueError(os.environ["STUB_LORA_ERROR"])
+
+    def set_adapters(self, names, adapter_weights=None):
+        _record({"adapters": names, "weights": adapter_weights})
+
+
+class WanPipeline(_Lora, _Pipeline):
     pass
 
 
-class WanImageToVideoPipeline(_Pipeline):
+class WanImageToVideoPipeline(_Lora, _Pipeline):
     pass
 
 
-class HunyuanVideoPipeline(_Pipeline):
+class AllegroPipeline(_Pipeline):
+    """A video pipeline with no LoRA loader."""
+
+
+class HunyuanVideoPipeline(_Lora, _Pipeline):
     """A video pipeline diffusers has no image-to-video sibling for here."""
 
 

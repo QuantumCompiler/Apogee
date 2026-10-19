@@ -183,6 +183,14 @@ TEST_CASE("the request the driver reads carries every setting, and only those it
     CHECK(document["image"] == "/seed.png");
     CHECK(document["guidance"] == 5.0);
     CHECK(document["variant"] == "fp16");
+
+    // Each LoRA and its strength, in the order given (49e).
+    request.loras = {{.file = "/loras/style.safetensors", .scale = 0.8},
+                     {.file = "/loras/motion.safetensors"}};
+    document = apogee::video::request_document(request, "/work/frames");
+    CHECK(document["loras"] ==
+          nlohmann::json::array({{{"path", "/loras/style.safetensors"}, {"scale", 0.8}},
+                                 {{"path", "/loras/motion.safetensors"}, {"scale", 1.0}}}));
 }
 
 TEST_CASE("the driver's lines are read into events, and nothing else is one",

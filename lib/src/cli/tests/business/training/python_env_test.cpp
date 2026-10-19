@@ -74,6 +74,8 @@ TEST_CASE("requirement sets are named and carry packages", "[training][python]")
     CHECK(to_string(RequirementSet::Video) == "video");
     CHECK(packages_for(RequirementSet::Video)[0] == "torch>=2.6");
     CHECK(packages_for(RequirementSet::Video)[1] == "diffusers>=0.35");
+    // What diffusers loads a LoRA through (49e).
+    CHECK(packages_for(RequirementSet::Video).back() == "peft>=0.13");
     CHECK_FALSE(requirement_set_from_string("nope").has_value());
     for (const std::string_view name : requirement_set_names()) {
         const auto set = requirement_set_from_string(name);

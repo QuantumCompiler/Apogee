@@ -71,7 +71,7 @@ TEST_CASE("a yes at a terminal installs the video set, saying what and how big",
                                             env.dir().string()));
     CHECK_THAT(out.str(), ContainsSubstring("(the 'video' set: torch>=2.6 diffusers>=0.35 "
                                             "transformers>=4.46 accelerate>=1.0 ftfy>=6.1 "
-                                            "sentencepiece>=0.2 -- several gigabytes"));
+                                            "sentencepiece>=0.2 peft>=0.13 -- several gigabytes"));
     CHECK_THAT(out.str(), ContainsSubstring("Install it now? [y/N] "));
     CHECK_THAT(out.str(), ContainsSubstring("installing the 'video' set: "));
     CHECK(out.str().ends_with("installed\n"));

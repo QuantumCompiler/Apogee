@@ -8,6 +8,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "contracts/cancellation.h"
 #include "training/script_runner.h"
@@ -29,6 +30,12 @@ namespace apogee::video {
 /// (`request_document`). A JSON file rather than arguments, so a prompt is
 /// never on a command line: not in a process listing, not bound by a
 /// command line's length, its UTF-8 intact.
+/// A LoRA the driver applies (49e): the safetensors file, its strength.
+struct LoraFile {
+    std::filesystem::path file;
+    double scale = 1.0;
+};
+
 struct VideoRequest {
     std::filesystem::path pipeline;
     std::string prompt;
@@ -45,6 +52,8 @@ struct VideoRequest {
     std::string variant{};
     /// Frames a second: the assembly's, never the driver's.
     int fps = 0;
+    /// The LoRAs to apply through diffusers' own loader, in order (49e).
+    std::vector<LoraFile> loras{};
 };
 
 /// The request the driver reads: every field of `request` it takes, and

@@ -12,8 +12,9 @@ the clip into place only when everything succeeded.
 Runs under the Python environment Apogee owns, never the system Python.
 Requires the video set there:  apogee train setup --with video
 (torch>=2.6, diffusers>=0.35, transformers>=4.46, accelerate>=1.0, ftfy>=6.1,
-sentencepiece>=0.2 -- floors, as every set's are; the versions that actually
-ran are reported on the "ready" line and kept in the run's document).
+sentencepiece>=0.2, peft>=0.13 -- floors, as every set's are; the versions
+that actually ran are reported on the "ready" line and kept in the run's
+document).
 
     video_generate.py --request <request.json>
 
@@ -22,7 +23,12 @@ The request, written by Apogee as UTF-8 JSON so a prompt is never an argument
 
   {"pipeline": "<dir>", "prompt": "...", "negative_prompt": "..."?,
    "image": "<png>"?, "seed": N, "width": W, "height": H, "frames": N,
-   "steps": N, "guidance": G?, "variant": "fp16"?, "frames_dir": "<dir>"}
+   "steps": N, "guidance": G?, "variant": "fp16"?, "frames_dir": "<dir>",
+   "loras": [{"path": "<file.safetensors>", "scale": S}, ...]?}
+
+Each LoRA (49e) is applied through diffusers' own loader -- the pipeline's
+`load_lora_weights`, then `set_adapters` with every strength -- before the
+first step; Apogee only names the files, and never reads their weights.
 
 The training drivers' protocol, one JSON object per line on stdout:
   {"message": "..."}                                       as it goes
@@ -115,6 +121,34 @@ def image_to_video(diffusers, pipe):
     return sibling.from_pipe(pipe)
 
 
+def apply_loras(pipe, loras):
+    """Each LoRA loaded through the pipeline's own loader, every strength set
+    at once; the failure in words, or None."""
+    if not callable(getattr(pipe, "load_lora_weights", None)):
+        return (
+            f"this pipeline ({type(pipe).__name__}) cannot take a LoRA -- diffusers has no "
+            "LoRA loader for its base model; generate without --lora"
+        )
+    names = []
+    for index, lora in enumerate(loras, start=1):
+        name = f"lora{index}"
+        try:
+            pipe.load_lora_weights(
+                os.path.dirname(lora["path"]),
+                weight_name=os.path.basename(lora["path"]),
+                adapter_name=name,
+            )
+        except Exception as exc:  # the library's own words
+            return f"could not apply the LoRA {lora['path']}: {type(exc).__name__}: {exc}"
+        names.append(name)
+    try:
+        pipe.set_adapters(names, adapter_weights=[float(lora.get("scale", 1.0)) for lora in loras])
+    except Exception as exc:
+        return f"could not set the LoRAs' strengths: {type(exc).__name__}: {exc}"
+    emit({"message": f"applied {len(names)} LoRA{'' if len(names) == 1 else 's'}"})
+    return None
+
+
 def main(argv):
     args = arguments(argv)
     try:
@@ -125,6 +159,10 @@ def main(argv):
         return fail(f"{request['pipeline']} is not a pipeline (no model_index.json)", 2)
     if request.get("image") and not os.path.isfile(request["image"]):
         return fail(f"the seed image {request['image']} is not there", 2)
+    loras = request.get("loras") or []
+    for lora in loras:
+        if not os.path.isfile(lora.get("path", "")):
+            return fail(f"the LoRA {lora.get('path', '')} is not there", 2)
     os.makedirs(request["frames_dir"], exist_ok=True)
 
     emit({"message": "loading torch and diffusers"})
@@ -158,6 +196,10 @@ def main(argv):
         pipe = pipe.to(device)
     except Exception as exc:  # the library's own words, whatever they are
         return fail(f"could not load the pipeline: {type(exc).__name__}: {exc}", 4)
+    if loras:
+        failure = apply_loras(pipe, loras)
+        if failure:
+            return fail(failure, 4)
 
     emit(
         {

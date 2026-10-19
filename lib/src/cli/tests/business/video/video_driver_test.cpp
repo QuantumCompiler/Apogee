@@ -354,3 +354,70 @@ TEST_CASE("the driver's guards come before any library is imported", "[video][dr
         CHECK(at < first_import);
     }
 }
+
+TEST_CASE("the driver applies each LoRA through diffusers' own loader, every strength at once",
+          "[video][driver][lora]") {
+    REQUIRE_PYTHON();
+    Run run;
+    const std::filesystem::path loras = run.dir.path() / "loras";
+    std::filesystem::create_directories(loras);
+    std::ofstream{loras / "style.safetensors"} << "weights";
+    std::ofstream{loras / "motion.safetensors"} << "weights";
+    run.request["loras"] =
+        json::array({{{"path", (loras / "style.safetensors").string()}, {"scale", 0.8}},
+                     {{"path", (loras / "motion.safetensors").string()}, {"scale", 1.0}}});
+    const apogee::training::ScriptOutcome outcome = run.go();
+    INFO(outcome.describe());
+    REQUIRE(outcome.ok);
+    // Loaded, each LoRA by its directory and file under its own adapter, the
+    // strengths set together, then the call.
+    const std::vector<json> record = records_in(run.record);
+    REQUIRE(record.size() == 5);
+    CHECK(record.at(1) == json{{"lora", loras.string()},
+                               {"weight_name", "style.safetensors"},
+                               {"adapter", "lora1"}});
+    CHECK(record.at(2) == json{{"lora", loras.string()},
+                               {"weight_name", "motion.safetensors"},
+                               {"adapter", "lora2"}});
+    CHECK(record.at(3) == json{{"adapters", {"lora1", "lora2"}}, {"weights", {0.8, 1.0}}});
+    CHECK(record.at(4)["call"] == "WanPipeline");
+    CHECK(std::ranges::any_of(run.lines, [](const apogee::training::ScriptEvent& line) {
+        return line.text == "applied 2 LoRAs";
+    }));
+}
+
+TEST_CASE("a LoRA the pipeline cannot take, a missing one, or one the library refuses",
+          "[video][driver][lora]") {
+    REQUIRE_PYTHON();
+    SECTION("a pipeline with no LoRA loader") {
+        Run run{{.class_name = "AllegroPipeline"}};
+        std::ofstream{run.dir.path() / "style.safetensors"} << "weights";
+        run.request["loras"] =
+            json::array({{{"path", (run.dir.path() / "style.safetensors").string()}}});
+        const apogee::training::ScriptOutcome outcome = run.go();
+        CHECK_FALSE(outcome.ok);
+        CHECK(outcome.error ==
+              "this pipeline (AllegroPipeline) cannot take a LoRA -- diffusers "
+              "has no LoRA loader for its base model; generate without --lora");
+    }
+    SECTION("a file that is not there") {
+        Run run;
+        const std::filesystem::path gone = run.dir.path() / "gone.safetensors";
+        run.request["loras"] = json::array({{{"path", gone.string()}}});
+        const apogee::training::ScriptOutcome outcome = run.go();
+        CHECK_FALSE(outcome.ok);
+        CHECK(outcome.error == "the LoRA " + gone.string() + " is not there");
+    }
+    SECTION("refused by the library, in its own words") {
+        Run run;
+        std::ofstream{run.dir.path() / "style.safetensors"} << "weights";
+        run.request["loras"] =
+            json::array({{{"path", (run.dir.path() / "style.safetensors").string()}}});
+        run.environment.emplace_back("STUB_LORA_ERROR", "Target modules not found");
+        const apogee::training::ScriptOutcome outcome = run.go();
+        CHECK_FALSE(outcome.ok);
+        CHECK(outcome.error == "could not apply the LoRA " +
+                                   (run.dir.path() / "style.safetensors").string() +
+                                   ": ValueError: Target modules not found");
+    }
+}
