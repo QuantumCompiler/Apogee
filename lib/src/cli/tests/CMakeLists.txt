@@ -898,7 +898,9 @@ if(UNIX)
     # document on stdout alone, the sidecar, a given seed kept, the caps and
     # an existing output refused, a failure and a real Ctrl-C leaving
     # nothing, no listener in the tree while the driver runs, a library's
-    # print on neither stream, and a missing runtime refused on a pipe.
+    # print on neither stream, the loop (49d: a draft, its final over the
+    # same seed, a continuation, a clip with no record refused), and a
+    # missing runtime refused on a pipe.
     # Skips (77) without python3.
     add_test(NAME cli.video_lifecycle
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/video_e2e.sh"

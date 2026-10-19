@@ -92,6 +92,14 @@ struct ExtractedFrame {
                                        const std::filesystem::path& output,
                                        const FfmpegLimits& limits, std::string& error);
 
+/// `file`'s last frame, written as the PNG `output` (49d): what a clip is
+/// continued from. Read from the last second -- every frame there decoded,
+/// each written over the one before, so the last one stays -- and from the
+/// whole clip when it is shorter than that. False with `error` filled.
+[[nodiscard]] bool extract_last_frame(const std::filesystem::path& file,
+                                      const std::filesystem::path& output,
+                                      const FfmpegLimits& limits, std::string& error);
+
 /// `length` seconds of `file`'s sound from `start` -- to its end when `length`
 /// is 0 -- mixed to mono at `rate` Hz, as a WAV file's bytes. Empty with
 /// `error` filled on failure; a span with no sound in it is empty with none.

@@ -31,6 +31,24 @@ struct VideoSettings {
     std::optional<double> guidance{};
 };
 
+/// Where a run came from, when it came from another (49d): `from` -- a
+/// record run again, its settings taken and the flags' changes over them --
+/// or `extend` -- a clip continued from its last frame. Each record names
+/// its parent, so a final render traces back to its drafts.
+struct VideoParent {
+    /// `from` or `extend`; empty for a run of its own.
+    std::string move{};
+    /// The record read (`from`), or the continued clip's record when it had
+    /// one (`extend`).
+    std::filesystem::path document{};
+    /// The clip whose record was read, or the clip continued.
+    std::filesystem::path clip{};
+    /// The clip whose last frame this run started from -- `extend`'s clip,
+    /// or the one a record run again had continued -- so running it again
+    /// continues the same clip. Empty for none.
+    std::filesystem::path continued{};
+};
+
 struct VideoRun {
     /// `done`, `failed` or `cancelled`.
     std::string status;
@@ -51,7 +69,8 @@ struct VideoRun {
     /// `t2v` or `i2v`.
     std::string mode{};
     std::int64_t seed = 0;
-    /// `given` (`--seed`) or `generated`.
+    /// `given` (`--seed`), `held` (a record's, run again -- 49d) or
+    /// `generated`.
     std::string seed_source{};
     VideoSettings settings{};
     /// Where it ran: torch's device and type, and this build's target.
@@ -68,10 +87,25 @@ struct VideoRun {
     std::string created_at{};
     /// Why it did not land, when it did not.
     std::string error{};
+    /// Where it came from (49d), and the preset it ran at (`draft`,
+    /// `final`), or empty.
+    VideoParent parent{};
+    std::string preset{};
 };
 
 /// The `video.generation` document.
 [[nodiscard]] nlohmann::json video_run_document(const VideoRun& run);
+
+/// `document` read back into a record -- what `--from` runs again (49d).
+/// Nullopt, with `error` saying why, for anything that is not a
+/// `video.generation` record holding its model, seed and settings.
+[[nodiscard]] std::optional<VideoRun> parse_video_run(const nlohmann::json& document,
+                                                      std::string& error);
+
+/// The record at `path`, read and parsed; nullopt with `error` naming the
+/// file and why.
+[[nodiscard]] std::optional<VideoRun> read_video_run(const std::filesystem::path& path,
+                                                     std::string& error);
 
 /// `<clip>.json`: where a clip's record sits -- beside it, its name the
 /// clip's own with `.json` after, so it never takes a name the clip's

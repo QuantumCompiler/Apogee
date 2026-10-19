@@ -319,6 +319,34 @@ std::string encode_video(const std::filesystem::path& directory, int fps,
     return "mpeg4";
 }
 
+bool extract_last_frame(const std::filesystem::path& file, const std::filesystem::path& output,
+                        const FfmpegLimits& limits, std::string& error) {
+    const auto arguments = [&](bool tail) {
+        std::vector<std::string> out{"-nostdin", "-hide_banner", "-loglevel", "error", "-y"};
+        if (tail) {
+            out.insert(out.end(), {"-sseof", "-1"});
+        }
+        out.insert(out.end(), {"-i", file.string(), "-an", "-update", "1", output.string()});
+        return out;
+    };
+    Run ran = run("ffmpeg", arguments(true), limits);
+    std::error_code code;
+    if (!ran.error.empty() || !std::filesystem::is_regular_file(output, code)) {
+        // Shorter than the second asked for: the whole clip, its last frame
+        // the one left.
+        ran = run("ffmpeg", arguments(false), limits);
+    }
+    if (!ran.error.empty()) {
+        error = ran.error;
+        return false;
+    }
+    if (!std::filesystem::is_regular_file(output, code)) {
+        error = "ffmpeg wrote no frame from " + file.string();
+        return false;
+    }
+    return true;
+}
+
 std::string decode_audio_wav(const std::filesystem::path& file, int rate, double start,
                              double length, const FfmpegLimits& limits, std::string& error) {
     std::vector<std::string> arguments{"-nostdin", "-hide_banner", "-loglevel", "error"};

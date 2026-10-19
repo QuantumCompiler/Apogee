@@ -629,19 +629,25 @@ and `sidecar` (where the record was written beside it -- `<clip>.json` -- or
 null when nothing landed); `model` (`name` as it was given, `path`, `class`
 from its `model_index.json`, `ref` and `revision` from its pull record,
 `variant` or null); `prompt`; `image` (the seed image, or null) and `mode`
-(`t2v`, `i2v`); `seed` and `seed_source` (`given` by `--seed`, or
-`generated` and kept); `settings` (`width`, `height`, `duration`, `fps`,
+(`t2v`, `i2v`); `seed` and `seed_source` (`given` by `--seed`, `held` from a
+record run again, or `generated` and kept); `settings` (`width`, `height`, `duration`, `fps`,
 `frames` -- the duration at the rate, rounded to the pipelines' `4k+1` --
 `steps`, `guidance` or null); `device` (`device` and `dtype` as torch
 reported them, `platform` this build's target); `versions` (`torch`,
 `diffusers`, `apogee` -- the ones that ran); `codec` (`h264`, `mpeg4`, or
-null); `seconds`; `created_at`; and `error` when it did not land. The clip
+null); `seconds`; `created_at`; since 49d `parent` -- null for a run of its
+own, else `move` (`from`: a record run again; `extend`: a clip continued),
+`document` (the record read, or the continued clip's record), `clip` (the
+clip that record is beside, or the clip continued) and `continued` (the clip
+whose last frame the run started from, or null) -- and `preset` (`draft`,
+`final`, or null); and `error` when it did not land. The clip
 and its sidecar are written only on `done`; a failed run exits `1` and a
 cancelled one `130`, the output path untouched either way. The narration --
 the device and the scale to expect, then each step -- goes to stderr. A run
 refused before it starts (a cap, an existing output, no pipeline, a runtime
 not installed) prints no document: one line on stderr naming the fix, exit
-`1`.
+`1`. A run from a record (`--from`) or continuing a clip (`--extend`) says
+first, on stderr, what came from the record and what the flags changed.
 
 Since 27l the graph navigation verbs are reads of the same kind:
 

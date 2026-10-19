@@ -12,7 +12,9 @@
 # existing output refused with the output untouched; a failing generation
 # and a real Ctrl-C leaving no clip, no sidecar and no working directory; no
 # listening socket anywhere in the tree while the driver runs; a library's
-# print on neither of apogee's streams; and on a pipe, a missing runtime
+# print on neither of apogee's streams; the loop (49d) -- a draft, the final
+# from it over the same seed and frame, a continuation from the final's last
+# frame, a clip with no record refused; and on a pipe, a missing runtime
 # refused naming the command that installs it.
 #
 # POSIX only. Skips (77) without python3.
@@ -163,6 +165,49 @@ grep -q "was not written" "$WORK_DIR/failing.err" || fail "the output's fate was
 [ ! -e "$WORK_DIR/out/failing.mp4.json" ] || fail "a failed run left a sidecar"
 
 echo "video generate: the pointer, the document, the sidecar, the seed, the refusals - OK"
+
+# --- the loop (49d): a draft, its final, a continuation, a bare clip -------
+run_video() {
+    # run_video <name> [args...]: apogee video generate as given, JSON on stdout.
+    name="$1"; shift
+    set +e
+    "$APOGEE_BIN" video generate "$@" --output-format json \
+        </dev/null >"$WORK_DIR/$name.out" 2>"$WORK_DIR/$name.err"
+    STATUS=$?
+    set -e
+    [ "$STATUS" -eq 0 ] || fail "the $name run failed ($STATUS): $(cat "$WORK_DIR/$name.err")"
+}
+run_video draft "a heron lands" --duration 1 --resolution 128x128 --fps 8 --draft \
+    -o "$WORK_DIR/out/draft.mp4"
+[ "$(field "$WORK_DIR/draft.out" '["preset"]')" = "draft" ] || fail "the draft's preset"
+[ "$(field "$WORK_DIR/draft.out" '["settings"]["steps"]')" = "16" ] || fail "the draft's steps"
+run_video final --from "$WORK_DIR/out/draft.mp4" --final -o "$WORK_DIR/out/final.mp4"
+[ "$(field "$WORK_DIR/final.out" '["seed"]')" = "$(field "$WORK_DIR/draft.out" '["seed"]')" ] \
+    || fail "the final did not hold the draft's seed"
+[ "$(field "$WORK_DIR/final.out" '["seed_source"]')" = "held" ] || fail "the held seed was not said"
+[ "$(field "$WORK_DIR/final.out" '["settings"]["steps"]')" = "50" ] || fail "the final's steps"
+[ "$(field "$WORK_DIR/final.out" '["settings"]["frames"]')" = "$(field "$WORK_DIR/draft.out" '["settings"]["frames"]')" ] \
+    || fail "the final is not the draft's frames"
+[ "$(field "$WORK_DIR/final.out" '["parent"]["document"]')" = "$WORK_DIR/out/draft.mp4.json" ] \
+    || fail "the final does not chain to the draft: $(cat "$WORK_DIR/final.out")"
+grep -q "\[video\] changed: 50 steps (--final)" "$WORK_DIR/final.err" \
+    || fail "what changed was not said: $(cat "$WORK_DIR/final.err")"
+run_video shot2 "the heron takes off" --extend "$WORK_DIR/out/final.mp4" -o "$WORK_DIR/out/shot2.mp4"
+[ "$(field "$WORK_DIR/shot2.out" '["mode"]')" = "i2v" ] || fail "the continuation is not image-to-video"
+[ "$(field "$WORK_DIR/shot2.out" '["parent"]["continued"]')" = "$WORK_DIR/out/final.mp4" ] \
+    || fail "the continuation does not name its clip"
+grep -q "\[video\] extending $WORK_DIR/out/final.mp4 from its last frame" "$WORK_DIR/shot2.err" \
+    || fail "the continuation was not said"
+[ -z "$(ls -A "$APOGEE_HOME/cache/video")" ] || fail "the continuation left its frame behind"
+set +e
+"$APOGEE_BIN" video generate --from "$WORK_DIR/out/missing.mp4" -o "$WORK_DIR/out/never.mp4" \
+    </dev/null >/dev/null 2>"$WORK_DIR/bare.err"
+set -e
+grep -q "settings are never guessed from pixels" "$WORK_DIR/bare.err" \
+    || fail "a clip with no record was not refused: $(cat "$WORK_DIR/bare.err")"
+[ ! -e "$WORK_DIR/out/never.mp4" ] || fail "a refused run wrote a clip"
+
+echo "video generate: a draft, its final over the same seed, a continuation - OK"
 
 # --- Ctrl-C mid-denoise, the tree sampled for a listener while it runs -----
 descendants() {

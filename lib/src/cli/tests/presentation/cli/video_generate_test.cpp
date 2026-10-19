@@ -367,3 +367,282 @@ TEST_CASE("the narration says the device and the scale to expect, then what happ
     CHECK(narrate_video_event({.kind = Kind::Message, .text = "loading the pipeline"}) ==
           "loading the pipeline");
 }
+
+// ---- the loop over the record (49d) -------------------------------------------------
+
+namespace {
+
+/// A first clip, landed with its record: what the loop runs again.
+[[nodiscard]] std::filesystem::path first_clip(Run& run, const std::string& name = "first.mp4") {
+    run.options.output = run.dir.path() / "out" / name;
+    const VideoGenerateResult result = run.go();
+    REQUIRE(result.exit_code == 0);
+    run.said.clear();
+    return run.options.output;
+}
+
+}  // namespace
+
+TEST_CASE("a run from a record runs it again, the seed held and the flags' changes over it",
+          "[cli][video][iterate][from]") {
+    Run run;
+    const std::filesystem::path clip = first_clip(run);
+    const std::filesystem::path record = apogee::harness::video_sidecar_path(clip);
+
+    run.options = {};
+    run.options.from = clip;
+    run.options.prompt = "a heron lands on a pier at dusk, rain";
+    run.options.output = run.dir.path() / "out" / "dusk.mp4";
+    const VideoGenerateResult again = run.go();
+    INFO(again.error);
+    REQUIRE(again.exit_code == 0);
+    // What came from the record and what the flags changed, said before the run.
+    REQUIRE(run.said.size() == 3);
+    CHECK(run.said.at(0) == "from " + record.string() +
+                                ": model org--clip/pipeline/aaaaaaaaaaaa, 1280x704, 24 fps, 5 s, "
+                                "50 steps, seed 4242 (held)");
+    CHECK(run.said.at(1) == "changed: the prompt");
+    CHECK(run.said.at(2).starts_with("org--clip/pipeline/aaaaaaaaaaaa (the record): 1280x704"));
+    // The run itself: the record's settings, the new prompt, the seed held.
+    CHECK(run.request["seed"] == 4242);
+    CHECK(run.request["prompt"] == "a heron lands on a pier at dusk, rain");
+    CHECK(run.request["frames"] == 121);
+    // Its record chains to its parent.
+    CHECK(again.document["seed_source"] == "held");
+    CHECK(again.document["parent"] == nlohmann::json{{"move", "from"},
+                                                     {"document", record.string()},
+                                                     {"clip", clip.string()},
+                                                     {"continued", nullptr}});
+    CHECK(again.document["preset"].is_null());
+
+    // Named by the record itself, the seed changed: said as a change.
+    run.said.clear();
+    run.options.from = record;
+    run.options.prompt.clear();
+    run.options.seed = 7;
+    run.options.output = run.dir.path() / "out" / "seven.mp4";
+    const VideoGenerateResult seven = run.go();
+    REQUIRE(seven.exit_code == 0);
+    CHECK(run.said.at(1) == "changed: seed 7");
+    CHECK(run.request["seed"] == 7);
+    CHECK(run.request["prompt"] == "a heron lands on a pier at dusk");
+    CHECK(seven.document["seed_source"] == "given");
+
+    // Nothing changed is said too: the same run again.
+    run.said.clear();
+    run.options.seed.reset();
+    run.options.output = run.dir.path() / "out" / "same.mp4";
+    REQUIRE(run.go().exit_code == 0);
+    CHECK(run.said.at(1) == "changed: nothing -- the same run again");
+}
+
+TEST_CASE("a run from a record refuses what holds none, and says a record from elsewhere",
+          "[cli][video][iterate][from]") {
+    Run run;
+    const std::filesystem::path clip = first_clip(run);
+    run.options = {};
+    run.options.output = run.dir.path() / "out" / "next.mp4";
+    const auto refused = [&run](const std::filesystem::path& from) {
+        run.options.from = from;
+        const VideoGenerateResult result = run.go();
+        CHECK(result.exit_code == 1);
+        return result.error;
+    };
+    std::ofstream{run.dir.path() / "bare.mp4"} << "MP4";
+    CHECK(refused(run.dir.path() / "bare.mp4") ==
+          "no record beside " + (run.dir.path() / "bare.mp4").string() +
+              " (bare.mp4.json is not there) -- settings are never guessed from pixels; name the "
+              "record itself with --from <record.json>");
+    CHECK(refused(run.dir.path() / "nowhere.json") ==
+          "no record at " + (run.dir.path() / "nowhere.json").string());
+    std::ofstream{run.dir.path() / "other.json"} << R"({"object": "list"})";
+    CHECK(refused(run.dir.path() / "other.json") ==
+          (run.dir.path() / "other.json").string() + " is not a video.generation record");
+    run.options.extend = clip;
+    CHECK(refused(clip) == "--from and --extend are two moves -- take one");
+    run.options.extend.clear();
+
+    // A record made on another platform runs, and says what that means.
+    nlohmann::json record = nlohmann::json::parse(slurp(apogee::harness::video_sidecar_path(clip)));
+    record["device"]["platform"] = "linux-x64";
+    record["device"]["device"] = "cuda";
+    std::ofstream{run.dir.path() / "elsewhere.json"} << record.dump();
+    run.options.from = run.dir.path() / "elsewhere.json";
+    run.said.clear();
+    REQUIRE(run.go().exit_code == 0);
+    CHECK(run.said.at(1) ==
+          "recorded on linux-x64 (cuda); this is macos-arm64 -- the same seed "
+          "may not make the same clip here");
+}
+
+TEST_CASE("a continuation starts from the clip's last frame, matching its record",
+          "[cli][video][iterate][extend]") {
+    Run run;
+    run.options.resolution = "704x1280";
+    const std::filesystem::path clip = first_clip(run, "shot1.mp4");
+    std::vector<std::filesystem::path> framed;
+    std::filesystem::path frame;
+    const auto extend = [&](VideoGenerateOptions options) {
+        run.options = std::move(options);
+        VideoGenerateSeams seams = run.seams();
+        seams.last_frame = [&](const std::filesystem::path& from,
+                               const std::filesystem::path& png) {
+            framed.push_back(from);
+            frame = png;
+            std::ofstream{png} << "PNG";
+            return std::string{};
+        };
+        return apogee::commands::generate_clip(run.config, run.roots, run.options, seams, {});
+    };
+    run.script =
+        R"({"event": "ready", "device": "mps", "dtype": "bfloat16", "pipeline": "WanImageToVideoPipeline", "mode": "i2v"})"
+        "\n"
+        R"({"event": "done", "frames": 5, "width": 704, "height": 1280})"
+        "\n";
+    VideoGenerateOptions options;
+    options.prompt = "the heron takes off";
+    options.extend = clip;
+    options.output = run.dir.path() / "out" / "shot2.mp4";
+    const VideoGenerateResult second = extend(options);
+    INFO(second.error);
+    REQUIRE(second.exit_code == 0);
+    REQUIRE(framed.size() == 1);
+    CHECK(framed.front() == clip);
+    // The frame is the seed image, taken for the run and gone after it.
+    CHECK(run.request["image"] == frame.string());
+    CHECK(frame.parent_path() == run.dir.path() / "cache" / "video");
+    CHECK_FALSE(std::filesystem::exists(frame));
+    // The continuation matches its parent's frame and rate; its seed is new.
+    CHECK(run.request["width"] == 704);
+    CHECK(run.request["height"] == 1280);
+    CHECK(run.said.at(0) == "extending " + clip.string() +
+                                " from its last frame; from its record: model "
+                                "org--clip/pipeline/aaaaaaaaaaaa, 704x1280, 24 fps");
+    CHECK(second.document["mode"] == "i2v");
+    CHECK(second.document["image"].is_null());
+    CHECK(second.document["seed_source"] == "generated");
+    CHECK(second.document["parent"] ==
+          nlohmann::json{{"move", "extend"},
+                         {"document", apogee::harness::video_sidecar_path(clip).string()},
+                         {"clip", clip.string()},
+                         {"continued", clip.string()}});
+
+    // Run again from its record: it continues the same clip again.
+    framed.clear();
+    VideoGenerateOptions again;
+    again.from = run.dir.path() / "out" / "shot2.mp4";
+    again.output = run.dir.path() / "out" / "shot2b.mp4";
+    const VideoGenerateResult rerun = extend(again);
+    INFO(rerun.error);
+    REQUIRE(rerun.exit_code == 0);
+    REQUIRE(framed.size() == 1);
+    CHECK(framed.front() == clip);
+    CHECK(rerun.document["parent"]["move"] == "from");
+    CHECK(rerun.document["parent"]["continued"] == clip.string());
+    CHECK(rerun.document["seed"] == second.document["seed"]);
+
+    // What it refuses.
+    VideoGenerateOptions both = options;
+    both.image = clip;
+    both.output = run.dir.path() / "out" / "both.mp4";
+    CHECK(extend(both).error ==
+          "--extend continues from the clip's last frame; it takes no --image");
+    VideoGenerateOptions missing = options;
+    missing.extend = run.dir.path() / "gone.mp4";
+    missing.output = run.dir.path() / "out" / "missing.mp4";
+    CHECK(extend(missing).error ==
+          "--extend " + (run.dir.path() / "gone.mp4").string() + " is not a file");
+}
+
+TEST_CASE("a frame that cannot be taken refuses the continuation, naming the clip",
+          "[cli][video][iterate][extend]") {
+    Run run;
+    const std::filesystem::path clip = first_clip(run);
+    run.options = {};
+    run.options.prompt = "on";
+    run.options.extend = clip;
+    run.options.output = run.dir.path() / "out" / "next.mp4";
+    VideoGenerateSeams seams = run.seams();
+    seams.last_frame = [](const std::filesystem::path&, const std::filesystem::path&) {
+        return std::string{"ffmpeg failed: Invalid data found when processing input"};
+    };
+    run.spawned = false;
+    const VideoGenerateResult result =
+        apogee::commands::generate_clip(run.config, run.roots, run.options, seams, {});
+    CHECK(result.error == "could not take the last frame of " + clip.string() +
+                              ": ffmpeg failed: Invalid data found when processing input");
+    CHECK_FALSE(run.spawned);
+}
+
+TEST_CASE("a draft, then the final from it: one seed, one frame, only the steps",
+          "[cli][video][iterate][presets]") {
+    Run run;
+    run.options.preset = "draft";
+    const std::filesystem::path draft = first_clip(run, "draft.mp4");
+    CHECK(run.request["steps"] == apogee::commands::kDraftPreset.steps);
+    const nlohmann::json drafted =
+        nlohmann::json::parse(slurp(apogee::harness::video_sidecar_path(draft)));
+    CHECK(drafted["preset"] == "draft");
+    CHECK(drafted["settings"]["steps"] == 16);
+
+    run.options = {};
+    run.options.from = draft;
+    run.options.preset = "final";
+    run.options.output = run.dir.path() / "out" / "final.mp4";
+    const VideoGenerateResult final_run = run.go();
+    INFO(final_run.error);
+    REQUIRE(final_run.exit_code == 0);
+    CHECK(run.said.at(1) == "changed: 50 steps (--final)");
+    // The same seed, frame and length as the draft: the draft's clip, finished.
+    CHECK(run.request["seed"] == drafted["seed"]);
+    CHECK(run.request["width"] == drafted["settings"]["width"]);
+    CHECK(run.request["height"] == drafted["settings"]["height"]);
+    CHECK(run.request["frames"] == drafted["settings"]["frames"]);
+    CHECK(run.request["steps"] == 50);
+    CHECK(final_run.document["preset"] == "final");
+    CHECK(final_run.document["parent"]["move"] == "from");
+
+    // A preset said on a run of its own; --steps given wins over it.
+    run.said.clear();
+    run.options = {};
+    run.options.prompt = "a heron";
+    run.options.preset = "draft";
+    run.options.steps = 30;
+    run.options.output = run.dir.path() / "out" / "thirty.mp4";
+    REQUIRE(run.go().exit_code == 0);
+    CHECK(run.request["steps"] == 30);
+    CHECK(run.said.at(0) == "preset: draft -- 30 steps");
+}
+
+TEST_CASE("a record reads back into the run it records, its parent and preset with it",
+          "[cli][video][iterate][record]") {
+    apogee::harness::VideoRun run;
+    run.status = "done";
+    run.output = "/clips/b.mp4";
+    run.sidecar = "/clips/b.mp4.json";
+    run.model = "org--clip/pipeline/aaaaaaaaaaaa";
+    run.prompt = "a heron";
+    run.seed = 42;
+    run.seed_source = "held";
+    run.settings = {
+        .width = 1280, .height = 704, .duration = 5.0, .fps = 24, .frames = 121, .steps = 16};
+    run.platform = "macos-arm64";
+    run.device = "mps";
+    run.parent = {.move = "from", .document = "/clips/a.mp4.json", .clip = "/clips/a.mp4"};
+    run.preset = "draft";
+    const nlohmann::json document = apogee::harness::video_run_document(run);
+    std::string error;
+    const std::optional<apogee::harness::VideoRun> back =
+        apogee::harness::parse_video_run(document, error);
+    REQUIRE(back.has_value());
+    CHECK(apogee::harness::video_run_document(*back) == document);
+    CHECK(back->parent.document == "/clips/a.mp4.json");
+    CHECK(back->settings.guidance == std::nullopt);
+
+    nlohmann::json no_seed = document;
+    no_seed.erase("seed");
+    CHECK_FALSE(apogee::harness::parse_video_run(no_seed, error).has_value());
+    CHECK(error == "a video.generation record without its model, seed or settings");
+    CHECK_FALSE(apogee::harness::parse_video_run(nlohmann::json::array(), error).has_value());
+    CHECK(error == "not a video.generation record");
+}

@@ -53,6 +53,19 @@ inline constexpr double kDefaultVideoSeconds = 5.0;
 inline constexpr int kDefaultVideoFps = 24;
 inline constexpr int kDefaultVideoSteps = 50;
 
+/// The preview loop's presets (49d), named beside the caps: a draft at a
+/// few steps, the final at the defaults'. Steps alone: under one seed only
+/// the same frame size and frame count draw the same starting noise, so a
+/// smaller draft would be another clip rather than a preview of this one --
+/// a draft that moves right becomes the final of *that* clip.
+struct VideoPreset {
+    std::string_view name;
+    int steps = 0;
+};
+
+inline constexpr VideoPreset kDraftPreset{.name = "draft", .steps = 16};
+inline constexpr VideoPreset kFinalPreset{.name = "final", .steps = kDefaultVideoSteps};
+
 /// What `video generate` was asked for. A setting not given is empty, so a
 /// run seeded from a record (49d) knows which ones the flags changed.
 struct VideoGenerateOptions {
@@ -67,6 +80,14 @@ struct VideoGenerateOptions {
     std::optional<int> steps{};
     std::optional<int> fps{};
     std::filesystem::path output{};
+    /// `--from` (49d): a run's record, or a clip whose record sits beside it
+    /// -- every setting the flags leave alone taken from it, the seed held.
+    std::filesystem::path from{};
+    /// `--extend` (49d): a clip continued from its last frame, through the
+    /// image-to-video path.
+    std::filesystem::path extend{};
+    /// `--draft` or `--final` (49d): `draft`, `final`, or empty.
+    std::string preset{};
 };
 
 /// The settings `options` come to, the defaults filling what was not given
@@ -118,6 +139,9 @@ struct VideoGenerateSeams {
     std::filesystem::path work_root{};
     /// This build's target, for the record.
     std::string platform{};
+    /// A clip's last frame written as a PNG (49d): the error, or empty.
+    std::function<std::string(const std::filesystem::path& clip, const std::filesystem::path& png)>
+        last_frame{};
 };
 
 struct VideoGenerateResult {

@@ -5,12 +5,14 @@
 #include <cmath>
 #include <cstdio>
 #include <exception>
+#include <random>
 #include <system_error>
 
 #include "contracts/config_edit.h"
 #include "modelstore/pipeline_info.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
+#include "platform/platform.h"
 #include "version/version.h"
 
 namespace apogee::commands {
@@ -68,6 +70,199 @@ namespace {
         return "expect a minute or more per clip on a GPU";
     }
     return "expect hours per clip on the CPU -- a GPU or Apple silicon is far faster";
+}
+
+/// A file removed when the run is done with it, however it ends.
+class RemovedAtEnd {
+public:
+    explicit RemovedAtEnd(std::filesystem::path path) : path_{std::move(path)} {}
+
+    ~RemovedAtEnd() {
+        if (!path_.empty()) {
+            std::error_code code;
+            std::filesystem::remove(path_, code);
+        }
+    }
+
+    RemovedAtEnd(const RemovedAtEnd&) = delete;
+    RemovedAtEnd& operator=(const RemovedAtEnd&) = delete;
+    RemovedAtEnd(RemovedAtEnd&&) = delete;
+    RemovedAtEnd& operator=(RemovedAtEnd&&) = delete;
+
+private:
+    std::filesystem::path path_;
+};
+
+[[nodiscard]] std::string joined(const std::vector<std::string>& parts) {
+    std::string out;
+    for (const std::string& part : parts) {
+        out += (out.empty() ? "" : ", ") + part;
+    }
+    return out;
+}
+
+/// The record `--from` names: the file itself, or the one beside a clip.
+[[nodiscard]] std::string read_from(const std::filesystem::path& given, harness::VideoRun& out,
+                                    std::filesystem::path& document) {
+    std::error_code code;
+    const bool named = given.extension() == ".json";
+    document = named ? given : harness::video_sidecar_path(given);
+    if (!std::filesystem::is_regular_file(document, code)) {
+        if (named) {
+            return "no record at " + given.string();
+        }
+        return "no record beside " + given.string() + " (" + document.filename().string() +
+               " is not there) -- settings are never guessed from pixels; name the record "
+               "itself with --from <record.json>";
+    }
+    std::string error;
+    std::optional<harness::VideoRun> run = harness::read_video_run(document, error);
+    if (!run.has_value()) {
+        return error;
+    }
+    out = std::move(*run);
+    return {};
+}
+
+/// `options` as a run seeded from a record (`--from`) or continuing a clip
+/// (`--extend`) has them, the presets applied (49d): `effective` holds the
+/// result, `parent` where it came from, `told` the lines saying what came
+/// from where. The refusal, or empty.
+[[nodiscard]] std::string seed_run(const VideoGenerateOptions& options, std::string_view platform,
+                                   VideoGenerateOptions& effective, harness::VideoParent& parent,
+                                   std::vector<std::string>& told) {
+    if (!options.from.empty() && !options.extend.empty()) {
+        return "--from and --extend are two moves -- take one";
+    }
+    if (!options.extend.empty() && !options.image.empty()) {
+        return "--extend continues from the clip's last frame; it takes no --image";
+    }
+    std::error_code code;
+    std::vector<std::string> taken;
+    std::vector<std::string> changed;
+    // What a record supplies a run, each setting the flags left alone.
+    const auto take = [&](const harness::VideoRun& record, bool whole) {
+        if (options.model.empty()) {
+            effective.model = record.model;
+            taken.push_back("model " + record.model);
+        } else if (whole) {
+            changed.push_back("model " + options.model);
+        }
+        if (options.prompt.empty()) {
+            effective.prompt = record.prompt;
+            taken.push_back("the prompt");
+        } else if (whole) {
+            changed.push_back("the prompt");
+        }
+        const std::string size =
+            std::to_string(record.settings.width) + "x" + std::to_string(record.settings.height);
+        if (options.resolution.empty()) {
+            effective.resolution = size;
+            taken.push_back(size);
+        } else if (whole) {
+            changed.push_back(options.resolution);
+        }
+        if (!options.fps.has_value()) {
+            effective.fps = record.settings.fps;
+            taken.push_back(std::to_string(record.settings.fps) + " fps");
+        } else if (whole) {
+            changed.push_back(std::to_string(*options.fps) + " fps");
+        }
+        if (!whole) {
+            return;
+        }
+        if (!options.duration.has_value()) {
+            effective.duration = record.settings.duration;
+            taken.push_back(seconds_text(record.settings.duration) + " s");
+        } else {
+            changed.push_back(seconds_text(*options.duration) + " s");
+        }
+        if (!options.steps.has_value()) {
+            effective.steps = record.settings.steps;
+            taken.push_back(std::to_string(record.settings.steps) + " steps");
+        } else {
+            changed.push_back(std::to_string(*options.steps) + " steps");
+        }
+        if (!options.seed.has_value()) {
+            effective.seed = record.seed;
+            taken.push_back("seed " + std::to_string(record.seed) + " (held)");
+        } else {
+            changed.push_back("seed " + std::to_string(*options.seed));
+        }
+    };
+
+    if (!options.from.empty()) {
+        harness::VideoRun record;
+        std::filesystem::path document;
+        if (std::string refused =
+                read_from(std::filesystem::absolute(options.from, code), record, document);
+            !refused.empty()) {
+            return refused;
+        }
+        parent = harness::VideoParent{.move = "from", .document = document, .clip = record.output};
+        take(record, true);
+        if (!options.image.empty()) {
+            changed.push_back("the seed image");
+        } else if (!record.parent.continued.empty()) {
+            // It continued a clip: run again, it continues that clip again.
+            if (!std::filesystem::is_regular_file(record.parent.continued, code)) {
+                return "the clip that run continued, " + record.parent.continued.string() +
+                       ", is gone -- its last frame cannot be taken again; pass --image";
+            }
+            parent.continued = record.parent.continued;
+            taken.push_back("the last frame of " + record.parent.continued.string());
+        } else if (!record.image.empty()) {
+            if (!std::filesystem::is_regular_file(record.image, code)) {
+                return "the record's seed image " + record.image.string() +
+                       " is gone -- pass --image";
+            }
+            effective.image = record.image;
+            taken.push_back("the seed image");
+        }
+        told.push_back("from " + document.string() + ": " + joined(taken));
+        if (!record.platform.empty() && !platform.empty() && record.platform != platform) {
+            told.push_back("recorded on " + record.platform +
+                           (record.device.empty() ? "" : " (" + record.device + ")") +
+                           "; this is " + std::string{platform} +
+                           " -- the same seed may not make the same clip here");
+        }
+    } else if (!options.extend.empty()) {
+        const std::filesystem::path clip = std::filesystem::absolute(options.extend, code);
+        if (!std::filesystem::is_regular_file(clip, code)) {
+            return "--extend " + options.extend.string() + " is not a file";
+        }
+        parent = harness::VideoParent{.move = "extend", .clip = clip, .continued = clip};
+        // Its record, when it has one: the continuation matches its frame,
+        // its rate and its model.
+        const std::filesystem::path document = harness::video_sidecar_path(clip);
+        std::string ignored;
+        if (const std::optional<harness::VideoRun> record =
+                std::filesystem::is_regular_file(document, code)
+                    ? harness::read_video_run(document, ignored)
+                    : std::nullopt) {
+            parent.document = document;
+            take(*record, false);
+        }
+        told.push_back("extending " + clip.string() + " from its last frame" +
+                       (taken.empty() ? "" : "; from its record: " + joined(taken)));
+    }
+    if (!options.preset.empty()) {
+        const VideoPreset& preset =
+            options.preset == kDraftPreset.name ? kDraftPreset : kFinalPreset;
+        if (!options.steps.has_value()) {
+            effective.steps = preset.steps;
+            changed.push_back(std::to_string(preset.steps) + " steps (--" +
+                              std::string{preset.name} + ")");
+        }
+    }
+    if (!options.from.empty()) {
+        told.push_back(changed.empty() ? "changed: nothing -- the same run again"
+                                       : "changed: " + joined(changed));
+    } else if (!options.preset.empty()) {
+        told.push_back("preset: " + options.preset + " -- " +
+                       std::to_string(effective.steps.value_or(kDefaultVideoSteps)) + " steps");
+    }
+    return {};
 }
 
 }  // namespace
@@ -215,19 +410,29 @@ VideoGenerateResult generate_clip(const harness::Config& config, const models::S
         return result;
     };
 
+    // A run seeded from a record, or continuing a clip (49d): the settings
+    // the flags left alone filled from it, and what came from where said.
+    VideoGenerateOptions effective = options;
+    harness::VideoParent parent;
+    std::vector<std::string> told;
+    if (std::string refused = seed_run(options, seams.platform, effective, parent, told);
+        !refused.empty()) {
+        return refuse(std::move(refused));
+    }
+
     // Every refusal before anything runs.
-    if (options.prompt.empty()) {
+    if (effective.prompt.empty()) {
         return refuse("a prompt is required -- say what the clip shows");
     }
     harness::VideoSettings settings;
-    if (std::string refused = resolve_video_settings(options, settings); !refused.empty()) {
+    if (std::string refused = resolve_video_settings(effective, settings); !refused.empty()) {
         return refuse(std::move(refused));
     }
     std::error_code code;
-    if (options.output.empty()) {
+    if (effective.output.empty()) {
         return refuse("-o names the clip to write");
     }
-    const std::filesystem::path output = std::filesystem::absolute(options.output, code);
+    const std::filesystem::path output = std::filesystem::absolute(effective.output, code);
     if (std::filesystem::exists(output, code)) {
         return refuse(output.string() +
                       " exists -- a generation never writes over a file; name another with -o");
@@ -236,22 +441,42 @@ VideoGenerateResult generate_clip(const harness::Config& config, const models::S
         return refuse("no directory " + output.parent_path().string() + " for the clip");
     }
     std::filesystem::path image;
-    if (!options.image.empty()) {
-        image = std::filesystem::absolute(options.image, code);
+    if (!effective.image.empty()) {
+        image = std::filesystem::absolute(effective.image, code);
         if (!std::filesystem::is_regular_file(image, code)) {
-            return refuse("--image " + options.image.string() + " is not a file");
+            return refuse("--image " + effective.image.string() + " is not a file");
         }
     }
     ResolvedPipeline pipeline;
     if (std::string refused =
-            resolve_video_pipeline(roots, options.model, config.models.default_video, pipeline);
+            resolve_video_pipeline(roots, effective.model, config.models.default_video, pipeline);
         !refused.empty()) {
         return refuse(std::move(refused));
+    }
+    if (options.model.empty() && !effective.model.empty()) {
+        pipeline.source = parent.move == "extend" ? "the continued clip's record" : "the record";
     }
     const video::VideoReadiness ready = seams.ready(pipeline);
     if (!ready.ready()) {
         return refuse(ready.message());
     }
+    // A continuation's seed image: the clip's last frame, taken now and
+    // gone when the run is.
+    std::filesystem::path frame;
+    if (!parent.continued.empty()) {
+        std::filesystem::create_directories(seams.work_root, code);
+        frame = seams.work_root / ("frame-" + std::to_string(platform::current_process_id()) + "-" +
+                                   std::to_string(std::random_device{}()) + ".png");
+        const std::string taken =
+            seams.last_frame ? seams.last_frame(parent.continued, frame) : "no way to take a frame";
+        if (!taken.empty()) {
+            std::filesystem::remove(frame, code);
+            return refuse("could not take the last frame of " + parent.continued.string() + ": " +
+                          taken);
+        }
+        image = frame;
+    }
+    const RemovedAtEnd frame_removed{frame};
 
     harness::VideoRun run;
     run.output = output;
@@ -261,11 +486,18 @@ VideoGenerateResult generate_clip(const harness::Config& config, const models::S
     run.model_ref = pipeline.ref;
     run.model_revision = pipeline.revision;
     run.variant = pipeline.variant;
-    run.prompt = options.prompt;
-    run.image = image;
-    run.seed_source = options.seed.has_value() ? "given" : "generated";
-    run.seed =
-        options.seed.has_value() ? *options.seed : (seams.random_seed ? seams.random_seed() : 0);
+    run.prompt = effective.prompt;
+    // A continuation's image is its parent clip's last frame, not a file
+    // that outlives the run: the parent says it.
+    run.image = parent.continued.empty() ? image : std::filesystem::path{};
+    run.parent = parent;
+    run.preset = effective.preset;
+    // `--seed`, a record's seed run again (49d), or one drawn now.
+    run.seed_source = options.seed.has_value()     ? "given"
+                      : effective.seed.has_value() ? "held"
+                                                   : "generated";
+    run.seed = effective.seed.has_value() ? *effective.seed
+                                          : (seams.random_seed ? seams.random_seed() : 0);
     run.settings = settings;
     run.platform = seams.platform;
     run.apogee = std::string{version::semantic()};
@@ -274,6 +506,9 @@ VideoGenerateResult generate_clip(const harness::Config& config, const models::S
     run.created_at = models::now_rfc3339();
 
     if (seams.say) {
+        for (const std::string& line : told) {
+            seams.say(line);
+        }
         seams.say(pipeline.handle + " (" + pipeline.source + "): " +
                   std::to_string(settings.width) + "x" + std::to_string(settings.height) + ", " +
                   std::to_string(settings.frames) + " frames (" + seconds_text(settings.duration) +
@@ -281,7 +516,7 @@ VideoGenerateResult generate_clip(const harness::Config& config, const models::S
                   std::to_string(settings.steps) + " steps, seed " + std::to_string(run.seed));
     }
     const video::VideoRequest request{.pipeline = pipeline.dir,
-                                      .prompt = options.prompt,
+                                      .prompt = effective.prompt,
                                       .image = image,
                                       .seed = run.seed,
                                       .width = settings.width,

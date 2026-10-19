@@ -8453,3 +8453,40 @@ Decisions taken while building, for veto:
 **Verified.** `lib/scripts/cicd.sh --test`: 3448 of 3450 tests passed. The two failures had one cause: a test name of mine began with `--model`, which `cli.test_names` refuses and which ctest's filter then read as an option. After the rename, both cases, `cli.video_lifecycle` and `cli.bare_help` pass when run again. The build is warning-free and the format clean.
 
 **Not run on real weights**: a genuine clip is the user's run, per the document. Every narration line and every document field was exercised over the stub runtime.
+
+### 2026-10-19 — `video-iterate` (backlog item 49d): the next run, seeded from the last
+
+**Why.** One clip is never the clip: every video harness lives on the loop of regenerating with one thing changed, extending the shot, and previewing cheap before rendering the winner. 49c's record makes it nearly free. This is the loop over that record, built as new runs rather than a session.
+
+- [x] **`video generate --from <record | clip>`** runs a recorded run again.
+  - The record is named itself, or found beside a clip as `<clip>.json`. A clip with no record is refused by name: settings are never guessed from pixels.
+  - Every setting the flags leave alone is taken from the record, and the seed is held unless `--seed` changes it. A new prompt is the positional, as on any run.
+  - Before the run, stderr says what came from where, for example `from <record>: model …, 1280x704, 24 fps, 5 s, 50 steps, seed 4242 (held)`, then `changed: the prompt` (or `nothing -- the same run again`).
+  - A record made on another platform runs, and says the same seed may not make the same clip here.
+- [x] **`--extend <clip>`** continues a clip.
+  - Its last frame is taken through the ffmpeg seam (`platform::extract_last_frame`, from the last second) into `cache/video` and removed after the run, and it seeds the image-to-video path.
+  - The clip's record, when it has one, supplies its model, frame size and rate, so the continuation matches. The seed is new unless given.
+  - A record that continued a clip, run again with `--from`, continues the same clip again.
+- [x] **`--draft` / `--final`**: named presets beside the caps (`kDraftPreset` 16 steps, `kFinalPreset` the default 50), mutually exclusive, over the same frame and seed. A draft that moves right, run again with `--from <draft> --final`, is that clip at full quality. `--steps` given wins over a preset.
+- [x] **The record grows** (`contracts/video_run`):
+  - `parent` (null, or `move` -- `from`, `extend` -- with the record read, its clip, and the clip continued);
+  - `preset`;
+  - `seed_source` `held`;
+  - a reader, `parse_video_run`/`read_video_run`, that the verb and the tests share.
+
+  A final render traces back to its drafts, and the chain is data in the records, stored nowhere else.
+- [x] **The tests**:
+  - `cli/video_generate_test`: over the seams. Covers the seed held and changed, nothing changed, every refusal, a record from elsewhere, a continuation matching its parent and continued again from its record, a frame that cannot be taken, a draft then its final over one seed and frame, `--steps` over a preset, and a record read back;
+  - `ffmpeg_test`: the last frame;
+  - `cli.video_lifecycle` on the real binary: a draft, its final holding the seed and frames and chaining to the draft's record, a continuation as image-to-video, and a clip with no record refused.
+
+Decisions taken while building, for veto:
+- **The presets change steps, not the frame size.** The document described them as steps-by-resolution pairs. Under one seed, though, only the same frame size and frame count draw the same starting noise, so a smaller draft would be a different clip, not a preview of this one. The draft is the final's own frame at 16 steps; the values are first guesses, to tune on the first real run.
+- **A prompt is changed with the positional**, `video generate "…at dusk" --from clip.mp4`, one spelling as on every run. The document's example wrote it as `--prompt`.
+- **`--extend` draws a new seed**: the document holds the seed for `--from` and `--final` only. It takes the parent's model, frame and rate when the parent has a record, and its prompt too when none is given.
+- **The continued frame is never kept.** The record says `continued: <clip>` and `--from` takes the frame again, so a record stays a reproducible instruction rather than pointing at a temporary file.
+- **`--from` with `--extend`, and `--extend` with `--image`, are refused** as two moves at once.
+
+**Verified.** `lib/scripts/cicd.sh --test`: all 3457 tests pass. This run also covers 49c: its two renamed cases pass inside it. The build is warning-free and the format clean.
+
+**Not run on real weights**: whether a 16-step draft previews the 50-step final well enough is the reference pipeline's to show, on the user's run.

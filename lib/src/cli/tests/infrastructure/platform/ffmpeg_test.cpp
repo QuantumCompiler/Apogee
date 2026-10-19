@@ -212,3 +212,29 @@ TEST_CASE("frames become an mp4: H.264 asked first, MPEG-4 when the build has no
     CHECK(apogee::platform::encode_video(frames, 16, clip, FfmpegLimits{}, error).empty());
     CHECK(error == "ffmpeg failed: Invalid data found when processing input");
 }
+
+TEST_CASE("a clip's last frame is written as a PNG, from its last second",
+          "[platform][ffmpeg][video]") {
+    // 49d: what `--extend` continues a clip from.
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("no child processes on this platform");
+    }
+    const Folder folder;
+    const FakeFfmpeg fake;
+    const std::filesystem::path clip = folder.dir.path() / "clip.mp4";
+    std::ofstream{clip} << "MP4";
+    const std::filesystem::path frame = folder.dir.path() / "last.png";
+    std::string error;
+    REQUIRE(apogee::platform::extract_last_frame(clip, frame, FfmpegLimits{}, error));
+    CHECK(error.empty());
+    std::ifstream in{frame};
+    CHECK(std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}} ==
+          "PNG last frame");
+    CHECK(fake.logged().find("-sseof -1 -i " + clip.string() + " -an -update 1 " +
+                             frame.string()) != std::string::npos);
+
+    fake.fail();
+    std::filesystem::remove(frame);
+    CHECK_FALSE(apogee::platform::extract_last_frame(clip, frame, FfmpegLimits{}, error));
+    CHECK(error == "ffmpeg failed: Invalid data found when processing input");
+}

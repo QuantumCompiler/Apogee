@@ -16,6 +16,7 @@
 #include "contracts/paths.h"
 #include "machine/json_reporter.h"
 #include "operations/renames.h"
+#include "platform/ffmpeg.h"
 #include "platform/platform.h"
 #include "views/status_line.h"
 
@@ -102,6 +103,13 @@ void video_generate(const RootContext& context, GenerateFlags flags, const CLI::
         return static_cast<std::int64_t>(device() & 0x7fffffffU);
     };
     seams.work_root = harness::video_work_dir();
+    seams.last_frame = [](const std::filesystem::path& clip, const std::filesystem::path& png) {
+        const harness::CancellationToken token = InterruptScope::token();
+        platform::FfmpegLimits limits;
+        limits.stopped = [token] { return token.stop_requested(); };
+        std::string error;
+        return platform::extract_last_frame(clip, png, limits, error) ? std::string{} : error;
+    };
     seams.platform = platform::host_target();
 
     VideoGenerateResult result;
@@ -147,7 +155,8 @@ void VideoCommand::bind(CLI::App& root, const RootContext& context) {
         "generate",
         "Generate one clip -- narrated step by step, written only when whole, its record beside "
         "it");
-    generate->add_option("prompt", flags->options.prompt, "What the clip shows")->required();
+    generate->add_option("prompt", flags->options.prompt,
+                         "What the clip shows (with --from, a new prompt over the recorded one)");
     generate
         ->add_option("-o,--output", flags->options.output,
                      "The clip to write (an mp4; never over an existing file)")
@@ -180,6 +189,25 @@ void VideoCommand::bind(CLI::App& root, const RootContext& context) {
                          "Frames a second, " + std::to_string(kMinVideoFps) + "-" +
                              std::to_string(kMaxVideoFps) + " (default " +
                              std::to_string(kDefaultVideoFps) + ")");
+    generate
+        ->add_option("--from", flags->options.from,
+                     "Run a recorded run again: its record, or a clip with its record beside it "
+                     "-- every setting not given here taken from it, the seed held")
+        ->type_name(kPathValue);
+    generate
+        ->add_option("--extend", flags->options.extend,
+                     "Continue a clip from its last frame (image-to-video), matching its record "
+                     "when it has one")
+        ->type_name(kPathValue);
+    CLI::Option* draft = generate->add_flag_callback(
+        "--draft", [flags] { flags->options.preset = std::string{kDraftPreset.name}; },
+        "A cheap preview: " + std::to_string(kDraftPreset.steps) +
+            " steps at the same frame and seed, so the final of the same seed is this clip");
+    CLI::Option* final_preset = generate->add_flag_callback(
+        "--final", [flags] { flags->options.preset = std::string{kFinalPreset.name}; },
+        "The full render: " + std::to_string(kFinalPreset.steps) +
+            " steps -- with --from a draft, that draft's clip at full quality");
+    draft->excludes(final_preset);
     add_read_format(generate, format);
     generate->callback([&context, flags, format, generate]() {
         flags->format = *format;
