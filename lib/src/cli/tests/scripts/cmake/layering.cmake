@@ -521,9 +521,9 @@ if(NOT VIOLATIONS STREQUAL "")
 endif()
 
 # `review/` (48c) is the review core: plain data in and out, its model calls
-# arriving as closures and the forge reached by the command that composes it
-# -- so it stands on the contracts (the skills, the finding contract, SHA-256)
-# and nothing else.
+# arriving as closures. It stands on the contracts (the skills, the finding
+# contract, SHA-256), and since 48d the sweep on the forge seam (the
+# listings) -- never a backend or a surface.
 file(GLOB_RECURSE review_sources "${PACKAGE_DIR_review}/*.h" "${PACKAGE_DIR_review}/*.cpp")
 if(review_sources STREQUAL "")
     message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_review} — "
@@ -532,7 +532,7 @@ endif()
 foreach(source IN LISTS review_sources)
     file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
     foreach(line IN LISTS project_includes)
-        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(review|contracts)/")
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(review|contracts|forge)/")
             get_filename_component(name "${source}" NAME)
             list(APPEND VIOLATIONS "  review/${name} reaches past its floor: ${line}")
         endif()
@@ -541,7 +541,7 @@ endforeach()
 if(NOT VIOLATIONS STREQUAL "")
     string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
     message(FATAL_ERROR "the review package includes more than its floor:\n${pretty}\n"
-                        "review/ may include only contracts/ and itself.")
+                        "review/ may include only contracts/, forge/ and itself.")
 endif()
 
 # The packages A1 carved, each held to the floor it was carved for.

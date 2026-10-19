@@ -194,6 +194,16 @@ const std::map<std::string, Classification>& table() {
         {"task halt", carve_out("steers the task running on the host; task control is CLI-only")},
         {"task cancel",
          carve_out("ends the turn of the task running on the host; task control is CLI-only")},
+        {"review sweep",
+         carve_out("the scheduler-invoked pass over the host's own watermarks and lock, posting "
+                   "through the host's own gh or glab login; review control is CLI-only, the "
+                   "cycle's precedent")},
+        {"review targets add",
+         carve_out("the sweep's own config unit, read by review control on the host alone; review "
+                   "control is CLI-only")},
+        {"review targets delete",
+         carve_out("the sweep's own config unit, read by review control on the host alone; review "
+                   "control is CLI-only")},
         {"review mr",
          carve_out("reviews with the host's own models and posts through the host's own gh or "
                    "glab login, on a user's act; review control is CLI-only, the training "

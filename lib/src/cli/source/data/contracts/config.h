@@ -640,6 +640,35 @@ struct McpServerConfig {
     bool enabled = true;
 };
 
+/// One entry under `review:` (48d) -- what a `review sweep` watches: one
+/// repository, or an owner whose repositories are listed at sweep time,
+/// on GitHub or GitLab, with the lenses it runs, whether a sweep may post
+/// there, and whether drafts count.
+///
+/// Keyed by name in a map like every other section. Exactly one of `repo`
+/// and `owner` is set. `post` is the target's declared grant: a sweep posts
+/// with nobody at the terminal, so it posts only where the config or the
+/// run's `--allow-post` says it may, and otherwise reviews into documents.
+struct ReviewTargetConfig {
+    /// `github` or `gitlab`.
+    std::string forge = "github";
+    /// The forge's host; empty for its default (`github.com`, `gitlab.com`).
+    std::string host;
+    /// `owner/repo` on GitHub, `group/project` on GitLab.
+    std::string repo;
+    /// An organization, a user or a group whose repositories are swept.
+    std::string owner;
+    /// The lenses to run; empty lets each merge request's plan decide.
+    std::vector<std::string> skills;
+    bool post = false;
+    bool drafts = false;
+    /// The backend that reviews; empty for the chat role.
+    std::string model;
+    /// The forge CLI to spawn -- `gh` or `glab` -- by path; empty for its
+    /// name on PATH.
+    std::string cli;
+};
+
 /// What an agent may call. **This is the agent's permission model**: a policy
 /// is enforced by what is registered, never by asking the model to behave.
 ///
@@ -1078,6 +1107,10 @@ struct Config {
     /// for the same reason `backends` is.
     std::map<std::string, McpServerConfig, CaseInsensitiveLess> mcp_servers;
 
+    /// Review sweep targets (48d) keyed by name AS WRITTEN, compared
+    /// case-insensitively.
+    std::map<std::string, ReviewTargetConfig, CaseInsensitiveLess> review_targets;
+
     /// Agents keyed by name AS WRITTEN, compared case-insensitively. The
     /// bundled agents are not here unless the file overrides one: they are
     /// compiled in (see `harness/assets.h`) and a same-named entry wins.
@@ -1120,6 +1153,8 @@ struct Config {
 
     /// Case-insensitive lookup of an MCP server entry. nullptr when absent.
     [[nodiscard]] const McpServerConfig* find_mcp_server(std::string_view name) const noexcept;
+    [[nodiscard]] const ReviewTargetConfig* find_review_target(
+        std::string_view name) const noexcept;
 
     /// Server names as written, in the map's (case-folded) order.
     [[nodiscard]] std::vector<std::string> mcp_server_names() const;

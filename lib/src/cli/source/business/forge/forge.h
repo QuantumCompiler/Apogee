@@ -60,6 +60,16 @@ struct MergeRequestRef {
 /// `gitlab.com/group/project!4` -- what a watermark is keyed by.
 [[nodiscard]] std::string to_string(const MergeRequestRef& ref);
 
+struct ForgeProject;
+
+/// A reference to `project` for a call that is not about one merge request
+/// (a listing): its forge and host, number 0.
+[[nodiscard]] MergeRequestRef project_ref(const ForgeProject& project);
+
+/// Whether `text` is a timestamp a listing may carry into a query: digits
+/// and `-:.TZ` only.
+[[nodiscard]] bool is_timestamp(std::string_view text) noexcept;
+
 /// Whether `text` is a commit id: 7 to 64 hexadecimal digits, nothing else
 /// -- checked before one read from a comment reaches an API path.
 [[nodiscard]] bool is_commit_id(std::string_view text) noexcept;
@@ -107,6 +117,24 @@ struct PostedComment {
     /// Empty for a general comment.
     std::string path;
     std::uint32_t line = 0;
+};
+
+/// A repository on a forge -- or, for `owner_projects`, an owner.
+struct ForgeProject {
+    Forge forge = Forge::GitHub;
+    /// Empty for the forge's default host.
+    std::string host;
+    std::string project;
+};
+
+/// An open merge request, as a listing shows it.
+struct MergeRequestListing {
+    MergeRequestRef ref;
+    std::string title;
+    std::string author;
+    /// ISO 8601, as the forge wrote it.
+    std::string updated_at;
+    bool draft = false;
 };
 
 /// What a publish did.
@@ -188,6 +216,17 @@ public:
     /// itself to -- the lines a new push added).
     [[nodiscard]] virtual std::string compare(const MergeRequestRef& ref, std::string_view from,
                                               std::string_view to) = 0;
+
+    /// The open merge requests on `project` updated after `updated_after`
+    /// (ISO 8601; empty for all), oldest update first (since 48d: what a
+    /// sweep reads past its watermark).
+    [[nodiscard]] virtual std::vector<MergeRequestListing> open_merge_requests(
+        const ForgeProject& project, std::string_view updated_after) = 0;
+
+    /// The repositories `owner.project` holds -- an organization's, a
+    /// group's (its subgroups' too), else a user's -- archived ones left
+    /// out (since 48d: an owner target, expanded at sweep time).
+    [[nodiscard]] virtual std::vector<std::string> owner_projects(const ForgeProject& owner) = 0;
 
     /// Posts one comment on its own, anchored to `request`'s head.
     virtual void create_comment(const MergeRequest& request, const InlineComment& comment) = 0;

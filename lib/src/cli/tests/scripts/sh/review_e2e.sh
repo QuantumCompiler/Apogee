@@ -5,7 +5,11 @@
 # over one pull request: `--dry-run` reviews and posts nothing; a piped run
 # without `--yes` reviews and is refused posting, saying how to post; `--yes`
 # posts one review holding the finding, its body on gh's stdin. The run's
-# document comes out on stdout alone, the narration on stderr.
+# document comes out on stdout alone, the narration on stderr. Then `review
+# sweep` (48d) over one target: a first sweep starting at now, `--since`
+# reviewing into the document without a grant, the watermark kept and
+# nothing reviewed twice, the lock refusing a second sweep, `--allow-post`
+# posting.
 #
 # POSIX only, like the other shell checks. Skips (77) without python3.
 set -eu
@@ -38,6 +42,9 @@ esac
 case " \$* " in
     *"application/vnd.github.diff"*) cat "$FIXTURES/review/security.defect.diff" ;;
     *" --method POST "*) echo '{}' ;;
+    *"pulls?state=open"*)
+        echo '[{"number": 12, "title": "Thumbnails", "user": {"login": "dev"},'
+        echo '  "updated_at": "2026-10-18T09:00:00Z", "draft": false}]' ;;
     *" --paginate "*) echo '[]' ;;
     *" api user "*) echo '{"login": "apogee-bot"}' ;;
     *" repos/acme/widget/pulls/12 "*)
@@ -100,3 +107,44 @@ grep -q '^body .*apogee-review:summary head=cafe2222cafe2222' "$LOG" || fail "th
 [ "$(grep -c -- '--method POST' "$LOG")" = "1" ] || fail "posted more than once"
 
 echo "review mr: reviewed, refused unasked, posted one batch under --yes - OK"
+
+# --- review sweep: a target, its watermark, the lock ------------------------
+"$APOGEE_BIN" review targets add widget --repo acme/widget --skills security </dev/null >/dev/null \
+    || fail "review targets add"
+sweep() {
+    name="$1"; shift
+    "$APOGEE_BIN" review sweep --output-format json "$@" \
+        </dev/null >"$WORK_DIR/$name.json" 2>"$WORK_DIR/$name.err" \
+        || fail "the $name sweep failed: $(cat "$WORK_DIR/$name.err")"
+}
+MARKS="$APOGEE_HOME/review/watermarks.json"
+# A first sweep starts at now: history stays unreviewed.
+sweep first
+[ "$(field "$WORK_DIR/first.json" '["object"]')" = "review.sweep" ] || fail "not a review.sweep document"
+[ "$(field "$WORK_DIR/first.json" '["reviewed"]')" = "0" ] || fail "a first sweep reviewed history"
+[ "$(field "$WORK_DIR/first.json" '["targets"][0]["projects"][0]["first_sweep"]')" = "True" ] || fail "the first sweep was not said"
+# From a date: the pull request reviewed, nothing posted without a grant.
+rm "$MARKS"
+sweep since --since 2026-10-01
+[ "$(field "$WORK_DIR/since.json" '["reviewed"]')" = "1" ] || fail "the sweep did not review the pull request: $(cat "$WORK_DIR/since.json")"
+[ "$(field "$WORK_DIR/since.json" '["posted"]')" = "0" ] || fail "an ungranted sweep posted"
+field "$WORK_DIR/since.json" '["targets"][0]["projects"][0]["reviewed"][0]["posted"]["reason"]' | grep -q "no grant" || fail "the ungranted sweep did not say it posted nothing"
+grep -q '"github.com/acme/widget": "2026-10-18T09:00:00Z"' "$MARKS" || fail "the watermark was not kept: $(cat "$MARKS")"
+[ -f "$(field "$WORK_DIR/since.json" '["document"]')" ] || fail "the sweep's document was not kept"
+# The next sweep: nothing past the watermark, nothing done.
+sweep again
+[ "$(field "$WORK_DIR/again.json" '["reviewed"]')" = "0" ] || fail "the sweep reviewed the same pull request twice"
+# One sweep at a time: a live holder of the lock refuses the second.
+printf '%s\nreview sweep\n' "$$" >"$APOGEE_HOME/review/sweep.lock"
+if "$APOGEE_BIN" review sweep </dev/null >/dev/null 2>"$WORK_DIR/locked.err"; then
+    fail "a second sweep ran beside a live one"
+fi
+grep -q "another review sweep is running (pid $$)" "$WORK_DIR/locked.err" || fail "the lock's refusal: $(cat "$WORK_DIR/locked.err")"
+rm "$APOGEE_HOME/review/sweep.lock"
+# --allow-post grants the run: one more batch posted.
+rm "$MARKS"
+sweep posting --since 2026-10-01 --allow-post
+[ "$(field "$WORK_DIR/posting.json" '["posted"]')" = "1" ] || fail "--allow-post did not post: $(cat "$WORK_DIR/posting.json")"
+[ "$(grep -c -- '--method POST' "$LOG")" = "2" ] || fail "the granted sweep did not post exactly once"
+
+echo "review sweep: first at now, since a date, the watermark kept, the lock, the grant - OK"

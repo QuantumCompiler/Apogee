@@ -8255,7 +8255,11 @@ Decisions taken while building, for veto:
 - **`review mr` takes no config yet**: the CLI's path, per-repository lenses and the post grant are the `review:` unit's (48d), so the config grows once.
 - **Not covered by a test: the terminal question itself.** The gate's question on a terminal goes through the same `answer_permission` every prompt uses, which is tested. The piped refusal and `--yes` are tested on the real binary.
 
-**Verified.** VERIFIED_PLACEHOLDER
+**Verified.** `lib/scripts/cicd.sh --test`: 3388 of 3391 pass, with the one test skipped where it always is. The three that failed were the suite's own rules catching mine:
+- a test name that began with `--` (`cli.test_names`, and the case Catch2 then could not select);
+- the new `ref` argument, which completes to nothing (`review mr ref` added to the reviewed free-text list: a merge request on a remote forge has nothing local to offer).
+
+Renamed and listed, all three pass on their own, as do the regenerated root help, `harness.layering` and `harness.layer_context` (the business card trimmed under its 3000 bytes). The build is warning-free and the format clean. (This line was written after the commit that shipped 48c had gone out with a placeholder here; it rides with 48d's commit rather than rewrite a pushed one.)
 
 **On real weights**, the optional pass: one family (Google's Gemma4-12B Q4_K_M), one fixture merge request, through the real binary, with a fake `gh` serving the planted security change and then its clean twin, `--dry-run`, every lens the hints chose (`back-end`, `general-correctness`, `security`).
 - **The planted injection** (45 s): found and kept.
@@ -8267,3 +8271,50 @@ Decisions taken while building, for veto:
   - The confirm pass tightened one wording and dismissed neither.
 
 So on a 12B Q4 the pipeline does what it is built to: dedup, the filters, a confirm pass that cannot add. But the precision the track promises is not there on the clean twin, with three lenses and the merge request's own text in the prompt. A larger or cloud model is the next thing to measure, with the confirm pass on the stronger of two members, a suite's verifier. **Not run: a cloud model**, which spends money under your key with nobody here to approve it.
+
+### 2026-10-18 — `review-sweep` (backlog item 48d): repos watched without a daemon
+
+**Why.** One merge request on demand was 48c's. This is the watch: a repository, a list of them, or an owner's whole set reviewed as merge requests appear. It is built inside the standing laws: interactive turns never listen, and nothing here is a daemon.
+
+- [x] **The `review:` config unit** (`contracts/config`):
+  - a target per name, either a `repo` or an `owner` (an organization, a group or a user, listed at sweep time);
+  - its `forge` (`github`, `gitlab`) and `host`, the `skills` it runs, `post` (its declared grant), `drafts`, a `model` and the `cli` to spawn;
+  - every shape refused at load, naming the target;
+  - written by `apogee review targets add|delete` through the one editor, in both formats, and listed by `review targets` with its document.
+
+  The starter config carries a commented example, compiled-in copy included.
+- [x] **The seam's two listings** (`forge/`):
+  - a repository's open merge requests updated after a time, oldest first (GitLab's time carried into the query only when it is a timestamp);
+  - an owner's repositories: an organization's or group's (subgroups included) else a user's, the archived left out.
+- [x] **The sweep** (`review/sweep`, one shot):
+  - each repository's open merge requests past its watermark;
+  - each a `review mr` run, re-review rules and all;
+  - the watermark advanced and saved after each one, so a crash resumes exactly where it stopped, and a merge request that failed is not advanced past;
+  - then exit, with the user's cron or CI the cadence.
+
+  A repository seen for the first time starts at now, so history stays unreviewed unless `--since` asks. Drafts skip unless the target counts them. Past `kMaxMergeRequestsPerSweep` (20) the rest wait for the next sweep, counted in the document.
+- [x] **Unattended consent, 27i's ceiling**:
+  - posting is the target's `post: true` or the run's `--allow-post`, seeded as the run's answer to `review_post` in the one checker, never widened, and `permissions.review_post: deny` over both;
+  - without a grant, the merge request is reviewed into the document, which says it posted nothing and how to grant it;
+  - each target's grant (`target`, `--allow-post`, `none`) is recorded.
+- [x] **One sweep at a time**: `review/sweep.lock` through `PidLock`. A second refuses, naming the live holder's pid, and a dead holder's lock is taken over: a killed sweep must not block the next cron run.
+- [x] **The record**: the `review.sweep` document (machine-mode.md) on stdout, and kept under `review/sweeps/` posted or not, since an ungranted sweep's findings are read there. A new private layout row, `review`, holds the watermarks, the lock and the documents. A sweep with errors exits 1 so a scheduler notices.
+- [x] **The tests**:
+  - `contracts/review_targets_test`: the unit loaded and refused, the editor in both formats;
+  - `forge/*_transport_test`: the listings, argv pinned;
+  - `review/sweep_test`: first sweep at now, `--since`, the watermark kept, a crash resumed, the cap, drafts, an owner expanded, every grant, `--target`;
+  - `cli/review_cmd_test`: `targets` add, list, delete, refusals with the file untouched, the completion, a sweep with nothing to sweep;
+  - `cli.review_mr` grown on the real binary: first sweep at now, `--since` into the document without a grant, nothing reviewed twice, the lock refusing a live holder by pid, `--allow-post` posting once;
+  - the parity tables classifying `review sweep`, `review targets add` and `delete`.
+
+Decisions taken while building, for veto:
+- **Targets are a map keyed by name, the top-level `review:` section**, like every other section, so the one editor writes them as it writes MCP servers. The CLI's path is a target's `cli:`, the 48a decision's "joins the review unit" made per target.
+- **The watermark advances per merge request, not per target.** That is finer than the document's "after that target's merge requests are handled", and it is what makes a crash resume exactly where it stopped.
+- **A posted review touches its merge request's update time**, so the next sweep lists it again. 48c's markers make that re-review `already reviewed`, with no pass and nothing posted, so it costs a few reads.
+- **A dead holder's lock is taken over** (the task runner's choice, not the cycle's): a scheduler's next run must not wait on a human to delete a file.
+- **`review targets add|delete` have no admin-plane twins**: carved out in the parity table as review control, CLI-only on the training and task precedent. The listing's twin is its document.
+- **No `--since` on targets already swept**: `--since` only seeds a repository seen for the first time. To reach back on one already swept, move `review/watermarks.json` aside, as the store's own refusal says.
+
+**Verified.** `lib/scripts/cicd.sh --test`: all 3401 tests pass, with the one test skipped where it always is. The build is warning-free and the format clean, and the root help is regenerated for `review`'s summary.
+
+**Not run on real weights**: a sweep is `review mr` runs (48c's real-weights pass above) over listings the scripted forge holds. **Not run live**: `gh`'s listing and owner endpoints, which would read a real organization's repositories, and posting, which would comment on a real pull request.

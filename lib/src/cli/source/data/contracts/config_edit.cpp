@@ -591,6 +591,62 @@ std::string delete_mcp_server(std::string_view content, std::string_view name) {
     return delete_entry(content, "mcp_servers", "MCP server", name);
 }
 
+Lines format_review_target_entry(std::string_view name, const ReviewTargetConfig& target,
+                                 std::string_view terminator) {
+    Lines out;
+    const std::string indent(kFieldIndent, ' ');
+    auto field = [&](std::string_view key, const std::string& value) {
+        out.push_back(indent + std::string{key} + ": " + value + std::string{terminator});
+    };
+    out.push_back(std::string(kEntryIndent, ' ') + std::string{name} + ":" +
+                  std::string{terminator});
+    // Alphabetical after the name, only what is set: two surfaces' entries
+    // read alike, and a default stays the loader's.
+    if (!target.cli.empty()) {
+        field("cli", yaml_scalar(target.cli));
+    }
+    if (target.drafts) {
+        field("drafts", "true");
+    }
+    field("forge", yaml_scalar(target.forge));
+    if (!target.host.empty()) {
+        field("host", yaml_scalar(target.host));
+    }
+    if (!target.model.empty()) {
+        field("model", yaml_scalar(target.model));
+    }
+    if (!target.owner.empty()) {
+        field("owner", yaml_scalar(target.owner));
+    }
+    if (target.post) {
+        field("post", "true");
+    }
+    if (!target.repo.empty()) {
+        field("repo", yaml_scalar(target.repo));
+    }
+    if (!target.skills.empty()) {
+        std::string rendered = "[";
+        for (const std::string& skill : target.skills) {
+            rendered += rendered.size() > 1 ? ", " : "";
+            rendered += yaml_scalar(skill);
+        }
+        field("skills", rendered + "]");
+    }
+    return out;
+}
+
+std::string append_review_target(std::string_view content, std::string_view name,
+                                 const ReviewTargetConfig& target, bool force) {
+    const Lines lines = split_lines(content);
+    return append_entry(content, "review", "review target", name,
+                        format_review_target_entry(name, target, dominant_terminator(lines)),
+                        force);
+}
+
+std::string delete_review_target(std::string_view content, std::string_view name) {
+    return delete_entry(content, "review", "review target", name);
+}
+
 std::string set_mcp_server_enabled(std::string_view content, std::string_view name, bool enabled) {
     Lines lines = split_lines(content);
     const std::string terminator = dominant_terminator(lines);
@@ -2756,6 +2812,19 @@ std::string append_mcp_server(std::string_view content, std::string_view name,
 std::string delete_mcp_server(std::string_view content, std::string_view name) {
     return in_format(
         content, [&](std::string_view text) { return yaml_text::delete_mcp_server(text, name); });
+}
+
+std::string append_review_target(std::string_view content, std::string_view name,
+                                 const ReviewTargetConfig& target, bool force) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::append_review_target(text, name, target, force);
+    });
+}
+
+std::string delete_review_target(std::string_view content, std::string_view name) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::delete_review_target(text, name);
+    });
 }
 
 std::string set_mcp_server_enabled(std::string_view content, std::string_view name, bool enabled) {

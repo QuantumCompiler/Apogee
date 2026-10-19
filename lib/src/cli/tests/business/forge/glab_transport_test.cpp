@@ -265,3 +265,35 @@ TEST_CASE("glab reads the login, the notes already there, and a comparison", "[f
     CHECK_THROWS_AS(glab.compare(kRef, "abc1234", "main&x=1"), ForgeError);
     CHECK(cli.commands.size() == 3);
 }
+
+TEST_CASE("glab lists open merge requests past a time and a group's projects",
+          "[forge][glab][listing]") {
+    ScriptedCli cli;
+    cli.replies = {
+        {R"([{"iid": 7, "title": "T", "author": {"username": "dev"},
+              "updated_at": "2026-10-18T10:00:00.000Z", "draft": false, "work_in_progress": true}])",
+         "", 0},
+        {R"([{"path_with_namespace": "platform/infra/one"}, {"path_with_namespace": "platform/two"}])",
+         "", 0},
+    };
+    GlabTransport glab{cli.options()};
+    const apogee::forge::ForgeProject project{
+        .forge = apogee::forge::Forge::GitLab, .host = "", .project = "group/sub/project"};
+    const std::vector<apogee::forge::MergeRequestListing> open =
+        glab.open_merge_requests(project, "2026-10-18T09:00:00Z");
+    CHECK(cli.argv(0) ==
+          argv({"api", "--paginate",
+                "projects/group%2Fsub%2Fproject/merge_requests?state=opened&order_by="
+                "updated_at&sort=asc&per_page=100&updated_after=2026-10-18T09:00:00Z"}));
+    REQUIRE(open.size() == 1);
+    CHECK(open[0].ref.number == 7);
+    CHECK(open[0].draft);
+    const std::vector<std::string> projects = glab.owner_projects(apogee::forge::ForgeProject{
+        .forge = apogee::forge::Forge::GitLab, .host = "", .project = "platform"});
+    CHECK(cli.argv(1) == argv({"api", "--paginate",
+                               "groups/platform/projects?include_subgroups=true&archived=false&per_"
+                               "page=100"}));
+    CHECK(projects == std::vector<std::string>{"platform/infra/one", "platform/two"});
+    // A time that is not a timestamp never reaches the query.
+    CHECK_THROWS_AS(glab.open_merge_requests(project, "2026&x=1"), ForgeError);
+}

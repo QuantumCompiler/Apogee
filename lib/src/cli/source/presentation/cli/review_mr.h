@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -26,6 +27,9 @@ namespace apogee::commands {
 
 struct ReviewMrOptions {
     std::string ref;
+    /// The merge request already parsed (a sweep's listing): used over
+    /// `ref` when set.
+    std::optional<forge::MergeRequestRef> parsed;
     /// `--skills`: run exactly these, the plan's hints aside.
     std::vector<std::string> skills;
     bool dry_run = false;

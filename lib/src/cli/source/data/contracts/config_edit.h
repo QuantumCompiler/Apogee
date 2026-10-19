@@ -205,6 +205,15 @@ public:
 /// Removes the entry and its fields; the exact inverse of the append.
 [[nodiscard]] std::string delete_mcp_server(std::string_view content, std::string_view name);
 
+/// Appends a review sweep target under `review:` (48d, creating the
+/// section), its fields alphabetical after the name, only the ones set
+/// written. Same collision and `force` rules as `append_backend`.
+[[nodiscard]] std::string append_review_target(std::string_view content, std::string_view name,
+                                               const ReviewTargetConfig& target, bool force);
+
+/// Removes the target and its fields; the exact inverse of the append.
+[[nodiscard]] std::string delete_review_target(std::string_view content, std::string_view name);
+
 /// Sets `mcp_servers.<name>.enabled`, replacing the line in place (keeping
 /// its trailing comment) or inserting one right after the name.
 [[nodiscard]] std::string set_mcp_server_enabled(std::string_view content, std::string_view name,

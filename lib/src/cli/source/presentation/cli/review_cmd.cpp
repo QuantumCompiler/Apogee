@@ -15,6 +15,7 @@
 #include "cli/permissions.h"
 #include "cli/review_mr.h"
 #include "contracts/config.h"
+#include "contracts/config_edit.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "contracts/review_skill.h"
@@ -23,7 +24,9 @@
 #include "harness/harness.h"
 #include "harness/roles.h"
 #include "machine/json_reporter.h"
+#include "platform/pid_lock.h"
 #include "platform/platform.h"
+#include "review/sweep.h"
 
 namespace apogee::commands {
 namespace {
@@ -308,6 +311,326 @@ void review_mr(const RootContext& context, const MrFlags& flags) {
     }
 }
 
+/// The posting gate for a sweep: nobody at the terminal, so the target's
+/// declared grant or the run's `--allow-post` -- seeded as the run's
+/// answer, never widened -- and otherwise a refusal that says the merge
+/// request was reviewed into the document. `permissions.review_post: deny`
+/// refuses over any grant.
+[[nodiscard]] PostGate make_sweep_gate(const harness::Config& config, bool granted) {
+    auto approvals = std::make_shared<SessionApprovals>();
+    if (granted) {
+        approvals->tools.insert(std::string{kPostTool});
+    }
+    agent::PermissionChecker checker = make_permission_checker(config, approvals);
+    return [checker](std::string_view target, std::size_t comments, std::string& why_not) {
+        const std::string detail =
+            std::to_string(comments) + " inline comment(s) and a summary, as one batch";
+        const agent::GateRequest request{.tool = kPostTool, .target = target, .detail = detail};
+        switch (checker(request)) {
+            case agent::Permission::Allow:
+                return true;
+            case agent::Permission::Deny:
+                why_not = "permissions.review_post denies posting";
+                return false;
+            case agent::Permission::Ask:
+                break;
+        }
+        why_not =
+            "no grant: reviewed into this document, posted nothing (the target's post: "
+            "true, or --allow-post, grants it)";
+        return false;
+    };
+}
+
+[[nodiscard]] std::unique_ptr<forge::ForgeClient> client_for(const harness::ReviewTargetConfig& t) {
+    forge::CliTransportOptions options;
+    options.executable = t.cli;
+    if (t.forge == "gitlab") {
+        return std::make_unique<forge::GlabTransport>(std::move(options));
+    }
+    return std::make_unique<forge::GhTransport>(std::move(options));
+}
+
+[[nodiscard]] nlohmann::json target_view(std::string_view name,
+                                         const harness::ReviewTargetConfig& target) {
+    nlohmann::json view{{"name", name},
+                        {"forge", target.forge},
+                        {"skills", target.skills},
+                        {"post", target.post},
+                        {"drafts", target.drafts}};
+    if (!target.host.empty()) {
+        view["host"] = target.host;
+    }
+    if (!target.repo.empty()) {
+        view["repo"] = target.repo;
+    } else {
+        view["owner"] = target.owner;
+    }
+    if (!target.model.empty()) {
+        view["model"] = target.model;
+    }
+    if (!target.cli.empty()) {
+        view["cli"] = target.cli;
+    }
+    return view;
+}
+
+[[nodiscard]] harness::Config load_review_config(const RootContext& context,
+                                                 std::filesystem::path& path) {
+    path = harness::resolve_config_path(context.config_path);
+    try {
+        return harness::load_config(path);
+    } catch (const harness::ConfigError& e) {
+        fail(e.what());
+    }
+}
+
+void list_targets(const RootContext& context, ReadFormat format) {
+    std::filesystem::path path;
+    const harness::Config config = load_review_config(context, path);
+    if (format == ReadFormat::Json) {
+        nlohmann::json data = nlohmann::json::array();
+        for (const auto& [name, target] : config.review_targets) {
+            data.push_back(target_view(name, target));
+        }
+        write_document(std::cout, nlohmann::json{{"object", "list"}, {"data", std::move(data)}});
+        return;
+    }
+    if (config.review_targets.empty()) {
+        std::cout << "no review targets -- add one: apogee review targets add <name> --repo "
+                     "owner/repo\n";
+        return;
+    }
+    for (const auto& [name, target] : config.review_targets) {
+        std::cout << name << "  " << target.forge << ":"
+                  << (target.repo.empty() ? target.owner + " (owner)" : target.repo)
+                  << (target.host.empty() ? std::string{} : " on " + target.host)
+                  << "  lenses: " << (target.skills.empty() ? "by hints" : joined(target.skills))
+                  << "  posts: " << (target.post ? "yes" : "no")
+                  << (target.drafts ? "  drafts: yes" : "") << "\n";
+    }
+}
+
+struct TargetFlags {
+    std::string name;
+    std::string repo;
+    std::string owner;
+    std::string forge = "github";
+    std::string host;
+    std::vector<std::string> skills;
+    bool post = false;
+    bool drafts = false;
+    std::string model;
+    std::string cli;
+    bool force = false;
+};
+
+void add_target(const RootContext& context, const TargetFlags& flags) {
+    std::filesystem::path path;
+    (void)load_review_config(context, path);
+    harness::ReviewTargetConfig target;
+    target.forge = flags.forge;
+    target.host = flags.host;
+    target.repo = flags.repo;
+    target.owner = flags.owner;
+    target.skills = flags.skills;
+    target.post = flags.post;
+    target.drafts = flags.drafts;
+    target.model = flags.model;
+    target.cli = flags.cli;
+    try {
+        // The editor writes it; the loader's re-read refuses a bad one, the
+        // file untouched.
+        harness::edit_config_file(path, [&](std::string_view content) {
+            return harness::append_review_target(content, flags.name, target, flags.force);
+        });
+    } catch (const std::exception& e) {
+        fail(e.what());
+    }
+    std::cout << "added review target '" << flags.name << "' to " << path.string() << "\n"
+              << "It is swept by: apogee review sweep"
+              << (flags.post ? "" : " (it posts only under --allow-post: post is not granted)")
+              << "\n";
+}
+
+void delete_target(const RootContext& context, const std::string& name) {
+    std::filesystem::path path;
+    (void)load_review_config(context, path);
+    try {
+        harness::edit_config_file(path, [&](std::string_view content) {
+            return harness::delete_review_target(content, name);
+        });
+    } catch (const std::exception& e) {
+        fail(e.what());
+    }
+    std::cout << "removed review target '" << name << "' from " << path.string() << "\n";
+}
+
+struct SweepFlags {
+    std::vector<std::string> targets;
+    bool allow_post = false;
+    bool dry_run = false;
+    std::string since;
+    std::string model;
+    ReadFormat format = ReadFormat::Text;
+};
+
+void review_sweep(const RootContext& context, const SweepFlags& flags) {
+    std::filesystem::path config_path;
+    const harness::Config config = load_review_config(context, config_path);
+    if (!flags.since.empty() && !forge::is_timestamp(flags.since)) {
+        fail("--since takes a date or time, 2026-10-01 or 2026-10-01T09:00:00Z, not '" +
+             flags.since + "'");
+    }
+    std::vector<review::SweepTarget> targets;
+    for (const auto& [name, target] : config.review_targets) {
+        targets.push_back(review::SweepTarget{.name = name, .config = target});
+    }
+    if (targets.empty()) {
+        fail(
+            "no review targets to sweep -- add one: apogee review targets add <name> --repo "
+            "owner/repo");
+    }
+    // One sweep at a time: a second refuses, saying who holds the lock; one
+    // a killed sweep left is taken over.
+    platform::PidLock::Refusal refusal;
+    std::optional<platform::PidLock> lock = platform::PidLock::acquire(
+        harness::review_dir() / "sweep.lock", "review sweep", true, refusal);
+    if (!lock.has_value()) {
+        fail(refusal.holder.has_value()
+                 ? "another review sweep is running (pid " + std::to_string(refusal.holder->pid) +
+                       ") -- one sweep at a time"
+                 : "could not take the sweep lock: " + refusal.error);
+    }
+
+    harness::Harness harness{config};
+    backends::BuildOptions build_options;
+    build_options.config_path = config_path;
+    (void)backends::build_providers(harness, build_options);
+    std::map<std::string, review::PassFn> passes;
+    const auto pass_for = [&](const std::string& backend) -> const review::PassFn& {
+        auto it = passes.find(backend);
+        if (it == passes.end()) {
+            it = passes.emplace(backend, make_pass(harness, backend)).first;
+        }
+        return it->second;
+    };
+    const auto progress = [](std::string_view line) { std::cerr << "[review] " << line << "\n"; };
+
+    review::WatermarkStore store{harness::review_dir() / "watermarks.json"};
+    review::SweepOptions options;
+    options.only = flags.targets;
+    if (!flags.since.empty()) {
+        options.since = flags.since;
+    }
+    options.allow_post = flags.allow_post;
+    options.dry_run = flags.dry_run;
+    options.now = platform::utc_time(std::chrono::system_clock::now(), "%Y-%m-%dT%H:%M:%SZ");
+
+    const review::ReviewOne review_one = [&](const forge::MergeRequestRef& ref,
+                                             const review::SweepTarget& target, bool post) {
+        const std::string model = harness::resolve_chat_backend(
+            config, target.config.model.empty() ? flags.model : target.config.model);
+        if (model.empty()) {
+            throw std::runtime_error("no backend is configured to review with");
+        }
+        ReviewMrSeams seams;
+        const harness::ReviewTargetConfig settings = target.config;
+        seams.forge = [settings](forge::Forge) { return client_for(settings); };
+        seams.pass = pass_for(model);
+        const harness::Resolution utility = harness::resolve_backend(
+            config,
+            harness::RoleRequest{.role = harness::ModelRole::Utility, .conversation = model});
+        if (harness::is_named(utility.from) && !utility.key.empty()) {
+            seams.narrow = pass_for(utility.key);
+        }
+        seams.gate = make_sweep_gate(config, post);
+        seams.progress = progress;
+        seams.skills_dir = harness::review_skills_dir();
+        ReviewMrOptions review;
+        review.parsed = ref;
+        review.skills = target.config.skills;
+        review.dry_run = flags.dry_run;
+        review.model = model;
+        try {
+            return review_merge_request(review, seams).document;
+        } catch (const forge::ForgeError& e) {
+            throw std::runtime_error(std::string{e.what()} +
+                                     (e.remedy().empty() ? "" : " -- " + e.remedy()));
+        }
+    };
+    nlohmann::json document;
+    try {
+        document = review::run_sweep(targets, store, options, client_for, review_one, progress);
+    } catch (const std::runtime_error& e) {
+        fail(e.what());
+    }
+    // Every sweep's document is kept, posted or not: an ungranted sweep's
+    // findings are read here.
+    const std::filesystem::path saved =
+        harness::review_dir() / "sweeps" /
+        (platform::utc_time(std::chrono::system_clock::now(), "%Y%m%dT%H%M%SZ") + ".json");
+    std::error_code code;
+    std::filesystem::create_directories(saved.parent_path(), code);
+    try {
+        harness::write_file_atomically(saved, document.dump(2) + "\n");
+        document["document"] = saved.string();
+    } catch (const std::exception& e) {
+        std::cerr << "[review] the sweep's document could not be kept: " << e.what() << "\n";
+    }
+    lock->release();
+
+    if (flags.format == ReadFormat::Json) {
+        write_document(std::cout, document);
+    } else {
+        for (const nlohmann::json& target : document["targets"]) {
+            if (target.contains("error")) {
+                std::cout << target["name"].get<std::string>() << ": "
+                          << target["error"].get<std::string>() << "\n";
+            }
+            for (const nlohmann::json& project : target["projects"]) {
+                std::string line = project["project"].get<std::string>() + ": ";
+                if (project.value("first_sweep", false)) {
+                    line += "first sweep -- starting at now (--since reviews earlier ones)";
+                } else {
+                    line += std::to_string(project["reviewed"].size()) + " reviewed";
+                    if (!project["skipped_drafts"].empty()) {
+                        line += ", " + std::to_string(project["skipped_drafts"].size()) +
+                                " draft(s) skipped";
+                    }
+                }
+                std::cout << line << "\n";
+                for (const nlohmann::json& run : project["reviewed"]) {
+                    std::cout << "  " << run["merge_request"].get<std::string>() << ": "
+                              << run["findings"].size() << " finding(s), "
+                              << (run["posted"].value("done", false)
+                                      ? std::string{"posted"}
+                                      : "posted nothing (" +
+                                            run["posted"].value("reason", std::string{}) + ")")
+                              << "\n";
+                }
+                if (project.contains("error")) {
+                    std::cout << "  stopped: " << project["error"].get<std::string>() << "\n";
+                }
+            }
+        }
+        std::cout << document["reviewed"].get<std::size_t>() << " reviewed, "
+                  << document["posted"].get<std::size_t>() << " posted";
+        if (document["deferred"].get<std::size_t>() > 0) {
+            std::cout << ", " << document["deferred"].get<std::size_t>()
+                      << " left for the next sweep (the cap is "
+                      << document["cap"].get<std::size_t>() << ")";
+        }
+        std::cout << (document.contains("document")
+                          ? " -- the document: " + document["document"].get<std::string>()
+                          : std::string{})
+                  << "\n";
+    }
+    if (document["errors"].get<std::size_t>() > 0) {
+        throw CLI::RuntimeError(1);
+    }
+}
+
 }  // namespace
 
 std::string_view ReviewCommand::name() const noexcept {
@@ -315,7 +638,8 @@ std::string_view ReviewCommand::name() const noexcept {
 }
 
 std::string_view ReviewCommand::summary() const noexcept {
-    return "Review a merge request with the review skills, and post what it finds";
+    return "Review merge requests with the review skills -- one, or every target swept -- and "
+           "post what they find";
 }
 
 void ReviewCommand::bind(CLI::App& root, const RootContext& context) {
@@ -345,6 +669,72 @@ void ReviewCommand::bind(CLI::App& root, const RootContext& context) {
     mr->callback([&context, mr_flags, mr_format]() {
         mr_flags->format = *mr_format;
         review_mr(context, *mr_flags);
+    });
+
+    auto sweep_flags = std::make_shared<SweepFlags>();
+    auto sweep_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    CLI::App* sweep = cmd->add_subcommand(
+        "sweep",
+        "Review what is new on every configured target since its watermark, once, and exit -- "
+        "your cron or CI is the cadence");
+    sweep->add_option("--target", sweep_flags->targets, "Sweep only this target (repeatable)")
+        ->type_name(kReviewTargetValue);
+    sweep->add_flag("--allow-post", sweep_flags->allow_post,
+                    "Grant posting on every target this run sweeps (else only where a target's "
+                    "post: true says)");
+    sweep->add_flag("--dry-run", sweep_flags->dry_run,
+                    "Review and keep the documents; post nothing");
+    sweep->add_option("--since", sweep_flags->since,
+                      "Where a target seen for the first time starts (default: now -- history "
+                      "stays unreviewed)");
+    sweep
+        ->add_option("-m,--model", sweep_flags->model,
+                     "The backend that reviews where a target names none")
+        ->type_name(kBackendValue);
+    add_read_format(sweep, sweep_format);
+    sweep->callback([&context, sweep_flags, sweep_format]() {
+        sweep_flags->format = *sweep_format;
+        review_sweep(context, *sweep_flags);
+    });
+
+    auto targets_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    CLI::App* targets = cmd->add_subcommand(
+        "targets", "The repositories and owners review sweep watches (the review: section)");
+    add_read_format(targets, targets_format);
+    auto target_flags = std::make_shared<TargetFlags>();
+    CLI::App* add = targets->add_subcommand("add", "Add a sweep target: a repository or an owner");
+    add->add_option("name", target_flags->name, "The target's name")->required();
+    CLI::Option* repo_option =
+        add->add_option("--repo", target_flags->repo, "A repository: owner/repo, group/project");
+    add->add_option("--owner", target_flags->owner,
+                    "An organization, a group or a user whose repositories are swept")
+        ->excludes(repo_option);
+    add->add_option("--forge", target_flags->forge, "github (default) or gitlab")
+        ->type_name(words_value(std::vector<std::string_view>{"github", "gitlab"}));
+    add->add_option("--host", target_flags->host, "A self-hosted forge's host");
+    add->add_option("--skills", target_flags->skills, "The lenses to run, comma-separated")
+        ->type_name(kReviewSkillValue)
+        ->delimiter(',');
+    add->add_flag("--post", target_flags->post,
+                  "Grant posting: a sweep posts here with nobody at the terminal");
+    add->add_flag("--drafts", target_flags->drafts, "Review draft merge requests too");
+    add->add_option("-m,--model", target_flags->model, "The backend that reviews this target")
+        ->type_name(kBackendValue);
+    add->add_option("--cli", target_flags->cli, "The gh or glab to spawn, by path")
+        ->type_name(kPathValue);
+    add->add_flag("--force", target_flags->force, "Replace a target of the same name");
+    add->callback([&context, target_flags]() { add_target(context, *target_flags); });
+    auto delete_name = std::make_shared<std::string>();
+    CLI::App* remove = targets->add_subcommand("delete", "Remove a sweep target");
+    remove->add_option("name", *delete_name, "The target")
+        ->type_name(kReviewTargetValue)
+        ->required();
+    remove->callback([&context, delete_name]() { delete_target(context, *delete_name); });
+    targets->callback([&context, targets_format, add, remove]() {
+        if (add->parsed() || remove->parsed()) {
+            return;
+        }
+        list_targets(context, *targets_format);
     });
 
     CLI::App* skills = cmd->add_subcommand(

@@ -170,3 +170,51 @@ TEST_CASE("each shipped skill's planted defect and clean twin hold to the one fi
         CHECK_FALSE(apogee::agentloop::validate_against(schema, partial).ok);
     }
 }
+
+TEST_CASE("review targets adds, lists and deletes the sweep's targets through the one editor",
+          "[cli][review][targets]") {
+    const apogee::testing::CliHome home{std::string{kConfig}};
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"review", "targets"}, &out, &err) == 0);
+    CHECK_THAT(out, ContainsSubstring("no review targets -- add one"));
+    REQUIRE(home.run({"review", "targets", "add", "widget", "--repo", "acme/widget", "--skills",
+                      "security,back-end", "--post"},
+                     &out, &err) == 0);
+    CHECK_THAT(out, ContainsSubstring("added review target 'widget'"));
+    REQUIRE(home.run({"review", "targets", "add", "infra", "--owner", "platform", "--forge",
+                      "gitlab", "--host", "git.corp.example", "--drafts"},
+                     &out, &err) == 0);
+    CHECK_THAT(out, ContainsSubstring("it posts only under --allow-post"));
+    REQUIRE(home.run({"review", "targets", "--output-format", "json"}, &out, &err) == 0);
+    const nlohmann::json document = nlohmann::json::parse(out);
+    REQUIRE(document["data"].size() == 2);
+    CHECK(document["data"][0]["name"] == "infra");
+    CHECK(document["data"][0]["owner"] == "platform");
+    CHECK(document["data"][0]["forge"] == "gitlab");
+    CHECK(document["data"][0]["drafts"] == true);
+    CHECK(document["data"][1]["repo"] == "acme/widget");
+    CHECK(document["data"][1]["skills"] == nlohmann::json::array({"security", "back-end"}));
+    CHECK(document["data"][1]["post"] == true);
+
+    // Refusals, each named, the file untouched.
+    const std::string before = slurp(home.config_path());
+    CHECK(home.run({"review", "targets", "add", "bad", "--repo", "widget"}, &out, &err) != 0);
+    CHECK_THAT(err, ContainsSubstring("'widget' is not owner/repo"));
+    CHECK(home.run({"review", "targets", "add", "both", "--repo", "a/b", "--owner", "a"}, &out,
+                   &err) != 0);
+    CHECK(home.run({"review", "targets", "add", "widget", "--repo", "acme/other"}, &out, &err) !=
+          0);
+    CHECK(slurp(home.config_path()) == before);
+
+    REQUIRE(home.run({"__complete", "review", "targets", "delete", ""}, &out, &err) == 0);
+    CHECK(out == "infra\nwidget\n");
+    REQUIRE(home.run({"__complete", "review", "sweep", "--target", ""}, &out, &err) == 0);
+    CHECK(out == "infra\nwidget\n");
+    REQUIRE(home.run({"review", "targets", "delete", "infra"}, &out, &err) == 0);
+    REQUIRE(home.run({"review", "targets", "delete", "widget"}, &out, &err) == 0);
+    REQUIRE(home.run({"review", "targets", "--output-format", "json"}, &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out)["data"].empty());
+    CHECK(home.run({"review", "sweep"}, &out, &err) != 0);
+    CHECK_THAT(err, ContainsSubstring("no review targets to sweep"));
+}

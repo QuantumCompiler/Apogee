@@ -398,6 +398,11 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
             list.names.push_back(entry.skill.name);
         }
         list.none = "no review skills -- 'apogee check --fix' seeds the shipped ones";
+    } else if (kind == kReviewTargetValue) {
+        for (const auto& [name, target] : config.review_targets) {
+            list.names.push_back(name);
+        }
+        list.none = "no review targets -- 'apogee review targets add' adds one";
     } else if (kind == kSymphonyEntryValue) {
         for (const auto& [name, spec] : config.symphonies) {
             list.names.push_back(name);

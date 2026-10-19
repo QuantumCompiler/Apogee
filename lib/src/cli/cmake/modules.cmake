@@ -59,7 +59,7 @@ set(APOGEE_LINKS_tasks agent agentloop contracts logger platform)
 set(APOGEE_LINKS_symphony agent agentloop contracts harness)
 set(APOGEE_LINKS_scaffold contracts symphony)
 set(APOGEE_LINKS_forge contracts platform)
-set(APOGEE_LINKS_review contracts)
+set(APOGEE_LINKS_review contracts forge)
 
 # ---- Presentation -----------------------------------------------------------
 set(APOGEE_LINKS_markdown ansi)

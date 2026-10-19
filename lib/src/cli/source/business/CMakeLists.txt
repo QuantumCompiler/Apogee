@@ -315,6 +315,8 @@ apogee_add_module(review
     review/identity.cpp
     review/engine.h
     review/engine.cpp
+    review/sweep.h
+    review/sweep.cpp
 )
 target_link_libraries(apogee_business_review PUBLIC nlohmann_json::nlohmann_json)
 

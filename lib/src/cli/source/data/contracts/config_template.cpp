@@ -251,6 +251,23 @@ constexpr std::string_view kConfigTemplate = R"APOGEE(// Apogee configuration.
   //   }
   // },
 
+  // Review sweep targets: what `apogee review sweep` watches -- a repository, or
+  // an owner whose repositories are listed at sweep time -- on GitHub (through
+  // your own `gh` login) or GitLab (`glab`). A sweep reviews what is new since
+  // each target's watermark, once, and exits: your cron or CI is the cadence. It
+  // posts only where `post` is true or the run says --allow-post; otherwise it
+  // reviews into its document and posts nothing. `apogee review targets add`
+  // writes an entry here.
+  //
+  // "review": {
+  //   "widget": {
+  //     "repo": "acme/widget",
+  //     "skills": ["security", "back-end"],
+  //     "post": true
+  //   },
+  //   "platform": {"forge": "gitlab", "owner": "platform", "drafts": false}
+  // },
+
   // Agents: named workflows run with `apogee analyze --agent <name>` -- a persona
   // from prompt files, an optional output schema the answer must satisfy, and a
   // TOOL POLICY that is the agent's permission model: read-only registers only

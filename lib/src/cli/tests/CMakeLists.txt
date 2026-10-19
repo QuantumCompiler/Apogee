@@ -56,6 +56,7 @@ add_library(apogee_tests_data OBJECT
     data/contracts/host_test.cpp
     data/contracts/server_tools_test.cpp
     data/contracts/review_skill_test.cpp
+    data/contracts/review_targets_test.cpp
     data/contracts/utf8_test.cpp
     data/contracts/todo_test.cpp
     data/contracts/paths_test.cpp
@@ -189,6 +190,7 @@ add_library(apogee_tests_business OBJECT
     business/forge/glab_transport_test.cpp
     business/review/diff_test.cpp
     business/review/engine_test.cpp
+    business/review/sweep_test.cpp
     business/scaffold/mcp_server_test.cpp
     business/scaffold/agent_test.cpp
     business/scaffold/symphony_test.cpp

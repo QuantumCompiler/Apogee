@@ -34,7 +34,8 @@ namespace {
 
 ReviewMrResult review_merge_request(const ReviewMrOptions& options, const ReviewMrSeams& seams) {
     std::string error;
-    const std::optional<forge::MergeRequestRef> ref = forge::parse_ref(options.ref, error);
+    const std::optional<forge::MergeRequestRef> ref =
+        options.parsed.has_value() ? options.parsed : forge::parse_ref(options.ref, error);
     if (!ref.has_value()) {
         throw std::runtime_error(error);
     }

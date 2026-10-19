@@ -1032,13 +1032,18 @@ const std::vector<std::string> kFreeText{
     "serve --bind",
     // A merge request on a remote forge (48c):
     // a URL or owner/repo#12, nothing local to offer.
-    "review mr ref", "task run goal", "task run --require", "task run --input",
-    "symphonies create name", "symphonies create --description",
-    "symphonies create --input-description", "symphonies create --stage",
-    "symphonies create --play", "symphonies play --input", "config rename-backend new-name",
-    "config set-backend --model", "config set-backend --embedding-model",
-    "config set-backend --system-prompt", "config set-backend --host", "models rename new-name",
-    "tui -s", "tui --system", "tui --allow-host"};
+    "review mr ref",
+    // A sweep's start (a date) and a new target's name, host and remote
+    // paths (48d).
+    "review sweep --since", "review targets add name", "review targets add --host",
+    "review targets add --owner", "review targets add --repo", "task run goal",
+    "task run --require", "task run --input", "symphonies create name",
+    "symphonies create --description", "symphonies create --input-description",
+    "symphonies create --stage", "symphonies create --play", "symphonies play --input",
+    "config rename-backend new-name", "config set-backend --model",
+    "config set-backend --embedding-model", "config set-backend --system-prompt",
+    "config set-backend --host", "models rename new-name", "tui -s", "tui --system",
+    "tui --allow-host"};
 
 /// The type names CLI11 gives a number: an untagged value of any other type
 /// is free text.

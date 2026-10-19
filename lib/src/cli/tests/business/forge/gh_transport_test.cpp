@@ -235,3 +235,39 @@ TEST_CASE("gh reads the login, the comments already there, and a comparison", "[
     CHECK_THROWS_AS(gh.compare(kRef, "../../etc", "def5678"), ForgeError);
     CHECK(cli.commands.size() == 4);
 }
+
+TEST_CASE("gh lists open pull requests past a time, oldest first, and an owner's repositories",
+          "[forge][gh][listing]") {
+    ScriptedCli cli;
+    cli.replies = {
+        {R"([{"number": 3, "title": "C", "user": {"login": "c"}, "updated_at": "2026-10-18T03:00:00Z", "draft": false},
+             {"number": 1, "title": "A", "user": {"login": "a"}, "updated_at": "2026-10-18T01:00:00Z", "draft": true}])"
+         R"([{"number": 2, "title": "B", "user": {"login": "b"}, "updated_at": "2026-10-18T02:00:00Z", "draft": false}])",
+         "", 0},
+        // Not an organization: a user's repositories, the archived one left out.
+        {"", "gh: Not Found (HTTP 404)", 1},
+        {R"([{"full_name": "octo/one", "archived": false}, {"full_name": "octo/old", "archived": true}])",
+         "", 0},
+    };
+    GhTransport gh{cli.options()};
+    const apogee::forge::ForgeProject project{
+        .forge = apogee::forge::Forge::GitHub, .host = "", .project = "acme/widget"};
+    const std::vector<apogee::forge::MergeRequestListing> open =
+        gh.open_merge_requests(project, "2026-10-18T01:30:00Z");
+    CHECK(cli.argv(0) ==
+          std::vector<std::string>{"/usr/local/bin/cli", "api", "--paginate",
+                                   "repos/acme/widget/pulls?state=open&sort=updated&direction=asc&"
+                                   "per_page=100"});
+    REQUIRE(open.size() == 2);  // #1 is older than the time
+    CHECK(open[0].ref.number == 2);
+    CHECK(open[1].ref.number == 3);
+    CHECK(open[0].ref.project == "acme/widget");
+    CHECK(open[0].author == "b");
+    const std::vector<std::string> repos = gh.owner_projects(apogee::forge::ForgeProject{
+        .forge = apogee::forge::Forge::GitHub, .host = "", .project = "octo"});
+    CHECK(cli.argv(1) == std::vector<std::string>{"/usr/local/bin/cli", "api", "--paginate",
+                                                  "orgs/octo/repos?per_page=100"});
+    CHECK(cli.argv(2) == std::vector<std::string>{"/usr/local/bin/cli", "api", "--paginate",
+                                                  "users/octo/repos?per_page=100&type=owner"});
+    CHECK(repos == std::vector<std::string>{"octo/one"});
+}

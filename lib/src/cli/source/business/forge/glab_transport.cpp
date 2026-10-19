@@ -2,6 +2,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+
 #include "contracts/utf8.h"
 
 namespace apogee::forge {
@@ -207,6 +209,69 @@ std::string GlabTransport::compare(const MergeRequestRef& ref, std::string_view 
         throw malformed(ref, "a comparison");
     }
     return unified_diff(json["diffs"]);
+}
+
+std::vector<MergeRequestListing> GlabTransport::open_merge_requests(
+    const ForgeProject& project, std::string_view updated_after) {
+    const MergeRequestRef ref = project_ref(project);
+    require_forge(ref);
+    if (!is_timestamp(updated_after)) {
+        throw ForgeError{ForgeError::Kind::Malformed,
+                         "'" + std::string{updated_after} + "' is not a timestamp", ""};
+    }
+    std::string endpoint = "projects/" + encode_project(project.project) +
+                           "/merge_requests?state=opened&order_by=updated_at&sort=asc&per_page=100";
+    if (!updated_after.empty()) {
+        endpoint += "&updated_after=" + std::string{updated_after};
+    }
+    const std::optional<nlohmann::json> items =
+        concatenated_arrays(api(ref, {"--paginate", endpoint}));
+    if (!items.has_value()) {
+        throw malformed(ref, "a list of merge requests");
+    }
+    std::vector<MergeRequestListing> out;
+    for (const nlohmann::json& item : *items) {
+        MergeRequestListing listing;
+        listing.ref = ref;
+        listing.ref.number = item.value("iid", std::uint64_t{0});
+        listing.title = text_at(item, {"title"});
+        listing.author = text_at(item, {"author", "username"});
+        listing.updated_at = text_at(item, {"updated_at"});
+        listing.draft = flag_at(item, "draft") || flag_at(item, "work_in_progress");
+        if (listing.ref.number != 0 && listing.updated_at > updated_after) {
+            out.push_back(std::move(listing));
+        }
+    }
+    std::ranges::stable_sort(out, {}, &MergeRequestListing::updated_at);
+    return out;
+}
+
+std::vector<std::string> GlabTransport::owner_projects(const ForgeProject& owner) {
+    const MergeRequestRef ref = project_ref(owner);
+    require_forge(ref);
+    std::string out;
+    try {
+        out = api(ref, {"--paginate",
+                        "groups/" + encode_project(owner.project) +
+                            "/projects?include_subgroups=true&archived=false&per_page=100"});
+    } catch (const ForgeError& e) {
+        if (e.kind() != ForgeError::Kind::NotFound) {
+            throw;
+        }
+        out = api(ref, {"--paginate", "users/" + encode_project(owner.project) +
+                                          "/projects?archived=false&per_page=100"});
+    }
+    const std::optional<nlohmann::json> items = concatenated_arrays(out);
+    if (!items.has_value()) {
+        throw malformed(ref, "a list of projects");
+    }
+    std::vector<std::string> projects;
+    for (const nlohmann::json& item : *items) {
+        if (const std::string path = text_at(item, {"path_with_namespace"}); !path.empty()) {
+            projects.push_back(path);
+        }
+    }
+    return projects;
 }
 
 void GlabTransport::create_comment(const MergeRequest& request, const InlineComment& comment) {

@@ -596,6 +596,28 @@ the document alone. Posting goes through the gate as `review_post`: asked on
 a terminal, allowed by `--yes` or `permissions.review_post: allow`, governed
 by `--permission-mode`.
 
+Since 48d the sweep and its targets read the same way:
+
+```bash
+apogee review targets --output-format json   # {"object":"list","data":[{"name","forge","repo"|"owner",…}]}
+apogee review sweep --output-format json     # {"object":"review.sweep",…}
+```
+
+A target is `name`, `forge`, `repo` or `owner`, `host` when it is not the
+forge's default, `skills` (empty: each merge request's plan decides), `post`
+(its declared grant), `drafts`, and `model` and `cli` when set -- the `review:`
+section's entry. A sweep's document is `started`, `dry_run`, `allow_post`,
+`cap`, and per target its `name`, `kind` (`repo`, `owner`), `grant` (`target`,
+`--allow-post`, `none`) and `projects`: each repository's `project`
+(`github.com/owner/repo`), `watermark_before` and `watermark_after`,
+`first_sweep` (it started at now), `reviewed` (each a `review.run` document,
+above), `skipped_drafts`, and `error` when it stopped -- a merge request that
+could not be reviewed is not advanced past, so the next sweep tries it again.
+`reviewed`, `posted`, `deferred` (past the cap, waiting for the next sweep)
+and `errors` count the whole run, and `document` names where it was kept
+(the data directory's `review/sweeps/`). A sweep with errors exits `1`; one a
+live sweep's lock refuses exits `1` naming its pid.
+
 Since 27l the graph navigation verbs are reads of the same kind:
 
 ```bash

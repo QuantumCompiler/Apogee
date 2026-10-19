@@ -158,6 +158,11 @@ struct LayoutEntry {
 /// seeded skip-if-present, and any markdown file the user drops beside them,
 /// each run by its file's name.
 [[nodiscard]] std::filesystem::path review_skills_dir();
+/// `<APOGEE_HOME>/review` -- a review sweep's state (48d): `watermarks.json`
+/// (each target's newest merge request handled), `sweep.lock` (the one
+/// sweep at a time) and `sweeps/` (each sweep's document). Private: it holds
+/// findings about code that may not be public.
+[[nodiscard]] std::filesystem::path review_dir();
 [[nodiscard]] std::filesystem::path cache_dir();
 /// `cache/prompt` -- a local model's attention cache kept between processes
 /// (26j): `models/<model>/` holds each model's prefix files (the state after

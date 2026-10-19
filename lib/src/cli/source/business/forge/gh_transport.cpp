@@ -2,6 +2,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+
 #include "contracts/utf8.h"
 
 namespace apogee::forge {
@@ -137,6 +139,68 @@ std::string GhTransport::compare(const MergeRequestRef& ref, std::string_view fr
     return harness::valid_utf8(api(
         ref, {"-H", "Accept: application/vnd.github.diff",
               "repos/" + ref.project + "/compare/" + std::string{from} + "..." + std::string{to}}));
+}
+
+std::vector<MergeRequestListing> GhTransport::open_merge_requests(const ForgeProject& project,
+                                                                  std::string_view updated_after) {
+    const MergeRequestRef ref = project_ref(project);
+    require_forge(ref);
+    const std::optional<nlohmann::json> items = concatenated_arrays(
+        api(ref, {"--paginate", "repos/" + project.project +
+                                    "/pulls?state=open&sort=updated&direction=asc&per_page=100"}));
+    if (!items.has_value()) {
+        throw ForgeError{ForgeError::Kind::Malformed,
+                         "gh answered for " + project.project +
+                             " with something that is not a list of pull requests",
+                         ""};
+    }
+    std::vector<MergeRequestListing> out;
+    for (const nlohmann::json& item : *items) {
+        MergeRequestListing listing;
+        listing.ref = ref;
+        listing.ref.number = item.value("number", std::uint64_t{0});
+        listing.title = text_at(item, {"title"});
+        listing.author = text_at(item, {"user", "login"});
+        listing.updated_at = text_at(item, {"updated_at"});
+        listing.draft =
+            item.contains("draft") && item["draft"].is_boolean() && item["draft"].get<bool>();
+        if (listing.ref.number != 0 && listing.updated_at > updated_after) {
+            out.push_back(std::move(listing));
+        }
+    }
+    std::ranges::stable_sort(out, {}, &MergeRequestListing::updated_at);
+    return out;
+}
+
+std::vector<std::string> GhTransport::owner_projects(const ForgeProject& owner) {
+    const MergeRequestRef ref = project_ref(owner);
+    require_forge(ref);
+    std::string out;
+    try {
+        out = api(ref, {"--paginate", "orgs/" + owner.project + "/repos?per_page=100"});
+    } catch (const ForgeError& e) {
+        if (e.kind() != ForgeError::Kind::NotFound) {
+            throw;
+        }
+        // Not an organization: a user's own repositories.
+        out = api(ref, {"--paginate", "users/" + owner.project + "/repos?per_page=100&type=owner"});
+    }
+    const std::optional<nlohmann::json> items = concatenated_arrays(out);
+    if (!items.has_value()) {
+        throw ForgeError{ForgeError::Kind::Malformed,
+                         "gh answered for " + owner.project +
+                             " with something that is not a list of repositories",
+                         ""};
+    }
+    std::vector<std::string> projects;
+    for (const nlohmann::json& item : *items) {
+        const bool archived = item.contains("archived") && item["archived"].is_boolean() &&
+                              item["archived"].get<bool>();
+        if (const std::string name = text_at(item, {"full_name"}); !name.empty() && !archived) {
+            projects.push_back(name);
+        }
+    }
+    return projects;
 }
 
 void GhTransport::create_comment(const MergeRequest& request, const InlineComment& comment) {

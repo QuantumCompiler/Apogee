@@ -24,6 +24,11 @@
 ///   login     glab api user
 ///   comments  glab api --paginate …/merge_requests/<iid>/notes?per_page=100,
 ///             system notes left out
+///   listing   glab api --paginate
+///   "projects/<p>/merge_requests?state=opened&order_by=updated_at&sort=asc&per_page=100[&updated_after=<t>]"
+///   owner     glab api --paginate
+///   "groups/<g>/projects?include_subgroups=true&archived=false&per_page=100",
+///             else users/<owner>/projects
 ///   compare   glab api projects/<project>/repository/compare?from=<a>&to=<b>,
 ///             its `diffs` joined as the merge request's are
 ///
@@ -44,6 +49,9 @@ public:
     [[nodiscard]] std::vector<PostedComment> comments(const MergeRequestRef& ref) override;
     [[nodiscard]] std::string compare(const MergeRequestRef& ref, std::string_view from,
                                       std::string_view to) override;
+    [[nodiscard]] std::vector<MergeRequestListing> open_merge_requests(
+        const ForgeProject& project, std::string_view updated_after) override;
+    [[nodiscard]] std::vector<std::string> owner_projects(const ForgeProject& owner) override;
     void create_comment(const MergeRequest& request, const InlineComment& comment) override;
     [[nodiscard]] PublishOutcome publish_batch(const MergeRequest& request,
                                                const std::vector<InlineComment>& comments,
