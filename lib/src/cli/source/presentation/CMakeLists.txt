@@ -303,6 +303,8 @@ apogee_add_module(cli
     cli/video_compose.cpp
     cli/voice_cmd.h
     cli/voice_cmd.cpp
+    cli/bootstrap_cmd.h
+    cli/bootstrap_cmd.cpp
     cli/voice_say.h
     cli/voice_say.cpp
     cli/knowledge.h

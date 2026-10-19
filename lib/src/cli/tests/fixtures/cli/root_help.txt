@@ -40,6 +40,7 @@ Subcommands:
   review                      Review merge requests with the review skills -- one, or every target swept -- and post what they find
   video                       Generate video locally from a diffusion pipeline in the store -- a clip from text or a seed image, or a narrated video composed from a brief
   voice                       Speak text with a voice model in the store, into a WAV
+  bootstrap                   Install the runtimes this machine can run and register its providers and models -- what every install runs after check --fix
   serve                       Serve the OpenAI-compatible HTTP API (server deployments only)
   symphonies                  Define and play symphonies: staged prompt processes over a suite's members
   system                      Show this machine as Apogee reads it: CPU, memory, GPU, the model store's disk

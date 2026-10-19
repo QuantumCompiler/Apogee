@@ -72,6 +72,42 @@ APOGEE_HOME="$WORK/a" "$APOGEE_BIN" check --fix >/dev/null 2>&1
 # would catch it -- both roots start empty and must end identical.
 APOGEE_HOME="$WORK/b" "$APOGEE_BIN" check --fix >/dev/null 2>&1
 
+# --- The bootstrap, minimal (51) --------------------------------------------
+# Every install path runs `apogee bootstrap` right after `check --fix`; under
+# APOGEE_MINIMAL_INSTALL (always, in a test: never the network) it skips
+# whole, said identically on both paths, and the trees compared below are
+# the ones it left.
+for path in a b; do
+    APOGEE_HOME="$WORK/$path" APOGEE_MINIMAL_INSTALL=1 "$APOGEE_BIN" bootstrap \
+        >"$WORK/bootstrap-$path.txt" 2>&1 </dev/null
+done
+if ! diff "$WORK/bootstrap-a.txt" "$WORK/bootstrap-b.txt"; then
+    echo "INSTALL PARITY VIOLATED: the two install paths bootstrap differently" >&2
+    exit 1
+fi
+if ! grep -q "bootstrap skipped: a minimal install (APOGEE_MINIMAL_INSTALL) -- 'apogee bootstrap'" \
+        "$WORK/bootstrap-a.txt"; then
+    echo "INSTALL PARITY: a minimal bootstrap did not skip whole, naming its door:" >&2
+    cat "$WORK/bootstrap-a.txt" >&2
+    exit 1
+fi
+# ...and every path runs it at the same point: after its `check --fix`. The
+# scripts are read, not run: a line invoking each, a comment never.
+SCRIPTS="$(cd "$(dirname "$0")/../../../../../scripts" && pwd)"
+MAKEFILE="$(cd "$(dirname "$0")/../../.." && pwd)/Makefile"
+first_call() {  # first_call <file> <verb...>: the first line invoking it
+    grep -n -E "[\"')] $2( |\$)" "$1" | grep -v -E '^[0-9]+:[[:space:]]*#' | head -1 | cut -d: -f1
+}
+for installer in "$SCRIPTS/install.sh" "$SCRIPTS/install.ps1" "$MAKEFILE"; do
+    fix="$(first_call "$installer" "check --fix")"
+    boot="$(first_call "$installer" "bootstrap")"
+    if [ -z "$fix" ] || [ -z "$boot" ] || [ "$boot" -le "$fix" ]; then
+        echo "INSTALL PARITY VIOLATED: $installer does not run 'apogee bootstrap' right after" \
+             "'check --fix' (check --fix at line ${fix:-none}, bootstrap at ${boot:-none})" >&2
+        exit 1
+    fi
+done
+
 if ! diff <(listing "$WORK/a") <(listing "$WORK/b"); then
     echo "INSTALL PARITY VIOLATED: the two install paths produce different trees" >&2
     exit 1
@@ -174,6 +210,13 @@ if [ -n "$CHANNEL_BIN" ]; then
     user="$WORK/home-$channel"
     mkdir -p "$user"
     env -u APOGEE_HOME HOME="$user" "$CHANNEL_BIN" check --fix >/dev/null 2>&1
+    # The channel's bootstrap, minimal, says what the release's does (51).
+    env -u APOGEE_HOME HOME="$user" APOGEE_MINIMAL_INSTALL=1 "$CHANNEL_BIN" bootstrap \
+        >"$WORK/bootstrap-$channel.txt" 2>&1 </dev/null
+    if ! diff "$WORK/bootstrap-a.txt" "$WORK/bootstrap-$channel.txt"; then
+        echo "INSTALL PARITY VIOLATED: the $channel channel bootstraps differently" >&2
+        exit 1
+    fi
     root="$user/$(root_name "$channel")"
     if [ ! -d "$root" ]; then
         echo "INSTALL PARITY: the $channel build seeded nothing at its own root, $root" >&2

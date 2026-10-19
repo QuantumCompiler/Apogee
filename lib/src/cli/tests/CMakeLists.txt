@@ -296,6 +296,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/video_cmd_test.cpp
     presentation/cli/voice_say_test.cpp
     presentation/cli/video_compose_test.cpp
+    presentation/cli/bootstrap_cmd_test.cpp
     presentation/cli/model_chain_test.cpp
     presentation/cli/complete_sources_test.cpp
     presentation/cli/models_test.cpp

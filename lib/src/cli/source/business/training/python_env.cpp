@@ -17,6 +17,13 @@ namespace {
 constexpr std::array<std::string_view, 7> kSetNames{"prepare", "mlx",   "peft", "convert",
                                                     "mlx-vlm", "video", "voice"};
 
+/// Where each set runs, in the names' order (51): what `apogee bootstrap`
+/// installs on a host is the table's own word.
+enum class SetHost : std::uint8_t { Any, AppleSilicon, NvidiaGpu };
+constexpr std::array<SetHost, kSetNames.size()> kSetHosts{
+    SetHost::Any,          SetHost::AppleSilicon, SetHost::NvidiaGpu, SetHost::Any,
+    SetHost::AppleSilicon, SetHost::Any,          SetHost::Any};
+
 constexpr std::array<std::string_view, 1> kPrepare{"datasets>=3.0"};
 constexpr std::array<std::string_view, 1> kMlx{"mlx-lm>=0.21"};
 // The mlx backend's vision path (27c): `load`, `stream_generate` and the
@@ -86,6 +93,19 @@ std::string describe_failure(std::string_view what, const CommandResult& result)
 
 std::string_view to_string(RequirementSet set) noexcept {
     return kSetNames.at(static_cast<std::size_t>(set));
+}
+
+std::string set_unfit_reason(RequirementSet set, bool apple_silicon, bool nvidia_smi) {
+    switch (kSetHosts.at(static_cast<std::size_t>(set))) {
+        case SetHost::Any:
+            return {};
+        case SetHost::AppleSilicon:
+            return apple_silicon ? std::string{} : "for Apple silicon, which this host is not";
+        case SetHost::NvidiaGpu:
+            return nvidia_smi ? std::string{}
+                              : "for an NVIDIA GPU, and nvidia-smi is not on PATH here";
+    }
+    return {};
 }
 
 std::optional<RequirementSet> requirement_set_from_string(std::string_view name) noexcept {

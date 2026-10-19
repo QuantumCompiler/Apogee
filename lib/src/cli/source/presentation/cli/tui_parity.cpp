@@ -63,6 +63,9 @@ constexpr std::array kSurfaces{
     ShellSurface{"voice", RunnerCovered,
                  "speech from a voice model in the store (50a): the exec line (37h) runs it as "
                  "typed"},
+    ShellSurface{"bootstrap", RunnerCovered,
+                 "the runtimes installed and what the machine has registered (51): the exec "
+                 "line (37h) runs it as typed, each step said"},
     // --- hidden plumbing: protocols other programs speak, never a person's ----
     ShellSurface{"__complete", RunnerCovered,
                  "the shell stubs' completion protocol -- the exec line's Tab asks the same "

@@ -671,6 +671,18 @@ header**, never estimated) and `offset`, and its `sentences` (`text`,
 on a cancel, the output untouched either way; a refusal before the run
 prints no document, one line on stderr naming the fix.
 
+Since 51 a bootstrap's summary is one:
+
+```bash
+apogee bootstrap --output-format json   # {"object":"apogee.bootstrap",…}
+```
+
+It is `minimal` (and `minimal_by`: `--minimal` or `APOGEE_MINIMAL_INSTALL`,
+null when it ran) and `steps` -- each `name`, `command` (the `apogee …` line
+it ran, null for a set this host is not for), `status` (`done` or
+`skipped`) and `reason` (null when done). The narration goes to stderr;
+the exit is `0` whatever was skipped.
+
 Since 50c a composed video is a document too -- its project, kept beside the
 video as `<video>.json` from the first step and printed when the run ends:
 

@@ -8,6 +8,7 @@
 #include "cli/agents_cmd.h"
 #include "cli/analyze.h"
 #include "cli/auth_cmd.h"
+#include "cli/bootstrap_cmd.h"
 #include "cli/chat.h"
 #include "cli/chat_history.h"
 #include "cli/check.h"
@@ -100,6 +101,7 @@ CommandRegistry default_registry(ShellEntry shell) {
     registry.add(std::make_unique<ReviewCommand>());
     registry.add(std::make_unique<VideoCommand>());
     registry.add(std::make_unique<VoiceCommand>());
+    registry.add(std::make_unique<BootstrapCommand>());
     registry.add(std::make_unique<ServeCommand>());
     registry.add(std::make_unique<SymphoniesCommand>());
     registry.add(std::make_unique<SystemCommand>());

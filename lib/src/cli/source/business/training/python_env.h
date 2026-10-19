@@ -67,6 +67,12 @@ enum class RequirementSet : std::uint8_t {
 /// The pip requirement specifiers `set` installs.
 [[nodiscard]] std::span<const std::string_view> packages_for(RequirementSet set) noexcept;
 
+/// Why `set` is not for a host with these facts (51) -- the table's own
+/// column, so a set added to it says there where it runs: `mlx` and
+/// `mlx-vlm` are Apple silicon's, `peft` an NVIDIA GPU's, every other set
+/// any host's. Empty when it is for this one.
+[[nodiscard]] std::string set_unfit_reason(RequirementSet set, bool apple_silicon, bool nvidia_smi);
+
 /// What the environment holds, read from `apogee.json` and the filesystem.
 struct PythonEnvStatus {
     /// The interpreter exists.

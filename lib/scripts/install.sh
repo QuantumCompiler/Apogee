@@ -5,8 +5,11 @@
 #   curl -fsSL https://raw.githubusercontent.com/QuantumCompiler/Apogee/stable/lib/scripts/install.sh | bash
 #
 # What it does, and nothing else: downloads the release archive for this
-# platform, puts the binary on your PATH, installs shell completions, and asks
-# the binary to create its own data directory.
+# platform, puts the binary on your PATH, installs shell completions, asks
+# the binary to create its own data directory, and then to bootstrap itself
+# (`apogee bootstrap`, 51): the Python runtime sets this machine can run,
+# installed into Apogee's own environment, and its providers and stored
+# models registered. APOGEE_MINIMAL_INSTALL=1 skips that last step.
 #
 # What it deliberately does NOT do:
 #   * download a model -- Apogee bundles none and fetches none unasked
@@ -97,6 +100,13 @@ main() {
     # The binary seeds its own layout, then verifies it. See the parity note.
     say ""
     "$PREFIX/bin/apogee" check --fix || die "post-install check failed"
+
+    # Then it arrives ready (51): the runtime sets this machine can run, its
+    # providers and its stored models registered -- each step said, never
+    # fatal. APOGEE_MINIMAL_INSTALL=1 skips it; `apogee bootstrap` runs it
+    # again any time.
+    say ""
+    "$PREFIX/bin/apogee" bootstrap || say "note: the bootstrap did not finish -- 'apogee bootstrap' runs it again"
 
     case ":$PATH:" in
         *":$PREFIX/bin:"*) ;;

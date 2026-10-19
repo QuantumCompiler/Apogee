@@ -160,6 +160,10 @@ const std::map<std::string, Classification>& table() {
         {"serve", carve_out("it is the server")},
         {"train setup",
          carve_out("creates the Python environment on the host; training control is CLI-only")},
+        {"bootstrap",
+         carve_out("installs runtime sets into the host's Python environment and registers the "
+                   "host's providers and models, on the install's own act; CLI-only, the "
+                   "training precedent")},
         {"train run",
          carve_out("an expensive GPU job with live progress; training control is CLI-only over "
                    "HTTP, forever -- the reads are served under /v1/admin/training/*")},

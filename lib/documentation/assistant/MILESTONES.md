@@ -2432,6 +2432,32 @@ Asked for directly (Taylor), in three reports: "Not all subcommands have tab aut
 
 Trade-off, recorded: `warn` is now reserved for real defects -- a fresh install shows only `ok` and `skip` rows, and every skip carries the command that changes it.
 
+### 2026-10-19 — `install-bootstrap` (backlog item 51): a fresh install that arrives ready
+
+**Why.** A fresh install ended with a ritual the user ran by hand and rejected: four `apogee train setup --with …` runs, then `providers scan --register` and `config scan --register` -- six commands before the machine did what it could. M11 made installs end healthy; this makes them end ready.
+
+- [x] **`apogee bootstrap`** (`cli/bootstrap_cmd`).
+  - Every requirement set of `train setup`'s one table this host is for, in the table's order, each by `apogee train setup --with <set>`. Then `apogee providers scan --register` and `apogee config scan --register`.
+  - Each step is the shipped command run as a captured child of the binary -- the shell's precedent (`self_command`, `run_child_lines`) -- so bootstrap composes and reimplements nothing. A set added to the table joins with no edit here; the voice set already has.
+  - Each step is said as it runs, its own lines passed through. Idempotence is the commands' own: a second run says the environment already exists, and pip finds each set satisfied without the network.
+- [x] **Never fatal.** A step that fails or cannot start (offline, nothing to register, no child processes on this platform) is skipped with its last line, and the rest still run. The exit is 0, M11's green, and the last line names `apogee bootstrap`, which runs it again any time.
+- [x] **The host decides the sets, and the table says how**: `training::set_unfit_reason` reads a column declared beside the set names. `mlx` and `mlx-vlm` are Apple silicon's; `peft`, the CUDA trainer's stack, needs an NVIDIA GPU (`nvidia-smi` on PATH); every other set is any host's. A set this host is not for is listed as skipped with that reason.
+- [x] **One minimal switch**: `--minimal`, or `APOGEE_MINIMAL_INSTALL` set to anything but empty, `0` or `false`, skips it whole, said with the re-run door. `--output-format json` prints the `apogee.bootstrap` summary (machine-mode.md), the narration then on stderr.
+- [x] **Every install path runs it right after `check --fix`**: `install.sh`, `install.ps1` and `make install`, each non-fatally. `cli.install_parity` runs it on every path under the minimal switch -- the same skip said on the release paths and the channel's, the trees compared after it -- and reads the three scripts to require the `bootstrap` invocation right after each one's `check --fix`. `check` is untouched: it still never edits config, and `--fix` still never downloads.
+- [x] **The tests**: `cli/bootstrap_cmd_test` over a scripted runner -- never a real install, never the network -- covering the plan from the table on two hosts, each step once and in order, a failing set skipped while the rest run, a step that cannot start, the JSON summary, both minimal switches, the real tree under the switch, and **the one-declaration scan**: no source but the table names three or more sets as literals on a line, so a planted second list fails.
+
+Decisions taken while building, for veto:
+- **Where sets run is a column of the table**, not a rule in bootstrap. On Apple silicon a bootstrap installs `prepare`, `mlx`, `convert`, `mlx-vlm`, `video` and `voice` -- the transcript's four, plus Parquet's `datasets` and the voice runtime. On an NVIDIA box it installs `peft` instead of the two mlx sets.
+- **One child per set.** One failing set never stops the next.
+- **The narration is stdout** in text mode, so an installer shows it, and stderr under JSON.
+- **`make install` bootstraps too**, as the item said every path does. A developer who installs often can skip it with `APOGEE_MINIMAL_INSTALL=1 make install`.
+- **Windows runs no child processes yet**, so there each step is skipped with its reason. The guarantee holds; the work waits for that platform's children.
+- **The re-run door's words**: "'apogee bootstrap' runs it again any time", the last line of every run.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3538 of 3538, two skipped and said (the real caption burn without libass, and the existing pdftotext case); `cli.install_parity` ran every path's minimal bootstrap.
+
+**Not run here**: a real bootstrap. It installs gigabytes into the real environment and registers into the real config, so no test or check in this run ran one; the minimal switch was on every time. The user's next install is its first real run.
+
 ## Milestone L — The vendor-CLI family
 
 **Goal.** A fifth backend and, more importantly, the machinery the rest of the vendor-CLI family will be built on: Claude driven through the official `claude` CLI as a **long-lived child process** — the subscription-auth path beside the API-key path from Milestone D. It reuses that backend's IR mapping and typed sinks and none of its HTTP: this one speaks JSONL over pipes.
