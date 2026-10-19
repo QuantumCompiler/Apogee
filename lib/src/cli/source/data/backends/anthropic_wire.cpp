@@ -1,8 +1,10 @@
 #include "backends/anthropic_wire.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "contracts/errors.h"
+#include "contracts/server_tools.h"
 
 namespace apogee::backends::anthropic {
 namespace {
@@ -249,14 +251,22 @@ nlohmann::json build_request(const harness::ChatRequest& request, const RequestO
     for (const harness::Tool& tool : request.tools) {
         tools.push_back(tool_definition(tool));
     }
-    if (options.web_search) {
+    const auto enabled = [&options](std::string_view tool) {
+        return std::ranges::find(options.server_tools, tool) != options.server_tools.end();
+    };
+    if (options.web_search || enabled(harness::kServerWebSearch)) {
         // A server-side tool: Anthropic runs the search itself, so nothing has
         // to be dispatched locally, and web search needs no claude CLI.
-        nlohmann::json search{{"type", "web_search_20250305"}, {"name", "web_search"}};
+        nlohmann::json search{{"type", std::string{kWebSearchToolType}}, {"name", "web_search"}};
         if (options.web_search_max_uses > 0) {
             search["max_uses"] = options.web_search_max_uses;
         }
         tools.push_back(std::move(search));
+    }
+    if (enabled(harness::kServerCodeExecution)) {
+        // The entry's consent (47a): code Anthropic runs in its own sandbox.
+        tools.push_back(
+            {{"type", std::string{kCodeExecutionToolType}}, {"name", "code_execution"}});
     }
     if (!request.transient.response_schema.empty()) {
         const nlohmann::json schema =
@@ -383,6 +393,87 @@ void fold_structured_output(harness::ChatResponse& response) {
 // ---------------------------------------------------------------------------
 // wire -> IR
 // ---------------------------------------------------------------------------
+
+namespace {
+
+/// The config's name for a server tool Anthropic reports under its own:
+/// its code runs as `bash_code_execution` and `text_editor_code_execution`.
+std::string_view config_tool_name(std::string_view name) {
+    if (name == "bash_code_execution" || name == "text_editor_code_execution" ||
+        name == "code_execution") {
+        return harness::kServerCodeExecution;
+    }
+    return name;
+}
+
+/// The error code a result block reports in place of its content, or empty.
+std::string result_error(const nlohmann::json& content) {
+    if (content.is_object()) {
+        const std::string type = content.value("type", std::string{});
+        if (type.ends_with("_error") || content.contains("error_code")) {
+            return content.value("error_code", std::string{"an error"});
+        }
+    }
+    return {};
+}
+
+}  // namespace
+
+std::optional<std::string> server_tool_line(const nlohmann::json& block) {
+    if (!block.is_object()) {
+        return std::nullopt;
+    }
+    constexpr std::string_view kVendor = "Anthropic";
+    const std::string type = block.value("type", std::string{});
+    if (type == "server_tool_use") {
+        const std::string name = block.value("name", std::string{});
+        const nlohmann::json input = block.value("input", nlohmann::json::object());
+        std::string what;
+        if (input.is_object()) {
+            if (name == "web_search") {
+                const std::string query = input.value("query", std::string{});
+                what =
+                    query.empty() ? std::string{} : "\"" + harness::narration_excerpt(query) + "\"";
+            } else if (name == "bash_code_execution") {
+                what = harness::narration_excerpt(input.value("command", std::string{}));
+            } else if (name == "text_editor_code_execution") {
+                const std::string command = input.value("command", std::string{});
+                const std::string path = input.value("path", std::string{});
+                what = harness::narration_excerpt(
+                    command + (command.empty() || path.empty() ? "" : " ") + path);
+            } else if (name == "code_execution") {
+                what = harness::narration_excerpt(input.value("code", std::string{}));
+            }
+        }
+        return harness::server_tool_line(config_tool_name(name), kVendor, what);
+    }
+    if (type == "web_search_tool_result") {
+        const nlohmann::json content = block.value("content", nlohmann::json{});
+        if (const std::string error = result_error(content); !error.empty()) {
+            return harness::server_tool_line(harness::kServerWebSearch, kVendor,
+                                             "failed (" + error + ")");
+        }
+        const std::size_t results = content.is_array() ? content.size() : 0;
+        return harness::server_tool_line(
+            harness::kServerWebSearch, kVendor,
+            std::to_string(results) + (results == 1 ? " result" : " results"));
+    }
+    if (type == "bash_code_execution_tool_result" || type == "code_execution_tool_result" ||
+        type == "text_editor_code_execution_tool_result") {
+        const nlohmann::json content = block.value("content", nlohmann::json{});
+        if (const std::string error = result_error(content); !error.empty()) {
+            return harness::server_tool_line(harness::kServerCodeExecution, kVendor,
+                                             "failed (" + error + ")");
+        }
+        if (content.is_object() && content.contains("return_code")) {
+            return harness::server_tool_line(
+                harness::kServerCodeExecution, kVendor,
+                "exit " + std::to_string(content.value("return_code", 0)));
+        }
+        return harness::server_tool_line(harness::kServerCodeExecution, kVendor, "done");
+    }
+    return std::nullopt;
+}
 
 harness::FinishReason finish_reason_from_stop_reason(std::string_view stop_reason) {
     if (stop_reason == "end_turn" || stop_reason == "stop_sequence") {

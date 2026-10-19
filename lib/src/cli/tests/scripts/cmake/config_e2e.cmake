@@ -266,6 +266,24 @@ endif()
 apogee_run(1 config set-backend claude)
 apogee_run(1 config set-backend claude --api-key sk-never)
 
+# A vendor's own server-side tools (47a): consent written per entry, a tool
+# the vendor does not run refused, and cleared -- the file as it was.
+apogee_run(0 config set-backend claude --server-tools web_search,code_execution)
+file(READ "${CONFIG_FILE}" WITH_SERVER_TOOLS)
+string(FIND "${WITH_SERVER_TOOLS}" "\"server_tools\"" SERVER_TOOLS_AT)
+string(FIND "${WITH_SERVER_TOOLS}" "\"code_execution\"" CODE_EXECUTION_AT)
+if(SERVER_TOOLS_AT EQUAL -1 OR CODE_EXECUTION_AT EQUAL -1)
+    message(FATAL_ERROR "set-backend --server-tools did not write the list:\n${WITH_SERVER_TOOLS}")
+endif()
+apogee_run(1 config set-backend claude --server-tools image_generation)
+file(READ "${CONFIG_FILE}" AFTER_REFUSAL)
+if(NOT AFTER_REFUSAL STREQUAL WITH_SERVER_TOOLS)
+    message(FATAL_ERROR "a refused --server-tools touched the file")
+endif()
+# Clearing takes an empty value, which CMake cannot pass; backend_fields_test
+# clears it. The file goes back as it was for the steps below.
+file(WRITE "${CONFIG_FILE}" "${BEFORE_RENAME}")
+
 # --- auto_rag: injection with no flag, reported, and switchable off --------
 apogee_run(0 config add-backend mock --type mock --model mock-1)
 file(READ "${CONFIG_FILE}" BEFORE_AUTO_RAG)

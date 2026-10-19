@@ -15,6 +15,7 @@
 #include <utility>
 
 #include "contracts/jsonc.h"
+#include "contracts/server_tools.h"
 #include "contracts/symphony_walk.h"
 #include "platform/platform.h"
 
@@ -149,6 +150,9 @@ std::optional<std::int64_t> integer_in(const YAML::Node& node, std::string_view 
     return value;
 }
 
+std::vector<std::string> string_list(const YAML::Node& node, std::string_view origin,
+                                     std::string_view key, bool paths);
+
 BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
                             const std::string& name) {
     const std::string where = "backends." + name;
@@ -218,6 +222,16 @@ BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
     backend.host = scalar(node["host"], origin, where + ".host");
     backend.idle_unload_seconds =
         integer(node["idle_unload_seconds"], origin, where + ".idle_unload_seconds");
+    for (std::string& tool :
+         string_list(node["server_tools"], origin, where + ".server_tools", false)) {
+        if (std::ranges::find(backend.server_tools, tool) == backend.server_tools.end()) {
+            backend.server_tools.push_back(std::move(tool));
+        }
+    }
+    if (const std::string refusal = server_tools_refusal(backend.type, backend.server_tools);
+        !refusal.empty()) {
+        fail(origin, where + ".server_tools: " + refusal);
+    }
 
     return backend;
 }

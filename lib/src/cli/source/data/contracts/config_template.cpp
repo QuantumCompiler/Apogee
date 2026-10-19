@@ -299,6 +299,15 @@ constexpr std::string_view kConfigTemplate = R"APOGEE(// Apogee configuration.
     //   "context_size": 200000,
     //   "max_tokens": 8192
     // },
+    //
+    // A vendor's own server-side tools -- its web search, its code execution --
+    // run on the vendor's servers under your key, where Apogee's permission
+    // prompts cannot see what they reach. They stay off until an entry lists
+    // them, and listing one is your consent for that vendor to run it
+    // (openai and google entries take the same names):
+    //   "server_tools": ["web_search", "code_execution"]
+    // Every use is said as a tool line while the answer streams;
+    // `apogee config set-backend <name> --server-tools web_search` writes it.
 
     // ── OpenAI ──────────────────────────────────────────────────────────────────
     // embedding_model is what this entry uses when it EMBEDS rather than chats;

@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "contracts/errors.h"
+#include "contracts/server_tools.h"
 #include "transport/sse_parser.h"
 
 namespace apogee::backends {
@@ -37,6 +38,12 @@ public:
         return saw_message_stop_;
     }
 
+    /// Whether Anthropic paused the turn (`pause_turn`): its server-side
+    /// tool loop reached its limit, and the turn continues on a resend.
+    [[nodiscard]] bool paused() const noexcept {
+        return stop_reason_ == "pause_turn";
+    }
+
 private:
     struct Block {
         std::string type;
@@ -45,7 +52,13 @@ private:
         std::string tool_id;
         std::string tool_name;
         std::string partial_json;
+        /// A server tool's result block, whole as it arrived: replayed
+        /// verbatim when a paused turn is continued.
+        nlohmann::json raw;
     };
+
+    /// Says a server-side block's line as a tool status (47a), when it has one.
+    void narrate(const nlohmann::json& block, harness::StatusEvent::Phase phase) const;
 
     const harness::StreamOptions& options_;
     std::string model_;
@@ -55,8 +68,26 @@ private:
     harness::FinishReason finish_reason_ = harness::FinishReason::Stop;
     harness::Usage usage_;
     std::string error_;
+    std::string stop_reason_;
     bool saw_message_stop_ = false;
 };
+
+void StreamAccumulator::narrate(const nlohmann::json& block,
+                                harness::StatusEvent::Phase phase) const {
+    if (!options_.on_status) {
+        return;
+    }
+    const std::optional<std::string> line = anthropic::server_tool_line(block);
+    if (!line.has_value()) {
+        return;
+    }
+    harness::StatusEvent status;
+    status.type = harness::StatusEvent::Type::ToolCall;
+    status.phase = phase;
+    status.name = block.value("name", block.value("type", std::string{}));
+    status.detail = *line;
+    options_.on_status(status);
+}
 
 bool StreamAccumulator::handle(const SseEvent& event) {
     const nlohmann::json payload = nlohmann::json::parse(event.data, nullptr, false);
@@ -99,6 +130,12 @@ bool StreamAccumulator::handle(const SseEvent& event) {
             block.tool_name = start->value("name", std::string{});
             if (block.type == "text") {
                 block.text = start->value("text", std::string{});
+            }
+            if (block.type.ends_with("_tool_result")) {
+                // A server tool's result arrives whole in its start event:
+                // said now, kept for a paused turn's resend.
+                block.raw = *start;
+                narrate(block.raw, harness::StatusEvent::Phase::Done);
             }
         }
         blocks_[index] = std::move(block);
@@ -146,6 +183,13 @@ bool StreamAccumulator::handle(const SseEvent& event) {
             call.name = it->second.tool_name;
             call.arguments = it->second.partial_json.empty() ? "{}" : it->second.partial_json;
             tool_calls_.push_back(std::move(call));
+        } else if (it != blocks_.end() && it->second.type == "server_tool_use") {
+            // Anthropic runs it, never Apogee: said, never dispatched (47a).
+            nlohmann::json input = nlohmann::json::parse(it->second.partial_json, nullptr, false);
+            narrate({{"type", "server_tool_use"},
+                     {"name", it->second.tool_name},
+                     {"input", input.is_discarded() ? nlohmann::json::object() : input}},
+                    harness::StatusEvent::Phase::Start);
         }
         return true;
     }
@@ -154,6 +198,7 @@ bool StreamAccumulator::handle(const SseEvent& event) {
         if (const auto delta = payload.find("delta"); delta != payload.end()) {
             if (const std::string stop = delta->value("stop_reason", std::string{});
                 !stop.empty()) {
+                stop_reason_ = stop;
                 finish_reason_ = anthropic::finish_reason_from_stop_reason(stop);
             }
         }
@@ -202,9 +247,55 @@ nlohmann::json StreamAccumulator::raw_blocks() const {
                               {"id", block.tool_id},
                               {"name", block.tool_name},
                               {"input", std::move(input)}});
+        } else if (block.type == "server_tool_use") {
+            nlohmann::json input = nlohmann::json::parse(block.partial_json, nullptr, false);
+            if (input.is_discarded()) {
+                input = nlohmann::json::object();
+            }
+            blocks.push_back({{"type", "server_tool_use"},
+                              {"id", block.tool_id},
+                              {"name", block.tool_name},
+                              {"input", std::move(input)}});
+        } else if (!block.raw.is_null()) {
+            blocks.push_back(block.raw);
         }
     }
     return blocks;
+}
+
+/// The response a paused turn's rounds make together: the text and calls in
+/// order, every round's tokens counted, the last round's finish.
+void merge_round(harness::ChatResponse& into, harness::ChatResponse round, bool first) {
+    if (first) {
+        into = std::move(round);
+        return;
+    }
+    into.message.content = harness::MessageContent{into.message.content.plain_text() +
+                                                   round.message.content.plain_text()};
+    for (harness::ToolCall& call : round.message.tool_calls) {
+        into.message.tool_calls.push_back(std::move(call));
+    }
+    into.usage.prompt_tokens += round.usage.prompt_tokens;
+    into.usage.completion_tokens += round.usage.completion_tokens;
+    into.finish_reason = round.finish_reason;
+    if (!round.model.empty()) {
+        into.model = round.model;
+    }
+}
+
+/// `body` with the paused assistant turn so far appended, so Anthropic
+/// resumes it: the docs' continuation, with no "continue" message added.
+nlohmann::json continued(const nlohmann::json& body, const nlohmann::json& turn) {
+    nlohmann::json next = body;
+    next["messages"].push_back({{"role", "assistant"}, {"content", turn}});
+    return next;
+}
+
+/// The notice a turn still paused after every continuation gets.
+std::string still_paused_notice() {
+    return "Anthropic paused its server-side tools " +
+           std::to_string(AnthropicProvider::kMaxPauseContinuations + 1) +
+           " times on this turn; the answer stops where it got to";
 }
 
 }  // namespace
@@ -227,6 +318,7 @@ std::unique_ptr<AnthropicProvider> AnthropicProvider::from_config(
     Options options;
     options.backend_name = backend_name;
     options.web_search = web_search;
+    options.server_tools = config.server_tools;
     // The key arrives resolved: the factory ran the one precedence chain
     // (config entry > stored slot > environment). This provider neither knows
     // nor cares where it came from.
@@ -271,6 +363,7 @@ anthropic::RequestOptions AnthropicProvider::request_options(const harness::Chat
         anthropic::thinking_budget_for(request.thinking, options_.thinking_budget_tokens);
     options.web_search = options_.web_search;
     options.web_search_max_uses = options_.web_search_max_uses;
+    options.server_tools = options_.server_tools;
     options.stream = stream;
     options.native_structured_output = anthropic::supports_native_structured_output(options_.model);
     return options;
@@ -316,22 +409,36 @@ harness::ChatResponse AnthropicProvider::chat(const harness::ChatRequest& reques
 
     const nlohmann::json body =
         anthropic::build_request(request, request_options(request, false), thinking_cache_);
-    const HttpResponse response = client_->send(
-        build_http_request(body, "/v1/messages", beta_for(request)), {}, cancellation);
-
-    if (!response.ok()) {
-        fail(response.status, response.body);
+    // A turn Anthropic paused (its server tools at their limit) is resent with
+    // what it has so far, so the answer is the whole turn's (47a).
+    harness::ChatResponse out;
+    nlohmann::json turn = nlohmann::json::array();
+    for (int round = 0;; ++round) {
+        const HttpResponse response =
+            client_->send(build_http_request(round == 0 ? body : continued(body, turn),
+                                             "/v1/messages", beta_for(request)),
+                          {}, cancellation);
+        if (!response.ok()) {
+            fail(response.status, response.body);
+        }
+        const nlohmann::json parsed = nlohmann::json::parse(response.body, nullptr, false);
+        if (parsed.is_discarded()) {
+            throw harness::ProviderError(options_.backend_name,
+                                         "the API returned a response that was not valid JSON");
+        }
+        if (const auto content = parsed.find("content");
+            content != parsed.end() && content->is_array()) {
+            for (const nlohmann::json& block : *content) {
+                turn.push_back(block);
+            }
+        }
+        merge_round(out, anthropic::parse_response(parsed), round == 0);
+        if (parsed.value("stop_reason", std::string{}) != "pause_turn" ||
+            round >= kMaxPauseContinuations) {
+            break;
+        }
     }
-
-    const nlohmann::json parsed = nlohmann::json::parse(response.body, nullptr, false);
-    if (parsed.is_discarded()) {
-        throw harness::ProviderError(options_.backend_name,
-                                     "the API returned a response that was not valid JSON");
-    }
-    if (const auto content = parsed.find("content"); content != parsed.end()) {
-        thinking_cache_.remember(*content);
-    }
-    harness::ChatResponse out = anthropic::parse_response(parsed);
+    thinking_cache_.remember(turn);
     anthropic::fold_structured_output(out);
     return out;
 }
@@ -343,37 +450,61 @@ harness::ChatResponse AnthropicProvider::stream_chat(const harness::ChatRequest&
     const nlohmann::json body =
         anthropic::build_request(request, request_options(request, true), thinking_cache_);
 
-    StreamAccumulator accumulator{options, options_.model};
-    SseParser parser{[&accumulator](const SseEvent& event) { return accumulator.handle(event); }};
+    // A turn Anthropic paused (`pause_turn`: its server-side tool loop at its
+    // limit) is resent with the turn so far and streams on, so the answer and
+    // its narration are the whole turn's (47a).
+    harness::ChatResponse out;
+    nlohmann::json turn = nlohmann::json::array();
+    for (int round = 0;; ++round) {
+        StreamAccumulator accumulator{options, options_.model};
+        SseParser parser{
+            [&accumulator](const SseEvent& event) { return accumulator.handle(event); }};
 
-    // The sink sees only a successful body: HttpTransport accumulates an error
-    // response into `response.body` instead of streaming it, which is what
-    // keeps a 429 retryable even on a streaming request.
-    const BodySink sink = [&](std::string_view chunk) {
-        options.cancellation.throw_if_cancelled();
-        return parser.feed(chunk);
-    };
+        // The sink sees only a successful body: HttpTransport accumulates an
+        // error response into `response.body` instead of streaming it, which
+        // is what keeps a 429 retryable even on a streaming request.
+        const BodySink sink = [&](std::string_view chunk) {
+            options.cancellation.throw_if_cancelled();
+            return parser.feed(chunk);
+        };
 
-    HttpRequest http_request = build_http_request(body, "/v1/messages", beta_for(request));
-    http_request.headers.push_back({"accept", "text/event-stream"});
+        HttpRequest http_request = build_http_request(round == 0 ? body : continued(body, turn),
+                                                      "/v1/messages", beta_for(request));
+        http_request.headers.push_back({"accept", "text/event-stream"});
 
-    const HttpResponse response = client_->send(http_request, sink, options.cancellation);
+        const HttpResponse response = client_->send(http_request, sink, options.cancellation);
 
-    if (!response.ok()) {
-        fail(response.status, response.body);
+        if (!response.ok()) {
+            fail(response.status, response.body);
+        }
+
+        parser.finish();
+
+        if (!accumulator.error().empty()) {
+            throw harness::ProviderError(options_.backend_name, accumulator.error());
+        }
+        for (const nlohmann::json& block : accumulator.raw_blocks()) {
+            turn.push_back(block);
+        }
+        merge_round(out, accumulator.take_response(), round == 0);
+        if (!accumulator.paused()) {
+            break;
+        }
+        if (round >= kMaxPauseContinuations) {
+            if (options.on_status) {
+                harness::StatusEvent notice;
+                notice.type = harness::StatusEvent::Type::Notice;
+                notice.detail = still_paused_notice();
+                options.on_status(notice);
+            }
+            break;
+        }
     }
 
-    parser.finish();
-
-    if (!accumulator.error().empty()) {
-        throw harness::ProviderError(options_.backend_name, accumulator.error());
-    }
-
-    thinking_cache_.remember(accumulator.raw_blocks());
+    thinking_cache_.remember(turn);
     // A forced structured_output call arrives as a tool_use block whose
     // arguments were never streamed as text; folding it here means the loop
     // sees an ordinary un-streamed answer and delivers it whole.
-    harness::ChatResponse out = accumulator.take_response();
     anthropic::fold_structured_output(out);
     return out;
 }

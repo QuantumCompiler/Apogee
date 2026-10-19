@@ -207,6 +207,15 @@ struct BackendConfig {
     /// a long-lived `apogee chat` that has switched to a cloud backend should
     /// not keep 16GB pinned for a conversation it is no longer having.
     std::optional<std::int64_t> idle_unload_seconds;
+
+    /// The vendor's own server-side tools this entry may run (47a):
+    /// `web_search`, `code_execution` -- `contracts/server_tools.h` holds each
+    /// vendor's set. Empty, the default, sends none. Listing one is recorded
+    /// consent for that vendor to browse or execute on the user's behalf under
+    /// the user's key, beyond what the host gate can see (SPEC.md ->
+    /// Principles, 2026-10-16). The loader refuses a name the vendor does not
+    /// offer, and any list on a backend whose API runs none.
+    std::vector<std::string> server_tools{};
 };
 
 /// The `models:` role pointers.

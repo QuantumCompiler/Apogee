@@ -151,3 +151,25 @@ TEST_CASE("set-backend in a JSONC config: the field in place, its comments kept"
     expected.replace(expected.find("\"claude-sonnet-5\""), 17, "\"claude-opus-5-5\"");
     CHECK(slurp(home.config_path()) == expected);
 }
+
+TEST_CASE("set-backend lists a vendor's server tools, completed, refused where it runs none",
+          "[set-backend][cli][server-tools]") {
+    // 47a: the consent is one visible line the one editor writes.
+    const apogee::testing::CliHome home{std::string{kConfig}};
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"__complete", "config", "set-backend", "claude", "--server-tools", ""}, &out,
+                     &err) == 0);
+    CHECK(out == "web_search\ncode_execution\n");
+    REQUIRE(home.run({"config", "set-backend", "claude", "--server-tools", "web_search"}, &out,
+                     &err) == 0);
+    CHECK_THAT(slurp(home.config_path()), ContainsSubstring("    server_tools: [web_search]\n"));
+    // A local entry runs none: refused in the loader's words, the file untouched.
+    const std::string before = slurp(home.config_path());
+    CHECK(home.run({"config", "set-backend", "local", "--server-tools", "web_search"}, &out,
+                   &err) != 0);
+    CHECK_THAT(err, ContainsSubstring("a llamacpp backend runs no server-side tools"));
+    CHECK(slurp(home.config_path()) == before);
+    REQUIRE(home.run({"config", "set-backend", "claude", "--server-tools", ""}, &out, &err) == 0);
+    CHECK(slurp(home.config_path()) == kConfig);
+}

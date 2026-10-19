@@ -1882,7 +1882,11 @@ TEST_CASE("the editable fields are the loader's, and every one add-backend write
                                                           {"binary", "/bin/x"},
                                                           {"mode", "m"},
                                                           {"host", "h"},
-                                                          {"idle_unload_seconds", "30"}};
+                                                          {"idle_unload_seconds", "30"},
+                                                          {"server_tools", "web_search"}};
+    // Only a vendor API runs server-side tools (47a): that field is set on an
+    // anthropic entry, alone, since the chain below turns its entry local.
+    constexpr std::string_view kVendorBase = "backends:\n  all:\n    type: anthropic\n";
     const std::string base_json = [&]() {
         const apogee::harness::Config base = apogee::harness::parse_config(kBase, "base");
         return apogee::harness::append_backend("", "all", *base.find_backend("all"), false);
@@ -1891,6 +1895,14 @@ TEST_CASE("the editable fields are the loader's, and every one add-backend write
     for (const std::string_view field : apogee::harness::backend_editable_fields()) {
         INFO(field);
         REQUIRE(samples.contains(field));  // every field has a sample here
+        if (field == "server_tools") {
+            const apogee::harness::Config config = apogee::harness::parse_config(
+                apogee::harness::set_backend_field(kVendorBase, "all", field, samples.at(field)),
+                "edited");
+            CHECK(config.find_backend("all")->server_tools ==
+                  std::vector<std::string>{"web_search"});
+            continue;
+        }
         const std::string edited =
             apogee::harness::set_backend_field(kBase, "all", field, samples.at(field));
         const apogee::harness::Config config = apogee::harness::parse_config(edited, "edited");

@@ -474,13 +474,24 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
                 say_raw("the utility model could not summarise it");
             }
         };
-        stream.on_status = [&reporter](const harness::StatusEvent& event) {
-            // Only notices and progress notes cross here: a model's load
-            // progress is the surface's own business, reported before the turn.
+        stream.on_status = [&reporter, &streamed](const harness::StatusEvent& event) {
+            // Only notices, progress notes and a vendor's own tool lines cross
+            // here: a model's load progress is the surface's own business,
+            // reported before the turn.
             if (event.detail.empty()) {
                 return;
             }
-            if (event.type == harness::StatusEvent::Type::Notice) {
+            if (event.type == harness::StatusEvent::Type::ToolCall) {
+                // A tool the vendor ran on its own servers (47a), said as any
+                // tool line is. It can fall mid-answer, between the text before
+                // the search and the text after: the answer so far is ended
+                // first, and the next token opens the rest.
+                if (streamed) {
+                    reporter.on_answer_end();
+                    streamed = false;
+                }
+                reporter.on_tool_status(event.detail);
+            } else if (event.type == harness::StatusEvent::Type::Notice) {
                 reporter.on_notice(event.detail);
             } else if (event.type == harness::StatusEvent::Type::PromptCache) {
                 reporter.on_progress(event.detail);

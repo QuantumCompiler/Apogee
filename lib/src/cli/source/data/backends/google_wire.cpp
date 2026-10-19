@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "contracts/errors.h"
+#include "contracts/server_tools.h"
 
 namespace apogee::backends::google {
 namespace {
@@ -211,8 +212,15 @@ nlohmann::json build_request(const harness::ChatRequest& request, const RequestO
     if (!declarations.empty()) {
         tools.push_back({{"functionDeclarations", std::move(declarations)}});
     }
-    if (options.web_search) {
+    const auto enabled = [&options](std::string_view tool) {
+        return std::ranges::find(options.server_tools, tool) != options.server_tools.end();
+    };
+    if (options.web_search || enabled(harness::kServerWebSearch)) {
         tools.push_back({{"google_search", nlohmann::json::object()}});
+    }
+    if (enabled(harness::kServerCodeExecution)) {
+        // The entry's consent (47a): code Gemini runs in its own sandbox.
+        tools.push_back({{"code_execution", nlohmann::json::object()}});
     }
     if (!tools.empty()) {
         body["tools"] = std::move(tools);
@@ -329,6 +337,62 @@ std::string error_message(long status, std::string_view body) {
         }
     }
     return "HTTP " + std::to_string(status);
+}
+
+std::vector<std::string> server_tool_lines(const nlohmann::json& chunk,
+                                           std::vector<std::string>& seen_queries) {
+    std::vector<std::string> lines;
+    constexpr std::string_view kVendor = "Google";
+    const auto candidates = chunk.find("candidates");
+    if (candidates == chunk.end() || !candidates->is_array() || candidates->empty()) {
+        return lines;
+    }
+    const nlohmann::json& candidate = candidates->front();
+    if (const auto content = candidate.find("content");
+        content != candidate.end() && content->is_object()) {
+        if (const auto parts = content->find("parts");
+            parts != content->end() && parts->is_array()) {
+            for (const nlohmann::json& part : *parts) {
+                if (const auto code = part.find("executableCode");
+                    code != part.end() && code->is_object()) {
+                    lines.push_back(harness::server_tool_line(
+                        harness::kServerCodeExecution, kVendor,
+                        harness::narration_excerpt(code->value("code", std::string{}))));
+                } else if (const auto result = part.find("codeExecutionResult");
+                           result != part.end() && result->is_object()) {
+                    std::string outcome = result->value("outcome", std::string{});
+                    if (outcome.starts_with("OUTCOME_")) {
+                        outcome = outcome.substr(8);
+                    }
+                    std::ranges::transform(outcome, outcome.begin(), [](char c) {
+                        return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+                    });
+                    lines.push_back(
+                        harness::server_tool_line(harness::kServerCodeExecution, kVendor, outcome));
+                }
+            }
+        }
+    }
+    if (const auto grounding = candidate.find("groundingMetadata");
+        grounding != candidate.end() && grounding->is_object()) {
+        if (const auto queries = grounding->find("webSearchQueries");
+            queries != grounding->end() && queries->is_array()) {
+            for (const nlohmann::json& query : *queries) {
+                if (!query.is_string()) {
+                    continue;
+                }
+                const std::string text = query.get<std::string>();
+                if (text.empty() || std::ranges::find(seen_queries, text) != seen_queries.end()) {
+                    continue;  // Gemini restates its grounding in later chunks
+                }
+                seen_queries.push_back(text);
+                lines.push_back(
+                    harness::server_tool_line(harness::kServerWebSearch, kVendor,
+                                              "\"" + harness::narration_excerpt(text) + "\""));
+            }
+        }
+    }
+    return lines;
 }
 
 }  // namespace apogee::backends::google

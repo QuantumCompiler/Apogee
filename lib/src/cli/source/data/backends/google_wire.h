@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "contracts/types.h"
 
@@ -35,9 +36,20 @@ struct RequestOptions {
     /// 0 where the model can stop thinking, its floor where it cannot.
     std::optional<std::int64_t> thinking_off_budget;
 
-    /// Adds the `google_search` server-side tool.
+    /// Adds the `google_search` server-side tool: the run's `--search`.
     bool web_search = false;
+
+    /// The entry's `server_tools:` (47a): `web_search` (the same
+    /// `google_search` block, once) and `code_execution`. Empty sends none.
+    std::vector<std::string> server_tools;
 };
+
+/// The narration lines for one streamed chunk's tools Google ran itself
+/// (47a): an `executableCode` part, a `codeExecutionResult` part, and the
+/// web searches `groundingMetadata` names -- each query once a stream,
+/// tracked in `seen_queries`. Worded through `harness::server_tool_line`.
+[[nodiscard]] std::vector<std::string> server_tool_lines(const nlohmann::json& chunk,
+                                                         std::vector<std::string>& seen_queries);
 
 /// A JSON Schema reduced to the OpenAPI subset `responseSchema` accepts:
 /// `$schema`, `title`, `additionalProperties` and every other keyword the

@@ -44,10 +44,18 @@ public:
         /// Extended thinking budget. 0 leaves thinking off.
         std::int64_t thinking_budget_tokens = 0;
 
-        /// Anthropic's server-side web_search tool.
+        /// Anthropic's server-side web_search tool: the run's `--search`.
         bool web_search = false;
         std::int64_t web_search_max_uses = 0;
+
+        /// The entry's `server_tools:` (47a): the server-side tools it has
+        /// consented to Anthropic running. Empty sends none.
+        std::vector<std::string> server_tools;
     };
+
+    /// How many times a turn Anthropic paused (`pause_turn`, its server-side
+    /// loop at its limit) is continued before what it has is the answer.
+    static constexpr int kMaxPauseContinuations = 5;
 
     /// `client` is injected so tests run against a scripted transport: no
     /// network, no key, no charges, and failure modes a live endpoint will not

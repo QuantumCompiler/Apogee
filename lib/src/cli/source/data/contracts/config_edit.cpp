@@ -1520,7 +1520,7 @@ namespace {
 /// after `type:`, else first) -- where a reader looks for it.
 std::string set_backend_path_field(std::string_view content, std::string_view name,
                                    std::string_view key, std::string_view after_field,
-                                   std::string_view path) {
+                                   std::string_view path, bool quote = true) {
     Lines lines = split_lines(content);
     const std::string terminator = dominant_terminator(lines);
     const SectionRange range = find_section(lines, "backends");
@@ -1532,7 +1532,7 @@ std::string set_backend_path_field(std::string_view content, std::string_view na
         throw ConfigEditError("backend '" + std::string{name} + "' not found in config");
     }
     const auto [begin, end] = entry_extent(lines, *key_line, range.end);
-    const std::string value = yaml_scalar(std::string{path});
+    const std::string value = quote ? yaml_scalar(std::string{path}) : std::string{path};
 
     const std::string prefix = std::string{key} + ":";
     const std::string after_prefix = std::string{after_field} + ":";
@@ -1639,7 +1639,41 @@ std::vector<std::string_view> backend_editable_fields() {
             "binary",
             "mode",
             "host",
-            "idle_unload_seconds"};
+            "idle_unload_seconds",
+            "server_tools"};
+}
+
+/// `value`, a comma-separated list of names (`web_search,code_execution`),
+/// as the YAML flow list a `server_tools:` line holds. Each name is a bare
+/// word, so the list needs no quoting; whether the vendor runs it is the
+/// loader's question, asked on the edit's own re-parse.
+std::string flow_list_of_names(std::string_view value) {
+    std::string list;
+    std::size_t start = 0;
+    while (start <= value.size()) {
+        const std::size_t comma = value.find(',', start);
+        std::string_view word = value.substr(
+            start, comma == std::string_view::npos ? std::string_view::npos : comma - start);
+        while (!word.empty() && word.front() == ' ') {
+            word.remove_prefix(1);
+        }
+        while (!word.empty() && word.back() == ' ') {
+            word.remove_suffix(1);
+        }
+        if (word.empty() || !std::ranges::all_of(word, [](char c) {
+                return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+            })) {
+            throw ConfigEditError("server_tools: '" + std::string{value} +
+                                  "' is not a comma-separated list of tool names "
+                                  "(e.g. web_search,code_execution)");
+        }
+        list += (list.empty() ? "" : ", ") + std::string{word};
+        if (comma == std::string_view::npos) {
+            break;
+        }
+        start = comma + 1;
+    }
+    return "[" + list + "]";
 }
 
 std::string set_backend_field(std::string_view content, std::string_view name,
@@ -1658,6 +1692,10 @@ std::string set_backend_field(std::string_view content, std::string_view name,
             throw ConfigEditError("a backend's type cannot be cleared -- name the type it is");
         }
         return remove_backend_field(content, name, field);
+    }
+    if (field == "server_tools") {
+        return set_backend_path_field(content, name, field, "", flow_list_of_names(value),
+                                      /*quote=*/false);
     }
     return set_backend_path_field(content, name, field, "", value);
 }

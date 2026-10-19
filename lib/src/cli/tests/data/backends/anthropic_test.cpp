@@ -917,3 +917,146 @@ TEST_CASE("list_catalog refuses a shape that is not the endpoint's",
     CHECK_THROWS_AS(fixture.provider->list_catalog(apogee::harness::CancellationToken{}),
                     apogee::harness::ProviderError);
 }
+
+// ---------------------------------------------------------------------------
+// The vendor's own tools (47a)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Text, a web search Anthropic runs, its result, more text: what a turn
+/// with `server_tools: [web_search]` streams.
+constexpr std::string_view kServerSearchStream =
+    "event: message_start\n"
+    R"(data: {"type":"message_start","message":{"model":"claude-opus-5-5","usage":{"input_tokens":20}}})"
+    "\n\n"
+    R"(data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}})"
+    "\n\n"
+    R"(data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Let me look. "}})"
+    "\n\n"
+    R"(data: {"type":"content_block_stop","index":0})"
+    "\n\n"
+    R"(data: {"type":"content_block_start","index":1,"content_block":{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{}}})"
+    "\n\n"
+    R"(data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"query\": \"apogee"}})"
+    "\n\n"
+    R"(data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":" harness\"}"}})"
+    "\n\n"
+    R"(data: {"type":"content_block_stop","index":1})"
+    "\n\n"
+    R"(data: {"type":"content_block_start","index":2,"content_block":{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[{"type":"web_search_result","url":"https://a.example","title":"A"},{"type":"web_search_result","url":"https://b.example","title":"B"}]}})"
+    "\n\n"
+    R"(data: {"type":"content_block_stop","index":2})"
+    "\n\n"
+    R"(data: {"type":"content_block_start","index":3,"content_block":{"type":"text","text":""}})"
+    "\n\n"
+    R"(data: {"type":"content_block_delta","index":3,"delta":{"type":"text_delta","text":"Found it."}})"
+    "\n\n"
+    R"(data: {"type":"content_block_stop","index":3})"
+    "\n\n";
+
+constexpr std::string_view kEndTurn =
+    R"(data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":9}})"
+    "\n\n"
+    R"(data: {"type":"message_stop"})"
+    "\n\n";
+
+constexpr std::string_view kPauseTurn =
+    R"(data: {"type":"message_delta","delta":{"stop_reason":"pause_turn"},"usage":{"output_tokens":4}})"
+    "\n\n"
+    R"(data: {"type":"message_stop"})"
+    "\n\n";
+
+}  // namespace
+
+TEST_CASE("an entry's server tools are its request blocks, and none without them",
+          "[backends][anthropic][wire][server-tools]") {
+    AnthropicProvider::Options options;
+    options.server_tools = {"web_search", "code_execution"};
+    options.web_search = true;  // the run's --search asks for the same block
+    Fixture f = make_provider({sse(kTextStream)}, options);
+    (void)f.provider->stream_chat(chat_request(), {});
+    const json body = json::parse(f.transport->requests()[0].body);
+    CHECK(body.at("tools") == json::parse(R"([{"type":"web_search_20250305","name":"web_search"},
+                          {"type":"code_execution_20260521","name":"code_execution"}])"));
+
+    // A fresh entry sends no block, byte for byte the request it always sent.
+    Fixture bare = make_provider({sse(kTextStream)});
+    (void)bare.provider->stream_chat(chat_request(), {});
+    CHECK_FALSE(json::parse(bare.transport->requests()[0].body).contains("tools"));
+}
+
+TEST_CASE("a search Anthropic runs is said, never dispatched, and the answer is whole",
+          "[backends][anthropic][server-tools]") {
+    Fixture f = make_provider({sse(std::string{kServerSearchStream} + std::string{kEndTurn}, 37)});
+    std::vector<std::string> order;
+    StreamOptions options;
+    options.on_token = [&order](std::string_view chunk) {
+        order.push_back("token:" + std::string{chunk});
+    };
+    options.on_status = [&order](const apogee::harness::StatusEvent& event) {
+        if (event.type == apogee::harness::StatusEvent::Type::ToolCall) {
+            order.push_back("tool:" + event.detail);
+        }
+    };
+    const auto response = f.provider->stream_chat(chat_request(), options);
+
+    CHECK(order == std::vector<std::string>{
+                       "token:Let me look. ",
+                       R"(tool:web_search, run by Anthropic: "apogee harness")",
+                       "tool:web_search, run by Anthropic: 2 results", "token:Found it."});
+    CHECK(response.message.content.plain_text() == "Let me look. Found it.");
+    CHECK(response.message.tool_calls.empty());  // Anthropic ran it: nothing to dispatch
+}
+
+TEST_CASE("a turn Anthropic paused is resent with what it has, and its answer is whole",
+          "[backends][anthropic][server-tools]") {
+    constexpr std::string_view kResumed =
+        R"(data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}})"
+        "\n\n"
+        R"(data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" And more."}})"
+        "\n\n"
+        R"(data: {"type":"content_block_stop","index":0})"
+        "\n\n";
+    Fixture f = make_provider({sse(std::string{kServerSearchStream} + std::string{kPauseTurn}),
+                               sse(std::string{kResumed} + std::string{kEndTurn})});
+    const auto response = f.provider->stream_chat(chat_request(), {});
+
+    REQUIRE(f.transport->requests().size() == 2);
+    const json resend = json::parse(f.transport->requests()[1].body);
+    const json& last = resend.at("messages").back();
+    CHECK(last.at("role") == "assistant");
+    // The paused turn, its server blocks verbatim -- and no "continue" added.
+    CHECK(last.at("content")[1].at("type") == "server_tool_use");
+    CHECK(last.at("content")[1].at("input") == json{{"query", "apogee harness"}});
+    CHECK(last.at("content")[2].at("type") == "web_search_tool_result");
+    CHECK(last.at("content")[2].at("content").size() == 2);
+    CHECK(resend.at("messages").size() ==
+          json::parse(f.transport->requests()[0].body).at("messages").size() + 1);
+
+    CHECK(response.message.content.plain_text() == "Let me look. Found it. And more.");
+    CHECK(response.finish_reason == apogee::harness::FinishReason::Stop);
+    CHECK(response.usage.completion_tokens == 13);
+}
+
+TEST_CASE("each server block is said in one line, its content never in it",
+          "[backends][anthropic][wire][server-tools]") {
+    using apogee::backends::anthropic::server_tool_line;
+    CHECK(
+        server_tool_line(json::parse(
+            R"({"type":"server_tool_use","name":"bash_code_execution","input":{"command":"python3 plot.py\nls"}})")) ==
+        "code_execution, run by Anthropic: python3 plot.py…");
+    CHECK(
+        server_tool_line(json::parse(
+            R"({"type":"server_tool_use","name":"text_editor_code_execution","input":{"command":"create","path":"/tmp/a.py"}})")) ==
+        "code_execution, run by Anthropic: create /tmp/a.py");
+    CHECK(
+        server_tool_line(json::parse(
+            R"({"type":"bash_code_execution_tool_result","content":{"type":"bash_code_execution_result","stdout":"secret page text","return_code":0}})")) ==
+        "code_execution, run by Anthropic: exit 0");
+    CHECK(
+        server_tool_line(json::parse(
+            R"({"type":"web_search_tool_result","content":{"type":"web_search_tool_result_error","error_code":"max_uses_exceeded"}})")) ==
+        "web_search, run by Anthropic: failed (max_uses_exceeded)");
+    CHECK_FALSE(server_tool_line(json::parse(R"({"type":"text","text":"hi"})")).has_value());
+}

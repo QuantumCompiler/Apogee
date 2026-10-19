@@ -164,6 +164,9 @@ nlohmann::json backend_view(std::string_view name, const harness::BackendConfig&
     if (backend.idle_unload_seconds.has_value()) {
         out["idle_unload_seconds"] = *backend.idle_unload_seconds;
     }
+    if (!backend.server_tools.empty()) {
+        out["server_tools"] = backend.server_tools;
+    }
     return out;
 }
 

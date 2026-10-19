@@ -1261,6 +1261,47 @@ The `/model`-carries-history claim was verified rather than assumed. `/model` on
 
 **Standing caveat, unchanged.** The live-API half of these acceptance criteria is unverified for all three vendors — every test here runs against recorded fixtures through `FakeTransport`. Confirming real traffic needs the user's keys.
 
+### 2026-10-18 — `vendor-server-tools` (backlog item 47a): the vendors' own tools, behind consent
+
+**Why.** Much of Claude Desktop's and ChatGPT's edge is not MCP but the vendors' **server-side tools**: web search and code execution, run on the vendor's infrastructure. The built-in-MCP parity spike (2026-10-16) found Apogee's wires carrying only the vendors' search, and only behind the run's `--search`. The spike also named the collision: a vendor-side search reaches sites the host gate never sees. The user settled it the same day, as a dated SPEC principle: **allowed, default-off, per backend entry**, enabling one being recorded consent for that vendor.
+
+- [x] **The vendors' sets, as data** (`contracts/server_tools`): each API vendor's names, `web_search` and `code_execution`, with a reviewed date per row (ADR 0009's discipline). The loader's refusals live here too, as does the one narration wording every wire speaks.
+- [x] **The consent, per entry** (`BackendConfig::server_tools`):
+  - `server_tools: [web_search, code_execution]` on an anthropic, openai or google entry, read once in order, empty by default;
+  - refused at load with the vendor's known set named (`'image_generation' is not a server-side tool Anthropic runs (known: web_search, code_execution)`), and refused on any backend that runs none (`a llamacpp backend runs no server-side tools`);
+  - written by `config set-backend <name> --server-tools web_search,code_execution` through the one editor, as a YAML flow list or a JSONC array, in place. It completes its names, and `""` clears it;
+  - shown by the admin plane's backend view, and documented in the starter config, compiled-in copy included.
+- [x] **The vendors' blocks, only when listed**:
+  - Anthropic: `code_execution_20260521`, and the same `web_search_20250305` block `--search` sends, once;
+  - OpenAI: `code_interpreter` with an `auto` container, beside `web_search`;
+  - Gemini: `code_execution` beside `google_search`.
+  - A fresh config sends none: every existing request golden is byte-identical.
+- [x] **Every use said, none dispatched**:
+  - each wire turns its vendor's blocks into one line through `server_tool_line`: Anthropic's `server_tool_use` and its result blocks, OpenAI's finished `web_search_call` and `code_interpreter_call` items, Gemini's `executableCode` and `codeExecutionResult` parts and grounding queries (each said once a stream);
+  - the provider sends each line as a `ToolCall` status;
+  - the loop relays it as a tool line, `web_search, run by Anthropic: "apogee harness"`, then `web_search, run by Anthropic: 2 results`, in the terminal, the shell, machine mode's `tool_status` and a served stream alike.
+  - A line falling mid-answer ends the answer so far, and the next token opens the rest, so a surface whose answer view closes keeps both halves.
+  - A tool event with no line (a vendor CLI's) is said nowhere, as before.
+- [x] **A paused turn, whole**: Anthropic stops a long server-side loop with `pause_turn`. The provider resends the turn so far (its server blocks verbatim, no "continue" added), streaming and not, up to `kMaxPauseContinuations` (5) times. The answer, the usage and the replay cache are the whole turn's, and past the bound a notice says the answer stops where it got to.
+- [x] **The rule, where it binds**: CLAUDE.md's host-gate ⚠ gains the consent sub-rule beside the SPEC principle; machine-mode.md says a vendor-run tool's lines; DEVELOPER.md's carried-list recipe covers the server-tool sets.
+- [x] **The tests**:
+  - `server_tools_test`: the table and its dates, the loader's refusals in both formats, the editor's list, the wording;
+  - the `[server-tools]` cases in `anthropic_test`, `openai_test` and `google_test`: no block without the list, the exact blocks with it, every use said in order around the answer, no call dispatched, the paused turn resent with its blocks and its answer whole;
+  - `loop_test`: the line between two answer halves, both kept, and a vendor CLI's line-less event unsaid;
+  - `backend_fields_test`: the flag completed, a local entry refused with the file untouched, cleared back to the file as it was;
+  - the editor's enumeration tie, with `server_tools` on a vendor entry;
+  - `cli.config_lifecycle` on the real binary: the list written and a tool the vendor does not run refused, the file untouched.
+
+Decisions taken while building, for veto:
+- **`--search` stays.** The 2026-08-26 decision made the vendors' search a per-run flag on purpose, and it predates the principle. A flag the user types for one run is explicit consent for that run, so it keeps sending the vendor's search block. `server_tools:` is the standing consent, and the two never send the block twice. The SPEC principle says "only behind a per-backend-entry switch", so this needs your word.
+- **The basic search block.** Anthropic's dynamic-filtering search (`web_search_20260209`) runs code execution of its own and takes only the newer models. The basic variant every model accepts stays the block, so `--search` behaves as before and listing both tools never makes two execution environments.
+- **Narration through the existing tool vocabulary**: a `ToolCall` status with a line, relayed as `on_tool_status`. No new Reporter callback and no new machine-mode event, so `cli.machine_schema_conformance` holds unchanged.
+- **The answer split at the line**: a vendor tool mid-answer ends the answer segment and the next token opens a new one. The terminal's answer view ignores text once finished, so carrying on in the same segment would have dropped the rest.
+- **A paused turn is continued inside the provider**, bounded at 5, rather than surfacing `pause_turn` to the loop: it is Anthropic's own server loop, and the loop has nothing to dispatch for it.
+- **No live vendor call was made.** Every case runs against recorded shapes through `FakeTransport`, as the cloud backends always have. The block types and result shapes are Anthropic's current documentation (the Messages API server tools), OpenAI's Responses API and Gemini's API as checked 2026-10-18.
+
+**Verified.** `lib/scripts/cicd.sh --test`: all 3331 tests pass (one skipped where it always is, `pdftotext` being installed here), the build warning-free on AppleClang and the format clean.
+
 ## Milestone J — Local inference
 
 **Goal.** Link llama.cpp into the process and let the KV cache simply *stay alive* between turns. This is the largest single simplification in the design: out of process, keeping KV state across turns can take an entire on-disk prompt-cache apparatus — cache files, fingerprinting, an M-RoPE replay self-heal, rules about what may never be written into a cache — whose only job is to move KV state between processes that cannot share memory. In-process, all of it collapses into arithmetic over a token prefix.

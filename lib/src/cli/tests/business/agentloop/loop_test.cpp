@@ -15,6 +15,7 @@
 #include "backends/mock.h"
 #include "contracts/config.h"
 #include "contracts/errors.h"
+#include "contracts/provider.h"
 #include "logger/session.h"
 #include "support/env_guard.h"
 #include "tasks/ledger.h"
@@ -1158,4 +1159,81 @@ TEST_CASE("a tool's bytes that are not UTF-8 reach history and the next request 
     CHECK(f.history[2].content.plain_text() == replaced);
     CHECK(f.provider->requests().back().messages.back().content.plain_text() == replaced);
     CHECK(saved(f.history, "mock")[2].content.plain_text() == replaced);
+}
+
+// ---------------------------------------------------------------------------
+// A tool the vendor ran itself (47a)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Streams an answer around a tool its vendor ran on its own servers, as a
+/// server-side web search arrives: text, the vendor's tool line, more text --
+/// and a tool event with no line, which a vendor CLI sends.
+class VendorToolProvider final : public apogee::harness::LLMProvider {
+public:
+    [[nodiscard]] std::string_view backend_name() const noexcept override {
+        return "vendor";
+    }
+
+    apogee::harness::ChatResponse chat(const apogee::harness::ChatRequest& /*request*/,
+                                       const apogee::harness::CancellationToken&) override {
+        apogee::harness::ChatResponse response;
+        response.message = ChatMessage::assistant("Let me look. Found it.");
+        return response;
+    }
+
+    apogee::harness::ChatResponse stream_chat(
+        const apogee::harness::ChatRequest& /*request*/,
+        const apogee::harness::StreamOptions& options) override {
+        options.on_token("Let me look. ");
+        apogee::harness::StatusEvent silent;
+        silent.type = apogee::harness::StatusEvent::Type::ToolCall;
+        silent.name = "Read";
+        options.on_status(silent);
+        apogee::harness::StatusEvent said;
+        said.type = apogee::harness::StatusEvent::Type::ToolCall;
+        said.detail = R"(web_search, run by Anthropic: "apogee")";
+        options.on_status(said);
+        options.on_token("Found it.");
+        apogee::harness::ChatResponse response;
+        response.message = ChatMessage::assistant("Let me look. Found it.");
+        return response;
+    }
+
+    std::vector<apogee::harness::ModelInfo> list_models(
+        const apogee::harness::CancellationToken&) override {
+        return {};
+    }
+};
+
+}  // namespace
+
+TEST_CASE("a tool the vendor ran is said as a tool line, the answer around it whole",
+          "[agentloop][server-tools]") {
+    Harness harness{Config{}};
+    harness.register_provider("vendor", std::make_shared<VendorToolProvider>());
+    harness.use_default_router();
+    std::vector<ChatMessage> history{ChatMessage::user("search for apogee")};
+    Options options;
+    options.model = "vendor";
+
+    RecordingReporter reporter;
+    const RunResult result = apogee::agentloop::run(harness, history, options, reporter);
+
+    // The answer is whole, in history and on the surface alike.
+    CHECK(result.answer == "Let me look. Found it.");
+    CHECK(reporter.answer == "Let me look. Found it.");
+    // The line falls between the two halves: the first ended, the second
+    // opened -- so a surface whose answer view closes never drops the rest.
+    std::vector<std::string> answer_events;
+    for (const std::string& event : reporter.events) {
+        if (event == "answer_start" || event == "answer_end" || event.starts_with("tool_status")) {
+            answer_events.push_back(event);
+        }
+    }
+    CHECK(answer_events ==
+          std::vector<std::string>{"answer_start", "answer_end",
+                                   R"(tool_status:web_search, run by Anthropic: "apogee")",
+                                   "answer_start", "answer_end"});
 }

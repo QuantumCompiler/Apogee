@@ -37,6 +37,9 @@ private:
     harness::FinishReason finish_reason_ = harness::FinishReason::Stop;
     harness::Usage usage_;
     std::string error_;
+    /// The web searches already said this stream: Gemini restates its
+    /// grounding in later chunks.
+    std::vector<std::string> seen_queries_;
 };
 
 bool StreamAccumulator::handle(const SseEvent& event) {
@@ -51,6 +54,17 @@ bool StreamAccumulator::handle(const SseEvent& event) {
 
     std::string thinking;
     const harness::ChatResponse chunk = google::parse_response(payload, &thinking);
+
+    // Tools Gemini ran itself (47a): said, never dispatched.
+    if (options_.on_status) {
+        for (const std::string& line : google::server_tool_lines(payload, seen_queries_)) {
+            harness::StatusEvent status;
+            status.type = harness::StatusEvent::Type::ToolCall;
+            status.phase = harness::StatusEvent::Phase::Done;
+            status.detail = line;
+            options_.on_status(status);
+        }
+    }
 
     if (!thinking.empty() && options_.on_thinking) {
         // Its own channel. A `thought: true` part must never reach the answer.
@@ -106,6 +120,7 @@ std::unique_ptr<GoogleProvider> GoogleProvider::from_config(const std::string& b
     // nor cares where it came from.
     options.api_key = std::move(api_key);
     options.web_search = web_search;
+    options.server_tools = config.server_tools;
     if (!config.model.empty()) {
         options.model = config.model;
     }
@@ -147,6 +162,7 @@ google::RequestOptions GoogleProvider::request_options(const harness::ChatReques
             budget > 0 ? google::thinking_budget_for(options_.model, budget) : 0;
     }
     options.web_search = options_.web_search;
+    options.server_tools = options_.server_tools;
     return options;
 }
 

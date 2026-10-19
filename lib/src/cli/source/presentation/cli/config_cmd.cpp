@@ -23,6 +23,7 @@
 #include "contracts/jsonc.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "contracts/server_tools.h"
 #include "graph/code_languages.h"
 #include "modelstore/store.h"
 #include "operations/backend_fields.h"
@@ -1011,6 +1012,9 @@ void bind_set_backend(CLI::App& parent, const RootContext& context) {
     for (const std::string_view type : harness::backend_type_names()) {
         types.emplace_back(type);
     }
+    // A comma-separated list of the vendors' server-side tools (47a): the
+    // loader refuses a name the entry's vendor does not run.
+    static const std::string kServerToolsType = word_list_value(harness::server_tool_names());
     // One flag per editable field, spelled as `add-backend` spells it.
     const std::vector<FieldFlag> flags{
         {"type", "", "Backend type", types},
@@ -1037,7 +1041,11 @@ void bind_set_backend(CLI::App& parent, const RootContext& context) {
          "The vendor CLI's mode: subscription, or bare (claude-cli alone)",
          {"subscription", "bare"}},
         {"host", "", "The host the backend reaches"},
-        {"idle_unload_seconds", "INT", "Seconds idle before a local model is unloaded"}};
+        {"idle_unload_seconds", "INT", "Seconds idle before a local model is unloaded"},
+        {"server_tools", kServerToolsType,
+         "The vendor's own server-side tools this entry may run, comma-separated: "
+         "web_search, code_execution -- consent for that vendor to search or run code "
+         "under your key, where the host gate cannot see"}};
     for (const FieldFlag& flag : flags) {
         std::string spelling = "--" + std::string{flag.field};
         std::ranges::replace(spelling, '_', '-');
