@@ -232,6 +232,9 @@ const std::map<std::string, Classification>& table() {
         {"config path", read_only()},
         {"mcp list", read_only()},
         {"mcp test", read_only()},
+        // The shipped presets (47c): a read of compiled-in data resolved on
+        // this machine; `create --from` is `mcp create`'s twin's `from`.
+        {"mcp presets", read_only()},
         {"auth list", read_only()},
         {"embed query", read_only()},
         {"embed list", read_only()},

@@ -1,4 +1,4 @@
-#include "cli/code_exec_server.h"
+#include "operations/code_exec_server.h"
 
 #include <system_error>
 
@@ -6,7 +6,7 @@
 #include "platform/platform.h"
 #include "training/python_env.h"
 
-namespace apogee::commands {
+namespace apogee::operations {
 namespace {
 
 /// `word` as a POSIX shell reads it back unchanged: bare when it is only
@@ -92,4 +92,4 @@ std::string registered_code_exec_server(const harness::Config& config,
     return {};
 }
 
-}  // namespace apogee::commands
+}  // namespace apogee::operations

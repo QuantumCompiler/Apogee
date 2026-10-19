@@ -17,6 +17,7 @@
 #include "cli/tui_common.h"
 #include "contracts/config.h"
 #include "operations/credential_views.h"
+#include "operations/mcp_presets.h"
 #include "operations/read_views.h"
 #include "secrets/resolve.h"
 
@@ -176,8 +177,7 @@ tui::ListOptions mcp_view_options(const RootContext& context, std::filesystem::p
         }
         std::vector<std::string> heading;
         if (rows.empty()) {
-            heading.emplace_back(
-                "No MCP servers configured. Create one with: apogee mcp create <name>");
+            heading.emplace_back(operations::kNoMcpServers);
         }
         {
             const std::lock_guard lock{last->mutex};

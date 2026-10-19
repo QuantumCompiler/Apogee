@@ -11,10 +11,11 @@
 /// The code-execution server's registration (47b): the seeded script, the
 /// interpreter it runs under, and the one `mcp create` line that registers
 /// it. `apogee check` says it with the paths filled in, never guessing an
-/// interpreter that is not there. The server itself is generic -- it
-/// registers through `mcp create --command` like any other, and nothing here
-/// writes the config.
-namespace apogee::commands {
+/// interpreter that is not there, and the `code-exec` preset (47c) registers
+/// exactly that line, on the command line and the admin plane alike. The
+/// server itself is generic -- it registers through `mcp create --command`
+/// like any other, and nothing here writes the config.
+namespace apogee::operations {
 
 /// The name the documented registration uses.
 inline constexpr std::string_view kCodeExecServerName = "code";
@@ -50,4 +51,4 @@ struct CodeExecRegistration {
 [[nodiscard]] std::string registered_code_exec_server(const harness::Config& config,
                                                       const std::filesystem::path& script);
 
-}  // namespace apogee::commands
+}  // namespace apogee::operations

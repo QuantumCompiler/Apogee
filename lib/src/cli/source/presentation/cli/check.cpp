@@ -28,7 +28,6 @@
 #include "backends/provider_probe.h"
 #include "backends/provider_status.h"
 #include "backends/provider_table.h"
-#include "cli/code_exec_server.h"
 #include "cli/embed.h"
 #include "cli/helpers.h"
 #include "cli/models_pull.h"
@@ -51,6 +50,7 @@
 #include "modelstore/mlx_info.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
+#include "operations/code_exec_server.h"
 #include "operations/graph_sources.h"
 #include "operations/suites.h"
 #include "platform/child_process.h"
@@ -1104,7 +1104,8 @@ void check_tools(CheckReport& report, const CheckInputs& inputs) {
 /// line that registers it with the interpreter it would run under, said
 /// rather than guessed. Not registered is not a defect: it is optional.
 void check_code_exec(CheckReport& report, const CheckInputs& inputs) {
-    const CodeExecRegistration registration = code_exec_registration(inputs.home);
+    const operations::CodeExecRegistration registration =
+        operations::code_exec_registration(inputs.home);
     const std::string script = registration.script.filename().string();
     const harness::SeededScript seeded =
         harness::inspect_seeded_script(inputs.home, script, inputs.retired_scripts);
@@ -1125,7 +1126,8 @@ void check_code_exec(CheckReport& report, const CheckInputs& inputs) {
     const bool edited = seeded == harness::SeededScript::Edited;
     const std::string copy = edited ? script + " differs from the shipped copy (your edit runs)"
                                     : script + " matches the shipped copy";
-    if (const std::string name = registered_code_exec_server(inputs.config, registration.script);
+    if (const std::string name =
+            operations::registered_code_exec_server(inputs.config, registration.script);
         !name.empty()) {
         add(report, edited ? Status::Warn : Status::Ok, "MCP", "code-exec",
             copy + "; registered as '" + name + "' (its tools: mcp__" + name +
@@ -1140,7 +1142,7 @@ void check_code_exec(CheckReport& report, const CheckInputs& inputs) {
     add(report, Status::Skipped, "MCP", "code-exec",
         copy + "; not registered -- it would run under " + registration.interpreter.string() +
             " (" + registration.interpreter_source + ")",
-        registration.mcp_create_line(kCodeExecServerName));
+        registration.mcp_create_line(operations::kCodeExecServerName));
 }
 
 void check_mcp(CheckReport& report, const CheckInputs& inputs) {

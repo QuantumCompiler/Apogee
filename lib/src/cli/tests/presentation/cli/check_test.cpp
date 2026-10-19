@@ -15,7 +15,6 @@
 #include "agentloop/recall.h"
 #include "backends/provider_cache.h"
 #include "backends/provider_table.h"
-#include "cli/code_exec_server.h"
 #include "contracts/assets.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
@@ -25,6 +24,7 @@
 #include "knowledge/record.h"
 #include "knowledge/store.h"
 #include "modelstore/store.h"
+#include "operations/code_exec_server.h"
 #include "platform/platform.h"
 #include "secrets/store.h"
 #include "support/env_guard.h"
@@ -2798,7 +2798,7 @@ TEST_CASE("the doctor says where the code-execution server stands and the line t
 
 TEST_CASE("the code-execution server's registration line quotes a path only where a shell needs it",
           "[commands][check][mcp][code-exec]") {
-    apogee::commands::CodeExecRegistration registration;
+    apogee::operations::CodeExecRegistration registration;
     registration.script = "/home/me/.apogee/training/scripts/code_exec_server.py";
     registration.interpreter = "/opt/my python/bin/python3";
     CHECK(registration.mcp_create_arguments("code") ==

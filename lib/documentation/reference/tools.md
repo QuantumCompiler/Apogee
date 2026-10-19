@@ -6,8 +6,9 @@ you run; **consult**, answered by a member of a model suite you configure --
 and beside it **validation**, the same member checking the others' work;
 **graph navigation**, answered by a knowledge graph you build; the
 **Orchestrator**, an `execute` session's symphonies offered to its model as
-tools; and **code execution**, the Python server Apogee ships, registered
-with one command.
+tools; **code execution**, the Python server Apogee ships, registered
+with one command; and the **MCP presets**, every server Apogee ships, listed
+with what it needs.
 
 The native toolsets (files, the shell, git, notes, document search, graph
 navigation) and `fetch_url` need no setup beyond that, and nor do the
@@ -156,14 +157,48 @@ may use either. The provider's search reaches sites from the provider's
 servers, where `tools.allowed_hosts` cannot see, which is why it is consent
 you give per run or per entry.
 
+## MCP presets: the servers Apogee ships
+
+A fresh install configures no MCP server, and `apogee mcp list` says where to
+start: `apogee mcp presets` lists the servers Apogee ships, each with what it
+provides and whether this machine can run it.
+
+```sh
+apogee mcp presets                         # what ships, and where each stands here
+apogee mcp create code --from code-exec    # register one by name
+```
+
+`--from` registers exactly the command and arguments the preset resolves to
+here, through the same path a typed `--command` takes, so the config is byte
+for byte what typing them would write. A preset this machine cannot run still
+lists, saying what is missing and the command that provides it; `--from`
+refuses it with the same words. The listing is also a document (`--output-format
+json`, in [machine-mode.md](machine-mode.md)), and the admin plane's `POST
+/v1/admin/mcp-servers` takes `from` the same way.
+
+| Preset | What it is |
+|---|---|
+| `code-exec` | The code-execution server below: `run_python` and `write_input`, registered as `code`. It needs the server seeded (`apogee check --fix`) and a Python: the training environment's, else `python3` on PATH. |
+| `self` | Apogee's own read-only tools (files, git, notes, document search, graph navigation), served on stdio by `apogee __mcp-tools` **for another MCP host**: a desktop assistant or an editor takes the entry the listing prints. It is never registered into Apogee, which already has these tools natively, so `--from self` is refused with that reason. |
+
+Web search is not a preset. It stays yours: point Apogee at a SearXNG
+instance you run, as [*Web search through SearXNG*](#web-search-through-searxng)
+above walks through.
+
 ## Running code: the code-execution server
 
 `run_python` runs Python for any model, local or cloud, the way ChatGPT's
 interpreter does: code goes in, and what it printed and the files it wrote
 come back. It is an MCP server Apogee ships, `code_exec_server.py`, seeded
 with the drivers under the data directory's `training/scripts/` by `apogee
-check --fix`. It is registered like any other server, and `apogee check`
-prints the line with this machine's paths filled in:
+check --fix`. It is registered like any other server, in one command:
+
+```sh
+apogee mcp create code --from code-exec
+```
+
+which is the same as typing the line `apogee check` prints with this
+machine's paths filled in:
 
 ```sh
 apogee mcp create code --command python3 \

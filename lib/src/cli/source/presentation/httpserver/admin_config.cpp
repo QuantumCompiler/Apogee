@@ -12,6 +12,7 @@
 #include "contracts/host.h"
 #include "harness/roles.h"
 #include "operations/backend_fields.h"
+#include "operations/mcp_presets.h"
 #include "operations/read_views.h"
 #include "operations/renames.h"
 #include "scaffold/mcp_server.h"
@@ -511,11 +512,15 @@ HttpResponse admin_create_mcp_server(const AdminConfigContext& context,
     scaffold::McpServerSpec spec;
     spec.name = optional_string(body, "name", error).value_or("");
     spec.command = optional_string(body, "command", error).value_or("");
+    const std::string from = optional_string(body, "from", error).value_or("");
     if (!error.empty()) {
         return error_response(400, error);
     }
     if (spec.name.empty()) {
         return error_response(400, "name is required");
+    }
+    if (!from.empty() && (!spec.command.empty() || body.contains("args"))) {
+        return error_response(400, "from names a preset: it takes no command or args");
     }
     if (const auto args = body.find("args"); args != body.end() && !args->is_null()) {
         if (!args->is_array()) {
@@ -530,6 +535,19 @@ HttpResponse admin_create_mcp_server(const AdminConfigContext& context,
     }
     if (const auto force = body.find("force"); force != body.end() && force->is_boolean()) {
         spec.force = force->get<bool>();
+    }
+    if (!from.empty()) {
+        // `mcp create --from`'s twin (47c): the preset's command and
+        // arguments as they resolve here, through the same create core.
+        try {
+            const operations::McpPresetResolution resolution =
+                operations::resolve_preset_for_create(
+                    from, operations::mcp_preset_host(context.config_path));
+            spec.command = resolution.command;
+            spec.args = resolution.args;
+        } catch (const std::exception& e) {
+            return error_response(400, e.what());
+        }
     }
     scaffold::McpServerResult result;
     try {

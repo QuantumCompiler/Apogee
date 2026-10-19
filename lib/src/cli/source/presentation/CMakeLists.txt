@@ -73,6 +73,10 @@ apogee_add_module(operations
     operations/graph_sources.cpp
     operations/knowledge_core.h
     operations/knowledge_core.cpp
+    operations/code_exec_server.h
+    operations/code_exec_server.cpp
+    operations/mcp_presets.h
+    operations/mcp_presets.cpp
     operations/read_views.h
     operations/renames.h
     operations/renames.cpp
@@ -215,8 +219,6 @@ apogee_add_module(cli
     cli/reset.h
     cli/reset.cpp
     cli/check.cpp
-    cli/code_exec_server.h
-    cli/code_exec_server.cpp
     cli/complete.h
     cli/complete.cpp
     cli/helpers.h

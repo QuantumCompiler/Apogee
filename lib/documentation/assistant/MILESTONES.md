@@ -4813,6 +4813,43 @@ Decisions taken while building, for veto:
 
 **Not run: a cloud backend.** Its code-running half needs your API key and spends money, and this run had nobody to approve that. The server is the same child for any provider, since MCP tools reach every backend through the one registry, but the cloud half of that acceptance line is still yours to see.
 
+### 2026-10-18 — `mcp-presets` (backlog item 47c): the box says what it holds
+
+**Why.** A fresh install configured no MCP server, and its only guidance was one line pointing at the scaffold (the parity spike's W1, 2026-10-16). Meanwhile the box now ships a server worth registering (47b). This makes the built-ins discoverable and one command away, without a second registration path.
+
+- [x] **The presets, as data** (`operations/mcp_presets`). Two ship:
+  - `code-exec`, the code-execution server, registered as `code`;
+  - `self`, Apogee's own read-only tools over `apogee __mcp-tools`.
+
+  Each is a name, a description, what it provides, its documented server name and how `mcp test` tries it. Its command and arguments resolve on this machine: the training environment's interpreter or `python3` on PATH with the seeded script; this binary's own path for `self`. A preset this machine cannot run still lists, naming what is missing and the command that provides it (`apogee check --fix` for an unseeded server, `apogee train setup` for no Python).
+- [x] **`apogee mcp presets`** prints each preset with what it provides, then one of:
+  - its `register:` line, `apogee mcp create code --from code-exec`, and what it runs here;
+  - for `self`, the entry another MCP host takes, and why it is not registered into Apogee.
+
+  `--output-format json` gives the document, in machine-mode.md.
+- [x] **`apogee mcp create <name> --from <preset>`** registers the resolved command and arguments through the same create core a typed `--command` reaches. The config is byte for byte the hand-typed twin's. It is exclusive with `--command`, and Tab completes the preset names. The refusals:
+  - `--from self`, with the circularity (Apogee already has those tools natively);
+  - an unknown name, naming the presets;
+  - a preset that cannot run here, with its fix.
+
+  The admin plane's `POST /v1/admin/mcp-servers` takes `from` the same way (http-api.md).
+- [x] **The empty state**: `mcp list` and the shell's MCP view share one line (`kNoMcpServers`) that names `apogee mcp presets` before the scaffold.
+- [x] **The reference**: tools.md gains *MCP presets*: the two, `--from`'s byte-for-byte promise, and web search left yours, pointing at the SearXNG chapter. *Running code* now registers with `--from code-exec`, its typed twin beside it.
+- [x] **The tests**:
+  - `operations/mcp_presets_test`: the table, `code-exec` resolved on a faked machine in each state, `self` and its refusal, the document;
+  - `cli/mcp_presets_cmd_test`: the listing and its document, **the composition pin** (`--from code-exec` against its typed twin, byte for byte), the refusals with the file untouched, the empty state, the completion;
+  - `admin_config_test`: `from` over HTTP byte-identical to the CLI's typed twin, and its refusals;
+  - the parity table classifying `mcp presets` as a read;
+  - `cli.config_lifecycle` on the real binary: the document's two rows, the pin against the command the listing reports, `--from self` refused with the file untouched.
+
+Decisions taken while building, for veto:
+- **The presets live in `operations/`, not `business/mcp/`.** The `code-exec` preset needs the interpreter resolution, which reads the training environment, and the admin plane needs it too. So 47b's registration helper moved from `cli/` to `operations/` with it, and the doctor reads it from there.
+- **`from` on the admin route, but no `GET /v1/admin/mcp-presets`.** The verb's twin is the route's `from`, since one create core serves both surfaces. The listing's twin is its JSON document, which is what the item asked for (ADR 0002, the skipped route named here).
+- **`self`'s host entry** is the generic `{"command": …, "args": ["__mcp-tools"]}` server entry MCP hosts take, under the name `apogee`. Apogee does not write any other host's config file: that file is the other host's.
+- **A preset's `mcp test` hint** is its own tool, `run_python` for `code-exec`, not the scaffold's `echo`. A register-only entry without a preset keeps the existing hint.
+
+**Verified.** `lib/scripts/cicd.sh --test`: all 3350 tests pass, with the one test skipped where it always is. The build is warning-free and the format clean. On the real binary, `mcp presets` lists both, `mcp create code --from code-exec` connects the server's two tools, and `mcp test code run_python` answers.
+
 ## Milestone X — Agents as data
 
 **Goal.** A named workflow the user runs with `apogee analyze --agent <name>`: a persona from prompt files, an output schema the answer must satisfy, a tool policy that is the agent's permission model, executed by the same loop every other surface runs — so an agent behaves identically on every backend the loop drives — with structured output validated on every provider, an in-process renderer, deterministic branch review from flags, `apogee agents` and its admin twins over one scaffold core, and three review agents re-authored for the owned loop.

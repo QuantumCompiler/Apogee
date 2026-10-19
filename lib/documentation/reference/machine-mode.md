@@ -617,6 +617,7 @@ apogee models status --output-format json            # {"fields":[{"field":"chat
 apogee chats list --output-format json      # {"object":"list","data":[{"id","updated","turns","name"},…]}
 apogee agents list --output-format json     # byte for byte GET /v1/admin/agents
 apogee mcp list --output-format json        # GET /v1/admin/mcp-servers's entries, with what connecting found
+apogee mcp presets --output-format json     # {"object":"list","data":[{"name","description","provides","registers_into_apogee","command","args","runnable",…}]}
 apogee check --output-format json           # {"rows":[{"section","name","status","detail","remedy"?}],"ok":…,"failures":N,"warnings":N}
 apogee providers scan --output-format json  # {"object":"list","data":[{"provider","type","label","tier","backend","evidence":[…]}]}
 apogee system --output-format json          # {"cpu":{…},"memory":{…},"apogee":{…},"gpu":{…},"disk":{…}}
@@ -653,6 +654,16 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   `command`, `args`, `enabled`, `env_set` (never the environment itself) — plus
   what connecting to it found: `state` (`connected`, `not connected`,
   `disabled`), `protocol_version`, `tools`, and `error` when it did not connect.
+- **`mcp presets`** (since 47c): one row per server Apogee ships, as `mcp
+  presets` prints them — `name`, `description`, `provides`,
+  `registers_into_apogee`, and what it registers on this machine: `command`
+  and `args`, resolved here (the training environment's interpreter or
+  `python3` on PATH, the seeded script; this binary's own path for `self`).
+  `runnable` says whether this machine can run it; when it cannot, `missing`
+  says what is lacking and `remedy` the command that provides it. A
+  registrable preset carries `register` (`apogee mcp create code --from
+  code-exec`), and `self` its `refusal` instead. Each carries `host_entry`,
+  `{"name", "server": {"command", "args"}}`: the entry another MCP host takes.
 - **`check`**: every row the report shows, `status` one of `ok`, `warn`, `fail`
   and `skipped` — never folded into a pass — `ok` the verdict and the exit code
   the human run's (non-zero on a failure). With `--fix`, what it repaired is the

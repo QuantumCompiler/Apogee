@@ -248,6 +248,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/registry_test.cpp
     presentation/cli/provider_offer_test.cpp
     presentation/cli/read_documents_test.cpp
+    presentation/cli/mcp_presets_cmd_test.cpp
     presentation/cli/system_cmd_test.cpp
     presentation/cli/tui_cmd_test.cpp
     presentation/cli/line_tokens_test.cpp
@@ -302,6 +303,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/operations/graph_sources_test.cpp
     presentation/operations/renames_test.cpp
     presentation/operations/backend_fields_test.cpp
+    presentation/operations/mcp_presets_test.cpp
     presentation/cli/chat_completer_test.cpp
     presentation/cli/chat_roster_test.cpp
     presentation/cli/chat_session_test.cpp
