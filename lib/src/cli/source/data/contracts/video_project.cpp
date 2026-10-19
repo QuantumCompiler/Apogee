@@ -52,6 +52,12 @@ nlohmann::json video_project_document(const VideoProject& project) {
                           {"voice", voice},
                           {"clip", clip}});
     }
+    nlohmann::json edits = nlohmann::json::array();
+    for (const ProjectEdit& edit : project.edits) {
+        edits.push_back({{"instruction", text_or_null(edit.instruction)},
+                         {"redo", edit.redo},
+                         {"from", edit.from.string()}});
+    }
     nlohmann::json captions = nullptr;
     if (!project.captions_file.empty()) {
         captions = {{"file", project.captions_file.string()}, {"burned", project.captions_burned}};
@@ -77,7 +83,9 @@ nlohmann::json video_project_document(const VideoProject& project) {
             {"assembly", text_or_null(project.assembly)},
             {"error", text_or_null(project.error)},
             {"created", project.created},
-            {"platform", project.platform}};
+            {"platform", project.platform},
+            {"parent", path_or_null(project.parent)},
+            {"edits", edits}};
 }
 
 std::optional<VideoProject> read_video_project(const nlohmann::json& document, std::string& error) {
@@ -170,6 +178,25 @@ std::optional<VideoProject> read_video_project(const nlohmann::json& document, s
     project.error = string_at(document, "error");
     project.created = string_at(document, "created");
     project.platform = string_at(document, "platform");
+    project.parent = string_at(document, "parent");
+    if (const auto edits = document.find("edits"); edits != document.end() && edits->is_array()) {
+        for (const nlohmann::json& item : *edits) {
+            if (!item.is_object()) {
+                continue;
+            }
+            ProjectEdit edit;
+            edit.instruction = string_at(item, "instruction");
+            edit.from = string_at(item, "from");
+            if (const auto redo = item.find("redo"); redo != item.end() && redo->is_array()) {
+                for (const nlohmann::json& scene : *redo) {
+                    if (scene.is_number_unsigned()) {
+                        edit.redo.push_back(scene.get<std::size_t>());
+                    }
+                }
+            }
+            project.edits.push_back(std::move(edit));
+        }
+    }
     return project;
 }
 

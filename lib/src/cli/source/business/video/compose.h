@@ -200,4 +200,85 @@ struct ComposeOutcome {
                                             const ComposeSeams& seams,
                                             const harness::CancellationToken& cancellation);
 
+// --- editing a project (50d) ------------------------------------------------------------
+//
+// An edit is a document rewrite plus record comparison: one structured pass
+// rewrites the plan -- each scene naming the scene it came `from`, or null
+// for a new one -- and a scene renders again exactly where its record
+// changed. Its narration speaks again when its text changed (or the voice
+// did); its clip renders again when its prompt, length, asset or seed
+// changed (or the pipeline did), its seed held unless re-rolled. Everything
+// else is carried over byte for byte.
+
+/// The edit's schema: the plan's, each scene first naming the scene it came
+/// `from` -- 1 to `scenes`, or null for a new one.
+[[nodiscard]] std::string edit_schema(const std::vector<std::string>& assets, std::size_t scenes);
+
+/// What the editor is told, and asked: the brief, the plan as it stands
+/// (each scene numbered as its `from`), and the instruction.
+[[nodiscard]] std::string edit_system_prompt();
+[[nodiscard]] std::string edit_user_message(const harness::VideoProject& project,
+                                            std::string_view instruction,
+                                            const std::vector<std::string>& assets);
+
+/// What became of one scene of the edited plan.
+struct SceneChange {
+    /// The parent's scene it came from, from 1; 0 for a new one.
+    std::size_t from = 0;
+    bool narration = false;
+    bool visual = false;
+    bool seconds = false;
+    bool asset = false;
+    /// Its seed re-rolled (`--redo-scene`).
+    bool reseeded = false;
+    /// Out of the parent's order.
+    bool moved = false;
+
+    [[nodiscard]] bool untouched() const noexcept {
+        return !narration && !visual && !seconds && !asset && !reseeded;
+    }
+};
+
+/// The plan after an edit: the scenes, what became of each, and the parent's
+/// scenes no longer in it.
+struct EditedScenes {
+    std::string title;
+    std::vector<harness::ProjectScene> scenes;
+    std::vector<SceneChange> changes;
+    /// The parent's scenes removed, from 1.
+    std::vector<std::size_t> removed;
+    int attempts = 0;
+    /// Why the edit changed nothing; empty when it holds.
+    std::string error;
+};
+
+/// The parent's plan through one edit pass on `edit`: refused -- nothing
+/// changed -- when the answer does not hold to the schema; else each scene
+/// compared with the one it came from, its seed held, a new scene's drawn
+/// from `seed`.
+[[nodiscard]] EditedScenes edit_scenes(const harness::VideoProject& parent,
+                                       std::string_view instruction,
+                                       const std::vector<std::string>& assets, const PlanFn& edit,
+                                       const std::function<std::int64_t()>& seed);
+
+/// The parent's plan with no edit: every scene untouched.
+[[nodiscard]] EditedScenes same_scenes(const harness::VideoProject& parent);
+
+/// Re-rolls `scene`'s seed (from 1) to `seed`; the refusal when there is no
+/// such scene.
+[[nodiscard]] std::string redo_scene(EditedScenes& edited, std::size_t scene, std::int64_t seed);
+
+/// The diff, scene by scene, in words -- said before anything renders.
+[[nodiscard]] std::vector<std::string> diff_lines(const EditedScenes& edited,
+                                                  std::size_t parent_scenes);
+
+/// Carries what each edited scene keeps from its parent into
+/// `scenes_dir`, copied byte for byte under its new number: its narration
+/// when its text is unchanged and `same_voice`, its clip when its prompt,
+/// length, asset and seed are unchanged and `same_pipeline`. The error, or
+/// empty.
+[[nodiscard]] std::string carry_scenes(const harness::VideoProject& parent, EditedScenes& edited,
+                                       const std::filesystem::path& scenes_dir, bool same_voice,
+                                       bool same_pipeline);
+
 }  // namespace apogee::video

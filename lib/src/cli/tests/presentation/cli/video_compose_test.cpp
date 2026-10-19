@@ -128,7 +128,7 @@ struct Run {
             if (!render_error.empty() && ask.scene == 2) {
                 return apogee::video::RenderedClip{.error = render_error};
             }
-            std::ofstream{mp4} << "MP4";
+            std::ofstream{mp4} << "MP4 seed " << ask.seed;
             return apogee::video::RenderedClip{.ok = true};
         };
         seams.assembly.probe = [](const std::filesystem::path&,
@@ -193,7 +193,7 @@ TEST_CASE("video compose is refused before anything runs, the fix named", "[cli]
     };
     const std::filesystem::path out = run.out_dir / "tides.mp4";
     CHECK(refused([](VideoComposeOptions& o) { o.brief = " \n"; }) ==
-          "there is nothing to compose -- give the brief");
+          "there is nothing to compose -- give the brief, or --from a project");
     CHECK(refused([](VideoComposeOptions& o) { o.brief = std::string(2001, 'a'); }) ==
           "the brief is 2001 characters, over the cap of 2000 -- say it shorter");
     CHECK(refused([&](VideoComposeOptions& o) { o.output = run.out_dir / "tides.mov"; }) ==
@@ -444,4 +444,187 @@ TEST_CASE("video compose completes its names and requires its output",
     CHECK_THAT(out, ContainsSubstring("m"));
     CHECK(home.run({"video", "compose", "b"}, &out, &err) != 0);
     CHECK_THAT(err, ContainsSubstring("--output is required"));
+}
+
+namespace {
+
+/// The editor's answer: the plan's three scenes, each from its own, with
+/// scene 2's visual changed.
+[[nodiscard]] nlohmann::json edited_plan() {
+    nlohmann::json out = plan();
+    for (std::size_t index = 0; index < 3; ++index) {
+        out["scenes"][index]["from"] = index + 1;
+    }
+    out["scenes"][1]["visual"] = "the moon over water";
+    return out;
+}
+
+/// A finished composition at `tides.mp4`, then options set to edit it into
+/// `edited.mp4`.
+void compose_parent(Run& run) {
+    REQUIRE(run.go().exit_code == 0);
+    run.calls.clear();
+    run.said.clear();
+    run.options = {};
+    run.options.from = run.out_dir / "tides.mp4";
+    run.options.output = run.out_dir / "edited.mp4";
+}
+
+}  // namespace
+
+TEST_CASE("video compose --edit rewrites the plan, says the diff, and renders only what changed",
+          "[cli][video][compose][edit]") {
+    Run run;
+    compose_parent(run);
+    run.options.edit = "make the second scene about the moon";
+    run.answer = edited_plan();
+    const VideoComposeResult result = run.go();
+    INFO(result.error);
+    REQUIRE(result.exit_code == 0);
+    CHECK(run.calls == std::vector<std::string>{
+                           "plan on m", "render s02.mp4 seed 8 on org--clip/pipeline/aaaaaaaaaaaa",
+                           "join", "mix", "burn"});
+    const auto said = [&run](const std::string& line) {
+        return std::ranges::find(run.said, line) != run.said.end();
+    };
+    CHECK(said("editing " + run.sidecar().string() +
+               " with m: \"make the second scene about the "
+               "moon\""));
+    CHECK(said("the edit: 3 scenes, were 3"));
+    CHECK(said("  2. scene 2; its prompt changed"));
+    CHECK(
+        said("spend: 1 clip run at 1280x704, 50 steps -- each takes minutes on Apple silicon, "
+             "less on a CUDA GPU; 2 clips already made"));
+    // Untouched scenes carried byte for byte; the changed one rendered anew
+    // on its held seed.
+    const std::filesystem::path scenes = run.out_dir / "edited.scenes";
+    CHECK(slurp(scenes / "s01.mp4") == "MP4 seed 7");
+    CHECK(slurp(scenes / "s03.mp4") == "MP4 seed 9");
+    CHECK(slurp(scenes / "s02.mp4") == "MP4 seed 8");
+    CHECK(slurp(scenes / "s01.wav") == "RIFF");
+    // The document chains to its parent.
+    const nlohmann::json& document = result.document;
+    CHECK(document["status"] == "done");
+    CHECK(document["brief"] == "a minute on tides");
+    CHECK(document["parent"] == run.sidecar().string());
+    REQUIRE(document["edits"].size() == 1);
+    CHECK(document["edits"][0] ==
+          nlohmann::json{{"instruction", "make the second scene about the moon"},
+                         {"redo", nlohmann::json::array()},
+                         {"from", run.sidecar().string()}});
+    CHECK(document["scenes"][1]["visual"] == "the moon over water");
+    CHECK(nlohmann::json::parse(slurp(run.out_dir / "edited.mp4.json")) == document);
+    // The parent is untouched.
+    CHECK(slurp(run.out_dir / "tides.scenes" / "s02.mp4") == "MP4 seed 8");
+    CHECK(nlohmann::json::parse(slurp(run.sidecar()))["visual"].is_null());
+}
+
+TEST_CASE("video compose --redo-scene re-rolls one scene; a voice override speaks them all again",
+          "[cli][video][compose][edit]") {
+    Run run;
+    compose_parent(run);
+    run.options.redo = {3};
+    VideoComposeResult result = run.go();
+    INFO(result.error);
+    REQUIRE(result.exit_code == 0);
+    CHECK(run.calls ==
+          std::vector<std::string>{"render s03.mp4 seed 10 on org--clip/pipeline/aaaaaaaaaaaa",
+                                   "join", "mix", "burn"});
+    CHECK(std::ranges::find(run.said, "  3. scene 3; a new seed") != run.said.end());
+    CHECK(result.document["scenes"][2]["seed"] == 10);
+    CHECK(result.document["edits"][0]["redo"] == nlohmann::json::array({3}));
+    CHECK(result.document["edits"][0]["instruction"].is_null());
+
+    run.calls.clear();
+    run.said.clear();
+    run.options.redo.clear();
+    run.options.output = run.out_dir / "voiced.mp4";
+    run.options.voice = "am_adam";
+    result = run.go();
+    REQUIRE(result.exit_code == 0);
+    CHECK(std::ranges::count_if(run.calls, [](const std::string& call) {
+              return call.starts_with("speak") && call.find(" as am_adam ") != std::string::npos;
+          }) == 3);
+    CHECK(std::ranges::none_of(run.calls,
+                               [](const std::string& call) { return call.starts_with("render"); }));
+    CHECK(std::ranges::find(run.said,
+                            "the voice is not the project's: every narration is spoken again") !=
+          run.said.end());
+}
+
+TEST_CASE("an edit that does not hold, or a dry run, writes nothing",
+          "[cli][video][compose][edit]") {
+    Run run;
+    compose_parent(run);
+    run.options.edit = "make it longer";
+    run.answer.reset();
+    VideoComposeResult result = run.go();
+    CHECK(result.exit_code == 1);
+    CHECK(result.document.is_null());
+    CHECK_THAT(result.error, ContainsSubstring("the edit did not hold to its shape"));
+    CHECK(result.error.ends_with("nothing was changed"));
+    CHECK_FALSE(std::filesystem::exists(run.out_dir / "edited.mp4.json"));
+    CHECK_FALSE(std::filesystem::exists(run.out_dir / "edited.scenes"));
+
+    run.answer = edited_plan();
+    run.options.dry_run = true;
+    run.calls.clear();
+    run.said.clear();
+    result = run.go();
+    REQUIRE(result.exit_code == 0);
+    CHECK(run.calls == std::vector<std::string>{"plan on m"});
+    CHECK(std::ranges::find(run.said, "  2. scene 2; its prompt changed") != run.said.end());
+    CHECK(result.document["status"] == "planned");
+    CHECK(result.document["scenes"][1]["visual"] == "the moon over water");
+    CHECK(result.lines == std::vector<std::string>{"a dry run: nothing was rendered or written"});
+    CHECK_FALSE(std::filesystem::exists(run.out_dir / "edited.mp4.json"));
+    CHECK_FALSE(std::filesystem::exists(run.out_dir / "edited.scenes"));
+}
+
+TEST_CASE("an edit is refused before anything runs when it cannot be one",
+          "[cli][video][compose][edit]") {
+    Run run;
+    const auto refused = [&run](const std::function<void(VideoComposeOptions&)>& set) {
+        const VideoComposeOptions kept = run.options;
+        set(run.options);
+        const VideoComposeResult result = run.go();
+        run.options = kept;
+        CHECK(result.exit_code == 1);
+        return result.error;
+    };
+    CHECK(refused([](VideoComposeOptions& o) { o.edit = "shorter"; }) ==
+          "--edit, --redo-scene and --dry-run work on a project -- name it with --from");
+    CHECK(refused([](VideoComposeOptions& o) { o.redo = {1}; }) ==
+          "--edit, --redo-scene and --dry-run work on a project -- name it with --from");
+    CHECK(refused([&run](VideoComposeOptions& o) { o.from = run.out_dir / "tides.mp4"; }) ==
+          "--from takes its brief from the project -- give no brief");
+    CHECK(refused([&run](VideoComposeOptions& o) {
+              o.brief.clear();
+              o.from = run.out_dir / "none.mp4";
+          }) == "there is no project at " + (run.out_dir / "none.mp4.json").string() +
+                    " -- --from takes a composed video or its project");
+    compose_parent(run);
+    run.options.redo = {4};
+    const VideoComposeResult result = run.go();
+    CHECK(result.error == "--redo-scene 4: the project has 3 scenes");
+    CHECK(run.calls.empty());
+}
+
+TEST_CASE("a failed edit run is resumed by the same command, without editing again",
+          "[cli][video][compose][edit]") {
+    Run run;
+    compose_parent(run);
+    run.options.edit = "make the second scene about the moon";
+    run.answer = edited_plan();
+    run.render_error = "the driver said no";
+    CHECK(run.go().exit_code == 1);
+    run.render_error.clear();
+    run.calls.clear();
+    const VideoComposeResult result = run.go();
+    INFO(result.error);
+    REQUIRE(result.exit_code == 0);
+    CHECK(run.calls ==
+          std::vector<std::string>{"render s02.mp4 seed 8 on org--clip/pipeline/aaaaaaaaaaaa",
+                                   "join", "mix", "burn"});
+    CHECK(result.document["parent"] == run.sidecar().string());
 }

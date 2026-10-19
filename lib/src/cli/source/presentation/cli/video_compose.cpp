@@ -94,6 +94,26 @@ namespace {
     return out;
 }
 
+/// `text` lowercased.
+[[nodiscard]] std::string lowered(std::string text) {
+    std::ranges::transform(text, text.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return text;
+}
+
+/// The project at `path`, or nullopt with `why` filled.
+[[nodiscard]] std::optional<harness::VideoProject> load_project(const std::filesystem::path& path,
+                                                                std::string& why) {
+    std::ifstream in{path, std::ios::binary};
+    const std::string text{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    try {
+        return harness::read_video_project(nlohmann::json::parse(text), why);
+    } catch (const std::exception& e) {
+        why = e.what();
+        return std::nullopt;
+    }
+}
+
 }  // namespace
 
 std::vector<std::string> plan_lines(const harness::VideoProject& project, bool can_burn) {
@@ -102,33 +122,61 @@ std::vector<std::string> plan_lines(const harness::VideoProject& project, bool c
     out.push_back("plan: \"" + project.title + "\" -- " + std::to_string(count) + " scene" +
                   (count == 1 ? "" : "s") + ", about " + seconds_words(video_seconds(project)) +
                   " of video");
+    // The spend is what will run: a scene already holding its narration or
+    // its clip -- resumed, or carried over by an edit -- costs nothing again.
+    const auto held = [](const std::filesystem::path& file) {
+        std::error_code code;
+        return !file.empty() && std::filesystem::is_regular_file(file, code);
+    };
+    std::size_t spoken = 0;
     std::size_t generated = 0;
     std::size_t taken = 0;
+    std::size_t kept = 0;
     for (std::size_t index = 0; index < count; ++index) {
         const harness::ProjectScene& scene = project.scenes[index];
-        std::string head = "  " + std::to_string(index + 1) + ". (" + seconds_words(scene.seconds) +
-                           ") \"" + scene.narration + "\"";
-        out.push_back(head);
-        if (!scene.asset.empty() && !video::is_still(scene.asset)) {
+        out.push_back("  " + std::to_string(index + 1) + ". (" + seconds_words(scene.seconds) +
+                      ") \"" + scene.narration + "\"");
+        const bool asset_clip = !scene.asset.empty() && !video::is_still(scene.asset);
+        if (asset_clip) {
             out.push_back("     takes " + scene.asset + " as it is");
-            ++taken;
         } else {
             out.push_back("     shows: " + shortened(scene.visual, 120) +
                           (scene.asset.empty() ? std::string{} : " (from " + scene.asset + ")"));
+        }
+        spoken += held(scene.voice) ? 0 : 1;
+        if (held(scene.clip)) {
+            ++kept;
+        } else if (asset_clip) {
+            ++taken;
+        } else {
             ++generated;
         }
     }
-    std::string spend = "spend: " + std::to_string(count) + " narration run" +
-                        (count == 1 ? "" : "s") + " (faster than real time)";
+    std::vector<std::string> parts;
+    if (spoken > 0) {
+        parts.push_back(std::to_string(spoken) + " narration run" + (spoken == 1 ? "" : "s") +
+                        " (faster than real time)");
+    }
     if (generated > 0) {
-        spend += ", then " + std::to_string(generated) + " clip run" + (generated == 1 ? "" : "s") +
-                 " at " + std::to_string(kDefaultVideoWidth) + "x" +
-                 std::to_string(kDefaultVideoHeight) + ", " + std::to_string(kDefaultVideoSteps) +
-                 " steps -- each takes minutes on Apple silicon, less on a CUDA GPU";
+        parts.push_back((spoken > 0 ? "then " : "") + std::to_string(generated) + " clip run" +
+                        (generated == 1 ? "" : "s") + " at " + std::to_string(kDefaultVideoWidth) +
+                        "x" + std::to_string(kDefaultVideoHeight) + ", " +
+                        std::to_string(kDefaultVideoSteps) +
+                        " steps -- each takes minutes on Apple silicon, less on a CUDA GPU");
+    }
+    std::string spend = "spend: ";
+    for (std::size_t at = 0; at < parts.size(); ++at) {
+        spend += (at == 0 ? "" : ", ") + parts[at];
+    }
+    if (parts.empty()) {
+        spend += "no narration or clip runs -- the assembly alone";
     }
     if (taken > 0) {
         spend += "; " + std::to_string(taken) + " asset" + (taken == 1 ? "" : "s") + " taken as " +
                  (taken == 1 ? "it is" : "they are");
+    }
+    if (kept > 0) {
+        spend += "; " + std::to_string(kept) + " clip" + (kept == 1 ? "" : "s") + " already made";
     }
     out.push_back(spend);
     if (!project.captions) {
@@ -191,11 +239,20 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
             seams.say(line);
         }
     };
+    const auto draw = [&seams] { return seams.random_seed ? seams.random_seed() : 0; };
     std::error_code code;
 
-    const std::string brief = trimmed(options.brief);
-    if (brief.empty()) {
-        return refuse("there is nothing to compose -- give the brief");
+    const bool editing = !options.from.empty();
+    if (!editing && (!options.edit.empty() || !options.redo.empty() || options.dry_run)) {
+        return refuse(
+            "--edit, --redo-scene and --dry-run work on a project -- name it with --from");
+    }
+    std::string brief = trimmed(options.brief);
+    if (editing && !brief.empty()) {
+        return refuse("--from takes its brief from the project -- give no brief");
+    }
+    if (!editing && brief.empty()) {
+        return refuse("there is nothing to compose -- give the brief, or --from a project");
     }
     if (brief.size() > video::kMaxBriefCharacters) {
         return refuse("the brief is " + std::to_string(brief.size()) +
@@ -206,10 +263,7 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
         return refuse("--output is required");
     }
     const std::filesystem::path output = std::filesystem::absolute(options.output, code);
-    std::string extension = output.extension().string();
-    std::ranges::transform(extension, extension.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    if (extension != ".mp4") {
+    if (lowered(output.extension().string()) != ".mp4") {
         return refuse("the video is an mp4 -- name it with .mp4");
     }
     if (std::filesystem::exists(output, code)) {
@@ -220,19 +274,34 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
         return refuse("no directory " + output.parent_path().string() + " for the video");
     }
 
-    // A project beside the output for the same brief is resumed.
+    // An edit's parent (50d): a composed video, or its project.
+    std::optional<harness::VideoProject> parent;
+    std::filesystem::path parent_document;
+    if (editing) {
+        const std::filesystem::path from = std::filesystem::absolute(options.from, code);
+        parent_document = lowered(from.extension().string()) == ".json"
+                              ? from
+                              : harness::video_sidecar_path(from);
+        if (!std::filesystem::is_regular_file(parent_document, code)) {
+            return refuse("there is no project at " + parent_document.string() +
+                          " -- --from takes a composed video or its project");
+        }
+        std::string why;
+        parent = load_project(parent_document, why);
+        if (!parent.has_value()) {
+            return refuse(parent_document.string() + " is not a project this build reads (" + why +
+                          ")");
+        }
+        brief = parent->brief;
+    }
+
+    // A project beside the output -- the same brief, and for an edit the same
+    // parent -- is resumed.
     const std::filesystem::path sidecar = harness::video_sidecar_path(output);
     std::optional<harness::VideoProject> resumed;
     if (std::filesystem::exists(sidecar, code)) {
-        std::ifstream in{sidecar, std::ios::binary};
-        const std::string text{std::istreambuf_iterator<char>{in},
-                               std::istreambuf_iterator<char>{}};
         std::string why;
-        try {
-            resumed = harness::read_video_project(nlohmann::json::parse(text), why);
-        } catch (const std::exception& e) {
-            why = e.what();
-        }
+        resumed = load_project(sidecar, why);
         if (!resumed.has_value()) {
             return refuse(sidecar.string() +
                           " is there and is not a project this run can resume (" + why +
@@ -241,6 +310,11 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
         if (resumed->brief != brief) {
             return refuse(sidecar.string() +
                           " holds a project for another brief -- name another -o, or move it "
+                          "away to start again");
+        }
+        if (editing && resumed->parent.lexically_normal() != parent_document.lexically_normal()) {
+            return refuse(sidecar.string() +
+                          " holds a project edited from another -- name another -o, or move it "
                           "away to start again");
         }
     }
@@ -254,8 +328,12 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
         project.brief = brief;
         project.output = output;
         project.scenes_dir = harness::video_project_scenes_dir(output);
-        project.crossfade = platform::kDefaultCrossfade;
-        project.captions = options.captions;
+        project.crossfade = editing ? parent->crossfade : platform::kDefaultCrossfade;
+        project.captions = options.captions && (!editing || parent->captions);
+        if (editing) {
+            project.music = parent->music;
+            project.assets = parent->assets;
+        }
         if (!options.music.empty()) {
             project.music = std::filesystem::absolute(options.music, code);
             if (!std::filesystem::is_regular_file(project.music, code)) {
@@ -267,47 +345,70 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
             if (!std::filesystem::is_directory(project.assets, code)) {
                 return refuse("there is no assets directory at " + project.assets.string());
             }
-            asset_names = video::list_assets(project.assets);
-            if (asset_names.empty()) {
+            if (video::list_assets(project.assets).empty()) {
                 return refuse(project.assets.string() +
                               " holds no stills or clips (png, jpg, jpeg, webp, mp4, mov, m4v, "
                               "webm)");
             }
         }
+        if (!project.assets.empty()) {
+            asset_names = video::list_assets(project.assets);
+        }
     }
 
-    // What runs it: a resumed project's own, else the flags' or the defaults.
+    // What runs it: a resumed project's own; an edit's parent's, unless a
+    // flag names another; else the flags' or the defaults.
+    const auto chosen = [&](const std::string& flag, const std::string& recorded) {
+        if (resumed.has_value()) {
+            return recorded;
+        }
+        return editing && flag.empty() ? recorded : flag;
+    };
     ResolvedPipeline pipeline;
     if (std::string why = resolve_video_pipeline(
-            roots, resumed.has_value() ? resumed->pipeline : options.model,
-            resumed.has_value() ? std::string{} : config.models.default_video, pipeline);
+            roots,
+            chosen(options.model, resumed.has_value() ? resumed->pipeline
+                                  : editing           ? parent->pipeline
+                                                      : std::string{}),
+            resumed.has_value() || editing ? std::string{} : config.models.default_video, pipeline);
         !why.empty()) {
         return refuse(why);
     }
     ResolvedVoiceModel voice_model;
     if (std::string why = resolve_voice_model(
-            roots, resumed.has_value() ? resumed->voice_model : options.voice_model, voice_model);
+            roots,
+            chosen(options.voice_model, resumed.has_value() ? resumed->voice_model
+                                        : editing           ? parent->voice_model
+                                                            : std::string{}),
+            voice_model);
         !why.empty()) {
         return refuse(why);
     }
+    // An edit keeps its parent's voice while it keeps its voice model.
+    std::string given_voice = options.voice;
+    if (resumed.has_value()) {
+        given_voice = resumed->voice;
+    } else if (editing && given_voice.empty() && voice_model.handle == parent->voice_model) {
+        given_voice = parent->voice;
+    }
     std::string voice;
-    if (std::string why = choose_voice(voice_model.info,
-                                       resumed.has_value() ? resumed->voice : options.voice, voice);
-        !why.empty()) {
+    if (std::string why = choose_voice(voice_model.info, given_voice, voice); !why.empty()) {
         return refuse(why);
     }
     const bool can_burn = project.captions && (!seams.can_burn || seams.can_burn());
-    if (project.captions && !can_burn && !resumed.has_value() &&
+    if (project.captions && !can_burn && !resumed.has_value() && !options.dry_run &&
         std::filesystem::exists(captions_beside(output), code)) {
         return refuse(captions_beside(output).string() +
                       " exists -- this ffmpeg cannot burn the captions, so they would be kept "
                       "there; name another -o");
     }
-    if (const video::VideoReadiness ready = seams.ready_video(pipeline); !ready.ready()) {
-        return refuse(ready.message());
-    }
-    if (const video::VideoReadiness ready = seams.ready_voice(voice_model); !ready.ready()) {
-        return refuse(ready.message());
+    if (!options.dry_run) {
+        if (const video::VideoReadiness ready = seams.ready_video(pipeline); !ready.ready()) {
+            return refuse(ready.message());
+        }
+        if (const video::VideoReadiness ready = seams.ready_voice(voice_model); !ready.ready()) {
+            return refuse(ready.message());
+        }
     }
 
     const auto save = [&sidecar](const harness::VideoProject& state) {
@@ -331,6 +432,75 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
             }
             say("a resumed project keeps its own settings: " + named + " not applied");
         }
+    } else if (editing) {
+        // One edit pass, or none; the re-rolls; the diff said before anything
+        // renders.
+        video::EditedScenes edited;
+        std::string backend = parent->planner;
+        if (!options.edit.empty()) {
+            backend = harness::resolve_chat_backend(config, options.planner);
+            if (backend.empty()) {
+                return refuse(
+                    "no backend is configured to edit with -- add one with 'apogee config "
+                    "add-backend', or name one with --planner");
+            }
+            say("editing " + parent_document.string() + " with " + backend + ": \"" + options.edit +
+                "\"");
+            edited = video::edit_scenes(
+                *parent, options.edit, asset_names,
+                [&](const std::string& system, const std::string& user, const std::string& schema) {
+                    return seams.plan(backend, system, user, schema);
+                },
+                draw);
+            if (!edited.error.empty()) {
+                return refuse(edited.error);
+            }
+        } else {
+            edited = video::same_scenes(*parent);
+        }
+        for (const std::size_t scene : options.redo) {
+            if (std::string why = video::redo_scene(edited, scene, draw()); !why.empty()) {
+                return refuse(why);
+            }
+        }
+        for (const std::string& line : video::diff_lines(edited, parent->scenes.size())) {
+            say(line);
+        }
+        const bool same_voice = voice_model.handle == parent->voice_model && voice == parent->voice;
+        const bool same_pipeline = pipeline.handle == parent->pipeline;
+        if (!same_voice) {
+            say("the voice is not the project's: every narration is spoken again");
+        }
+        if (!same_pipeline) {
+            say("the pipeline is not the project's: every clip renders again, its seed held");
+        }
+        project.title = edited.title;
+        project.pipeline = pipeline.handle;
+        project.voice_model = voice_model.handle;
+        project.voice = voice;
+        project.planner = backend;
+        project.plan_attempts = options.edit.empty() ? parent->plan_attempts : edited.attempts;
+        project.parent = parent_document;
+        project.edits = parent->edits;
+        project.edits.push_back(harness::ProjectEdit{
+            .instruction = options.edit, .redo = options.redo, .from = parent_document});
+        project.created = models::now_rfc3339();
+        project.platform = seams.platform;
+        if (options.dry_run) {
+            project.scenes = edited.scenes;
+            project.status = "planned";
+            result.document = harness::video_project_document(project);
+            result.lines.emplace_back("a dry run: nothing was rendered or written");
+            return result;
+        }
+        if (std::string why =
+                video::carry_scenes(*parent, edited, project.scenes_dir, same_voice, same_pipeline);
+            !why.empty()) {
+            return refuse(why);
+        }
+        project.scenes = edited.scenes;
+        project.status = "rendering";
+        save(project);
     } else {
         const std::string backend = harness::resolve_chat_backend(config, options.planner);
         if (backend.empty()) {
@@ -350,7 +520,7 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
         project.title = planned.title;
         project.scenes = planned.scenes;
         for (harness::ProjectScene& scene : project.scenes) {
-            scene.seed = seams.random_seed ? seams.random_seed() : 0;
+            scene.seed = draw();
         }
         project.pipeline = pipeline.handle;
         project.voice_model = voice_model.handle;

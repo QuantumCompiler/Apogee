@@ -56,7 +56,8 @@ constexpr std::array kSurfaces{
                  "reviewing merge requests and the skills they run (48): the exec line (37h) "
                  "runs it as typed; a Review view is a recorded later item"},
     ShellSurface{"video", RunnerCovered,
-                 "generating video locally (49) and composing it from a brief (50c): the exec "
+                 "generating video locally (49) and composing it from a brief and editing it by "
+                 "instruction (50c, 50d): the exec "
                  "line (37h) runs it as typed, its narration streamed; a Video view is a "
                  "recorded later item"},
     ShellSurface{"voice", RunnerCovered,

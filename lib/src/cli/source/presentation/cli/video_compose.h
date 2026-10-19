@@ -44,6 +44,15 @@ struct VideoComposeOptions {
     std::string voice_model{};
     std::string voice{};
     std::string planner{};
+    /// `--from` (50d): a composed video, or its project, to edit -- its
+    /// brief and settings taken, the flags above changing them.
+    std::filesystem::path from{};
+    /// `--edit`: the instruction one structured pass rewrites the plan by.
+    std::string edit{};
+    /// `--redo-scene`: scenes (from 1) whose seed is re-rolled.
+    std::vector<std::size_t> redo{};
+    /// `--dry-run`: the edited project and its diff, nothing rendered.
+    bool dry_run = false;
 };
 
 /// What a composition needs from outside.

@@ -399,6 +399,42 @@ grep -q "scene 2/2: rendering its clip" "$WORK_DIR/resumed.err" || fail "the mis
 
 echo "video compose: planned with one correction, said first, spoken, rendered, kept, resumed - OK"
 
+# --- video compose --edit (50d): the diff said, only the changed scene rendered ---
+cat >"$WORK_DIR/edit.json" <<'JSON'
+{"turns": [{"text": "{\"title\": \"Tides\", \"scenes\": [{\"from\": 1, \"narration\": \"The sea breathes.\", \"visual\": \"a shore at dawn\", \"seconds\": 3}, {\"from\": 2, \"narration\": \"Twice a day.\", \"visual\": \"a full moon rising\", \"seconds\": 3}]}"}]}
+JSON
+"$APOGEE_BIN" config add-backend editor --type mock --model-path "$WORK_DIR/edit.json" \
+    </dev/null >/dev/null || fail "add-backend editor"
+edit() {
+    out="$1"; shift
+    set +e
+    "$APOGEE_BIN" video compose --from "$WORK_DIR/out/tides.mp4" --edit "make the second scene the moon" \
+        --planner editor -o "$WORK_DIR/out/$out.mp4" --output-format json "$@" \
+        </dev/null >"$WORK_DIR/$out.out" 2>"$WORK_DIR/$out.err"
+    STATUS=$?
+    set -e
+}
+edit dry --dry-run
+[ "$STATUS" -eq 0 ] || fail "the dry run failed ($STATUS): $(cat "$WORK_DIR/dry.err")"
+[ "$(field "$WORK_DIR/dry.out" '["status"]')" = "planned" ] || fail "a dry run's project is not planned"
+[ ! -e "$WORK_DIR/out/dry.mp4.json" ] && [ ! -e "$WORK_DIR/out/dry.scenes" ] || fail "a dry run wrote something"
+edit edited
+[ "$STATUS" -eq 0 ] || fail "the edit failed ($STATUS): $(cat "$WORK_DIR/edited.err")"
+[ "$(field "$WORK_DIR/edited.out" '["status"]')" = "done" ] || fail "the edit is not done: $(cat "$WORK_DIR/edited.out")"
+[ "$(field "$WORK_DIR/edited.out" '["parent"]')" = "$WORK_DIR/out/tides.mp4.json" ] || fail "the edit does not chain to its parent"
+[ "$(field "$WORK_DIR/edited.out" '["edits"][0]["instruction"]')" = "make the second scene the moon" ] || fail "the edit's instruction"
+grep -q "\[compose\] the edit: 2 scenes, were 2" "$WORK_DIR/edited.err" || fail "the diff was not said: $(cat "$WORK_DIR/edited.err")"
+grep -q "\[compose\]   2. scene 2; its prompt changed" "$WORK_DIR/edited.err" || fail "the changed scene was not said"
+grep -q "scene 2/2: rendering its clip" "$WORK_DIR/edited.err" || fail "the changed scene was not rendered"
+if grep -q "scene 1/2: rendering\|speaking its narration" "$WORK_DIR/edited.err"; then
+    fail "an untouched scene rendered again: $(cat "$WORK_DIR/edited.err")"
+fi
+cmp -s "$WORK_DIR/out/tides.scenes/s01.mp4" "$WORK_DIR/out/edited.scenes/s01.mp4" || fail "scene 1's clip was not carried byte for byte"
+cmp -s "$WORK_DIR/out/tides.scenes/s02.wav" "$WORK_DIR/out/edited.scenes/s02.wav" || fail "scene 2's narration was not carried byte for byte"
+[ -f "$WORK_DIR/out/edited.mp4" ] || fail "the edited video did not land"
+
+echo "video compose --edit: a dry run writes nothing; the diff said; only the changed scene rendered; chained - OK"
+
 # --- on a pipe, a missing runtime is refused naming its installer -----------
 rm -rf "$SITE/diffusers"
 generate missing -o "$WORK_DIR/out/missing.mp4"

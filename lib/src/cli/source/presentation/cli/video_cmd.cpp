@@ -396,8 +396,8 @@ void VideoCommand::bind(CLI::App& root, const RootContext& context) {
         "compose",
         "Compose a narrated, captioned video from a brief -- the scenes planned and said first, "
         "each one clip and one narration, the whole kept as a project beside it");
-    compose->add_option("brief", compose_flags->options.brief, "What the video is about")
-        ->required();
+    compose->add_option("brief", compose_flags->options.brief,
+                        "What the video is about (none with --from: the project's own)");
     compose
         ->add_option("-o,--output", compose_flags->options.output,
                      "The video to write (an mp4; never over an existing file -- the same "
@@ -434,6 +434,21 @@ void VideoCommand::bind(CLI::App& root, const RootContext& context) {
         ->add_option("--planner", compose_flags->options.planner,
                      "The backend that plans the scenes (default: the chat role)")
         ->type_name(kBackendValue);
+    compose
+        ->add_option("--from", compose_flags->options.from,
+                     "Edit a composed video: it, or its project -- its brief and settings taken, "
+                     "every scene not changed carried over as it is")
+        ->type_name(kPathValue);
+    compose->add_option(
+        "--edit", compose_flags->options.edit,
+        "With --from: an instruction one structured pass rewrites the plan by -- the diff said "
+        "first, only the changed scenes rendered again, their seeds held");
+    compose->add_option("--redo-scene", compose_flags->options.redo,
+                        "With --from: render a scene (from 1) again on a fresh seed; give it "
+                        "again for more");
+    compose->add_flag("--dry-run", compose_flags->options.dry_run,
+                      "With --from: say the diff and print the edited project; render and write "
+                      "nothing");
     add_read_format(compose, compose_format);
     compose->callback([&context, compose_flags, compose_format]() {
         compose_flags->format = *compose_format;

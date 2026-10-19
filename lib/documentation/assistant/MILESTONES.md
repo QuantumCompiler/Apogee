@@ -8595,3 +8595,33 @@ Decisions taken while building, for veto:
 **Verified.** `lib/scripts/cicd.sh --test`: 3515 of 3515, two skipped and said (the real caption burn without libass, and the existing pdftotext case); `cli.video_lifecycle`'s compose phase ran on the real binary.
 
 **Not run on real weights**: a real brief through the reference pipeline (Wan 2.2 TI2V-5B), Kokoro-82M and a real planner is the user's run. The real burn waits on an ffmpeg with libass.
+
+### 2026-10-19 — `compose-edit` (backlog item 50d): editing by instruction
+
+**Why.** The feature the composer track was opened for: a finished video edited by typed command -- "remove scene 2", "make the second scene the moon" -- rather than on a timeline. The project document is the only state (50c), and 49d made selective re-rendering the law, so an edit is a document rewrite plus record comparison.
+
+- [x] **`video compose --from <video or project>`** takes the project's brief and settings; `-m`, `--voice-model`, `--voice`, `--music`, `--assets` and `--no-captions` change them.
+  - `--edit "<instruction>"` runs **one structured pass** (`edit_scenes`) over the same planner closure. The editor sees the brief, the plan with every scene numbered, and the instruction. It answers with the whole plan, each scene naming the scene it came `from` (null for a new one) -- `edit_schema` is the plan's with that field first. An answer that does not hold changes nothing, said.
+  - `--redo-scene <n>` (repeatable) re-rolls one scene's seed: the deterministic knob beside the natural-language one.
+  - `--dry-run` says the diff and prints the edited project as `planned`, rendering and writing nothing.
+- [x] **The diff before anything renders** (`diff_lines`): every scene of the edited plan as new, untouched, moved, or with what changed -- its narration, its prompt, its length, its asset, a new seed -- and every scene removed. A scene is "moved" only when it is outside the longest run still in the parent's order, so an added intro moves nothing.
+- [x] **Record comparison, not heuristics** (`carry_scenes`):
+  - A scene's narration speaks again exactly when its text changed (or the voice did).
+  - Its clip renders again exactly when its prompt, length, asset or seed changed (or the pipeline did), its seed held otherwise -- 49d's move, the same seed with a new prompt.
+  - Everything unchanged is copied byte for byte, with its record, under the scene's new number. The walk then renders only what is missing.
+  - The spend line counts only what will run ("2 clips already made"), so a resume's and an edit's spend are honest too.
+- [x] **Chained**: the new project names its `parent` and carries `edits` -- every instruction and re-roll from the original brief to it, each naming the project it came from. The parent is never touched. A failed edit run resumes by the same command, without editing again.
+- [x] **The tests**: `video/compose_test` (the schema's `from`, the diff matrix -- no-op, removal, an intro, a reorder, narration, prompt and length changes, a re-roll -- each golden, an edit that does not hold, the byte-for-byte carry and the exact render set, and no carry under another voice or pipeline), `cli/video_compose_test` (an edit end to end with its parent untouched, `--redo-scene`, a voice override, a failed edit and a dry run writing nothing, the refusals, a failed edit resumed), and `cli.video_lifecycle` grown: `--edit` on the real binary over a mock editor, a dry run first, then only the changed scene rendered and the rest carried (`cmp`).
+
+Decisions taken while building, for veto:
+- **Narration and clip are compared apart.** The document's rule says a scene re-renders when any of its fields change; this splits it: a narration-only change speaks again and keeps the clip -- unless the kept clip is now too short for it, which the walk already renders again. A prompt-only change keeps the narration.
+- **The diff's words**: `the edit: N scenes, were M`, then `  i. new`, `  i. scene k, untouched`, `  i. scene k, moved`, `  i. scene k; its narration changed, its prompt changed, its length changed, its asset changed, a new seed`, and `  scene k removed`.
+- **The chain's shape**: `parent` (the parent's document) and `edits` (each `instruction`, `redo`, `from`), additive to version 1.
+- **Copied, not linked or referenced.** Each project's scenes are its own, so a parent can be removed without breaking its child; the cost is the copies' disk space.
+- **The editor is the chat role's backend or `--planner`**, as the planner is. An edit with no instruction (re-rolls, overrides) makes no model call at all.
+- **A new video, never in place.** `-o` names a new file like every run; the parent and its video stay as they were.
+- **A dry run checks no runtime**: it only plans. A real edit checks both ladders before its model call.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3524 of 3524, two skipped and said (the real caption burn without libass, and the existing pdftotext case); `cli.video_lifecycle`'s edit phase ran on the real binary.
+
+**Not run on real weights**: an edit of a real composition is the user's run, after the real compose.

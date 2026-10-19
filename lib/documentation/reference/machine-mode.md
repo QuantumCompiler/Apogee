@@ -688,7 +688,18 @@ until it exists, and each file with its own record beside it
 (`video.generation`, `voice.speech`); `captions` (`file`, and `burned` --
 false when this ffmpeg has no libass and the SRT is kept beside the video);
 `assembly` (the joins, the mix and the burn in words); `error`; `created`
-and `platform`. Exit `1` on a failure and `130` on a cancel, every finished
+and `platform`; and since 50d `parent` (the project it was edited from, null
+for an original) and `edits` -- every edit from the original brief to this
+one, each its `instruction` (null for none), the scenes it re-rolled
+(`redo`) and the project it was made `from`. An edit is the same verb:
+
+```bash
+apogee video compose --from video.mp4 --edit "<instruction>" -o edited.mp4 --output-format json
+```
+
+Its scene diff is said on stderr before anything renders; `--dry-run`
+prints the edited project with `status` `planned` and renders and writes
+nothing. Exit `1` on a failure and `130` on a cancel, every finished
 scene kept either way: the same command again resumes it, rendering only
 what the document does not hold. A refusal before the plan prints no
 document, one line on stderr naming the fix.

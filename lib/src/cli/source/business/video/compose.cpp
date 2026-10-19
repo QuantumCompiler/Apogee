@@ -49,26 +49,37 @@ namespace {
     return project.scenes_dir / (std::string{name.data()} + "." + std::string{extension});
 }
 
-}  // namespace
-
-std::string plan_schema(const std::vector<std::string>& assets) {
-    nlohmann::ordered_json scene = {
-        {"type", "object"},
-        {"additionalProperties", false},
-        {"required", {"narration", "visual", "seconds"}},
-        {"properties",
-         {{"narration",
-           {{"type", "string"}, {"minLength", 1}, {"maxLength", kMaxNarrationCharacters}}},
-          {"visual", {{"type", "string"}, {"minLength", 1}, {"maxLength", kMaxVisualCharacters}}},
-          {"seconds",
-           {{"type", "number"}, {"minimum", kMinSceneSeconds}, {"maximum", kMaxSceneSeconds}}}}}};
+/// The plan's schema; with `from_scenes`, each scene first names the scene
+/// it came from (1 to `from_scenes`, or null) -- the edit's.
+[[nodiscard]] std::string scenes_schema(const std::vector<std::string>& assets,
+                                        std::size_t from_scenes) {
+    nlohmann::ordered_json properties = nlohmann::ordered_json::object();
+    nlohmann::ordered_json required = nlohmann::ordered_json::array();
+    if (from_scenes > 0) {
+        properties["from"] = {
+            {"type", {"integer", "null"}}, {"minimum", 1}, {"maximum", from_scenes}};
+        required.push_back("from");
+    }
+    properties["narration"] = {
+        {"type", "string"}, {"minLength", 1}, {"maxLength", kMaxNarrationCharacters}};
+    properties["visual"] = {
+        {"type", "string"}, {"minLength", 1}, {"maxLength", kMaxVisualCharacters}};
+    properties["seconds"] = {
+        {"type", "number"}, {"minimum", kMinSceneSeconds}, {"maximum", kMaxSceneSeconds}};
+    for (const char* name : {"narration", "visual", "seconds"}) {
+        required.push_back(name);
+    }
     if (!assets.empty()) {
         nlohmann::ordered_json names = nlohmann::ordered_json::array({nullptr});
         for (const std::string& asset : assets) {
             names.push_back(asset);
         }
-        scene["properties"]["asset"] = {{"enum", names}};
+        properties["asset"] = {{"enum", names}};
     }
+    const nlohmann::ordered_json scene = {{"type", "object"},
+                                          {"additionalProperties", false},
+                                          {"required", required},
+                                          {"properties", properties}};
     const nlohmann::ordered_json schema = {
         {"type", "object"},
         {"additionalProperties", false},
@@ -81,6 +92,38 @@ std::string plan_schema(const std::vector<std::string>& assets) {
             {"maxItems", kMaxComposeScenes},
             {"items", scene}}}}}};
     return schema.dump();
+}
+
+/// A scene as the planner and the editor read it.
+[[nodiscard]] nlohmann::ordered_json scene_json(const harness::ProjectScene& scene) {
+    nlohmann::ordered_json out = {
+        {"narration", scene.narration}, {"visual", scene.visual}, {"seconds", scene.seconds}};
+    if (!scene.asset.empty()) {
+        out["asset"] = scene.asset;
+    }
+    return out;
+}
+
+/// `from` into `to` byte for byte, its record beside it too.
+[[nodiscard]] std::string carry_file(const std::filesystem::path& from,
+                                     const std::filesystem::path& to) {
+    std::error_code code;
+    std::filesystem::copy_file(from, to, std::filesystem::copy_options::overwrite_existing, code);
+    if (code) {
+        return "could not carry " + from.string() + " over: " + code.message();
+    }
+    const std::filesystem::path record = harness::video_sidecar_path(from);
+    if (std::filesystem::is_regular_file(record, code)) {
+        std::filesystem::copy_file(record, harness::video_sidecar_path(to),
+                                   std::filesystem::copy_options::overwrite_existing, code);
+    }
+    return {};
+}
+
+}  // namespace
+
+std::string plan_schema(const std::vector<std::string>& assets) {
+    return scenes_schema(assets, 0);
 }
 
 std::string plan_system_prompt() {
@@ -439,6 +482,242 @@ ComposeOutcome render_project(harness::VideoProject& project, const ComposeSeams
     project.error.clear();
     save();
     return ComposeOutcome{.ok = true};
+}
+
+std::string edit_schema(const std::vector<std::string>& assets, std::size_t scenes) {
+    return scenes_schema(assets, std::max<std::size_t>(scenes, 1));
+}
+
+std::string edit_system_prompt() {
+    return "You edit the plan of a short narrated video. You are given the plan as it stands, "
+           "its scenes numbered, and an instruction. Answer with the whole plan after the "
+           "instruction is carried out, in the same shape. Each scene's `from` is the number of "
+           "the scene it keeps or changes, or null for a scene the instruction adds. Leave every "
+           "scene the instruction does not touch exactly as it is -- the same narration, visual, "
+           "seconds and asset, word for word -- and keep the scenes' order unless the "
+           "instruction moves them. The plan's rules still hold: each narration one or two "
+           "short spoken sentences, each visual a prompt for a text-to-video model, each scene " +
+           whole(kMinSceneSeconds) + " to " + whole(kMaxSceneSeconds) +
+           " seconds. Answer with the JSON object only.";
+}
+
+std::string edit_user_message(const harness::VideoProject& project, std::string_view instruction,
+                              const std::vector<std::string>& assets) {
+    nlohmann::ordered_json scenes = nlohmann::ordered_json::array();
+    for (std::size_t index = 0; index < project.scenes.size(); ++index) {
+        nlohmann::ordered_json scene = {{"from", index + 1}};
+        scene.update(scene_json(project.scenes[index]));
+        scenes.push_back(scene);
+    }
+    const nlohmann::ordered_json plan = {{"title", project.title}, {"scenes", scenes}};
+    std::string out = "The brief: " + project.brief + "\n\nThe plan:\n" + plan.dump(2) +
+                      "\n\nThe instruction: " + std::string{instruction} + "\n\nAt most " +
+                      std::to_string(kMaxComposeScenes) + " scenes.";
+    if (!assets.empty()) {
+        out += "\nThe user's files:";
+        for (const std::string& asset : assets) {
+            out += " " + asset + (asset == assets.back() ? "" : ",");
+        }
+    }
+    return out;
+}
+
+EditedScenes edit_scenes(const harness::VideoProject& parent, std::string_view instruction,
+                         const std::vector<std::string>& assets, const PlanFn& edit,
+                         const std::function<std::int64_t()>& seed) {
+    EditedScenes out;
+    const PlanAnswer answer =
+        edit(edit_system_prompt(), edit_user_message(parent, instruction, assets),
+             edit_schema(assets, parent.scenes.size()));
+    out.attempts = answer.attempts;
+    if (!answer.json.has_value() || !answer.conforms) {
+        out.error = "the edit did not hold to its shape" +
+                    std::string{answer.attempts > 1 ? " after its one correction" : ""} +
+                    (answer.error.empty() ? std::string{} : ": " + answer.error) +
+                    " -- the caps: " + caps_words() + "; nothing was changed";
+        return out;
+    }
+    const nlohmann::json& json = *answer.json;
+    out.title = json.value("title", parent.title);
+    std::vector<bool> kept(parent.scenes.size(), false);
+    for (const nlohmann::json& item : json.at("scenes")) {
+        harness::ProjectScene scene;
+        scene.narration = item.at("narration").get<std::string>();
+        scene.visual = item.at("visual").get<std::string>();
+        scene.seconds = item.at("seconds").get<double>();
+        if (const auto asset = item.find("asset"); asset != item.end() && asset->is_string()) {
+            scene.asset = asset->get<std::string>();
+        }
+        SceneChange change;
+        const nlohmann::json& from = item.at("from");
+        if (from.is_number_integer() && from.get<std::int64_t>() >= 1 &&
+            static_cast<std::size_t>(from.get<std::int64_t>()) <= parent.scenes.size()) {
+            change.from = static_cast<std::size_t>(from.get<std::int64_t>());
+            const harness::ProjectScene& was = parent.scenes[change.from - 1];
+            kept[change.from - 1] = true;
+            scene.seed = was.seed;
+            change.narration = scene.narration != was.narration;
+            change.visual = scene.visual != was.visual;
+            change.seconds = std::abs(scene.seconds - was.seconds) > 1e-9;
+            change.asset = scene.asset != was.asset;
+        } else {
+            scene.seed = seed ? seed() : 0;
+        }
+        out.scenes.push_back(std::move(scene));
+        out.changes.push_back(change);
+    }
+    for (std::size_t index = 0; index < kept.size(); ++index) {
+        if (!kept[index]) {
+            out.removed.push_back(index + 1);
+        }
+    }
+    // In place: the longest run of kept scenes still in the parent's order;
+    // every other kept scene moved.
+    const std::size_t count = out.changes.size();
+    std::vector<std::size_t> length(count, 0);
+    std::vector<std::size_t> before(count, count);
+    std::size_t best = count;
+    for (std::size_t index = 0; index < count; ++index) {
+        if (out.changes[index].from == 0) {
+            continue;
+        }
+        length[index] = 1;
+        for (std::size_t earlier = 0; earlier < index; ++earlier) {
+            if (out.changes[earlier].from != 0 &&
+                out.changes[earlier].from < out.changes[index].from &&
+                length[earlier] + 1 > length[index]) {
+                length[index] = length[earlier] + 1;
+                before[index] = earlier;
+            }
+        }
+        if (best == count || length[index] >= length[best]) {
+            best = index;
+        }
+    }
+    std::vector<bool> in_place(count, false);
+    for (std::size_t at = best; at < count; at = before[at]) {
+        in_place[at] = true;
+    }
+    for (std::size_t index = 0; index < count; ++index) {
+        out.changes[index].moved = out.changes[index].from != 0 && !in_place[index];
+    }
+    return out;
+}
+
+EditedScenes same_scenes(const harness::VideoProject& parent) {
+    EditedScenes out;
+    out.title = parent.title;
+    for (std::size_t index = 0; index < parent.scenes.size(); ++index) {
+        const harness::ProjectScene& was = parent.scenes[index];
+        harness::ProjectScene scene;
+        scene.narration = was.narration;
+        scene.visual = was.visual;
+        scene.seconds = was.seconds;
+        scene.asset = was.asset;
+        scene.seed = was.seed;
+        out.scenes.push_back(std::move(scene));
+        out.changes.push_back(SceneChange{.from = index + 1});
+    }
+    return out;
+}
+
+std::string redo_scene(EditedScenes& edited, std::size_t scene, std::int64_t seed) {
+    if (scene < 1 || scene > edited.scenes.size()) {
+        return "--redo-scene " + std::to_string(scene) + ": the project has " +
+               std::to_string(edited.scenes.size()) + " scene" +
+               (edited.scenes.size() == 1 ? "" : "s");
+    }
+    edited.scenes[scene - 1].seed = seed;
+    edited.changes[scene - 1].reseeded = true;
+    return {};
+}
+
+std::vector<std::string> diff_lines(const EditedScenes& edited, std::size_t parent_scenes) {
+    std::vector<std::string> out;
+    const std::size_t count = edited.scenes.size();
+    out.push_back("the edit: " + std::to_string(count) + " scene" + (count == 1 ? "" : "s") +
+                  ", were " + std::to_string(parent_scenes));
+    for (std::size_t index = 0; index < count; ++index) {
+        const SceneChange& change = edited.changes[index];
+        std::string line = "  " + std::to_string(index + 1) + ". ";
+        if (change.from == 0) {
+            out.push_back(line + "new");
+            continue;
+        }
+        std::vector<std::string> what;
+        if (change.narration) {
+            what.emplace_back("its narration changed");
+        }
+        if (change.visual) {
+            what.emplace_back("its prompt changed");
+        }
+        if (change.seconds) {
+            what.emplace_back("its length changed");
+        }
+        if (change.asset) {
+            what.emplace_back("its asset changed");
+        }
+        if (change.reseeded) {
+            what.emplace_back("a new seed");
+        }
+        line += "scene " + std::to_string(change.from) + (change.moved ? ", moved" : "");
+        if (what.empty()) {
+            line += change.moved ? "" : ", untouched";
+        } else {
+            line += "; ";
+            for (std::size_t at = 0; at < what.size(); ++at) {
+                line += (at == 0 ? "" : ", ") + what[at];
+            }
+        }
+        out.push_back(line);
+    }
+    for (const std::size_t removed : edited.removed) {
+        out.push_back("  scene " + std::to_string(removed) + " removed");
+    }
+    return out;
+}
+
+std::string carry_scenes(const harness::VideoProject& parent, EditedScenes& edited,
+                         const std::filesystem::path& scenes_dir, bool same_voice,
+                         bool same_pipeline) {
+    std::error_code code;
+    std::filesystem::create_directories(scenes_dir, code);
+    if (code) {
+        return "could not make " + scenes_dir.string() + ": " + code.message();
+    }
+    harness::VideoProject numbering;
+    numbering.scenes_dir = scenes_dir;
+    for (std::size_t index = 0; index < edited.scenes.size(); ++index) {
+        const SceneChange& change = edited.changes[index];
+        if (change.from == 0) {
+            continue;
+        }
+        const harness::ProjectScene& was = parent.scenes[change.from - 1];
+        harness::ProjectScene& scene = edited.scenes[index];
+        if (same_voice && !change.narration && std::filesystem::is_regular_file(was.voice, code)) {
+            const std::filesystem::path wav = scene_file(numbering, index, "wav");
+            if (std::string error = carry_file(was.voice, wav); !error.empty()) {
+                return error;
+            }
+            scene.voice = wav;
+            scene.voice_seconds = was.voice_seconds;
+            scene.sentences = was.sentences;
+        }
+        if (same_pipeline && !change.visual && !change.seconds && !change.asset &&
+            !change.reseeded && std::filesystem::is_regular_file(was.clip, code)) {
+            std::string extension = was.clip.extension().string();
+            if (!extension.empty()) {
+                extension.erase(0, 1);
+            }
+            const std::filesystem::path clip = scene_file(numbering, index, extension);
+            if (std::string error = carry_file(was.clip, clip); !error.empty()) {
+                return error;
+            }
+            scene.clip = clip;
+            scene.clip_seconds = was.clip_seconds;
+        }
+    }
+    return {};
 }
 
 }  // namespace apogee::video

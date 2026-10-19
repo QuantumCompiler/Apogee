@@ -12,11 +12,13 @@
 #include <optional>
 #include <random>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "agentloop/structured.h"
 #include "contracts/captions.h"
 #include "contracts/video_project.h"
+#include "contracts/video_run.h"
 #include "platform/child_process.h"
 #include "support/env_guard.h"
 #include "support/fake_ffmpeg.h"
@@ -574,4 +576,218 @@ TEST_CASE("the assembly runs on the seam, handed the scenes' files and their off
                     apogee::platform::filter_path(scenes / "captions.srt")) != std::string::npos);
     CHECK(slurp(run.project.output) == "MP4 libx264");
     CHECK(run.project.assembly.starts_with("joined: the final profile: h264 at crf 20"));
+}
+
+namespace {
+
+/// A finished parent of three scenes, its files in its own scenes directory.
+struct Parent {
+    apogee::testing::TempDir dir{"compose-parent-" + std::to_string(std::random_device{}())};
+    VideoProject project;
+
+    Parent() {
+        project.status = "done";
+        project.brief = "tides";
+        project.title = "Tides";
+        project.output = dir.path() / "tides.mp4";
+        project.scenes_dir = apogee::harness::video_project_scenes_dir(project.output);
+        project.crossfade = 0.5;
+        std::filesystem::create_directories(project.scenes_dir);
+        for (std::size_t index = 0; index < 3; ++index) {
+            const std::string n = std::to_string(index + 1);
+            ProjectScene scene;
+            scene.narration = "Line " + n + ".";
+            scene.visual = "shot " + n;
+            scene.seconds = 4.0;
+            scene.seed = 100 + static_cast<std::int64_t>(index);
+            scene.voice = project.scenes_dir / ("s0" + n + ".wav");
+            scene.voice_seconds = 2.0;
+            scene.sentences = {{.text = scene.narration, .seconds = 2.0, .offset = 0.0}};
+            scene.clip = project.scenes_dir / ("s0" + n + ".mp4");
+            scene.clip_seconds = 4.04;
+            std::ofstream{scene.voice} << "WAV " << n;
+            std::ofstream{apogee::harness::video_sidecar_path(scene.voice)} << "{\"voice\": " << n
+                                                                            << "}";
+            std::ofstream{scene.clip} << "MP4 " << n;
+            std::ofstream{apogee::harness::video_sidecar_path(scene.clip)} << "{\"clip\": " << n
+                                                                           << "}";
+            project.scenes.push_back(scene);
+        }
+    }
+
+    /// The plan the editor answers: each scene `{from, narration, visual,
+    /// seconds}`, a null `from` written as 0.
+    [[nodiscard]] static nlohmann::json answer(
+        const std::vector<std::tuple<int, std::string, std::string, double>>& scenes) {
+        nlohmann::json out = {{"title", "Tides"}, {"scenes", nlohmann::json::array()}};
+        for (const auto& [from, narration, visual, seconds] : scenes) {
+            out["scenes"].push_back(
+                {{"from", from == 0 ? nlohmann::json(nullptr) : nlohmann::json(from)},
+                 {"narration", narration},
+                 {"visual", visual},
+                 {"seconds", seconds}});
+        }
+        return out;
+    }
+
+    [[nodiscard]] apogee::video::EditedScenes edit(const nlohmann::json& json) const {
+        std::int64_t next = 900;
+        return apogee::video::edit_scenes(
+            project, "the instruction", {},
+            [&json](const std::string&, const std::string&, const std::string&) {
+                return apogee::video::PlanAnswer{.json = json, .conforms = true, .attempts = 1};
+            },
+            [&next] { return next++; });
+    }
+};
+
+using Edit = std::vector<std::tuple<int, std::string, std::string, double>>;
+
+}  // namespace
+
+TEST_CASE("the edit's schema names where each scene came from", "[video][compose][edit]") {
+    using apogee::agentloop::validate_against;
+    const nlohmann::json schema = nlohmann::json::parse(apogee::video::edit_schema({}, 3));
+    REQUIRE(apogee::agentloop::validate_schema(schema).ok);
+    CHECK(validate_against(schema, Parent::answer({{1, "a.", "b", 4}, {0, "c.", "d", 4}})).ok);
+    CHECK_FALSE(validate_against(schema, Parent::answer({{4, "a.", "b", 4}})).ok);
+    CHECK_FALSE(validate_against(schema, plan_answer(1)).ok);  // no `from`
+    const std::string text = apogee::video::edit_schema({}, 3);
+    CHECK(text.find("\"from\"") < text.find("\"narration\""));
+}
+
+TEST_CASE("an edit's diff says what became of each scene, the seeds held",
+          "[video][compose][edit]") {
+    const Parent parent;
+    using apogee::video::diff_lines;
+    SECTION("nothing changed") {
+        const auto edited = parent.edit(Parent::answer({{1, "Line 1.", "shot 1", 4},
+                                                        {2, "Line 2.", "shot 2", 4},
+                                                        {3, "Line 3.", "shot 3", 4}}));
+        CHECK(diff_lines(edited, 3) ==
+              std::vector<std::string>{"the edit: 3 scenes, were 3", "  1. scene 1, untouched",
+                                       "  2. scene 2, untouched", "  3. scene 3, untouched"});
+        CHECK(std::ranges::all_of(edited.changes,
+                                  [](const auto& change) { return change.untouched(); }));
+    }
+    SECTION("a scene removed") {
+        const auto edited =
+            parent.edit(Parent::answer({{1, "Line 1.", "shot 1", 4}, {3, "Line 3.", "shot 3", 4}}));
+        CHECK(diff_lines(edited, 3) ==
+              std::vector<std::string>{"the edit: 2 scenes, were 3", "  1. scene 1, untouched",
+                                       "  2. scene 3, untouched", "  scene 2 removed"});
+        CHECK(edited.scenes[1].seed == 102);
+    }
+    SECTION("an intro added") {
+        const auto edited = parent.edit(Parent::answer({{0, "Welcome.", "a title card", 3},
+                                                        {1, "Line 1.", "shot 1", 4},
+                                                        {2, "Line 2.", "shot 2", 4},
+                                                        {3, "Line 3.", "shot 3", 4}}));
+        CHECK(diff_lines(edited, 3) ==
+              std::vector<std::string>{"the edit: 4 scenes, were 3", "  1. new",
+                                       "  2. scene 1, untouched", "  3. scene 2, untouched",
+                                       "  4. scene 3, untouched"});
+        CHECK(edited.scenes[0].seed == 900);  // drawn
+        CHECK(edited.scenes[1].seed == 100);  // held
+    }
+    SECTION("scenes reordered") {
+        const auto edited = parent.edit(Parent::answer({{3, "Line 3.", "shot 3", 4},
+                                                        {1, "Line 1.", "shot 1", 4},
+                                                        {2, "Line 2.", "shot 2", 4}}));
+        CHECK(diff_lines(edited, 3) ==
+              std::vector<std::string>{"the edit: 3 scenes, were 3", "  1. scene 3, moved",
+                                       "  2. scene 1, untouched", "  3. scene 2, untouched"});
+    }
+    SECTION("a narration, and a prompt and a length, changed") {
+        const auto edited = parent.edit(Parent::answer({{1, "Line 1.", "shot 1", 4},
+                                                        {2, "A new line.", "shot 2", 4},
+                                                        {3, "Line 3.", "the moon", 6}}));
+        CHECK(diff_lines(edited, 3) ==
+              std::vector<std::string>{"the edit: 3 scenes, were 3", "  1. scene 1, untouched",
+                                       "  2. scene 2; its narration changed",
+                                       "  3. scene 3; its prompt changed, its length changed"});
+        CHECK(edited.scenes[2].seed == 102);
+    }
+    SECTION("a scene re-rolled") {
+        auto edited = apogee::video::same_scenes(parent.project);
+        CHECK(apogee::video::redo_scene(edited, 4, 5) ==
+              "--redo-scene 4: the project has 3 scenes");
+        CHECK(apogee::video::redo_scene(edited, 0, 5) ==
+              "--redo-scene 0: the project has 3 scenes");
+        REQUIRE(apogee::video::redo_scene(edited, 2, 555).empty());
+        CHECK(edited.scenes[1].seed == 555);
+        CHECK(diff_lines(edited, 3)[2] == "  2. scene 2; a new seed");
+    }
+}
+
+TEST_CASE("an edit that does not hold changes nothing, saying so", "[video][compose][edit]") {
+    const Parent parent;
+    const auto edited = apogee::video::edit_scenes(
+        parent.project, "make it longer", {},
+        [](const std::string&, const std::string& user, const std::string&) {
+            // The editor is shown the plan as it stands, numbered.
+            CHECK(user.find("\"from\": 2") != std::string::npos);
+            CHECK(user.find("The instruction: make it longer") != std::string::npos);
+            return apogee::video::PlanAnswer{.json = plan_answer(2),
+                                             .conforms = false,
+                                             .attempts = 2,
+                                             .error = "/scenes/0: required property 'from'"};
+        },
+        [] { return 1; });
+    CHECK(edited.scenes.empty());
+    CHECK(edited.error ==
+          "the edit did not hold to its shape after its one correction: "
+          "/scenes/0: required property 'from' -- the caps: at most 8 scenes of "
+          "2-10 s, each narration at most 240 characters; nothing was changed");
+}
+
+TEST_CASE("an edit carries over byte for byte what it did not change, and renders the rest",
+          "[video][compose][edit]") {
+    const Parent parent;
+    // An intro added; scene 1 after it; scene 2's narration changed; scene
+    // 3's prompt changed.
+    auto edited = parent.edit(Parent::answer({{0, "Welcome.", "a title card", 3},
+                                              {1, "Line 1.", "shot 1", 4},
+                                              {2, "A new line.", "shot 2", 4},
+                                              {3, "Line 3.", "the moon", 4}}));
+    Compose child{0};
+    const std::filesystem::path scenes = child.project.scenes_dir;
+    REQUIRE(apogee::video::carry_scenes(parent.project, edited, scenes, true, true).empty());
+    // Scene 1, now the second: both files, and their records.
+    CHECK(slurp(scenes / "s02.wav") == "WAV 1");
+    CHECK(slurp(scenes / "s02.mp4") == "MP4 1");
+    CHECK(slurp(scenes / "s02.mp4.json") == "{\"clip\": 1}");
+    CHECK(edited.scenes[1].clip_seconds == 4.04);
+    // Scene 2's clip, not its narration; scene 3's narration, not its clip.
+    CHECK(slurp(scenes / "s03.mp4") == "MP4 2");
+    CHECK_FALSE(std::filesystem::exists(scenes / "s03.wav"));
+    CHECK(slurp(scenes / "s04.wav") == "WAV 3");
+    CHECK_FALSE(std::filesystem::exists(scenes / "s04.mp4"));
+    CHECK(edited.scenes[0].voice.empty());
+
+    // Rendered: exactly what was not carried.
+    child.project.scenes = edited.scenes;
+    child.probed["s02.mp4"] = 4.04;
+    child.probed["s03.mp4"] = 4.04;
+    REQUIRE(child.go().ok);
+    CHECK(child.calls == std::vector<std::string>{"speak s01.wav", "speak s03.wav",
+                                                  "render s01.mp4", "render s04.mp4", "join", "mix",
+                                                  "burn"});
+    CHECK(child.asks[1].seed == 102);  // scene 3's seed held through its new prompt
+    CHECK(slurp(scenes / "s02.mp4") == "MP4 1");
+
+    // Another voice carries no narration; another pipeline no clip.
+    auto again = parent.edit(Parent::answer(
+        {{1, "Line 1.", "shot 1", 4}, {2, "Line 2.", "shot 2", 4}, {3, "Line 3.", "shot 3", 4}}));
+    const apogee::testing::TempDir other{"compose-other-" + std::to_string(std::random_device{}())};
+    REQUIRE(apogee::video::carry_scenes(parent.project, again, other.path(), false, true).empty());
+    CHECK(std::ranges::all_of(again.scenes, [](const ProjectScene& s) { return s.voice.empty(); }));
+    CHECK(std::ranges::none_of(again.scenes, [](const ProjectScene& s) { return s.clip.empty(); }));
+    auto third = parent.edit(Parent::answer(
+        {{1, "Line 1.", "shot 1", 4}, {2, "Line 2.", "shot 2", 4}, {3, "Line 3.", "shot 3", 4}}));
+    const apogee::testing::TempDir another{"compose-another-" +
+                                           std::to_string(std::random_device{}())};
+    REQUIRE(
+        apogee::video::carry_scenes(parent.project, third, another.path(), true, false).empty());
+    CHECK(std::ranges::all_of(third.scenes, [](const ProjectScene& s) { return s.clip.empty(); }));
 }

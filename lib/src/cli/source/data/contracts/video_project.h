@@ -48,8 +48,17 @@ struct ProjectScene {
     double clip_seconds = 0.0;
 };
 
+/// One edit in a project's chain (50d): the instruction (empty for none),
+/// the scenes re-rolled, and the project it was made from.
+struct ProjectEdit {
+    std::string instruction{};
+    std::vector<std::size_t> redo{};
+    std::filesystem::path from{};
+};
+
 struct VideoProject {
-    /// `rendering`, `done`, `failed` or `cancelled`.
+    /// `rendering`, `done`, `failed` or `cancelled` -- or `planned`, for a
+    /// dry run's edited project, which nothing renders.
     std::string status;
     std::string brief;
     std::string title{};
@@ -79,6 +88,10 @@ struct VideoProject {
     std::string error{};
     std::string created{};
     std::string platform{};
+    /// The project this one was edited from (50d), empty for an original;
+    /// and every edit from the original brief to this one, in order.
+    std::filesystem::path parent{};
+    std::vector<ProjectEdit> edits{};
 };
 
 /// The `video.project` document.
