@@ -12,6 +12,8 @@ hash in a test. Steered by the environment:
   STUB_MLX_CONVERT_SHORT   "1": the shard is cut short of what its header
                            describes -- a result Apogee must not commit
   STUB_MLX_CONVERT_NOQUANT "1": asked to quantize, writes no `quantization`
+  STUB_MLX_UNSUPPORTED     comma-separated model_types convert() refuses as
+                           the real one refuses a type it has no class for (M15)
 """
 
 import json
@@ -36,13 +38,18 @@ def _shard(path, tensors, short=False):
 
 def convert(hf_path, mlx_path="mlx_model", quantize=False, q_group_size=None, q_bits=None,
             q_mode="affine", dtype=None, **rest):
+    with open(os.path.join(hf_path, "config.json")) as src:
+        model_type = json.load(src).get("model_type")
     record = os.environ.get("STUB_MLX_CONVERT_RECORD")
     if record:
         with open(record, "a") as out:
             out.write(json.dumps({"hf_path": hf_path, "mlx_path": mlx_path, "quantize": quantize,
                                   "q_bits": q_bits, "q_group_size": q_group_size,
-                                  "q_mode": q_mode, "dtype": dtype}) + "\n")
+                                  "q_mode": q_mode, "dtype": dtype,
+                                  "model_type": model_type}) + "\n")
     print("[INFO] Loading")  # the real one prints; the driver must keep it off the protocol
+    if model_type in os.environ.get("STUB_MLX_UNSUPPORTED", "").split(","):
+        raise ValueError(f"Model type {model_type} not supported.")
     error = os.environ.get("STUB_MLX_CONVERT_ERROR")
     if error:
         raise ValueError(error)

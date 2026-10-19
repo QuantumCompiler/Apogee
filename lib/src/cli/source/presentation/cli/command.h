@@ -107,6 +107,8 @@ inline constexpr const char* kVideoPipelineValue = "VIDEO_PIPELINE";
 /// carry (50a): `voice say --model` and `--voice`.
 inline constexpr const char* kVoiceModelValue = "VOICE_MODEL";
 inline constexpr const char* kVoiceValue = "VOICE";
+/// A model type the installed mlx-lm converts (M15): `convert --mlx --model-type`.
+inline constexpr const char* kMlxModelTypeValue = "MLX_MODEL_TYPE";
 /// A `training.pipelines` entry, or a spec path.
 inline constexpr const char* kPipelineValue = "PIPELINE";
 /// A regime by name -- a `training.regimes` entry, a spec under
@@ -158,7 +160,7 @@ inline constexpr const char* kAllowedHostValue = "ALLOWED_HOST";
 
 /// Every name kind above, for the protocol to recognise and a test to hold
 /// each to a source.
-inline constexpr std::array<std::string_view, 47> kNameValues{kCollectionValue,
+inline constexpr std::array<std::string_view, 48> kNameValues{kCollectionValue,
                                                               kCollectionListValue,
                                                               kGraphValue,
                                                               kNamedGraphValue,
@@ -204,7 +206,8 @@ inline constexpr std::array<std::string_view, 47> kNameValues{kCollectionValue,
                                                               kReviewTargetValue,
                                                               kVideoPipelineValue,
                                                               kVoiceModelValue,
-                                                              kVoiceValue};
+                                                              kVoiceValue,
+                                                              kMlxModelTypeValue};
 
 /// `{a,b}`: a set of words, as a type name spells it.
 template <typename Words>

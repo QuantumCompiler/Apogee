@@ -189,3 +189,59 @@ TEST_CASE("a cancel ends the driver mid-conversion", "[training][mlx][convert][d
     CHECK(result == "cancelled");
     CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds{15});
 }
+
+TEST_CASE("the types an installed mlx-lm converts are read from its own files",
+          "[training][mlx][convert][model_type]") {
+    // M15: its model modules -- each defining a Model, never a helper like
+    // `cache` -- and MODEL_REMAPPING's keys, read and never imported.
+    CHECK(apogee::training::mlx_model_types(kStubs / "stub_mlx" / "mlx_lm") ==
+          std::vector<std::string>{"gemma3", "gemma4", "gemma4_text", "gemma4_unified", "llama",
+                                   "mistral"});
+    CHECK(apogee::training::mlx_model_types(kStubs / "nowhere").empty());
+    CHECK(apogee::training::mlx_model_types({}).empty());
+}
+
+TEST_CASE("the nearest types share the longest prefix, the shorter first, never a stranger",
+          "[training][mlx][convert][model_type]") {
+    using apogee::training::nearest_model_types;
+    const std::vector<std::string> types{"gemma3", "gemma4",  "gemma4_text", "gemma4_unified",
+                                         "llama",  "mistral", "gemma"};
+    CHECK(nearest_model_types("gemma4_unified_assistant", types) ==
+          std::vector<std::string>{"gemma4_unified", "gemma4_text", "gemma4", "gemma", "gemma3"});
+    CHECK(nearest_model_types("gemma4_unified_assistant", types, 2) ==
+          std::vector<std::string>{"gemma4_unified", "gemma4_text"});
+    CHECK(nearest_model_types("qwen3", types).empty());
+    // The type itself is no suggestion.
+    CHECK(nearest_model_types("llama", {"llama", "llama4"}) == std::vector<std::string>{"llama4"});
+    CHECK(apogee::training::unsupported_model_type(
+              "ValueError: Model type gemma4_unified_assistant not supported. -- stderr: x") ==
+          "gemma4_unified_assistant");
+    CHECK(apogee::training::unsupported_model_type("ValueError: out of memory").empty());
+}
+
+TEST_CASE("mlx-lm refusing a model_type is folded with its door and the nearest types",
+          "[training][mlx][convert][model_type][driver]") {
+    // The transcript's bytes, over the stub: the vendor's variant refused,
+    // now carrying the way out.
+    REQUIRE_PYTHON();
+    Work work;
+    apogee::testing::write_mlx_model(
+        work.snapshot, apogee::testing::MlxModelSpec{
+                           .bits = 0, .model_type = "gemma4_unified_assistant", .format = "pt"});
+    const apogee::testing::EnvGuard path{"PYTHONPATH", (kStubs / "stub_mlx").string()};
+    const apogee::testing::EnvGuard unsupported{"STUB_MLX_UNSUPPORTED", "gemma4_unified_assistant"};
+    const apogee::training::MlxConverter converter = apogee::training::script_mlx_converter(
+        python3(), kDriver, *find_mlx_precision("4bit"), kStubs / "stub_mlx" / "mlx_lm");
+    const std::string error = converter(work.snapshot, work.out, {}, {});
+    CHECK(error ==
+          "ValueError: Model type gemma4_unified_assistant not supported. -- stderr: [INFO] "
+          "Loading -- if these weights are a type this mlx-lm knows, convert them as it: "
+          "--model-type <type> (nearest here: gemma4_unified, gemma4_text, gemma4, gemma3)");
+    // With nowhere to read the lists from, the door alone.
+    const std::string bare = apogee::training::script_mlx_converter(
+        python3(), kDriver, *find_mlx_precision("4bit"))(work.snapshot, work.out, {}, {});
+    CHECK(bare.ends_with("convert them as it: --model-type <type>"));
+    // Any other failure stays the converter's own words.
+    CHECK(apogee::training::fold_model_type_failure("ValueError: out of memory", {"llama"}) ==
+          "ValueError: out of memory");
+}

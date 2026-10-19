@@ -209,6 +209,66 @@ std::string mlx_conversion_refusal(const std::filesystem::path& snapshot,
     return {};
 }
 
+std::string snapshot_model_type(const std::filesystem::path& snapshot) {
+    std::ifstream in{snapshot / "config.json", std::ios::binary};
+    const nlohmann::json config = nlohmann::json::parse(in, nullptr, false);
+    if (!config.is_object()) {
+        return {};
+    }
+    const auto found = config.find("model_type");
+    return found != config.end() && found->is_string() ? found->get<std::string>() : std::string{};
+}
+
+std::string stage_model_type_overlay(const std::filesystem::path& snapshot,
+                                     const std::filesystem::path& overlay,
+                                     std::string_view model_type) {
+    std::ifstream in{snapshot / "config.json", std::ios::binary};
+    nlohmann::json config = nlohmann::json::parse(in, nullptr, false);
+    if (!config.is_object()) {
+        return snapshot.string() + "/config.json cannot be read as JSON";
+    }
+    config["model_type"] = std::string{model_type};
+    std::error_code code;
+    std::filesystem::create_directories(overlay, code);
+    if (code) {
+        return "could not make " + overlay.string() + ": " + code.message();
+    }
+    for (auto entry = std::filesystem::recursive_directory_iterator(snapshot, code);
+         !code && entry != std::filesystem::recursive_directory_iterator(); entry.increment(code)) {
+        const std::filesystem::path relative = entry->path().lexically_relative(snapshot);
+        const std::filesystem::path target = overlay / relative;
+        std::error_code type;
+        if (entry->is_directory(type)) {
+            std::filesystem::create_directories(target, type);
+            continue;
+        }
+        if (relative == "config.json" || !entry->is_regular_file(type)) {
+            continue;
+        }
+        // Linked, never copied -- the weights are gigabytes -- unless no link
+        // can be made here.
+        std::error_code link;
+        std::filesystem::create_hard_link(entry->path(), target, link);
+        if (link) {
+            std::error_code copy;
+            std::filesystem::copy_file(entry->path(), target, copy);
+            if (copy) {
+                return "could not stage " + relative.string() +
+                       " for the conversion: " + copy.message();
+            }
+        }
+    }
+    if (code) {
+        return "could not read " + snapshot.string() + ": " + code.message();
+    }
+    std::ofstream out{overlay / "config.json", std::ios::binary | std::ios::trunc};
+    out << config.dump(2) << "\n";
+    if (!out) {
+        return "could not write " + (overlay / "config.json").string();
+    }
+    return {};
+}
+
 MlxConvertResult convert_snapshot_to_mlx(const std::filesystem::path& snapshot,
                                          const std::filesystem::path& out, int bits,
                                          const MlxConvertFn& convert,

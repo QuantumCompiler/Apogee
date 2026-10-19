@@ -27,6 +27,7 @@
 #include "platform/child_process.h"
 #include "platform/platform.h"
 #include "support/cli_home.h"
+#include "support/env_guard.h"
 #include "support/mlx_model.h"
 #include "training/mlx_convert.h"
 #include "transport/http_client.h"
@@ -722,4 +723,82 @@ TEST_CASE("models convert --mlx on the command line: the real driver, listed, ch
     REQUIRE(home.run({"models", "delete", "m-4bit", "--yes"}, &out) == 0);
     CHECK(out.find("backend 'm-4bit' points into this") != std::string::npos);
     CHECK_FALSE(std::filesystem::exists(stored.front().dir));
+}
+
+TEST_CASE("a vendor's model_type is refused with its door, then converted as the type named",
+          "[commands][models][mlx][convert][driver][model_type]") {
+    // M15, the user's transcript: an Assistant variant mlx-lm has no class
+    // for, its door and the nearest types now said; then converted as the
+    // base type through a view, the snapshot untouched, the record telling.
+    if (apogee::platform::host_target() != "macos-arm64" ||
+        apogee::platform::find_on_path("python3").empty()) {
+        SKIP("the mlx runtime is Apple silicon's, and the driver needs a python3");
+    }
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    fake_mlx_runtime(home.home());
+    const std::filesystem::path snapshot =
+        home.models() / "google--gemma-4-12B-it-assistant" / "safetensors" / "aaaaaaaaaaaa";
+    write_mlx_model(snapshot,
+                    {.bits = 0, .model_type = "gemma4_unified_assistant", .format = "pt"});
+    const std::string config_before = read_file(snapshot / "config.json");
+    const apogee::testing::EnvGuard unsupported{"STUB_MLX_UNSUPPORTED", "gemma4_unified_assistant"};
+    const apogee::testing::EnvGuard record{"STUB_MLX_CONVERT_RECORD",
+                                           (home.home() / "calls.jsonl").string()};
+
+    std::string out;
+    CHECK(home.run(
+              {"models", "convert", "--mlx", "google--gemma-4-12B-it-assistant", "--type", "4bit"},
+              &out) != 0);
+    CHECK(out.find("ValueError: Model type gemma4_unified_assistant not supported.") !=
+          std::string::npos);
+    CHECK(out.find("convert them as it: --model-type <type> (nearest here: gemma4_unified, "
+                   "gemma4_text, gemma4, gemma3)") != std::string::npos);
+    const StoreRoots roots = StoreRoots::at(home.models());
+    CHECK(apogee::models::list_store_mlx(roots, "google--gemma-4-12B-it-assistant").empty());
+
+    REQUIRE(home.run({"models", "convert", "--mlx", "google--gemma-4-12B-it-assistant", "--type",
+                      "4bit", "--model-type", "gemma4_unified"},
+                     &out) == 0);
+    INFO(out);
+    CHECK(out.find("converting it as model_type gemma4_unified (its config.json says "
+                   "gemma4_unified_assistant) -- through a view of it; the snapshot itself is "
+                   "untouched") != std::string::npos);
+    // The driver read the view: the type named, under the store's staging.
+    std::ifstream calls{home.home() / "calls.jsonl"};
+    std::vector<nlohmann::json> seen;
+    for (std::string line; std::getline(calls, line);) {
+        seen.push_back(nlohmann::json::parse(line));
+    }
+    REQUIRE(seen.size() == 2);
+    CHECK(seen.back()["model_type"] == "gemma4_unified");
+    CHECK(seen.back()["hf_path"].get<std::string>().find(".incoming-") != std::string::npos);
+    // The snapshot untouched, and no view left behind.
+    CHECK(read_file(snapshot / "config.json") == config_before);
+    CHECK(apogee::models::find_abandoned_staging(roots).empty());
+    const std::vector<apogee::models::StoredMlx> stored =
+        apogee::models::list_store_mlx(roots, "google--gemma-4-12B-it-assistant");
+    REQUIRE(stored.size() == 1);
+    const std::optional<apogee::models::Snapshot> made =
+        apogee::models::load_snapshot(stored.front().dir);
+    REQUIRE(made.has_value());
+    CHECK(made->transform ==
+          "mlx_lm.convert 4bit, converted as gemma4_unified (model_type was "
+          "gemma4_unified_assistant)");
+    REQUIRE(home.run({"models", "info", "google--gemma-4-12B-it-assistant/mlx/" + stored.front().id,
+                      "-q"},
+                     &out) == 0);
+    CHECK(out.find("converted as gemma4_unified (model_type was gemma4_unified_assistant)") !=
+          std::string::npos);
+
+    // Without --mlx the flag means nothing, and is refused saying why.
+    CHECK(home.run({"models", "convert", "google--gemma-4-12B-it-assistant", "--model-type",
+                    "gemma4_unified"},
+                   &out) != 0);
+    CHECK(out.find("--model-type names the type mlx-lm converts these weights as -- it works "
+                   "with --mlx") != std::string::npos);
+    // The types complete from the installed mlx-lm's own lists.
+    REQUIRE(home.run({"__complete", "models", "convert", "x", "--mlx", "--model-type", "gemma4"},
+                     &out) == 0);
+    CHECK(out == "gemma4\ngemma4_text\ngemma4_unified\n");
 }

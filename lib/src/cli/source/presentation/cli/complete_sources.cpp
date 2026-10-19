@@ -38,6 +38,7 @@
 #include "training/datasets.h"
 #include "training/kit.h"
 #include "training/mlx_convert.h"
+#include "training/python_env.h"
 #include "training/regime_specs.h"
 #include "training/script_runner.h"
 #include "training/store.h"
@@ -517,6 +518,11 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         list.none = "no voice model in the store -- 'apogee models pull hexgrad/Kokoro-82M'";
         list.as_listed = true;
         note_store(store_roots(config), list);
+    } else if (kind == kMlxModelTypeValue) {
+        // M15: the types the installed mlx-lm converts, read from its files.
+        list.names = training::mlx_model_types(
+            training::find_site_package(harness::training_venv_dir(), "mlx_lm"));
+        list.none = "no mlx-lm in Apogee's Python environment -- 'apogee train setup --with mlx'";
     } else if (kind == kVoiceValue) {
         // Every voice the store's voice models carry, each with its language.
         for (const models::StoredVoice& stored : models::list_store_voices(store_roots(config))) {

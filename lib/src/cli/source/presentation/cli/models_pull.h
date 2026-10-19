@@ -268,10 +268,17 @@ struct ConvertedMlx {
 /// naming the set it was made from. The same set at the same precision is
 /// recognised before anything runs. Ctrl-C mid-run, or mid-hash, removes the
 /// staging: the store is untouched.
+///
+/// With `model_type` (M15), the user's word that these weights are a type
+/// mlx-lm knows: the converter reads a view of the snapshot whose
+/// `config.json` says so (`models::stage_model_type_overlay`, removed
+/// either way), the snapshot untouched, and the record says it was
+/// converted as that type and what the snapshot declared.
 [[nodiscard]] ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots,
                                                 std::string_view given, std::string_view from,
                                                 const training::MlxPrecision& precision,
-                                                const training::MlxConverter& converter);
+                                                const training::MlxConverter& converter,
+                                                std::string_view model_type = {});
 
 /// Where a SafeTensors snapshot lands and is looked for: `paths.hf_dir`
 /// when the config sets it, else the models directory. The template

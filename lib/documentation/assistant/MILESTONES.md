@@ -3757,6 +3757,35 @@ Decisions taken while building, for veto:
 
 **Verified.** `lib/scripts/cicd.sh --test`: 3540 of 3542. The two failures were one cause: a new test named starting with `--and-backends`, which `cli.test_names` forbids and ctest cannot select. Renamed, both pass with every delete case (47); M15's full run covers it whole.
 
+### 2026-10-19 — `mlx-convert-vendor-model-types` (maintenance item M15): a vendor's model_type, an explicit door
+
+**Why.** `models convert --mlx` refused the user's four Assistant models with mlx-lm's own words and no way out: `ValueError: Model type gemma4_unified_assistant not supported.`. The snapshot's `config.json` carries the vendor's variant spelling, and mlx-lm resolves a converter by `model_type` through a remap table that knows the base (`gemma4_unified`) and not the variant. The GGUF path coped with the same weights because it resolves by `architectures`.
+
+- [x] **`models convert --mlx <model> --model-type <type>`**: the user's word that these weights are a type mlx-lm knows.
+  - The converter reads an overlay view of the snapshot (`models::stage_model_type_overlay`): every file hard-linked (copied only where no link can be made), `config.json` alone written anew with its `model_type` replaced.
+  - The overlay is staged under the store's own staging (`incoming_path`, so an abandoned one is swept like any) and removed however the run ends. The snapshot is never written.
+  - The record's `transform` says it for good -- `mlx_lm.convert 4bit, converted as gemma4_unified (model_type was gemma4_unified_assistant)` -- so `models info`'s lineage explains the model forever. The same set converted plainly and under an override are two different conversions.
+  - Naming the type the snapshot already declares just converts it as it is, said. `--model-type` without `--mlx` is refused, saying why.
+- [x] **The refusal names its door** (`training::fold_model_type_failure`): a failure saying `Model type <X> not supported` gains `--model-type <type>` and the nearest types the installed mlx-lm knows -- suggested, never applied.
+  - The types are read from the environment's `mlx_lm` at failure time, never imported (`mlx_model_types`): each module under `models/` that defines a `Model` (so `cache` and `base` are no types), and `utils.py`'s `MODEL_REMAPPING` keys.
+  - Nearest first by shared prefix, then shorter, at most five, none sharing under three characters.
+  - Apogee keeps no equivalence table of its own. The same list completes `--model-type` (a new name kind, `MLX_MODEL_TYPE`).
+- [x] **The tests**:
+  - `training/mlx_convert_test`: the lists read from the stub mlx-lm, the nearest ordering, and the transcript's bytes over the real driver now carrying the door with `gemma4_unified` first;
+  - `models/convert_test`: the overlay file by file -- linked, the config the only file written, everything else kept, the snapshot byte-identical;
+  - `cli/models_mlx_test`, on the command line: the user's exact command refused with the door, then converted as the base type, the driver seeing the overlay, the snapshot untouched, no staging left, the record and `models info` telling, the flag refused without `--mlx`, and completion.
+  - The stub mlx-lm gained model modules, a remap table and a refusal of a listed type.
+
+Decisions taken while building, for veto:
+- **The hint's words**: "if these weights are a type this mlx-lm knows, convert them as it: --model-type <type> (nearest here: …)", appended to mlx-lm's own message.
+- **A model module is one defining `class Model(`.** Every mlx-lm architecture module does; its helpers do not.
+- **The overlay lives in the store's staging**, not a temporary directory, so hard links stay on one filesystem and the store's sweep covers a crash.
+- **The driver is unchanged.** The fold reads the environment's files from C++, so there is no new digest.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3547 of 3547, two skipped and said (the real caption burn without libass, and the existing pdftotext case) -- M14's renamed case included.
+
+**Not run on real weights**: converting the four Assistant models under the override is the user's run.
+
 ## Milestone O — Local multimodal
 
 **Goal.** Make `VisionCapable` tell the truth on the local backend: wire llama.cpp's `mtmd`, add `mmproj_path`, and close the cross-surface guard gap that let one surface accept a picture the other refused.

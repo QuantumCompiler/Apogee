@@ -1362,7 +1362,8 @@ PulledVoice pull_voice(const std::string& ref, const models::StoreRoots& roots,
 
 ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_view given,
                                   std::string_view from, const training::MlxPrecision& precision,
-                                  const training::MlxConverter& converter) {
+                                  const training::MlxConverter& converter,
+                                  std::string_view model_type) {
     const SnapshotChoice source = choose_snapshot(roots, given, from);
     if (!source.error.empty()) {
         fail(source.error);
@@ -1384,6 +1385,19 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
         source.id.empty() ? source.path.string() : source.model + "/safetensors/" + source.id;
     record.source = "convert";
     record.transform = "mlx_lm.convert " + std::string{precision.name};
+    // The user's word on the type (M15), recorded for good.
+    std::string declared;
+    if (!model_type.empty()) {
+        declared = models::snapshot_model_type(source.path);
+        if (declared == model_type) {
+            std::cout << "the snapshot's config.json already says model_type " << model_type
+                      << " -- converting it as it is\n";
+            model_type = {};
+        } else {
+            record.transform += ", converted as " + std::string{model_type} + " (model_type was " +
+                                (declared.empty() ? std::string{"unstated"} : declared) + ")";
+        }
+    }
 
     // Recognised before it runs: the same set at the same precision is the
     // same weights.
@@ -1408,6 +1422,36 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
     std::cout << "converting " << source.path.string() << " to MLX (" << precision.name
               << (estimate > 0 ? ", about " + format_progress_size(estimate) : std::string{})
               << ") -- mlx-lm's converter, in Apogee's Python environment\n";
+    // A view the converter reads as the named type, gone however this ends.
+    std::filesystem::path overlay;
+    if (!model_type.empty()) {
+        std::cout << "converting it as model_type " << model_type << " (its config.json says "
+                  << (declared.empty() ? std::string{"none"} : declared)
+                  << ") -- through a view of it; the snapshot itself is untouched\n";
+        overlay = models::incoming_path(roots, models::kMlxFormat, source.model);
+        if (std::string staged = models::stage_model_type_overlay(source.path, overlay, model_type);
+            !staged.empty()) {
+            (void)models::remove_weights(overlay);
+            fail(staged);
+        }
+    }
+
+    const struct OverlayRemoved {
+        std::filesystem::path dir;
+
+        explicit OverlayRemoved(std::filesystem::path path) : dir{std::move(path)} {}
+
+        ~OverlayRemoved() {
+            if (!dir.empty()) {
+                (void)models::remove_weights(dir);
+            }
+        }
+
+        OverlayRemoved(const OverlayRemoved&) = delete;
+        OverlayRemoved& operator=(const OverlayRemoved&) = delete;
+        OverlayRemoved(OverlayRemoved&&) = delete;
+        OverlayRemoved& operator=(OverlayRemoved&&) = delete;
+    } overlay_removed{overlay};
 
     // Named and claimed, never created: mlx_lm.convert makes the directory
     // itself and refuses one that exists.
@@ -1423,10 +1467,11 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
             const InterruptScope interrupt;
             result = models::convert_snapshot_to_mlx(
                 source.path, staging, precision.bits,
-                [&converter](const std::filesystem::path& snapshot,
-                             const std::filesystem::path& output,
-                             const harness::CancellationToken& cancellation) {
-                    return converter(snapshot, output, {}, cancellation);
+                [&converter, &overlay](const std::filesystem::path& snapshot,
+                                       const std::filesystem::path& output,
+                                       const harness::CancellationToken& cancellation) {
+                    return converter(overlay.empty() ? snapshot : overlay, output, {},
+                                     cancellation);
                 },
                 InterruptScope::token());
         }
@@ -2147,7 +2192,8 @@ namespace {
 /// precision, the runtime -- the backend's own ladder, file facts only --
 /// and the seeded driver asked before anything is announced, then the core.
 void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& given,
-                            const std::string& from, const std::string& type, bool registers) {
+                            const std::string& from, const std::string& type, bool registers,
+                            const std::string& model_type) {
     if (registers) {
         fail(
             "--register makes GGUF backends; an MLX model is registered with the "
@@ -2174,7 +2220,9 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
     }
     (void)convert_model_to_mlx(
         roots, given, from, *precision,
-        training::script_mlx_converter(runtime.interpreter, script, *precision));
+        training::script_mlx_converter(runtime.interpreter, script, *precision,
+                                       training::find_site_package(host.venv, "mlx_lm")),
+        model_type);
 }
 
 }  // namespace
@@ -2628,6 +2676,13 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                       "--type, into the model's mlx/");
     convert->add_option("--from", *convert_from, "Which of the model's SafeTensors sets, by id")
         ->type_name(kSnapshotIdValue);
+    auto convert_model_type = std::make_shared<std::string>();
+    convert
+        ->add_option("--model-type", *convert_model_type,
+                     "With --mlx: convert these weights as a type mlx-lm knows -- your word, for "
+                     "a vendor's variant its converter does not list; the snapshot is untouched "
+                     "and the record says so")
+        ->type_name(kMlxModelTypeValue);
     auto convert_register = std::make_shared<bool>(false);
     auto convert_register_with = std::make_shared<std::vector<std::string>>();
     convert->add_flag("--register", *convert_register,
@@ -2646,15 +2701,21 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         "(default: the model's name)");
 
     convert->callback([convert_in, convert_type, convert_type_option, convert_mlx, convert_from,
-                       convert_register, convert_register_with, register_with_option,
-                       convert_base_name, convert_base_name_option, models_dir, &context]() {
+                       convert_model_type, convert_register, convert_register_with,
+                       register_with_option, convert_base_name, convert_base_name_option,
+                       models_dir, &context]() {
         const models::StoreRoots roots = store_roots(models_dir, context.config_path);
         const bool registers = *convert_register || register_with_option->count() > 0;
         if (*convert_mlx) {
             convert_to_mlx_command(roots, *convert_in, *convert_from,
                                    convert_type_option->count() > 0 ? *convert_type : "4bit",
-                                   registers);
+                                   registers, *convert_model_type);
             return;
+        }
+        if (!convert_model_type->empty()) {
+            fail(
+                "--model-type names the type mlx-lm converts these weights as -- it works with "
+                "--mlx; the GGUF converter finds a model by its architectures");
         }
         if (std::ranges::find(training::converter_out_types(), *convert_type) ==
             training::converter_out_types().end()) {
