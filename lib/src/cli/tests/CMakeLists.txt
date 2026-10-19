@@ -24,6 +24,7 @@ add_library(apogee_tests_infrastructure OBJECT
     infrastructure/platform/pid_lock_test.cpp
     infrastructure/platform/child_process_test.cpp
     infrastructure/platform/ffmpeg_test.cpp
+    infrastructure/platform/ffmpeg_assembly_test.cpp
     infrastructure/platform/system_info_test.cpp
     infrastructure/ansi/ansi_test.cpp
     infrastructure/events/bus_test.cpp
@@ -60,6 +61,7 @@ add_library(apogee_tests_data OBJECT
     data/contracts/review_skill_test.cpp
     data/contracts/review_targets_test.cpp
     data/contracts/utf8_test.cpp
+    data/contracts/captions_test.cpp
     data/contracts/todo_test.cpp
     data/contracts/paths_test.cpp
     data/contracts/types_test.cpp

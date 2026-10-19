@@ -44,6 +44,8 @@ apogee_add_module(contracts
     contracts/assets_video.cpp
     contracts/video_run.h
     contracts/video_run.cpp
+    contracts/captions.h
+    contracts/captions.cpp
     contracts/assets_symphonies.cpp
     contracts/assets_recipes.cpp
     contracts/assets_review_skills.cpp
