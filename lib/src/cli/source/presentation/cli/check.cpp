@@ -28,6 +28,7 @@
 #include "backends/provider_probe.h"
 #include "backends/provider_status.h"
 #include "backends/provider_table.h"
+#include "cli/code_exec_server.h"
 #include "cli/embed.h"
 #include "cli/helpers.h"
 #include "cli/models_pull.h"
@@ -1090,6 +1091,58 @@ void check_tools(CheckReport& report, const CheckInputs& inputs) {
 /// Each enabled MCP server's command: a bare name is looked up on PATH; a
 /// path must exist and be executable. `--fix` adds the execute bit and never
 /// edits the config -- a dangling entry is the user's to delete.
+/// A seeded driver an earlier Apogee wrote and nobody edited (27c): it runs,
+/// but as that Apogee shipped it, and the fix replaces it in place.
+[[nodiscard]] std::string stale_script_detail(const std::string& script) {
+    return script +
+           " is an earlier Apogee's copy, unedited -- 'apogee check --fix' brings it up to this "
+           "build's";
+}
+
+/// The code-execution server (47b): the seeded script against the shipped
+/// copy, then where it stands -- registered under which name, or the one
+/// line that registers it with the interpreter it would run under, said
+/// rather than guessed. Not registered is not a defect: it is optional.
+void check_code_exec(CheckReport& report, const CheckInputs& inputs) {
+    const CodeExecRegistration registration = code_exec_registration(inputs.home);
+    const std::string script = registration.script.filename().string();
+    const harness::SeededScript seeded =
+        harness::inspect_seeded_script(inputs.home, script, inputs.retired_scripts);
+    switch (seeded) {
+        case harness::SeededScript::Missing:
+            add(report, Status::Warn, "MCP", "code-exec",
+                script + " is missing from " + registration.script.parent_path().string(),
+                "apogee check --fix");
+            return;
+        case harness::SeededScript::Stale:
+            add(report, Status::Warn, "MCP", "code-exec", stale_script_detail(script),
+                "apogee check --fix");
+            return;
+        case harness::SeededScript::Edited:
+        case harness::SeededScript::Current:
+            break;
+    }
+    const bool edited = seeded == harness::SeededScript::Edited;
+    const std::string copy = edited ? script + " differs from the shipped copy (your edit runs)"
+                                    : script + " matches the shipped copy";
+    if (const std::string name = registered_code_exec_server(inputs.config, registration.script);
+        !name.empty()) {
+        add(report, edited ? Status::Warn : Status::Ok, "MCP", "code-exec",
+            copy + "; registered as '" + name + "' (its tools: mcp__" + name +
+                "__run_python, mcp__" + name + "__write_input)");
+        return;
+    }
+    if (registration.interpreter.empty()) {
+        add(report, Status::Skipped, "MCP", "code-exec",
+            copy + "; not registered, and " + registration.missing, "apogee train setup");
+        return;
+    }
+    add(report, Status::Skipped, "MCP", "code-exec",
+        copy + "; not registered -- it would run under " + registration.interpreter.string() +
+            " (" + registration.interpreter_source + ")",
+        registration.mcp_create_line(kCodeExecServerName));
+}
+
 void check_mcp(CheckReport& report, const CheckInputs& inputs) {
     if (inputs.config_missing || !inputs.config_error.empty()) {
         return;
@@ -1136,6 +1189,7 @@ void check_mcp(CheckReport& report, const CheckInputs& inputs) {
         }
         add(report, Status::Ok, "MCP", label, server.command);
     }
+    check_code_exec(report, inputs);
 }
 
 /// The `Agents` section: the bundled assets present, and every configured
@@ -1603,14 +1657,6 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
                 "apogee graph build " + name);
         }
     }
-}
-
-/// A seeded driver an earlier Apogee wrote and nobody edited (27c): it runs,
-/// but as that Apogee shipped it, and the fix replaces it in place.
-[[nodiscard]] std::string stale_script_detail(const std::string& script) {
-    return script +
-           " is an earlier Apogee's copy, unedited -- 'apogee check --fix' brings it up to this "
-           "build's";
 }
 
 /// The MLX runtime (27a): whether this host can run an `mlx` backend at all,

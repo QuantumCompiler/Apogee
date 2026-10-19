@@ -277,10 +277,11 @@ void refresh_converter_tree(const std::filesystem::path& root, const std::filesy
 
 namespace {
 
-/// The seeded driver named `name` -- a trainer's or an MLX one -- or null.
+/// The seeded driver named `name` -- a trainer's, an MLX one or the
+/// code-execution server -- or null.
 [[nodiscard]] const BundledScript* find_seeded_script(std::string_view name) {
     for (const std::span<const BundledScript> scripts :
-         {bundled_training_scripts(), bundled_mlx_scripts()}) {
+         {bundled_training_scripts(), bundled_mlx_scripts(), bundled_mcp_scripts()}) {
         for (const BundledScript& script : scripts) {
             if (script.name == name) {
                 return &script;
@@ -309,7 +310,7 @@ SeededScript inspect_seeded_script(const std::filesystem::path& root, std::strin
 void refresh_seeded_scripts(const std::filesystem::path& root, AssetSeedResult& result,
                             std::span<const std::string_view> retired) {
     for (const std::span<const BundledScript> scripts :
-         {bundled_training_scripts(), bundled_mlx_scripts()}) {
+         {bundled_training_scripts(), bundled_mlx_scripts(), bundled_mcp_scripts()}) {
         for (const BundledScript& script : scripts) {
             if (inspect_seeded_script(root, script.name, retired) != SeededScript::Stale) {
                 continue;  // current, the user's, or seeding's to write
@@ -332,6 +333,10 @@ std::string bundled_mlx_driver_relative_path() {
 
 std::string bundled_mlx_converter_relative_path() {
     return bundled_script_relative_path("mlx_convert.py");
+}
+
+std::string bundled_code_exec_server_relative_path() {
+    return bundled_script_relative_path("code_exec_server.py");
 }
 
 std::string bundled_converter_relative_dir() {
@@ -360,6 +365,9 @@ std::vector<BundledFile> bundled_files() {
         files.push_back({bundled_script_relative_path(script.name), script.text});
     }
     for (const BundledScript& script : bundled_mlx_scripts()) {
+        files.push_back({bundled_script_relative_path(script.name), script.text});
+    }
+    for (const BundledScript& script : bundled_mcp_scripts()) {
         files.push_back({bundled_script_relative_path(script.name), script.text});
     }
     for (const BundledScript& file : bundled_converter_files()) {

@@ -82,11 +82,11 @@ TEST_CASE("seeding writes absent files only: an edit survives a re-seed",
     REQUIRE(first.ok());
     // Fourteen agent files (40a), eight kits (42b), three training regimes
     // (42a, 42b), seven symphony starters (27q, 40b), three task recipes
-    // (40c), three training drivers, the two mlx drivers, the vendored
-    // converter.
+    // (40c), three training drivers, the two mlx drivers, the code-execution
+    // server (47b), the vendored converter.
     CHECK(first.created.size() == apogee::harness::bundled_files().size());
     CHECK(first.created.size() ==
-          14 + 8 + 3 + 7 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
+          14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + apogee::harness::bundled_converter_files().size());
     for (const apogee::harness::BundledSymphony& starter : apogee::harness::bundled_symphonies()) {
         CHECK(read(root.path() / "symphonies" / (std::string{starter.name} + ".yaml")) ==
               starter.text);
@@ -336,7 +336,7 @@ TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
     CHECK(apogee::harness::bundled_script_relative_path(script.name) ==
           "training/scripts/prepare_dataset.py");
     CHECK(apogee::harness::bundled_files().size() ==
-          14 + 8 + 3 + 7 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
+          14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + apogee::harness::bundled_converter_files().size());
 }
 
 TEST_CASE("the compiled-in mlx drivers byte-match the shipped files and seed beside the trainers",
@@ -367,6 +367,36 @@ TEST_CASE("the compiled-in mlx drivers byte-match the shipped files and seed bes
     CHECK(apogee::harness::is_unmodified_bundled_asset(root.path(), seeded));
     std::ofstream{seeded, std::ios::binary} << "# my edit\n";
     CHECK_FALSE(apogee::harness::is_unmodified_bundled_asset(root.path(), seeded));
+    REQUIRE(apogee::harness::seed_data_directory(root.path()).ok());
+    CHECK(read(seeded) == "# my edit\n");
+}
+
+TEST_CASE(
+    "the compiled-in code-execution server byte-matches the shipped file and seeds beside "
+    "the drivers",
+    "[harness][assets][mcp]") {
+    // 47b: the drivers' rule -- the file is the source of truth, the literal
+    // never drifts from it, and the seeded copy is the user's once edited.
+    const std::filesystem::path assets{APOGEE_ASSETS_DIR};
+    REQUIRE(apogee::harness::bundled_mcp_scripts().size() == 1);
+    const apogee::harness::BundledScript& server = apogee::harness::bundled_mcp_scripts()[0];
+    CHECK(server.name == "code_exec_server.py");
+    CHECK(read(assets / "mcp" / "code_exec_server.py") == server.text);
+    CHECK(apogee::harness::bundled_code_exec_server_relative_path() ==
+          "training/scripts/code_exec_server.py");
+
+    const apogee::testing::TempDir root{"assets-mcp-" + std::to_string(std::random_device{}())};
+    REQUIRE(apogee::harness::seed_data_directory(root.path()).ok());
+    const std::filesystem::path seeded =
+        root.path() / apogee::harness::bundled_code_exec_server_relative_path();
+    REQUIRE(std::filesystem::exists(seeded));
+    CHECK(read(seeded) == server.text);
+    CHECK(apogee::harness::inspect_seeded_script(root.path(), "code_exec_server.py") ==
+          apogee::harness::SeededScript::Current);
+    CHECK(apogee::harness::is_unmodified_bundled_asset(root.path(), seeded));
+    std::ofstream{seeded, std::ios::binary} << "# my edit\n";
+    CHECK(apogee::harness::inspect_seeded_script(root.path(), "code_exec_server.py") ==
+          apogee::harness::SeededScript::Edited);
     REQUIRE(apogee::harness::seed_data_directory(root.path()).ok());
     CHECK(read(seeded) == "# my edit\n");
 }
@@ -539,7 +569,8 @@ std::filesystem::path seeded_script(const std::filesystem::path& root, std::stri
 /// This build's text of the seeded driver `name`.
 std::string bundled_text(std::string_view name) {
     for (const std::span<const apogee::harness::BundledScript> scripts :
-         {apogee::harness::bundled_training_scripts(), apogee::harness::bundled_mlx_scripts()}) {
+         {apogee::harness::bundled_training_scripts(), apogee::harness::bundled_mlx_scripts(),
+          apogee::harness::bundled_mcp_scripts()}) {
         for (const apogee::harness::BundledScript& script : scripts) {
             if (script.name == name) {
                 return std::string{script.text};
@@ -568,10 +599,12 @@ TEST_CASE("an earlier Apogee's drivers are brought up to this build's; an edit i
     write("mlx_generate.py", "# 27a's driver\n");
     write("train_mlx.py", "# v0.1.0's trainer\n");
     write("train_peft.py", "# the user's own change\n");
+    write("code_exec_server.py", "# an earlier server\n");  // 47b: refreshed alike
     std::filesystem::remove(seeded_script(root.path(), "prepare_dataset.py"));
     std::vector<std::string> retired{
         "mlx_generate.py " + apogee::models::sha256_hex("# 27a's driver\n"),
         "train_mlx.py " + apogee::models::sha256_hex("# v0.1.0's trainer\n"),
+        "code_exec_server.py " + apogee::models::sha256_hex("# an earlier server\n"),
     };
     std::ranges::sort(retired);
     const std::vector<std::string_view> list{retired.begin(), retired.end()};
@@ -581,6 +614,7 @@ TEST_CASE("an earlier Apogee's drivers are brought up to this build's; an edit i
     };
     CHECK(state("mlx_generate.py") == SeededScript::Stale);
     CHECK(state("train_mlx.py") == SeededScript::Stale);
+    CHECK(state("code_exec_server.py") == SeededScript::Stale);
     CHECK(state("train_peft.py") == SeededScript::Edited);
     CHECK(state("prepare_dataset.py") == SeededScript::Missing);
     CHECK(state("mlx_convert.py") == SeededScript::Current);
@@ -592,10 +626,13 @@ TEST_CASE("an earlier Apogee's drivers are brought up to this build's; an edit i
     apogee::harness::refresh_seeded_scripts(root.path(), result, list);
     REQUIRE(result.ok());
     CHECK(result.updated == std::vector<std::string>{"training/scripts/train_mlx.py",
-                                                     "training/scripts/mlx_generate.py"});
+                                                     "training/scripts/mlx_generate.py",
+                                                     "training/scripts/code_exec_server.py"});
     CHECK(result.created.empty());
     CHECK(read(seeded_script(root.path(), "mlx_generate.py")) == bundled_text("mlx_generate.py"));
     CHECK(read(seeded_script(root.path(), "train_mlx.py")) == bundled_text("train_mlx.py"));
+    CHECK(read(seeded_script(root.path(), "code_exec_server.py")) ==
+          bundled_text("code_exec_server.py"));
     // The edit is exactly as the user left it; the missing one is seeding's.
     CHECK(read(seeded_script(root.path(), "train_peft.py")) == "# the user's own change\n");
     CHECK_FALSE(std::filesystem::exists(seeded_script(root.path(), "prepare_dataset.py")));

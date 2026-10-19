@@ -166,6 +166,18 @@ struct BundledScript {
 /// `training/scripts/mlx_convert.py`, relative to the data directory.
 [[nodiscard]] std::string bundled_mlx_converter_relative_path();
 
+/// The code-execution server (47b): `code_exec_server.py`, an MCP server on
+/// stdio that runs Python in a throwaway per-session directory. Compiled in
+/// from `assets/mcp/`, byte-identical to it by test, and seeded
+/// skip-if-present beside the drivers under `training/scripts/` -- it runs
+/// under the same Python environment when there is one, and a stale copy
+/// refreshes by the same retired digests. Registered by hand through
+/// `mcp create --command`, like any server; what runs is the seeded copy.
+[[nodiscard]] std::span<const BundledScript> bundled_mcp_scripts();
+
+/// `training/scripts/code_exec_server.py`, relative to the data directory.
+[[nodiscard]] std::string bundled_code_exec_server_relative_path();
+
 /// Every version of a seeded driver -- the trainers' and the MLX ones -- an
 /// earlier Apogee shipped and this one does not, as `<name> <sha256>` with
 /// the name as in `BundledScript::name`, sorted. From
@@ -191,8 +203,8 @@ enum class SeededScript : std::uint8_t {
     Missing,
 };
 
-/// The driver `name` (a `bundled_training_scripts` or `bundled_mlx_scripts`
-/// name) under `root`'s `training/scripts/`. `retired` is
+/// The driver `name` (a `bundled_training_scripts`, `bundled_mlx_scripts` or
+/// `bundled_mcp_scripts` name) under `root`'s `training/scripts/`. `retired` is
 /// `bundled_scripts_retired()` but for tests.
 [[nodiscard]] SeededScript inspect_seeded_script(
     const std::filesystem::path& root, std::string_view name,

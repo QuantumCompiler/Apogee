@@ -182,6 +182,7 @@ add_library(apogee_tests_business OBJECT
     business/mcp/client_test.cpp
     business/mcp/registry_test.cpp
     business/mcp/serve_stdio_test.cpp
+    business/mcp/code_exec_server_test.cpp
     business/scaffold/mcp_server_test.cpp
     business/scaffold/agent_test.cpp
     business/scaffold/symphony_test.cpp
@@ -844,6 +845,20 @@ if(UNIX)
     )
     set_tests_properties(cli.mcp_lifecycle PROPERTIES TIMEOUT 120)
 
+    # The code-execution server (47b) on the real binary: seeded byte for byte,
+    # its registration line said by the doctor, registered by hand, and a
+    # model's call through the gate -- refused unasked, run under --allow with
+    # its file returned as a path, refused by plan and dont-ask, never passed
+    # by accept-edits -- the session directory gone after. Skips (77) without
+    # python3.
+    add_test(NAME cli.code_exec_server
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/code_exec_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/code-exec-e2e-home
+            ${CMAKE_CURRENT_SOURCE_DIR}/../assets
+    )
+    set_tests_properties(cli.code_exec_server PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+
     # `analyze` on the real binary: the bundled agents on the mock backend
     # against a fixture repository -- a ref reviewed without being checked out,
     # the refs decided by flags, the report rendered and saved, the validator's
@@ -979,7 +994,8 @@ if(UNIX)
         # in a unit test.
         # A noisy, dying MCP server under a PTY: its stderr never paints the
         # terminal, the failure carries its tail, and startup does not wait
-        # out the connect timeout.
+        # out the connect timeout. Since 47b also a noisy run through the
+        # code-execution server: none of the code's output reaches the screen.
         add_test(NAME cli.mcp_server_stderr_stays_off_the_terminal
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_mcp_check.py"

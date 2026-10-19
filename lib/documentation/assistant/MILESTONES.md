@@ -4759,6 +4759,60 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,278
 
 **The survivor, and what it taught.** "`done` not closed from the read loop's error path" survived its first run because the dying fake *refused the write*, so the send path released the waiter and the read loop never had to. A real child that dies mid-handshake takes the `initialize` frame into its pipe buffer and only the read hits EOF — that is the path the fix exists for. The fake now takes the frame and hangs up, and the mutant costs the full twenty-second bound, which the test refuses. A fixture that fails earlier than the real thing tests the wrong path. The other survivor, an extra quoting check on flow-list items, was dead code: `yaml_scalar` already quotes every character a flow list could misread. The check was removed rather than tested.
 
+### 2026-10-18 — `code-exec-server` (backlog item 47b): the interpreter in the box
+
+**Why.** The built-in-MCP parity spike (2026-10-16) measured the biggest honest gap to ChatGPT: code execution. `run_command` is a gated raw shell, not an interpreter with a working directory and files coming back, and a fresh install configures no MCP server at all. The spike's reframe also set the shape: one generic server serving every provider alike, since the host already translates tools per vendor.
+
+- [x] **The server** (`assets/mcp/code_exec_server.py`): an MCP server on stdio, standard library only, Python 3.8 or later. It has two tools:
+  - **`run_python`** runs a script in the session's working directory. It returns stdout, `[stderr]`, `[exit N]` and `[files written]` with each new or changed file's full path and size. An error is the interpreter's own traceback, trimmed to the code's lines.
+  - **`write_input`** writes a data file there, as text or base64.
+
+  Files persist between calls. Variables do not, since each call is a new process.
+- [x] **The sandbox, honest about what it is**:
+  - **The working directory** is new for each session, under `cache/code-exec/`, and deleted when the session ends. A lock held for the server's life lets the next server's start sweep a killed one's leftovers, and never a live one's.
+  - **The bounds** are named constants each result quotes when hit:
+    - `MAX_SECONDS`, 30: the run and every process it started are stopped;
+    - `OUTPUT_KEEP`, the first and last 8 KB, in `run_command`'s idiom;
+    - `MAX_SESSION_BYTES`, 256 MiB: what a run wrote past it is removed, and a `write_input` that would cross it is refused.
+  - **The network guard**: the code cannot import `socket`, so urllib and http.client fail saying the network is off. It is recorded as best effort, not a boundary.
+  - **A write guard**: an audit hook refuses the code's writes outside the working directory, naming the path, `/dev/null` kept. It is best effort too.
+  - **An allow-listed environment**: `HOME` and the temporary directory point at the working directory, so no key in Apogee's environment reaches the code.
+  - **The boundary is the gate**: both tools say they are not read-only, so the MCP client gates them like any writer, and the permission modes govern them. Nothing new was needed: zero new protocol or gate code.
+- [x] **Seeded on the drivers' precedent**: compiled in by `generate_training_assets.py` as a fourth unit (`assets_mcp.cpp`, `bundled_mcp_scripts()`), held byte-identical by test, and seeded skip-if-present beside the drivers under `training/scripts/`. A stale copy refreshes from the same retired digests, and an edit is kept.
+- [x] **Said, never guessed**: the doctor's `MCP` section gains a `code-exec` row (`cli/code_exec_server.h/.cpp`). It reports the seeded copy against the shipped one, then one of:
+  - registered under which name, with its tools;
+  - the one `apogee mcp create code --command <interpreter> --args <script>` line, with the interpreter it would run under: the training environment's when there is one, else `python3` on PATH;
+  - with neither, the reason, pointing at `apogee train setup`.
+
+  Code runs under the training environment's interpreter when there is one, else under the server's own.
+- [x] **The reference**: tools.md gains *Running code*: the registration line, what the model gets, and the sandbox's table, with the guards called best effort and the gate the boundary. Its *Every backend* paragraph now names 47a's `server_tools:` beside `--search`, a drift 47a left.
+- [x] **The tests**:
+  - `mcp/code_exec_server_test` drives the real compiled-in script through the shipped client: both tools gated; output, exit status and files as paths; inputs and modules persisting; each bound against a planted violation (a grandchild stopped with the run, 60 KB of output cut to 8 KB a side, a 200 KB file past a 100 KB cap); the jail, the socket guard, a planted key; the server's stderr in the sink and none of the code's; the directory gone at the end and a dead session swept;
+  - `assets_test`: the byte match, seeding and the stale refresh;
+  - `check_test`: the row's five states;
+  - `cli.code_exec_server` on the real binary: seeded byte for byte, the line said then the registration seen, two tools connected, and the gate on real turns (refused with nobody to ask, run under `--allow` with the file's path, refused by plan over an allow and by dont-ask, never passed by accept-edits), no session directory left;
+  - `cli.complete_opens_no_listening_socket` gains a phase sampling a code-exec turn's whole tree, the server required to be seen, verified against a copy that listens at start;
+  - `cli.mcp_server_stderr_stays_off_the_terminal` gains a phase where a run printing two hundred lines on each stream paints nothing, proved to have run by a second call listing the file it left.
+
+Decisions taken while building, for veto:
+- **Seeded under `training/scripts/`, not a new `mcp/code-exec/` directory.** The drivers' precedent whole: no new layout row, the retired-digest refresh for free, and it sits beside the environment it runs under. The `mcp/` row stays the user's scaffolds.
+- **The session directory is the server's own.** It is created at start and removed at exit, with a lock for the sweep. The `cli/` composition the document sketched has nothing to compose for a server registered by hand like any other: what `cli/` gained is the doctor's row and the registration line 47c's preset will reuse.
+- **A write guard the document did not ask for**: an audit hook refusing writes outside the working directory, under the same "best effort, said so" label as the socket guard. Without it, the "jail" would have covered only `write_input`'s path.
+- **An allow-listed environment**, so a key exported for Apogee never reaches model-written code (the secrets invariant, applied to a child the model drives).
+- **The disk cap is 256 MiB**, enforced after a run by removing what that run wrote or changed, and before a `write_input`. A cap that refused the next run instead would leave no way to delete anything.
+- **An exit status is data, not a tool failure**: `isError` is set for refusals and the time cap, never for code that raised. That matches `run_command`'s output.
+- **"Said in the server's registration detail"** reads as the doctor's row, which names the interpreter, plus the server's `instructions` and `run_python`'s description, which name the version and the working directory.
+
+**Verified.** `lib/scripts/cicd.sh --test`: all 3340 tests pass, with the one test skipped where it always is. The build is warning-free and the format clean. The registration line's quoting case, added after that run so a Windows path's backslashes are quoted and the doctor's test reads either form, passes on its own.
+
+**On real weights**, each family's local model in its own scratch home, one at a time, asked to sum the squares of 1 to 100 with `run_python`, write it to `sum.txt` and give the path the tool reported:
+- **Google**, Gemma4-12B Q4_K_M: 338,350 and the exact session path, in 102 s.
+- **Qwen**, Qwen3-VL-8B Q4_K_M: 338350 and the exact path, in 19 s.
+- **OpenAI**, GPT-OSS-20B (F16; no Q4_K_M build is installed): 338350 and the exact path, in 26 s.
+- **Meta**, Llama3.1-8B Q4_K_M: it called the tool and had the number both times. In one of two runs it named its own working folder as the file's path instead of the one the tool reported.
+
+**Not run: a cloud backend.** Its code-running half needs your API key and spends money, and this run had nobody to approve that. The server is the same child for any provider, since MCP tools reach every backend through the one registry, but the cloud half of that acceptance line is still yours to see.
+
 ## Milestone X — Agents as data
 
 **Goal.** A named workflow the user runs with `apogee analyze --agent <name>`: a persona from prompt files, an output schema the answer must satisfy, a tool policy that is the agent's permission model, executed by the same loop every other surface runs — so an agent behaves identically on every backend the loop drives — with structured output validated on every provider, an in-process renderer, deterministic branch review from flags, `apogee agents` and its admin twins over one scaffold core, and three review agents re-authored for the owned loop.

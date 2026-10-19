@@ -40,6 +40,7 @@ apogee_add_module(contracts
     contracts/assets_training.cpp
     contracts/assets_converter.cpp
     contracts/assets_mlx.cpp
+    contracts/assets_mcp.cpp
     contracts/assets_symphonies.cpp
     contracts/assets_recipes.cpp
     contracts/errors.h

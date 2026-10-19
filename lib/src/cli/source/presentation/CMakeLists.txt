@@ -215,6 +215,8 @@ apogee_add_module(cli
     cli/reset.h
     cli/reset.cpp
     cli/check.cpp
+    cli/code_exec_server.h
+    cli/code_exec_server.cpp
     cli/complete.h
     cli/complete.cpp
     cli/helpers.h

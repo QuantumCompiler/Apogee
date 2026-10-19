@@ -93,6 +93,73 @@ fi
 
 echo "no listening sockets during an interactive turn - OK"
 
+# --- the code-execution server: a child over pipes, never a port (47b) --------
+#
+# The same continuous sample over a turn whose tool call runs Python through
+# the seeded code_exec_server.py -- an MCP child of apogee, and the code a
+# child of that -- across the whole process tree, which must SEE the server
+# at least once or it proved nothing. Skipped without python3.
+code_descendants() {
+    for child in $(pgrep -P "$1" 2>/dev/null); do
+        echo "$child"
+        code_descendants "$child"
+    done
+}
+if command -v python3 >/dev/null 2>&1; then
+    "$APOGEE_BIN" check --fix >/dev/null 2>&1 || true   # seeds the server
+    "$APOGEE_BIN" mcp create code --command python3 \
+        --args "$WORK_DIR/training/scripts/code_exec_server.py" </dev/null >/dev/null || exit 1
+    printf '%s' '{"turns":[{"text":"","tool_calls":[{"name":"mcp__code__run_python","arguments":{"code":"import time\ntime.sleep(1.5)\nprint(\"slept\")"}}]},{"text":"code said: {{last_tool_result}}"}]}' \
+        >"$WORK_DIR/code.json"
+    "$APOGEE_BIN" config add-backend code-runner --type mock --model-path "$WORK_DIR/code.json" \
+        >/dev/null || exit 1
+
+    ( sleep 1; printf 'hello\n' ) | "$APOGEE_BIN" complete -m code-runner --tools \
+        --allow mcp__code__run_python >"$WORK_DIR/code-out.txt" 2>"$WORK_DIR/code-err.txt" &
+    CHILD=$!
+    LISTENING=""
+    SERVER_SEEN=""
+    while kill -0 "$CHILD" 2>/dev/null; do
+        PIDS="$CHILD"
+        for pid in $(code_descendants "$CHILD"); do
+            PIDS="$PIDS,$pid"
+            if ps -o command= -p "$pid" 2>/dev/null | grep -q code_exec_server.py; then
+                SERVER_SEEN=1
+            fi
+        done
+        HIT="$(lsof -a -p "$PIDS" -i -sTCP:LISTEN -Fn 2>/dev/null)"
+        if [ -n "$HIT" ]; then
+            LISTENING="$HIT"
+            break
+        fi
+    done
+    wait "$CHILD"
+    STATUS=$?
+    if [ -n "$LISTENING" ]; then
+        echo "INVARIANT VIOLATED: a code-exec turn's process tree opened a listening socket:" >&2
+        echo "$LISTENING" >&2
+        exit 1
+    fi
+    if [ "$STATUS" -ne 0 ]; then
+        echo "no_listen_check: the code-exec turn failed (exit $STATUS)" >&2
+        cat "$WORK_DIR/code-err.txt" >&2
+        exit 1
+    fi
+    if [ -z "$SERVER_SEEN" ]; then
+        echo "no_listen_check: the sample never saw the code-exec server, so it proved nothing" >&2
+        exit 1
+    fi
+    if ! grep -q "code said: slept" "$WORK_DIR/code-out.txt"; then
+        echo "no_listen_check: the code-exec turn produced no answer" >&2
+        cat "$WORK_DIR/code-out.txt" "$WORK_DIR/code-err.txt" >&2
+        exit 1
+    fi
+    "$APOGEE_BIN" config delete-mcp-server code >/dev/null || exit 1
+    echo "no listening sockets across a code-exec turn and its server - OK"
+else
+    echo "no_listen_check: the code-exec phase needs python3; skipping it"
+fi
+
 # --- the mlx backend: a child over pipes, never a port (27a) -------------------
 #
 # The same continuous sample over a turn answered by the REAL driver -- the
