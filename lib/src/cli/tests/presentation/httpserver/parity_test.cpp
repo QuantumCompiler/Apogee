@@ -215,6 +215,10 @@ const std::map<std::string, Classification>& table() {
         {"voice say",
          carve_out("speaks with a voice model on the host, writing the WAV on the host, on a "
                    "user's act; generating is CLI-only, the training precedent")},
+        {"video compose",
+         carve_out("plans, speaks and renders scene after scene on the host's own GPU for a long "
+                   "while, on a user's act, writing the video and its project on the host; "
+                   "generating is CLI-only, the training precedent")},
         {"config set-default-video",
          carve_out("the pointer only video generate reads, which is CLI-only; set on the host "
                    "alone")},

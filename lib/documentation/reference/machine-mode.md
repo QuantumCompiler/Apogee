@@ -668,6 +668,31 @@ header**, never estimated) and `offset`, and its `sentences` (`text`,
 on a cancel, the output untouched either way; a refusal before the run
 prints no document, one line on stderr naming the fix.
 
+Since 50c a composed video is a document too -- its project, kept beside the
+video as `<video>.json` from the first step and printed when the run ends:
+
+```bash
+apogee video compose "<brief>" -o video.mp4 --output-format json   # {"object":"video.project",…}
+```
+
+It is `version` (1), `status` (`rendering` while it runs, then `done`,
+`failed` or `cancelled`), `brief`, `title`, `output` and `scenes_dir`
+(`<stem>.scenes/` beside the video); `settings` (`model` and `voice_model`
+as store handles, `voice`, `crossfade`, `captions`, `music` and `assets`,
+null when not given); `plan` (`backend`, and the `attempts` it took: 1, or
+2 after its one correction); `scenes` -- each its `index`, `narration`,
+`visual`, `seconds` (the plan's), `asset` (null for none), `seed`, `voice`
+(`file`, `seconds` measured from the WAV, its `sentences` with `seconds` and
+`offset`) and `clip` (`file`, `seconds` as ffprobe read them), each null
+until it exists, and each file with its own record beside it
+(`video.generation`, `voice.speech`); `captions` (`file`, and `burned` --
+false when this ffmpeg has no libass and the SRT is kept beside the video);
+`assembly` (the joins, the mix and the burn in words); `error`; `created`
+and `platform`. Exit `1` on a failure and `130` on a cancel, every finished
+scene kept either way: the same command again resumes it, rendering only
+what the document does not hold. A refusal before the plan prints no
+document, one line on stderr naming the fix.
+
 Since 27l the graph navigation verbs are reads of the same kind:
 
 ```bash

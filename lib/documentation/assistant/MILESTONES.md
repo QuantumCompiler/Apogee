@@ -8563,3 +8563,35 @@ Decisions taken while building, for veto:
 **Verified.** `lib/scripts/cicd.sh --test`: 3491 of 3491, two skipped and said: the real caption burn (this ffmpeg has no libass) and the existing pdftotext case. The real-fixture join and mix ran against Homebrew's ffmpeg 8.1.
 
 **Not run here**: the real caption burn, since this ffmpeg is built without libass -- the test says so and skips; its builder and the refusal are covered.
+
+### 2026-10-19 — `video-compose` (backlog item 50c): a brief into a narrated video
+
+**Why.** Every piece of the composer stood -- clips with records (49), a voice with measured lengths (50a), the assembly operations (50b), structured planning (26f) -- but nothing joined them. This is the glue: `apogee video compose "<brief>" -o video.mp4`.
+
+- [x] **The plan** (`video/compose`): one structured member call, arriving as a closure (`PlanFn`), so the composer names no backend. The caps are written into the schema: at most 8 scenes of 2-10 s, narration at most 240 characters, a visual at most 600. With `--assets`, a scene's `asset` is an enum of the directory's names, so an asset the directory lacks fails the plan's validation and earns the one correction. An answer that still does not hold is refused with the caps quoted. The command's planner is `plan_on` in `video_cmd`: the chat role's backend or `--planner`, `run_structured` with thinking off, a side request.
+- [x] **Spend said first** (`plan_lines`): the title and length, each scene's narration and what it shows, then the runs it takes -- narrations, clips at 1280x704 and 50 steps, assets taken as they are -- and what becomes of the captions, all before anything renders.
+- [x] **The walk** (`render_project`, over `ComposeSeams`):
+  - **Every narration first.** It is cheap, and its measured length decides each clip's: a scene is stretched to hold its narration's lead, speech, the room after it and the next fade (`scene_length`). A narration no scene can hold stops the run there, before any clip renders.
+  - **Then every clip**, through `generate_clip` with a seed drawn per scene at plan time. An asset clip is copied in as it is (one too short for its narration is refused in the narration pass); an asset still seeds its scene's clip through image-to-video. An existing clip is kept when it is long enough for its narration, else rendered again with its seed held.
+  - **Captions are arithmetic**: each sentence of each narration one cue, at its scene's start (the probed clip lengths less a crossfade at each boundary), the lead and its offset, for its counted seconds (`caption_cues`), written by `write_srt`.
+  - **Then the assembly** on the seam: joined with 0.5 s crossfades, the narration laid at each scene's start over the optional `--music` bed, the captions burned -- or, by an ffmpeg without libass, kept beside the video as `<stem>.srt`. The output is touched once, by a rename.
+- [x] **The project document** (`contracts/video_project`, `video.project` in machine-mode.md): the brief, the settings, the plan's backend and attempts, every scene with its seed, its narration (measured, with its sentences) and its clip (probed). It is written beside the video from the first step and saved after every one. Each scene's files sit in `<stem>.scenes/` with their own records (`video.generation`, `voice.speech`).
+- [x] **Resumable by the same command.** A project beside the output for the same brief renders only what it does not hold, with its own settings: flags that would change them are said and not applied, and another brief's project is refused. A stopped run's file the document never recorded is replaced. A failure exits 1 and a cancel 130, every finished scene kept either way.
+- [x] **The verb**: `video compose` with `--music`, `--assets`, `--no-captions`, `-m` (the pipeline), `--voice-model`, `--voice`, `--planner` and `--output-format`. It is completed, classified as the exec line's (the `video` row), carved out of the HTTP parity table, its brief free text, and named in `video`'s summary (the root help golden regenerated).
+- [x] **The tests**: `video/compose_test` (the schema, the plan, the timing arithmetic, the walk's matrix, the assembly through the fake ffmpeg argv-pinned), `cli/video_compose_test` (every refusal, a whole run with its plan said first and its document beside the video, `plan_lines` golden, a failure resumed, captions kept beside, an asset slotted, completion), `contracts/video_project_test`, and `cli.video_lifecycle` grown: compose on the real binary over a mock planner whose first answer is not JSON, the stub drivers and a fake ffmpeg without libass, then resumed.
+
+Decisions taken while building, for veto:
+- **Narration before clips, and narration sets the length.** The voice is faster than real time and its measured length is the ground truth for timing, so every narration is spoken first. A scene runs as long as the plan says or as its narration needs, whichever is longer; a narration that needs more than 10 s refuses the run before any clip renders.
+- **The timing constants**: the narration starts 0.25 s into its scene and ends at least 0.25 s before the next fade; the crossfade is 50b's 0.5 s default, with no flag for it.
+- **The caps**: 8 scenes, 2-10 s each (one clip run's limit), narration 240 characters (about ten seconds of speech), a visual 600, the brief 2000.
+- **Resume is the same command.** No `--resume` flag: a project beside the output for the same brief is resumed, keeping its own settings. That never regenerates what stands and never writes over a video.
+- **Assets**: a clip is copied in and taken whole, its length from the probe; a still seeds an image-to-video clip run, so its scene moves and is recorded like any other. Trimming a long asset clip is not done.
+- **Captions without libass are kept beside the video** as `<stem>.srt`, said in the plan and the final line, and a file already there refuses the run (50b's decision carried through).
+- **The output is an `.mp4`**, since every assembly step writes one.
+- **No draft path yet.** Every clip renders at the defaults (1280x704, 50 steps). 49d's `--draft` over a whole composition is a natural later option, recorded here.
+- **Absolute paths in the document.** A project moved elsewhere no longer resumes; it is a record, not a portable bundle.
+- **The spend is said in runs and scale, not as a time estimate.** There is no measured per-device rate to quote.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3515 of 3515, two skipped and said (the real caption burn without libass, and the existing pdftotext case); `cli.video_lifecycle`'s compose phase ran on the real binary.
+
+**Not run on real weights**: a real brief through the reference pipeline (Wan 2.2 TI2V-5B), Kokoro-82M and a real planner is the user's run. The real burn waits on an ffmpeg with libass.

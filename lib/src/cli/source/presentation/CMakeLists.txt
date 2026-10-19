@@ -299,6 +299,8 @@ apogee_add_module(cli
     cli/video_cmd.cpp
     cli/video_generate.h
     cli/video_generate.cpp
+    cli/video_compose.h
+    cli/video_compose.cpp
     cli/voice_cmd.h
     cli/voice_cmd.cpp
     cli/voice_say.h

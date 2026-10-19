@@ -7,13 +7,19 @@
 #include <random>
 #include <string>
 
+#include "agentloop/reporter.h"
+#include "agentloop/structured.h"
+#include "backends/factory.h"
 #include "cli/helpers.h"
 #include "cli/interrupt.h"
+#include "cli/video_compose.h"
 #include "cli/video_generate.h"
 #include "cli/video_runtime.h"
+#include "cli/voice_say.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "harness/harness.h"
 #include "machine/json_reporter.h"
 #include "operations/renames.h"
 #include "platform/ffmpeg.h"
@@ -134,6 +140,176 @@ void video_generate(const RootContext& context, GenerateFlags flags, const CLI::
     }
 }
 
+struct ComposeFlags {
+    VideoComposeOptions options;
+    ReadFormat format = ReadFormat::Text;
+};
+
+/// The plan on `backend`: the system prompt and the user message as a
+/// throwaway history (a side request), the model's thinking off, the answer
+/// held to the schema by the structured-output path -- retried once,
+/// validated always.
+[[nodiscard]] video::PlanAnswer plan_on(const harness::Config& config,
+                                        const std::filesystem::path& config_path,
+                                        const std::string& backend, const std::string& system,
+                                        const std::string& user, const std::string& schema) {
+    video::PlanAnswer answer;
+    harness::Harness harness{config};
+    backends::BuildOptions build_options;
+    build_options.config_path = config_path;
+    const backends::BuildResult built = backends::build_providers(harness, build_options);
+    for (const backends::BackendStatus& status : built.statuses) {
+        if (status.name == backend && !status.constructed) {
+            answer.error =
+                "backend '" + backend + "' is configured but unavailable -- " + status.reason;
+            return answer;
+        }
+    }
+    std::vector<harness::ChatMessage> history{harness::ChatMessage::system(system),
+                                              harness::ChatMessage::user(user)};
+    agentloop::Options options;
+    options.model = backend;
+    options.max_tokens = 4096;
+    options.stream_answer = false;
+    options.side_request = true;
+    options.thinking.mode = harness::ThinkingMode::Off;
+    agentloop::NullReporter reporter;
+    try {
+        const agentloop::StructuredResult result = agentloop::run_structured(
+            harness, history, options, reporter, std::string_view{schema});
+        answer.json = result.json;
+        answer.conforms = result.conforms;
+        answer.attempts = result.attempts;
+        for (const std::string& error : result.errors) {
+            answer.error += (answer.error.empty() ? "" : "; ") + error;
+        }
+    } catch (const std::exception& e) {
+        answer.error = e.what();
+    }
+    return answer;
+}
+
+void video_compose(const RootContext& context, const ComposeFlags& flags) {
+    const std::filesystem::path config_path = harness::resolve_config_path(context.config_path);
+    harness::Config config;
+    try {
+        config = harness::load_config(config_path);
+    } catch (const harness::ConfigError& e) {
+        fail(e.what());
+    }
+    const models::StoreRoots roots = store_roots_of(config);
+    BusyLine busy{std::cerr, "planning", busy_options(false)};
+    const auto say = [&busy](const std::string& line) {
+        busy.above([&line] { std::cerr << "[compose] " << line << "\n"; });
+    };
+    std::string scene_label;
+    int said_tenth = -1;
+
+    VideoComposeSeams seams;
+    seams.ready_video = [&config](const ResolvedPipeline& pipeline) {
+        const video::VideoReadiness runtime = ready_video_runtime(config, "video compose");
+        if (!runtime.ready() && runtime.refusal != video::VideoRefusal::NoDriver &&
+            runtime.refusal != video::VideoRefusal::NoFfmpeg) {
+            return runtime;
+        }
+        return video::probe_video(video::VideoHost::current(), pipeline.dir, pipeline.handle);
+    };
+    seams.ready_voice = [&config](const ResolvedVoiceModel& model) {
+        const video::VideoReadiness runtime = ready_voice_runtime(config, "video compose");
+        if (!runtime.ready() && runtime.refusal != video::VideoRefusal::NoDriver) {
+            return runtime;
+        }
+        return video::probe_voice(video::VideoHost::current(), model.dir, model.handle);
+    };
+    seams.plan = [&config, &config_path, &busy](const std::string& backend,
+                                                const std::string& system, const std::string& user,
+                                                const std::string& schema) {
+        busy.set("planning");
+        return plan_on(config, config_path, backend, system, user, schema);
+    };
+    seams.speak = [&](const ResolvedVoiceModel& model, const std::string& voice,
+                      const std::string& text, const std::filesystem::path& wav) {
+        busy.set("speaking");
+        VoiceSayOptions options;
+        options.text = text;
+        options.model = model.handle;
+        options.voice = voice;
+        options.output = wav;
+        VoiceSaySeams run;
+        run.ready = [](const ResolvedVoiceModel& resolved) {
+            return video::probe_voice(video::VideoHost::current(), resolved.dir, resolved.handle);
+        };
+        run.work_root = harness::video_work_dir();
+        run.platform = platform::host_target();
+        return spoken_from(say_text(roots, options, run, InterruptScope::token()));
+    };
+    seams.render = [&](const ResolvedPipeline& pipeline, const video::ClipAsk& ask,
+                       const std::filesystem::path& mp4) {
+        scene_label = "scene " + std::to_string(ask.scene);
+        said_tenth = -1;
+        busy.set(scene_label + ": loading the pipeline");
+        VideoGenerateOptions options;
+        options.prompt = ask.prompt;
+        options.model = pipeline.handle;
+        options.seed = ask.seed;
+        options.duration = ask.seconds;
+        options.image = ask.image;
+        options.output = mp4;
+        VideoGenerateSeams run;
+        run.ready = [](const ResolvedPipeline& resolved) {
+            return video::probe_video(video::VideoHost::current(), resolved.dir, resolved.handle);
+        };
+        run.on_event = [&](const video::VideoEvent& event) {
+            if (event.kind == video::VideoEvent::Kind::Step) {
+                if (busy.active()) {
+                    busy.report(scene_label + ": denoising", static_cast<std::size_t>(event.step),
+                                static_cast<std::size_t>(event.steps));
+                    return;
+                }
+                const int tenth = event.steps > 0 ? (event.step * 10) / event.steps : 0;
+                if (tenth != said_tenth || event.step == event.steps) {
+                    said_tenth = tenth;
+                    say(scene_label + ": step " + std::to_string(event.step) + "/" +
+                        std::to_string(event.steps));
+                }
+            }
+        };
+        run.work_root = harness::video_work_dir();
+        run.platform = platform::host_target();
+        return rendered_from(generate_clip(config, roots, options, run, InterruptScope::token()));
+    };
+    seams.can_burn = [] { return platform::ffmpeg_has_filter("subtitles", {}); };
+    seams.random_seed = [] {
+        std::random_device device;
+        return static_cast<std::int64_t>(device() & 0x7fffffffU);
+    };
+    seams.say = [&](const std::string& line) {
+        say(line);
+        busy.set("working");
+    };
+    seams.platform = platform::host_target();
+
+    VideoComposeResult result;
+    {
+        const InterruptScope interrupt;
+        result = compose_video(config, roots, flags.options, seams, InterruptScope::token());
+    }
+    busy.finish();
+    if (result.document.is_null()) {
+        fail(result.error, result.exit_code);
+    }
+    if (flags.format == ReadFormat::Json) {
+        write_document(std::cout, result.document);
+    } else {
+        for (const std::string& line : result.lines) {
+            std::cout << line << "\n";
+        }
+    }
+    if (result.exit_code != 0) {
+        fail(result.error, result.exit_code);
+    }
+}
+
 }  // namespace
 
 std::string_view VideoCommand::name() const noexcept {
@@ -141,8 +317,8 @@ std::string_view VideoCommand::name() const noexcept {
 }
 
 std::string_view VideoCommand::summary() const noexcept {
-    return "Generate video locally from a diffusion pipeline in the store -- from text or a "
-           "seed image";
+    return "Generate video locally from a diffusion pipeline in the store -- a clip from text "
+           "or a seed image, or a narrated video composed from a brief";
 }
 
 void VideoCommand::bind(CLI::App& root, const RootContext& context) {
@@ -212,6 +388,56 @@ void VideoCommand::bind(CLI::App& root, const RootContext& context) {
     generate->callback([&context, flags, format, generate]() {
         flags->format = *format;
         video_generate(context, *flags, *generate);
+    });
+
+    auto compose_flags = std::make_shared<ComposeFlags>();
+    auto compose_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    CLI::App* compose = cmd->add_subcommand(
+        "compose",
+        "Compose a narrated, captioned video from a brief -- the scenes planned and said first, "
+        "each one clip and one narration, the whole kept as a project beside it");
+    compose->add_option("brief", compose_flags->options.brief, "What the video is about")
+        ->required();
+    compose
+        ->add_option("-o,--output", compose_flags->options.output,
+                     "The video to write (an mp4; never over an existing file -- the same "
+                     "command again resumes its project)")
+        ->type_name(kPathValue)
+        ->required();
+    compose
+        ->add_option("--music", compose_flags->options.music,
+                     "A music bed under the narration, ducked while it speaks")
+        ->type_name(kPathValue);
+    compose
+        ->add_option("--assets", compose_flags->options.assets,
+                     "A directory of your own stills and clips, offered to the plan by name")
+        ->type_name(kPathValue);
+    compose->add_flag_callback(
+        "--no-captions", [compose_flags] { compose_flags->options.captions = false; },
+        "No captions (default: the narration's own sentences, timed from the voice)");
+    compose
+        ->add_option("-m,--model", compose_flags->options.model,
+                     "The pipeline: a store handle, id or model, or a path (default: "
+                     "models.default_video)")
+        ->type_name(kVideoPipelineValue);
+    compose
+        ->add_option("--voice-model", compose_flags->options.voice_model,
+                     "The voice model: a store handle, id or model, or a path (default: the "
+                     "store's one)")
+        ->type_name(kVoiceModelValue);
+    compose
+        ->add_option("--voice", compose_flags->options.voice,
+                     "One of the voice model's own voices (default: " + std::string{kDefaultVoice} +
+                         " when it has it)")
+        ->type_name(kVoiceValue);
+    compose
+        ->add_option("--planner", compose_flags->options.planner,
+                     "The backend that plans the scenes (default: the chat role)")
+        ->type_name(kBackendValue);
+    add_read_format(compose, compose_format);
+    compose->callback([&context, compose_flags, compose_format]() {
+        compose_flags->format = *compose_format;
+        video_compose(context, *compose_flags);
     });
 }
 

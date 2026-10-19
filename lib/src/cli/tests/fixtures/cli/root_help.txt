@@ -38,7 +38,7 @@ Subcommands:
   providers                   See which providers this machine has, and register them as backends
   reset                       Reset the data directory to a fresh install, keeping the rows you name
   review                      Review merge requests with the review skills -- one, or every target swept -- and post what they find
-  video                       Generate video locally from a diffusion pipeline in the store -- from text or a seed image
+  video                       Generate video locally from a diffusion pipeline in the store -- a clip from text or a seed image, or a narrated video composed from a brief
   voice                       Speak text with a voice model in the store, into a WAV
   serve                       Serve the OpenAI-compatible HTTP API (server deployments only)
   symphonies                  Define and play symphonies: staged prompt processes over a suite's members

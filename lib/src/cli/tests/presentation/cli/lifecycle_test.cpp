@@ -1047,7 +1047,9 @@ const std::vector<std::string> kFreeText{
     // A clip's description and its frame size (49c).
     "video generate prompt", "video generate --resolution",
     // What to say (50a).
-    "voice say text"};
+    "voice say text",
+    // What a composed video is about (50c).
+    "video compose brief"};
 
 /// The type names CLI11 gives a number: an untagged value of any other type
 /// is free text.

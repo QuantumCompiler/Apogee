@@ -62,6 +62,7 @@ add_library(apogee_tests_data OBJECT
     data/contracts/review_targets_test.cpp
     data/contracts/utf8_test.cpp
     data/contracts/captions_test.cpp
+    data/contracts/video_project_test.cpp
     data/contracts/todo_test.cpp
     data/contracts/paths_test.cpp
     data/contracts/types_test.cpp
@@ -202,6 +203,7 @@ add_library(apogee_tests_business OBJECT
     business/video/video_driver_test.cpp
     business/video/voice_test.cpp
     business/video/voice_driver_test.cpp
+    business/video/compose_test.cpp
     business/scaffold/mcp_server_test.cpp
     business/scaffold/agent_test.cpp
     business/scaffold/symphony_test.cpp
@@ -293,6 +295,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/video_generate_test.cpp
     presentation/cli/video_cmd_test.cpp
     presentation/cli/voice_say_test.cpp
+    presentation/cli/video_compose_test.cpp
     presentation/cli/model_chain_test.cpp
     presentation/cli/complete_sources_test.cpp
     presentation/cli/models_test.cpp

@@ -57,6 +57,8 @@ cat >"$WORK_DIR/bin/ffmpeg" <<'EOF'
 #!/bin/sh
 echo "ffmpeg: a banner nobody should see" >&2
 out=''; for a in "$@"; do out="$a"; done
+# A query (`-filters`) lists nothing: this ffmpeg has no libass.
+case "$out" in -*) exit 0 ;; esac
 printf 'MP4 clip' > "$out"
 EOF
 cp "$WORK_DIR/bin/ffmpeg" "$WORK_DIR/bin/ffprobe"
@@ -329,6 +331,73 @@ set -e
 [ ! -e "$WORK_DIR/out/stopped.wav" ] || fail "a cancelled speech left a file"
 
 echo "voice say: one WAV, its sentences timed, its record; no listener; Ctrl-C - OK"
+
+# --- video compose (50c): planned on a mock, spoken, rendered, assembled -----
+# The planner's first answer is not JSON: the one correction is what lands.
+cat >"$WORK_DIR/plan.json" <<'JSON'
+{"turns": [{"text": "Here is a plan."},
+           {"text": "{\"title\": \"Tides\", \"scenes\": [{\"narration\": \"The sea breathes.\", \"visual\": \"a shore at dawn\", \"seconds\": 3}, {\"narration\": \"Twice a day.\", \"visual\": \"the moon over water\", \"seconds\": 3}]}"}]}
+JSON
+"$APOGEE_BIN" config add-backend planner --type mock --model-path "$WORK_DIR/plan.json" \
+    </dev/null >/dev/null || fail "add-backend planner"
+# ffprobe answers in stream blocks, as the real one does.
+cat >"$WORK_DIR/bin/ffprobe" <<'PROBE'
+#!/bin/sh
+case "$*" in
+  *.wav) printf '[STREAM]\ncodec_name=pcm_s16le\ncodec_type=audio\nsample_rate=24000\nchannels=1\n[/STREAM]\n[FORMAT]\nduration=1.0\n[/FORMAT]\n' ;;
+  *) printf '[STREAM]\ncodec_name=h264\ncodec_type=video\nwidth=128\nheight=128\nr_frame_rate=24/1\n[/STREAM]\n[FORMAT]\nduration=3.04\n[/FORMAT]\n' ;;
+esac
+PROBE
+chmod +x "$WORK_DIR/bin/ffprobe"
+compose() {
+    set +e
+    "$APOGEE_BIN" video compose "the tides, twice a day" -o "$WORK_DIR/out/tides.mp4" \
+        --planner planner --output-format json </dev/null >"$WORK_DIR/$1.out" 2>"$WORK_DIR/$1.err"
+    STATUS=$?
+    set -e
+}
+compose compose
+[ "$STATUS" -eq 0 ] || fail "video compose failed ($STATUS): $(cat "$WORK_DIR/compose.err")"
+[ "$(field "$WORK_DIR/compose.out" '["object"]')" = "video.project" ] || fail "not a video.project document"
+[ "$(field "$WORK_DIR/compose.out" '["status"]')" = "done" ] || fail "not done: $(cat "$WORK_DIR/compose.out")"
+[ "$(field "$WORK_DIR/compose.out" '["plan"]["attempts"]')" = "2" ] || fail "the correction did not land"
+[ "$(field "$WORK_DIR/compose.out" '["settings"]["voice"]')" = "af_heart" ] || fail "the voice"
+[ "$(field "$WORK_DIR/compose.out" '["captions"]["burned"]')" = "False" ] || fail "captions burned without libass"
+[ "$(cat "$WORK_DIR/out/tides.mp4")" = "MP4 clip" ] || fail "the video did not land"
+[ -f "$WORK_DIR/out/tides.srt" ] || fail "the captions were not kept beside the video"
+grep -q "The sea breathes." "$WORK_DIR/out/tides.srt" || fail "the captions: $(cat "$WORK_DIR/out/tides.srt")"
+python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); b=json.load(open(sys.argv[2])); sys.exit(a != b)' \
+    "$WORK_DIR/out/tides.mp4.json" "$WORK_DIR/compose.out" || fail "the project beside it is not the document"
+SCENES="$WORK_DIR/out/tides.scenes"
+for file in s01.mp4 s01.wav s02.mp4 s02.wav captions.srt; do
+    [ -f "$SCENES/$file" ] || fail "the scenes directory lacks $file"
+done
+[ "$(field "$SCENES/s01.mp4.json" '["object"]')" = "video.generation" ] || fail "a clip without its record"
+[ "$(field "$SCENES/s02.wav.json" '["object"]')" = "voice.speech" ] || fail "a narration without its record"
+# The plan and its spend said before the first scene.
+PLAN_AT="$(grep -n '\[compose\] plan: "Tides" -- 2 scenes' "$WORK_DIR/compose.err" | cut -d: -f1)"
+SPEND_AT="$(grep -n '\[compose\] spend: 2 narration runs' "$WORK_DIR/compose.err" | cut -d: -f1)"
+FIRST_AT="$(grep -n '\[compose\] scene 1/2: speaking its narration' "$WORK_DIR/compose.err" | cut -d: -f1)"
+[ -n "$PLAN_AT" ] && [ -n "$SPEND_AT" ] && [ -n "$FIRST_AT" ] || fail "the plan was not said: $(cat "$WORK_DIR/compose.err")"
+[ "$PLAN_AT" -lt "$FIRST_AT" ] && [ "$SPEND_AT" -lt "$FIRST_AT" ] || fail "the plan was said after the work began"
+grep -q "captions: kept beside the video as tides.srt" "$WORK_DIR/compose.err" || fail "the captions' fate was not said"
+for stream in out err; do
+    if grep -q "chatter\|noise on stderr\|nobody should see" "$WORK_DIR/compose.$stream"; then
+        fail "a library's output reached compose's std$stream"
+    fi
+done
+[ -z "$(ls -A "$APOGEE_HOME/cache/video")" ] || fail "a composition left a working directory"
+# The same command again resumes: no plan (the mock has no third answer), one clip rendered.
+rm "$WORK_DIR/out/tides.mp4" "$SCENES/s02.mp4" "$SCENES/s02.mp4.json"
+compose resumed
+[ "$STATUS" -eq 0 ] || fail "the resume failed ($STATUS): $(cat "$WORK_DIR/resumed.err")"
+grep -q "\[compose\] resuming .*tides.mp4.json: 2 of 2 narrations and 1 clips already there" \
+    "$WORK_DIR/resumed.err" || fail "the resume was not said: $(cat "$WORK_DIR/resumed.err")"
+if grep -q "scene 1/2: rendering" "$WORK_DIR/resumed.err"; then fail "a kept clip rendered again"; fi
+grep -q "scene 2/2: rendering its clip" "$WORK_DIR/resumed.err" || fail "the missing clip was not rendered"
+[ -f "$WORK_DIR/out/tides.mp4" ] || fail "the resumed video did not land"
+
+echo "video compose: planned with one correction, said first, spoken, rendered, kept, resumed - OK"
 
 # --- on a pipe, a missing runtime is refused naming its installer -----------
 rm -rf "$SITE/diffusers"
