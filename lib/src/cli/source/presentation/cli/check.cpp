@@ -448,10 +448,10 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
 
         if (backend.type == harness::BackendType::LlamaCpp) {
             if (backend.model_path.empty()) {
+                // The entry exists: a door the binary accepts on it (M14).
                 add(report, Status::Warn, "Config", label,
                     std::string{type} + " -- model_path not set",
-                    "apogee config add-backend " + name +
-                        " --type llamacpp --model-path <file.gguf>");
+                    "apogee config set-backend " + name + " --model-path <file.gguf>");
                 continue;
             }
             const std::filesystem::path model = harness::expand_env(backend.model_path);
@@ -460,10 +460,14 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
             if (!std::filesystem::exists(model, code)) {
                 // A dangling model_path is a real failure -- the backend cannot
                 // answer -- but check does NOT edit it out. It says what to run.
+                // Its two real doors (M14): add-backend on an existing name
+                // is refused, so the hint never names it.
                 add(report, Status::Fail, "Config", label,
                     "model_path does not exist: " + model.string(),
-                    "apogee config add-backend " + name +
-                        " --type llamacpp --model-path <an existing .gguf>");
+                    "apogee config set-backend " + name +
+                        " --model-path <an existing .gguf> to repoint it, or apogee config "
+                        "delete-backend " +
+                        name + " to remove it");
                 continue;
             }
             // A full header read rather than the 4-byte magic check this used

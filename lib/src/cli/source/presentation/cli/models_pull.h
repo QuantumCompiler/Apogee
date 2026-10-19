@@ -85,6 +85,27 @@ struct DeletePlan {
 [[nodiscard]] DeletePlan plan_delete(const models::StoreRoots& roots, const harness::Config& config,
                                      std::string_view name);
 
+/// Whether `models delete` removes the backend entries that point into what
+/// it removes, too (M14): `--and-backends` says yes without asking; else the
+/// `count` entries are asked about through `ask` -- the question in, the
+/// answer out, nullopt for nobody to ask -- and only a yes removes them.
+/// Never silently: no flag and nobody to ask keeps them.
+[[nodiscard]] bool remove_backends_too(
+    bool and_backends, const std::vector<std::string>& backends,
+    const std::function<std::optional<std::string>(const std::string& question)>& ask);
+
+/// The two doors for a backend whose model is gone -- each a command the
+/// binary accepts on that state: repoint it, or remove it.
+[[nodiscard]] std::string backend_doors(const std::string& name);
+
+/// What the delete does about `backends` once the weights are gone: with
+/// `remove`, each entry removed through the one config editor -- byte for
+/// byte `config delete-backend` -- and its own line said; else each kept,
+/// its doors said. A line each.
+[[nodiscard]] std::vector<std::string> settle_backends(const std::filesystem::path& config_path,
+                                                       const std::vector<std::string>& backends,
+                                                       bool remove);
+
 /// The GGUF half of `apogee models repair <name>`: re-verify each stored GGUF
 /// `name` covers against its record, and say what to do. Empty when `name`
 /// covers no stored GGUF.

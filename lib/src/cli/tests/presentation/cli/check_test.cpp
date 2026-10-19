@@ -226,7 +226,11 @@ TEST_CASE("a dangling model_path fails and names the command to fix it", "[comma
     REQUIRE(row != nullptr);
     CHECK(row->status == Status::Fail);
     CHECK(row->detail.find("/nope/missing.gguf") != std::string::npos);
-    CHECK_FALSE(row->remedy.empty());
+    // Its two real doors (M14) -- never `add-backend` on a name that exists,
+    // which the binary refuses.
+    CHECK(row->remedy ==
+          "apogee config set-backend local --model-path <an existing .gguf> to repoint it, or "
+          "apogee config delete-backend local to remove it");
 }
 
 TEST_CASE("a present but unloadable GGUF fails", "[commands][check]") {

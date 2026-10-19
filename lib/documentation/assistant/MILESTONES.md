@@ -3731,6 +3731,32 @@ Decisions taken while building, for veto:
 
 **Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,291 tests, one skipped for want of `pdftotext`. The shells' completion checks (`cli.complete_e2e` and the rest of the 91 completion cases) are among them. `make format-check` is clean for every file touched.
 
+### 2026-10-19 — `weights-delete-backend-cleanup` (maintenance item M14): the delete offers the cleanup, the doctor names real doors
+
+**Why.** The user removed 26 GGUF sets in bulk and was left with 32 dangling backends, each two broken lines in `models list`. The delete had warned about every one of them and offered no way out, and `check`'s hint for each named `config add-backend <name> …` -- a command the binary refuses on a name that exists ("already exists; pass --force").
+
+- [x] **`models delete --and-backends`** removes the backend entries pointing into what goes, through the one config editor: each is `config delete-backend`'s own removal (`remove_backend`), byte for byte, and said per name. The plan says before anything runs what happens to them: "--and-backends: their N entries go too", or that they stay unless you say.
+- [x] **The config half has its own consent** (`remove_backends_too`): the flag, or a yes at a terminal, asked before anything is removed and default no. `-y` keeps its meaning -- remove the weights -- and never implies the config. On a pipe without the flag the entries stay, and each one is said with its two doors (`backend_doors`): repoint with `config set-backend <name> --model-path <file>`, or remove with `config delete-backend <name>`.
+- [x] **The doctor's doors run as printed.** A llamacpp entry whose model is gone now names both doors; one with no `model_path` names `set-backend --model-path`. Neither names `add-backend` on an existing name. The mlx entry's door already passes `--force` and is accepted, so it is unchanged.
+- [x] **The tests** (`models_pull_test`, `check_test`) over a planted GGUF set with three entries, two on it and one elsewhere, a comment and an inline comment in the config:
+  - the plan alone and the flag without `--yes` leave everything;
+  - `--yes` alone removes the weights and leaves the config byte-identical, the doors said;
+  - `--yes --and-backends` leaves the config equal, byte for byte, to two hand-typed `config delete-backend`s;
+  - the ask's every answer;
+  - the doctor's doors are run as printed against the same state, and the old `add-backend` door is shown still refused.
+
+Decisions taken while building, for veto:
+- **The wording**:
+  - the ask is "Remove the backend entries first, second too? [y/N]";
+  - the plan says "the backend entries stay unless you say -- --and-backends removes them with the weights.";
+  - a kept entry is said as "kept backend 'X', which points at nothing now -- repoint it: …; or remove it: …";
+  - a removed one is `delete-backend`'s own "removed backend 'X' from <config>".
+- **The ask comes before anything is removed**, so one decision covers both halves.
+- **Role pointers and suite members** naming a removed entry are left for `check` to report, exactly as after a hand-typed `config delete-backend`.
+- **The `model_path not set` hint was fixed too**: the same refused-door bug in the same seam.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3540 of 3542. The two failures were one cause: a new test named starting with `--and-backends`, which `cli.test_names` forbids and ctest cannot select. Renamed, both pass with every delete case (47); M15's full run covers it whole.
+
 ## Milestone O — Local multimodal
 
 **Goal.** Make `VisionCapable` tell the truth on the local backend: wire llama.cpp's `mtmd`, add `mmproj_path`, and close the cross-surface guard gap that let one surface accept a picture the other refused.

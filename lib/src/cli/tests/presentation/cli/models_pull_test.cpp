@@ -5,6 +5,8 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <optional>
 #include <random>
 #include <string>
 #include <system_error>
@@ -519,4 +521,148 @@ TEST_CASE("a conversion is recognised by its record: the same set, at the same p
     REQUIRE(apogee::models::write_record(made, record).empty());
     CHECK_FALSE(
         find_conversion(store.roots, "org--repo", "org--repo/safetensors/aaaaaaaaaaaa", "f16"));
+}
+
+namespace {
+
+/// A stored GGUF set and three backends: two on it, one elsewhere -- the
+/// fixture M14's consent branches run over.
+struct Stranded {
+    apogee::testing::CliHome home{""};
+    std::filesystem::path file =
+        home.models() / "org--m" / "gguf" / "aaaaaaaaaaaa" / "m-Q4_K_M.gguf";
+    std::filesystem::path other = home.home() / "elsewhere.gguf";
+
+    Stranded() {
+        std::filesystem::create_directories(file.parent_path());
+        std::ofstream{file, std::ios::binary} << apogee::testing::minimal_gguf("llama");
+        std::ofstream{other, std::ios::binary} << apogee::testing::minimal_gguf("llama");
+        std::ofstream{home.config_path(), std::ios::binary}
+            << "# my backends\nbackends:\n  first:\n    type: llamacpp\n    model_path: " +
+                   file.string() +
+                   "  # the quick one\n  second:\n    type: llamacpp\n    "
+                   "model_path: " +
+                   file.string() +
+                   "\n  kept:\n    type: llamacpp\n    "
+                   "model_path: " +
+                   other.string() + "\n";
+    }
+
+    [[nodiscard]] std::string config() const {
+        std::ifstream in{home.config_path(), std::ios::binary};
+        return {std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    }
+};
+
+}  // namespace
+
+TEST_CASE("deleting weights never touches the config without a word, and says the doors",
+          "[commands][models][delete][backends]") {
+    Stranded stranded;
+    const std::string before = stranded.config();
+    std::string out;
+    // The plan alone: nothing removed, the backends' fate said.
+    REQUIRE(stranded.home.run({"models", "delete", "org--m/gguf/aaaaaaaaaaaa"}, &out) == 0);
+    CHECK(out.find("backend 'first' points into this and will stop working") != std::string::npos);
+    CHECK(out.find("the backend entries stay unless you say -- --and-backends removes them with "
+                   "the weights.\n") != std::string::npos);
+    CHECK(std::filesystem::exists(stranded.file));
+    REQUIRE(stranded.home.run({"models", "delete", "org--m/gguf/aaaaaaaaaaaa", "--and-backends"},
+                              &out) == 0);
+    CHECK(out.find("--and-backends: their 2 entries go too, through the config editor.\n") !=
+          std::string::npos);
+    CHECK(std::filesystem::exists(stranded.file));
+    CHECK(stranded.config() == before);
+
+    // -y alone removes the weights and never the entries: nobody to ask here.
+    REQUIRE(stranded.home.run({"models", "delete", "org--m/gguf/aaaaaaaaaaaa", "--yes"}, &out) ==
+            0);
+    CHECK_FALSE(std::filesystem::exists(stranded.file));
+    CHECK(stranded.config() == before);
+    CHECK(out.find("kept backend 'first', which points at nothing now -- repoint it: apogee "
+                   "config set-backend first --model-path <file>; or remove it: apogee config "
+                   "delete-backend first\n") != std::string::npos);
+    CHECK(out.find("kept backend 'second'") != std::string::npos);
+    CHECK(out.find("kept backend 'kept'") == std::string::npos);
+}
+
+TEST_CASE(
+    "with --and-backends exactly the affected entries go, as config delete-backend removes them",
+    "[commands][models][delete][backends]") {
+    Stranded flagged;
+    Stranded by_hand;
+    std::string out;
+    REQUIRE(flagged.home.run(
+                {"models", "delete", "org--m/gguf/aaaaaaaaaaaa", "--yes", "--and-backends"},
+                &out) == 0);
+    CHECK(out.find("removed backend 'first' from " + flagged.home.config_path().string()) !=
+          std::string::npos);
+    CHECK(out.find("removed backend 'second' from ") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(flagged.file));
+    // Byte for byte the hand-typed removal's edit, comments and the
+    // unrelated entry kept.
+    REQUIRE(by_hand.home.run({"config", "delete-backend", "first"}, &out) == 0);
+    REQUIRE(by_hand.home.run({"config", "delete-backend", "second"}, &out) == 0);
+    std::string flagged_config = flagged.config();
+    std::string hand_config = by_hand.config();
+    const auto strip = [](std::string text, const std::string& root) {
+        for (std::size_t at = text.find(root); at != std::string::npos; at = text.find(root)) {
+            text.replace(at, root.size(), "<home>");
+        }
+        return text;
+    };
+    CHECK(strip(flagged_config, flagged.home.home().string()) ==
+          strip(hand_config, by_hand.home.home().string()));
+    CHECK(flagged_config.find("# my backends") != std::string::npos);
+    CHECK(flagged_config.find("kept:") != std::string::npos);
+}
+
+TEST_CASE("the ask is the config half's own consent, default no", "[commands][models][delete]") {
+    using apogee::commands::remove_backends_too;
+    const std::vector<std::string> two{"first", "second"};
+    std::string asked;
+    const auto answer = [&asked](std::optional<std::string> said) {
+        return [&asked, said](const std::string& question) {
+            asked = question;
+            return said;
+        };
+    };
+    CHECK(remove_backends_too(false, two, answer("y")));
+    CHECK(asked == "Remove the backend entries first, second too? [y/N] ");
+    CHECK(remove_backends_too(false, {"first"}, answer("yes")));
+    CHECK(asked == "Remove the backend entry first too? [y/N] ");
+    CHECK_FALSE(remove_backends_too(false, two, answer("n")));
+    CHECK_FALSE(remove_backends_too(false, two, answer("")));            // the default
+    CHECK_FALSE(remove_backends_too(false, two, answer(std::nullopt)));  // nobody there
+    CHECK_FALSE(remove_backends_too(false, two, {}));
+    asked.clear();
+    CHECK(remove_backends_too(true, two, answer("n")));  // the flag: never asked
+    CHECK(asked.empty());
+    CHECK_FALSE(remove_backends_too(true, {}, answer("y")));  // nothing to remove
+}
+
+TEST_CASE("the doctor's door for a dangling backend is one the binary accepts",
+          "[commands][models][delete][check]") {
+    // The user's transcript: check named `add-backend` on an existing name,
+    // which the binary refuses. Each door it names now runs as printed.
+    Stranded stranded;
+    std::string out;
+    REQUIRE(stranded.home.run({"models", "delete", "org--m/gguf/aaaaaaaaaaaa", "--yes"}, &out) ==
+            0);
+    (void)stranded.home.run({"check", "--no-color"}, &out);
+    const std::string repoint = "apogee config set-backend first --model-path <an existing .gguf>";
+    const std::string remove = "apogee config delete-backend first";
+    CHECK(out.find(repoint) != std::string::npos);
+    CHECK(out.find(remove) != std::string::npos);
+    // The old door, refused as the user saw it.
+    CHECK(stranded.home.run({"config", "add-backend", "first", "--type", "llamacpp", "--model-path",
+                             stranded.other.string()},
+                            &out) != 0);
+    // The repoint door, as printed with a real file in its blank.
+    REQUIRE(stranded.home.run(
+                {"config", "set-backend", "first", "--model-path", stranded.other.string()},
+                &out) == 0);
+    REQUIRE(stranded.home.run({"config", "delete-backend", "second"}, &out) == 0);
+    (void)stranded.home.run({"check", "--no-color"}, &out);
+    CHECK(out.find("model_path does not exist") == std::string::npos);
 }

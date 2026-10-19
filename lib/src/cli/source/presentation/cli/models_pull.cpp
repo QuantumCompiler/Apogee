@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "backends/mlx_local.h"
+#include "cli/config_cmd.h"
 #include "cli/helpers.h"
 #include "cli/interrupt.h"
 #include "cli/model_chain.h"
@@ -247,6 +248,48 @@ void print_backend_hint(const std::filesystem::path& model_file,
     }
     return names;
 }
+
+}  // namespace
+
+bool remove_backends_too(
+    bool and_backends, const std::vector<std::string>& backends,
+    const std::function<std::optional<std::string>(const std::string& question)>& ask) {
+    if (backends.empty()) {
+        return false;
+    }
+    if (and_backends) {
+        return true;
+    }
+    if (!ask) {
+        return false;
+    }
+    std::string named;
+    for (const std::string& backend : backends) {
+        named += (named.empty() ? "" : ", ") + backend;
+    }
+    const std::optional<std::string> answer =
+        ask(std::string{"Remove the backend "} + (backends.size() == 1 ? "entry " : "entries ") +
+            named + " too? [y/N] ");
+    return answer.has_value() && (*answer == "y" || *answer == "Y" || *answer == "yes");
+}
+
+std::string backend_doors(const std::string& name) {
+    return "repoint it: apogee config set-backend " + name +
+           " --model-path <file>; or remove it: apogee config delete-backend " + name;
+}
+
+std::vector<std::string> settle_backends(const std::filesystem::path& config_path,
+                                         const std::vector<std::string>& backends, bool remove) {
+    std::vector<std::string> out;
+    for (const std::string& backend : backends) {
+        out.push_back(remove ? remove_backend(config_path, backend)
+                             : "kept backend '" + backend + "', which points at nothing now -- " +
+                                   backend_doors(backend));
+    }
+    return out;
+}
+
+namespace {
 
 /// Fetches a snapshot's files from where its record says it came -- the
 /// repository and revision it was pulled at -- each checked by the ladder
@@ -2406,6 +2449,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
     // ---- delete -------------------------------------------------------------
     auto delete_name = std::make_shared<std::string>();
     auto delete_yes = std::make_shared<bool>(false);
+    auto delete_backends = std::make_shared<bool>(false);
     CLI::App* remove = models.add_subcommand("delete", "Remove a model, or one set of its weights");
     remove
         ->add_option("name", *delete_name,
@@ -2414,8 +2458,11 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         ->type_name(kModelOrBackendValue)
         ->required();
     remove->add_flag("-y,--yes", *delete_yes, "Do not ask for confirmation");
+    remove->add_flag("--and-backends", *delete_backends,
+                     "Also remove the backend entries that point into what goes, through the "
+                     "config editor (asked at a terminal otherwise; -y never implies it)");
 
-    remove->callback([delete_name, delete_yes, models_dir, &context]() {
+    remove->callback([delete_name, delete_yes, delete_backends, models_dir, &context]() {
         const models::StoreRoots roots = store_roots(models_dir, context.config_path);
         // The config, for a backend's name (M7); without one, names mean the
         // store alone, as they always did.
@@ -2443,10 +2490,25 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         for (const std::filesystem::path& dir : plan.removes) {
             std::cout << "  " << dir.string() << "\n";
         }
-        // A backend pointing into what goes stops working: say which, before.
-        for (const std::string& backend : backends_inside(context.config_path, plan.removes)) {
+        // A backend pointing into what goes stops working: say which, and
+        // what will be done about it, before (M14).
+        const std::vector<std::string> affected =
+            backends_inside(context.config_path, plan.removes);
+        for (const std::string& backend : affected) {
             std::cout << "\nbackend '" << backend
                       << "' points into this and will stop working until it is repointed.\n";
+        }
+        if (!affected.empty()) {
+            const bool one = affected.size() == 1;
+            std::cout << (*delete_backends ? std::string{"--and-backends: "} +
+                                                 (one ? "its entry goes"
+                                                      : "their " + std::to_string(affected.size()) +
+                                                            " entries go") +
+                                                 " too, through the config editor.\n"
+                                           : std::string{"the backend "} +
+                                                 (one ? "entry stays" : "entries stay") +
+                                                 " unless you say -- --and-backends removes " +
+                                                 (one ? "it" : "them") + " with the weights.\n");
         }
         if (plan.ollama_sourced) {
             // Apogee's copy only. Ollama's blobs are shared between models, so
@@ -2460,12 +2522,40 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
             std::cout << "\nre-run with --yes to remove.\n";
             return;
         }
+        // The config half on its own consent: the flag, or a yes at a
+        // terminal -- never -y alone, never on a pipe without the flag.
+        const bool interactive =
+            platform::is_terminal(platform::StandardStream::In) && !stdin_is_piped();
+        const bool remove_entries = remove_backends_too(
+            *delete_backends, affected,
+            [interactive](const std::string& question) -> std::optional<std::string> {
+                if (!interactive) {
+                    return std::nullopt;
+                }
+                std::cerr << "\n" << question << std::flush;
+                std::string answer;
+                if (!std::getline(std::cin, answer)) {
+                    return std::string{};
+                }
+                return answer;
+            });
         for (const std::filesystem::path& dir : plan.removes) {
             if (const std::string error = models::remove_weights(dir); !error.empty()) {
                 fail(error);
             }
         }
         std::cout << "\nremoved.\n";
+        if (affected.empty()) {
+            return;
+        }
+        try {
+            for (const std::string& line : settle_backends(
+                     harness::resolve_config_path(context.config_path), affected, remove_entries)) {
+                std::cout << line << "\n";
+            }
+        } catch (const std::exception& e) {
+            fail(e.what());
+        }
     });
 
     // ---- quantize -----------------------------------------------------------
