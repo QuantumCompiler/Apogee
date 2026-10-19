@@ -17,11 +17,10 @@
 - 2026-10-18 — **Silence is correct** and the **incremental filter is post-model and absolute** — both core constraints, never tunables.
 - 2026-10-18 — The confirm pass dismisses or tightens, never adds — the precision bias made structural.
 - 2026-10-18 — Posting batches into one notification per review; a forge without native batching posts serially and says so (`(consumed decision)` — the seam's).
+- 2026-10-18 — The diff-filter exclusion list (lockfiles, generated, vendored, binary) ships as data beside the skills, user-extendable on the same ladder (the default, confirmed 2026-10-18).
+- 2026-10-18 — `--skills <names>` overrides the plan entirely for that run; per-repo defaults are the sweep's `review:` unit (the default, confirmed 2026-10-18).
+- 2026-10-18 — Past the findings cap (a named constant), the top-N by severity/confidence post inline and the remainder is counted and summarized in the review's one summary comment (the default, confirmed 2026-10-18).
 
-**Open calls:**
-- [default: the diff filter's exclusion list (lockfiles, generated, vendored, binary) ships as data beside the skills, user-extendable on the same ladder.]
-- [default: `--skills` overrides the plan entirely; per-repo defaults are the sweep's config (`(consumed decision)` — 48d).]
-- [default: findings above a count cap post the top-N by severity/confidence with the remainder in the review summary comment — the cap a named constant.]
 
 **Guardrail(s).** The fixture-diff matrix (seven planted defects, seven clean twins — found once, silent respectively); the incremental and dedup planted cases; argv-exact posting through the fakes; clean-diff exit-0-no-comment golden; document conformance; an optional real-weights pass per the model families (one family, one fixture MR, recorded).
 

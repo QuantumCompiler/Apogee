@@ -16,10 +16,9 @@
 - 2026-10-16 — The set lands in v0.1.9 as track 47 (the user's placement call); **vendor server-side tools are allowed, default-off, per backend entry** (the user's W4 answer), the SPEC principle recorded the same day.
 - 2026-10-16 — Anthropic ships first; OpenAI and Google follow in the same item where their APIs carry equivalents, each wire's list carried with a reviewed date.
 - 2026-10-16 — The reframe stands: provider-specific work is wire blocks in `backends/`; MCP servers stay generic (`(consumed decision)` — the siblings own that half).
+- 2026-10-18 — The config spelling is a per-entry list (`server_tools: ["web_search", …]`), exact key and values settled at build, unknown names refused at parse naming the vendor's known set (the default, confirmed 2026-10-18).
+- 2026-10-18 — A vendor-executed tool use counts against the turn's existing budget like any tool round; no separate cap in the first cut (the default, confirmed 2026-10-18).
 
-**Open calls:**
-- [default: the config spelling is a per-entry list (`server_tools: ["web_search", …]`), the exact key and values settled at build through the editor's golden suite; unknown names refused at parse naming the vendor's known set.]
-- [default: a model-initiated server-tool use counts against the turn's budget as any tool round does; no separate cap in the first cut.]
 
 **Guardrail(s).** The absent-case goldens (no config → no blocks, byte-identical requests); the enabled-case block shapes per vendor; narration in all four front ends plus machine-mode conformance; the reviewed-date check alongside ADR 0009's; the SPEC/CLAUDE consent wording present and linked; `cli.config_lifecycle`'s enable pass on the real binary.
 

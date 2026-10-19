@@ -16,10 +16,9 @@
 - 2026-10-16 — The set lands in v0.1.9 as track 47 (the user's placement call); the sandbox is **throwaway and network-less** (the user's standing default, confirmed by execution).
 - 2026-10-16 — One generic server for all providers — never per-vendor variants (the spike's reframe, standing).
 - 2026-10-16 — The no-network guard is best-effort in-process and said so; the permission gate is the real boundary, and `run_python` is `writes`-gated.
+- 2026-10-18 — The bounds are 30 seconds wall clock, 8 KiB output head/tail and a named session-directory size cap — constants the tool result quotes when hit, tuned at build (the default, confirmed 2026-10-18).
+- 2026-10-18 — Registration here is by hand (`mcp create code --command <seeded path>`), documented; the one-command preset is [`mcp-presets.md`](mcp-presets.md)'s (the default, confirmed 2026-10-18).
 
-**Open calls:**
-- [default: the bounds — 30 seconds wall clock, 8 KiB output head/tail, the session directory capped at a named size — exact numbers at build, quoted in refusals.]
-- [default: registration in this item is by hand (`mcp create code --command <seeded path>`), documented; the one-command preset is [`mcp-presets.md`](mcp-presets.md)'s.]
 
 **Guardrail(s).** The hermetic client-driven suite above (jail, bounds, socket guard, sink — each with a planted violation); byte-identity of the compiled-in copy; `cli.install_parity` green with any new row; the lsof check seeing the server's child and no socket; the gate's ask/allow/mode matrix on a real turn.
 

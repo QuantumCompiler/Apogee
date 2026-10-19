@@ -17,10 +17,9 @@
 - 2026-10-18 — The catalog is the seven above (the user's four — front-end, back-end, embedded, ai-ml — plus general-correctness, concurrency and security as the proposed others, standing).
 - 2026-10-18 — One finding schema for every skill, the `code-review` agent's — a skill is a lens, never a new contract.
 - 2026-10-18 — **Silence is correct**: the precision bias is a core constraint of every shipped skill's prompt and the engine's goldens, not a tunable.
+- 2026-10-18 — Each skill's exact prompt text is the build's craft within its charter, sanity-checked on one local Q4 model and one cloud model over the fixture diffs before ship (the default, confirmed 2026-10-18).
+- 2026-10-18 — `applies` hints ship conservative (extensions and well-known paths); a hint-less skill applies everywhere, like `general-correctness` (the default, confirmed 2026-10-18).
 
-**Open calls:**
-- [default: each skill's exact prompt text is the build's craft within its one-line charter above, reviewed against one local Q4 model and one cloud model on a fixture diff before ship (the persona item's discipline).]
-- [default: `applies` hints ship conservative (extensions and well-known paths); a skill with no hints applies everywhere, like `general-correctness`.]
 
 **Guardrail(s).** The parser and ladder suites; every shipped skill held to the schema on a scripted model (a fixture diff, a canned response validated); byte-identity; the fixture-diff pass where each skill finds its planted defect **and stays silent on the clean twin** — the precision golden, both directions.
 

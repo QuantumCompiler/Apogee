@@ -16,10 +16,9 @@
 - 2026-10-18 — The set lands in v0.1.9 as track 48 (the user's placement call on the spike report; 48 by the ever-assigned rule).
 - 2026-10-18 — **Spawned CLIs are the transports**; auth stays theirs end to end — no token slot, no secrets change (the spike's design, standing). A direct REST+token transport for CI boxes is the recorded later option, behind the same seam.
 - 2026-10-18 — **Both forges from day one** in the seam and the scripted tests; live verification on this machine is `gh`-only (`glab` absent), recorded.
+- 2026-10-18 — The ref grammar: a full MR/PR URL always; the short forms `owner/repo!<iid>` and `owner/repo#<number>` with the forge inferred or prefixed; every case pinned by the parser's test table at build (the default, confirmed 2026-10-18).
+- 2026-10-18 — `publish_batch` maps to each forge's native batching (a pending review on GitHub, a draft-notes publish on GitLab); a forge without one posts serially and says so (the default, confirmed 2026-10-18).
 
-**Open calls:**
-- [default: the one ref grammar — a full MR/PR URL, or `owner/repo!<iid>` / `owner/repo#<number>` with the forge inferred or prefixed — settled at build by the parser's test table.]
-- [default: `publish_batch` maps to each forge's native batching (a review with pending comments on GitHub, a draft-notes publish on GitLab); where a forge has none, comments post serially and the item says so.]
 
 **Guardrail(s).** The scripted-fake suites per transport (every verb, every refusal, byte-exact argv to the child); the parser table; the mend case; the layering row verified (a planted include up fails); no `listen`/socket anywhere (the standing scans cover the new module by construction).
 

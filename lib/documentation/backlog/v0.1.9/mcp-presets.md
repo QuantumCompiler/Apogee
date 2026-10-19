@@ -16,10 +16,9 @@
 - 2026-10-16 — The set lands in v0.1.9 as track 47 (the user's placement call); SearXNG stays user-owned with the doc pointer easing setup (the standing default, confirmed by execution); connectors and image generation stay out (the spike's recorded outs).
 - 2026-10-16 — Presets are compiled-in data over the one create path — never seeded files, never a second writer (the simplest ladder that cannot drift).
 - 2026-10-16 — `self` is listed for other hosts and refused into Apogee, with the reason.
+- 2026-10-18 — The first wave is exactly two presets (`code-exec`, `self`); a community-server catalog is a later deliberate question, recorded here (the default, confirmed 2026-10-18).
+- 2026-10-18 — A preset whose command is not runnable on this machine still lists, its detail naming what is missing — the providers-scan honesty idiom (the default, confirmed 2026-10-18).
 
-**Open calls:**
-- [default: the first wave is exactly two presets (`code-exec`, `self`); a community-server catalog is a later item's question, recorded here so adding one is deliberate.]
-- [default: a preset whose command is not runnable on this machine (no python3, say) still lists, with the detail saying what is missing — the providers-scan honesty idiom.]
 
 **Guardrail(s).** The composition pin; the document's conformance; the `self` circularity refusal; the empty-state line; the not-runnable detail against a faked environment; byte-stability of `mcp create` without `--from`.
 

@@ -17,11 +17,10 @@
 - 2026-10-18 — **Webhooks are the recorded later item**, under `serve` with signature verification — push belongs to the one listener, not to an interactive command.
 - 2026-10-18 — The three pointing modes are the surface: `review mr <ref>` (the core's), `review sweep` over configured repos, and owner/organization targets expanded at sweep time.
 - 2026-10-18 — No grant, no post: an ungran­ted sweep still reviews and writes documents, saying it posted nothing — honesty over convenience.
+- 2026-10-18 — The watermark is per target, keyed by forge+repo, storing the newest MR update-time handled; the store's exact shape at build under its layout row (the default, confirmed 2026-10-18).
+- 2026-10-18 — A sweep caps MRs per run (a named constant, deferrals counted and said); `--since <date>` seeds a fresh watermark, so history stays unreviewed unless asked (the default, confirmed 2026-10-18).
+- 2026-10-18 — Draft/WIP merge requests skip by default; a per-target switch includes them (the default, confirmed 2026-10-18).
 
-**Open calls:**
-- [default: the watermark is per target, keyed by forge+repo, storing the newest MR update-time handled; the exact key and store shape at build under the layout row.]
-- [default: a sweep caps MRs per run (a named constant) and says what it deferred — a first run against a big organization must not review years of history unasked; `--since <date>` seeds a fresh watermark.]
-- [default: draft/WIP MRs are skipped by default, a per-target switch includes them.]
 
 **Guardrail(s).** The scripted-forge sweep matrix above (watermark, resume, lock, expansion, grants); the ungranted run's documents-only honesty; the cap's deferral said; config and document conformance; the lock's takeover rules exactly `pid_lock`'s.
 
