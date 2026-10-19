@@ -17,10 +17,9 @@
 - 2026-10-18 — **The driver is pipeline-generic** (diffusers' own loading), with Wan 2.2 TI2V-5B the reference model for the user's verification run — never auto-downloaded, never in tests (the standing defaults).
 - 2026-10-18 — The runtime extends the environment Apogee already owns rather than creating a second venv — one Python environment, one interpreter rule (torch is already a training dependency there).
 - 2026-10-18 — ComfyUI is the recorded out: it is a listening server, and the never-listens law makes the driver route the only house-shaped one.
+- 2026-10-19 — The install-consent wording and the package pin set (`diffusers` + minimal deps, versions pinned in the driver's header, reproducible) are the build's, on the mlx-vlm flow's shape (the default, confirmed 2026-10-19).
+- 2026-10-19 — Frames land in a throwaway working directory under the cache rows, cleaned on success and on cancellation; only the assembled mp4 survives at the caller's output path (the default, confirmed 2026-10-19).
 
-**Open calls:**
-- [default: the install-on-demand consent wording and the package pin set (`diffusers` + its minimal deps, versions pinned in the driver's header) at build, the `mlx-vlm` flow's shape.]
-- [default: frames land in a throwaway working directory under the cache rows, cleaned on success and on cancellation; only the assembled mp4 survives at the caller's output path.]
 
 **Guardrail(s).** The fake-driver protocol matrix (order, cancel, crash-tail, stdout guard); the refusal ladder exhaustively, nothing spawned on any refusal; byte-identity of the seeded driver; the lsof tree sample over a fake generating turn; no network, no weights, no real install in any test.
 

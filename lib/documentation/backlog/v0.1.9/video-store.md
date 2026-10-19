@@ -15,10 +15,9 @@
 **Decisions made** (dated):
 - 2026-10-18 — The set lands in v0.1.9 as track 49 (the user's placement call); the SPEC scope amendment landed first the same day (SPEC.md → One-liner, dated — the user's yes).
 - 2026-10-18 — Pipelines are their own store format (`pipeline/`), never shoehorned into `safetensors/` — the snapshot rule's root-`config.json` requirement (`snapshot.cpp:85`) is a different contract and stays untouched.
+- 2026-10-19 — The reference pipeline for real-weights verification is Wan 2.2 TI2V-5B, pulled by the user and never by a test; the fixture stubs mirror its component layout (the default, confirmed 2026-10-19).
+- 2026-10-19 — `models pull` infers the pipeline kind from the repository's root (`model_index.json` → pipeline); no new flag unless practice finds ambiguity (the default, confirmed 2026-10-19).
 
-**Open calls:**
-- [default: the reference pipeline for real-weights verification is **Wan 2.2 TI2V-5B** (pulled by the user per the standing rules); the fixture stubs mirror its component layout.]
-- [default: `models pull` infers kind from the repository's root (`model_index.json` → pipeline); no new flag unless ambiguity shows up in practice.]
 
 **Guardrail(s).** The fixture matrix (recognized / missing-component refusal by name / partial-pull leaves nothing / listed-priced-infoed); the one-declaration proof (a planted second list fails the house's existing scans); rename moving the directory whole with references repointed; no network in any test.
 

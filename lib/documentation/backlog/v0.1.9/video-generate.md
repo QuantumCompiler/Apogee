@@ -17,10 +17,9 @@
 - 2026-10-18 — No new role: `models.default_video` + `--model`, outside the six-role resolver (the standing default).
 - 2026-10-18 — `--image` (image-to-video) ships in the first cut — the realism workflow (the spike's research, standing).
 - 2026-10-18 — The recorded later items: a `generate_video` session tool once this verb exists, audio tracks, video training — each a deliberate pickup, named here.
+- 2026-10-19 — The caps (duration, resolution, steps) are named constants with conservative first values, quoted in refusals, tuned at build against the reference pipeline's limits (the default, confirmed 2026-10-19).
+- 2026-10-19 — The progress line follows the download-progress idiom (step N of M, elapsed, the device), exact wording the build's against the goldens (the default, confirmed 2026-10-19).
 
-**Open calls:**
-- [default: the caps — duration, resolution, steps — are named constants with conservative first values, quoted in refusals, tuned at build against the reference pipeline's limits.]
-- [default: a progress line's wording follows the download-progress idiom (step N of M, elapsed, device), exact text at build.]
 
 **Guardrail(s).** The fake-driver end-to-end matrix (every flag on the argv contract, narration, cancel, document, output honesty); pointer goldens; completion and classification; refusals byte-equal to the runtime's ladder; machine-document conformance. The real-weights pass — one genuine generation on the reference pipeline — is the user's run, its result recorded in the milestone per the standing rules.
 
