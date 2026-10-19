@@ -1702,6 +1702,8 @@ Config parse_config(std::string_view content, std::string_view origin) {
             scalar(models["default_utility"], origin, "models.default_utility");
         config.models.default_suite =
             scalar(models["default_suite"], origin, "models.default_suite");
+        config.models.default_video =
+            scalar(models["default_video"], origin, "models.default_video");
     }
 
     if (const YAML::Node paths = root["paths"]; paths.IsDefined() && !paths.IsNull()) {
@@ -2358,7 +2360,8 @@ bool operator==(const ModelsConfig& lhs, const ModelsConfig& rhs) noexcept {
            lhs.default_extraction == rhs.default_extraction &&
            lhs.default_vision == rhs.default_vision &&
            lhs.default_transcription == rhs.default_transcription &&
-           lhs.default_utility == rhs.default_utility && lhs.default_suite == rhs.default_suite;
+           lhs.default_utility == rhs.default_utility && lhs.default_suite == rhs.default_suite &&
+           lhs.default_video == rhs.default_video;
 }
 
 }  // namespace apogee::harness

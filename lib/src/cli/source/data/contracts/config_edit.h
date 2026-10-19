@@ -328,6 +328,12 @@ public:
 /// name with no `suites:` entry.
 [[nodiscard]] std::string set_default_suite(std::string_view content, std::string_view name);
 
+/// Sets `models.default_video` -- the pipeline `video generate` runs when
+/// `--model` names none (49c) -- as `set_default_suite` sets its pointer;
+/// "" clears it. What it names is the caller's to check: a pipeline in the
+/// store, never a backend.
+[[nodiscard]] std::string set_default_video(std::string_view content, std::string_view name);
+
 /// Sets `attachments.graph` -- the method an attach takes when nothing on the
 /// line says otherwise (27p) -- to `method`, `code` or `off`: the line
 /// replaced in place (keeping any trailing comment), else inserted into the

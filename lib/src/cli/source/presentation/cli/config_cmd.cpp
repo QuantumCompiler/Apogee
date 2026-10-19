@@ -16,6 +16,7 @@
 
 #include "cli/config_suites.h"
 #include "cli/graph.h"
+#include "cli/video_generate.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/config_migrate.h"
@@ -139,6 +140,9 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
     }
     if (key == "models.default_utility") {
         return render(config.models.default_utility);
+    }
+    if (key == "models.default_video") {
+        return render(config.models.default_video);
     }
     if (key == "paths.gguf_dir") {
         return render(config.paths.gguf_dir);
@@ -1124,6 +1128,19 @@ void bind_set_role(CLI::App& parent, const RootContext& context, const std::stri
     });
 }
 
+void bind_set_default_video(CLI::App& parent, const RootContext& context) {
+    auto name = std::make_shared<std::string>();
+    CLI::App* cmd = parent.add_subcommand(
+        "set-default-video",
+        "Set the pipeline 'video generate' runs when --model names none, or off for none");
+    cmd->add_option("name", *name, "A stored pipeline -- handle, id or model -- or off")
+        ->type_name(kVideoPipelineValue)
+        ->required();
+    cmd->callback([&context, name]() {
+        std::cout << point_default_video(config_path_for(context), *name) << "\n";
+    });
+}
+
 void bind_delete_mcp_server(CLI::App& parent, const RootContext& context) {
     auto name = std::make_shared<std::string>();
     CLI::App* cmd = parent.add_subcommand("delete-mcp-server",
@@ -1360,6 +1377,29 @@ std::string point_role(const std::filesystem::path& path, std::string_view field
     return "models." + std::string{field} + " = " + name;
 }
 
+std::string point_default_video(const std::filesystem::path& path, const std::string& name) {
+    std::string value;
+    if (name != harness::kSuiteOff) {
+        Config config;
+        try {
+            config = harness::load_config(path);
+        } catch (const ConfigError& e) {
+            fail(e.what());
+        }
+        ResolvedPipeline pipeline;
+        if (const std::string refused =
+                resolve_video_pipeline(store_roots_of(config), name, {}, pipeline);
+            !refused.empty()) {
+            fail(refused);
+        }
+        value = name;
+    }
+    apply_edit(path, [&value](std::string_view content) {
+        return harness::set_default_video(content, value);
+    });
+    return "models.default_video = " + (value.empty() ? std::string{"(none)"} : value);
+}
+
 std::string remove_backend(const std::filesystem::path& path, const std::string& name) {
     apply_edit(
         path, [&name](std::string_view content) { return harness::delete_backend(content, name); });
@@ -1376,6 +1416,7 @@ std::vector<std::string> config_keys(const harness::Config& config) {
                                   "models.default_vision",
                                   "models.default_transcription",
                                   "models.default_utility",
+                                  "models.default_video",
                                   "paths.gguf_dir",
                                   "paths.hf_dir",
                                   "paths.mcp_dir",
@@ -1464,6 +1505,7 @@ void ConfigCommand::bind(CLI::App& root, const RootContext& context) {
                   "Set the backend for chores: titles, compaction, search queries, large tool "
                   "results");
     bind_suite_verbs(*cmd, context);
+    bind_set_default_video(*cmd, context);
     bind_set_permission(*cmd, context);
     bind_add_allowed_host(*cmd, context);
     bind_delete_allowed_host(*cmd, context);

@@ -8405,3 +8405,51 @@ Decisions taken while building, for veto:
 **Verified.** `lib/scripts/cicd.sh --test`: all 3438 tests pass. The real-driver cases ran under the host's `python3`, not skipped. The build is warning-free and the format clean, and `harness.layering` and `harness.layer_context` hold the new module's row, card and table.
 
 **Not run on real weights**, by the document's own rule: a genuine Wan 2.2 TI2V-5B generation is the user's run. diffusers is absent on this machine (the spike's measurement), so the driver's calls are written against diffusers' documented pipeline API and exercised only through the stubs. The first real run is where a mismatch would show.
+
+### 2026-10-19 — `video-generate` (backlog item 49c): the clip, honestly priced
+
+**Why.** The store could hold a pipeline and the runtime could run one; this is the door. It also carries the iteration amendment: every clip is a reproducible record, its seed captured and its document written beside it.
+
+- [x] **`apogee video generate "<prompt>" -o <clip>`** (`cli/video_cmd`, composed in `cli/video_generate` over seams):
+  - from text, or from a seed image with `--image`;
+  - `--model`, else `models.default_video`;
+  - `--seed`, `--duration`, `--resolution`, `--steps`, `--fps`, and `--output-format json`.
+- [x] **The pipeline by any name the store gives it**: a handle, a bare id, a model holding exactly one pipeline, or a pipeline's path. Two under one model are refused, naming both.
+- [x] **The pointer** `models.default_video` holds what was written, checked against the store when it is set.
+  - It is no seventh role: nothing in `harness/roles.h`, read by the verb alone.
+  - `config set-default-video <pipeline|off>` writes it through the one editor (`set_default_video`), and `config get` reads it. The starter config documents it, commented.
+  - `models rename` carries it with the directory in the same edit.
+- [x] **The caps as named constants**, each quoted in its refusal before anything runs: 10 seconds, 1920 pixels a side (128 the least, a multiple of 16), 100 steps, 4-60 fps. The defaults are the reference pipeline's own: 1280x704, 5 s at 24 fps (121 frames, rounded to the pipelines' `4k+1`), 50 steps.
+- [x] **Output honesty**:
+  - An existing output is never written over.
+  - The clip lands whole, through 49b's working directory, or not at all.
+  - A failed run exits 1 and a cancelled one 130, each saying the output was left untouched and writing no sidecar.
+- [x] **The record** (`contracts/video_run`): the `video.generation` document (machine-mode.md), with the pipeline, prompt, image and mode, the seed and whether it was given or drawn, every setting, the device and type torch reported, this build's target, the versions that ran, the codec and the time.
+  - It is printed under `--output-format json` whether or not the clip landed.
+  - It is written beside a clip that landed as `<clip>.json`.
+- [x] **The narration on stderr**: the pipeline, settings and seed first, then the device and the scale to expect once the driver says where it runs. Apple silicon is "minutes per clip"; the CPU is "hours", and says a GPU is far faster. Then each step: a busy line counting on a terminal, a line every tenth on a pipe.
+- [x] **Every mode**:
+  - the shell classifies `video` as the exec line's (a Video view is a recorded later item);
+  - the HTTP parity table carves out `video generate` and `config set-default-video` (CLI-only, the training precedent);
+  - completion offers the store's pipelines (`VIDEO_PIPELINE`) for `--model` and the pointer;
+  - the root help golden is regenerated.
+- [x] **The tests**:
+  - `cli/video_generate_test`: in process over the seams, with a scripted driver writing real frame files. Covers the pointer and every spelling of a pipeline, each cap, the output rules, the document field by field and the sidecar that is it, a failure, a cancel, a given seed and a seed image, and the narration's words per device;
+  - `cli/video_cmd_test`: through the real command tree. Covers the pointer written, read, refused and cleared, completion, the refusals, and the rename;
+  - the editor's goldens, YAML and JSONC;
+  - `cli.video_lifecycle` on the real binary over a fake runtime, with the real seeded driver under stub libraries. Covers the document on stdout alone and equal to its sidecar, the narration, no library's print on either stream, the refusals, a failing run, and a real Ctrl-C mid-denoise leaving nothing. While the driver runs, the process tree is sampled with `lsof` for a listener (the sample is required to have seen the driver); a missing runtime is refused on a pipe.
+
+Decisions taken while building, for veto:
+- **The caps' first values** (10 s, 1920 px, 100 steps, 4-60 fps) are conservative and the defaults are Wan 2.2 TI2V-5B's own. Both are tuned on the first real run, which is the user's.
+- **`--steps` and `--fps` are flags too.** The document listed the caps as duration, resolution and steps, and a duration needs a rate to become frames; both are kept in the record. Guidance is not a flag: the pipeline's own default runs, and the record says `null`.
+- **`-o` is required**, an existing file is never replaced, and the clip's directory must exist.
+- **The sidecar is `<clip>.json`**, appended, never the clip's stem with its extension replaced, so it cannot take a name the folder already gives something else.
+- **The pointer keeps what was written.** A model name that later holds two pipelines is refused at run time, naming both, rather than guessed.
+- **A refusal before the run prints no document**: one line on stderr naming the fix, exit 1. Every run that started prints one.
+- **A drawn seed is 31 bits** from the system's random device, kept in the record.
+- **No admin twins**: generating runs the host's GPU for minutes on a user's act, and the pointer serves only that, so both are carved out.
+- **The no-listener sample and the noisy-library check deferred from 49b** live in `cli.video_lifecycle`. That is a script of its own rather than another phase of `cli.complete_opens_no_listening_socket`, whose later phases are gated on the MLX stubs.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3448 of 3450 tests passed. The two failures had one cause: a test name of mine began with `--model`, which `cli.test_names` refuses and which ctest's filter then read as an option. After the rename, both cases, `cli.video_lifecycle` and `cli.bare_help` pass when run again. The build is warning-free and the format clean.
+
+**Not run on real weights**: a genuine clip is the user's run, per the document. Every narration line and every document field was exercised over the stub runtime.

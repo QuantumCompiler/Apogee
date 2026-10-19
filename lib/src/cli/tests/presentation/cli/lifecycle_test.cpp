@@ -1043,7 +1043,9 @@ const std::vector<std::string> kFreeText{
     "config rename-backend new-name", "config set-backend --model",
     "config set-backend --embedding-model", "config set-backend --system-prompt",
     "config set-backend --host", "models rename new-name", "tui -s", "tui --system",
-    "tui --allow-host"};
+    "tui --allow-host",
+    // A clip's description and its frame size (49c).
+    "video generate prompt", "video generate --resolution"};
 
 /// The type names CLI11 gives a number: an untagged value of any other type
 /// is free text.

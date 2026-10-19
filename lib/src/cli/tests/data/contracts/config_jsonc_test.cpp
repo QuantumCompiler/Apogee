@@ -305,6 +305,10 @@ TEST_CASE("every verb of the one editor edits a JSONC config in place, comments 
         {"set_suite_orchestrate",
          [](std::string_view c) { return set_suite_orchestrate(c, "research", true); }},
         {"set_default_suite", [](std::string_view c) { return set_default_suite(c, "research"); }},
+        {"set_default_video",
+         [](std::string_view c) {
+             return apogee::harness::set_default_video(c, "org--clip/pipeline/aaaaaaaaaaaa");
+         }},
         {"append_symphony",
          [](std::string_view c) {
              SymphonySpec spec;

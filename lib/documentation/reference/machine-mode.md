@@ -618,6 +618,31 @@ and `errors` count the whole run, and `document` names where it was kept
 (the data directory's `review/sweeps/`). A sweep with errors exits `1`; one a
 live sweep's lock refuses exits `1` naming its pid.
 
+Since 49c a generated clip's record is a document, whether or not it landed:
+
+```bash
+apogee video generate "<prompt>" -o clip.mp4 --output-format json   # {"object":"video.generation",…}
+```
+
+It is `status` (`done`, `failed`, `cancelled`), `output` (the clip, absolute)
+and `sidecar` (where the record was written beside it -- `<clip>.json` -- or
+null when nothing landed); `model` (`name` as it was given, `path`, `class`
+from its `model_index.json`, `ref` and `revision` from its pull record,
+`variant` or null); `prompt`; `image` (the seed image, or null) and `mode`
+(`t2v`, `i2v`); `seed` and `seed_source` (`given` by `--seed`, or
+`generated` and kept); `settings` (`width`, `height`, `duration`, `fps`,
+`frames` -- the duration at the rate, rounded to the pipelines' `4k+1` --
+`steps`, `guidance` or null); `device` (`device` and `dtype` as torch
+reported them, `platform` this build's target); `versions` (`torch`,
+`diffusers`, `apogee` -- the ones that ran); `codec` (`h264`, `mpeg4`, or
+null); `seconds`; `created_at`; and `error` when it did not land. The clip
+and its sidecar are written only on `done`; a failed run exits `1` and a
+cancelled one `130`, the output path untouched either way. The narration --
+the device and the scale to expect, then each step -- goes to stderr. A run
+refused before it starts (a cap, an existing output, no pipeline, a runtime
+not installed) prints no document: one line on stderr naming the fix, exit
+`1`.
+
 Since 27l the graph navigation verbs are reads of the same kind:
 
 ```bash

@@ -1959,6 +1959,10 @@ std::string set_default_suite(std::string_view content, std::string_view name) {
     return set_section_scalar(content, "models", "default_suite", name);
 }
 
+std::string set_default_video(std::string_view content, std::string_view name) {
+    return set_section_scalar(content, "models", "default_video", name);
+}
+
 std::string set_attachments_graph(std::string_view content, std::string_view method) {
     if (!attachment_graph_method_from_string(method).has_value()) {
         throw ConfigEditError(attachment_graph_values_message("attachments.graph", method));
@@ -2924,6 +2928,11 @@ std::string set_suite_orchestrate(std::string_view content, std::string_view sui
 std::string set_default_suite(std::string_view content, std::string_view name) {
     return in_format(
         content, [&](std::string_view text) { return yaml_text::set_default_suite(text, name); });
+}
+
+std::string set_default_video(std::string_view content, std::string_view name) {
+    return in_format(
+        content, [&](std::string_view text) { return yaml_text::set_default_video(text, name); });
 }
 
 std::string set_attachments_graph(std::string_view content, std::string_view method) {

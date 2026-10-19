@@ -88,6 +88,11 @@ constexpr std::string_view kConfigTemplate = R"APOGEE(// Apogee configuration.
     // `apogee chat --suite <name>` (or `/suite <name>` mid-chat) picks one for a
     // single chat instead, and `--suite off` none.
     // "default_suite": "research"
+
+    // The pipeline `apogee video generate` runs when --model names none: a
+    // diffusion pipeline in the store, by its handle, id or model. Not a role --
+    // no backend runs a pipeline. `apogee config set-default-video <pipeline>`.
+    // "default_video": "Wan-AI--Wan2.2-TI2V-5B-Diffusers"
   },
 
   // Suites: named bundles of models, one backend per role a suite speaks for --

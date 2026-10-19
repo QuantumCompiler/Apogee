@@ -283,6 +283,8 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/models_mlx_test.cpp
     presentation/cli/models_pipeline_test.cpp
     presentation/cli/video_runtime_test.cpp
+    presentation/cli/video_generate_test.cpp
+    presentation/cli/video_cmd_test.cpp
     presentation/cli/model_chain_test.cpp
     presentation/cli/complete_sources_test.cpp
     presentation/cli/models_test.cpp
@@ -889,6 +891,22 @@ if(UNIX)
             ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
     )
     set_tests_properties(cli.review_mr PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+
+    # `video generate` (49c) on the real binary over a fake runtime -- the
+    # seeded driver under stub torch and diffusers behind the venv's shim, a
+    # fake ffmpeg -- and a pipeline built in the store: the pointer, the
+    # document on stdout alone, the sidecar, a given seed kept, the caps and
+    # an existing output refused, a failure and a real Ctrl-C leaving
+    # nothing, no listener in the tree while the driver runs, a library's
+    # print on neither stream, and a missing runtime refused on a pipe.
+    # Skips (77) without python3.
+    add_test(NAME cli.video_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/video_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/video-e2e
+            ${CMAKE_CURRENT_SOURCE_DIR}/business/video/scripts
+    )
+    set_tests_properties(cli.video_lifecycle PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
 
     # `analyze` on the real binary: the bundled agents on the mock backend
     # against a fixture repository -- a ref reviewed without being checked out,

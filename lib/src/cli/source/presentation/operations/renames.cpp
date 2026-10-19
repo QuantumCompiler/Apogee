@@ -13,6 +13,7 @@
 #include "contracts/config_edit.h"
 #include "contracts/layout.h"
 #include "logger/session.h"
+#include "modelstore/hf_ref.h"
 
 namespace apogee::commands {
 
@@ -49,6 +50,15 @@ namespace {
     }
     return false;
 }
+
+/// `pointer` -- `models.default_video` -- as it reads once the stored model
+/// `model` is `renamed`, or nullopt when it does not name that model: the
+/// model's directory name, a handle under it, the repository it was pulled
+/// as, or a path into it. A bare id stays as it is.
+[[nodiscard]] std::optional<std::string> repointed_video(const std::string& pointer,
+                                                         const models::StoreRoots& roots,
+                                                         std::string_view model,
+                                                         std::string_view renamed);
 
 /// `path` as written, its store directory `model` renamed `renamed`: the one
 /// path segment swapped, so a `~` or a `${VAR}` the user wrote stays theirs.
@@ -441,6 +451,33 @@ std::vector<std::string> model_names(const harness::Config& config,
     return names;
 }
 
+namespace {
+
+std::optional<std::string> repointed_video(const std::string& pointer,
+                                           const models::StoreRoots& roots, std::string_view model,
+                                           std::string_view renamed) {
+    if (pointer.empty()) {
+        return std::nullopt;
+    }
+    if (pointer == model) {
+        return std::string{renamed};
+    }
+    const std::string prefix = std::string{model} + "/";
+    if (pointer.starts_with(prefix)) {
+        return std::string{renamed} + "/" + pointer.substr(prefix.size());
+    }
+    if (const std::optional<models::HfRef> ref = models::parse_hf_ref(pointer);
+        ref.has_value() && ref->file.empty() && models::repo_directory_name(*ref) == model) {
+        return std::string{renamed};
+    }
+    if (stored_model_at(roots, pointer) == model) {
+        return rebased(pointer, model, renamed);
+    }
+    return std::nullopt;
+}
+
+}  // namespace
+
 RenameOutcome rename_stored_model(const std::filesystem::path& config_path,
                                   const models::StoreRoots& roots, std::string_view old_model,
                                   std::string_view new_model) {
@@ -545,6 +582,12 @@ RenameOutcome rename_stored_model(const std::filesystem::path& config_path,
         }
     }
 
+    // `models.default_video` names a pipeline by the model's own name, a
+    // handle under it, its repository or a path into it (49c): each spelling
+    // moves with the directory, and a bare id needs nothing.
+    const std::optional<std::string> video =
+        repointed_video(config->models.default_video, roots, model, new_model);
+
     std::vector<std::pair<std::filesystem::path, std::filesystem::path>> moves;
     for (const std::filesystem::path& dir : dirs) {
         moves.emplace_back(dir, dir.parent_path() / std::string{new_model});
@@ -555,10 +598,13 @@ RenameOutcome rename_stored_model(const std::filesystem::path& config_path,
         out.refusal = "could not move '" + model + "': " + error;
         return out;
     }
-    if (!pointing.empty()) {
+    if (!pointing.empty() || video.has_value()) {
         try {
             harness::edit_config_file(config_path, [&](std::string_view content) {
                 std::string text{content};
+                if (video.has_value()) {
+                    text = harness::set_default_video(text, *video);
+                }
                 for (const std::string& name : pointing) {
                     const harness::BackendConfig& backend = *config->find_backend(name);
                     if (stored_model_at(roots, backend.model_path) == model) {
@@ -590,6 +636,10 @@ RenameOutcome rename_stored_model(const std::filesystem::path& config_path,
         }
         out.said.push_back("repointed " + std::to_string(pointing.size()) +
                            (pointing.size() == 1 ? " backend: " : " backends: ") + names);
+    }
+    if (video.has_value()) {
+        out.said.push_back("repointed models.default_video: " + config->models.default_video +
+                           " -> " + *video);
     }
     for (const auto& [from, to] : renames) {
         out.said.push_back("renamed backend '" + from + "' to '" + to +

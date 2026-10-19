@@ -55,6 +55,9 @@ constexpr std::array kSurfaces{
     ShellSurface{"review", RunnerCovered,
                  "reviewing merge requests and the skills they run (48): the exec line (37h) "
                  "runs it as typed; a Review view is a recorded later item"},
+    ShellSurface{"video", RunnerCovered,
+                 "generating video locally (49): the exec line (37h) runs it as typed, its "
+                 "narration streamed; a Video view is a recorded later item"},
     // --- hidden plumbing: protocols other programs speak, never a person's ----
     ShellSurface{"__complete", RunnerCovered,
                  "the shell stubs' completion protocol -- the exec line's Tab asks the same "

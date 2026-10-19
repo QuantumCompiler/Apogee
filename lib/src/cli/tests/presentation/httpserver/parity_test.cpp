@@ -208,6 +208,13 @@ const std::map<std::string, Classification>& table() {
          carve_out("reviews with the host's own models and posts through the host's own gh or "
                    "glab login, on a user's act; review control is CLI-only, the training "
                    "precedent")},
+        {"video generate",
+         carve_out("runs a diffusion pipeline on the host's own GPU for minutes, on a user's act, "
+                   "writing the clip on the host; generating is CLI-only, the training "
+                   "precedent")},
+        {"config set-default-video",
+         carve_out("the pointer only video generate reads, which is CLI-only; set on the host "
+                   "alone")},
         {"symphonies play",
          carve_out("runs the host's own models, stage by stage, on a user's act; playing is "
                    "CLI-only, the training precedent -- the definitions are served under "

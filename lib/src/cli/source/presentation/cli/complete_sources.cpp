@@ -490,6 +490,12 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         }
         list.none = "the model store is empty -- 'apogee models pull'";
         list.as_listed = true;
+    } else if (kind == kVideoPipelineValue) {
+        // The store's pipelines, by model then handle (49c).
+        list.names = stored_models(store_roots(config), false, false, false, true);
+        list.none = "no pipeline in the store -- 'apogee models pull <owner>/<repo>' stores one";
+        list.as_listed = true;
+        note_store(store_roots(config), list);
     } else if (kind == kNewBackendValue) {
         list.names = unregistered_gguf_names(config);
     } else if (kind == kSnapshotIdValue) {

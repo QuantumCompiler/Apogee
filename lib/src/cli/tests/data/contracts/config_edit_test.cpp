@@ -1392,6 +1392,26 @@ TEST_CASE("the default suite is set like a pointer, and the loader holds it to a
         apogee::harness::ConfigError);
 }
 
+TEST_CASE("the default video pipeline is set like a pointer, read back, and cleared",
+          "[config_edit][video]") {
+    // 49c: `models.default_video` -- the pipeline `video generate` runs --
+    // written as the suite's pointer is, beside the roles, never one of them.
+    using apogee::harness::set_default_video;
+    const std::string hand{kHandSuite};
+    const std::string set = set_default_video(hand, "org--clip/pipeline/aaaaaaaaaaaa");
+    CHECK(set == "models:\n  default: claude\n  default_video: org--clip/pipeline/aaaaaaaaaaaa\n" +
+                     hand.substr(std::string{"models:\n  default: claude\n"}.size()));
+    const apogee::harness::Config config = apogee::harness::parse_config(set, "<test>");
+    CHECK(config.models.default_video == "org--clip/pipeline/aaaaaaaaaaaa");
+    CHECK(config.models.default_backend == "claude");
+    // Replaced in place, then cleared.
+    const std::string cleared = set_default_video(set_default_video(set, "org--clip"), "");
+    CHECK(cleared.find("  default_video: \"\"\n") != std::string::npos);
+    CHECK(apogee::harness::parse_config(cleared, "<test>").models.default_video.empty());
+    // Not a role: the role editor refuses the field.
+    CHECK_THROWS_AS(apogee::harness::set_models_role(hand, "default_video", "x"), ConfigEditError);
+}
+
 TEST_CASE("a suite's consultable members and caps are written after its members, and round-trip",
           "[config_edit][golden][suites]") {
     using apogee::harness::append_suite;

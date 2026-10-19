@@ -244,6 +244,12 @@ struct ModelsConfig {
     /// `suites:` entry fails the load, as a typo here would otherwise run
     /// every command on the global pointers without a word.
     std::string default_suite;
+
+    /// The pipeline `apogee video generate` runs when `--model` names none
+    /// (49c): a store handle (`<model>/pipeline/<id>`), id or model, or a
+    /// path. Not a role -- no backend runs a pipeline, so nothing here goes
+    /// through `harness/roles.h`; the verb reads it and nothing else does.
+    std::string default_video;
 };
 
 /// The roles a suite names members for (27d), as `suites.<name>.members`
