@@ -183,6 +183,9 @@ add_library(apogee_tests_business OBJECT
     business/mcp/registry_test.cpp
     business/mcp/serve_stdio_test.cpp
     business/mcp/code_exec_server_test.cpp
+    business/forge/forge_test.cpp
+    business/forge/gh_transport_test.cpp
+    business/forge/glab_transport_test.cpp
     business/scaffold/mcp_server_test.cpp
     business/scaffold/agent_test.cpp
     business/scaffold/symphony_test.cpp

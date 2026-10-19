@@ -27,7 +27,7 @@ set(APOGEE_LAYERS infrastructure data business presentation)
 set(APOGEE_LAYER_infrastructure platform events ansi version)
 set(APOGEE_LAYER_data contracts transport modelstore logger secrets embedstore backends)
 set(APOGEE_LAYER_business harness agent agentloop knowledge graph tools mcp models training
-                          tasks symphony scaffold)
+                          tasks symphony scaffold forge)
 set(APOGEE_LAYER_presentation markdown render views machine operations httpserver tui cli)
 
 # ---- Infrastructure ---------------------------------------------------------
@@ -58,6 +58,7 @@ set(APOGEE_LINKS_training contracts platform transport)
 set(APOGEE_LINKS_tasks agent agentloop contracts logger platform)
 set(APOGEE_LINKS_symphony agent agentloop contracts harness)
 set(APOGEE_LINKS_scaffold contracts symphony)
+set(APOGEE_LINKS_forge contracts platform)
 
 # ---- Presentation -----------------------------------------------------------
 set(APOGEE_LINKS_markdown ansi)

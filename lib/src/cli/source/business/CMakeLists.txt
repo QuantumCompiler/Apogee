@@ -294,6 +294,20 @@ apogee_add_module(symphony
 )
 target_link_libraries(apogee_business_symphony PUBLIC nlohmann_json::nlohmann_json)
 
+apogee_add_module(forge
+    forge/forge.h
+    forge/forge.cpp
+    forge/cli_call.h
+    forge/cli_call.cpp
+    forge/cli_forge.h
+    forge/cli_forge.cpp
+    forge/gh_transport.h
+    forge/gh_transport.cpp
+    forge/glab_transport.h
+    forge/glab_transport.cpp
+)
+target_link_libraries(apogee_business_forge PRIVATE nlohmann_json::nlohmann_json)
+
 apogee_add_module(scaffold
     scaffold/mcp_server.h
     scaffold/mcp_server.cpp

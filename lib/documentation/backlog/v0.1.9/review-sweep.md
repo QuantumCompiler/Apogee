@@ -10,7 +10,7 @@
 - `presentation/cli/review_cmd.cpp` — `review sweep [--target …] [--allow-post] [--dry-run]`, `review targets` (+ JSON), the lock, the gate composition (27i's `seed_approvals`/`make_permission_checker`, never a second checker); the parity rows.
 - Tests: the sweep over scripted forge fakes (two targets, the watermark advancing per target, a crash-resume case, the lock's second-run refusal, owner expansion, grants declared vs. absent — posts vs. documents-only, each said); config-unit goldens; document conformance; `cli.install_parity` with the new row.
 
-**Reference.** The training cycle (the watermark, the PID lock, the circuit-breaker temperament — the one-shot-over-state shape copied); 27i — the policy ceiling composed, never re-implemented; [`forge-seam.md`](forge-seam.md) and [`review-core.md`](review-core.md) — consumed whole; the review-agent spike (2026-10-18) for the no-daemon reasoning.
+**Reference.** The training cycle (the watermark, the PID lock, the circuit-breaker temperament — the one-shot-over-state shape copied); 27i — the policy ceiling composed, never re-implemented; 48a's forge seam ([Milestone AL](../../assistant/MILESTONES.md#milestone-al--the-review-agent)) and [`review-core.md`](review-core.md) — consumed whole; the review-agent spike (2026-10-18) for the no-daemon reasoning.
 
 **Decisions made** (dated):
 - 2026-10-18 — The set lands in v0.1.9 as track 48 (the user's placement call); the watch is **one-shot sweeps over a watermark**, cadence the user's scheduler — never a daemon, never a listener (the spike's design, standing).
@@ -20,6 +20,7 @@
 - 2026-10-18 — The watermark is per target, keyed by forge+repo, storing the newest MR update-time handled; the store's exact shape at build under its layout row (the default, confirmed 2026-10-18).
 - 2026-10-18 — A sweep caps MRs per run (a named constant, deferrals counted and said); `--since <date>` seeds a fresh watermark, so history stays unreviewed unless asked (the default, confirmed 2026-10-18).
 - 2026-10-18 — Draft/WIP merge requests skip by default; a per-target switch includes them (the default, confirmed 2026-10-18).
+- 2026-10-18 — 48a shipped the seam's four verbs only (metadata, diff, comment, batch); the two listings this item needs — a repository's merge requests updated since a time, and an owner's repositories — join `ForgeClient` here, on both transports, in the same idiom (one `<cli> api` child each, argv pinned, the same refusal ladder), and the CLI's configured path joins the `review:` unit (recorded at 48a's ship).
 
 
 **Guardrail(s).** The scripted-forge sweep matrix above (watermark, resume, lock, expansion, grants); the ungranted run's documents-only honesty; the cap's deferral said; config and document conformance; the lock's takeover rules exactly `pid_lock`'s.

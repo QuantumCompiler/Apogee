@@ -1,0 +1,172 @@
+#pragma once
+
+#include <cstdint>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <vector>
+
+/// The forge seam (48a): GitHub and GitLab behind one interface.
+///
+/// Everything the review track needs from a code forge is four verbs -- a
+/// merge request's metadata, its diff, an inline comment, a batch of them
+/// published as one notification -- and the house's answer to auth is a
+/// principle: **a vendor CLI is spawned, never opened.** So the first
+/// transports are spawned `gh` and `glab` (`gh_transport.h`,
+/// `glab_transport.h`), each call one bounded, captured child; their logins
+/// are theirs, and Apogee never reads a token, a credential file or an OAuth
+/// flow.
+///
+/// What comes back is **data**: parsed into the plain structs below, its
+/// text made valid UTF-8 at entry, and never treated as instructions by
+/// anything downstream. Nothing here listens or watches: every call is a
+/// one-shot child.
+namespace apogee::forge {
+
+enum class Forge : std::uint8_t { GitHub, GitLab };
+
+/// `github` or `gitlab`.
+[[nodiscard]] std::string_view to_string(Forge forge) noexcept;
+
+/// `github.com` or `gitlab.com`: the host a short reference means.
+[[nodiscard]] std::string_view default_host(Forge forge) noexcept;
+
+/// One merge request, spelled one way whatever it was typed as. A GitHub
+/// pull request is a merge request here; its number is GitLab's `iid`.
+struct MergeRequestRef {
+    Forge forge = Forge::GitHub;
+    /// The forge's host: `github.com`, `gitlab.com`, or a self-hosted one.
+    std::string host;
+    /// `owner/repo` on GitHub; `group/subgroup/project` on GitLab.
+    std::string project;
+    std::uint64_t number = 0;
+
+    [[nodiscard]] bool operator==(const MergeRequestRef&) const = default;
+};
+
+/// Reads a reference:
+///   - a full URL: `https://github.com/o/r/pull/12`, a GitLab
+///     `https://gitlab.com/g/p/-/merge_requests/4`, a self-hosted host of
+///     either (the path's shape says which), with or without a trailing
+///     `/files`, `/diffs`, query or fragment;
+///   - the short forms: `owner/repo#12` (GitHub) and `group/project!4`
+///     (GitLab), the separator choosing the forge;
+///   - a short form prefixed `github:` or `gitlab:`, the prefix choosing.
+/// Nullopt with `error` saying why, naming the forms, for anything else.
+[[nodiscard]] std::optional<MergeRequestRef> parse_ref(std::string_view text, std::string& error);
+
+/// The canonical spelling: `github.com/owner/repo#12`,
+/// `gitlab.com/group/project!4` -- what a watermark is keyed by.
+[[nodiscard]] std::string to_string(const MergeRequestRef& ref);
+
+/// A merge request's metadata, as the forge reported it.
+struct MergeRequest {
+    MergeRequestRef ref;
+    std::string title;
+    std::string description;
+    std::string author;
+    /// `open`, `closed`, `merged` (GitLab says `opened`; read as `open`).
+    std::string state;
+    bool draft = false;
+    std::string source_branch;
+    std::string target_branch;
+    /// The commits a comment anchors to: the merge base, GitLab's start
+    /// commit (the base on GitHub), and the head.
+    std::string base_sha;
+    std::string start_sha;
+    std::string head_sha;
+    std::string web_url;
+    /// ISO 8601, as the forge wrote it.
+    std::string updated_at;
+};
+
+/// One inline comment on the new side of the diff.
+struct InlineComment {
+    std::string path;
+    /// The line on the new side.
+    std::uint32_t line = 0;
+    std::string body;
+    /// The same line on the old side, for a line the change did not touch:
+    /// GitLab anchors an unchanged line by both. Unset for an added line.
+    std::optional<std::uint32_t> old_line;
+
+    [[nodiscard]] bool operator==(const InlineComment&) const = default;
+};
+
+/// What a publish did.
+struct PublishOutcome {
+    /// Comments posted, the summary not counted.
+    std::size_t posted = 0;
+    /// Whether they went as one notification (GitHub's review, GitLab's
+    /// draft notes published in bulk).
+    bool batched = false;
+    /// Anything worth saying about how they went: a forge without native
+    /// batching posts one by one, and says so here.
+    std::string note;
+};
+
+/// A refusal, in the CLI's own words, with the fix named.
+class ForgeError : public std::runtime_error {
+public:
+    enum class Kind : std::uint8_t {
+        /// The CLI is not installed, not on PATH, or would not start.
+        Missing,
+        /// The CLI is not logged in to this host.
+        LoggedOut,
+        /// The forge said the repository or merge request is not there (or
+        /// not visible to this login).
+        NotFound,
+        /// The forge refused or failed the call otherwise.
+        Api,
+        /// The CLI answered with something that is not what was asked for.
+        Malformed,
+    };
+
+    ForgeError(Kind kind, const std::string& message, std::string remedy);
+
+    [[nodiscard]] Kind kind() const noexcept {
+        return kind_;
+    }
+
+    /// The command that fixes it, when one does; empty otherwise.
+    [[nodiscard]] const std::string& remedy() const noexcept {
+        return remedy_;
+    }
+
+private:
+    Kind kind_;
+    std::string remedy_;
+};
+
+/// The seam. Every verb is synchronous and one-shot; a failure is a
+/// `ForgeError`.
+class ForgeClient {
+public:
+    ForgeClient() = default;
+    virtual ~ForgeClient() = default;
+    ForgeClient(const ForgeClient&) = delete;
+    ForgeClient& operator=(const ForgeClient&) = delete;
+    ForgeClient(ForgeClient&&) = delete;
+    ForgeClient& operator=(ForgeClient&&) = delete;
+
+    [[nodiscard]] virtual Forge forge() const noexcept = 0;
+
+    [[nodiscard]] virtual MergeRequest merge_request(const MergeRequestRef& ref) = 0;
+
+    /// The merge request's changes as one unified diff (`diff --git`
+    /// headers, hunks), valid UTF-8.
+    [[nodiscard]] virtual std::string diff(const MergeRequestRef& ref) = 0;
+
+    /// Posts one comment on its own, anchored to `request`'s head.
+    virtual void create_comment(const MergeRequest& request, const InlineComment& comment) = 0;
+
+    /// Posts `comments` and `summary` (a general comment; empty for none)
+    /// as one notification where the forge can batch, else one by one,
+    /// saying so. Nothing at all is posted for no comments and no summary.
+    [[nodiscard]] virtual PublishOutcome publish_batch(const MergeRequest& request,
+                                                       const std::vector<InlineComment>& comments,
+                                                       std::string_view summary) = 0;
+};
+
+}  // namespace apogee::forge

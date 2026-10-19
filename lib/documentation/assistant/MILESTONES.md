@@ -8076,3 +8076,72 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,249
 - Linux and Windows.
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,261 tests, none failing, one skipped for want of `pdftotext` -- `cli.machine_schema_conformance` (no event added) and `cli.unit_suite_under_a_tty` among them. `clang-format` is clean on every touched file.
+
+## Milestone AL — The review agent
+
+**Goal.** Apogee reviewing GitHub pull requests and GitLab merge requests (track 48, opened 2026-10-18 from that day's review-agent spike): one merge request on demand, or a repository's or an owner's whole set swept, inside the house's own laws. Auth goes through spawned `gh` and `glab`, never a token Apogee reads. The watch is a one-shot sweep over a watermark, never a daemon or a listener. The temperament is pinned: silence is correct, and a repeat review flags only what the new push added.
+
+### 2026-10-18 — `forge-seam` (backlog item 48a): GitHub and GitLab behind one interface
+
+**Why.** The spike measured no forge-client code anywhere in `source/`. Everything the review track needs from a forge is four verbs, and the house already owns the auth answer as a principle: a vendor CLI is spawned, never opened.
+
+- [x] **The seam** (`business/forge/forge.h`), a new business module: `ForgeClient`'s four verbs over plain structs.
+  - `merge_request` returns the metadata: title, description, author, state, draft, branches, the three commits a comment anchors to, URL, update time.
+  - `diff` returns one unified diff.
+  - `create_comment` posts one inline comment.
+  - `publish_batch` posts the comments and a summary as one notification.
+
+  A refusal is a `ForgeError` of a named kind (missing, logged out, not found, API, malformed), its words the CLI's own and its fix named.
+- [x] **One spelling of a merge request** (`parse_ref`), pinned by a table:
+  - a full URL of either forge, self-hosted included, the path's shape saying which (`/pull/N`, `/-/merge_requests/N`), trailing tabs, queries and fragments ignored;
+  - `owner/repo#12` (GitHub) and `group/project!4` (GitLab), the separator choosing;
+  - either prefixed `github:` or `gitlab:`, the prefix choosing.
+
+  The canonical form is `github.com/owner/repo#12`, what a watermark will be keyed by. A near miss is refused naming the forms.
+- [x] **The transports, each verb one bounded child** (`cli_call`, `cli_forge`, `gh_transport`, `glab_transport`).
+  - The CLI is an explicit path or its name on PATH, never bundled.
+  - The request body goes on stdin (`--input -`), stdout is kept to 64 MiB (a larger answer is refused, never cut short), and stderr is captured to its last 8 KiB for the refusal. Nothing reaches the terminal as itself.
+  - A host that is not the forge's default adds `--hostname`.
+- [x] **GitHub, through `gh api`**:
+  - the pull request: `repos/o/r/pulls/N`;
+  - the diff: with `Accept: application/vnd.github.diff`;
+  - one comment: to `…/comments`;
+  - a batch: one review to `…/reviews`, `event: COMMENT`, its body the summary.
+- [x] **GitLab, through `glab api`**:
+  - the merge request: under the encoded project path, `projects/group%2Fproject/merge_requests/N`;
+  - the diff: `--paginate …/diffs`, each file's hunks joined under its own `diff --git` header into one unified diff (new, deleted and renamed files said as git says them);
+  - one comment: a discussion anchored by base, start and head;
+  - a batch: draft notes, then `…/draft_notes/bulk_publish`. A failure part-way says how many drafts it left as the login's own, never published.
+- [x] **The refusal ladder** names the fix at each rung:
+  - not installed: `install the GitHub CLI (https://cli.github.com), then: gh auth login`;
+  - not logged in: `gh auth login`, with `--hostname` for a self-hosted host;
+  - not found or not visible: `gh auth status`;
+  - any other failure, its tail folded in;
+  - an answer that is not JSON.
+- [x] **Data, never instructions**: every string a forge sends is made valid UTF-8 at entry, the diff included.
+- [x] **The module's law, in the same change**: its row in `cmake/modules.cmake` (`forge` links `contracts` and `platform` only), ADR 0008's table, the business layer's card, and a named rule in `harness.layering` holding `forge/` to `contracts/`, `platform/` and itself, never a backend. A planted include of the secrets store fails the check.
+- [x] **The tests** (`tests/business/forge/`, over `support/scripted_forge_cli`, scripted children behind the spawn seam):
+  - the reference table, both ways;
+  - every verb's argv and request body byte for byte, on both forges;
+  - the answers read into the structs, a Latin-1 byte in a diff mended;
+  - GitLab's pages joined and its files rebuilt into one diff;
+  - the batch as one review, and as drafts published in bulk, with a part-way failure said;
+  - every rung of both ladders;
+  - only ever `<cli> api` run, never `auth token`.
+
+Decisions taken while building, for veto:
+- **`forge` links `contracts` and `platform` only.** The document allowed `transport/` for JSON plumbing, but nothing here needs the framer: each answer is one document, parsed whole. An unused link would fail the map's check.
+- **No config key for the CLI's path yet.** The transports take an explicit path or the name on PATH. The `review:` config unit is 48d's, and the path joins it there, so the config grows once.
+- **Every request body goes on stdin as JSON**, with `Content-Type: application/json` said explicitly, rather than as `-f`/`-F` fields: a comment body's text is never an argument, and nested positions need no field syntax.
+- **GitLab's diff is its `/diffs` endpoint**, paginated, rebuilt into a unified diff. `/changes` is deprecated, and `glab mr diff` prints for a terminal.
+- **A comment may carry its old-side line** (`InlineComment::old_line`). GitLab anchors an unchanged line by both sides, and 48c's diff map knows both. GitHub needs only the new side.
+- **Both forges batch natively**, so `publish_batch`'s serial path ("a forge without one posts one by one, and says so") is the contract's, unexercised today.
+
+**Live, on this machine**, read-only, `gh` 2.101.0 against this repository's own merged pull request #9:
+- the metadata keys the transport reads (`title`, `body`, `user.login`, `state`, `draft`, `merged_at`, `head`/`base` `ref` and `sha`, `html_url`, `updated_at`) are all there;
+- the diff call returns a unified diff (`diff --git`, `index`, `---`, `+++`);
+- an unknown pull request exits 1 saying `gh: Not Found (HTTP 404)`, the not-found rung's words.
+
+Nothing was posted. **Not run: `glab`**, which is not installed here (as the spike measured). Its transport is held by the scripted suite alone.
+
+**Verified.** `lib/scripts/cicd.sh --test`: all 3362 tests pass, with the one test skipped where it always is. The build is warning-free, the format clean, and `harness.layering` and `harness.layer_context` hold the new module's row, card and table.
