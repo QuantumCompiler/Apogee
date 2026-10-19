@@ -120,13 +120,20 @@ void note_store(const models::StoreRoots& roots, NameList& list) {
         list.notes[models::weights_handle(stored.model, models::kMlxFormat, stored.id)] = {
             .group = "MLX", .description = "an MLX directory"};
     }
+    for (const models::StoredPipeline& stored : models::list_store_pipelines(roots)) {
+        list.notes.try_emplace(stored.model, CandidateNote{.group = "Pipelines"});
+        list.notes[models::weights_handle(stored.model, models::kPipelineFormat, stored.id)] = {
+            .group = "Pipelines", .description = "a diffusion pipeline"};
+    }
 }
 
 /// Models in the store, and each set of their weights by handle
 /// (`<model>/<format>/<id>`), for the formats asked -- by format, then name
-/// (45a), the formats in `models list`'s order: SafeTensors, GGUF, MLX.
+/// (45a), the formats in `models list`'s order: SafeTensors, GGUF, MLX,
+/// pipelines (49a).
 [[nodiscard]] std::vector<std::string> stored_models(const models::StoreRoots& roots, bool ggufs,
-                                                     bool snapshots, bool mlx = false) {
+                                                     bool snapshots, bool mlx = false,
+                                                     bool pipelines = false) {
     std::vector<std::string> out;
     if (snapshots) {
         std::vector<std::pair<std::string, std::string>> found;
@@ -150,6 +157,14 @@ void note_store(const models::StoreRoots& roots, NameList& list) {
         for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
             found.emplace_back(stored.model,
                                models::weights_handle(stored.model, models::kMlxFormat, stored.id));
+        }
+        push_format(out, std::move(found));
+    }
+    if (pipelines) {
+        std::vector<std::pair<std::string, std::string>> found;
+        for (const models::StoredPipeline& stored : models::list_store_pipelines(roots)) {
+            found.emplace_back(stored.model, models::weights_handle(
+                                                 stored.model, models::kPipelineFormat, stored.id));
         }
         push_format(out, std::move(found));
     }
@@ -423,7 +438,7 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         }
         list.paths = true;
     } else if (kind == kModelValue) {
-        list.names = stored_models(store_roots(config), true, true, true);
+        list.names = stored_models(store_roots(config), true, true, true, true);
         list.none = "the model store is empty -- 'apogee models pull'";
         list.as_listed = true;  // by format, then name (45a)
         note_store(store_roots(config), list);
@@ -446,7 +461,7 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         // The configured first, then the store's weights by format (45a).
         list.names = config.backend_names();
         order_names(list.names);
-        for (const std::string& name : stored_models(store_roots(config), true, true, true)) {
+        for (const std::string& name : stored_models(store_roots(config), true, true, true, true)) {
             if (name.find('/') != std::string::npos) {
                 list.names.push_back(name);  // a handle; a bare model name is no weights
             }
@@ -470,7 +485,7 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
             }
         }
         order_names(list.names);
-        for (std::string& name : stored_models(roots, true, true, true)) {
+        for (std::string& name : stored_models(roots, true, true, true, true)) {
             list.names.push_back(std::move(name));
         }
         list.none = "the model store is empty -- 'apogee models pull'";

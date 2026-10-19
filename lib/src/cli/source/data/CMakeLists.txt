@@ -79,6 +79,8 @@ apogee_add_module(modelstore
     modelstore/footprint.cpp
     modelstore/mlx_info.h
     modelstore/mlx_info.cpp
+    modelstore/pipeline_info.h
+    modelstore/pipeline_info.cpp
     modelstore/sidecar.h
     modelstore/sidecar.cpp
     modelstore/snapshot.h

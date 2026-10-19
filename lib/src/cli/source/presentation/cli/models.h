@@ -84,6 +84,11 @@ struct ModelRow {
     std::string format;
     std::string quant;
     std::string window;
+    /// For a diffusion pipeline (49a): its components counted and its size
+    /// on disk, in bytes -- what it costs the disk, said as a number. Zero
+    /// for every other row, and then not in the JSON.
+    std::size_t components = 0;
+    std::uintmax_t bytes = 0;
 
     /// A `backends:` entry, rather than something on disk no backend points at.
     bool configured = false;
@@ -165,12 +170,14 @@ struct ModelGroup {
     /// `cloud` or `local`.
     std::string section;
     /// The table's stable id: a provider's backend type (`claude-cli`,
-    /// `anthropic`), or `safetensors`, `gguf`, `mlx`, `ollama-cli`, `other`.
+    /// `anthropic`), or `safetensors`, `gguf`, `mlx`, `pipeline`,
+    /// `ollama-cli`, `other`.
     std::string id;
     /// Its heading: the provider's label (`Claude CLI`), or the format's.
     std::string title;
     /// Its place: cloud before local, providers in the provider table's
-    /// order, then SafeTensors, GGUF, MLX, the Ollama CLI, anything else.
+    /// order, then SafeTensors, GGUF, MLX, pipelines, the Ollama CLI,
+    /// anything else.
     std::size_t order = 0;
 };
 

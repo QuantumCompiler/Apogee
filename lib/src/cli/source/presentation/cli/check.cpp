@@ -48,6 +48,7 @@
 #include "modelstore/gguf_inspect.h"
 #include "modelstore/kv_cache.h"
 #include "modelstore/mlx_info.h"
+#include "modelstore/pipeline_info.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
 #include "operations/code_exec_server.h"
@@ -782,7 +783,8 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
     const std::vector<models::StoredGguf> ggufs = models::list_store_ggufs(roots);
     const std::vector<models::StoredSnapshot> snapshots = models::list_store_snapshots(roots);
     const std::vector<models::StoredMlx> mlx = models::list_store_mlx(roots);
-    const std::size_t total = ggufs.size() + snapshots.size() + mlx.size();
+    const std::vector<models::StoredPipeline> pipelines = models::list_store_pipelines(roots);
+    const std::size_t total = ggufs.size() + snapshots.size() + mlx.size() + pipelines.size();
     std::size_t read = 0;
     for (const models::StoredGguf& stored : ggufs) {
         ++found;
@@ -830,6 +832,23 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
             add(report, Status::Ok, "Models", name,
                 (info.model_type.empty() ? std::string{} : info.model_type + ", ") + "MLX, " +
                     info.quantization.describe() + ", files whole");
+        }
+    }
+    // A diffusion pipeline the same way: every component the index names
+    // there with what its kind needs, every shard within its file (49a).
+    for (const models::StoredPipeline& stored : pipelines) {
+        ++found;
+        const std::string name =
+            models::weights_handle(stored.model, models::kPipelineFormat, stored.id);
+        say(inputs, "checking models: " + name, ++read, total);
+        const models::PipelineInfo info = models::read_pipeline_info(stored.dir);
+        if (!info.complete) {
+            add(report, Status::Fail, "Models", name, "pipeline that " + info.problem,
+                "apogee models repair " + name);
+        } else {
+            add(report, Status::Ok, "Models", name,
+                info.class_name + ", " + std::to_string(info.components.size()) +
+                    " components, files whole");
         }
     }
 

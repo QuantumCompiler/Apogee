@@ -31,6 +31,7 @@
 #include "modelstore/gguf_inspect.h"
 #include "modelstore/kv_cache.h"
 #include "modelstore/mlx_info.h"
+#include "modelstore/pipeline_info.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
@@ -331,6 +332,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
     std::vector<models::RecordedGguf> recorded_ggufs;
     std::vector<models::RecordedSnapshot> stored_snapshots;
     std::vector<models::StoredMlx> stored_mlx;
+    std::vector<models::StoredPipeline> stored_pipelines;
     if (!models_dir.empty()) {
         for (models::StoredGguf& stored : models::list_store_ggufs(roots)) {
             recorded_ggufs.push_back({.stored = std::move(stored), .record = std::nullopt});
@@ -339,6 +341,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
             stored_snapshots.push_back({.stored = std::move(stored), .record = std::nullopt});
         }
         stored_mlx = models::list_store_mlx(roots);
+        stored_pipelines = models::list_store_pipelines(roots);
     }
     // The SafeTensors sets `convert --mlx` made an MLX model of, by handle --
     // a conversion consumes its source as a GGUF's does (27b).
@@ -373,7 +376,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
 
     std::vector<GgufRow> gguf_rows;
     std::vector<std::pair<std::size_t, std::filesystem::path>> snapshot_rows;
-    std::size_t reads = stored_ggufs.size() + stored_snapshots.size();
+    std::size_t reads = stored_ggufs.size() + stored_snapshots.size() + stored_pipelines.size();
     for (const models::StoredMlx& stored : stored_mlx) {
         reads += is_configured(stored.dir) ? 0U : 1U;
     }
@@ -647,6 +650,33 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
             rows.push_back(std::move(row));
         }
 
+        // Diffusion pipelines (49a) -- what video generation runs, no backend
+        // over them -- listed whole with their class, their components and
+        // what they cost the disk, or said why one cannot load.
+        for (const models::StoredPipeline& stored : stored_pipelines) {
+            reading("reading pipelines: ", stored.model);
+            ModelRow row;
+            row.backend = "(not configured)";
+            row.type = "-";
+            row.model = models::weights_handle(stored.model, models::kPipelineFormat, stored.id);
+            row.format = std::string{models::kPipelineFormat};
+            const std::optional<models::Snapshot> record = models::load_snapshot(stored.dir);
+            row.provenance =
+                record.has_value() && !record->source.empty() ? record->source : "local";
+            const models::PipelineInfo info = models::read_pipeline_info(stored.dir);
+            row.architecture = info.class_name.empty() ? "-" : info.class_name;
+            row.profile = "-";
+            row.state = info.complete ? "pipeline" : "cannot load";
+            row.verified = record.has_value()
+                               ? std::to_string(record->files.size()) + " file(s) on record"
+                               : "no record";
+            row.components = info.components.size();
+            row.bytes = info.bytes;
+            row.attention = !info.complete;
+            row.note = info.complete ? pipeline_summary(info) : info.problem;
+            rows.push_back(std::move(row));
+        }
+
         // The flat layout this one replaced: shown, never used in place.
         const models::LegacyLayout legacy = models::find_legacy(roots);
         for (const models::LegacyGguf& gguf : legacy.ggufs) {
@@ -747,6 +777,9 @@ ModelGroup model_group(const ModelRow& row) {
     if (row.format == models::kMlxFormat || type == harness::BackendType::Mlx) {
         return local("mlx", "MLX", kLocal + 2);
     }
+    if (row.format == models::kPipelineFormat) {
+        return local("pipeline", "Pipelines", kLocal + 3);
+    }
     // A provider by its row in the providers' table -- any number of them,
     // in that table's order. The Ollama CLI runs models on this machine.
     if (type.has_value()) {
@@ -755,7 +788,7 @@ ModelGroup model_group(const ModelRow& row) {
             std::string id{harness::to_string(*type)};
             std::string title{facts->label};
             if (*type == harness::BackendType::OllamaCli) {
-                return local(std::move(id), std::move(title), kLocal + 3);
+                return local(std::move(id), std::move(title), kLocal + 4);
             }
             return ModelGroup{
                 .section = "cloud",
@@ -764,7 +797,7 @@ ModelGroup model_group(const ModelRow& row) {
                 .order = static_cast<std::size_t>(facts - backends::provider_table().data())};
         }
     }
-    return local("other", "Other", kLocal + 4);
+    return local("other", "Other", kLocal + 5);
 }
 
 std::string render_model_table(const std::vector<ModelRow>& all_rows, const ansi::Style& style,
@@ -921,6 +954,12 @@ nlohmann::json model_row_json(const ModelRow& row) {
         if (!value.empty()) {
             object[key] = value;
         }
+    }
+    if (row.components > 0) {
+        object["components"] = row.components;
+    }
+    if (row.bytes > 0) {
+        object["bytes"] = row.bytes;
     }
     return object;
 }
@@ -1278,6 +1317,59 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     return out.str();
 }
 
+/// `info` on one stored diffusion pipeline (49a): where it came from, its
+/// class, and each component the index names with its kind, its files and
+/// what it weighs -- the directory read whole, or said why it cannot load.
+[[nodiscard]] std::string render_stored_pipeline(const models::StoredPipeline& stored,
+                                                 const models::StoreRoots& roots) {
+    const std::string handle =
+        models::weights_handle(stored.model, models::kPipelineFormat, stored.id);
+    std::ostringstream out;
+    out << "weights:      " << handle << "\n";
+    out << "path:         " << stored.dir.string() << "\n";
+    out << "format:       pipeline -- a diffusion pipeline, taken whole\n";
+    out << "lineage:      " << mlx_origin(models::load_snapshot(stored.dir), roots) << "\n";
+    const models::PipelineInfo info = models::read_pipeline_info(stored.dir);
+    if (info.index_read) {
+        out << "pipeline:     " << (info.class_name.empty() ? "-" : info.class_name)
+            << (info.diffusers_version.empty() ? "" : " (diffusers " + info.diffusers_version + ")")
+            << "\n";
+    }
+    out << "files:        "
+        << (info.complete
+                ? "whole -- model_index.json and " + std::to_string(info.components.size()) +
+                      " component(s), " + std::to_string(info.shard_count()) +
+                      " shard(s), each holding every byte its header lists"
+                : info.problem)
+        << "\n";
+    // The component table, one continuation line each.
+    bool first = true;
+    for (const models::PipelineComponent& component : info.components) {
+        out << (first ? "components:   " : "              ") << component.name << "  "
+            << models::to_string(component.kind) << "  " << component.class_name << "  "
+            << component.files << " file(s)";
+        if (!component.shards.empty()) {
+            out << ", " << component.shards.size() << " shard(s)"
+                << (component.variant.empty() ? "" : " (" + component.variant + ")");
+        }
+        out << ", " << format_progress_size(static_cast<std::int64_t>(component.bytes)) << "\n";
+        first = false;
+    }
+    if (!info.absent.empty()) {
+        std::string names;
+        for (const std::string& name : info.absent) {
+            names += (names.empty() ? "" : ", ") + name;
+        }
+        out << "not shipped:  " << names << " (declared optional by the index)\n";
+    }
+    out << "size:         " << format_progress_size(static_cast<std::int64_t>(info.bytes))
+        << " on disk\n";
+    if (!info.complete) {
+        out << "repair:       apogee models repair " << handle << "\n";
+    }
+    return out.str();
+}
+
 /// `info` on one set of weights in the store, by its handle or id (M4);
 /// empty when `name` names none.
 [[nodiscard]] std::string render_stored_weights(const harness::Config& config,
@@ -1304,6 +1396,15 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
         for (const models::StoredMlx& stored : models::list_store_mlx(roots, target.model)) {
             if (stored.id == target.id) {
                 return render_stored_mlx(config, stored, roots);
+            }
+        }
+        return {};
+    }
+    if (target.format == models::kPipelineFormat) {
+        for (const models::StoredPipeline& stored :
+             models::list_store_pipelines(roots, target.model)) {
+            if (stored.id == target.id) {
+                return render_stored_pipeline(stored, roots);
             }
         }
         return {};
@@ -1740,6 +1841,13 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
                     if (target.format.empty() || target.format == models::kMlxFormat) {
                         sets += "\n  " +
                                 models::weights_handle(stored.model, models::kMlxFormat, stored.id);
+                    }
+                }
+                for (const models::StoredPipeline& stored :
+                     models::list_store_pipelines(roots, target.model)) {
+                    if (target.format.empty() || target.format == models::kPipelineFormat) {
+                        sets += "\n  " + models::weights_handle(stored.model,
+                                                                models::kPipelineFormat, stored.id);
                     }
                 }
                 fail("'" + *info_name + "' is a model -- name one set of its weights:" + sets);

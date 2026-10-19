@@ -153,8 +153,7 @@ std::string stored_model_at(const models::StoreRoots& roots, const std::filesyst
             continue;
         }
         const std::string format = part->string();
-        if (format == models::kGgufFormat || format == models::kSafetensorsFormat ||
-            format == models::kMlxFormat) {
+        if (models::is_store_format(format)) {
             return model;
         }
     }

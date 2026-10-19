@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -19,6 +20,8 @@
 /// <safetensors root>/<model>/safetensors/<id>/     (config.json, shards, apogee-snapshot.json)
 /// <models>/<model>/mlx/<id>/                        (config.json, tokenizer, shards,
 /// apogee-snapshot.json)
+/// <models>/<model>/pipeline/<id>/                   (model_index.json, one directory per
+/// component, apogee-snapshot.json)
 /// ```
 ///
 /// **Declared once, here.** Every command that writes, finds, lists or removes
@@ -45,7 +48,22 @@ inline constexpr std::string_view kSafetensorsFormat = "safetensors";
 /// one, never under `paths.hf_dir`; its id is the SafeTensors rule's, a
 /// digest over every shard's sha256.
 inline constexpr std::string_view kMlxFormat = "mlx";
+/// A diffusion pipeline (49a): a directory whose root carries
+/// `model_index.json` and whose components -- the transformer, the VAE, the
+/// text encoder, the tokenizer, the scheduler -- each sit in a directory of
+/// their own with their own configuration and SafeTensors. Taken whole and
+/// verified before it is committed, as an MLX model is; what `apogee video
+/// generate` runs, so under the models directory; its id the SafeTensors
+/// rule's, a digest over every shard's sha256 across every component.
+inline constexpr std::string_view kPipelineFormat = "pipeline";
 inline constexpr std::size_t kWeightIdLength = 12;
+
+/// Every format, in the order a listing names them -- the one list a verb
+/// walking the store reads.
+[[nodiscard]] std::span<const std::string_view> store_formats() noexcept;
+
+/// Whether `text` names a format of the store.
+[[nodiscard]] bool is_store_format(std::string_view text) noexcept;
 
 /// Where each format's model directories are rooted. SafeTensors sets can be
 /// tens of gigabytes, so `paths.hf_dir` may put them on another disk; GGUFs
@@ -307,6 +325,36 @@ struct StoredDirectory {
 [[nodiscard]] StoredDirectory commit_mlx(const StoreRoots& roots, std::string_view model,
                                          const std::filesystem::path& staging, Snapshot record,
                                          const HashProgress& progress = {});
+
+/// One stored diffusion pipeline (49a): a whole directory, its components
+/// never apart.
+struct StoredPipeline {
+    std::string model;
+    std::string id;
+    std::filesystem::path dir;
+    /// The record's `pulled_at`, when it has a record. For display.
+    std::string arrived;
+};
+
+/// Every stored pipeline, by model then id -- every directory under a
+/// model's `pipeline/`, whole or not, so one that cannot load is listed and
+/// said rather than hidden. `model` narrows to one.
+[[nodiscard]] std::vector<StoredPipeline> list_store_pipelines(const StoreRoots& roots,
+                                                               std::string_view model = {});
+
+/// The stored pipeline whose directory is `dir`, compared as normal paths;
+/// nullopt when none is.
+[[nodiscard]] std::optional<StoredPipeline> stored_pipeline_at(
+    const std::vector<StoredPipeline>& stored, const std::filesystem::path& dir);
+
+/// A pipeline directory just written into `staging` (from `incoming_path`),
+/// committed (49a) by `commit_mlx`'s rule: every file recorded with its size
+/// and sha256, the record written in as `apogee-snapshot.json`, the
+/// directory renamed to the digest over its shards. The caller verifies it
+/// whole first (`read_pipeline_info`).
+[[nodiscard]] StoredDirectory commit_pipeline(const StoreRoots& roots, std::string_view model,
+                                              const std::filesystem::path& staging, Snapshot record,
+                                              const HashProgress& progress = {});
 
 /// Every stored SafeTensors set, by model then id, from both roots (new sets
 /// go under `paths.hf_dir`; ones pulled before it was set stay where they

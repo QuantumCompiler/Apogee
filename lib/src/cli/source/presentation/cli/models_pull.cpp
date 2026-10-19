@@ -34,6 +34,7 @@
 #include "models/source_ollama.h"
 #include "modelstore/gguf_inspect.h"
 #include "modelstore/mlx_info.h"
+#include "modelstore/pipeline_info.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
 #include "operations/renames.h"
@@ -324,6 +325,16 @@ PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& r
     if (!tree.ok) {
         fail(tree.error);
     }
+    // A pipeline's shards sit in its components' directories, and a
+    // snapshot holds a model's at its root: taken as one, it would land
+    // where nothing lists it (49a).
+    if (std::ranges::any_of(tree.files, [](const models::HfFile& file) {
+            return file.path == models::kModelIndex;
+        })) {
+        fail("'" + parsed->repo_id() +
+             "' is a diffusion pipeline (model_index.json at its root) -- pull it without "
+             "--safetensors; it lands whole in the store's pipeline/ format");
+    }
     std::vector<models::HfFile> wanted;
     std::vector<models::SnapshotFile> published;
     bool any_shard = false;
@@ -476,9 +487,16 @@ DeletePlan plan_delete(const models::StoreRoots& roots, std::string_view name) {
             plan.removes.push_back(stored.dir);
         }
     }
-    // An MLX model goes whole -- the directory, never a shard alone (27b).
+    // An MLX model goes whole -- the directory, never a shard alone (27b) --
+    // and so does a pipeline, never one component (49a).
     for (const models::StoredMlx& stored : models::list_store_mlx(roots, target.model)) {
         if ((target.format.empty() || target.format == models::kMlxFormat) &&
+            (target.id.empty() || target.id == stored.id)) {
+            plan.removes.push_back(stored.dir);
+        }
+    }
+    for (const models::StoredPipeline& stored : models::list_store_pipelines(roots, target.model)) {
+        if ((target.format.empty() || target.format == models::kPipelineFormat) &&
             (target.id.empty() || target.id == stored.id)) {
             plan.removes.push_back(stored.dir);
         }
@@ -651,6 +669,12 @@ SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view
                        "' is an MLX model; this reads full-weight SafeTensors weights";
         return choice;
     }
+    if (target.format == models::kPipelineFormat) {
+        choice.error = "'" + std::string{given} +
+                       "' is a diffusion pipeline; this reads a language model's full-weight "
+                       "SafeTensors weights";
+        return choice;
+    }
     const std::string id = !target.id.empty() ? target.id : std::string{from_id};
     if (!id.empty()) {
         const std::filesystem::path dir =
@@ -716,6 +740,10 @@ GgufChoice choose_gguf(const models::StoreRoots& roots, std::string_view given,
         choice.error = "'" + std::string{given} +
                        "' is an MLX model, already quantized for the mlx backend; quantize "
                        "makes smaller GGUFs";
+        return choice;
+    }
+    if (target.format == models::kPipelineFormat) {
+        choice.error = "'" + std::string{given} + "' is a diffusion pipeline; quantize makes GGUFs";
         return choice;
     }
     const std::string id = !target.id.empty() ? target.id : std::string{from_id};
@@ -882,7 +910,7 @@ void print_mlx_backend_hint(const models::StoredMlx& stored) {
 /// Which checks a tree pull ran, never the bare word: a repository that
 /// publishes no digest for a file is said to have published none.
 [[nodiscard]] std::string pull_verification(const models::AcquireTreeResult& result,
-                                            std::size_t shards) {
+                                            std::string_view read_whole) {
     std::size_t sized = 0;
     std::size_t digests = 0;
     for (const models::Sidecar& sidecar : result.sidecars) {
@@ -897,8 +925,7 @@ void print_mlx_backend_hint(const models::StoredMlx& stored) {
     }
     return "verified: " + std::to_string(result.files) + " file(s), " + human_size(result.bytes) +
            " -- " + std::to_string(sized) + " size(s) checked, " + std::to_string(digests) +
-           " against a published sha256" + none + "; config.json, a tokenizer and " +
-           std::to_string(shards) + " shard header(s) read whole";
+           " against a published sha256" + none + "; " + std::string{read_whole};
 }
 
 [[noreturn]] void cancelled_nothing_written(const std::filesystem::path& staging) {
@@ -1020,7 +1047,10 @@ PulledMlx pull_mlx(const std::string& ref, const models::StoreRoots& roots,
     } else {
         std::cout << "\n"
                   << stored.dir.string() << "\n"
-                  << pull_verification(result, pulled.info.shards.size()) << "\n";
+                  << pull_verification(result, "config.json, a tokenizer and " +
+                                                   std::to_string(pulled.info.shards.size()) +
+                                                   " shard header(s) read whole")
+                  << "\n";
     }
     std::cout << "mlx model: " << mlx_summary(pulled.info) << "\n";
     if (!pulled.info.mlx_format) {
@@ -1028,6 +1058,143 @@ PulledMlx pull_mlx(const std::string& ref, const models::StoreRoots& roots,
                      "mlx-lm) -- mlx-lm reads such weights all the same\n";
     }
     print_mlx_backend_hint(stored_at(roots, pulled.model, pulled.dir));
+    return pulled;
+}
+
+std::string pipeline_summary(const models::PipelineInfo& info) {
+    return models::describe(info) + ", " +
+           format_progress_size(static_cast<std::int64_t>(info.bytes));
+}
+
+PulledPipeline pull_pipeline(const std::string& ref, const models::StoreRoots& roots,
+                             backends::HttpClient& client,
+                             const harness::CancellationToken& cancellation) {
+    const std::optional<models::HfRef> parsed = models::parse_hf_ref(ref);
+    if (!parsed.has_value() || !parsed->file.empty()) {
+        fail("'" + ref + "' is not a Hugging Face repository (owner/repo[@revision])");
+    }
+    const std::string token = models::hf_token({});
+    // The index first: it names the directories that are the pipeline, so a
+    // repository that also carries a single-file checkpoint or sample media
+    // does not spend them.
+    const models::HfText index = models::fetch_repo_text(client, *parsed, models::HfRepoKind::Model,
+                                                         models::kModelIndex, token, cancellation);
+    if (!index.ok) {
+        fail(index.error);
+    }
+    const std::vector<std::string> components = models::pipeline_components(index.text);
+    if (components.empty()) {
+        fail("'" + parsed->repo_id() +
+             "' has a model_index.json that names no components -- not a diffusion pipeline");
+    }
+    const models::HfTree tree =
+        models::list_repo_tree(client, *parsed, models::HfRepoKind::Model, token, cancellation);
+    if (!tree.ok) {
+        fail(tree.error);
+    }
+    const std::vector<models::HfFile> wanted = models::pipeline_wanted(tree.files, components);
+    std::vector<models::SnapshotFile> published;
+    std::int64_t total = 0;
+    for (const models::HfFile& file : wanted) {
+        total += file.size;
+        published.push_back({.path = file.path, .size = file.size, .sha256 = file.sha256});
+    }
+    // Refused before a byte moves: a component the index names that the
+    // repository holds nothing for is a pipeline that cannot load.
+    for (const std::string& component : components) {
+        if (std::ranges::none_of(wanted, [&component](const models::HfFile& file) {
+                return file.path.starts_with(component + "/");
+            })) {
+            fail("'" + parsed->repo_id() + "' names the " + component +
+                 " component in model_index.json but holds no " + component +
+                 "/ files -- nothing diffusers can load; nothing was downloaded");
+        }
+    }
+
+    PulledPipeline pulled;
+    pulled.model = models::repo_directory_name(*parsed);
+    // Hugging Face publishes every shard's sha256, so weights already here
+    // are found before a byte moves -- the SafeTensors rule's id.
+    if (const std::string known = models::snapshot_weight_id(published); !known.empty()) {
+        const std::filesystem::path existing =
+            models::weights_dir(roots, models::kPipelineFormat, pulled.model, known);
+        std::error_code code;
+        if (std::filesystem::is_directory(existing, code)) {
+            std::cout << "already here -- these exact weights are at\n  " << existing.string()
+                      << "\n";
+            pulled.dir = existing;
+            pulled.existed = true;
+            pulled.info = models::read_pipeline_info(existing);
+            return pulled;
+        }
+    }
+
+    // Claimed by this process from the moment it is named: an interrupted
+    // pull is a leftover `check` finds and `check --fix` removes.
+    const std::filesystem::path staging =
+        models::incoming_path(roots, models::kPipelineFormat, pulled.model);
+    std::cout << "a diffusion pipeline (" << components.size() << " components): downloading "
+              << wanted.size() << " file(s), " << human_size(total) << ", into "
+              << staging.parent_path().string() << "\n";
+    std::vector<models::TreeItem> items;
+    std::vector<models::SourcePromise> promises;
+    promises.reserve(wanted.size());
+    for (const models::HfFile& file : wanted) {
+        promises.emplace_back();
+        models::TreeItem item;
+        item.relative = file.path;
+        item.source = models::http_source(client, *parsed, models::HfRepoKind::Model, file, token,
+                                          cancellation, promises.back());
+        item.promise = promises.back();
+        items.push_back(std::move(item));
+    }
+    DownloadProgress progress{std::cout, stdout_download_options()};
+    const models::AcquireTreeResult result = models::acquire_tree(
+        staging, items,
+        [&progress](std::size_t index, std::size_t count, std::string_view relative,
+                    std::int64_t written,
+                    std::int64_t size) { progress.file(index, count, relative, written, size); });
+    progress.finish();
+    if (cancellation.stop_requested()) {
+        cancelled_nothing_written(staging);
+    }
+    if (!result.ok) {
+        (void)models::remove_weights(staging);
+        fail(result.error);
+    }
+
+    // The last rung: the files make a pipeline diffusers can load -- the
+    // index, every component it names with what its kind needs, every shard
+    // whole. A repository that is not one lands nothing.
+    pulled.info = models::read_pipeline_info(staging);
+    if (!pulled.info.complete) {
+        (void)models::remove_weights(staging);
+        fail("what '" + parsed->repo_id() + "' holds is not a loadable pipeline -- " +
+             pulled.info.problem + "; nothing was kept");
+    }
+
+    const models::StoredDirectory stored = models::commit_pipeline(
+        roots, pulled.model, staging, pulled_record(*parsed, wanted, result));
+    if (!stored.error.empty()) {
+        (void)models::remove_weights(staging);
+        fail(stored.error);
+    }
+    pulled.dir = stored.dir;
+    pulled.existed = stored.existed;
+    if (stored.existed) {
+        std::cout << "\nalready here -- these exact weights are at\n  " << stored.dir.string()
+                  << "\n";
+    } else {
+        std::cout << "\n"
+                  << stored.dir.string() << "\n"
+                  << pull_verification(result, "model_index.json and " +
+                                                   std::to_string(pulled.info.components.size()) +
+                                                   " component(s) read whole, " +
+                                                   std::to_string(pulled.info.shard_count()) +
+                                                   " shard header(s) among them")
+                  << "\n";
+    }
+    std::cout << "pipeline: " << pipeline_summary(pulled.info) << "\n";
     return pulled;
 }
 
@@ -1964,10 +2131,17 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
             const std::string token = models::hf_token({});
 
             if (hf.file.empty()) {
-                // An MLX model is a directory, pulled whole, when its model
-                // card says it is one and there is no GGUF to prefer (27b).
+                // A diffusion pipeline is a directory, pulled whole, when
+                // its root carries model_index.json (49a); an MLX model is
+                // one when its model card says so and there is no GGUF to
+                // prefer (27b).
                 const models::HfListing listing =
                     models::list_gguf_files(*client, hf, token, cancellation);
+                if (listing.ok && listing.pipeline()) {
+                    const InterruptScope interrupt;
+                    (void)pull_pipeline(ref, roots, *client, InterruptScope::token());
+                    return;
+                }
                 if (listing.ok && listing.gguf_files.empty() && listing.mlx()) {
                     const InterruptScope interrupt;
                     (void)pull_mlx(ref, roots, *client, InterruptScope::token());
@@ -2348,6 +2522,28 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                 const models::MlxInfo info = models::read_mlx_info(stored.dir);
                 std::cout << "files:    "
                           << (info.complete ? "whole -- " + mlx_summary(info) : info.problem)
+                          << "\n";
+            }
+        }
+        // A pipeline the same way, every component's files against the one
+        // record, then read whole (49a).
+        if (target.format.empty() || target.format == models::kPipelineFormat) {
+            for (const models::StoredPipeline& stored :
+                 models::list_store_pipelines(roots, target.model)) {
+                if (!target.id.empty() && target.id != stored.id) {
+                    continue;
+                }
+                std::cout << (any ? "\n" : "") << "pipeline: "
+                          << models::weights_handle(stored.model, models::kPipelineFormat,
+                                                    stored.id)
+                          << "\n";
+                any = true;
+                if (!repair_snapshot_in_place(stored.dir)) {
+                    throw CLI::RuntimeError(1);
+                }
+                const models::PipelineInfo info = models::read_pipeline_info(stored.dir);
+                std::cout << "files:    "
+                          << (info.complete ? "whole -- " + pipeline_summary(info) : info.problem)
                           << "\n";
             }
         }

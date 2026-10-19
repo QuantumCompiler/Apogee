@@ -8318,3 +8318,48 @@ Decisions taken while building, for veto:
 **Verified.** `lib/scripts/cicd.sh --test`: all 3401 tests pass, with the one test skipped where it always is. The build is warning-free and the format clean, and the root help is regenerated for `review`'s summary.
 
 **Not run on real weights**: a sweep is `review mr` runs (48c's real-weights pass above) over listings the scripted forge holds. **Not run live**: `gh`'s listing and owner endpoints, which would read a real organization's repositories, and posting, which would comment on a real pull request.
+
+## Milestone AM — Video generation
+
+**Goal.** Apogee generating video locally (track 49, opened 2026-10-18 from that day's video-generation spike, behind the dated SPEC scope amendment the user approved the same day): diffusion pipelines in the store, a runtime Apogee owns and never links, and one honest verb. The MLX backend's discipline carries over whole: a heavy Python runtime reached through a seeded driver over the one script runner, its packages in the venv Apogee owns, refused by a ladder of file facts each naming its fix. Tests never touch the network or real weights; the reference generation is the user's run.
+
+### 2026-10-19 — `video-store` (backlog item 49a): diffusion pipelines as model directories
+
+**Why.** A video model is a pipeline, not one weights file: a repository whose root carries `model_index.json`, with each component (`transformer/`, `vae/`, `text_encoder/`, the tokenizer, the scheduler) in a directory of its own. The spike found the store refusing one outright: the snapshot rule wants a root `config.json` (`snapshot.cpp:85`).
+
+- [x] **The `pipeline/` format** (`modelstore/store.h`): `<models>/<model>/pipeline/<id>/`, under the models directory beside `gguf/`, `safetensors/` and `mlx/`, with no backend type over it.
+  - The id is the SafeTensors rule's: a digest over every component's shards.
+  - It is listed, committed and named by model, handle, bare id or path like the other formats. MLX's listing and commit became one whole-directory implementation that both formats call.
+  - **One list of formats**: `store_formats()` and `is_store_format`. Every walk of the store reads it, and so does the rename core, which kept its own list before.
+- [x] **The reader** (`modelstore/pipeline_info`), `mlx_info`'s shape and honesty rule: `read_pipeline_info` reads `model_index.json`'s class and version and each component it declares.
+  - A component's kind comes from its class name (scheduler, tokenizer, processor, else a model), and the kind says which file it needs. A model needs its `config.json` and its SafeTensors: every shard its index names present, each shard's header within its file.
+  - `[null, null]` is an optional component the checkpoint does not ship; it is listed as not shipped, never required.
+  - Anything missing is "cannot load", naming the piece: `the vae component (AutoencoderKLWan) is missing -- no vae/ directory`.
+- [x] **The pull**: `models pull <owner>/<repo>` on a repository with `model_index.json` at its root lands it whole (`pull_pipeline`), with no new flag.
+  - The index is read first; only the components it names are downloaded.
+  - A component the index names with no files in the repository is refused before a byte moves.
+  - Each file is checked against the published size and sha256, and the staging directory is read whole before it is committed. A failure or Ctrl-C at any rung leaves nothing behind.
+  - Weights already here are found by the published digests before a byte of weights moves.
+- [x] **Every verb learns it**:
+  - `models list` has a **Pipelines** table: class, components and size in the note, and `components` and `bytes` in the JSON.
+  - `models info` prints the component table: kind, class, files, shards and variant, size.
+  - `delete` and `repair` take a pipeline whole, `check` validates it (a broken one names its repair), and completion offers it.
+  - `convert` and `quantize` refuse one by name. `models rename` moves it with its model's directory.
+- [x] **The tests**, over pipelines built in Wan 2.2 TI2V-5B's layout (`support/pipeline_model.h`, real SafeTensors headers, never real weights):
+  - `pipeline_info_test`: every way a pipeline cannot load;
+  - `store_test`: the row;
+  - `source_hf_test`: detection and selection;
+  - `models_pipeline_test`: the pull against a fixture Hugging Face source through the real HTTP client, every failing rung, the listing, `info`, delete, repair, the convert refusal and rename;
+  - `check_test`: the doctor's rows.
+
+Decisions taken while building, for veto:
+- **The index decides what is pulled.** Only the directories `model_index.json` names are taken, so a repository that also carries a single-file checkpoint at its root (Stable Video Diffusion's 9 GB `svd_xt.safetensors`) or sample media does not spend them. A weights variant (`*.fp16.safetensors`) is left out where the plain weights sit beside it, and kept where it is the only weights; the reader says the variant.
+- **`model_index.json` at the root is the decision**, asked before the MLX model card and before any GGUF. An explicit `owner/repo:file.gguf` stays a file pull.
+- **`--safetensors` on a pipeline repository is refused**, naming the plain pull. The store map found it would otherwise land a directory nothing lists. This refusal has no unit test: `pull_snapshot` builds its own network client.
+- **Components are classified by their class names**, so a scheduler needs only its configuration and a tokenizer only its files. Weights are required of model components alone.
+- **The id ignores configuration files**, as MLX's does, so two pipelines with identical shards and different configurations share a directory.
+- **`models list` gains two numeric JSON fields**, `components` and `bytes`, on pipeline rows only. The change is additive.
+
+**Verified.** `lib/scripts/cicd.sh --test`: all 3416 tests pass. The build is warning-free and the format clean.
+
+**Not run: a live pull.** The reference pipeline, Wan 2.2 TI2V-5B, is the user's to pull (the standing testing rule). The fixture mirrors its layout, and the pull's code is the one a live repository meets.

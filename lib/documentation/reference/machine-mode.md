@@ -713,7 +713,11 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   `state`, `verified`, and `note`, `format`, `quant`, `window` where the row has
   them — the very object each line of `--output-format stream-json` carries
   (which stays, a row per line). A snapshot a conversion consumed is folded as
-  the table folds it, and `folded` counts them.
+  the table folds it, and `folded` counts them. Since 49a a stored diffusion
+  pipeline is a row of its own (`format` and `group` `pipeline`, `state`
+  `pipeline` or `cannot load`, `architecture` its pipeline class) carrying two
+  numbers no other row has: `components`, how many the pipeline's
+  `model_index.json` names, and `bytes`, what it holds on disk.
 - **`models info`** and **`models status`**: their `label: value` record as
   `fields`, in order, each label as printed and a value's indented continuation
   joined to it with a newline. The values are the same words the human view

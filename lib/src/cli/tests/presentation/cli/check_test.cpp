@@ -31,6 +31,7 @@
 #include "support/fake_existence_view.h"
 #include "support/gguf_builder.h"
 #include "support/mlx_model.h"
+#include "support/pipeline_model.h"
 #include "training/python_env.h"
 
 /// The doctor, against a matrix of deliberately broken installs.
@@ -2337,6 +2338,37 @@ TEST_CASE("stored MLX models are validated by their files, and a broken one name
     CHECK_FALSE(std::filesystem::exists(staging));
     CHECK(std::filesystem::exists(broken / "config.json"));
     CHECK(std::filesystem::exists(whole / "model.safetensors"));
+}
+
+TEST_CASE("stored pipelines are validated by their files, and a broken one names its repair",
+          "[commands][check][pipeline][store]") {
+    // 49a: the store's pipeline/ row in the doctor -- every component there
+    // with what its kind needs passes, a component missing fails naming it
+    // with the handle to repair.
+    const Install install;
+    install.seed();
+    const std::filesystem::path whole =
+        install.root / "models" / "Wan-AI--Wan2.2-TI2V-5B-Diffusers" / "pipeline" / "aaaaaaaaaaaa";
+    const std::filesystem::path broken =
+        install.root / "models" / "org--v" / "pipeline" / "bbbbbbbbbbbb";
+    apogee::testing::write_pipeline_model(whole);
+    apogee::testing::write_pipeline_model(broken, {.missing = "vae"});
+    CheckInputs inputs = inputs_for(install);
+    load_into(inputs);
+    const CheckReport report = run_checks(inputs);
+    INFO(render_report(report, false));
+    const apogee::commands::CheckRow* ok =
+        row_with(report, "Wan-AI--Wan2.2-TI2V-5B-Diffusers/pipeline/aaaaaaaaaaaa");
+    REQUIRE(ok != nullptr);
+    CHECK(ok->status == Status::Ok);
+    CHECK(ok->detail == "WanPipeline, 5 components, files whole");
+    const apogee::commands::CheckRow* bad = row_with(report, "org--v/pipeline/bbbbbbbbbbbb");
+    REQUIRE(bad != nullptr);
+    CHECK(bad->status == Status::Fail);
+    CHECK(bad->detail ==
+          "pipeline that cannot load: the vae component (AutoencoderKLWan) is missing -- no vae/ "
+          "directory");
+    CHECK(bad->remedy == "apogee models repair org--v/pipeline/bbbbbbbbbbbb");
 }
 
 TEST_CASE("each suite has a row: its members named, a member at nothing failed",

@@ -36,6 +36,7 @@ add_library(apogee_tests_infrastructure OBJECT
     support/fake_ffmpeg.h
     support/gguf_builder.h
     support/mlx_model.h
+    support/pipeline_model.h
     support/terminal_model.h
     support/terminal_model.cpp
     support/embedding_fixtures.h
@@ -91,6 +92,7 @@ add_library(apogee_tests_data OBJECT
     data/modelstore/kv_cache_test.cpp
     data/modelstore/footprint_test.cpp
     data/modelstore/mlx_info_test.cpp
+    data/modelstore/pipeline_info_test.cpp
     data/contracts/sha256_test.cpp
     data/modelstore/store_test.cpp
     data/modelstore/sidecar_test.cpp
@@ -276,6 +278,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/models_migrate_test.cpp
     presentation/cli/models_convert_test.cpp
     presentation/cli/models_mlx_test.cpp
+    presentation/cli/models_pipeline_test.cpp
     presentation/cli/model_chain_test.cpp
     presentation/cli/complete_sources_test.cpp
     presentation/cli/models_test.cpp

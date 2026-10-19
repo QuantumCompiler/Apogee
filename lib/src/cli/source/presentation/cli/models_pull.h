@@ -12,6 +12,7 @@
 #include "contracts/config.h"
 #include "models/quantize.h"
 #include "modelstore/mlx_info.h"
+#include "modelstore/pipeline_info.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/store.h"
 #include "training/mlx_convert.h"
@@ -172,6 +173,38 @@ struct PulledMlx {
 [[nodiscard]] PulledMlx pull_mlx(const std::string& ref, const models::StoreRoots& roots,
                                  backends::HttpClient& client,
                                  const harness::CancellationToken& cancellation);
+
+// --- diffusion pipelines (49a) --------------------------------------------------------
+
+/// One line for a pipeline: its class, its components, its shards and its
+/// size on disk -- "WanPipeline, 5 components (scheduler, text_encoder,
+/// tokenizer, transformer, vae), 9 shard(s), 21.4 GB". What `pull`, `list`,
+/// `info`, `repair` and `check` all say it as.
+[[nodiscard]] std::string pipeline_summary(const models::PipelineInfo& info);
+
+/// What `models pull` of a diffusion pipeline stored, or found stored.
+struct PulledPipeline {
+    std::string model;
+    std::filesystem::path dir;
+    bool existed = false;
+    models::PipelineInfo info;
+};
+
+/// `models pull <owner>/<repo>` for a repository with `model_index.json` at
+/// its root (`HfListing::pipeline`, 49a): the index read first, then the
+/// files of the components it names (`pipeline_wanted`) through the tree
+/// ladder over `client` -- each checked against the size and sha256 the
+/// repository publishes -- into a staging directory this process claims;
+/// then the directory read as a whole pipeline (`read_pipeline_info`: every
+/// component there with what its kind needs, every shard whole) before it is
+/// committed as `<model>/pipeline/<id>`. A component the index names that
+/// the repository holds nothing for is refused before a byte moves; a
+/// failure at any rung, a cancel (Ctrl-C) included, leaves nothing under an
+/// id and no staging behind. The client is a parameter so a test serves a
+/// fixture source.
+[[nodiscard]] PulledPipeline pull_pipeline(const std::string& ref, const models::StoreRoots& roots,
+                                           backends::HttpClient& client,
+                                           const harness::CancellationToken& cancellation);
 
 /// What `models convert --mlx` stored, or found stored.
 struct ConvertedMlx {

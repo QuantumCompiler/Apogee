@@ -28,12 +28,12 @@ constexpr std::string_view kIncomingPrefix = ".incoming-";
     return name.empty() || name.front() == '.';
 }
 
-[[nodiscard]] bool is_format(std::string_view text) noexcept {
-    return text == kGgufFormat || text == kSafetensorsFormat || text == kMlxFormat;
-}
+constexpr std::array<std::string_view, 4> kFormats{kGgufFormat, kSafetensorsFormat, kMlxFormat,
+                                                   kPipelineFormat};
 
-/// Every format, in the order a listing names them.
-constexpr std::array<std::string_view, 3> kFormats{kGgufFormat, kSafetensorsFormat, kMlxFormat};
+[[nodiscard]] bool is_format(std::string_view text) noexcept {
+    return std::ranges::find(kFormats, text) != kFormats.end();
+}
 
 /// The visible subdirectories of `dir`, sorted.
 [[nodiscard]] std::vector<std::filesystem::path> subdirectories(const std::filesystem::path& dir) {
@@ -460,6 +460,14 @@ std::vector<StoredGguf> stored_ggufs_named(const std::vector<StoredGguf>& ggufs,
     return out;
 }
 
+std::span<const std::string_view> store_formats() noexcept {
+    return kFormats;
+}
+
+bool is_store_format(std::string_view text) noexcept {
+    return is_format(text);
+}
+
 std::string_view backend_type_for_format(std::string_view format) noexcept {
     if (format == kGgufFormat) {
         return "llamacpp";
@@ -470,16 +478,24 @@ std::string_view backend_type_for_format(std::string_view format) noexcept {
     return {};
 }
 
-std::vector<StoredMlx> list_store_mlx(const StoreRoots& roots, std::string_view model) {
-    std::vector<StoredMlx> out;
+namespace {
+
+/// Every directory under each model's `<format>/` in the models root, as a
+/// `Stored` of the format's own kind -- a model taken whole (MLX, a
+/// pipeline), listed whole or not.
+template <typename Stored>
+[[nodiscard]] std::vector<Stored> list_whole_directories(const StoreRoots& roots,
+                                                         std::string_view format,
+                                                         std::string_view model) {
+    std::vector<Stored> out;
     for (const std::filesystem::path& model_path : subdirectories(roots.models)) {
         const std::string name = model_path.filename().string();
         if (!model.empty() && name != model) {
             continue;
         }
         for (const std::filesystem::path& id_dir :
-             subdirectories(model_path / std::string{kMlxFormat})) {
-            StoredMlx stored;
+             subdirectories(model_path / std::string{format})) {
+            Stored stored;
             stored.model = name;
             stored.id = id_dir.filename().string();
             stored.dir = id_dir;
@@ -492,20 +508,42 @@ std::vector<StoredMlx> list_store_mlx(const StoreRoots& roots, std::string_view 
     return out;
 }
 
-std::optional<StoredMlx> stored_mlx_at(const std::vector<StoredMlx>& stored,
-                                       const std::filesystem::path& dir) {
-    // A trailing separator names the same directory.
+/// The one of `stored` whose directory is `dir`; a trailing separator names
+/// the same directory.
+template <typename Stored>
+[[nodiscard]] std::optional<Stored> stored_directory_at(const std::vector<Stored>& stored,
+                                                        const std::filesystem::path& dir) {
     const auto normal = [](const std::filesystem::path& path) {
         const std::filesystem::path out = path.lexically_normal();
         return out.has_filename() ? out : out.parent_path();
     };
     const std::filesystem::path wanted = normal(dir);
-    for (const StoredMlx& candidate : stored) {
+    for (const Stored& candidate : stored) {
         if (normal(candidate.dir) == wanted) {
             return candidate;
         }
     }
     return std::nullopt;
+}
+
+}  // namespace
+
+std::vector<StoredMlx> list_store_mlx(const StoreRoots& roots, std::string_view model) {
+    return list_whole_directories<StoredMlx>(roots, kMlxFormat, model);
+}
+
+std::optional<StoredMlx> stored_mlx_at(const std::vector<StoredMlx>& stored,
+                                       const std::filesystem::path& dir) {
+    return stored_directory_at(stored, dir);
+}
+
+std::vector<StoredPipeline> list_store_pipelines(const StoreRoots& roots, std::string_view model) {
+    return list_whole_directories<StoredPipeline>(roots, kPipelineFormat, model);
+}
+
+std::optional<StoredPipeline> stored_pipeline_at(const std::vector<StoredPipeline>& stored,
+                                                 const std::filesystem::path& dir) {
+    return stored_directory_at(stored, dir);
 }
 
 std::string stored_mlx_name(const StoredMlx& stored) {
@@ -535,9 +573,14 @@ std::vector<StoredMlx> stored_mlx_named(const std::vector<StoredMlx>& stored,
     return out;
 }
 
-StoredDirectory commit_mlx(const StoreRoots& roots, std::string_view model,
-                           const std::filesystem::path& staging, Snapshot record,
-                           const HashProgress& progress) {
+namespace {
+
+/// A directory taken whole, committed under `format` (27b's rule, 49a's
+/// too): every file recorded, the record written in, the directory renamed
+/// to the digest over its shards.
+[[nodiscard]] StoredDirectory commit_whole_directory(
+    const StoreRoots& roots, std::string_view format, std::string_view model,
+    const std::filesystem::path& staging, Snapshot record, const HashProgress& progress) {
     StoredDirectory stored;
     std::error_code code;
     std::vector<std::filesystem::path> files;
@@ -591,11 +634,26 @@ StoredDirectory commit_mlx(const StoreRoots& roots, std::string_view model,
         stored.error = "could not write the record into " + staging.string();
         return stored;
     }
-    const Commit commit = commit_weights(staging, weights_dir(roots, kMlxFormat, model, id));
+    const Commit commit = commit_weights(staging, weights_dir(roots, format, model, id));
     stored.dir = commit.dir;
     stored.existed = commit.existed;
     stored.error = commit.error;
     return stored;
+}
+
+}  // namespace
+
+StoredDirectory commit_mlx(const StoreRoots& roots, std::string_view model,
+                           const std::filesystem::path& staging, Snapshot record,
+                           const HashProgress& progress) {
+    return commit_whole_directory(roots, kMlxFormat, model, staging, std::move(record), progress);
+}
+
+StoredDirectory commit_pipeline(const StoreRoots& roots, std::string_view model,
+                                const std::filesystem::path& staging, Snapshot record,
+                                const HashProgress& progress) {
+    return commit_whole_directory(roots, kPipelineFormat, model, staging, std::move(record),
+                                  progress);
 }
 
 std::vector<StoredSnapshot> list_store_snapshots(const StoreRoots& roots, std::string_view model) {
@@ -797,6 +855,14 @@ StoreTarget resolve_store_target(const StoreRoots& roots, std::string_view given
                                    .format = std::string{kMlxFormat},
                                    .id = mlx.id,
                                    .path = mlx.dir});
+            }
+        }
+        for (const StoredPipeline& pipeline : list_store_pipelines(roots)) {
+            if (pipeline.id == given) {
+                matches.push_back({.model = pipeline.model,
+                                   .format = std::string{kPipelineFormat},
+                                   .id = pipeline.id,
+                                   .path = pipeline.dir});
             }
         }
         if (matches.size() == 1) {
