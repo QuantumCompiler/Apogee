@@ -1,0 +1,154 @@
+#include "video/runtime.h"
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <filesystem>
+#include <fstream>
+#include <random>
+#include <string>
+
+#include "support/env_guard.h"
+#include "support/pipeline_model.h"
+#include "training/python_env.h"
+
+/// The video runtime's ladder (49b), over installs built in the test: every
+/// rung refused with its own reason and its exact fix, in the order they are
+/// asked, from files alone -- nothing imported, nothing spawned.
+namespace {
+
+using apogee::video::VideoHost;
+using apogee::video::VideoReadiness;
+using apogee::video::VideoRefusal;
+
+void write(const std::filesystem::path& path, const std::string& text = {}) {
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream{path, std::ios::binary} << text;
+}
+
+/// An install with everything a generation needs: the environment with
+/// torch and diffusers in it, the driver, a pipeline, ffmpeg.
+struct Install {
+    apogee::testing::TempDir root{"video-runtime-" + std::to_string(std::random_device{}())};
+    VideoHost host = VideoHost::at(root.path());
+    std::filesystem::path site = host.venv / "lib" / "python3.99" / "site-packages";
+    std::filesystem::path pipeline =
+        root.path() / "models" / "org--v" / "pipeline" / "aaaaaaaaaaaa";
+    std::string handle = "org--v/pipeline/aaaaaaaaaaaa";
+
+    Install() {
+        host.ffmpeg = "/usr/bin/ffmpeg";
+        write(apogee::training::PythonEnv{host.venv}.interpreter(), "#!/bin/sh\n");
+        package("torch", "2.9.1");
+        package("diffusers", "0.35.1");
+        write(host.driver, "# the driver\n");
+        apogee::testing::write_pipeline_model(pipeline);
+    }
+
+    void package(const std::string& name, const std::string& version) const {
+        write(site / name / "__init__.py");
+        std::filesystem::create_directories(site / (name + "-" + version + ".dist-info"));
+    }
+
+    [[nodiscard]] VideoReadiness probe() const {
+        return apogee::video::probe_video(host, pipeline, handle);
+    }
+};
+
+}  // namespace
+
+TEST_CASE("an install with every fact is ready, and says what it found",
+          "[video][runtime][ladder]") {
+    const Install install;
+    CHECK(install.host.venv == install.root.path() / "training" / "venv");
+    CHECK(install.host.driver ==
+          install.root.path() / "training" / "scripts" / "video_generate.py");
+    const VideoReadiness ready = install.probe();
+    INFO(ready.message());
+    REQUIRE(ready.ready());
+    CHECK(ready.interpreter == apogee::training::PythonEnv{install.host.venv}.interpreter());
+    CHECK(ready.driver == install.host.driver);
+    CHECK(ready.ffmpeg == "/usr/bin/ffmpeg");
+    CHECK(ready.torch_version == "2.9.1");
+    CHECK(ready.diffusers_version == "0.35.1");
+    // The runtime alone, no pipeline asked about.
+    CHECK(apogee::video::probe_video(install.host).ready());
+}
+
+TEST_CASE("the ladder: every rung refuses with its own reason and its exact fix",
+          "[video][runtime][ladder]") {
+    Install install;
+    const std::string venv = install.host.venv.string();
+    SECTION("no environment") {
+        std::filesystem::remove(apogee::training::PythonEnv{install.host.venv}.interpreter());
+        const VideoReadiness refused = install.probe();
+        CHECK(refused.refusal == VideoRefusal::NoEnvironment);
+        CHECK(refused.message() ==
+              "there is no Python environment at " + venv +
+                  " -- video generation runs diffusers there, never the system Python -- apogee "
+                  "train setup --with video");
+    }
+    SECTION("no torch") {
+        std::filesystem::remove_all(install.site / "torch");
+        const VideoReadiness refused = install.probe();
+        CHECK(refused.refusal == VideoRefusal::NoTorch);
+        CHECK(refused.message() == "torch is not installed in the Python environment at " + venv +
+                                       " -- apogee train setup --with video");
+    }
+    SECTION("no diffusers") {
+        std::filesystem::remove_all(install.site / "diffusers");
+        const VideoReadiness refused = install.probe();
+        CHECK(refused.refusal == VideoRefusal::NoDiffusers);
+        CHECK(refused.message() == "diffusers is not installed in the Python environment at " +
+                                       venv + " -- apogee train setup --with video");
+        CHECK(refused.torch_version == "2.9.1");  // what was found is kept
+    }
+    SECTION("no pipeline there") {
+        std::filesystem::remove_all(install.pipeline);
+        const VideoReadiness refused = install.probe();
+        CHECK(refused.refusal == VideoRefusal::NoPipeline);
+        CHECK(refused.message() ==
+              "there is no pipeline at " + install.pipeline.string() +
+                  " -- apogee models pull <owner>/<repo> (a diffusers repository)");
+    }
+    SECTION("a pipeline that cannot load") {
+        std::filesystem::remove_all(install.pipeline / "vae");
+        const VideoReadiness refused = install.probe();
+        CHECK(refused.refusal == VideoRefusal::NotAPipeline);
+        CHECK(refused.message() ==
+              "org--v/pipeline/aaaaaaaaaaaa cannot load: the vae component (AutoencoderKLWan) is "
+              "missing -- no vae/ directory -- apogee models repair org--v/pipeline/aaaaaaaaaaaa");
+    }
+    SECTION("no driver") {
+        std::filesystem::remove(install.host.driver);
+        const VideoReadiness refused = install.probe();
+        CHECK(refused.refusal == VideoRefusal::NoDriver);
+        CHECK(refused.message() == "the video driver is missing: " + install.host.driver.string() +
+                                       " -- apogee check --fix");
+    }
+    SECTION("no ffmpeg") {
+        install.host.ffmpeg.clear();
+        const VideoReadiness refused = install.probe();
+        CHECK(refused.refusal == VideoRefusal::NoFfmpeg);
+        CHECK(refused.message() ==
+              "the frames are assembled into an mp4 with ffmpeg, which is not on PATH -- install "
+              "ffmpeg");
+    }
+}
+
+TEST_CASE("the ladder asks the environment first, the packages before the pipeline",
+          "[video][runtime][ladder]") {
+    Install install;
+    // Everything missing at once: the first rung is the one said.
+    std::filesystem::remove(install.host.driver);
+    std::filesystem::remove_all(install.pipeline);
+    install.host.ffmpeg.clear();
+    std::filesystem::remove_all(install.site / "diffusers");
+    CHECK(install.probe().refusal == VideoRefusal::NoDiffusers);
+    install.package("diffusers", "0.35.1");
+    CHECK(install.probe().refusal == VideoRefusal::NoPipeline);
+    apogee::testing::write_pipeline_model(install.pipeline);
+    CHECK(install.probe().refusal == VideoRefusal::NoDriver);
+    write(install.host.driver);
+    CHECK(install.probe().refusal == VideoRefusal::NoFfmpeg);
+    CHECK(apogee::video::to_string(VideoRefusal::NotAPipeline) == "cannot load");
+}

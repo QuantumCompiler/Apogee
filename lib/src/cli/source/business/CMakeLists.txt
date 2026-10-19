@@ -320,6 +320,14 @@ apogee_add_module(review
 )
 target_link_libraries(apogee_business_review PUBLIC nlohmann_json::nlohmann_json)
 
+apogee_add_module(video
+    video/runtime.h
+    video/runtime.cpp
+    video/generation.h
+    video/generation.cpp
+)
+target_link_libraries(apogee_business_video PUBLIC nlohmann_json::nlohmann_json)
+
 apogee_add_module(scaffold
     scaffold/mcp_server.h
     scaffold/mcp_server.cpp

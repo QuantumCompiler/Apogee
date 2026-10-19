@@ -127,6 +127,10 @@ std::filesystem::path prompt_cache_dir() {
     return cache_dir() / "prompt";
 }
 
+std::filesystem::path video_work_dir() {
+    return cache_dir() / "video";
+}
+
 std::filesystem::path provider_cache_path() {
     return cache_dir() / "providers.json";
 }

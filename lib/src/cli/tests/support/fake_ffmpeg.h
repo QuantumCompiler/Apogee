@@ -21,9 +21,11 @@ namespace apogee::testing {
 /// - `ffprobe` reports the streams in `streams` and `duration` seconds.
 /// - `ffmpeg` appends its arguments to `log()`, writes a JPEG-named file
 ///   for each time in `frames` with a `showinfo` line on stderr when its
-///   output is a frame pattern, and writes `pcm_bytes` of silence to stdout
-///   when it is `-`. Either way it says something on stderr first. With
-///   `fail` set it says that and exits 1.
+///   output is a frame pattern, writes `pcm_bytes` of silence to stdout
+///   when it is `-`, and writes a file naming its codec when it is an `.mp4`
+///   or a `.png` (49b, 49d). Either way it says something on stderr first.
+///   With `fail` set it says that and exits 1; with `no_x264` set, a run
+///   asking for `libx264` is refused as a build without it refuses one.
 class FakeFfmpeg {
 public:
     explicit FakeFfmpeg(std::string streams = "video audio", std::string duration = "15",
@@ -49,6 +51,10 @@ public:
                    "if [ -f '" +
                    (dir_.path() / "slow").string() +
                    "' ]; then sleep 5; fi\n"
+                   "if [ -f '" +
+                   (dir_.path() / "no_x264").string() +
+                   "' ]; then case \" $* \" in *' libx264 '*) echo \"Unknown encoder "
+                   "'libx264'\" >&2; exit 1 ;; esac; fi\n"
                    "out=''\nfor a in \"$@\"; do out=\"$a\"; done\n"
                    "case \"$out\" in\n"
                    "  *%05d.jpg)\n"
@@ -60,6 +66,11 @@ public:
                    "      echo \"[Parsed_showinfo_2 @ 0x1] n: $((n-1)) pts: 0 pts_time:$t\" >&2\n"
                    "      n=$((n+1))\n"
                    "    done ;;\n"
+                   "  *.mp4) codec=''; prev=''\n"
+                   "    for a in \"$@\"; do [ \"$prev\" = -c:v ] && codec=\"$a\"; prev=\"$a\"; "
+                   "done\n"
+                   "    printf 'MP4 %s' \"$codec\" > \"$out\" ;;\n"
+                   "  *.png) printf 'PNG last frame' > \"$out\" ;;\n"
                    "  -) head -c " +
                    std::to_string(pcm_bytes) + " /dev/zero ;;\n" + "esac\nexit 0\n");
     }
@@ -77,6 +88,11 @@ public:
     /// Makes every ffmpeg run fail from now on.
     void fail() const {
         std::ofstream{dir_.path() / "fail"} << "1";
+    }
+
+    /// Makes a run asking for `libx264` fail as an ffmpeg built without it.
+    void no_x264() const {
+        std::ofstream{dir_.path() / "no_x264"} << "1";
     }
 
     /// Makes every ffmpeg run take five seconds from now on.

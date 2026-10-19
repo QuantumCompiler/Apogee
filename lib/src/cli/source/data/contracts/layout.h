@@ -172,6 +172,13 @@ struct LayoutEntry {
 /// cached prompt.
 [[nodiscard]] std::filesystem::path prompt_cache_dir();
 
+/// `cache/video` -- the throwaway working directories a video generation
+/// writes its request, its frames and its assembled clip into (49b),
+/// `run-<pid>-<random>/` each, removed when the run ends and swept by the
+/// next run when the process that made one is gone. Safe to delete like the
+/// rest of `cache/`; created by the first generation.
+[[nodiscard]] std::filesystem::path video_work_dir();
+
 /// `cache/providers.json` -- what the last provider scan found (28a): each
 /// provider's tier and evidence, the binary fingerprints its version probes
 /// were asked for, and the date each provider last answered a real turn.

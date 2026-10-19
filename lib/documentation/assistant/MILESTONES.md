@@ -8363,3 +8363,45 @@ Decisions taken while building, for veto:
 **Verified.** `lib/scripts/cicd.sh --test`: all 3416 tests pass. The build is warning-free and the format clean.
 
 **Not run: a live pull.** The reference pipeline, Wan 2.2 TI2V-5B, is the user's to pull (the standing testing rule). The fixture mirrors its layout, and the pull's code is the one a live repository meets.
+
+### 2026-10-19 — `video-runtime` (backlog item 49b): diffusers behind the driver discipline
+
+**Why.** Generating video locally means a diffusion pipeline run in Python, torch and diffusers, which the spike found absent from every environment Apogee owns. The house already owned the template: the MLX backend reaches mlx-lm through a seeded driver over the one script runner, never linked, refused by a ladder of file facts.
+
+- [x] **The driver** (`assets/video/video_generate.py`), seeded beside the others under `training/scripts/`, compiled in and byte-identical by test.
+  - It runs one pipeline from the store on a request: device auto (CUDA, MPS, then CPU, as torch reports), the pipeline loaded by the class its index names, local files only.
+  - Image-to-video goes through the pipeline's sibling class over the same components (`WanPipeline` to `WanImageToVideoPipeline`), refused by name when there is none.
+  - The seed runs on a CPU generator, and progress is one `step` record per denoising step. The frames are written as numbered PNGs, with `ready` and `done` records around them.
+  - Before anything is imported, the house's guards are in place: offline, SIGINT ignored, descriptor 1 on stderr.
+- [x] **The request is a JSON file the driver reads** (`video/generation`'s `request_document`), so a prompt is never an argument.
+- [x] **The ladder** (`video/runtime`'s `probe_video`), read from files and refused at its first missing rung with its fix: the environment, torch, diffusers, the pipeline read whole, the driver, ffmpeg. The package probe is `training/python_env`'s new `find_site_package` (either site-packages layout, never an import), with the version from the distribution record.
+- [x] **The `video` requirement set** (torch, diffusers, transformers, accelerate, ftfy, sentencepiece, as floors), installed by `apogee train setup --with video` or on demand (`cli/video_runtime`):
+  - at a terminal the person is asked, with the packages named and the size said, and a yes installs through the environment's own pip;
+  - on a pipe, or on a no, the refusal names `train setup --with video`.
+- [x] **One generation** (`video::generate_video`):
+  - A working directory under `cache/video` (`run-<pid>-<random>`, a new layout accessor). A directory a dead run left is swept first.
+  - The driver runs over the script runner with every event said.
+  - The frames are assembled by `platform::encode_video`: H.264 in `yuv420p`, the index at the front, even sides, and MPEG-4 Part 2 when the ffmpeg has no x264.
+  - The clip is moved to the output. The working directory is removed on every path, and the output is touched only on success.
+- [x] **The doctor**: a **Video** section with `runtime` (a skip naming the set until it is installed, then the versions found) and `driver` (the seeded copy against this build's).
+- [x] **The module's law**: a new business module, `video` (links `training`, `modelstore`, `contracts`, `platform`). It has its row, ADR 0008's table, the business card, and a named rule in `harness.layering`.
+- [x] **The tests**, never real weights:
+  - `video/runtime_test`: the ladder, every rung with its exact fix, in order;
+  - `video/generation_test`: over a scripted driver writing real frame files. Covers the request contract, the events in order, the clip in place, and every way a run ends without one (a crash with its stderr tail, the driver's own refusal, no frames, a failed assembly, a cancel), each leaving an existing output as it was and no working directory. Also the dead run's frames swept;
+  - `video/video_driver_test`: the shipped driver under `python3` over stub `torch` and `diffusers`. Covers the device and type, the call built from the request, each step, every frame, image-to-video, every refusal with its exit code, a stop mid-denoise, a whole generation, and a library's print kept off the protocol;
+  - `ffmpeg_test`: the encode with its fallback;
+  - `cli/video_runtime_test`: the consent;
+  - the asset, environment and doctor suites.
+
+Decisions taken while building, for veto:
+- **Floors, not exact pins.** The document asked for versions pinned in the driver's header, reproducible. The environment's rule is floors, because an exact pin ages into an uninstallable one the day it is yanked. So the set states floors and the driver's header names them, and reproducibility comes from the versions that actually ran: the `ready` line reports them, and the run's document keeps them (49c).
+- **The request is a file, not arguments**: a prompt stays off a process listing and out of Windows' command-line limit, its UTF-8 intact.
+- **No platform rung.** The ladder's facts are the environment, the packages, the pipeline, the driver and ffmpeg. torch runs wherever its wheels install, and the device is torch's to report, said on the `ready` line (the CPU is hours, and 49c says so).
+- **The consent question is new.** The house's mlx-vlm precedent is a refusal naming `train setup --with mlx-vlm`. The document asked for on-demand install with consent, so the environment's own question (`require_python_env`) is asked one level down, and a pipe still refuses.
+- **The seed's noise is drawn on the CPU** whatever the device, so one seed is one clip across devices at the same versions, as far as the denoise itself is deterministic there.
+- **Weights load at bfloat16 on CUDA and MPS, float32 on the CPU.** The VAE is not upcast separately and memory offload is not offered: both are later questions once a real generation measures them.
+- **The no-listener sample and the terminal check move to 49c.** Both drive the binary through a generation, and the binary has no generating path until the verb. The C++ suite holds the stderr capture and the stdout guard here.
+
+**Verified.** `lib/scripts/cicd.sh --test`: all 3438 tests pass. The real-driver cases ran under the host's `python3`, not skipped. The build is warning-free and the format clean, and `harness.layering` and `harness.layer_context` hold the new module's row, card and table.
+
+**Not run on real weights**, by the document's own rule: a genuine Wan 2.2 TI2V-5B generation is the user's run. diffusers is absent on this machine (the spike's measurement), so the driver's calls are written against diffusers' documented pipeline API and exercised only through the stubs. The first real run is where a mismatch would show.

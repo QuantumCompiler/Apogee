@@ -49,6 +49,11 @@ enum class RequirementSet : std::uint8_t {
     /// it (27c). Installed on demand, never with `mlx`: only a vision model
     /// needs it, and without it such a model's images go to the vision role.
     MlxVlm,
+    /// `torch` and `diffusers` with what a diffusion pipeline loads through
+    /// (49b): what `video_generate.py` runs a pipeline on. Installed on
+    /// demand -- asked for at a terminal, named on a pipe -- or by `train
+    /// setup --with video`; several gigabytes, so never with anything else.
+    Video,
 };
 
 [[nodiscard]] std::string_view to_string(RequirementSet set) noexcept;
@@ -108,6 +113,17 @@ private:
     std::filesystem::path dir_;
     CommandRunner runner_;
 };
+
+/// `<venv>`'s installed package `name` -- its directory in the
+/// environment's site-packages (`lib/python*/site-packages/<name>/`, or
+/// `Lib/site-packages/<name>/` on Windows) holding an `__init__.py` -- or
+/// empty. Read from files, never by importing anything (27a's rule).
+[[nodiscard]] std::filesystem::path find_site_package(const std::filesystem::path& venv,
+                                                      std::string_view name);
+
+/// The version a package's distribution record names in its own directory
+/// name -- `diffusers-0.35.1.dist-info` beside `diffusers/` -- or empty.
+[[nodiscard]] std::string installed_package_version(const std::filesystem::path& package);
 
 /// The interpreter an environment is seeded from: `configured` (with `${ENV}`
 /// and `~` expanded) when non-empty, else `python3` then `python` on PATH.

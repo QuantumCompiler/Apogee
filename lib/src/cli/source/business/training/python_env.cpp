@@ -14,7 +14,8 @@
 namespace apogee::training {
 namespace {
 
-constexpr std::array<std::string_view, 5> kSetNames{"prepare", "mlx", "peft", "convert", "mlx-vlm"};
+constexpr std::array<std::string_view, 6> kSetNames{"prepare", "mlx",     "peft",
+                                                    "convert", "mlx-vlm", "video"};
 
 constexpr std::array<std::string_view, 1> kPrepare{"datasets>=3.0"};
 constexpr std::array<std::string_view, 1> kMlx{"mlx-lm>=0.21"};
@@ -33,6 +34,15 @@ constexpr std::array<std::string_view, 5> kPeft{"torch>=2.6", "transformers>=4.4
 constexpr std::array<std::string_view, 6> kConvert{"torch>=2.11",        "transformers>=4.57",
                                                    "gguf>=0.19",         "numpy>=2.2",
                                                    "sentencepiece>=0.2", "protobuf>=4.21"};
+
+// The video driver's stack (49b): a pipeline loads through diffusers, its
+// text encoder and tokenizer through transformers (sentencepiece for the
+// tokenizers that need it), accelerate for the loading, and ftfy for the
+// prompt cleaning Wan's pipelines do. Floors, as every set's are; the
+// versions that ran go into each clip's document.
+constexpr std::array<std::string_view, 6> kVideo{"torch>=2.6",         "diffusers>=0.35",
+                                                 "transformers>=4.46", "accelerate>=1.0",
+                                                 "ftfy>=6.1",          "sentencepiece>=0.2"};
 
 std::string now_rfc3339() {
     const std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
@@ -97,6 +107,8 @@ std::span<const std::string_view> packages_for(RequirementSet set) noexcept {
             return kConvert;
         case RequirementSet::MlxVlm:
             return kMlxVlm;
+        case RequirementSet::Video:
+            return kVideo;
     }
     return {};
 }
@@ -250,6 +262,44 @@ std::filesystem::path locate_base_python(std::string_view configured, std::strin
         }
     }
     error = "no python3 on PATH -- install Python 3, or set training.python in the config";
+    return {};
+}
+
+std::filesystem::path find_site_package(const std::filesystem::path& venv, std::string_view name) {
+    std::error_code code;
+    // Windows keeps one site-packages under `Lib/`; POSIX one per version
+    // under `lib/python3.N/`.
+    const std::filesystem::path windows = venv / "Lib" / "site-packages" / std::string{name};
+    if (std::filesystem::is_regular_file(windows / "__init__.py", code)) {
+        return windows;
+    }
+    const std::filesystem::path lib = venv / "lib";
+    if (!std::filesystem::is_directory(lib, code)) {
+        return {};
+    }
+    for (const auto& entry : std::filesystem::directory_iterator(lib, code)) {
+        if (!entry.path().filename().string().starts_with("python")) {
+            continue;
+        }
+        const std::filesystem::path package = entry.path() / "site-packages" / std::string{name};
+        if (std::filesystem::is_regular_file(package / "__init__.py", code)) {
+            return package;
+        }
+    }
+    return {};
+}
+
+std::string installed_package_version(const std::filesystem::path& package) {
+    const std::string prefix = package.filename().string() + "-";
+    constexpr std::string_view suffix = ".dist-info";
+    std::error_code code;
+    for (const auto& entry : std::filesystem::directory_iterator(package.parent_path(), code)) {
+        const std::string name = entry.path().filename().string();
+        if (name.starts_with(prefix) && name.ends_with(suffix) &&
+            name.size() > prefix.size() + suffix.size()) {
+            return name.substr(prefix.size(), name.size() - prefix.size() - suffix.size());
+        }
+    }
     return {};
 }
 

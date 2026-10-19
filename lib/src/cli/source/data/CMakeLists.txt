@@ -41,6 +41,7 @@ apogee_add_module(contracts
     contracts/assets_converter.cpp
     contracts/assets_mlx.cpp
     contracts/assets_mcp.cpp
+    contracts/assets_video.cpp
     contracts/assets_symphonies.cpp
     contracts/assets_recipes.cpp
     contracts/assets_review_skills.cpp

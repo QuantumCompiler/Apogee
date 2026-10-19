@@ -83,9 +83,10 @@ TEST_CASE("seeding writes absent files only: an edit survives a re-seed",
     // Fourteen agent files (40a), eight kits (42b), three training regimes
     // (42a, 42b), seven symphony starters (27q, 40b), three task recipes
     // (40c), three training drivers, the two mlx drivers, the code-execution
-    // server (47b), seven review skills (48b), the vendored converter.
+    // server (47b), the video driver (49b), seven review skills (48b), the
+    // vendored converter.
     CHECK(first.created.size() == apogee::harness::bundled_files().size());
-    CHECK(first.created.size() == 14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + 7 + 1 +
+    CHECK(first.created.size() == 14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + 1 + 7 + 1 +
                                       apogee::harness::bundled_converter_files().size());
     for (const apogee::harness::BundledSymphony& starter : apogee::harness::bundled_symphonies()) {
         CHECK(read(root.path() / "symphonies" / (std::string{starter.name} + ".yaml")) ==
@@ -336,7 +337,7 @@ TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
     CHECK(apogee::harness::bundled_script_relative_path(script.name) ==
           "training/scripts/prepare_dataset.py");
     CHECK(apogee::harness::bundled_files().size() ==
-          14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + 7 + 1 +
+          14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + 1 + 7 + 1 +
               apogee::harness::bundled_converter_files().size());
 }
 
@@ -430,6 +431,33 @@ TEST_CASE(
     CHECK(apogee::harness::is_unmodified_bundled_asset(root.path(), seeded));
     std::ofstream{seeded, std::ios::binary} << "# my edit\n";
     CHECK(apogee::harness::inspect_seeded_script(root.path(), "code_exec_server.py") ==
+          apogee::harness::SeededScript::Edited);
+    REQUIRE(apogee::harness::seed_data_directory(root.path()).ok());
+    CHECK(read(seeded) == "# my edit\n");
+}
+
+TEST_CASE("the compiled-in video driver byte-matches the shipped file and seeds beside the drivers",
+          "[harness][assets][video]") {
+    // 49b: the drivers' rule -- the file is the source of truth, the literal
+    // never drifts from it, and the seeded copy is the user's once edited.
+    const std::filesystem::path assets{APOGEE_ASSETS_DIR};
+    REQUIRE(apogee::harness::bundled_video_scripts().size() == 1);
+    const apogee::harness::BundledScript& driver = apogee::harness::bundled_video_scripts()[0];
+    CHECK(driver.name == "video_generate.py");
+    CHECK(read(assets / "video" / "video_generate.py") == driver.text);
+    CHECK(apogee::harness::bundled_video_driver_relative_path() ==
+          "training/scripts/video_generate.py");
+
+    const apogee::testing::TempDir root{"assets-video-" + std::to_string(std::random_device{}())};
+    REQUIRE(apogee::harness::seed_data_directory(root.path()).ok());
+    const std::filesystem::path seeded =
+        root.path() / apogee::harness::bundled_video_driver_relative_path();
+    REQUIRE(std::filesystem::exists(seeded));
+    CHECK(read(seeded) == driver.text);
+    CHECK(apogee::harness::inspect_seeded_script(root.path(), "video_generate.py") ==
+          apogee::harness::SeededScript::Current);
+    std::ofstream{seeded, std::ios::binary} << "# my edit\n";
+    CHECK(apogee::harness::inspect_seeded_script(root.path(), "video_generate.py") ==
           apogee::harness::SeededScript::Edited);
     REQUIRE(apogee::harness::seed_data_directory(root.path()).ok());
     CHECK(read(seeded) == "# my edit\n");
@@ -604,7 +632,7 @@ std::filesystem::path seeded_script(const std::filesystem::path& root, std::stri
 std::string bundled_text(std::string_view name) {
     for (const std::span<const apogee::harness::BundledScript> scripts :
          {apogee::harness::bundled_training_scripts(), apogee::harness::bundled_mlx_scripts(),
-          apogee::harness::bundled_mcp_scripts()}) {
+          apogee::harness::bundled_mcp_scripts(), apogee::harness::bundled_video_scripts()}) {
         for (const apogee::harness::BundledScript& script : scripts) {
             if (script.name == name) {
                 return std::string{script.text};

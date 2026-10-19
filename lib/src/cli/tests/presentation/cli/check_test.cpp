@@ -2340,6 +2340,52 @@ TEST_CASE("stored MLX models are validated by their files, and a broken one name
     CHECK(std::filesystem::exists(whole / "model.safetensors"));
 }
 
+TEST_CASE("the video runtime is a skip until set up, then its packages and driver are said",
+          "[commands][check][video]") {
+    // 49b: torch and diffusers read from their files, never imported; the
+    // seeded driver against its compiled-in copy.
+    const Install install;
+    install.seed();
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    load_into(inputs);
+    const auto video_row = [](const CheckReport& report, std::string_view name) {
+        for (const apogee::commands::CheckRow& row : report.rows) {
+            if (row.section == "Video" && row.name == name) {
+                return &row;
+            }
+        }
+        return static_cast<const apogee::commands::CheckRow*>(nullptr);
+    };
+    const CheckReport fresh = run_checks(inputs);
+    INFO(render_report(fresh, false));
+    const apogee::commands::CheckRow* runtime = video_row(fresh, "runtime");
+    REQUIRE(runtime != nullptr);
+    CHECK(runtime->status == Status::Skipped);
+    CHECK(runtime->detail.starts_with("not set up -- there is no Python environment at "));
+    CHECK(runtime->remedy == "apogee train setup --with video");
+    const apogee::commands::CheckRow* driver = video_row(fresh, "driver");
+    REQUIRE(driver != nullptr);
+    CHECK(driver->status == Status::Ok);
+    CHECK(driver->detail == "video_generate.py matches the shipped copy");
+
+    // Set up: both packages found by their files, their versions said.
+    write_fake_interpreter(install);
+    const std::filesystem::path site =
+        install.root / "training" / "venv" / "lib" / "python3.13" / "site-packages";
+    for (const std::string name : {"torch", "diffusers"}) {
+        std::filesystem::create_directories(site / name);
+        std::ofstream{site / name / "__init__.py"};
+    }
+    std::filesystem::create_directories(site / "diffusers-0.35.1.dist-info");
+    const CheckReport ready = run_checks(inputs);
+    runtime = video_row(ready, "runtime");
+    REQUIRE(runtime != nullptr);
+    CHECK(runtime->detail.starts_with("torch (version unstated) and diffusers 0.35.1 in " +
+                                      (install.root / "training" / "venv").string() +
+                                      " (their files, not imported by check)"));
+}
+
 TEST_CASE("stored pipelines are validated by their files, and a broken one names its repair",
           "[commands][check][pipeline][store]") {
     // 49a: the store's pipeline/ row in the doctor -- every component there

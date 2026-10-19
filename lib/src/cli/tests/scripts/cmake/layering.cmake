@@ -146,7 +146,7 @@ endif()
 # ---- The named rules ------------------------------------------------------------
 
 set(GUARDED_PACKAGES harness agentloop agent secrets tools mcp knowledge graph training tasks
-                     symphony forge review)
+                     symphony forge review video)
 
 set(ALL_SOURCES "")
 foreach(package IN LISTS GUARDED_PACKAGES)
@@ -542,6 +542,31 @@ if(NOT VIOLATIONS STREQUAL "")
     string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
     message(FATAL_ERROR "the review package includes more than its floor:\n${pretty}\n"
                         "review/ may include only contracts/, forge/ and itself.")
+endif()
+
+# `video/` (49b) is the video runtime: diffusers reached through a seeded
+# driver over the training track's one script runner, the pipeline read
+# from the store's files, the frames assembled through the platform's
+# ffmpeg seam. Never a backend, never a surface, never a model call.
+file(GLOB_RECURSE video_sources "${PACKAGE_DIR_video}/*.h" "${PACKAGE_DIR_video}/*.cpp")
+if(video_sources STREQUAL "")
+    message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_video} — "
+                        "this check would pass vacuously")
+endif()
+foreach(source IN LISTS video_sources)
+    file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+    foreach(line IN LISTS project_includes)
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(video|training|modelstore|contracts|platform)/")
+            get_filename_component(name "${source}" NAME)
+            list(APPEND VIOLATIONS "  video/${name} reaches past its floor: ${line}")
+        endif()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "the video package includes more than its floor:\n${pretty}\n"
+                        "video/ may include only training/, modelstore/, contracts/, platform/ "
+                        "and itself.")
 endif()
 
 # The packages A1 carved, each held to the floor it was carved for.

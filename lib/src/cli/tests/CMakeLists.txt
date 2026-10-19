@@ -193,6 +193,9 @@ add_library(apogee_tests_business OBJECT
     business/review/diff_test.cpp
     business/review/engine_test.cpp
     business/review/sweep_test.cpp
+    business/video/runtime_test.cpp
+    business/video/generation_test.cpp
+    business/video/video_driver_test.cpp
     business/scaffold/mcp_server_test.cpp
     business/scaffold/agent_test.cpp
     business/scaffold/symphony_test.cpp
@@ -279,6 +282,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/models_convert_test.cpp
     presentation/cli/models_mlx_test.cpp
     presentation/cli/models_pipeline_test.cpp
+    presentation/cli/video_runtime_test.cpp
     presentation/cli/model_chain_test.cpp
     presentation/cli/complete_sources_test.cpp
     presentation/cli/models_test.cpp

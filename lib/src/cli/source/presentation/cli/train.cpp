@@ -1281,7 +1281,8 @@ void run_train_setup(const harness::Config& config, const SetupRequest& request)
                   << "  apogee train setup --with prepare     # Parquet in 'datasets prepare'\n"
                   << "  apogee train setup --trainer auto     # the trainer stack for this host\n"
                   << "  apogee train setup --with convert     # the GGUF converter, for promote\n"
-                  << "  apogee train setup --with mlx-vlm     # images, for an mlx vision model\n";
+                  << "  apogee train setup --with mlx-vlm     # images, for an mlx vision model\n"
+                  << "  apogee train setup --with video       # torch and diffusers, for video\n";
     }
 }
 

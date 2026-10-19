@@ -68,6 +68,7 @@
 #include "training/store.h"
 #include "training/trainer.h"
 #include "version/version.h"
+#include "video/runtime.h"
 #include "views/download_progress.h"
 
 namespace apogee::commands {
@@ -1784,6 +1785,58 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
     }
 }
 
+/// The video runtime (49b): torch and diffusers in the environment Apogee
+/// owns, read from their files (not set up is a skip naming the set, as the
+/// MLX rows are), and the seeded driver against its compiled-in copy.
+void check_video(CheckReport& report, const CheckInputs& inputs) {
+    const video::VideoHost host = video::VideoHost::at(inputs.home);
+    const video::VideoReadiness ready = video::probe_video(host);
+    switch (ready.refusal) {
+        case video::VideoRefusal::NoEnvironment:
+        case video::VideoRefusal::NoTorch:
+        case video::VideoRefusal::NoDiffusers:
+            add(report, Status::Skipped, "Video", "runtime", "not set up -- " + ready.reason,
+                std::string{video::kVideoSetupRemedy});
+            break;
+        default: {
+            const std::string found =
+                "torch " +
+                (ready.torch_version.empty() ? "(version unstated)" : ready.torch_version) +
+                " and diffusers " +
+                (ready.diffusers_version.empty() ? "(version unstated)" : ready.diffusers_version) +
+                " in " + host.venv.string() + " (their files, not imported by check)";
+            if (ready.refusal == video::VideoRefusal::NoFfmpeg) {
+                add(report, Status::Warn, "Video", "runtime", found + ", but " + ready.reason,
+                    ready.remedy);
+            } else {
+                add(report, Status::Ok, "Video", "runtime", found);
+            }
+            break;
+        }
+    }
+    const std::string script = host.driver.filename().string();
+    switch (harness::inspect_seeded_script(inputs.home, script, inputs.retired_scripts)) {
+        case harness::SeededScript::Missing:
+            add(report, Status::Warn, "Video", "driver",
+                script + " is missing from " + host.driver.parent_path().string(),
+                "apogee check --fix");
+            break;
+        case harness::SeededScript::Current:
+            add(report, Status::Ok, "Video", "driver", script + " matches the shipped copy");
+            break;
+        case harness::SeededScript::Stale:
+            add(report, Status::Warn, "Video", "driver", stale_script_detail(script),
+                "apogee check --fix");
+            break;
+        case harness::SeededScript::Edited:
+            add(report, Status::Warn, "Video", "driver",
+                script +
+                    " differs from the shipped copy -- your edit is kept and runs; delete the file "
+                    "and run 'apogee check --fix' to restore the shipped one");
+            break;
+    }
+}
+
 /// The training track's install: the Python environment (created only on
 /// request, so its absence is a warning with the command that creates it),
 /// every seeded script against its compiled-in copy (a user's edit is kept
@@ -2118,6 +2171,8 @@ CheckReport run_checks(const CheckInputs& inputs) {
     check_training(report, inputs);
     say(inputs, "checking MLX");
     check_mlx(report, inputs);
+    say(inputs, "checking video");
+    check_video(report, inputs);
     say(inputs, "checking the data directory");
     check_filesystem(report, inputs);
     say(inputs, "checking secrets");

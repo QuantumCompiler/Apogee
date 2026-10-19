@@ -82,6 +82,16 @@ struct ExtractedFrame {
                                                          const FfmpegLimits& limits,
                                                          std::string& error);
 
+/// `directory`'s frames -- `f00001.png`, `f00002.png`, … -- assembled into
+/// the mp4 `output` at `fps` frames a second (49b): H.264 in `yuv420p`, the
+/// index at the front so a player starts at once, each side rounded down to
+/// an even number as the format needs; an ffmpeg built without `libx264` is
+/// asked again for MPEG-4 Part 2. The codec used (`h264`, `mpeg4`), or empty
+/// with `error` filled.
+[[nodiscard]] std::string encode_video(const std::filesystem::path& directory, int fps,
+                                       const std::filesystem::path& output,
+                                       const FfmpegLimits& limits, std::string& error);
+
 /// `length` seconds of `file`'s sound from `start` -- to its end when `length`
 /// is 0 -- mixed to mono at `rate` Hz, as a WAV file's bytes. Empty with
 /// `error` filled on failure; a span with no sound in it is empty with none.

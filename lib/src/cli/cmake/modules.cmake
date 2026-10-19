@@ -27,7 +27,7 @@ set(APOGEE_LAYERS infrastructure data business presentation)
 set(APOGEE_LAYER_infrastructure platform events ansi version)
 set(APOGEE_LAYER_data contracts transport modelstore logger secrets embedstore backends)
 set(APOGEE_LAYER_business harness agent agentloop knowledge graph tools mcp models training
-                          tasks symphony scaffold forge review)
+                          tasks symphony scaffold forge review video)
 set(APOGEE_LAYER_presentation markdown render views machine operations httpserver tui cli)
 
 # ---- Infrastructure ---------------------------------------------------------
@@ -60,6 +60,7 @@ set(APOGEE_LINKS_symphony agent agentloop contracts harness)
 set(APOGEE_LINKS_scaffold contracts symphony)
 set(APOGEE_LINKS_forge contracts platform)
 set(APOGEE_LINKS_review contracts forge)
+set(APOGEE_LINKS_video contracts modelstore platform training)
 
 # ---- Presentation -----------------------------------------------------------
 set(APOGEE_LINKS_markdown ansi)
@@ -74,7 +75,7 @@ set(APOGEE_LINKS_tui agentloop ansi contracts markdown operations platform views
 set(APOGEE_LINKS_cli agent agentloop ansi backends contracts embedstore events forge graph
                      harness httpserver knowledge logger machine mcp models modelstore operations
                      platform render review scaffold secrets symphony tasks tools training
-                     transport tui version views)
+                     transport tui version video views)
 
 # ---- The index both enforcers read ------------------------------------------
 # APOGEE_MODULES (every module, lowest layer first), APOGEE_MODULE_LAYER_<m>

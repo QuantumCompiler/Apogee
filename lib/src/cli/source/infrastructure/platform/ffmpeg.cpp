@@ -281,6 +281,44 @@ std::vector<ExtractedFrame> extract_frames(const std::filesystem::path& file,
     return frames;
 }
 
+std::string encode_video(const std::filesystem::path& directory, int fps,
+                         const std::filesystem::path& output, const FfmpegLimits& limits,
+                         std::string& error) {
+    const auto arguments = [&](const std::vector<std::string>& codec) {
+        std::vector<std::string> out{"-nostdin",
+                                     "-hide_banner",
+                                     "-loglevel",
+                                     "error",
+                                     "-y",
+                                     "-framerate",
+                                     std::to_string(fps),
+                                     "-start_number",
+                                     "1",
+                                     "-i",
+                                     (directory / "f%05d.png").string(),
+                                     "-vf",
+                                     "scale=trunc(iw/2)*2:trunc(ih/2)*2"};
+        out.insert(out.end(), codec.begin(), codec.end());
+        out.insert(out.end(), {"-movflags", "+faststart", output.string()});
+        return out;
+    };
+    Run ran = run("ffmpeg", arguments({"-c:v", "libx264", "-pix_fmt", "yuv420p"}), limits);
+    if (ran.error.empty()) {
+        return "h264";
+    }
+    // A build without x264 says so by name; anything else is the failure.
+    if (ran.tail.find("libx264") == std::string::npos) {
+        error = ran.error;
+        return {};
+    }
+    ran = run("ffmpeg", arguments({"-c:v", "mpeg4", "-q:v", "2", "-pix_fmt", "yuv420p"}), limits);
+    if (!ran.error.empty()) {
+        error = ran.error;
+        return {};
+    }
+    return "mpeg4";
+}
+
 std::string decode_audio_wav(const std::filesystem::path& file, int rate, double start,
                              double length, const FfmpegLimits& limits, std::string& error) {
     std::vector<std::string> arguments{"-nostdin", "-hide_banner", "-loglevel", "error"};
