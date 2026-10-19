@@ -1,0 +1,33 @@
+# The video runtime: diffusers behind the house's own driver discipline
+
+**What / why.** Generating video locally means running a diffusion pipeline, and the runtime for that world is Python (`torch` + `diffusers`) — absent from any environment Apogee owns, measured 2026-10-18 (the video-generation spike: `diffusers` not importable; **torch 2.9.1 with MPS available** proven working on the dev machine, so the Apple-silicon story is real, not hoped). The house already owns the whole template for exactly this: the MLX backend (27a–c) — a heavy Python runtime **never linked**, reached through a seeded driver child over the one script runner's JSONL protocol, its packages installed **on demand** into the venv Apogee owns (`mlx-vlm`'s precedent verbatim), refused by a ladder of file facts each naming its fix. This item is that template applied: `diffusers` (and torch where absent) installed on demand into the owned environment; a seeded **`video_generate.py`** driver that loads a pipeline from the store ([`video-store.md`](video-store.md)'s format), takes a prompt and optionally a seed image, reports per-step progress as JSONL events, writes frames, and assembles them to mp4 through the bundled `ffmpeg` seam; cancellation, captured stderr, descriptor hygiene — the mlx driver's discipline whole. Closes the spike's W1 and W2; the user-facing verb is [`video-generate.md`](video-generate.md)'s.
+
+**Core constraint(s).** **Never linked, never system Python**: the driver runs under the environment Apogee owns (the training venv's interpreter), `diffusers` installed on demand with the user told (the `mlx-vlm` flow), and a missing fact — platform, environment, package, pipeline directory, driver — refuses **before any spawn** with its fix named (27a's ladder, verbatim shape). **The driver is a seeded asset**: compiled-in copy via the generators, byte-identity-tested, its own stdout pointed at stderr before imports so a library's print can never reach the protocol channel (the mlx driver's exact guard), stderr a bounded tail folded into failures. **Progress is the one protocol**: JSONL events over the script runner (Milestone Z's), per-step with totals, so [`video-generate.md`](video-generate.md) narrates through 37e's widget with no new plumbing; cancellation ends the child and cleans partial output. **ffmpeg through the seam** (`platform/ffmpeg`, present on the dev machine — measured): frames to mp4 as a captured bounded child, never the pipeline's own muxing. **No listener anywhere**; the lsof check's tree sampling covers a generating turn. Speed honesty: MPS is minutes per clip — the driver's progress events are what make that livable, and nothing pretends otherwise.
+
+**Seam + files.**
+- `lib/src/cli/assets/video/video_generate.py` — the driver: pipeline load (device auto: MPS/CUDA/CPU as torch reports), T2V and I2V entry, per-step JSONL progress, frame output, the stdout→stderr guard; the generator regenerates its compiled-in copy; seeded beside the training drivers (the existing `training/scripts/` row or its own, decided by the layout's same-commit rule).
+- `business/training/` (the script runner, consumed as-is) and `business/video/` or an extension of the environment machinery — the environment probe (`probe_video_runtime`: venv, torch, diffusers, each a file fact), the on-demand install flow with consent (the `mlx-vlm` wording), the driver invocation shape (one argv contract).
+- `platform/ffmpeg` consumed as-is for assembly.
+- Tests: a **scripted fake driver** (the `fake_mlx_driver` idiom) driving the full protocol — progress events ordered, cancellation mid-run cleaning partials, a crashing driver's tail folded, the stdout guard; the refusal ladder's matrix (each missing fact naming its fix, nothing spawned); byte-identity; assembly over a fake ffmpeg. Real-weights verification (a genuine Wan 2.2 TI2V-5B generation) is the user's run, recorded per the standing rules — never a test.
+
+**Reference.** 27a–c — the MLX backend: the ladder, the driver guards, the on-demand install, the one script runner (this item's template, cited per mechanism); Milestone Z — the JSONL progress protocol; 26e/`platform/ffmpeg`; 37e — the widget the progress feeds; the video-generation spike (2026-10-18) for the torch/diffusers measurements.
+
+**Decisions made** (dated):
+- 2026-10-18 — The set lands in v0.1.9 as track 49 (the user's placement call); the SPEC amendment landed first (dated, the user's yes).
+- 2026-10-18 — **The driver is pipeline-generic** (diffusers' own loading), with Wan 2.2 TI2V-5B the reference model for the user's verification run — never auto-downloaded, never in tests (the standing defaults).
+- 2026-10-18 — The runtime extends the environment Apogee already owns rather than creating a second venv — one Python environment, one interpreter rule (torch is already a training dependency there).
+- 2026-10-18 — ComfyUI is the recorded out: it is a listening server, and the never-listens law makes the driver route the only house-shaped one.
+
+**Open calls:**
+- [default: the install-on-demand consent wording and the package pin set (`diffusers` + its minimal deps, versions pinned in the driver's header) at build, the `mlx-vlm` flow's shape.]
+- [default: frames land in a throwaway working directory under the cache rows, cleaned on success and on cancellation; only the assembled mp4 survives at the caller's output path.]
+
+**Guardrail(s).** The fake-driver protocol matrix (order, cancel, crash-tail, stdout guard); the refusal ladder exhaustively, nothing spawned on any refusal; byte-identity of the seeded driver; the lsof tree sample over a fake generating turn; no network, no weights, no real install in any test.
+
+**Acceptance criteria:**
+- [ ] The environment probe refuses with named fixes until the runtime exists; the on-demand install flow brings `diffusers` into the owned venv with consent.
+- [ ] The driver loads a store pipeline, streams per-step progress as JSONL, honors cancellation with cleanup, and assembles mp4 through the ffmpeg seam.
+- [ ] A noisy or crashing driver never touches the terminal; the stdout guard holds; byte-identity green.
+- [ ] The full suite is green with no network and no real weights anywhere.
+
+**Scope note.** Earmarked for v0.1.9; ungated — buildable beside [`video-store.md`](video-store.md) (the fake driver needs no real pipeline). Out of scope: the verb ([`video-generate.md`](video-generate.md)), ComfyUI (recorded out), audio tracks, video training/LoRA.

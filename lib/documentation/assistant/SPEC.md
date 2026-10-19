@@ -6,7 +6,7 @@ The product spec: what Apogee is, what it is for, and the principles that shape 
 
 ## One-liner
 
-**Apogee** is a self-contained, primarily-C++ AI harness that runs local and cloud LLMs from one system — a one-shot completion, an interactive chat, a session opened with a suite of models, or an OpenAI-compatible HTTP server — with cloud access to Anthropic, OpenAI, Google, and Ollama under either a subscription plan (their official CLIs) or an API billing plan, and local inference via llama.cpp (and, opt-in on Apple silicon, MLX).
+**Apogee** is a self-contained, primarily-C++ AI harness that runs local and cloud LLMs from one system — a one-shot completion, an interactive chat, a session opened with a suite of models, or an OpenAI-compatible HTTP server — with cloud access to Anthropic, OpenAI, Google, and Ollama under either a subscription plan (their official CLIs) or an API billing plan, and local inference via llama.cpp (and, opt-in on Apple silicon, MLX). *Widened 2026-10-18 (the user's call, from the video-generation spike — deliberately reopening the image-generation out recorded on track 47 for this half):* the harness also runs **local generative media models** — video generation first (diffusion pipelines behind an owned Python runtime, the MLX backend's never-linked discipline), with image generation expected to ride the same shape later. The LLM invariants carry over whole: no bundled models, no listener, every heavy runtime a captured child.
 
 ## Background
 
