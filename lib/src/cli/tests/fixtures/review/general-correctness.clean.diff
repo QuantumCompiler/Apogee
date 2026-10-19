@@ -1,0 +1,17 @@
+diff --git a/src/stats.py b/src/stats.py
+--- a/src/stats.py
++++ b/src/stats.py
+@@ -1,5 +1,13 @@
+ """Running statistics over a list of readings."""
+ 
+ 
+ def mean(items):
+     return sum(items) / len(items)
++
++
++def tail_total(items, n):
++    """The sum of the last n readings."""
++    total = 0
++    for i in range(max(0, len(items) - n), len(items)):
++        total += items[i]
++    return total

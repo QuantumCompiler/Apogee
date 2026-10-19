@@ -96,6 +96,8 @@ inline constexpr const char* kSymphonyNameValue = "SYMPHONY_NAME";
 inline constexpr const char* kSymphonyEntryValue = "SYMPHONY_ENTRY";
 /// A task recipe (40c): a shipped one, or a file under `recipes/`.
 inline constexpr const char* kRecipeValue = "RECIPE";
+/// A review skill (48b): a shipped one, or a file under `review-skills/`.
+inline constexpr const char* kReviewSkillValue = "REVIEW_SKILL";
 /// A `training.pipelines` entry, or a spec path.
 inline constexpr const char* kPipelineValue = "PIPELINE";
 /// A regime by name -- a `training.regimes` entry, a spec under
@@ -147,7 +149,7 @@ inline constexpr const char* kAllowedHostValue = "ALLOWED_HOST";
 
 /// Every name kind above, for the protocol to recognise and a test to hold
 /// each to a source.
-inline constexpr std::array<std::string_view, 42> kNameValues{kCollectionValue,
+inline constexpr std::array<std::string_view, 43> kNameValues{kCollectionValue,
                                                               kCollectionListValue,
                                                               kGraphValue,
                                                               kNamedGraphValue,
@@ -188,7 +190,8 @@ inline constexpr std::array<std::string_view, 42> kNameValues{kCollectionValue,
                                                               kSymphonyValue,
                                                               kSymphonyNameValue,
                                                               kSymphonyEntryValue,
-                                                              kRecipeValue};
+                                                              kRecipeValue,
+                                                              kReviewSkillValue};
 
 /// `{a,b}`: a set of words, as a type name spells it.
 template <typename Words>

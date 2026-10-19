@@ -1,0 +1,15 @@
+diff --git a/web/components/Comment.tsx b/web/components/Comment.tsx
+--- a/web/components/Comment.tsx
++++ b/web/components/Comment.tsx
+@@ -1,6 +1,9 @@
+ import React from "react";
+ import { CommentData } from "../api/types";
+ 
+-export function Comment({ comment }: { comment: CommentData }) {
+-  return <p className="comment">{comment.body}</p>;
++export function Comment({ comment }: { comment: CommentData }) {
++  // Comments keep their paragraphs.
++  return (
++    <div className="comment">{comment.body}</div>
++  );
+ }

@@ -19,6 +19,7 @@
 #include "contracts/cancellation.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "contracts/review_skill.h"
 #include "knowledge/store.h"
 #include "logger/session.h"
 #include "models/source_ollama.h"
@@ -391,6 +392,12 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
             list.names.push_back(entry.recipe.name);
         }
         list.none = "no recipes -- 'apogee check --fix' seeds the shipped ones";
+    } else if (kind == kReviewSkillValue) {
+        for (const harness::ReviewSkillEntry& entry :
+             harness::review_skill_book(harness::review_skills_dir()).skills) {
+            list.names.push_back(entry.skill.name);
+        }
+        list.none = "no review skills -- 'apogee check --fix' seeds the shipped ones";
     } else if (kind == kSymphonyEntryValue) {
         for (const auto& [name, spec] : config.symphonies) {
             list.names.push_back(name);

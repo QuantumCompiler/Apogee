@@ -1,0 +1,18 @@
+diff --git a/ml/train.py b/ml/train.py
+--- a/ml/train.py
++++ b/ml/train.py
+@@ -1,8 +1,12 @@
+ from sklearn.linear_model import LogisticRegression
+ from sklearn.model_selection import train_test_split
+ from sklearn.preprocessing import StandardScaler
+ 
+ 
+ def fit(X, y):
+-    model = LogisticRegression()
+-    return model.fit(X, y)
++    X_train, X_test, y_train, y_test = train_test_split(
++        X, y, test_size=0.2, random_state=0)
++    scaler = StandardScaler().fit(X_train)
++    model = LogisticRegression().fit(scaler.transform(X_train), y_train)
++    print("test accuracy", model.score(scaler.transform(X_test), y_test))
++    return scaler, model

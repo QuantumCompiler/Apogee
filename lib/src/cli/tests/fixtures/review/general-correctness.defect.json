@@ -1,0 +1,1 @@
+{"findings": [{"severity": "high", "kind": "correctness", "file": "src/stats.py", "location": "11", "claim": "The range stops at len(items) - 1, so the last reading is never added: tail_total returns the sum of n - 1 readings.", "suggested_fix": "Loop over range(len(items) - n, len(items)), or return sum(items[-n:]).", "confidence": "high"}]}

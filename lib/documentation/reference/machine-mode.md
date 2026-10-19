@@ -547,6 +547,26 @@ the template. `problems` names a file under `recipes/` that did not parse. A
 recipe's run is a task run like any other — the same events, ledger and view
 — its ledger carrying the recipe's name as `recipe`.
 
+Since 48b the review skills — the lenses a review runs, each a markdown file —
+read the same way:
+
+```bash
+apogee review skills list --output-format json         # {"object":"list","data":[…],"problems":[…]}
+apogee review skills show <name> --output-format json  # {"object":"review.skill",…}
+```
+
+Each skill is `name`, `description`, `source` (`shipped` — its compiled-in
+text, `seeded` — its file under the data directory's `review-skills/`, as
+shipped, or `user` — a file of the user's, or a shipped one edited), `path`
+(absent for `shipped`), `applies` (`extensions`, `paths` — globs over
+repository paths — and `languages`, the hints that decide which changed files
+a skill applies to) and `everywhere` (no hints: it applies to every file);
+`show` adds `prompt`, the hunt prompt. `problems` names a file under
+`review-skills/` that did not parse. Every skill's answer is held to one
+finding contract, the shipped `code-review` agent's findings: `severity`,
+`kind`, `file`, `location`, `claim`, `suggested_fix`, `confidence`, and an
+empty list a complete answer.
+
 Since 27l the graph navigation verbs are reads of the same kind:
 
 ```bash

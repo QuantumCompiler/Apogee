@@ -298,6 +298,27 @@ struct BundledRecipe {
 /// `recipes/<name>.yaml`, relative to the data directory.
 [[nodiscard]] std::string bundled_recipe_relative_path(std::string_view name);
 
+/// A shipped review skill (48b): one lens a review runs -- a markdown file
+/// with its description and applies-to hints in a front matter and its hunt
+/// prompt below -- compiled in, byte-identical to
+/// `assets/review-skills/<name>.md` by test, and seeded skip-if-present under
+/// `review-skills/`. As a recipe's, the seeded copy is the user's once it
+/// exists, the compiled-in text standing in only while it is absent.
+struct BundledReviewSkill {
+    std::string_view name;
+    std::string_view text;
+};
+
+/// The seven, by name (`assets_review_skills.cpp`, written by
+/// `scripts/generate_review_skill_assets.py`).
+[[nodiscard]] std::span<const BundledReviewSkill> bundled_review_skills() noexcept;
+
+/// The skill `name` (exactly), or nullptr.
+[[nodiscard]] const BundledReviewSkill* find_bundled_review_skill(std::string_view name) noexcept;
+
+/// `review-skills/<name>.md`, relative to the data directory.
+[[nodiscard]] std::string bundled_review_skill_relative_path(std::string_view name);
+
 /// `training/kits/<name>.yaml` and `training/scripts/<name>`, relative to the
 /// data directory -- the paths seeding writes and the commands read.
 [[nodiscard]] std::string bundled_kit_relative_path(std::string_view name);

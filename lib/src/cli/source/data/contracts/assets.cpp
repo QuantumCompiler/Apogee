@@ -146,6 +146,19 @@ std::string bundled_recipe_relative_path(std::string_view name) {
     return "recipes/" + std::string{name} + ".yaml";
 }
 
+const BundledReviewSkill* find_bundled_review_skill(std::string_view name) noexcept {
+    for (const BundledReviewSkill& skill : bundled_review_skills()) {
+        if (skill.name == name) {
+            return &skill;
+        }
+    }
+    return nullptr;
+}
+
+std::string bundled_review_skill_relative_path(std::string_view name) {
+    return "review-skills/" + std::string{name} + ".md";
+}
+
 std::string bundled_script_relative_path(std::string_view name) {
     return "training/scripts/" + std::string{name};
 }
@@ -360,6 +373,9 @@ std::vector<BundledFile> bundled_files() {
     }
     for (const BundledRecipe& recipe : bundled_recipes()) {
         files.push_back({bundled_recipe_relative_path(recipe.name), recipe.text});
+    }
+    for (const BundledReviewSkill& skill : bundled_review_skills()) {
+        files.push_back({bundled_review_skill_relative_path(skill.name), skill.text});
     }
     for (const BundledScript& script : bundled_training_scripts()) {
         files.push_back({bundled_script_relative_path(script.name), script.text});

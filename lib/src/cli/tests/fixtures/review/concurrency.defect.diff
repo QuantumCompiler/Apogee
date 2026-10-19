@@ -1,0 +1,22 @@
+diff --git a/internal/cache/cache.go b/internal/cache/cache.go
+--- a/internal/cache/cache.go
++++ b/internal/cache/cache.go
+@@ -1,8 +1,18 @@
+ package cache
+ 
+ import "sync"
+ 
+ type Cache struct {
+ 	mu      sync.Mutex
+ 	entries map[string][]byte
+ }
++
++// Get is called from every request goroutine.
++func (c *Cache) Get(key string, load func(string) []byte) []byte {
++	if v, ok := c.entries[key]; ok {
++		return v
++	}
++	v := load(key)
++	c.entries[key] = v
++	return v
++}

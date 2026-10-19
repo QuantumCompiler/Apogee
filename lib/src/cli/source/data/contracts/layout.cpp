@@ -14,7 +14,7 @@ namespace {
 /// Order matters only for readability -- `create_directories` handles nesting
 /// -- but keeping it stable keeps `apogee check` output stable, and diffing
 /// two installs is easier when both enumerate in the same order.
-constexpr std::array<LayoutEntry, 18> kDirectories{{
+constexpr std::array<LayoutEntry, 19> kDirectories{{
     // `config` is a row like any other, even though `config_dir()` is the
     // accessor callers use. Leaving it out was the first version, and it
     // immediately produced the bug this whole file exists to prevent: seeding
@@ -60,6 +60,12 @@ constexpr std::array<LayoutEntry, 18> kDirectories{{
     {"recipes",
      "task recipes -- the shipped starters and any of your own, run by name ('apogee task run "
      "--recipe')",
+     false, true},
+    // The shipped review skills seed here, and a skill the user drops beside
+    // them is a lens the review runs by its name too (48b).
+    {"review-skills",
+     "review skills -- the shipped lenses and any of your own, each a markdown file ('apogee "
+     "review skills')",
      false, true},
     {"cache", "downloads and scratch state, safe to delete", false, false},
 }};
@@ -184,6 +190,10 @@ std::filesystem::path symphonies_dir() {
 
 std::filesystem::path recipes_dir() {
     return apogee_home() / "recipes";
+}
+
+std::filesystem::path review_skills_dir() {
+    return apogee_home() / "review-skills";
 }
 
 std::filesystem::path prompts_dir() {

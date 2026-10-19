@@ -83,10 +83,10 @@ TEST_CASE("seeding writes absent files only: an edit survives a re-seed",
     // Fourteen agent files (40a), eight kits (42b), three training regimes
     // (42a, 42b), seven symphony starters (27q, 40b), three task recipes
     // (40c), three training drivers, the two mlx drivers, the code-execution
-    // server (47b), the vendored converter.
+    // server (47b), seven review skills (48b), the vendored converter.
     CHECK(first.created.size() == apogee::harness::bundled_files().size());
     CHECK(first.created.size() ==
-          14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + apogee::harness::bundled_converter_files().size());
+          14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + 7 + apogee::harness::bundled_converter_files().size());
     for (const apogee::harness::BundledSymphony& starter : apogee::harness::bundled_symphonies()) {
         CHECK(read(root.path() / "symphonies" / (std::string{starter.name} + ".yaml")) ==
               starter.text);
@@ -336,7 +336,7 @@ TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
     CHECK(apogee::harness::bundled_script_relative_path(script.name) ==
           "training/scripts/prepare_dataset.py");
     CHECK(apogee::harness::bundled_files().size() ==
-          14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + apogee::harness::bundled_converter_files().size());
+          14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + 7 + apogee::harness::bundled_converter_files().size());
 }
 
 TEST_CASE("the compiled-in mlx drivers byte-match the shipped files and seed beside the trainers",
@@ -369,6 +369,39 @@ TEST_CASE("the compiled-in mlx drivers byte-match the shipped files and seed bes
     CHECK_FALSE(apogee::harness::is_unmodified_bundled_asset(root.path(), seeded));
     REQUIRE(apogee::harness::seed_data_directory(root.path()).ok());
     CHECK(read(seeded) == "# my edit\n");
+}
+
+TEST_CASE("the compiled-in review skills byte-match the shipped files and seed by name",
+          "[harness][assets][review]") {
+    // 48b: the recipes' rule -- every shipped file compiled in byte for
+    // byte, every literal a file, seeded under review-skills/ and the
+    // user's once edited.
+    const std::filesystem::path dir = std::filesystem::path{APOGEE_ASSETS_DIR} / "review-skills";
+    std::size_t files = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+        if (entry.path().extension() == ".md") {
+            ++files;
+            const apogee::harness::BundledReviewSkill* skill =
+                apogee::harness::find_bundled_review_skill(entry.path().stem().string());
+            REQUIRE(skill != nullptr);
+            CHECK(read(entry.path()) == skill->text);
+        }
+    }
+    CHECK(files == apogee::harness::bundled_review_skills().size());
+    CHECK(files == 7);
+    CHECK(apogee::harness::bundled_review_skill_relative_path("front-end") ==
+          "review-skills/front-end.md");
+
+    const apogee::testing::TempDir root{"assets-review-" + std::to_string(std::random_device{}())};
+    REQUIRE(apogee::harness::seed_data_directory(root.path()).ok());
+    const std::filesystem::path seeded = root.path() / "review-skills" / "security.md";
+    REQUIRE(std::filesystem::exists(seeded));
+    CHECK(read(seeded) == apogee::harness::find_bundled_review_skill("security")->text);
+    CHECK(apogee::harness::is_unmodified_bundled_asset(root.path(), seeded));
+    std::ofstream{seeded, std::ios::binary} << "# my lens\n";
+    CHECK_FALSE(apogee::harness::is_unmodified_bundled_asset(root.path(), seeded));
+    REQUIRE(apogee::harness::seed_data_directory(root.path()).ok());
+    CHECK(read(seeded) == "# my lens\n");
 }
 
 TEST_CASE(

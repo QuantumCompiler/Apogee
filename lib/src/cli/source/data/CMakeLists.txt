@@ -43,6 +43,9 @@ apogee_add_module(contracts
     contracts/assets_mcp.cpp
     contracts/assets_symphonies.cpp
     contracts/assets_recipes.cpp
+    contracts/assets_review_skills.cpp
+    contracts/review_skill.h
+    contracts/review_skill.cpp
     contracts/errors.h
     contracts/errors.cpp
     contracts/cancellation.h

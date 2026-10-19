@@ -24,6 +24,7 @@
 #include "cli/models.h"
 #include "cli/providers_cmd.h"
 #include "cli/reset.h"
+#include "cli/review_cmd.h"
 #include "cli/serve_cmd.h"
 #include "cli/symphonies_cmd.h"
 #include "cli/system_cmd.h"
@@ -94,6 +95,7 @@ CommandRegistry default_registry(ShellEntry shell) {
     registry.add(std::make_unique<ModelsCommand>());
     registry.add(std::make_unique<ProvidersCommand>());
     registry.add(std::make_unique<ResetCommand>());
+    registry.add(std::make_unique<ReviewCommand>());
     registry.add(std::make_unique<ServeCommand>());
     registry.add(std::make_unique<SymphoniesCommand>());
     registry.add(std::make_unique<SystemCommand>());

@@ -235,6 +235,10 @@ const std::map<std::string, Classification>& table() {
         // The shipped presets (47c): a read of compiled-in data resolved on
         // this machine; `create --from` is `mcp create`'s twin's `from`.
         {"mcp presets", read_only()},
+        // The review skills (48b): reads of the shipped lenses and the
+        // user's own files, beside `task recipes`.
+        {"review skills list", read_only()},
+        {"review skills show", read_only()},
         {"auth list", read_only()},
         {"embed query", read_only()},
         {"embed list", read_only()},

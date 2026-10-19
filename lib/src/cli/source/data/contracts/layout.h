@@ -154,6 +154,10 @@ struct LayoutEntry {
 /// seeded skip-if-present, and any the user drops beside them, each run by
 /// its file's name (`task run --recipe <name>`).
 [[nodiscard]] std::filesystem::path recipes_dir();
+/// `<APOGEE_HOME>/review-skills` -- review skills (48b): the shipped lenses,
+/// seeded skip-if-present, and any markdown file the user drops beside them,
+/// each run by its file's name.
+[[nodiscard]] std::filesystem::path review_skills_dir();
 [[nodiscard]] std::filesystem::path cache_dir();
 /// `cache/prompt` -- a local model's attention cache kept between processes
 /// (26j): `models/<model>/` holds each model's prefix files (the state after

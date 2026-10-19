@@ -8145,3 +8145,64 @@ Decisions taken while building, for veto:
 Nothing was posted. **Not run: `glab`**, which is not installed here (as the spike measured). Its transport is held by the scripted suite alone.
 
 **Verified.** `lib/scripts/cicd.sh --test`: all 3362 tests pass, with the one test skipped where it always is. The build is warning-free, the format clean, and `harness.layering` and `harness.layer_context` hold the new module's row, card and table.
+
+### 2026-10-18 — `review-skills` (backlog item 48b): local lenses, one finding contract
+
+**Why.** A good automated review is a set of lenses, each hunting one domain's failure modes, selectable per repository and extendable without hosting anything. Apogee already owned the shape: the recipes' source ladder, and the shipped `code-review` agent's finding (severity, kind, file, location, claim, suggested fix, confidence), fields made for inline comments.
+
+- [x] **A skill is a markdown file** (`contracts/review_skill`): a front matter with its `description` and optional `applies` hints, then the hunt prompt.
+  - The hints are `extensions`, `paths` (globs over repository paths: `*` within a segment, `**` across, `?` one character) and `languages` (sixteen named, each standing for its extensions).
+  - One parser refuses, naming the file, anything else: no front matter or an unclosed one, a front matter that is not YAML or holds an unknown key, no description, an extension without its dot, an absolute or climbing glob, an unknown language, an empty prompt, a `name:` that disagrees with the file.
+  - A skill is a prompt, not an agent: no tools, no model, no schema of its own.
+- [x] **Applies, deterministically**: a skill applies to a changed file whose extension it lists (directly or through a language) or whose path matches a glob. A skill with no hints applies everywhere. `ReviewSkillBook::applicable` gives a change's lenses in the book's order, for 48c's plan.
+- [x] **The ladder, the recipes' exactly**:
+  - a file under the new `review-skills/` layout row, run by its name;
+  - over the shipped skill of that name: its seeded file while it is there (`seeded` while it is the shipped bytes, the user's once edited), its compiled-in text while it is not;
+  - a dropped file is a new lens, listed after the shipped ones, and one that does not parse is said and left out.
+
+  The skills are compiled in by `scripts/generate_review_skill_assets.py` and seeded skip-if-present, so install parity learns the row.
+- [x] **The one finding contract** (`review_finding_schema_text()`): `{"findings": [...]}`, each finding the `code-review` agent's, read from that agent's compiled-in schema and never restated. An empty list is a complete answer.
+- [x] **The seven shipped**, each a lens with a short hunt list and the same rules (grounded in the shown lines, nothing judged from code not shown, `kind` is `correctness`), and each carrying the prime directive word for word: *silence is correct*, the empty answer a complete review, a false positive the worse failure.
+  - `general-correctness` and `security` apply everywhere. `security` is the `security-review` agent's substance re-cut to the precision bias.
+  - `front-end` and `back-end` apply by extension and well-known paths.
+  - `embedded` and `ai-ml` apply by paths and a few telling extensions (`.ino`, `.ld`, `.ipynb`), not every `.c` or `.py`.
+  - `concurrency` applies by nine languages.
+- [x] **`apogee review skills list|show`**, the new `review` command's first verbs. `list` gives a row per skill (its source, what it applies to, its description), and `show` gives its hints and prompt whole. Both have `--output-format json` documents (machine-mode.md), and the names complete from the book. The shell classifies `review` runner-covered: the exec line runs it, and a Review view is a recorded later item.
+- [x] **The planted fixtures** (`tests/fixtures/review/`): per skill a defect, its clean twin and the canned answer:
+  - `general-correctness`: an off-by-one range;
+  - `front-end`: user text through `dangerouslySetInnerHTML`;
+  - `back-end`: a delete without the owner check its sibling has;
+  - `embedded`: an ISR-shared counter without `volatile`;
+  - `ai-ml`: a scaler fitted before the split;
+  - `concurrency`: a map written from goroutines without the struct's mutex;
+  - `security`: a request value in a `shell=True` command.
+
+  The hunk headers are well-formed and the canned lines are added ones, ready for 48c's engine goldens.
+- [x] **The tests**:
+  - `contracts/review_skill_test`: the parser's table, the globs, applies, the seven and their directive, the ladder, the contract equal to the agent's finding;
+  - `assets_test`: the files byte for byte, the count, seeding;
+  - `cli/review_cmd_test`: the verbs, the documents, a dropped and an edited skill, the completion, and the goldens: each skill applies to its fixture, its canned answer conforms to the contract (through the structured-output validator) and names an added line, silence conforms, a finding missing a field does not;
+  - the parity tables classifying `review` and its two reads.
+
+Decisions taken while building, for veto:
+- **Front matter, then prompt.** The document named the fields, not the format. YAML between `---` lines is the markdown convention, and the prompt reads naturally below it.
+- **The contract is derived, not copied**: built at runtime from the `code-review` schema's `findings` property, so a change there is a change here. `kind` keeps that schema's two values, and every shipped lens says `correctness`: a review that posts comments has no place for simplification notes, under the precision bias.
+- **"Conservative" hints** read as narrow: `embedded` and `ai-ml` match well-known paths and telling extensions, not every C or Python file. `concurrency` matches its languages, and its prompt answers empty where nothing concurrent changed. 48c's plan narrows further when too many apply.
+- **Skills are told the diff's new-side lines come numbered.** The engine (48c) numbers them, so a `location` is a line a comment can anchor to; the real-weights check below numbered them the same way.
+- **No doctor rows for the seeded skills**, as for recipes: an edited skill is the user's lens, and `review skills list` says which are.
+- **SPEC is untouched here.** The review agent's scope line lands with the engine (48c), when `review mr` exists.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3372 of 3373 pass, with the one test skipped where it always is. The one failure was `cli.bare_help`: the committed root help moved by exactly the new `review` line. It was regenerated, and it and the layout, install-parity and reset checks pass on their own. The build is warning-free and the format clean.
+
+**On real weights**, the sanity check the item asks for: each skill over its planted defect and its clean twin, on one local Q4 model. Google's Gemma4-12B Q4_K_M ran in a scratch home, served once on loopback. Each request carried the skill's prompt with the contract as its output format, and the change came with its new-side lines numbered.
+- **Thinking left on**, the answers ran out of their 1500 tokens before writing JSON in eleven of fourteen calls. The hunt passes want thinking off, a note left for 48c.
+- **Round one** (thinking off, the prompts as first written): all seven planted defects found. Only two clean twins drew silence (`ai-ml`, `back-end`). The others drew a false positive:
+  - React's escaped `{comment.body}` called XSS;
+  - a `volatile` counter called unprotected;
+  - `Path(x).name` called traversal;
+  - a lock held across `load` called a hazard;
+  - a real edge case in the general-correctness twin (`n > len(items)` wrapped the index), which the fixture now guards.
+- **Tightened twice.** Every lens gained a last check: drop a candidate on a line without `+`, drop one the shown code already guards, and judge an unseen call by what the shown lines say. `front-end`, `embedded`, `security` and `concurrency` each gained the one domain fact their false positive missed.
+- **Round three**: all seven defects found, `security`'s answer right but not valid JSON (unescaped quotes, which the engine's grammar-held structured output prevents). Five of seven clean twins drew silence. `concurrency` still calls a lock held across `load` contention, and `embedded` still ignores the twin's `volatile`, both on a 12B Q4. The confirm pass (48c) is the next defense.
+
+**Not run: a cloud model.** It spends money under your key, and this run had nobody to approve that. The cloud half of the sanity check is yours to see.

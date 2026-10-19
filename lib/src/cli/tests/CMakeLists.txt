@@ -55,6 +55,7 @@ add_library(apogee_tests_data OBJECT
     data/contracts/symphony_walk_test.cpp
     data/contracts/host_test.cpp
     data/contracts/server_tools_test.cpp
+    data/contracts/review_skill_test.cpp
     data/contracts/utf8_test.cpp
     data/contracts/todo_test.cpp
     data/contracts/paths_test.cpp
@@ -252,6 +253,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/provider_offer_test.cpp
     presentation/cli/read_documents_test.cpp
     presentation/cli/mcp_presets_cmd_test.cpp
+    presentation/cli/review_cmd_test.cpp
     presentation/cli/system_cmd_test.cpp
     presentation/cli/tui_cmd_test.cpp
     presentation/cli/line_tokens_test.cpp

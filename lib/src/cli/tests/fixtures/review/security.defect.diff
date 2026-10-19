@@ -1,0 +1,17 @@
+diff --git a/app/thumbnails.py b/app/thumbnails.py
+--- a/app/thumbnails.py
++++ b/app/thumbnails.py
+@@ -1,7 +1,11 @@
+ import subprocess
+ 
+ from flask import request
+ 
+ 
+-def make_thumbnail():
+-    pass
++def make_thumbnail():
++    name = request.args["file"]
++    subprocess.run(
++        f"convert uploads/{name} -resize 128x128 thumbs/{name}",
++        shell=True, check=True)
++    return "ok"
