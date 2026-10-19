@@ -74,7 +74,7 @@ Release-agnostic upkeep — polish, performance and ergonomics — claimable at 
 
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
-| M14 | Weights-delete backend cleanup — `models delete` offers removal of the entries it already warns about (ask default-no, `--and-backends` for scripts, the one editor); `check`'s dangling-backend hint names runnable doors | Maintenance | [`weights-delete-backend-cleanup.md`](maintenance/weights-delete-backend-cleanup.md) | 🟢 |
+| M14 | Weights-delete backend cleanup — `models delete` offers removal of the entries it already warns about (ask default-no, `--and-backends` for scripts, the one editor); `check`'s dangling-backend hint names runnable doors | Maintenance | [`weights-delete-backend-cleanup.md`](maintenance/weights-delete-backend-cleanup.md) | 🚧 |
 | M15 | MLX conversion of vendor model_types — `convert --mlx --model-type <t>`: the user's explicit override over an overlay view (snapshot untouched, override in provenance), and the `not supported` failure folds in the door with candidates from mlx-lm's own lists | Maintenance | [`mlx-convert-vendor-model-types.md`](maintenance/mlx-convert-vendor-model-types.md) | 🟢 |
 | M16 | MLX convert-and-register — with `--mlx`, `--register` executes the printed `add-backend --type mlx` line and `--register-with` takes the MLX precisions, one conversion per level, each its own backend; M3's chain honesty whole | Maintenance | [`mlx-convert-register-chain.md`](maintenance/mlx-convert-register-chain.md) | 🟢 |
 
