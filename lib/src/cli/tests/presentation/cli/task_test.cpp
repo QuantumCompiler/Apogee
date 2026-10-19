@@ -1161,6 +1161,10 @@ nlohmann::json comparable(const t::Task& task) {
     for (nlohmann::json& transition : json.at("transitions")) {
         transition.erase("at");
     }
+    for (nlohmann::json& round : json.at("rounds")) {
+        round.erase("started_at");
+        round.erase("ended_at");
+    }
     return json;
 }
 

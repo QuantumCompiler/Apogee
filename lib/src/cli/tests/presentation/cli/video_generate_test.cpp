@@ -694,7 +694,9 @@ TEST_CASE("video generate --lora hands each LoRA to the driver and records its h
     run.ready.peft = true;
     run.ready.peft_version = "0.17.1";
     const std::filesystem::path style = lora(run, "style.safetensors");
-    const std::filesystem::path motion = lora(run, "motion/motion.safetensors");
+    // Spelled with the platform's separator, as the directory walk that finds
+    // the one file returns it: on Windows a joined "motion/..." keeps its '/'.
+    const std::filesystem::path motion = lora(run, "motion/motion.safetensors").lexically_normal();
     run.options.loras = {style.string() + ":0.8", motion.parent_path().string()};
     const VideoGenerateResult result = run.go();
     INFO(result.error);
