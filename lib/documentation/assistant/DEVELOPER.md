@@ -167,7 +167,7 @@ That split is what makes surface parity structural rather than something a revie
 | Layer | Directory | Packages |
 |---|---|---|
 | Presentation | `source/presentation/` | `cli`, `views`, `machine`, `operations`, `httpserver`, `markdown`, `render` |
-| Business | `source/business/` | `harness`, `agentloop`, `agent`, `tools`, `knowledge`, `graph`, `training`, `tasks`, `symphony`, `scaffold`, `models`, `mcp`, `forge`, `review` |
+| Business | `source/business/` | `harness`, `agentloop`, `agent`, `tools`, `knowledge`, `graph`, `training`, `tasks`, `symphony`, `scaffold`, `models`, `mcp`, `forge`, `review`, `video` |
 | Data | `source/data/` | `contracts`, `backends`, `embedstore`, `logger`, `secrets`, `modelstore`, `transport` |
 | Infrastructure | `source/infrastructure/` | `platform`, `ansi`, `events`, `version` |
 

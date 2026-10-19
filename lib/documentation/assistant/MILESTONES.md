@@ -7175,6 +7175,12 @@ The roster test now holds that each reviewed date is a real date.
 
 Both `...Reviewed` dates moved to 2026-10-16.
 
+**Reviewed 2026-10-19, at v0.1.9's pre-merge docs pass**, since that branch touched the backends (47a's server tools) and completion (M15's and M16's name kinds). Both lists were current, and no row changed:
+- Anthropic's models overview still lists the same four current models and nine legacy ones, the thirteen ids carried; Claude Mythos 5.1 is still named only in a pricing note, so it is still not carried.
+- The installed Gemini CLI, still 0.46.0, aliases `pro`, `flash` and `flash-lite` beside `auto`.
+
+Both `...Reviewed` dates moved to 2026-10-19.
+
 ### 2026-10-10 — `models-list-sections` (backlog item 36): cloud by provider, local by format
 
 **Why.** With item 35's rows in place, the user's `models list` was one table of 50 rows: local GGUFs, three vendor CLIs and their sub-models, sorted together by name. Their ask was cloud backends tabled by provider, adaptable to any number of providers and backends, and local backends split by format: SafeTensors, GGUF, then MLX.

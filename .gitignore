@@ -5,6 +5,8 @@ build/
 compile_commands.json
 CMakeUserPresets.json
 .cache/
+# What ctest writes when run outside the build tree.
+Testing/
 
 # Editor and OS noise
 .DS_Store

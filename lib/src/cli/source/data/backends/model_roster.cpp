@@ -39,12 +39,12 @@ struct BuiltInModel {
 
 /// Claude Code prints no model list, so Apogee carries Anthropic's: every
 /// model its models overview listed as current or still available on
-/// 2026-10-16 (platform.claude.com/docs/en/models/overview), by Claude API
+/// 2026-10-19 (platform.claude.com/docs/en/models/overview), by Claude API
 /// id -- the 4.6 generation and later dateless, the 4.5 models by the aliases
 /// the API keeps for their dated snapshots. A new model is a row here, a
 /// retired one a deletion; the CLI hands any id to the API, which is the
 /// judge.
-constexpr std::string_view kClaudeCodeReviewed{"2026-10-16"};
+constexpr std::string_view kClaudeCodeReviewed{"2026-10-19"};
 constexpr std::array kClaudeCodeModels{
     BuiltInModel{"claude-fable-5-1", "Claude Fable 5.1"},
     BuiltInModel{"claude-opus-5-5", "Claude Opus 5.5"},
@@ -65,7 +65,7 @@ constexpr std::array kClaudeCodeModels{
 /// current models itself (`GEMINI_MODEL_ALIAS_*`, Gemini CLI 0.46.0). `auto`
 /// is the CLI with no `--model` at all -- the entry as configured -- so it is
 /// not listed.
-constexpr std::string_view kGeminiCliReviewed{"2026-10-16"};
+constexpr std::string_view kGeminiCliReviewed{"2026-10-19"};
 constexpr std::array kGeminiCliModels{
     BuiltInModel{"pro", "Gemini CLI's pro alias"},
     BuiltInModel{"flash", "Gemini CLI's flash alias"},
