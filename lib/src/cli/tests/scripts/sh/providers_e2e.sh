@@ -85,7 +85,7 @@ grep -q '"offer"' "$APOGEE_HOME/cache/providers.json" && fail "a non-interactive
 grep -q '^registered claude (claude-cli)$' "$WORK_DIR/reg.txt" || fail "claude not registered: $(cat "$WORK_DIR/reg.txt")"
 grep -q '^registered codex (codex-cli)$' "$WORK_DIR/reg.txt" || fail "codex not registered"
 grep -q 'models.default' "$WORK_DIR/reg.txt" && fail "the default was moved off mock"
-"$APOGEE_BIN" config get backends.claude.type </dev/null 2>/dev/null | grep -q claude-cli \
+"$APOGEE_BIN" config get backends.claude.type </dev/null 2>/dev/null | grep claude-cli >/dev/null \
     || grep -q '"type": "claude-cli"' "$CONFIG" || fail "no claude-cli entry in the config"
 head -1 "$CONFIG" | cmp -s - <(head -1 "$WORK_DIR/before.yaml") || fail "the config's head changed"
 cp "$CONFIG" "$WORK_DIR/registered.yaml"
@@ -105,7 +105,7 @@ grep -q "^claude: not registered -- a backend named 'claude' already exists (moc
     || fail "the taken name was not said: $(cat "$WORK_DIR/taken.txt")"
 grep -q '^registered codex (codex-cli)$' "$WORK_DIR/taken.txt" || fail "codex not registered beside it"
 grep -q 'claude-2\|claude_2\|"claude-cli": {' "$CONFIG" && fail "a suffixed name was written"
-grep -A2 '^    "claude": {' "$CONFIG" | grep -q '"type": "mock"' || fail "the existing claude entry was touched"
+grep -A2 '^    "claude": {' "$CONFIG" | grep '"type": "mock"' >/dev/null || fail "the existing claude entry was touched"
 
 # --- no config: a scan still reads, --register refuses ------------------------
 export APOGEE_HOME="$WORK_DIR/none"

@@ -34,8 +34,17 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
 fail() { echo "mlx_models_e2e: $*" >&2; exit 1; }
 
-# The doctor's report wraps long rows; read it joined.
-joined() { perl -0pe 's/\n  (?! )//g' "$1"; }
+# Whether the doctor's report in file $1 holds the text $2, its wrapped rows
+# joined. One process reads the file whole, never a pipe into `grep -q`:
+# under pipefail that fails whenever grep exits before its writer's last
+# write -- the writer killed by SIGPIPE, status 141 -- and once `check`'s
+# report grew past perl's 8 KiB output buffer, that made these checks fail
+# under load with the text right there (2026-10-20).
+report_has() {
+    perl -0ne 'BEGIN { $want = pop @ARGV; $found = 0 }
+        s/\n  (?! )//g; $found ||= index($_, $want) >= 0;
+        END { $? = $found ? 0 : 1 }' "$1" "$2"
+}
 
 no_driver_left() {
     if pgrep -f "$WORK_DIR/training/scripts/mlx_convert.py" >/dev/null 2>&1; then
@@ -90,9 +99,9 @@ grep -q "org--m/mlx/$ID" "$WORK_DIR/list.txt" || fail "list does not show the se
 grep -q "llama, 4-bit (affine, group 64), 32768-token window" "$WORK_DIR/list.txt" \
     || fail "list does not show its quantization and window"
 "$APOGEE_BIN" check --no-color -q >"$WORK_DIR/check.txt" 2>&1
-joined "$WORK_DIR/check.txt" | grep -q "org--m/mlx/$ID  llama, MLX, 4-bit (affine, group 64), files whole" \
+report_has "$WORK_DIR/check.txt" "org--m/mlx/$ID  llama, MLX, 4-bit (affine, group 64), files whole" \
     || fail "check did not read the set whole: $(cat "$WORK_DIR/check.txt")"
-joined "$WORK_DIR/check.txt" | grep -q "mlx_convert.py matches the shipped copy" \
+report_has "$WORK_DIR/check.txt" "mlx_convert.py matches the shipped copy" \
     || fail "check did not report the conversion driver"
 
 # --- a real Ctrl-C mid-conversion: nothing written, nothing left ---------------

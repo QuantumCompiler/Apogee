@@ -22,10 +22,21 @@ public struct ApogeeClient: Sendable {
     private let preferences: Preferences
     private let home: URL
 
-    public init(
-        identity: ClientIdentity, spawner: any ChildSpawner = ProcessSpawner(),
-        preferences: Preferences = .standard(), home: URL = FileManager.default.homeDirectoryForCurrentUser
-    ) {
+    /// The app's client: real processes, the app's own preferences, the
+    /// user's home directory.
+    ///
+    /// Spelled out here rather than as default arguments: Swift compiles a
+    /// public initializer's default arguments into its caller, so defaults
+    /// naming `ProcessSpawner` and `Preferences` would make every caller link
+    /// InfrastructureProcess and DataPreferences -- which `PresentationApp`
+    /// does not, and its link failed for it (2026-10-20).
+    public init(identity: ClientIdentity) {
+        self.init(
+            identity: identity, spawner: ProcessSpawner(), preferences: .standard(),
+            home: FileManager.default.homeDirectoryForCurrentUser)
+    }
+
+    public init(identity: ClientIdentity, spawner: any ChildSpawner, preferences: Preferences, home: URL) {
         self.identity = identity
         self.spawner = spawner
         self.preferences = preferences

@@ -74,3 +74,15 @@ Release-agnostic upkeep — polish, performance and ergonomics — claimable at 
 
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
+
+### v0.2.0
+
+**52, the desktop client's CLI growths**, opened 2026-10-20 (the user's call, from that day's GUI design-completion spike; 52 by the ever-assigned rule). The design's contract board (`lib/design/spec/html/BuildContract.dc.html`) maps all 61 design parts to the machine-mode contract — 29 ready, 13 the app's own, 15 gaps, 4 assumed — and the spike verified it against the installed 0.1.9: every relied-on flag and verb exists, the gaps are real, and two assumed rows resolved into new gaps (no forget-recall command; the model-set JSON an untyped `{name, fields[]}` with no window/cache fields on a safetensors set). Every gap is an **additive** growth (ADR 0006: new fields, events, lines and flags older drivers ignore), each already carrying the app's fallback until it lands, so nothing here gates the GUI queue. The split, by seam, the design's before-v1 recommendation (G1, G8, G9, G11, G12) at the head: **52a** the session's events say more (the permission diff, recall's names, the sources event, each chat's model); **52b** long jobs as event streams (`models pull` and the media verbs under `--output-format stream-json`, a relay of the progress that already exists); **52c** the composer's plan documents (a new-brief `--dry-run`, the edit diff as per-scene `from`/`changes`); **52d** the driver's inbound lines (`detach`, `set`, `compact` + `chats compact`, and `chat --private` — each an existing core's door, ADR 0010 classification where a verb is new); **52e** the doctor and config growths (ffmpeg's encode/filter rows, the allow-listed `config set`, the recall-forget verb, the typed model-set document). No **[user]** call blocks any item.
+
+| # | Item | Version | File | Status |
+|---|---|---|---|---|
+| 52a | Session event fields — the permission question's unified diff, `memory`'s recalled sessions, the `sources` event, `chats list` rows' backend and model; additive, schema-held | v0.2.0 | [`session-event-fields.md`](v0.2.0/session-event-fields.md) | 🟢 |
+| 52b | Jobs as stream-json — `models pull` and the media verbs emit their existing progress as machine events, the final line the verb's own document; default output byte-identical | v0.2.0 | [`jobs-stream-json.md`](v0.2.0/jobs-stream-json.md) | 🟢 |
+| 52c | Compose plan documents — `--dry-run` on a new brief (the plan call alone, priced and said), and the edit dry-run's per-scene `from`/`changes` off 50d's own comparison | v0.2.0 | [`compose-plan-documents.md`](v0.2.0/compose-plan-documents.md) | 🟢 |
+| 52d | Session inbound lines — `detach`, `set`, `compact` (+ `chats compact`) and `chat --private` (never written), each an existing core's door, `capabilities.accepts` announcing | v0.2.0 | [`session-inbound-lines.md`](v0.2.0/session-inbound-lines.md) | 🟢 |
+| 52e | Doctor and config growths — ffmpeg encode/filter rows, allow-listed `config set`, the recall-forget verb, the typed `data` on the model-set document beside unchanged prose | v0.2.0 | [`doctor-config-growths.md`](v0.2.0/doctor-config-growths.md) | 🟢 |

@@ -211,6 +211,16 @@ The release's third track, **names and fields editable** *(track 46, opened 2026
 
 ## In progress
 
+### v0.2.0 — The desktop client's CLI growths
+
+Opened 2026-10-20 (the user's call, from that day's GUI design-completion spike — track **52**): the additive machine-mode growths the desktop app's design needs, each a new field, event, line or flag older drivers ignore (ADR 0006), each with the app's recorded fallback until it lands. The design's contract board mapped all 61 design parts against apogee 0.1.9; the 15 gaps it found plus 2 the spike's probes added are the track. In build order (the design's before-v1 recommendation at the head):
+
+- [ ] **Session event fields** *([52a](../backlog/v0.2.0/session-event-fields.md))* — the fs writers' permission question carries its unified diff (as `fetch_url` carries its URL), `memory` names the recalled sessions, a `sources` event says which excerpts an answer drew on (scores on their retriever's scale), and `chats list` rows gain `backend` and `model`.
+- [ ] **Jobs as stream-json** *([52b](../backlog/v0.2.0/jobs-stream-json.md))* — `models pull`, `video generate`, `video compose` and `voice say` gain `--output-format stream-json`: the progress they already narrate, relayed as machine events (steps, bytes, scenes), the final line the verb's own document; default output byte-identical.
+- [ ] **Compose plan documents** *([52c](../backlog/v0.2.0/compose-plan-documents.md))* — `--dry-run` on a new brief runs the plan call alone (priced and said, nothing rendered), and the edit dry-run's document gains per-scene `from` and `changes` off 50d's own record comparison.
+- [ ] **Session inbound lines** *([52d](../backlog/v0.2.0/session-inbound-lines.md))* — `detach`, `set` and `compact` as driver lines (each an existing core's door), `chats compact <id>`, and `chat --private` (never written, no recall row), `capabilities.accepts` announcing all four.
+- [ ] **Doctor and config growths** *([52e](../backlog/v0.2.0/doctor-config-growths.md))* — `check` rows for ffmpeg's encoders and filters, an allow-listed `config set <key> <value>` through the one editor, a consented recall-forget verb, and a typed `data` object on the model-set document beside its unchanged prose fields.
+
 ### v0.1.9 — Desktop-parity capabilities
 
 Opened 2026-10-16 (the user's call, from that day's built-in-MCP parity spike — track **47**): the capabilities that make Claude Desktop and ChatGPT feel ahead, shipped Apogee's way. The spike's reframe, measured: MCP servers are provider-neutral (the host already translates per vendor; Apogee itself answers the MCP handshake with 17 tools), so the provider-specific work is the vendors' **server-side tools** — and that is wire work in the backends, settled by the user the same day as **allowed, default-off, per entry** (the dated SPEC principle). In build order:

@@ -96,7 +96,7 @@ fi
 SCRIPTS="$(cd "$(dirname "$0")/../../../../../scripts" && pwd)"
 MAKEFILE="$(cd "$(dirname "$0")/../../.." && pwd)/Makefile"
 first_call() {  # first_call <file> <verb...>: the first line invoking it
-    grep -n -E "[\"')] $2( |\$)" "$1" | grep -v -E '^[0-9]+:[[:space:]]*#' | head -1 | cut -d: -f1
+    grep -n -E "[\"')] $2( |\$)" "$1" | grep -v -E '^[0-9]+:[[:space:]]*#' | sed -n 1p | cut -d: -f1
 }
 for installer in "$SCRIPTS/install.sh" "$SCRIPTS/install.ps1" "$MAKEFILE"; do
     fix="$(first_call "$installer" "check --fix")"
@@ -161,7 +161,7 @@ fi
 # install leaves nothing for the user to resolve, and any future feature
 # that re-warns on a fresh install fails here rather than shipping.
 if ! APOGEE_HOME="$WORK/a" "$APOGEE_BIN" check --output-format json 2>/dev/null \
-        | grep -q '"warnings":0'; then
+        | grep '"warnings":0' >/dev/null; then
     echo "INSTALL PARITY: a freshly seeded install reports warnings -- installs end green (M11)" >&2
     APOGEE_HOME="$WORK/a" "$APOGEE_BIN" check >&2 || true
     exit 1
@@ -234,7 +234,7 @@ if [ -n "$CHANNEL_BIN" ]; then
     fi
     # Zero warnings here too (M11): every channel's fresh install ends green.
     if ! env -u APOGEE_HOME HOME="$user" "$CHANNEL_BIN" check --output-format json 2>/dev/null \
-            | grep -q '"warnings":0'; then
+            | grep '"warnings":0' >/dev/null; then
         echo "INSTALL PARITY: a fresh $channel install reports warnings -- installs end green (M11)" >&2
         env -u APOGEE_HOME HOME="$user" "$CHANNEL_BIN" check >&2 || true
         exit 1

@@ -41,6 +41,18 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
 fail() { echo "mlx_e2e: $*" >&2; exit 1; }
 
+# Whether the doctor's report in file $1 holds the text $2, its wrapped rows
+# joined. One process reads the file whole, never a pipe into `grep -q`:
+# under pipefail that fails whenever grep exits before its writer's last
+# write -- the writer killed by SIGPIPE, status 141 -- and once `check`'s
+# report grew past perl's 8 KiB output buffer, that made these checks fail
+# under load with the text right there (2026-10-20).
+report_has() {
+    perl -0ne 'BEGIN { $want = pop @ARGV; $found = 0 }
+        s/\n  (?! )//g; $found ||= index($_, $want) >= 0;
+        END { $? = $found ? 0 : 1 }' "$1" "$2"
+}
+
 no_driver_left() {
     if pgrep -f "$WORK_DIR/training/scripts/mlx_generate.py" >/dev/null 2>&1; then
         fail "a driver outlived its apogee: $(pgrep -fl "$WORK_DIR/training/scripts/mlx_generate.py")"
@@ -73,9 +85,8 @@ grep -q "mlx_generate.py matches the shipped copy" "$WORK_DIR/check.txt" \
 grep -q "backend: mlx.*llama model directory" "$WORK_DIR/check.txt" \
     || fail "check did not report the entry: $(cat "$WORK_DIR/check.txt")"
 # Its window, read from config.json under 26a's default (27b).
-perl -0pe 's/\n  (?! )//g' "$WORK_DIR/check.txt" \
-    | grep -q "32768-token window (the default; trained for 131072)" \
-    || fail "check did not report the entry's window"
+report_has "$WORK_DIR/check.txt" "32768-token window (the default; trained for 131072)" \
+    || fail "check did not report the entry's window: $(grep "backend: mlx" "$WORK_DIR/check.txt")"
 
 # --- an upgrade reaches the driver (27c) -------------------------------------
 # An install that ran 27a holds its mlx_generate.py: seeding is skip-if-present,
@@ -95,8 +106,9 @@ grep -q "mlx_generate.py matches the shipped copy" "$WORK_DIR/check-stale.txt" \
 printf '\n# mine\n' >>"$WORK_DIR/training/scripts/mlx_generate.py"
 "$APOGEE_BIN" check --fix >"$WORK_DIR/fix.txt" 2>&1
 grep -q "# mine" "$WORK_DIR/training/scripts/mlx_generate.py" || fail "check --fix overwrote an edit"
-"$APOGEE_BIN" check --no-color 2>&1 | grep -q "mlx_generate.py differs from the shipped copy -- your edit is kept" \
-    || fail "an edited driver was not reported as the user's"
+"$APOGEE_BIN" check --no-color >"$WORK_DIR/check-edited.txt" 2>&1
+grep -q "mlx_generate.py differs from the shipped copy -- your edit is kept" "$WORK_DIR/check-edited.txt" \
+    || fail "an edited driver was not reported as the user's: $(grep mlx_generate "$WORK_DIR/check-edited.txt")"
 rm -f "$WORK_DIR/training/scripts/mlx_generate.py"
 "$APOGEE_BIN" check --fix >/dev/null 2>&1 || true
 

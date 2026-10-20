@@ -218,9 +218,9 @@ grep -qi "\[y\]es" "$WORK_DIR/denied.txt" && fail "the task prompted"
 # The budget: an honest status naming the check -- the model's own "done"
 # claimed nothing.
 [ "$(field "$DENIED" "t['status']")" = exhausted ] || fail "the denied task is not exhausted"
-field "$DENIED" "t['reason']" | grep -q "the round budget (1) is spent and the task is not done -- not passed: the file .*report.txt exists and is not empty (no such file)" \
+field "$DENIED" "t['reason']" | grep "the round budget (1) is spent and the task is not done -- not passed: the file .*report.txt exists and is not empty (no such file)" >/dev/null \
     || fail "exhaustion does not name the check: $(field "$DENIED" "t['reason']")"
-"$APOGEE_BIN" task status "$DENIED" </dev/null 2>&1 | grep -q "round 1: write_file on report.txt" \
+"$APOGEE_BIN" task status "$DENIED" </dev/null 2>&1 | grep "round 1: write_file on report.txt" >/dev/null \
     || fail "task status does not show the denial"
 
 # --- 27i: a granted write runs unprompted, recorded with its target -------------
@@ -358,11 +358,11 @@ wait_for "$KILLED" '"round": 2' || fail "the slow task never reached round 2"
     && fail "a second task ran beside a live one"
 grep -q "task $KILLED is running (process $RUNNER) -- one task runs at a time" "$WORK_DIR/second.txt" \
     || fail "the lock did not name the running task: $(cat "$WORK_DIR/second.txt")"
-"$APOGEE_BIN" task status </dev/null 2>&1 | grep -q "task $KILLED  running (now, process $RUNNER)" \
+"$APOGEE_BIN" task status </dev/null 2>&1 | grep "task $KILLED  running (now, process $RUNNER)" >/dev/null \
     || fail "status does not show the running task"
 kill -9 "$RUNNER"
 wait "$RUNNER" 2>/dev/null
-"$APOGEE_BIN" task status "$KILLED" </dev/null 2>&1 | grep -q "running (interrupted -- its process is gone" \
+"$APOGEE_BIN" task status "$KILLED" </dev/null 2>&1 | grep "running (interrupted -- its process is gone" >/dev/null \
     || fail "status does not say the killed task was interrupted"
 # The next round's answer, as the restarted model gives it.
 script killed '{"text": "It is 42.\nTASK STATUS: DONE"}'

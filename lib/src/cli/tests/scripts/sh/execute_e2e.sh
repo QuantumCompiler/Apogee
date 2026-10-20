@@ -297,11 +297,11 @@ assert types[-1] == "result", types
 PY
 
 # --- completion ------------------------------------------------------------------------
-"$APOGEE_BIN" __complete "" </dev/null | grep -qx execute || fail "completion: no execute command"
-"$APOGEE_BIN" __complete execute -- </dev/null | grep -qx -- --suite || fail "completion: no --suite"
+"$APOGEE_BIN" __complete "" </dev/null | grep -x execute >/dev/null || fail "completion: no execute command"
+"$APOGEE_BIN" __complete execute -- </dev/null | grep -x -- --suite >/dev/null || fail "completion: no --suite"
 SUITES=$("$APOGEE_BIN" __complete execute --suite "" </dev/null)
 [ "$SUITES" = "duo
 fast" ] || fail "completion: --suite offered '$SUITES'"
-"$APOGEE_BIN" __complete execute --resume "" </dev/null | grep -qx "$ID" || fail "completion: --resume lacks $ID"
+"$APOGEE_BIN" __complete execute --resume "" </dev/null | grep -x "$ID" >/dev/null || fail "completion: --resume lacks $ID"
 
 echo "execute: OK"

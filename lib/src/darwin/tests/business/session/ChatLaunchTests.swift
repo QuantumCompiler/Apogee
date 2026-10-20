@@ -32,7 +32,8 @@ struct ChatLaunchTests {
         let home = fake.directory.appendingPathComponent("home")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         let client = ApogeeClient(
-            identity: ClientIdentity(version: "0.2.0"), preferences: Preferences(store: MemoryStore()), home: home)
+            identity: ClientIdentity(version: "0.2.0"), spawner: ProcessSpawner(),
+            preferences: Preferences(store: MemoryStore()), home: home)
         let cwd = fake.directory.appendingPathComponent("cwd")
         let session = client.startChat(
             binary: fake.executable,

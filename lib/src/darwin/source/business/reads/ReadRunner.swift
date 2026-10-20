@@ -13,7 +13,13 @@ public struct ReadRunner: Sendable {
     private let spawner: any ChildSpawner
     private let timeout: Duration
 
-    public init(spawner: any ChildSpawner = ProcessSpawner(), timeout: Duration = .seconds(60)) {
+    /// Over real processes. (Not a default argument: Swift compiles those
+    /// into the caller, which would then have to link InfrastructureProcess.)
+    public init(timeout: Duration = .seconds(60)) {
+        self.init(spawner: ProcessSpawner(), timeout: timeout)
+    }
+
+    public init(spawner: any ChildSpawner, timeout: Duration = .seconds(60)) {
         self.spawner = spawner
         self.timeout = timeout
     }
