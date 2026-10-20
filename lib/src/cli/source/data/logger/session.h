@@ -182,6 +182,12 @@ struct Session {
     /// removed if it had one. Absent from an older file: false.
     bool private_chat = false;
 
+    /// Opened with `chat --private` (52d): never written at all -- `save` is
+    /// a no-op for it, so not one byte of the conversation lands under
+    /// `sessions/`, not even to be deleted later. Never serialised: a file
+    /// that exists was, by definition, not this.
+    bool never_written = false;
+
     /// The session's `--retriever` SETTING (`lexical` / `vector` / `hybrid`;
     /// empty means auto) and its `--rerank` setting (a backend, `off`, or
     /// empty for the collections' pins). What the user chose, never what auto
@@ -251,7 +257,8 @@ struct LoadedSession {
 /// that reopens with a note.
 [[nodiscard]] LoadedSession deserialize(std::string_view text, const KnownDependencies& known);
 
-/// Writes `session` atomically. Called after every completed turn.
+/// Writes `session` atomically. Called after every completed turn. A
+/// `never_written` session (52d) writes nothing.
 void save(const Session& session);
 
 /// Loads by chat id or by custom name.

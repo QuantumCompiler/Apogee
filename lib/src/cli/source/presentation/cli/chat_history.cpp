@@ -8,12 +8,18 @@
 #include <memory>
 #include <sstream>
 
+#include "agentloop/content.h"
+#include "backends/factory.h"
 #include "cli/chat_attachments.h"
 #include "cli/chat_recall.h"
 #include "cli/helpers.h"
 #include "cli/task_cmd.h"
+#include "contracts/config.h"
 #include "contracts/errors.h"
+#include "contracts/paths.h"
 #include "machine/json_reporter.h"
+#include "operations/backend_names.h"
+#include "platform/platform.h"
 
 namespace apogee::commands {
 namespace {
@@ -178,8 +184,6 @@ std::string_view ChatsCommand::summary() const noexcept {
 }
 
 void ChatsCommand::bind(CLI::App& root, const RootContext& context) {
-    (void)context;  // sessions live under APOGEE_HOME, not beside the config
-
     CLI::App* cmd = root.add_subcommand(std::string{name()}, std::string{summary()});
     cmd->require_subcommand(1);
 
@@ -236,10 +240,116 @@ void ChatsCommand::bind(CLI::App& root, const RootContext& context) {
         }
     });
 
+    // `chats compact` (52d): the one compaction a session's /compact runs,
+    // on a saved chat -- asked first at a terminal, --yes for scripts.
+    auto compact_name = std::make_shared<std::string>();
+    auto compact_yes = std::make_shared<bool>(false);
+    CLI::App* compact = cmd->add_subcommand(
+        "compact", "Compact a saved conversation: its history folded into a summary");
+    compact->add_option("name", *compact_name, "Chat id or name")
+        ->type_name(kChatValue)
+        ->required();
+    compact->add_flag("-y,--yes", *compact_yes, "Do not ask first (for scripts)");
+    compact->callback([compact_name, compact_yes, &context]() {
+        if (!*compact_yes) {
+            if (!platform::is_terminal(platform::StandardStream::In) || stdin_is_piped()) {
+                fail(
+                    "compacting rewrites a saved chat's history as a summary -- add --yes to do "
+                    "it with no terminal to ask at");
+            }
+            logger::Session session;
+            try {
+                session = logger::load(*compact_name, {}).session;
+            } catch (const std::exception& e) {
+                fail(e.what());
+            }
+            std::cerr << "Compact " << session.display_name() << " (" << session.chat_id
+                      << ")? Its " << session.messages.size()
+                      << " messages are folded into a summary. [y/N] " << std::flush;
+            std::string answer;
+            if (!std::getline(std::cin, answer) ||
+                (answer != "y" && answer != "Y" && answer != "yes")) {
+                std::cout << "left as it was\n";
+                return;
+            }
+        }
+        std::cout << compact_saved_chat(*compact_name,
+                                        harness::resolve_config_path(context.config_path))
+                  << "\n";
+    });
+
     auto delete_name = std::make_shared<std::string>();
     CLI::App* remove = cmd->add_subcommand("delete", "Delete a conversation");
     remove->add_option("name", *delete_name, "Chat id or name")->type_name(kChatValue)->required();
     remove->callback([delete_name]() { std::cout << delete_chat(*delete_name) << "\n"; });
+}
+
+std::string compact_conversation(const harness::Harness& harness, logger::Session& session) {
+    const std::string compactor =
+        helper_backend(harness.config(), harness::ModelRole::Utility, session.backend);
+    session.messages = agentloop::compact_history(harness, session.messages, compactor);
+    ++session.compactions;
+    return compactor;
+}
+
+std::string compact_saved_chat(const std::string& name, const std::filesystem::path& config_path) {
+    try {
+        logger::Session session = logger::load(name, {}).session;
+        // A live task writes this chat every round (27h): not rewritten
+        // under it.
+        if (const std::string held = task_holds_chat(session); !held.empty()) {
+            fail(held);
+        }
+        const harness::Config config = harness::load_config(config_path);
+        harness::Harness harness{config};
+        // The chat's own model, as it runs: its roster pin (33) too.
+        if (!session.model.empty()) {
+            (void)harness.pin_model(session.backend, session.model);
+        }
+        backends::BuildOptions options;
+        options.config_path = config_path;
+        const backends::BuildResult built = backends::build_providers(harness, options);
+        const std::string compactor =
+            helper_backend(config, harness::ModelRole::Utility, session.backend);
+        if (config.find_backend(compactor) == nullptr) {
+            fail("nothing to compact with: " + session.chat_id + " ran on '" + session.backend +
+                 "', which the config no longer has -- set models.default_utility");
+        }
+        for (const backends::BackendStatus& status : built.statuses) {
+            if (status.name == compactor && !status.constructed) {
+                fail("backend '" + compactor + "' is configured but unavailable -- " +
+                     status.reason);
+            }
+        }
+        const std::size_t before = session.messages.size();
+        (void)compact_conversation(harness, session);
+        // Its attachments told, as a live chat's are: what rode the folded
+        // messages is retrieved from now on.
+        std::vector<std::string> said;
+        {
+            ChatAttachments attached{
+                harness, session, ChatAttachments::index_for(session.chat_id),
+                ChatAttachments::Hooks{
+                    .say = [&said](const std::string& line, bool) { said.push_back(line); },
+                    .progress = {},
+                    .confirm_large = {},
+                    .save = true,
+                    .built_in_graph = harness::AttachmentGraphMethod::Code}};
+            attached.after_compaction();
+        }
+        logger::save(session);
+        std::string out = "compacted " + session.chat_id + ": " + std::to_string(before) +
+                          " messages into " + std::to_string(session.messages.size()) +
+                          (compactor == session.backend ? "" : ", by " + compactor);
+        for (const std::string& line : said) {
+            out += "\n" + line;
+        }
+        return out;
+    } catch (const CLI::RuntimeError&) {
+        throw;
+    } catch (const std::exception& e) {
+        fail(e.what());
+    }
 }
 
 std::string delete_chat(const std::string& name) {

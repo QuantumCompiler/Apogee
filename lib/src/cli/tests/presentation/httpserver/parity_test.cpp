@@ -140,6 +140,9 @@ const std::map<std::string, Classification>& table() {
         {"datasets pull", backfill("training: the datasets plane, an async job")},
         {"chats title", backfill("sessions: transcripts on disk")},
         {"chats delete", backfill("sessions: transcripts on disk")},
+        // 52d: a served session's compaction is the recorded out the item
+        // names -- the sessions plane, a model call.
+        {"chats compact", backfill("sessions: transcripts on disk, a model call")},
         // --- carve-outs: host-local by nature ---------------------------------
         {"config init", carve_out("the server cannot exist without a config to start from")},
         {"config migrate",

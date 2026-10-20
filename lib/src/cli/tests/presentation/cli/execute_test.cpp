@@ -407,8 +407,10 @@ TEST_CASE("a line that is not UTF-8 is played, kept and saved as text", "[execut
     CHECK(out == played + "\n");
     const std::vector<apogee::logger::Session> sessions = home.sessions();
     REQUIRE(sessions.size() == 1);
+    // /system replaces the transcript's prompt in place (52d) -- until then
+    // it moved only the setting -- mended as it enters.
     CHECK(transcript(sessions.front()) ==
-          std::vector<std::string>{"system: r" + replacement + "sum" + replacement,
+          std::vector<std::string>{"system: cr" + replacement + "me",
                                    "user: /play echo2 caf" + replacement, "assistant: " + played});
     CHECK(sessions.front().params.system_prompt == "cr" + replacement + "me");
 }

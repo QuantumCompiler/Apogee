@@ -2,12 +2,14 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "cli/command.h"
 #include "contracts/types.h"
+#include "harness/harness.h"
 #include "logger/session.h"
 
 /// `apogee chats` — list, inspect, and rename saved conversations.
@@ -30,6 +32,21 @@ namespace apogee::commands {
 /// the full-screen shell's (32d). Refused while a live task writes it.
 /// Returns what was done: `deleted <id>`.
 [[nodiscard]] std::string delete_chat(const std::string& name);
+
+/// Compacts `session`'s history in memory (52d): the utility model when one
+/// is named, else the chat's own backend, folds the earlier exchanges into a
+/// summary, and the session counts it. The one compaction `/compact`, a
+/// driver's `compact` line and `chats compact` run -- each caller settles
+/// what it holds and saves. Returns the backend that compacted.
+[[nodiscard]] std::string compact_conversation(const harness::Harness& harness,
+                                               logger::Session& session);
+
+/// `chats compact <name>`'s work (52d), on a saved chat: compacted, its
+/// attachments told, saved -- what the verb runs once asked, and the shell's
+/// Chats view once confirmed. Refused while a live task writes the chat.
+/// Returns what was done: `compacted <id>: 12 messages into 3, by <backend>`.
+[[nodiscard]] std::string compact_saved_chat(const std::string& name,
+                                             const std::filesystem::path& config_path);
 
 /// The auto-title prompt sent after the first exchange.
 [[nodiscard]] std::string title_prompt();

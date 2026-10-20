@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <istream>
 #include <stdexcept>
@@ -71,7 +72,7 @@ const std::string& JsonReporter::turn_text() const noexcept {
 }
 
 void JsonReporter::begin_session(std::string_view model, const MachineCapabilities& capabilities,
-                                 std::optional<std::int64_t> next_turn) {
+                                 std::optional<std::int64_t> next_turn, bool private_chat) {
     nlohmann::json object = event("session");
     object["protocol_version"] = kMachineProtocolVersion;
     object["model"] = std::string{model};
@@ -90,6 +91,10 @@ void JsonReporter::begin_session(std::string_view model, const MachineCapabiliti
     object["capabilities"] = std::move(announced);
     if (next_turn.has_value()) {
         object["next_turn"] = *next_turn;
+    }
+    if (private_chat) {
+        // `chat --private` (52d): nothing of this session is ever written.
+        object["private"] = true;
     }
     write(object);
 }
@@ -590,6 +595,39 @@ DriverMessage parse_driver_line(std::string_view line) {
             message.wants = wants->dump();
         }
         return message;
+    } else if (type == "detach") {
+        // An attachment's name, as `/detach` takes it (52d).
+        message.kind = DriverMessage::Kind::Detach;
+        message.text = root.value("path", std::string{});
+        return message;
+    } else if (type == "set") {
+        // The run settings, applied in the slash commands' order (52d); a
+        // key that is none, or a value that is no text, is refused by name.
+        message.kind = DriverMessage::Kind::Set;
+        for (const std::string_view key : settable_keys()) {
+            const auto found = root.find(std::string{key});
+            if (found == root.end()) {
+                continue;
+            }
+            if (found->is_string()) {
+                message.settings.emplace_back(key, found->get<std::string>());
+            } else if (found->is_number()) {
+                message.settings.emplace_back(key, found->dump());
+            } else {
+                message.refused.emplace_back(key);
+            }
+        }
+        const std::vector<std::string_view> settable = settable_keys();
+        for (const auto& [key, value] : root.items()) {
+            if (key != "type" &&
+                std::ranges::find(settable, std::string_view{key}) == settable.end()) {
+                message.refused.push_back(key);
+            }
+        }
+        return message;
+    } else if (type == "compact") {
+        message.kind = DriverMessage::Kind::Compact;
+        return message;
     } else if (type == "attach") {
         // A file, folder or glob to attach, as `/attach` takes one (26d),
         // and its method, as `/attach`'s `--graph` (27p).
@@ -605,6 +643,10 @@ DriverMessage parse_driver_line(std::string_view line) {
 
     message.text = root.value("text", std::string{});
     return message;
+}
+
+std::vector<std::string_view> settable_keys() {
+    return {"model", "system", "think", "effort", "temperature"};
 }
 
 std::string describe_hello(const DriverMessage& hello) {

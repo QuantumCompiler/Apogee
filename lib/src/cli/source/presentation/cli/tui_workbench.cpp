@@ -99,7 +99,7 @@ tui::ListOptions models_view_options(const RootContext& context, const Workbench
     return options;
 }
 
-tui::ListOptions chats_view_options(const WorkbenchHooks& hooks) {
+tui::ListOptions chats_view_options(const RootContext& context, const WorkbenchHooks& hooks) {
     tui::ListOptions options;
     options.title = "Chats";
     options.columns = {"UPDATED", "TURNS", "NAME", "ID"};
@@ -131,7 +131,19 @@ tui::ListOptions chats_view_options(const WorkbenchHooks& hooks) {
                                 return "Delete chat " + row.cells.at(2) + " (" + row.key +
                                        "), its attachments' index and its recall summary?";
                             },
-                        .run = [](const tui::ListRow& row) { return delete_chat(row.key); }}};
+                        .run = [](const tui::ListRow& row) { return delete_chat(row.key); }},
+        // `chats compact`'s work (52d), confirmed here as the verb asks.
+        tui::ListAction{.key = "c",
+                        .label = "compact",
+                        .confirm =
+                            [](const tui::ListRow& row) {
+                                return "Compact chat " + row.cells.at(2) + " (" + row.key +
+                                       ")? Its history is folded into a summary.";
+                            },
+                        .run =
+                            [&context](const tui::ListRow& row) {
+                                return compact_saved_chat(row.key, config_file(context));
+                            }}};
     return options;
 }
 
@@ -214,7 +226,8 @@ std::vector<std::unique_ptr<tui::ListView>> make_workbench(tui::Pump& pump, tui:
     std::vector<std::unique_ptr<tui::ListView>> views;
     views.push_back(
         std::make_unique<tui::ListView>(pump, theme, models_view_options(context, hooks)));
-    views.push_back(std::make_unique<tui::ListView>(pump, theme, chats_view_options(hooks)));
+    views.push_back(
+        std::make_unique<tui::ListView>(pump, theme, chats_view_options(context, hooks)));
     views.push_back(
         std::make_unique<tui::ListView>(pump, theme, suites_view_options(context, hooks)));
     views.push_back(std::make_unique<tui::ListView>(pump, theme, config_view_options(context)));

@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <random>
 #include <sstream>
 #include <utility>
 
@@ -191,6 +192,182 @@ namespace {
     }
     session.model = pinned;
     return {};
+}
+
+/// What a private chat says at its start (52d).
+constexpr std::string_view kPrivateLine =
+    "private: nothing of this chat is written -- no transcript, no recall";
+
+/// A private chat's own folder (52d), in the system's temporary directory
+/// and removed with the run: where its attachments are indexed, so nothing
+/// of the conversation lands in the data directory. Inert for any other.
+class PrivateFolder {
+public:
+    explicit PrivateFolder(bool used) {
+        if (used) {
+            path_ = std::filesystem::temp_directory_path() /
+                    ("apogee-private-" + std::to_string(std::random_device{}()));
+        }
+    }
+
+    PrivateFolder(const PrivateFolder&) = delete;
+    PrivateFolder& operator=(const PrivateFolder&) = delete;
+    PrivateFolder(PrivateFolder&&) = delete;
+    PrivateFolder& operator=(PrivateFolder&&) = delete;
+
+    ~PrivateFolder() {
+        if (!path_.empty()) {
+            std::error_code code;
+            std::filesystem::remove_all(path_, code);
+        }
+    }
+
+    [[nodiscard]] const std::filesystem::path& path() const noexcept {
+        return path_;
+    }
+
+private:
+    std::filesystem::path path_;
+};
+
+/// What moving one of the session's run settings did (52d): whether it took,
+/// the line saying so, and a warning beside it when there is one. The one
+/// setter `/system`, `/temperature`, `/think`, `/effort` and `/model` and a
+/// driver's `set` line each reach -- one behavior, said in the same words.
+struct SettingSaid {
+    bool ok = true;
+    std::string line;
+    std::string warning{};
+};
+
+/// The prompt is the transcript's first message, put there as the chat
+/// opened: replaced in place -- matched by the prompt it held, so a
+/// compaction's summary is never taken for it -- or added at the head, so
+/// the next turn is sent under it. Until 52d `/system` moved only the
+/// setting, and every request after kept the old prompt (found 2026-10-20).
+[[nodiscard]] SettingSaid set_system_prompt(logger::Session& session, std::string_view text) {
+    const std::string before = session.params.system_prompt;
+    session.params.system_prompt = harness::valid_utf8(text);
+    const std::string& now = session.params.system_prompt;
+    std::vector<harness::ChatMessage>& messages = session.messages;
+    const bool held = !before.empty() && !messages.empty() &&
+                      messages.front().role == harness::Role::System &&
+                      messages.front().content.plain_text() == before;
+    if (held && now.empty()) {
+        messages.erase(messages.begin());
+    } else if (held) {
+        messages.front() = harness::ChatMessage::system(now);
+    } else if (!now.empty()) {
+        messages.insert(messages.begin(), harness::ChatMessage::system(now));
+    }
+    return {.line = "system prompt updated"};
+}
+
+[[nodiscard]] SettingSaid set_temperature(logger::Session& session, const std::string& text) {
+    try {
+        session.params.temperature = std::stod(text);
+    } catch (const std::exception&) {
+        return {.ok = false, .line = "not a number: '" + text + "'"};
+    }
+    return {.line = "temperature: " + text};
+}
+
+[[nodiscard]] SettingSaid set_thinking(logger::Session& session, const std::string& mode) {
+    const std::optional<harness::ThinkingMode> thinking = harness::thinking_mode_from_string(mode);
+    if (!thinking.has_value()) {
+        return {.ok = false, .line = "not a thinking mode: '" + mode + "' (on, off or auto)"};
+    }
+    session.params.thinking = thinking;
+    return {.line = "thinking: " + std::string{harness::to_string(*thinking)}};
+}
+
+/// How hard the model thinks (39a): a level stands in for the session's
+/// budget, and asking for one turns thinking on when it was off -- a level
+/// with thinking off would do nothing. Empty says where it stands.
+[[nodiscard]] SettingSaid set_effort(logger::Session& session, const harness::Harness& harness,
+                                     const std::string& level) {
+    const auto resolved = [&]() {
+        return resolve_thinking(session.params.thinking, session.params.thinking_budget,
+                                harness.config(), session.backend, session.params.effort);
+    };
+    if (level == "auto") {
+        session.params.effort.reset();
+    } else if (const std::optional<harness::Effort> effort = harness::effort_from_string(level);
+               effort.has_value()) {
+        session.params.effort = effort;
+        session.params.thinking_budget.reset();
+        if (resolved().off()) {
+            session.params.thinking = harness::ThinkingMode::On;
+        }
+    } else if (!level.empty()) {
+        return {.ok = false,
+                .line = "not an effort level: '" + level + "' (" +
+                        join_words(effort_words(), ", ", " or ") + ", or auto)"};
+    }
+    return {.line = effort_line(resolved()) +
+                    (level.empty() ? " -- " + join_words(effort_words(), ", ", ", ") + ", or auto"
+                                   : std::string{})};
+}
+
+/// What -m takes (33): a backend, an entry's model, or a roster's model on
+/// its sole configured owner -- read against the file's view, so a pin is
+/// never mistaken for its entry's own model. `settle` runs before a pin
+/// moves: rebuilding a backend is a model call's business.
+[[nodiscard]] SettingSaid switch_model(harness::Harness& harness, logger::Session& session,
+                                       const harness::Config& config, const std::string& argument,
+                                       const backends::BuildOptions& options, bool tools,
+                                       const std::function<void()>& settle) {
+    const SessionModel asked = resolve_session_model(config, argument);
+    if (asked.backend.empty()) {
+        return {
+            .ok = false,
+            .line = asked.refusal.empty() ? "no backend named '" + argument + "'" : asked.refusal};
+    }
+    if (!asked.pinned.empty() || !session.model.empty()) {
+        settle();
+    }
+    if (const std::string refused =
+            move_pin(harness, session, asked.backend, asked.pinned, options);
+        !refused.empty()) {
+        return {.ok = false, .line = refused};
+    }
+    // Instant, and history carries over: every backend was constructed up
+    // front and history is neutral IR.
+    session.backend = asked.backend;
+    harness.resume_conversation(session.backend, session.chat_id);
+    const bool base = is_base_model(harness, session.backend);
+    SettingSaid said{.line =
+                         "switched to " +
+                         (asked.pinned.empty() ? session.backend
+                                               : asked.pinned + " -- " + roster_pin_note(asked)) +
+                         (base ? " -- a base model" : "")};
+    if (base && tools) {
+        said.warning = base_model_tools_note(session.backend);
+    }
+    return said;
+}
+
+/// Detaches `name`, as `/detach` and a driver's `detach` line both do (52d):
+/// what is still indexing settles first.
+[[nodiscard]] SettingSaid detach_named(ChatAttachments& attached, const std::string& name) {
+    attached.settle();
+    if (attached.detach(name)) {
+        return {.line = "detached " + name};
+    }
+    return {.ok = false, .line = "nothing attached as '" + name + "' -- /attachments lists them"};
+}
+
+/// Compacts the conversation now, as `/compact` and a driver's `compact`
+/// line both do (52d): a model call, so what is reading an attachment
+/// settles first (26e); the attachments told; the session saved. Returns
+/// the line to say.
+[[nodiscard]] std::string compact_attached(const harness::Harness& harness,
+                                           logger::Session& session, ChatAttachments& attached) {
+    attached.settle();
+    const std::string compactor = compact_conversation(harness, session);
+    attached.after_compaction();
+    logger::save(session);
+    return "history compacted" + (compactor == session.backend ? "" : " by " + compactor);
 }
 
 /// The models each owning entry runs from its type's roster (M13, 35), by
@@ -404,6 +581,9 @@ void bind_session_flags(CLI::App& command, const std::shared_ptr<SessionFlags>& 
                     "Whether a reasoning model thinks first: on, off, or auto (per question)")
         ->check(CLI::IsMember({"on", "off", "auto"}));
     cmd->add_flag("--no-recall", flags->no_recall, "Recall no earlier chats in this run");
+    cmd->add_flag("--private", flags->private_chat,
+                  "Write nothing of this chat: no transcript, no recall, its attachments indexed "
+                  "in a place gone with the run");
     cmd->add_option("--allow", flags->allow,
                     "Allow a tool for this chat without asking (repeatable, with --tools)")
         ->type_name(kToolValue)
@@ -649,6 +829,11 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     known.suites = config.suite_names();
     known.check_suites = true;
 
+    if (flags->private_chat && (!flags->resume.empty() || flags->cont)) {
+        fail_user(mode,
+                  "--private starts a chat that is never written -- it cannot resume one "
+                  "already saved");
+    }
     if (!flags->resume.empty() || flags->cont) {
         try {
             logger::LoadedSession loaded = flags->cont ? [&]() {
@@ -676,6 +861,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     } else {
         session.chat_id = logger::new_chat_id();
     }
+    // A private chat (52d) is never written -- `save` does nothing for it --
+    // and never summarised.
+    session.never_written = flags->private_chat;
+    session.private_chat = session.private_chat || flags->private_chat;
     // The backend a resumed chat was left on, which a roster pin rides (33).
     const std::string saved_backend = session.backend;
 
@@ -801,7 +990,23 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     int saved_compactions = session.compactions;
     // Recall across chats (26l): on unless the config or the flag says
     // not; a chat a process that died left due is summarised now.
-    ChatRecall recall{harness, config, session, config.memory.recall && !flags->no_recall};
+    ChatRecall recall{harness, config, session,
+                      config.memory.recall && !flags->no_recall && !flags->private_chat};
+    // Where the chat's attachments are indexed: its own index beside its
+    // file -- or, for a private chat (52d), a folder of the run's own,
+    // removed as it ends, so nothing of the conversation stays in the data
+    // directory.
+    const PrivateFolder private_folder{flags->private_chat};
+    const std::filesystem::path attachment_index =
+        flags->private_chat ? private_folder.path() / "index.db"
+                            : ChatAttachments::index_for(session.chat_id);
+    // The backend's saved state of the conversation (26j) -- none for a
+    // private chat, whose words go nowhere.
+    const auto save_state = [&harness, &session](const harness::StatusSink& on_status) {
+        if (!session.never_written) {
+            harness.save_conversation(session.backend, session.chat_id, on_status);
+        }
+    };
     for (const std::string& line : recall.catch_up({})) {
         out.print_line(style.dim("[memory] " + line));
     }
@@ -1141,6 +1346,11 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             out.print_line(style.tag(ansi::Role::Warning) + " " + line);
         }
     }
+    // A private chat says so at its start (52d), on a terminal, a pipe and
+    // the shell alike; machine mode says it in its own stream.
+    if (flags->private_chat && flags->output_format != OutputFormat::StreamJson) {
+        out.print_line(style.tag(ansi::Role::Apogee) + " " + std::string{kPrivateLine});
+    }
     // Tools withheld from a base model are said once, at the start, on a
     // terminal and a pipe alike -- never into machine mode's stream.
     if (tools_on() && flags->output_format != OutputFormat::StreamJson &&
@@ -1204,7 +1414,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 .accepts = {machine_inbound_types().begin(), machine_inbound_types().end()},
                 .tools = tools_on(),
                 .ask = flags->tools},
-            next_turn);
+            next_turn, flags->private_chat);
         // The todo's board (41d): this conversation's list, each change an
         // event; a resumed list is said as the session opens.
         const tools::TodoScope todo_scope{tools::TodoBoard{
@@ -1237,7 +1447,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         std::error_code cwd_error;
         const std::filesystem::path working_directory = std::filesystem::current_path(cwd_error);
         ChatAttachments attached{
-            harness, session, ChatAttachments::index_for(session.chat_id),
+            harness, session, attachment_index,
             ChatAttachments::Hooks{
                 .say = [&machine_reporter](const std::string& line,
                                            bool /*warning*/) { machine_reporter.on_notice(line); },
@@ -1260,6 +1470,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         }
         // The project opening said as the banner says it (41b), before the
         // folder's own attach lines.
+        if (flags->private_chat) {
+            machine_reporter.on_notice(std::string{kPrivateLine});
+        }
         if (persona_line.has_value()) {
             machine_reporter.on_notice(*persona_line);
         }
@@ -1302,6 +1515,57 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 }
                 (void)attached.attach(message.text, working_directory,
                                       attached.graph_method(graph));
+                continue;
+            }
+            // The session's own doors (52d), each its slash command's core:
+            // said as notices, effective from the next turn.
+            if (message.kind == DriverMessage::Kind::Detach) {
+                machine_reporter.on_notice(detach_named(attached, message.text).line);
+                continue;
+            }
+            if (message.kind == DriverMessage::Kind::Compact) {
+                machine_reporter.on_notice(compact_attached(harness, session, attached));
+                continue;
+            }
+            if (message.kind == DriverMessage::Kind::Set) {
+                const std::string keys = "model, system, think, effort or temperature";
+                if (!message.refused.empty()) {
+                    std::string named;
+                    for (const std::string& key : message.refused) {
+                        named += (named.empty() ? "'" : ", '") + key + "'";
+                    }
+                    machine_reporter.on_notice(
+                        "set: " + named + (message.refused.size() == 1 ? " is" : " are") +
+                        " not a setting a session moves, as text -- " + keys + "; nothing was set");
+                    continue;
+                }
+                if (message.settings.empty()) {
+                    machine_reporter.on_notice("set: nothing to set -- " + keys);
+                    continue;
+                }
+                for (const auto& [key, value] : message.settings) {
+                    SettingSaid said;
+                    if (key == "model") {
+                        said = switch_model(harness, session, config, value, build_options,
+                                            flags->tools, [&attached]() { attached.settle(); });
+                        if (said.ok) {
+                            reoffer_tools();
+                        }
+                    } else if (key == "system") {
+                        said = set_system_prompt(session, value);
+                    } else if (key == "think") {
+                        said = set_thinking(session, value);
+                    } else if (key == "effort") {
+                        said = set_effort(session, harness, value);
+                    } else {
+                        said = set_temperature(session, value);
+                    }
+                    machine_reporter.on_notice(said.ok ? said.line + " -- from the next turn"
+                                                       : "set " + key + ": " + said.line);
+                    if (!said.warning.empty()) {
+                        machine_reporter.on_notice(said.warning);
+                    }
+                }
                 continue;
             }
             if (message.kind != DriverMessage::Kind::User || message.text.empty()) {
@@ -1403,8 +1667,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             title.start_if_due(session);
             if (session.compactions != saved_compactions) {
                 saved_compactions = session.compactions;
-                harness.save_conversation(session.backend, session.chat_id,
-                                          progress_sink(machine_reporter));
+                save_state(progress_sink(machine_reporter));
             }
 
             harness::ChatResponse response;
@@ -1422,8 +1685,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         if (const std::string said = recall.finish({}); !said.empty()) {
             machine_notice(said);
         }
-        harness.save_conversation(session.backend, session.chat_id,
-                                  progress_sink(machine_reporter));
+        save_state(progress_sink(machine_reporter));
         return;
     }
 
@@ -1431,7 +1693,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     std::error_code cwd_error;
     const std::filesystem::path working_directory = std::filesystem::current_path(cwd_error);
     ChatAttachments attached{
-        harness, session, ChatAttachments::index_for(session.chat_id),
+        harness, session, attachment_index,
         ChatAttachments::Hooks{
             .say =
                 [&out, &style](const std::string& line, bool warning) {
@@ -1719,7 +1981,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         std::string state = "off";
                         if (recall.active()) {
                             state = "on";
-                        } else if (config.memory.recall && !flags->no_recall) {
+                        } else if (config.memory.recall && !flags->no_recall &&
+                                   !flags->private_chat) {
                             state = "off for this chat";
                         }
                         out.print_line(style.tag(ansi::Role::Apogee) + " recall: " + state);
@@ -1860,45 +2123,19 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         out.print_line(model_label(session));
                         break;
                     }
-                    // What -m takes (33): a backend, an entry's model, or a
-                    // roster's model on its sole configured owner -- read
-                    // against the file's view, so a pin is never mistaken
-                    // for its entry's own model.
-                    const SessionModel asked = resolve_session_model(config, argument);
-                    if (asked.backend.empty()) {
-                        out.print_line(style.tag(ansi::Role::Error) + " " +
-                                       (asked.refusal.empty()
-                                            ? "no backend named '" + argument + "'"
-                                            : asked.refusal));
+                    const SettingSaid said =
+                        switch_model(harness, session, config, argument, build_options,
+                                     flags->tools, [&attached]() { attached.settle(); });
+                    if (!said.ok) {
+                        out.print_line(style.tag(ansi::Role::Error) + " " + said.line);
                         break;
                     }
-                    if (!asked.pinned.empty() || !session.model.empty()) {
-                        // Rebuilding a backend is a model call's business:
-                        // what is reading an attachment settles first.
-                        attached.settle();
-                    }
-                    if (const std::string refused =
-                            move_pin(harness, session, asked.backend, asked.pinned, build_options);
-                        !refused.empty()) {
-                        out.print_line(style.tag(ansi::Role::Error) + " " + refused);
-                        break;
-                    }
-                    // Instant, and history carries over: every backend
-                    // was constructed up front and history is neutral IR.
-                    session.backend = asked.backend;
-                    harness.resume_conversation(session.backend, session.chat_id);
                     // A suite's toolset pin follows the backend (27d).
                     reoffer_tools();
                     refresh_header();
-                    const bool base = is_base_model(harness, session.backend);
-                    out.print_line(style.tag(ansi::Role::Apogee) + " switched to " +
-                                   (asked.pinned.empty()
-                                        ? session.backend
-                                        : asked.pinned + " -- " + roster_pin_note(asked)) +
-                                   (base ? " -- a base model" : ""));
-                    if (base && flags->tools) {
-                        out.print_line(style.tag(ansi::Role::Warning) + " " +
-                                       base_model_tools_note(session.backend));
+                    out.print_line(style.tag(ansi::Role::Apogee) + " " + said.line);
+                    if (!said.warning.empty()) {
+                        out.print_line(style.tag(ansi::Role::Warning) + " " + said.warning);
                     }
                     break;
                 }
@@ -2049,15 +2286,13 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     break;
                 }
                 case ChatVerb::System:
-                    session.params.system_prompt = harness::valid_utf8(argument);
-                    out.print_line(style.tag(ansi::Role::Apogee) + " system prompt updated");
+                    out.print_line(style.tag(ansi::Role::Apogee) + " " +
+                                   set_system_prompt(session, argument).line);
                     break;
                 case ChatVerb::Temperature:
-                    try {
-                        session.params.temperature = std::stod(argument);
-                    } catch (const std::exception&) {
-                        out.print_line(style.tag(ansi::Role::Error) + " not a number: '" +
-                                       argument + "'");
+                    // Said only when refused, as it always was.
+                    if (const SettingSaid said = set_temperature(session, argument); !said.ok) {
+                        out.print_line(style.tag(ansi::Role::Error) + " " + said.line);
                     }
                     break;
                 case ChatVerb::Think:
@@ -2074,13 +2309,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                             (thinking.effort.has_value()
                                  ? ", effort " + std::string{harness::to_string(*thinking.effort)}
                                  : std::string{}));
-                    } else if (const std::optional<harness::ThinkingMode> thinking =
-                                   harness::thinking_mode_from_string(argument);
-                               thinking.has_value()) {
-                        session.params.thinking = thinking;
-                    } else {
-                        out.print_line(style.tag(ansi::Role::Error) + " not a thinking mode: '" +
-                                       argument + "' (on, off or auto)");
+                    } else if (const SettingSaid said = set_thinking(session, argument); !said.ok) {
+                        out.print_line(style.tag(ansi::Role::Error) + " " + said.line);
                     }
                     break;
                 case ChatVerb::ThinkingDisplay: {
@@ -2118,36 +2348,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     break;
                 }
                 case ChatVerb::Effort: {
-                    // How hard the model thinks (39a): a level stands in for
-                    // the session's budget, and asking for one turns thinking
-                    // on when it was off -- a level with thinking off would
-                    // do nothing.
-                    const auto resolved = [&]() {
-                        return resolve_thinking(session.params.thinking,
-                                                session.params.thinking_budget, harness.config(),
-                                                session.backend, session.params.effort);
-                    };
-                    if (argument == "auto") {
-                        session.params.effort.reset();
-                    } else if (const std::optional<harness::Effort> effort =
-                                   harness::effort_from_string(argument);
-                               effort.has_value()) {
-                        session.params.effort = effort;
-                        session.params.thinking_budget.reset();
-                        if (resolved().off()) {
-                            session.params.thinking = harness::ThinkingMode::On;
-                        }
-                    } else if (!argument.empty()) {
-                        out.print_line(style.tag(ansi::Role::Error) + " not an effort level: '" +
-                                       argument + "' (" + join_words(effort_words(), ", ", " or ") +
-                                       ", or auto)");
-                        break;
-                    }
-                    out.print_line(
-                        style.tag(ansi::Role::Apogee) + " " + effort_line(resolved()) +
-                        (argument.empty()
-                             ? " -- " + join_words(effort_words(), ", ", ", ") + ", or auto"
-                             : std::string{}));
+                    const SettingSaid said = set_effort(session, harness, argument);
+                    out.print_line(style.tag(said.ok ? ansi::Role::Apogee : ansi::Role::Error) +
+                                   " " + said.line);
                     break;
                 }
                 case ChatVerb::MaxTokens:
@@ -2249,12 +2452,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     break;
                 }
                 case ChatVerb::Detach: {
-                    attached.settle();
-                    const std::string name = unquoted(argument);
-                    out.print_line(attached.detach(name)
-                                       ? style.tag(ansi::Role::Apogee) + " detached " + name
-                                       : style.tag(ansi::Role::Error) + " nothing attached as '" +
-                                             name + "' -- /attachments lists them");
+                    const SettingSaid said = detach_named(attached, unquoted(argument));
+                    out.print_line(style.tag(said.ok ? ansi::Role::Apogee : ansi::Role::Error) +
+                                   " " + said.line);
                     break;
                 }
                 case ChatVerb::Check: {
@@ -2304,21 +2504,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     }
                     break;
                 }
-                case ChatVerb::Compact: {
-                    // A model call: what is reading an attachment
-                    // settles first (26e).
-                    attached.settle();
-                    const std::string compactor = helper_backend(
-                        harness.config(), harness::ModelRole::Utility, session.backend);
-                    session.messages =
-                        agentloop::compact_history(harness, session.messages, compactor);
-                    ++session.compactions;
-                    attached.after_compaction();
-                    logger::save(session);
-                    out.print_line(style.tag(ansi::Role::Apogee) + " history compacted" +
-                                   (compactor == session.backend ? "" : " by " + compactor));
+                case ChatVerb::Compact:
+                    out.print_line(style.tag(ansi::Role::Apogee) + " " +
+                                   compact_attached(harness, session, attached));
                     break;
-                }
             }
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
@@ -2368,8 +2557,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         title.start_if_due(session);
         if (session.compactions != saved_compactions) {
             saved_compactions = session.compactions;
-            harness.save_conversation(session.backend, session.chat_id,
-                                      progress_sink(out.reporter()));
+            save_state(progress_sink(out.reporter()));
         }
         typeahead.reset();
         if (decorate) {
@@ -2391,18 +2579,21 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         if (const std::string said = recall.finish({}); !said.empty()) {
             out.print_line(style.dim("[memory] " + said));
         }
-        harness.save_conversation(session.backend, session.chat_id, progress_sink(out.reporter()));
+        save_state(progress_sink(out.reporter()));
     }
     // Opt-in auto-capture on a CLEAN exit -- /exit, /quit, the end of the
     // input -- with the still-loaded model as the clerk. Never on an
     // interrupt: a user who hit Ctrl-C did not ask for a model call, and
     // the transcript is already saved either way. Best-effort: a failure
     // is a line, never a non-zero exit.
-    if (config.knowledge.auto_capture && !reader->interrupted()) {
+    // Never for a private chat (52d): its words go nowhere.
+    if (config.knowledge.auto_capture && !reader->interrupted() && !session.never_written) {
         capture_session({});
     }
     if (decorate) {
-        out.print_line(style.tag(ansi::Role::Apogee) + " saved " + session.chat_id);
+        out.print_line(style.tag(ansi::Role::Apogee) +
+                       (session.never_written ? " private: nothing of this chat was written"
+                                              : " saved " + session.chat_id));
     }
     out.set_held({});
 }

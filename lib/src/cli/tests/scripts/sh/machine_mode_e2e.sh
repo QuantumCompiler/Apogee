@@ -92,7 +92,8 @@ for stream in (plain, hello):
     session = stream[0]
     assert session["type"] == "session", session
     caps = session["capabilities"]
-    assert caps["accepts"] == ["user", "answer", "attach", "hello", "cancel"], caps
+    assert caps["accepts"] == ["user", "answer", "attach", "hello", "cancel", "detach", "set",
+                               "compact"], caps
     assert "result" in caps["events"] and "question" in caps["events"], caps
     assert caps["tools"] is False and caps["ask"] is False, caps
     assert isinstance(caps["schema"], str) and caps["schema"], caps
@@ -103,6 +104,24 @@ assert [e for e in plain[1:]] == [e for e in hello[1:]], (plain, hello)
 assert [e["text"] for e in hello if e["type"] == "result"] == ["echo: one", "echo: two"], hello
 PY
 grep -q 'a hello after the first line is ignored' "$HS_DIR/hello.err" || fail "the late hello was not noted"
+# --- the session's own doors and a private chat (52d), on the real binary ---
+BEFORE=$(ls "$WORK_DIR"/sessions/*.json 2>/dev/null | wc -l)
+printf '%s\n' '{"type":"set","temperature":0.4,"max_tokens":3}' '{"type":"set","temperature":0.4}' \
+    '{"type":"user","text":"one"}' \
+    | "$APOGEE_BIN" chat -m echo --private --output-format stream-json --input-format stream-json \
+        >"$HS_DIR/private.jsonl" 2>"$HS_DIR/private.err" || fail "private driven chat failed: $(cat "$HS_DIR/private.err")"
+python3 - "$HS_DIR/private.jsonl" <<'PY' || fail "the private stream: $(cat "$HS_DIR/private.jsonl")"
+import json, sys
+events = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+assert events[0]["type"] == "session" and events[0]["private"] is True, events[0]
+notices = [e["text"] for e in events if e["type"] == "notice"]
+assert "private: nothing of this chat is written -- no transcript, no recall" in notices, notices
+assert any(n.startswith("set: 'max_tokens' is not a setting") for n in notices), notices
+assert "temperature: 0.4 -- from the next turn" in notices, notices
+assert [e["text"] for e in events if e["type"] == "result"] == ["echo: one"], events
+PY
+AFTER=$(ls "$WORK_DIR"/sessions/*.json 2>/dev/null | wc -l)
+[ "$BEFORE" -eq "$AFTER" ] || fail "a private chat wrote a session file"
 grep -rq 'hello from e2e-host 9.1, wants \["tools"\]' "$APOGEE_HOME/logs" || fail "the hello was not recorded"
 grep -rq 'hello from late' "$APOGEE_HOME/logs" && fail "a late hello was recorded"
 # complete, its prompt piped: a hello first is recorded and never asked.

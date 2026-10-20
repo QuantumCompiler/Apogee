@@ -27,7 +27,7 @@ constexpr std::array<FieldSpec, 5> kCapabilities{{
     {"schema", "string", true, "The vocabulary's version, a date.", {}, {}},
 }};
 
-constexpr std::array<FieldSpec, 4> kSession{{
+constexpr std::array<FieldSpec, 5> kSession{{
     {"protocol_version",
      "integer",
      true,
@@ -40,6 +40,12 @@ constexpr std::array<FieldSpec, 4> kSession{{
      "integer",
      false,
      "A session of user lines: the number its next turn will carry.",
+     {},
+     {}},
+    {"private",
+     "boolean",
+     false,
+     "true for chat --private: nothing of the session is ever written.",
      {},
      {}},
 }};
@@ -313,6 +319,28 @@ constexpr std::array<FieldSpec, 2> kHelloLine{{
      "string"},
 }};
 
+constexpr std::array<FieldSpec, 1> kDetachLine{{
+    {"path", "string", true, "The attachment to detach, by the name it was attached as.", {}, {}},
+}};
+
+constexpr std::array<FieldSpec, 5> kSetLine{{
+    {"model",
+     "string",
+     false,
+     "A backend, a roster model, or backend:model, as /model takes it.",
+     {},
+     {}},
+    {"system", "string", false, "The system prompt, replaced whole, as /system takes it.", {}, {}},
+    {"think", "string", false, "on, off or auto, as /think takes it.", {}, {}},
+    {"effort", "string", false, "An effort level or auto, as /effort takes it.", {}, {}},
+    {"temperature",
+     "number|string",
+     false,
+     "The sampling temperature, as /temperature takes it.",
+     {},
+     {}},
+}};
+
 // --- the lines -----------------------------------------------------------------
 
 constexpr std::array<LineSpec, 29> kOutbound{{
@@ -352,12 +380,17 @@ constexpr std::array<LineSpec, 29> kOutbound{{
     LineSpec{"document", "A job's last event: the verb's own document.", kDocument},
 }};
 
-constexpr std::array<LineSpec, 5> kInbound{{
+constexpr std::array<LineSpec, 8> kInbound{{
     LineSpec{"user", "A user turn.", kUserLine},
     LineSpec{"answer", "An answer to a pending question.", kAnswerLine},
     LineSpec{"attach", "Something to attach to the chat.", kAttachLine},
     LineSpec{"hello", "An optional first line: who is driving.", kHelloLine},
     LineSpec{"cancel", "Stop the turn in flight, as Ctrl-C would.", {}},
+    LineSpec{"detach", "Detach an attachment, as /detach does.", kDetachLine},
+    LineSpec{"set",
+             "Move the session's run settings from the next turn, as their slash commands do.",
+             kSetLine},
+    LineSpec{"compact", "Compact the conversation's history now, as /compact does.", {}},
 }};
 
 template <std::size_t N>

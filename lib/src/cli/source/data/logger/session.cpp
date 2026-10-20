@@ -389,6 +389,9 @@ LoadedSession deserialize(std::string_view text, const KnownDependencies& known)
 }
 
 void save(const Session& session) {
+    if (session.never_written) {
+        return;  // a private chat (52d): nothing written, ever
+    }
     Session stamped = session;
     stamped.schema_version = kCurrentSchemaVersion;
     if (stamped.started_at.empty()) {

@@ -8896,3 +8896,54 @@ Decisions taken while building, for veto:
 **Verified.** `lib/scripts/cicd.sh --test`: 3578 of 3578, two skipped and said (the real caption burn without libass, and the existing pdftotext case); the darwin suite passed; `cli.video_lifecycle`'s dry-run phase ran on the real binary.
 
 **Not run on real weights**: a dry run makes one planning call; the user's real compose plans on their own planner.
+
+### 2026-10-20 — `session-inbound-lines` (backlog item 52d): detach, set, compact, and a chat that is never written
+
+**Why.** Four of the design's session abilities had no door in the protocol:
+- **(G2)** attach had a line, detach none.
+- **(G5)** changing the model, thinking, effort, temperature or the system prompt meant ending the child and resuming it, so a local model loaded again for a settings tweak.
+- **(G6)** there was no compact, either as a line or as a verb.
+- **(G7)** there was no private session. The app's fallback, `--no-recall` plus `chats delete` on close, still wrote the transcript for the session's whole life.
+
+- [x] **Three inbound lines, each an existing core's door.**
+  - `{"type":"detach","path":…}` reaches `/detach`.
+  - `{"type":"set",…}` moves exactly the slash-settable run settings: `model`, `system`, `think`, `effort`, `temperature`. They apply in that order, so the model comes first. Each is said as a `notice` `… -- from the next turn`, or refused by name.
+  - `{"type":"compact"}` reaches `/compact`.
+  - A `set` line naming any other key (or a value that is no text) is refused whole by name, and nothing is set.
+  - `capabilities.accepts` announces all three, from the one declaration.
+- [x] **One core, two doors.** The REPL's handlers were extracted into setters in `chat_session.cpp` (`SettingSaid`), and both the slash commands and the driver's lines call them: `set_system_prompt`, `set_temperature`, `set_thinking`, `set_effort`, `switch_model` (the roster pin, the rebuild, the conversation's saved state), `detach_named` and `compact_attached`.
+  - The REPL's words are unchanged: the chat and execute surface goldens differ only in `accepts` and the new flag.
+  - A test drives both doors and asserts one session.
+  - **A latent defect fixed on the way**: `/system` mid-chat had moved only the setting. The prompt is the transcript's first message, put there as the chat opened, so every request after it kept the old prompt. The one setter now replaces that message in place, matched by the prompt it held so a compaction's summary is never taken for it, or adds it at the head. The slash command and the line both reach the next turn under the new prompt, and a test pins it.
+- [x] **`chats compact <name>`**: the one compaction (`compact_conversation`, also what `/compact` and the line run) on a saved chat.
+  - Refused while a live task drives the chat.
+  - It compacts with the chat's own pin and backend, or the utility model, and refuses one that is unavailable.
+  - The chat's attachments are told, and the chat is saved.
+  - It asks at a terminal (`[y/N]`); `--yes` is for scripts; with no terminal and no `--yes` it is refused naming the flag.
+  - The shell's Chats view gained `c compact`, confirmed and run through the same core: the parity row. `chats` is classified as a whole (ADR 0010), and the verb and its flag complete (ADR 0007).
+- [x] **`chat --private`**, through the one opening's flag table, so `execute` and the shell take it too (ADR 0011). It writes nothing of the conversation:
+  - `Session::never_written` makes `logger::save` a no-op, so no transcript is ever written, not even to be deleted later;
+  - there is no recall of earlier chats and no summary;
+  - there is no saved model state and no auto-capture;
+  - its attachments are indexed in a folder of the system's temporary directory, removed with the run;
+  - it is said at the start on every front end (`private: nothing of this chat is written -- no transcript, no recall`) and on the `session` event as `"private": true`, and the exit line says nothing was saved;
+  - `--private` with `--resume` or `--continue` is refused: a saved chat cannot be made never-written.
+- [x] **The tests**:
+  - `cli/chat_test`: the set line's settings equal to the slash commands', the next turn sent under the new prompt by both doors; refusals; a model moved; detach and compact lines; the private absence pinned over the sessions, attachments and memory directories and the recall index; `chats compact` refused without a terminal and done with `--yes`.
+  - `machine/machine_mode_test`: the lines parsed, the inbound set, `private`, the declaration test.
+  - `cli/tui_workbench_test`: the Chats view's compact, a no and a yes.
+  - `cli.machine_mode` on the real binary: the new `accepts`; a private driven chat whose `set` lines are refused by name and then applied, its `private: true`, and no session file written.
+  - `cli/execute_test` now expects `/system` to replace the transcript's prompt in place; it had pinned the old behaviour.
+  - The parity table (`httpserver/parity_test`) classes `chats compact` as a backfill on the sessions plane: a served compaction is the recorded out.
+
+Decisions taken while building, for veto:
+- **The `set` line's shape** is one field per setting, applied in the slash commands' order. An unknown key or a non-text value refuses the whole line; a value a setter refuses ("loud" for effort) refuses that setting alone. `max_tokens` and the rest are not settable: the doc's set is "exactly the slash-settable run settings", and `/max-tokens` was left out as a token cap rather than a run setting the design names.
+- **`--private` implies no recall at all**, reading included, as G7's own fallback did with `--no-recall`.
+- **A private chat's attachment index lives in the system's temporary directory**, removed with the run, as a one-shot's does. Nothing lands under the data directory.
+- **The REPL keeps its silence** on `/temperature` and `/think` success, as it always has. Only the driver's notices say them (`temperature: 0.3 -- from the next turn`).
+- **Lines sent while a question waits** are taken by the question as before, which skips anything but an answer. A host sends `set` between turns.
+- **A saved chat's model state** (26j) is left as it is after `chats compact`: a cache that no longer matches only costs reuse.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3586 of 3586, two skipped and said (the real caption burn without libass, and the existing pdftotext case); the darwin suite's 102 cases passed; `cli.machine_mode`'s private phase ran on the real binary.
+
+**Not run on real weights**: every door runs on the mock backend; the compaction's summary is the utility model's own call.

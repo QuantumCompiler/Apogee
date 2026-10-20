@@ -46,7 +46,7 @@ document last (see [A long job's run](#a-long-jobs-run)).
 One JSON object per line on stdout. Every object has a `type`.
 
 ```jsonl
-{"type":"session","protocol_version":1,"model":"claude-sonnet-5","next_turn":1,"capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello","cancel"],"tools":true,"ask":true,"schema":"2026-10-20"}}
+{"type":"session","protocol_version":1,"model":"claude-sonnet-5","next_turn":1,"capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"tools":true,"ask":true,"schema":"2026-10-20"}}
 {"type":"thinking"}
 {"type":"thinking_delta","text":"…"}
 {"type":"memory","chats":1,"decisions":1,"sessions":[{"id":"20261019-142233-a1b2c3","name":"asyncio timeouts in the scraper","updated":"2026-10-19T14:40:02Z"}]}
@@ -63,7 +63,7 @@ One JSON object per line on stdout. Every object has a `type`.
 
 | Event | Meaning |
 |---|---|
-| `session` | Once, first, unprompted. Names the protocol version, the model and the session's `capabilities` (below). |
+| `session` | Once, first, unprompted. Names the protocol version, the model and the session's `capabilities` (below); `"private": true` for a chat that writes nothing (52d, [below](#a-private-chat-chat---private)). |
 | `thinking` | The model began reasoning. No text. Sent again with `"budget_reached": true` when the reasoning reached its thinking budget and was ended there (`--think-budget`, an `--effort` level's budget, or the backend's `thinking_budget`). Machine mode carries the reasoning as it streams whatever `ui.thinking_display` says: the terminal's and the shell's one-line summary (43) is theirs alone, and is never asked for here. |
 | `thinking_delta` | A chunk of reasoning. **Droppable** — see below. |
 | `memory` | `chat` only: what a turn was handed from earlier conversations -- `chats`, past chats' summaries, and `decisions`, recorded knowledge records -- injected for this turn and never into the transcript (26l). Sent before the turn, only when it recalled something. Since 52a `sessions` names each past chat recalled, in the order sent: its `id` (what `chats list` and `--resume` take), and the `name` and `updated` time the recall index recorded when it summarised the chat -- what the model was handed, so a later rename shows only once the chat is summarised again. Absent when `chats` is 0. |
@@ -86,7 +86,7 @@ it is talking to:
 | Field | Meaning |
 |---|---|
 | `capabilities.events` | Every event type this build can write. A stream never carries one that is not here. |
-| `capabilities.accepts` | The line types this session reads on stdin: a driven `chat` or `execute` takes `user`, `answer`, `attach`, `hello` and `cancel`; `complete` reading its prompt on stdin takes only a `hello` before it; a `task run` and an agent's run read nothing. |
+| `capabilities.accepts` | The line types this session reads on stdin: a driven `chat` or `execute` takes `user`, `answer`, `attach`, `hello` and `cancel`, and since 52d `detach`, `set` and `compact`; `complete` reading its prompt on stdin takes only a `hello` before it; a `task run` and an agent's run read nothing. |
 | `capabilities.tools` | Whether the model can call tools in this session. |
 | `capabilities.ask` | Whether `ask_user` and the permission prompt reach the driver as `question` events. Without it nothing is asked: `ask` resolves to deny and the tool is never offered. |
 | `capabilities.schema` | The vocabulary's version, a date: moved when a release grows the vocabulary (a new type, a new field, a new inbound line). Two builds with the same `schema` speak the same vocabulary. |
@@ -326,6 +326,9 @@ One JSON object per line on stdin.
 {"type":"answer","text":"Yes"}
 {"type":"attach","path":"report.pdf"}
 {"type":"attach","path":"src","graph":"off"}
+{"type":"detach","path":"report.pdf"}
+{"type":"set","model":"claude","think":"off","temperature":0.2}
+{"type":"compact"}
 ```
 
 An unrecognised line is ignored rather than fatal — the tolerance this protocol
@@ -418,6 +421,50 @@ be read, such as a video's sound with no model to hear it.
 
 Closing stdin ends the session: the child drains its queued output, persists the
 conversation, and exits cleanly.
+
+### The session's own doors: `detach`, `set`, `compact`
+
+Since 52d a driven `chat` or `execute` takes three lines that reach exactly
+what the session's slash commands reach — never a second implementation —
+each answered by `notice`s and effective from the next turn. Sent while a
+turn runs, a line waits for it to end, as an `attach` does.
+
+- **`{"type":"detach","path":…}`** detaches what was attached under that
+  name (the `path` the `attach` line gave), as `/detach` does: `notice`
+  `detached <name>`, or `nothing attached as '<name>' -- /attachments lists
+  them`.
+- **`{"type":"set",…}`** moves the run settings the slash commands move —
+  `model` (a backend, a roster model or `backend:model`, as `/model` and `-m`
+  take it), `system` (the system prompt, replaced whole), `think` (`on`,
+  `off`, `auto`), `effort` (a level or `auto`) and `temperature` (a number,
+  or its text). Several in one line apply in that order — the model first,
+  so thinking and effort are judged on the backend that will answer. Each is
+  said as a `notice` ending `-- from the next turn` (`switched to claude --
+  from the next turn`), or refused by name (`set effort: not an effort level:
+  'loud' (…)`) while the rest still apply. **Any key that is no setting — or
+  a value neither text nor a number — refuses the whole line by name, and
+  nothing is set**: `set: 'max_tokens' is not a setting a session moves, as
+  text -- model, system, think, effort or temperature; nothing was set`. A
+  line with no setting says so. The permission mode is not among them: it is
+  chosen at launch.
+- **`{"type":"compact"}`** compacts the conversation now, as `/compact`
+  does — the utility model, else the chat's own backend, folds the earlier
+  exchanges into a summary — said as `history compacted by <backend>`. A
+  saved chat is compacted with the verb `apogee chats compact <id>` (asked
+  first at a terminal, `--yes` for a script).
+
+### A private chat: `chat --private`
+
+`chat --private` (and `execute --private`, the session's one opening)
+writes **nothing** of the conversation: no transcript under `sessions/` —
+not written and later deleted, never written — no recall summary and no
+recall of earlier chats, no saved model state, no auto-capture, and its
+attachments indexed in a folder of the run's own in the system's temporary
+directory, removed as the run ends. The `session` event carries `"private":
+true`, and a `notice` says it: `private: nothing of this chat is written --
+no transcript, no recall`; the terminal and the shell say the same line at
+the start. A saved chat cannot be resumed privately: `--private` with
+`--resume` or `--continue` is refused.
 
 ### Playing a symphony (`execute`)
 
@@ -566,8 +613,8 @@ the counts, not the diff.
 **The session's permission mode** decides what is asked at all. It is set at
 launch with `--permission-mode manual|accept-edits|plan|dont-ask|bypass`, the
 same modes a terminal session moves between with `/permission-mode` and
-Shift+Tab. The protocol carries no settings verbs, so a driver chooses the mode
-when it starts the child.
+Shift+Tab. No line moves it — `set` moves only the run settings — so a
+driver chooses the mode when it starts the child.
 
 - `manual`, the default, asks as above.
 - `accept-edits` runs the file and note edits unasked.

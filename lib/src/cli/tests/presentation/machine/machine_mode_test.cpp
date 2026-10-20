@@ -995,7 +995,49 @@ TEST_CASE("hello is parsed, recorded in words, and malformed fields are just abs
 
     const auto inbound = apogee::commands::machine_inbound_types();
     CHECK(std::vector<std::string_view>(inbound.begin(), inbound.end()) ==
-          std::vector<std::string_view>{"user", "answer", "attach", "hello", "cancel"});
+          std::vector<std::string_view>{"user", "answer", "attach", "hello", "cancel", "detach",
+                                        "set", "compact"});
+}
+
+TEST_CASE("the session's own doors parse: detach, set, compact", "[commands][machine][input]") {
+    // 52d: each line an existing core's door. A set line's settings in the
+    // order they apply; any key that is no setting, or no text, refused by
+    // name.
+    using apogee::commands::DriverMessage;
+    const DriverMessage detach =
+        apogee::commands::parse_driver_line(R"({"type":"detach","path":"notes.md"})");
+    CHECK(detach.kind == DriverMessage::Kind::Detach);
+    CHECK(detach.text == "notes.md");
+    CHECK(apogee::commands::parse_driver_line(R"({"type":"compact"})").kind ==
+          DriverMessage::Kind::Compact);
+
+    const DriverMessage set = apogee::commands::parse_driver_line(
+        R"({"type":"set","temperature":0.2,"think":"off","model":"helper","system":"be brief"})");
+    CHECK(set.kind == DriverMessage::Kind::Set);
+    CHECK(set.refused.empty());
+    CHECK(set.settings == std::vector<std::pair<std::string, std::string>>{{"model", "helper"},
+                                                                           {"system", "be brief"},
+                                                                           {"think", "off"},
+                                                                           {"temperature", "0.2"}});
+    const DriverMessage refused = apogee::commands::parse_driver_line(
+        R"({"type":"set","max_tokens":9,"think":["on"],"effort":"high"})");
+    CHECK(refused.kind == DriverMessage::Kind::Set);
+    CHECK(refused.refused == std::vector<std::string>{"think", "max_tokens"});
+    CHECK(refused.settings == std::vector<std::pair<std::string, std::string>>{{"effort", "high"}});
+    CHECK(apogee::commands::settable_keys() ==
+          std::vector<std::string_view>{"model", "system", "think", "effort", "temperature"});
+}
+
+TEST_CASE("a private session says so on its session event", "[commands][machine][private]") {
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.begin_session("m", {}, 1, true);
+    const nlohmann::json session = events(out.str()).front();
+    CHECK(session.at("private") == true);
+    std::ostringstream plain;
+    JsonReporter plain_reporter{plain};
+    plain_reporter.begin_session("m", {}, 1);
+    CHECK_FALSE(events(plain.str()).front().contains("private"));
 }
 
 // --- 28f: turn ids and cancel ---------------------------------------------------
@@ -1215,7 +1257,7 @@ TEST_CASE("every event every emitter writes is the declaration's, field for fiel
     capabilities.accepts = {"user"};
     capabilities.tools = true;
     capabilities.ask = true;
-    reporter.begin_session("m", capabilities, 1);
+    reporter.begin_session("m", capabilities, 1, true);
     reporter.begin_turn(1);
     reporter.on_recall({{.id = "c1", .name = "one", .updated = "2026-10-19T10:00:00Z"}}, 1);
     reporter.on_sources({{.file = "a.md",

@@ -9,6 +9,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "agent/tool.h"
@@ -112,7 +113,8 @@ public:
     /// `user` lines also names `next_turn` (28f): the number its next turn
     /// will carry, past those a resumed conversation already holds.
     void begin_session(std::string_view model, const MachineCapabilities& capabilities,
-                       std::optional<std::int64_t> next_turn = std::nullopt);
+                       std::optional<std::int64_t> next_turn = std::nullopt,
+                       bool private_chat = false);
 
     /// A `user` line was accepted as turn `turn` (28f): every event until
     /// `end_turn` carries `"turn": turn`, so a driver can attribute any event
@@ -341,6 +343,13 @@ struct DriverMessage {
         /// Stop the turn in flight, as Ctrl-C would (28f). Read by the
         /// session's stdin reader, never queued.
         Cancel,
+        /// Detach an attachment, as `/detach` does (52d); `text` is its name.
+        Detach,
+        /// Move the session's run settings, as their slash commands do
+        /// (52d): `settings`, and the keys `refused`.
+        Set,
+        /// Compact the conversation's history, as `/compact` does (52d).
+        Compact,
         /// A line that parsed but carried no recognised type.
         Unknown,
     };
@@ -356,7 +365,17 @@ struct DriverMessage {
     std::string client_name;
     std::string client_version;
     std::string wants;
+    /// A `set` line's settings (52d), in the order they apply -- `model`,
+    /// `system`, `think`, `effort`, `temperature` -- each value as text (a
+    /// number as written); and each key it named that is no setting a
+    /// session moves, or whose value is neither a string nor a number.
+    std::vector<std::pair<std::string, std::string>> settings;
+    std::vector<std::string> refused;
 };
+
+/// The run settings a `set` line moves (52d), in the order they apply:
+/// exactly the ones the session's slash commands move.
+[[nodiscard]] std::vector<std::string_view> settable_keys();
 
 /// What a driver's `hello` is recorded as (28d): one line for the
 /// operational log, never a value from the config or a secret -- the client's

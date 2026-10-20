@@ -51,7 +51,8 @@ struct WorkbenchHooks {
 /// actions, for the shell and for the tests that hold them to the commands.
 [[nodiscard]] tui::ListOptions models_view_options(const RootContext& context,
                                                    const WorkbenchHooks& hooks);
-[[nodiscard]] tui::ListOptions chats_view_options(const WorkbenchHooks& hooks);
+[[nodiscard]] tui::ListOptions chats_view_options(const RootContext& context,
+                                                  const WorkbenchHooks& hooks);
 [[nodiscard]] tui::ListOptions suites_view_options(const RootContext& context,
                                                    const WorkbenchHooks& hooks);
 [[nodiscard]] tui::ListOptions config_view_options(const RootContext& context);
