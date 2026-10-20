@@ -4,9 +4,11 @@ The reference for setting up the tools a model reaches with `--tools` that
 need something set up first: **web search**, answered by a SearXNG instance
 you run; **consult**, answered by a member of a model suite you configure --
 and beside it **validation**, the same member checking the others' work;
-**graph navigation**, answered by a knowledge graph you build; and the
+**graph navigation**, answered by a knowledge graph you build; the
 **Orchestrator**, an `execute` session's symphonies offered to its model as
-tools.
+tools; **code execution**, the Python server Apogee ships, registered
+with one command; and the **MCP presets**, every server Apogee ships, listed
+with what it needs.
 
 The native toolsets (files, the shell, git, notes, document search, graph
 navigation) and `fetch_url` need no setup beyond that, and nor do the
@@ -149,8 +151,102 @@ again, in case the instance was fixed.
 ### Every backend
 
 Any backend with `--tools` gets `web_search`, cloud ones included. A cloud
-backend run with `--search` also has its provider's own server-side search,
-and the model may use either.
+backend run with `--search`, or whose entry lists `server_tools:
+[web_search]`, also has its provider's own server-side search, and the model
+may use either. The provider's search reaches sites from the provider's
+servers, where `tools.allowed_hosts` cannot see, which is why it is consent
+you give per run or per entry.
+
+## MCP presets: the servers Apogee ships
+
+A fresh install configures no MCP server, and `apogee mcp list` says where to
+start: `apogee mcp presets` lists the servers Apogee ships, each with what it
+provides and whether this machine can run it.
+
+```sh
+apogee mcp presets                         # what ships, and where each stands here
+apogee mcp create code --from code-exec    # register one by name
+```
+
+`--from` registers exactly the command and arguments the preset resolves to
+here, through the same path a typed `--command` takes, so the config is byte
+for byte what typing them would write. A preset this machine cannot run still
+lists, saying what is missing and the command that provides it; `--from`
+refuses it with the same words. The listing is also a document (`--output-format
+json`, in [machine-mode.md](machine-mode.md)), and the admin plane's `POST
+/v1/admin/mcp-servers` takes `from` the same way.
+
+| Preset | What it is |
+|---|---|
+| `code-exec` | The code-execution server below: `run_python` and `write_input`, registered as `code`. It needs the server seeded (`apogee check --fix`) and a Python: the training environment's, else `python3` on PATH. |
+| `self` | Apogee's own read-only tools (files, git, notes, document search, graph navigation), served on stdio by `apogee __mcp-tools` **for another MCP host**: a desktop assistant or an editor takes the entry the listing prints. It is never registered into Apogee, which already has these tools natively, so `--from self` is refused with that reason. |
+
+Web search is not a preset. It stays yours: point Apogee at a SearXNG
+instance you run, as [*Web search through SearXNG*](#web-search-through-searxng)
+above walks through.
+
+## Running code: the code-execution server
+
+`run_python` runs Python for any model, local or cloud, the way ChatGPT's
+interpreter does: code goes in, and what it printed and the files it wrote
+come back. It is an MCP server Apogee ships, `code_exec_server.py`, seeded
+with the drivers under the data directory's `training/scripts/` by `apogee
+check --fix`. It is registered like any other server, in one command:
+
+```sh
+apogee mcp create code --from code-exec
+```
+
+which is the same as typing the line `apogee check` prints with this
+machine's paths filled in:
+
+```sh
+apogee mcp create code --command python3 \
+    --args ~/.apogee/training/scripts/code_exec_server.py
+```
+
+Its tools then reach every tool-using run as `mcp__code__run_python` and
+`mcp__code__write_input`. Code runs under the training environment's
+interpreter when there is one (`apogee train setup`, which is where packages
+like numpy belong), else under the interpreter running the server. Name it as
+`--command` if you want that one always.
+
+### What the model gets
+
+- **`run_python`** takes `code` and runs it as a script in the session's
+  working directory. It returns stdout, then stderr under `[stderr]`, then
+  `[exit N]`, then `[files written]` with each new or changed file's full
+  path and size. An error comes back as the interpreter's own traceback.
+- **`write_input`** takes a relative `path` and `content` (text, or bytes
+  with `encoding: base64`) and writes a data file there for code to read.
+
+Files persist between calls. Variables do not, since each call is a new
+process, so code that the next call builds on saves to a file.
+
+### The sandbox, said plainly
+
+| What | How |
+|---|---|
+| Working directory | New for each session, under `cache/code-exec/`, and **deleted when the session ends**: copy out anything worth keeping. A server that was killed leaves its directory behind, and the next one removes it at start. |
+| Wall clock | 30 seconds a run. Then the code and every process it started are stopped, and the result says so. |
+| Output | The first and last 8 KB, like `run_command`, with how much was cut between them. |
+| Disk | 256 MiB in the working directory. A run that goes past it has what it wrote removed, and is told; a `write_input` that would is refused. |
+| Network | The code cannot import `socket`, so Python's own networking (urllib, http.client, requests) fails with a message saying the network is off. |
+| Writes | Code that writes outside the working directory is refused, naming the path. |
+| Environment | An allow-list: `PATH`, the locale, the time zone. `HOME` and the temporary directory point at the working directory, so no key in Apogee's environment reaches the code. |
+
+The network and write guards are **best effort, not a boundary**: a
+subprocess or a C extension can get around them. The boundary is the
+permission gate. Both tools declare that they write, so each call is asked
+like `run_command`, or allowed for a run with `--allow
+mcp__code__run_python`, or for good with `permissions:` in the config. The
+session's permission mode governs them too: plan and dont-ask refuse them,
+and accept-edits does not pass them unasked.
+
+The server speaks MCP over pipes, never a port, and its stderr is captured
+like any server's. The limits are constants at the top of the script, and
+`--max-seconds` and `--max-session-bytes` in the registration's `--args`
+change them for that entry.
 
 ## Consulting a suite member
 

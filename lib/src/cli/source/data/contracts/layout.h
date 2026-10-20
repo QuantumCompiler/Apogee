@@ -154,6 +154,15 @@ struct LayoutEntry {
 /// seeded skip-if-present, and any the user drops beside them, each run by
 /// its file's name (`task run --recipe <name>`).
 [[nodiscard]] std::filesystem::path recipes_dir();
+/// `<APOGEE_HOME>/review-skills` -- review skills (48b): the shipped lenses,
+/// seeded skip-if-present, and any markdown file the user drops beside them,
+/// each run by its file's name.
+[[nodiscard]] std::filesystem::path review_skills_dir();
+/// `<APOGEE_HOME>/review` -- a review sweep's state (48d): `watermarks.json`
+/// (each target's newest merge request handled), `sweep.lock` (the one
+/// sweep at a time) and `sweeps/` (each sweep's document). Private: it holds
+/// findings about code that may not be public.
+[[nodiscard]] std::filesystem::path review_dir();
 [[nodiscard]] std::filesystem::path cache_dir();
 /// `cache/prompt` -- a local model's attention cache kept between processes
 /// (26j): `models/<model>/` holds each model's prefix files (the state after
@@ -162,6 +171,13 @@ struct LayoutEntry {
 /// evicted; safe to delete like the rest of `cache/`. Created by the first
 /// cached prompt.
 [[nodiscard]] std::filesystem::path prompt_cache_dir();
+
+/// `cache/video` -- the throwaway working directories a video generation
+/// writes its request, its frames and its assembled clip into (49b),
+/// `run-<pid>-<random>/` each, removed when the run ends and swept by the
+/// next run when the process that made one is gone. Safe to delete like the
+/// rest of `cache/`; created by the first generation.
+[[nodiscard]] std::filesystem::path video_work_dir();
 
 /// `cache/providers.json` -- what the last provider scan found (28a): each
 /// provider's tier and evidence, the binary fingerprints its version probes

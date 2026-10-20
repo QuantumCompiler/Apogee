@@ -12,8 +12,10 @@
 #include "contracts/config.h"
 #include "models/quantize.h"
 #include "modelstore/mlx_info.h"
+#include "modelstore/pipeline_info.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/store.h"
+#include "modelstore/voice_info.h"
 #include "training/mlx_convert.h"
 #include "transport/http_client.h"
 
@@ -82,6 +84,27 @@ struct DeletePlan {
 /// file is refused, saying why.
 [[nodiscard]] DeletePlan plan_delete(const models::StoreRoots& roots, const harness::Config& config,
                                      std::string_view name);
+
+/// Whether `models delete` removes the backend entries that point into what
+/// it removes, too (M14): `--and-backends` says yes without asking; else the
+/// `count` entries are asked about through `ask` -- the question in, the
+/// answer out, nullopt for nobody to ask -- and only a yes removes them.
+/// Never silently: no flag and nobody to ask keeps them.
+[[nodiscard]] bool remove_backends_too(
+    bool and_backends, const std::vector<std::string>& backends,
+    const std::function<std::optional<std::string>(const std::string& question)>& ask);
+
+/// The two doors for a backend whose model is gone -- each a command the
+/// binary accepts on that state: repoint it, or remove it.
+[[nodiscard]] std::string backend_doors(const std::string& name);
+
+/// What the delete does about `backends` once the weights are gone: with
+/// `remove`, each entry removed through the one config editor -- byte for
+/// byte `config delete-backend` -- and its own line said; else each kept,
+/// its doors said. A line each.
+[[nodiscard]] std::vector<std::string> settle_backends(const std::filesystem::path& config_path,
+                                                       const std::vector<std::string>& backends,
+                                                       bool remove);
 
 /// The GGUF half of `apogee models repair <name>`: re-verify each stored GGUF
 /// `name` covers against its record, and say what to do. Empty when `name`
@@ -173,6 +196,63 @@ struct PulledMlx {
                                  backends::HttpClient& client,
                                  const harness::CancellationToken& cancellation);
 
+// --- diffusion pipelines (49a) --------------------------------------------------------
+
+/// One line for a pipeline: its class, its components, its shards and its
+/// size on disk -- "WanPipeline, 5 components (scheduler, text_encoder,
+/// tokenizer, transformer, vae), 9 shard(s), 21.4 GB". What `pull`, `list`,
+/// `info`, `repair` and `check` all say it as.
+[[nodiscard]] std::string pipeline_summary(const models::PipelineInfo& info);
+
+/// What `models pull` of a diffusion pipeline stored, or found stored.
+struct PulledPipeline {
+    std::string model;
+    std::filesystem::path dir;
+    bool existed = false;
+    models::PipelineInfo info;
+};
+
+/// `models pull <owner>/<repo>` for a repository with `model_index.json` at
+/// its root (`HfListing::pipeline`, 49a): the index read first, then the
+/// files of the components it names (`pipeline_wanted`) through the tree
+/// ladder over `client` -- each checked against the size and sha256 the
+/// repository publishes -- into a staging directory this process claims;
+/// then the directory read as a whole pipeline (`read_pipeline_info`: every
+/// component there with what its kind needs, every shard whole) before it is
+/// committed as `<model>/pipeline/<id>`. A component the index names that
+/// the repository holds nothing for is refused before a byte moves; a
+/// failure at any rung, a cancel (Ctrl-C) included, leaves nothing under an
+/// id and no staging behind. The client is a parameter so a test serves a
+/// fixture source.
+[[nodiscard]] PulledPipeline pull_pipeline(const std::string& ref, const models::StoreRoots& roots,
+                                           backends::HttpClient& client,
+                                           const harness::CancellationToken& cancellation);
+
+// --- voice models (50a) -----------------------------------------------------------
+
+/// One line for a voice model: its checkpoint, its voices and their
+/// languages, and its size on disk.
+[[nodiscard]] std::string voice_summary(const models::VoiceInfo& info);
+
+/// What `models pull` of a voice model stored, or found stored.
+struct PulledVoice {
+    std::string model;
+    std::filesystem::path dir;
+    bool existed = false;
+    models::VoiceInfo info;
+};
+
+/// `models pull <owner>/<repo>` for a repository laid out as a voice model
+/// (`HfListing::voice`: `config.json` and a checkpoint at its root, packs
+/// under `voices/`) -- `voice_wanted`'s files through the tree ladder over
+/// `client`, each checked against the size and sha256 the repository
+/// publishes, into a staging directory this process claims; then read whole
+/// (`read_voice_info`) before it is committed as `<model>/voice/<id>`. A
+/// failure at any rung, a cancel included, leaves nothing behind.
+[[nodiscard]] PulledVoice pull_voice(const std::string& ref, const models::StoreRoots& roots,
+                                     backends::HttpClient& client,
+                                     const harness::CancellationToken& cancellation);
+
 /// What `models convert --mlx` stored, or found stored.
 struct ConvertedMlx {
     std::string model;
@@ -188,10 +268,58 @@ struct ConvertedMlx {
 /// naming the set it was made from. The same set at the same precision is
 /// recognised before anything runs. Ctrl-C mid-run, or mid-hash, removes the
 /// staging: the store is untouched.
+///
+/// With `model_type` (M15), the user's word that these weights are a type
+/// mlx-lm knows: the converter reads a view of the snapshot whose
+/// `config.json` says so (`models::stage_model_type_overlay`, removed
+/// either way), the snapshot untouched, and the record says it was
+/// converted as that type and what the snapshot declared.
 [[nodiscard]] ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots,
                                                 std::string_view given, std::string_view from,
                                                 const training::MlxPrecision& precision,
-                                                const training::MlxConverter& converter);
+                                                const training::MlxConverter& converter,
+                                                std::string_view model_type = {},
+                                                bool chained = false);
+
+/// `--register-with`'s precisions with `--mlx` (M16): `--type`'s own MLX
+/// set, each once, in the order given. Fails before anything runs on any
+/// other word -- a GGUF level named as one -- naming the set.
+[[nodiscard]] std::vector<std::string> register_mlx_precisions(
+    const std::vector<std::string>& given);
+
+/// A precision's converter: `mlx_lm.convert` in the owned environment, or a
+/// test's stand-in.
+using MlxConverterFor = std::function<training::MlxConverter(const training::MlxPrecision&)>;
+
+/// One command from SafeTensors to runnable `mlx` backends (M16).
+struct MlxRegisterRequest {
+    models::StoreRoots roots;
+    std::filesystem::path config_path;
+    /// The SafeTensors set, as `convert` takes it.
+    std::string snapshot;
+    std::string snapshot_from;
+    /// The MLX precisions: one conversion each -- MLX quantizes as it
+    /// converts -- and each its own backend.
+    std::vector<std::string> precisions;
+    /// What each backend's name begins with; empty: the model's own name.
+    std::string base_name;
+    /// `--model-type` (M15): every conversion made as that type.
+    std::string model_type;
+    /// Typed as `--register-with <list>` rather than `--register --type`:
+    /// the resume line says it the same way.
+    bool listed = false;
+};
+
+/// For each precision: convert the set with `models convert --mlx`'s own
+/// core -- a build already stored found, not made again -- and register it
+/// as `<base>-<precision>`, an `mlx` backend, through the one config editor:
+/// the very edit the hint's `config add-backend <name> --type mlx
+/// --model-path <dir>` makes. Refuses before the first conversion a
+/// registration that would refuse at the end; a failure says where it
+/// stopped and the command that resumes it, every finished build and entry
+/// kept (M3's chain, `cli/model_chain.h`).
+void run_mlx_register_chain(const MlxRegisterRequest& request,
+                            const MlxConverterFor& converter_for);
 
 /// Where a SafeTensors snapshot lands and is looked for: `paths.hf_dir`
 /// when the config sets it, else the models directory. The template

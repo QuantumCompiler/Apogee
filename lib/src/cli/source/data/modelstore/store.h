@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,6 +19,10 @@
 /// <models>/<model>/gguf/<id>/<file>.gguf          (+ <file>.json, + <file>-mmproj.gguf)
 /// <safetensors root>/<model>/safetensors/<id>/     (config.json, shards, apogee-snapshot.json)
 /// <models>/<model>/mlx/<id>/                        (config.json, tokenizer, shards,
+/// apogee-snapshot.json)
+/// <models>/<model>/pipeline/<id>/                   (model_index.json, one directory per
+/// component, apogee-snapshot.json)
+/// <models>/<model>/voice/<id>/                      (config.json, *.pth, voices/*.pt,
 /// apogee-snapshot.json)
 /// ```
 ///
@@ -45,7 +50,28 @@ inline constexpr std::string_view kSafetensorsFormat = "safetensors";
 /// one, never under `paths.hf_dir`; its id is the SafeTensors rule's, a
 /// digest over every shard's sha256.
 inline constexpr std::string_view kMlxFormat = "mlx";
+/// A diffusion pipeline (49a): a directory whose root carries
+/// `model_index.json` and whose components -- the transformer, the VAE, the
+/// text encoder, the tokenizer, the scheduler -- each sit in a directory of
+/// their own with their own configuration and SafeTensors. Taken whole and
+/// verified before it is committed, as an MLX model is; what `apogee video
+/// generate` runs, so under the models directory; its id the SafeTensors
+/// rule's, a digest over every shard's sha256 across every component.
+inline constexpr std::string_view kPipelineFormat = "pipeline";
+/// A voice model (50a): a text-to-speech model taken whole as Kokoro
+/// publishes one -- its `config.json`, its checkpoint (`*.pth`) and its
+/// voices (`voices/*.pt`), no SafeTensors at all, so no other format fits.
+/// What `apogee voice say` runs, so under the models directory; its id a
+/// digest over the checkpoint's and every voice's sha256 (`voice_weight_id`).
+inline constexpr std::string_view kVoiceFormat = "voice";
 inline constexpr std::size_t kWeightIdLength = 12;
+
+/// Every format, in the order a listing names them -- the one list a verb
+/// walking the store reads.
+[[nodiscard]] std::span<const std::string_view> store_formats() noexcept;
+
+/// Whether `text` names a format of the store.
+[[nodiscard]] bool is_store_format(std::string_view text) noexcept;
 
 /// Where each format's model directories are rooted. SafeTensors sets can be
 /// tens of gigabytes, so `paths.hf_dir` may put them on another disk; GGUFs
@@ -78,6 +104,10 @@ struct StoreRoots {
 /// `*.safetensors` entry, sorted by path. Empty when there is no shard or a
 /// shard has no digest -- the caller then hashes what landed, or falls back.
 [[nodiscard]] std::string snapshot_weight_id(const std::vector<SnapshotFile>& files);
+
+/// The id of a voice model: the SafeTensors rule's digest, over its
+/// checkpoint (`*.pth`) and its voices (`*.pt`) instead of shards (50a).
+[[nodiscard]] std::string voice_weight_id(const std::vector<SnapshotFile>& files);
 
 /// A random id of the same shape, for weights nothing can be hashed for.
 [[nodiscard]] std::string random_weight_id();
@@ -307,6 +337,62 @@ struct StoredDirectory {
 [[nodiscard]] StoredDirectory commit_mlx(const StoreRoots& roots, std::string_view model,
                                          const std::filesystem::path& staging, Snapshot record,
                                          const HashProgress& progress = {});
+
+/// One stored diffusion pipeline (49a): a whole directory, its components
+/// never apart.
+struct StoredPipeline {
+    std::string model;
+    std::string id;
+    std::filesystem::path dir;
+    /// The record's `pulled_at`, when it has a record. For display.
+    std::string arrived;
+};
+
+/// Every stored pipeline, by model then id -- every directory under a
+/// model's `pipeline/`, whole or not, so one that cannot load is listed and
+/// said rather than hidden. `model` narrows to one.
+[[nodiscard]] std::vector<StoredPipeline> list_store_pipelines(const StoreRoots& roots,
+                                                               std::string_view model = {});
+
+/// The stored pipeline whose directory is `dir`, compared as normal paths;
+/// nullopt when none is.
+[[nodiscard]] std::optional<StoredPipeline> stored_pipeline_at(
+    const std::vector<StoredPipeline>& stored, const std::filesystem::path& dir);
+
+/// A pipeline directory just written into `staging` (from `incoming_path`),
+/// committed (49a) by `commit_mlx`'s rule: every file recorded with its size
+/// and sha256, the record written in as `apogee-snapshot.json`, the
+/// directory renamed to the digest over its shards. The caller verifies it
+/// whole first (`read_pipeline_info`).
+[[nodiscard]] StoredDirectory commit_pipeline(const StoreRoots& roots, std::string_view model,
+                                              const std::filesystem::path& staging, Snapshot record,
+                                              const HashProgress& progress = {});
+
+/// One stored voice model (50a): a whole directory, its voices never apart
+/// from its checkpoint.
+struct StoredVoice {
+    std::string model;
+    std::string id;
+    std::filesystem::path dir;
+    /// The record's `pulled_at`, when it has a record. For display.
+    std::string arrived;
+};
+
+/// Every stored voice model, by model then id, whole or not. `model`
+/// narrows to one.
+[[nodiscard]] std::vector<StoredVoice> list_store_voices(const StoreRoots& roots,
+                                                         std::string_view model = {});
+
+/// The stored voice model whose directory is `dir`; nullopt when none is.
+[[nodiscard]] std::optional<StoredVoice> stored_voice_at(const std::vector<StoredVoice>& stored,
+                                                         const std::filesystem::path& dir);
+
+/// A voice model directory just written into `staging`, committed (50a) by
+/// the whole-directory rule, its id `voice_weight_id`. The caller verifies
+/// it whole first (`read_voice_info`).
+[[nodiscard]] StoredDirectory commit_voice(const StoreRoots& roots, std::string_view model,
+                                           const std::filesystem::path& staging, Snapshot record,
+                                           const HashProgress& progress = {});
 
 /// Every stored SafeTensors set, by model then id, from both roots (new sets
 /// go under `paths.hf_dir`; ones pulled before it was set stay where they

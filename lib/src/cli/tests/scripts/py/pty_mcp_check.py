@@ -13,9 +13,15 @@ for the full connect timeout.  Both are locked here on the real binary:
   * it all happens well inside the connect timeout, because a dead server
     releases its waiters at once.
 
+Since 47b a second phase does the same for the code-execution server Apogee
+ships: a model's call whose code prints hundreds of lines on both streams
+goes to the model as the tool's result, and none of it -- nor anything the
+server says -- reaches the screen.
+
 POSIX only -- `pty` has no Windows equivalent.
 """
 
+import json
 import os
 import shutil
 import stat
@@ -100,6 +106,79 @@ def main():
                 print(f"FAIL: {failure}", file=sys.stderr)
             return 1
         print("a noisy dying MCP server stays off the terminal and fails fast - OK")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return code_exec_phase(binary)
+
+
+# The code a model runs through the code-execution server (47b), loud on both
+# streams. The marker is built at run time, so the call's own arguments --
+# which a tool line may show -- never spell it. It leaves a file at its end,
+# which a second, quiet call lists into the answer: proof the noisy run ran.
+NOISY_CODE = (
+    "import sys\n"
+    "mark = 'NOI' + 'SE_'\n"
+    "for i in range(200):\n"
+    "    print(mark + 'OUT', i)\n"
+    "    print(mark + 'ERR', i, file=sys.stderr)\n"
+    "open('noisy-done.txt', 'w').write('done')\n"
+)
+QUIET_CODE = "import os\nprint(sorted(os.listdir('.')))\n"
+
+
+def code_exec_phase(binary):
+    """A noisy run through the seeded code-execution server: everything the
+    code prints goes to the model as the tool's result, and none of it -- nor
+    anything the server says -- reaches the terminal."""
+    if shutil.which("python3") is None:
+        print("the code-exec phase needs python3; skipping it")
+        return 0
+    work = tempfile.mkdtemp(prefix="apogee-pty-code-exec-")
+    try:
+        env = dict(os.environ)
+        env["APOGEE_HOME"] = work
+        env.pop("NO_COLOR", None)
+        script = os.path.join(work, "training", "scripts", "code_exec_server.py")
+        runner = os.path.join(work, "runner.json")
+        with open(runner, "w", encoding="utf-8") as handle:
+            json.dump({"turns": [
+                {"text": "", "tool_calls": [
+                    {"name": "mcp__code__run_python", "arguments": {"code": NOISY_CODE}}]},
+                {"text": "", "tool_calls": [
+                    {"name": "mcp__code__run_python", "arguments": {"code": QUIET_CODE}}]},
+                {"text": "ran it quietly: {{last_tool_result}}"},
+            ]}, handle)
+        for args in (
+            ["config", "init"],
+            ["check", "--fix"],
+            ["mcp", "create", "code", "--command", "python3", "--args", script],
+            ["config", "add-backend", "runner", "--type", "mock", "--model-path", runner],
+        ):
+            done = subprocess.run([binary, *args], env=env, stdin=subprocess.DEVNULL,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if done.returncode != 0 and args[0] != "check":
+                print(f"setup failed: {args}", file=sys.stderr)
+                return 1
+
+        raw, code = drive(binary, ["complete", "-m", "runner", "--tools", "--allow",
+                                   "mcp__code__run_python", "hello"], env)
+        if code != 0:
+            print(f"apogee exited {code}\n{raw!r}", file=sys.stderr)
+            return 1
+        screen = render(raw)
+        text = "\n".join(screen)
+        failures = []
+        if "ran it quietly: ['noisy-done.txt']" not in text:
+            failures.append(f"the answer is missing, or the noisy run never ran:\n{screen!r}")
+        if "NOISE_" in raw.decode("utf-8", "replace"):
+            failures.append(f"the code's output reached the terminal:\n{screen!r}")
+        if "code-exec:" in text:
+            failures.append(f"the server's own stderr reached the terminal:\n{screen!r}")
+        if failures:
+            for failure in failures:
+                print(f"FAIL: {failure}", file=sys.stderr)
+            return 1
+        print("a noisy code-exec run stays off the terminal - OK")
         return 0
     finally:
         shutil.rmtree(work, ignore_errors=True)

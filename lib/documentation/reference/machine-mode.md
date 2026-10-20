@@ -63,7 +63,7 @@ One JSON object per line on stdout. Every object has a `type`.
 | `thinking` | The model began reasoning. No text. Sent again with `"budget_reached": true` when the reasoning reached its thinking budget and was ended there (`--think-budget`, an `--effort` level's budget, or the backend's `thinking_budget`). Machine mode carries the reasoning as it streams whatever `ui.thinking_display` says: the terminal's and the shell's one-line summary (43) is theirs alone, and is never asked for here. |
 | `thinking_delta` | A chunk of reasoning. **Droppable** — see below. |
 | `memory` | `chat` only: what a turn was handed from earlier conversations -- `chats`, past chats' summaries, and `decisions`, recorded knowledge records -- injected for this turn and never into the transcript (26l). Sent before the turn, only when it recalled something. |
-| `tool_status` | A tool is running, described in `text` for display -- or another model call the turn makes besides the chat model's own (the embedder, the utility model, the rerank judge, the knowledge clerk, a suite member the model consults), as `<role> — <what it is doing>` (26n). A `consult` (27f) is an ordinary tool call: `[tool] consult`, then `consult — asking utility (<backend>): <the question's first words>` while the member answers, and the answer reaches the model as the tool's result. A suite's verifier checking a tool call or an answer (27g) is said the same way: `validate — asking utility (<backend>): Check …`. A symphony the root model plays on its own (27t, an orchestrating `execute` session) is an ordinary tool call too: `[tool] play_<symphony>`, then `play — the model chose <symphony>: <n> member calls, <roles>`, then a line per stage. |
+| `tool_status` | A tool is running, described in `text` for display -- or another model call the turn makes besides the chat model's own (the embedder, the utility model, the rerank judge, the knowledge clerk, a suite member the model consults), as `<role> — <what it is doing>` (26n). A `consult` (27f) is an ordinary tool call: `[tool] consult`, then `consult — asking utility (<backend>): <the question's first words>` while the member answers, and the answer reaches the model as the tool's result. A suite's verifier checking a tool call or an answer (27g) is said the same way: `validate — asking utility (<backend>): Check …`. A symphony the root model plays on its own (27t, an orchestrating `execute` session) is an ordinary tool call too: `[tool] play_<symphony>`, then `play — the model chose <symphony>: <n> member calls, <roles>`, then a line per stage. A tool the **vendor** ran on its own servers (47a: an entry's `server_tools:`, or the run's `--search`) is said here too, never dispatched: `<tool>, run by <vendor>: <what>` -- `web_search, run by Anthropic: "apogee harness"`, then `web_search, run by Anthropic: 5 results` -- and since it can fall between two parts of an answer, the answer's events end before it and start again after. |
 | `notice` | A line for the user in `text` that is neither progress nor an error — a local model answering without the tools it was given because its chat template cannot take them, or a reply kept as text because it did not match the template's format, or a request trimmed to fit the model's window (`context budget: 2 earlier exchanges not sent`), or what a suite's verifier said (27g): an objection to a tool call returned to the model, a dispute the call runs over, the two positions on an answer under `answers: always` (`validate: …`), a check that could not be made. Show it and keep it; it never ends the turn. |
 | `todo` | The session's todo, whole (41d): `items`, an array of `{text, state}` -- `state` `pending`, `active` (being done now) or `done` -- in the model's order, empty when it cleared it. Sent each time the model rewrites it with `todo_write` (a session with tools), and once as a resumed session opens, right after `session`, when it was left holding one. Draw it in place of the last: it is the plan, not a log. |
 | `answer_start` / `answer_end` | Bracket one answer's deltas. |
@@ -547,6 +547,178 @@ the template. `problems` names a file under `recipes/` that did not parse. A
 recipe's run is a task run like any other — the same events, ledger and view
 — its ledger carrying the recipe's name as `recipe`.
 
+Since 48b the review skills — the lenses a review runs, each a markdown file —
+read the same way:
+
+```bash
+apogee review skills list --output-format json         # {"object":"list","data":[…],"problems":[…]}
+apogee review skills show <name> --output-format json  # {"object":"review.skill",…}
+```
+
+Each skill is `name`, `description`, `source` (`shipped` — its compiled-in
+text, `seeded` — its file under the data directory's `review-skills/`, as
+shipped, or `user` — a file of the user's, or a shipped one edited), `path`
+(absent for `shipped`), `applies` (`extensions`, `paths` — globs over
+repository paths — and `languages`, the hints that decide which changed files
+a skill applies to) and `everywhere` (no hints: it applies to every file);
+`show` adds `prompt`, the hunt prompt. `problems` names a file under
+`review-skills/` that did not parse. Every skill's answer is held to one
+finding contract, the shipped `code-review` agent's findings: `severity`,
+`kind`, `file`, `location`, `claim`, `suggested_fix`, `confidence`, and an
+empty list a complete answer.
+
+Since 48c a review's run is a document too, whether or not it posted:
+
+```bash
+apogee review mr <ref> --output-format json   # {"object":"review.run",…}
+```
+
+`ref` is a merge request's URL, `owner/repo#12` (GitHub) or `group/project!4`
+(GitLab). The document is `merge_request` (the canonical spelling,
+`github.com/owner/repo#12`), `url`, `title`, `head` (the commit reviewed),
+`mode` (`full`; `incremental` when this login reviewed an earlier head, with
+`since` that head; `already reviewed` when it read this head before), `model`
+(the backend that reviewed), `skills` (the lenses run) with `plan` (`named`,
+`hints`, `hints, narrowed`) and `left_out_skills`, `excluded_files` (the
+exclusion list's and binary files), `chunks`, and `findings` -- each the
+finding contract's fields plus `line` (where its comment anchors),
+`identity`, `found_by` (every lens that found it), `tightened` (the confirm
+pass reworded it) and `inline` (`false` past the cap, listed in the summary
+instead). `counts` says what each step left out: `candidates` (what the hunts
+returned), `off_change` (not on a line the change added), `not_new` (not on a
+line the new push added), `known` (posted before), `duplicates`, `dismissed`
+and `tightened` (the confirm pass). `posted` is `{"done": true, "comments",
+"summary", "batched"}`, or `{"done": false, "reason"}` -- nothing to say,
+`--dry-run`, or the gate's refusal (`nobody to ask -- run with --yes to post,
+or --dry-run`). `notes` says what a pass that did not answer cost. The
+narration (`[review] hunting with security`) goes to stderr; stdout carries
+the document alone. Posting goes through the gate as `review_post`: asked on
+a terminal, allowed by `--yes` or `permissions.review_post: allow`, governed
+by `--permission-mode`.
+
+Since 48d the sweep and its targets read the same way:
+
+```bash
+apogee review targets --output-format json   # {"object":"list","data":[{"name","forge","repo"|"owner",…}]}
+apogee review sweep --output-format json     # {"object":"review.sweep",…}
+```
+
+A target is `name`, `forge`, `repo` or `owner`, `host` when it is not the
+forge's default, `skills` (empty: each merge request's plan decides), `post`
+(its declared grant), `drafts`, and `model` and `cli` when set -- the `review:`
+section's entry. A sweep's document is `started`, `dry_run`, `allow_post`,
+`cap`, and per target its `name`, `kind` (`repo`, `owner`), `grant` (`target`,
+`--allow-post`, `none`) and `projects`: each repository's `project`
+(`github.com/owner/repo`), `watermark_before` and `watermark_after`,
+`first_sweep` (it started at now), `reviewed` (each a `review.run` document,
+above), `skipped_drafts`, and `error` when it stopped -- a merge request that
+could not be reviewed is not advanced past, so the next sweep tries it again.
+`reviewed`, `posted`, `deferred` (past the cap, waiting for the next sweep)
+and `errors` count the whole run, and `document` names where it was kept
+(the data directory's `review/sweeps/`). A sweep with errors exits `1`; one a
+live sweep's lock refuses exits `1` naming its pid.
+
+Since 49c a generated clip's record is a document, whether or not it landed:
+
+```bash
+apogee video generate "<prompt>" -o clip.mp4 --output-format json   # {"object":"video.generation",…}
+```
+
+It is `status` (`done`, `failed`, `cancelled`), `output` (the clip, absolute)
+and `sidecar` (where the record was written beside it -- `<clip>.json` -- or
+null when nothing landed); `model` (`name` as it was given, `path`, `class`
+from its `model_index.json`, `ref` and `revision` from its pull record,
+`variant` or null); `prompt`; `image` (the seed image, or null) and `mode`
+(`t2v`, `i2v`); `seed` and `seed_source` (`given` by `--seed`, `held` from a
+record run again, or `generated` and kept); `settings` (`width`, `height`, `duration`, `fps`,
+`frames` -- the duration at the rate, rounded to the pipelines' `4k+1` --
+`steps`, `guidance` or null); `device` (`device` and `dtype` as torch
+reported them, `platform` this build's target); `versions` (`torch`,
+`diffusers`, `apogee` -- the ones that ran); `codec` (`h264`, `mpeg4`, or
+null); `seconds`; `created_at`; since 49d `parent` -- null for a run of its
+own, else `move` (`from`: a record run again; `extend`: a clip continued),
+`document` (the record read, or the continued clip's record), `clip` (the
+clip that record is beside, or the clip continued) and `continued` (the clip
+whose last frame the run started from, or null) -- and `preset` (`draft`,
+`final`, or null); since 49e `loras` -- each LoRA the run applied, in the
+order given: `path` (the `.safetensors` file), `sha256` (the file as the run
+began, what a `--from` rerun verifies it against) and `scale` -- empty for
+none, with `versions` then naming `peft` too; and `error` when it did not
+land. The clip and its sidecar are written only on `done`; a failed run exits `1` and a
+cancelled one `130`, the output path untouched either way. The narration --
+the device and the scale to expect, then each step -- goes to stderr. A run
+refused before it starts (a cap, an existing output, no pipeline, a runtime
+not installed) prints no document: one line on stderr naming the fix, exit
+`1`. A run from a record (`--from`) or continuing a clip (`--extend`) says
+first, on stderr, what came from the record and what the flags changed.
+
+Since 50a spoken text is a document too, whether or not it landed:
+
+```bash
+apogee voice say "<text>" -o hello.wav --output-format json   # {"object":"voice.speech",…}
+```
+
+It is `status` (`done`, `failed`, `cancelled`), `output` and `sidecar`
+(`<file>.json`, or null when nothing landed); `model` (`name` as given,
+`path`, `ref`, `revision`, `checkpoint`); `voice` and its `language` (by
+the voice's first letter, Kokoro's convention); `speed`; `text`;
+`segments` -- each its `text`, `seconds` (**measured from the WAV's own
+header**, never estimated) and `offset`, and its `sentences` (`text`,
+`seconds` counted from the samples spoken, `offset`); `seconds` and
+`sample_rate` for the whole file; `device` (`device` as torch reported it,
+`platform`); `versions` (`torch`, `kokoro`, `apogee`); `run_seconds`;
+`created_at`; and `error` when it did not land. Exit `1` on a failure, `130`
+on a cancel, the output untouched either way; a refusal before the run
+prints no document, one line on stderr naming the fix.
+
+Since 51 a bootstrap's summary is one:
+
+```bash
+apogee bootstrap --output-format json   # {"object":"apogee.bootstrap",…}
+```
+
+It is `minimal` (and `minimal_by`: `--minimal` or `APOGEE_MINIMAL_INSTALL`,
+null when it ran) and `steps` -- each `name`, `command` (the `apogee …` line
+it ran, null for a set this host is not for), `status` (`done` or
+`skipped`) and `reason` (null when done). The narration goes to stderr;
+the exit is `0` whatever was skipped.
+
+Since 50c a composed video is a document too -- its project, kept beside the
+video as `<video>.json` from the first step and printed when the run ends:
+
+```bash
+apogee video compose "<brief>" -o video.mp4 --output-format json   # {"object":"video.project",…}
+```
+
+It is `version` (1), `status` (`rendering` while it runs, then `done`,
+`failed` or `cancelled`), `brief`, `title`, `output` and `scenes_dir`
+(`<stem>.scenes/` beside the video); `settings` (`model` and `voice_model`
+as store handles, `voice`, `crossfade`, `captions`, `music` and `assets`,
+null when not given); `plan` (`backend`, and the `attempts` it took: 1, or
+2 after its one correction); `scenes` -- each its `index`, `narration`,
+`visual`, `seconds` (the plan's), `asset` (null for none), `seed`, `voice`
+(`file`, `seconds` measured from the WAV, its `sentences` with `seconds` and
+`offset`) and `clip` (`file`, `seconds` as ffprobe read them), each null
+until it exists, and each file with its own record beside it
+(`video.generation`, `voice.speech`); `captions` (`file`, and `burned` --
+false when this ffmpeg has no libass and the SRT is kept beside the video);
+`assembly` (the joins, the mix and the burn in words); `error`; `created`
+and `platform`; and since 50d `parent` (the project it was edited from, null
+for an original) and `edits` -- every edit from the original brief to this
+one, each its `instruction` (null for none), the scenes it re-rolled
+(`redo`) and the project it was made `from`. An edit is the same verb:
+
+```bash
+apogee video compose --from video.mp4 --edit "<instruction>" -o edited.mp4 --output-format json
+```
+
+Its scene diff is said on stderr before anything renders; `--dry-run`
+prints the edited project with `status` `planned` and renders and writes
+nothing. Exit `1` on a failure and `130` on a cancel, every finished
+scene kept either way: the same command again resumes it, rendering only
+what the document does not hold. A refusal before the plan prints no
+document, one line on stderr naming the fix.
+
 Since 27l the graph navigation verbs are reads of the same kind:
 
 ```bash
@@ -617,6 +789,7 @@ apogee models status --output-format json            # {"fields":[{"field":"chat
 apogee chats list --output-format json      # {"object":"list","data":[{"id","updated","turns","name"},…]}
 apogee agents list --output-format json     # byte for byte GET /v1/admin/agents
 apogee mcp list --output-format json        # GET /v1/admin/mcp-servers's entries, with what connecting found
+apogee mcp presets --output-format json     # {"object":"list","data":[{"name","description","provides","registers_into_apogee","command","args","runnable",…}]}
 apogee check --output-format json           # {"rows":[{"section","name","status","detail","remedy"?}],"ok":…,"failures":N,"warnings":N}
 apogee providers scan --output-format json  # {"object":"list","data":[{"provider","type","label","tier","backend","evidence":[…]}]}
 apogee system --output-format json          # {"cpu":{…},"memory":{…},"apogee":{…},"gpu":{…},"disk":{…}}
@@ -641,7 +814,13 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   `state`, `verified`, and `note`, `format`, `quant`, `window` where the row has
   them — the very object each line of `--output-format stream-json` carries
   (which stays, a row per line). A snapshot a conversion consumed is folded as
-  the table folds it, and `folded` counts them.
+  the table folds it, and `folded` counts them. Since 49a a stored diffusion
+  pipeline is a row of its own (`format` and `group` `pipeline`, `state`
+  `pipeline` or `cannot load`, `architecture` its pipeline class) carrying two
+  numbers no other row has: `components`, how many the pipeline's
+  `model_index.json` names, and `bytes`, what it holds on disk. Since 50a a stored voice model is a row too (`format` and `group`
+  `voice`, `state` `voice` or `cannot load`, `architecture` its checkpoint),
+  with its `bytes`.
 - **`models info`** and **`models status`**: their `label: value` record as
   `fields`, in order, each label as printed and a value's indented continuation
   joined to it with a newline. The values are the same words the human view
@@ -653,6 +832,16 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   `command`, `args`, `enabled`, `env_set` (never the environment itself) — plus
   what connecting to it found: `state` (`connected`, `not connected`,
   `disabled`), `protocol_version`, `tools`, and `error` when it did not connect.
+- **`mcp presets`** (since 47c): one row per server Apogee ships, as `mcp
+  presets` prints them — `name`, `description`, `provides`,
+  `registers_into_apogee`, and what it registers on this machine: `command`
+  and `args`, resolved here (the training environment's interpreter or
+  `python3` on PATH, the seeded script; this binary's own path for `self`).
+  `runnable` says whether this machine can run it; when it cannot, `missing`
+  says what is lacking and `remedy` the command that provides it. A
+  registrable preset carries `register` (`apogee mcp create code --from
+  code-exec`), and `self` its `refusal` instead. Each carries `host_entry`,
+  `{"name", "server": {"command", "args"}}`: the entry another MCP host takes.
 - **`check`**: every row the report shows, `status` one of `ok`, `warn`, `fail`
   and `skipped` — never folded into a pass — `ok` the verdict and the exit code
   the human run's (non-zero on a failure). With `--fix`, what it repaired is the

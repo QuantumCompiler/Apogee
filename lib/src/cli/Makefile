@@ -119,7 +119,9 @@ build:
 # because an installed binary the shell cannot find is the one failure mode a
 # user-level prefix introduces.
 # Installs the binary, its completions, and then asks the binary to create its
-# own data directory and verify it.
+# own data directory and verify it -- and then to bootstrap itself (51): the
+# runtime sets this machine can run, its providers and stored models
+# registered, as both installers do. APOGEE_MINIMAL_INSTALL=1 skips that.
 #
 # That last step is the parity rule in one line: this target does NOT know what
 # `~/.apogee/` contains. `apogee check --fix` creates it from the single
@@ -140,6 +142,8 @@ else
 endif
 	@echo ""
 	@"$(APOGEE_BIN)" check --fix
+	@echo ""
+	@"$(APOGEE_BIN)" bootstrap || echo "note: the bootstrap did not finish -- '$(APOGEE_NAME) bootstrap' runs it again"
 	@case ":$$PATH:" in \
 		*":$(PREFIX)/bin:"*) ;; \
 		*) echo ""; \

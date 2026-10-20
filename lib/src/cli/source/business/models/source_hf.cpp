@@ -7,6 +7,7 @@
 #include <functional>
 
 #include "contracts/errors.h"
+#include "modelstore/pipeline_info.h"
 
 namespace apogee::models {
 namespace {
@@ -128,6 +129,89 @@ bool snapshot_wanted(std::string_view path) noexcept {
     return false;
 }
 
+std::vector<HfFile> pipeline_wanted(const std::vector<HfFile>& tree,
+                                    const std::vector<std::string>& components) {
+    const auto parent = [](std::string_view path) {
+        const std::size_t slash = path.rfind('/');
+        return slash == std::string_view::npos ? std::string{} : std::string{path.substr(0, slash)};
+    };
+    const auto name_of = [](std::string_view path) {
+        const std::size_t slash = path.rfind('/');
+        return slash == std::string_view::npos ? path : path.substr(slash + 1);
+    };
+    // The directories holding plain weights: a variant beside them is a copy.
+    std::vector<std::string> plain;
+    for (const HfFile& file : tree) {
+        if (file.path.ends_with(".safetensors") && weights_variant(name_of(file.path)).empty()) {
+            plain.push_back(parent(file.path));
+        }
+    }
+    std::vector<HfFile> out;
+    for (const HfFile& file : tree) {
+        if (file.path == kModelIndex) {
+            out.push_back(file);
+            continue;
+        }
+        const std::size_t slash = file.path.find('/');
+        if (slash == std::string::npos || !snapshot_wanted(file.path) ||
+            std::ranges::find(components, file.path.substr(0, slash)) == components.end()) {
+            continue;
+        }
+        if (!weights_variant(name_of(file.path)).empty() &&
+            std::ranges::find(plain, parent(file.path)) != plain.end()) {
+            continue;
+        }
+        out.push_back(file);
+    }
+    return out;
+}
+
+std::vector<HfFile> voice_wanted(const std::vector<HfFile>& tree) {
+    std::vector<HfFile> out;
+    for (const HfFile& file : tree) {
+        const bool root = file.path.find('/') == std::string::npos;
+        const bool pack = file.path.starts_with("voices/") && file.path.ends_with(".pt") &&
+                          file.path.find('/', 7) == std::string::npos;
+        if ((root && (file.path == "config.json" || file.path.ends_with(".pth"))) || pack) {
+            out.push_back(file);
+        }
+    }
+    return out;
+}
+
+HfText fetch_repo_text(backends::HttpClient& client, const HfRef& ref, HfRepoKind kind,
+                       std::string_view path, std::string_view token,
+                       const harness::CancellationToken& cancellation, std::size_t limit) {
+    HfText out;
+    HfRef file = ref;
+    file.file = std::string{path};
+    backends::HttpRequest request;
+    request.method = "GET";
+    request.url = hf_download_url(file, kind);
+    request.headers = headers_for(token);
+    request.timeout = std::chrono::seconds{60};
+    backends::HttpResponse response;
+    try {
+        response = client.send(request, {}, cancellation);
+    } catch (const backends::HttpError& e) {
+        out.error = std::string{"could not reach Hugging Face: "} + e.what();
+        return out;
+    }
+    if (!response.ok()) {
+        out.error = "could not read " + std::string{path} + " from '" + ref.repo_id() +
+                    "' (Hugging Face returned status " + std::to_string(response.status) + ")";
+        return out;
+    }
+    if (response.body.size() > limit) {
+        out.error = std::string{path} + " in '" + ref.repo_id() + "' is larger than " +
+                    std::to_string(limit) + " bytes -- not the small file it should be";
+        return out;
+    }
+    out.text = std::move(response.body);
+    out.ok = true;
+    return out;
+}
+
 bool dataset_file_wanted(std::string_view path) noexcept {
     const std::size_t slash = path.rfind('/');
     const std::string_view name = slash == std::string_view::npos ? path : path.substr(slash + 1);
@@ -204,6 +288,15 @@ HfListing list_gguf_files(backends::HttpClient& client, const HfRef& ref, std::s
                 continue;
             }
             const std::string name = sibling.value("rfilename", std::string{});
+            if (name == kModelIndex) {
+                listing.has_model_index = true;
+            }
+            listing.has_root_config = listing.has_root_config || name == "config.json";
+            listing.has_root_checkpoint =
+                listing.has_root_checkpoint ||
+                (name.ends_with(".pth") && name.find('/') == std::string::npos);
+            listing.has_voice_packs =
+                listing.has_voice_packs || (name.starts_with("voices/") && name.ends_with(".pt"));
             if (name.size() > 5 && name.ends_with(".gguf")) {
                 listing.gguf_files.push_back(name);
             } else if (name.ends_with(".safetensors")) {

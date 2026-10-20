@@ -381,9 +381,14 @@ are never returned — a user may well have put a token in one.
 
 The twin of `apogee mcp create`. Body: `name` (required), and either
 `command` with optional `args` (register an existing executable, nothing
-written) or nothing else (scaffold a runnable Python server under the data
-directory's `mcp/<name>/`, exactly as the CLI would); `force` replaces an
-existing entry. `201` with the view plus `directory` (empty for register-only)
+written), `from` naming a preset (since 47c: what `apogee mcp presets` lists,
+registered as `mcp create --from` registers it, byte for byte), or nothing
+else (scaffold a runnable Python server under the data directory's
+`mcp/<name>/`, exactly as the CLI would); `force` replaces an existing entry.
+`from` with `command` or `args` is a `400`, as is a preset that cannot run on
+this machine (what is missing and its fix in the message), an unknown one
+(the presets named), and `self` (Apogee's own tools, refused into Apogee with
+the reason). `201` with the view plus `directory` (empty for register-only)
 and `restart_required: true` — servers connect at startup. `409` (`type:
 conflict`) on a name collision without `force`; `400` on a name that is not a
 server name or a malformed body.

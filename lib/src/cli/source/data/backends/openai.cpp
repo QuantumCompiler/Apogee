@@ -96,6 +96,21 @@ bool StreamAccumulator::handle(const SseEvent& event) {
         return true;
     }
 
+    if (type == "response.output_item.done") {
+        // A tool OpenAI ran itself (47a): said, never dispatched.
+        if (const auto item = payload.find("item"); item != payload.end() && options_.on_status) {
+            if (const std::optional<std::string> line = openai::server_tool_line(*item)) {
+                harness::StatusEvent status;
+                status.type = harness::StatusEvent::Type::ToolCall;
+                status.phase = harness::StatusEvent::Phase::Done;
+                status.name = item->value("type", std::string{});
+                status.detail = *line;
+                options_.on_status(status);
+            }
+        }
+        return true;
+    }
+
     if (type == "response.function_call_arguments.delta") {
         const auto index = payload.value("output_index", std::int64_t{0});
         calls_[index].arguments += payload.value("delta", std::string{});
@@ -160,6 +175,7 @@ std::unique_ptr<OpenAIProvider> OpenAIProvider::from_config(const std::string& b
     // nor cares where it came from.
     options.api_key = std::move(api_key);
     options.web_search = web_search;
+    options.server_tools = config.server_tools;
     if (!config.model.empty()) {
         options.model = config.model;
     }
@@ -195,6 +211,7 @@ openai::RequestOptions OpenAIProvider::request_options(const harness::ChatReques
     options.reasoning_effort =
         openai::effort_for(request.thinking, options_.model, options_.thinking_budget_tokens);
     options.web_search = options_.web_search;
+    options.server_tools = options_.server_tools;
     options.stream = stream;
     return options;
 }

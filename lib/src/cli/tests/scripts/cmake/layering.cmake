@@ -146,7 +146,7 @@ endif()
 # ---- The named rules ------------------------------------------------------------
 
 set(GUARDED_PACKAGES harness agentloop agent secrets tools mcp knowledge graph training tasks
-                     symphony)
+                     symphony forge review video)
 
 set(ALL_SOURCES "")
 foreach(package IN LISTS GUARDED_PACKAGES)
@@ -494,6 +494,79 @@ if(NOT VIOLATIONS STREQUAL "")
     message(FATAL_ERROR "the symphony package includes a surface:\n${pretty}\n"
                         "symphony/ may include only agent/, agentloop/, harness/, contracts/, "
                         "platform/ and itself.")
+endif()
+
+# `forge/` (48a) is the seam to the code forges: a spawned `gh` or `glab`
+# per call, their logins theirs. It stands on the contracts (UTF-8 at entry)
+# and the platform (the child, the PATH lookup) and nothing else -- never a
+# backend, never a surface, never the secrets store.
+file(GLOB_RECURSE forge_sources "${PACKAGE_DIR_forge}/*.h" "${PACKAGE_DIR_forge}/*.cpp")
+if(forge_sources STREQUAL "")
+    message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_forge} — "
+                        "this check would pass vacuously")
+endif()
+foreach(source IN LISTS forge_sources)
+    file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+    foreach(line IN LISTS project_includes)
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(forge|contracts|platform)/")
+            get_filename_component(name "${source}" NAME)
+            list(APPEND VIOLATIONS "  forge/${name} reaches past its floor: ${line}")
+        endif()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "the forge package includes more than its floor:\n${pretty}\n"
+                        "forge/ may include only contracts/, platform/ and itself.")
+endif()
+
+# `review/` (48c) is the review core: plain data in and out, its model calls
+# arriving as closures. It stands on the contracts (the skills, the finding
+# contract, SHA-256), and since 48d the sweep on the forge seam (the
+# listings) -- never a backend or a surface.
+file(GLOB_RECURSE review_sources "${PACKAGE_DIR_review}/*.h" "${PACKAGE_DIR_review}/*.cpp")
+if(review_sources STREQUAL "")
+    message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_review} — "
+                        "this check would pass vacuously")
+endif()
+foreach(source IN LISTS review_sources)
+    file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+    foreach(line IN LISTS project_includes)
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(review|contracts|forge)/")
+            get_filename_component(name "${source}" NAME)
+            list(APPEND VIOLATIONS "  review/${name} reaches past its floor: ${line}")
+        endif()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "the review package includes more than its floor:\n${pretty}\n"
+                        "review/ may include only contracts/, forge/ and itself.")
+endif()
+
+# `video/` (49b) is the video runtime: diffusers reached through a seeded
+# driver over the training track's one script runner, the pipeline read
+# from the store's files, the frames assembled through the platform's
+# ffmpeg seam. Never a backend, never a surface, never a model call.
+file(GLOB_RECURSE video_sources "${PACKAGE_DIR_video}/*.h" "${PACKAGE_DIR_video}/*.cpp")
+if(video_sources STREQUAL "")
+    message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_video} — "
+                        "this check would pass vacuously")
+endif()
+foreach(source IN LISTS video_sources)
+    file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+    foreach(line IN LISTS project_includes)
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(video|training|modelstore|contracts|platform)/")
+            get_filename_component(name "${source}" NAME)
+            list(APPEND VIOLATIONS "  video/${name} reaches past its floor: ${line}")
+        endif()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "the video package includes more than its floor:\n${pretty}\n"
+                        "video/ may include only training/, modelstore/, contracts/, platform/ "
+                        "and itself.")
 endif()
 
 # The packages A1 carved, each held to the floor it was carved for.

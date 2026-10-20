@@ -3,8 +3,10 @@
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "contracts/types.h"
 
@@ -38,9 +40,19 @@ struct RequestOptions {
     /// knob into a band. One knob per provider, mapped at the boundary.
     std::string reasoning_effort;
 
+    /// The server-side `web_search` tool: the run's `--search`.
     bool web_search = false;
     bool stream = false;
+
+    /// The entry's `server_tools:` (47a): `web_search` (the same block, once)
+    /// and `code_execution`, OpenAI's `code_interpreter`. Empty sends none.
+    std::vector<std::string> server_tools;
 };
+
+/// The narration line for one finished output item OpenAI ran itself (47a):
+/// a `web_search_call` or a `code_interpreter_call`, worded through
+/// `harness::server_tool_line`. Nullopt for any other item.
+[[nodiscard]] std::optional<std::string> server_tool_line(const nlohmann::json& item);
 
 /// The effort band for a token budget: "" (off), "low", "medium", or "high".
 [[nodiscard]] std::string effort_for_budget(std::int64_t budget_tokens);

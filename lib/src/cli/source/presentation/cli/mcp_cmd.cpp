@@ -19,6 +19,7 @@
 #include "machine/json_reporter.h"
 #include "mcp/registry.h"
 #include "mcp/serve_stdio.h"
+#include "operations/mcp_presets.h"
 #include "operations/read_views.h"
 #include "scaffold/mcp_server.h"
 #include "tools/toolsets.h"
@@ -70,22 +71,45 @@ void bind_create(CLI::App& parent, const RootContext& context) {
     auto name = std::make_shared<std::string>();
     auto command = std::make_shared<std::string>();
     auto args = std::make_shared<std::vector<std::string>>();
+    auto from = std::make_shared<std::string>();
     auto force = std::make_shared<bool>(false);
     CLI::App* cmd = parent.add_subcommand(
-        "create", "Scaffold a runnable Python MCP server, or register an existing executable");
+        "create",
+        "Scaffold a runnable Python MCP server, register an existing executable, or register a "
+        "shipped preset");
     cmd->add_option("name", *name, "The server's name (letters, digits, _ and -)")->required();
-    cmd->add_option("--command", *command,
-                    "Register this executable instead of scaffolding a server")
-        ->type_name(kPathValue);
+    CLI::Option* command_option =
+        cmd->add_option("--command", *command,
+                        "Register this executable instead of scaffolding a server")
+            ->type_name(kPathValue);
     cmd->add_option("--args", *args, "Arguments for --command")->needs("--command");
+    cmd->add_option("--from", *from,
+                    "Register a preset Apogee ships, as its command and arguments resolve here "
+                    "(see: apogee mcp presets)")
+        ->type_name(words_value(operations::mcp_preset_names()))
+        ->excludes(command_option);
     cmd->add_flag("--force", *force, "Replace an existing server of the same name");
-    cmd->callback([&context, name, command, args, force]() {
+    cmd->callback([&context, name, command, args, from, force]() {
         const std::filesystem::path path = config_path_for(context);
         scaffold::McpServerSpec spec;
         spec.name = *name;
         spec.command = *command;
         spec.args = *args;
         spec.force = *force;
+        const operations::McpPreset* preset = nullptr;
+        if (!from->empty()) {
+            // The preset's command and arguments, through the one create
+            // core: the config byte for byte as the typed registration.
+            try {
+                const operations::McpPresetResolution resolution =
+                    operations::resolve_preset_for_create(*from, operations::mcp_preset_host(path));
+                spec.command = resolution.command;
+                spec.args = resolution.args;
+            } catch (const std::exception& e) {
+                fail(e.what());
+            }
+            preset = operations::find_mcp_preset(*from);
+        }
         scaffold::McpServerResult result;
         try {
             result = scaffold::create_mcp_server(path, spec);
@@ -98,9 +122,15 @@ void bind_create(CLI::App& parent, const RootContext& context) {
             std::cout << "  dir:     " << result.directory.string() << "\n";
         }
         std::cout << "  command: " << result.command << "\n"
-                  << "  config:  " << result.config_path.string() << "\n\n"
-                  << "Test it:  apogee mcp test " << result.name << " echo '{\"text\":\"hi\"}'\n"
-                  << "It connects at the start of the next tool-using run.\n";
+                  << "  config:  " << result.config_path.string() << "\n\n";
+        if (preset != nullptr) {
+            std::cout << "Test it:  apogee mcp test " << result.name << " " << preset->try_tool
+                      << " '" << preset->try_arguments << "'\n";
+        } else {
+            std::cout << "Test it:  apogee mcp test " << result.name
+                      << " echo '{\"text\":\"hi\"}'\n";
+        }
+        std::cout << "It connects at the start of the next tool-using run.\n";
     });
 }
 
@@ -143,7 +173,7 @@ void bind_list(CLI::App& parent, const RootContext& context) {
                 write_document(std::cout, operations::mcp_servers_document(config));
                 return;
             }
-            std::cout << "No MCP servers configured. Create one with: apogee mcp create <name>\n";
+            std::cout << operations::kNoMcpServers << "\n";
             return;
         }
         if (json) {
@@ -169,6 +199,51 @@ void bind_list(CLI::App& parent, const RootContext& context) {
                       << (tools.empty() ? "-" : tools) << "\n";
             if (!status.connected && status.enabled && !status.error.empty()) {
                 std::cout << "  " << status.error << "\n";
+            }
+        }
+    });
+}
+
+void bind_presets(CLI::App& parent, const RootContext& context) {
+    CLI::App* cmd = parent.add_subcommand(
+        "presets", "List the MCP servers Apogee ships, ready to register with create --from");
+    auto format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    add_read_format(cmd, format);
+    cmd->callback([&context, format]() {
+        const operations::McpPresetHost host =
+            operations::mcp_preset_host(config_path_for(context));
+        if (*format == ReadFormat::Json) {
+            write_document(std::cout, operations::mcp_presets_document(host));
+            return;
+        }
+        bool first = true;
+        for (const operations::McpPreset& preset : operations::mcp_presets()) {
+            const operations::McpPresetResolution resolution =
+                operations::resolve_mcp_preset(preset, host);
+            std::cout << (first ? "" : "\n") << pad(std::string{preset.name}, 11)
+                      << preset.description << "\n";
+            first = false;
+            const std::string indent(11, ' ');
+            std::cout << indent << "provides: " << preset.provides << "\n";
+            std::string runs = resolution.command;
+            for (const std::string& argument : resolution.args) {
+                runs += " " + argument;
+            }
+            if (preset.refusal.empty()) {
+                std::cout << indent << "register: apogee mcp create " << preset.server_name
+                          << " --from " << preset.name << "\n";
+                if (resolution.runnable()) {
+                    std::cout << indent << "runs:     " << runs << "\n";
+                }
+            } else {
+                std::cout << indent << "for another MCP host: \"" << preset.server_name
+                          << "\": " << operations::mcp_host_entry(resolution).dump() << "\n"
+                          << indent
+                          << "not registered into Apogee: it already has these tools natively\n";
+            }
+            if (!resolution.runnable()) {
+                std::cout << indent << "not runnable here: " << resolution.missing
+                          << (resolution.remedy.empty() ? "" : " -- " + resolution.remedy) << "\n";
             }
         }
     });
@@ -254,6 +329,7 @@ void McpCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->require_subcommand(1);
     bind_create(*cmd, context);
     bind_list(*cmd, context);
+    bind_presets(*cmd, context);
     bind_test(*cmd, context);
     bind_enable(*cmd, context, true);
     bind_enable(*cmd, context, false);

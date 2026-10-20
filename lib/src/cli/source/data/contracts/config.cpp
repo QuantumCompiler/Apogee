@@ -11,10 +11,12 @@
 #include <fstream>
 #include <limits>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <utility>
 
 #include "contracts/jsonc.h"
+#include "contracts/server_tools.h"
 #include "contracts/symphony_walk.h"
 #include "platform/platform.h"
 
@@ -149,6 +151,9 @@ std::optional<std::int64_t> integer_in(const YAML::Node& node, std::string_view 
     return value;
 }
 
+std::vector<std::string> string_list(const YAML::Node& node, std::string_view origin,
+                                     std::string_view key, bool paths);
+
 BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
                             const std::string& name) {
     const std::string where = "backends." + name;
@@ -218,6 +223,16 @@ BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
     backend.host = scalar(node["host"], origin, where + ".host");
     backend.idle_unload_seconds =
         integer(node["idle_unload_seconds"], origin, where + ".idle_unload_seconds");
+    for (std::string& tool :
+         string_list(node["server_tools"], origin, where + ".server_tools", false)) {
+        if (std::ranges::find(backend.server_tools, tool) == backend.server_tools.end()) {
+            backend.server_tools.push_back(std::move(tool));
+        }
+    }
+    if (const std::string refusal = server_tools_refusal(backend.type, backend.server_tools);
+        !refusal.empty()) {
+        fail(origin, where + ".server_tools: " + refusal);
+    }
 
     return backend;
 }
@@ -1385,6 +1400,11 @@ const McpServerConfig* Config::find_mcp_server(std::string_view name) const noex
     return it == mcp_servers.end() ? nullptr : &it->second;
 }
 
+const ReviewTargetConfig* Config::find_review_target(std::string_view name) const noexcept {
+    const auto it = review_targets.find(name);
+    return it == review_targets.end() ? nullptr : &it->second;
+}
+
 std::vector<std::string> Config::mcp_server_names() const {
     std::vector<std::string> names;
     names.reserve(mcp_servers.size());
@@ -1682,6 +1702,8 @@ Config parse_config(std::string_view content, std::string_view origin) {
             scalar(models["default_utility"], origin, "models.default_utility");
         config.models.default_suite =
             scalar(models["default_suite"], origin, "models.default_suite");
+        config.models.default_video =
+            scalar(models["default_video"], origin, "models.default_video");
     }
 
     if (const YAML::Node paths = root["paths"]; paths.IsDefined() && !paths.IsNull()) {
@@ -1783,6 +1805,111 @@ Config parse_config(std::string_view content, std::string_view origin) {
                                  "' is not a permission level (accepted: ask, allow, deny)");
             }
             config.permissions.levels[tool] = *level;
+        }
+    }
+
+    if (const YAML::Node targets = root["review"]; targets.IsDefined() && !targets.IsNull()) {
+        if (!targets.IsMap()) {
+            fail(origin, "review: expected a mapping of target name -> settings");
+        }
+        for (const auto& entry : targets) {
+            const std::string name = entry.first.Scalar();
+            const std::string where = "review." + name;
+            const YAML::Node node = entry.second;
+            if (name.empty()) {
+                fail(origin, "review: a target has an empty name");
+            }
+            if (!node.IsMap()) {
+                fail(origin,
+                     where + ": expected a mapping of settings (repo or owner, forge, ...)");
+            }
+            ReviewTargetConfig target;
+            for (const auto& field : node) {
+                const std::string key = field.first.Scalar();
+                static const std::set<std::string> known{
+                    "forge", "host", "repo", "owner", "skills", "post", "drafts", "model", "cli"};
+                if (!known.contains(key)) {
+                    fail(origin, where + ": unknown key '" + key +
+                                     "' (a target's are repo or owner, forge, host, skills, post, "
+                                     "drafts, model, cli)");
+                }
+            }
+            const auto text = [&](const char* key) {
+                const YAML::Node value = node[key];
+                return value.IsDefined() && !value.IsNull()
+                           ? scalar(value, origin, where + "." + key)
+                           : std::string{};
+            };
+            const auto flag = [&](const char* key) {
+                const std::string value = text(key);
+                if (value.empty() || value == "false") {
+                    return false;
+                }
+                if (value != "true") {
+                    fail(origin, where + "." + key + ": '" + value + "' is not true or false");
+                }
+                return true;
+            };
+            if (const std::string forge = text("forge"); !forge.empty()) {
+                if (forge != "github" && forge != "gitlab") {
+                    fail(origin, where + ".forge: '" + forge + "' is not github or gitlab");
+                }
+                target.forge = forge;
+            }
+            target.host = text("host");
+            target.repo = text("repo");
+            target.owner = text("owner");
+            if (target.repo.empty() == target.owner.empty()) {
+                fail(origin, where +
+                                 ": set exactly one of repo (a repository) and owner (whose "
+                                 "repositories are swept)");
+            }
+            const auto segments = [](const std::string& path) {
+                std::size_t count = 0;
+                std::size_t start = 0;
+                while (start <= path.size()) {
+                    const std::size_t slash = path.find('/', start);
+                    const std::string piece = path.substr(
+                        start, slash == std::string::npos ? std::string::npos : slash - start);
+                    if (piece.empty() || piece == "." || piece == ".." ||
+                        piece.find_first_not_of(
+                            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+                            "0123456789._-") != std::string::npos) {
+                        return std::size_t{0};
+                    }
+                    ++count;
+                    if (slash == std::string::npos) {
+                        break;
+                    }
+                    start = slash + 1;
+                }
+                return count;
+            };
+            if (!target.repo.empty()) {
+                const std::size_t parts = segments(target.repo);
+                if (target.forge == "github" ? parts != 2 : parts < 2) {
+                    fail(origin, where + ".repo: '" + target.repo + "' is not " +
+                                     (target.forge == "github" ? "owner/repo" : "group/project"));
+                }
+            }
+            if (!target.owner.empty()) {
+                const std::size_t parts = segments(target.owner);
+                if (target.forge == "github" ? parts != 1 : parts < 1) {
+                    fail(origin, where + ".owner: '" + target.owner + "' is not " +
+                                     (target.forge == "github" ? "an organization or a user"
+                                                               : "a group or a user"));
+                }
+            }
+            target.skills = string_list(node["skills"], origin, where + ".skills", false);
+            target.post = flag("post");
+            target.drafts = flag("drafts");
+            target.model = text("model");
+            target.cli = expand_env_and_home(text("cli"));
+            const auto [it, inserted] = config.review_targets.emplace(name, std::move(target));
+            if (!inserted) {
+                fail(origin, "review: '" + name + "' collides with '" + it->first +
+                                 "' -- target names are compared case-insensitively; rename one");
+            }
         }
     }
 
@@ -2233,7 +2360,8 @@ bool operator==(const ModelsConfig& lhs, const ModelsConfig& rhs) noexcept {
            lhs.default_extraction == rhs.default_extraction &&
            lhs.default_vision == rhs.default_vision &&
            lhs.default_transcription == rhs.default_transcription &&
-           lhs.default_utility == rhs.default_utility && lhs.default_suite == rhs.default_suite;
+           lhs.default_utility == rhs.default_utility && lhs.default_suite == rhs.default_suite &&
+           lhs.default_video == rhs.default_video;
 }
 
 }  // namespace apogee::harness

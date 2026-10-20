@@ -166,6 +166,33 @@ struct BundledScript {
 /// `training/scripts/mlx_convert.py`, relative to the data directory.
 [[nodiscard]] std::string bundled_mlx_converter_relative_path();
 
+/// The code-execution server (47b): `code_exec_server.py`, an MCP server on
+/// stdio that runs Python in a throwaway per-session directory. Compiled in
+/// from `assets/mcp/`, byte-identical to it by test, and seeded
+/// skip-if-present beside the drivers under `training/scripts/` -- it runs
+/// under the same Python environment when there is one, and a stale copy
+/// refreshes by the same retired digests. Registered by hand through
+/// `mcp create --command`, like any server; what runs is the seeded copy.
+[[nodiscard]] std::span<const BundledScript> bundled_mcp_scripts();
+
+/// `training/scripts/code_exec_server.py`, relative to the data directory.
+[[nodiscard]] std::string bundled_code_exec_server_relative_path();
+
+/// The video driver (49b): `video_generate.py`, which runs one diffusion
+/// pipeline from the store on a request and writes its frames. Compiled in
+/// from `assets/video/`, byte-identical to it by test, and seeded
+/// skip-if-present beside the drivers under `training/scripts/` -- it runs
+/// under the same Python environment, and a stale copy refreshes by the
+/// same retired digests. What runs is the seeded copy.
+[[nodiscard]] std::span<const BundledScript> bundled_video_scripts();
+
+/// `training/scripts/video_generate.py`, relative to the data directory.
+[[nodiscard]] std::string bundled_video_driver_relative_path();
+
+/// `training/scripts/voice_say.py` (50a), the speech driver -- one of
+/// `bundled_video_scripts`, seeded beside the video driver.
+[[nodiscard]] std::string bundled_voice_driver_relative_path();
+
 /// Every version of a seeded driver -- the trainers' and the MLX ones -- an
 /// earlier Apogee shipped and this one does not, as `<name> <sha256>` with
 /// the name as in `BundledScript::name`, sorted. From
@@ -191,8 +218,9 @@ enum class SeededScript : std::uint8_t {
     Missing,
 };
 
-/// The driver `name` (a `bundled_training_scripts` or `bundled_mlx_scripts`
-/// name) under `root`'s `training/scripts/`. `retired` is
+/// The driver `name` (a `bundled_training_scripts`, `bundled_mlx_scripts`,
+/// `bundled_mcp_scripts` or `bundled_video_scripts` name) under `root`'s
+/// `training/scripts/`. `retired` is
 /// `bundled_scripts_retired()` but for tests.
 [[nodiscard]] SeededScript inspect_seeded_script(
     const std::filesystem::path& root, std::string_view name,
@@ -285,6 +313,36 @@ struct BundledRecipe {
 
 /// `recipes/<name>.yaml`, relative to the data directory.
 [[nodiscard]] std::string bundled_recipe_relative_path(std::string_view name);
+
+/// A shipped review skill (48b): one lens a review runs -- a markdown file
+/// with its description and applies-to hints in a front matter and its hunt
+/// prompt below -- compiled in, byte-identical to
+/// `assets/review-skills/<name>.md` by test, and seeded skip-if-present under
+/// `review-skills/`. As a recipe's, the seeded copy is the user's once it
+/// exists, the compiled-in text standing in only while it is absent.
+struct BundledReviewSkill {
+    std::string_view name;
+    std::string_view text;
+};
+
+/// The seven, by name (`assets_review_skills.cpp`, written by
+/// `scripts/generate_review_skill_assets.py`).
+[[nodiscard]] std::span<const BundledReviewSkill> bundled_review_skills() noexcept;
+
+/// The skill `name` (exactly), or nullptr.
+[[nodiscard]] const BundledReviewSkill* find_bundled_review_skill(std::string_view name) noexcept;
+
+/// `review-skills/<name>.md`, relative to the data directory.
+[[nodiscard]] std::string bundled_review_skill_relative_path(std::string_view name);
+
+/// The diff-exclusion list (48c): globs of the files a review leaves out --
+/// lockfiles, generated, vendored -- compiled in byte-identical to
+/// `assets/review-skills/exclude.txt` and seeded skip-if-present at
+/// `review-skills/exclude.txt`, where an edited copy is the user's.
+[[nodiscard]] std::string_view bundled_review_exclusions() noexcept;
+
+/// `review-skills/exclude.txt`, relative to the data directory.
+[[nodiscard]] std::string bundled_review_exclusions_relative_path();
 
 /// `training/kits/<name>.yaml` and `training/scripts/<name>`, relative to the
 /// data directory -- the paths seeding writes and the commands read.

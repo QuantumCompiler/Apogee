@@ -73,6 +73,10 @@ apogee_add_module(operations
     operations/graph_sources.cpp
     operations/knowledge_core.h
     operations/knowledge_core.cpp
+    operations/code_exec_server.h
+    operations/code_exec_server.cpp
+    operations/mcp_presets.h
+    operations/mcp_presets.cpp
     operations/read_views.h
     operations/renames.h
     operations/renames.cpp
@@ -241,6 +245,10 @@ apogee_add_module(cli
     cli/analyze.cpp
     cli/agents_cmd.h
     cli/agents_cmd.cpp
+    cli/review_cmd.h
+    cli/review_cmd.cpp
+    cli/review_mr.h
+    cli/review_mr.cpp
     cli/symphonies_cmd.h
     cli/symphonies_cmd.cpp
     cli/system_cmd.h
@@ -285,6 +293,20 @@ apogee_add_module(cli
     cli/datasets.cpp
     cli/train.h
     cli/train.cpp
+    cli/video_runtime.h
+    cli/video_runtime.cpp
+    cli/video_cmd.h
+    cli/video_cmd.cpp
+    cli/video_generate.h
+    cli/video_generate.cpp
+    cli/video_compose.h
+    cli/video_compose.cpp
+    cli/voice_cmd.h
+    cli/voice_cmd.cpp
+    cli/bootstrap_cmd.h
+    cli/bootstrap_cmd.cpp
+    cli/voice_say.h
+    cli/voice_say.cpp
     cli/knowledge.h
     cli/knowledge.cpp
     cli/chat.h

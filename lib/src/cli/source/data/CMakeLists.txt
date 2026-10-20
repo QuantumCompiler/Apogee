@@ -32,14 +32,27 @@ apogee_add_module(contracts
     contracts/utf8.cpp
     contracts/todo.h
     contracts/todo.cpp
+    contracts/server_tools.h
+    contracts/server_tools.cpp
     contracts/assets.h
     contracts/assets.cpp
     contracts/assets_agents.cpp
     contracts/assets_training.cpp
     contracts/assets_converter.cpp
     contracts/assets_mlx.cpp
+    contracts/assets_mcp.cpp
+    contracts/assets_video.cpp
+    contracts/video_run.h
+    contracts/video_run.cpp
+    contracts/captions.h
+    contracts/captions.cpp
+    contracts/video_project.h
+    contracts/video_project.cpp
     contracts/assets_symphonies.cpp
     contracts/assets_recipes.cpp
+    contracts/assets_review_skills.cpp
+    contracts/review_skill.h
+    contracts/review_skill.cpp
     contracts/errors.h
     contracts/errors.cpp
     contracts/cancellation.h
@@ -73,6 +86,10 @@ apogee_add_module(modelstore
     modelstore/footprint.cpp
     modelstore/mlx_info.h
     modelstore/mlx_info.cpp
+    modelstore/pipeline_info.h
+    modelstore/pipeline_info.cpp
+    modelstore/voice_info.h
+    modelstore/voice_info.cpp
     modelstore/sidecar.h
     modelstore/sidecar.cpp
     modelstore/snapshot.h

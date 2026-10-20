@@ -1,0 +1,24 @@
+diff --git a/firmware/timer.c b/firmware/timer.c
+--- a/firmware/timer.c
++++ b/firmware/timer.c
+@@ -1,6 +1,18 @@
+ #include <stdint.h>
+ #include "board.h"
+ 
+-void timer_init(void) {
+-    TIMER0->LOAD = SYSTEM_CLOCK_HZ / 1000;
++static volatile uint32_t tick_count;
++
++void SysTick_Handler(void) {
++    tick_count++;
++}
++
++void delay_ms(uint32_t ms) {
++    uint32_t start = tick_count;
++    while (tick_count - start < ms) {
++    }
++}
++
++void timer_init(void) {
++    TIMER0->LOAD = SYSTEM_CLOCK_HZ / 1000;
+ }

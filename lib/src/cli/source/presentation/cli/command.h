@@ -96,6 +96,22 @@ inline constexpr const char* kSymphonyNameValue = "SYMPHONY_NAME";
 inline constexpr const char* kSymphonyEntryValue = "SYMPHONY_ENTRY";
 /// A task recipe (40c): a shipped one, or a file under `recipes/`.
 inline constexpr const char* kRecipeValue = "RECIPE";
+/// A review skill (48b): a shipped one, or a file under `review-skills/`.
+inline constexpr const char* kReviewSkillValue = "REVIEW_SKILL";
+/// A review sweep target (48d): a `review:` entry.
+inline constexpr const char* kReviewTargetValue = "REVIEW_TARGET";
+/// A stored diffusion pipeline (49c): `video generate --model` and `config
+/// set-default-video` -- the store's pipelines by model and handle.
+inline constexpr const char* kVideoPipelineValue = "VIDEO_PIPELINE";
+/// A stored voice model, and one of the voices the store's voice models
+/// carry (50a): `voice say --model` and `--voice`.
+inline constexpr const char* kVoiceModelValue = "VOICE_MODEL";
+inline constexpr const char* kVoiceValue = "VOICE";
+/// A model type the installed mlx-lm converts (M15): `convert --mlx --model-type`.
+inline constexpr const char* kMlxModelTypeValue = "MLX_MODEL_TYPE";
+/// `convert --register-with`'s levels (M16): the MLX precisions after `--mlx`,
+/// the GGUF quantization levels otherwise.
+inline constexpr const char* kRegisterLevelValue = "REGISTER_LEVEL";
 /// A `training.pipelines` entry, or a spec path.
 inline constexpr const char* kPipelineValue = "PIPELINE";
 /// A regime by name -- a `training.regimes` entry, a spec under
@@ -147,7 +163,7 @@ inline constexpr const char* kAllowedHostValue = "ALLOWED_HOST";
 
 /// Every name kind above, for the protocol to recognise and a test to hold
 /// each to a source.
-inline constexpr std::array<std::string_view, 42> kNameValues{kCollectionValue,
+inline constexpr std::array<std::string_view, 49> kNameValues{kCollectionValue,
                                                               kCollectionListValue,
                                                               kGraphValue,
                                                               kNamedGraphValue,
@@ -188,7 +204,14 @@ inline constexpr std::array<std::string_view, 42> kNameValues{kCollectionValue,
                                                               kSymphonyValue,
                                                               kSymphonyNameValue,
                                                               kSymphonyEntryValue,
-                                                              kRecipeValue};
+                                                              kRecipeValue,
+                                                              kReviewSkillValue,
+                                                              kReviewTargetValue,
+                                                              kVideoPipelineValue,
+                                                              kVoiceModelValue,
+                                                              kVoiceValue,
+                                                              kMlxModelTypeValue,
+                                                              kRegisterLevelValue};
 
 /// `{a,b}`: a set of words, as a type name spells it.
 template <typename Words>

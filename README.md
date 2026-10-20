@@ -8,7 +8,7 @@ This repository is home to the whole Apogee project. Today that is the **CLI app
 
 ## Install
 
-One command fetches the [latest release](https://github.com/QuantumCompiler/Apogee/releases/latest) for your platform, installs the binary and shell completions, and verifies the install.
+One command fetches the [latest release](https://github.com/QuantumCompiler/Apogee/releases/latest) for your platform, installs the binary and shell completions, verifies the install, and bootstraps it: the Python runtimes this machine can run are installed into Apogee's own environment, and the providers and stored models it finds are registered — each step said, none fatal. Models are never downloaded; you pull those. `APOGEE_MINIMAL_INSTALL=1` skips the bootstrap, and `apogee bootstrap` runs it any time.
 
 macOS / Linux:
 
@@ -22,7 +22,7 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/QuantumCompiler/Apogee/stable/lib/scripts/install.ps1 | iex
 ```
 
-Prefer to do it by hand? Take your platform's archive from the [releases page](https://github.com/QuantumCompiler/Apogee/releases) — `apogee-<target>.tar.gz` for macOS and Linux, `apogee-<target>.zip` for Windows, each holding the binary, the completion stubs and `machine-schema.json` (the machine-mode protocol as a JSON Schema, for front-end authors) — then run `apogee check --fix` once.
+Prefer to do it by hand? Take your platform's archive from the [releases page](https://github.com/QuantumCompiler/Apogee/releases) — `apogee-<target>.tar.gz` for macOS and Linux, `apogee-<target>.zip` for Windows, each holding the binary, the completion stubs and `machine-schema.json` (the machine-mode protocol as a JSON Schema, for front-end authors) — then run `apogee check --fix` once, and `apogee bootstrap`.
 
 **Platforms:** `macos-arm64`, `linux-x64`, `linux-arm64`, `windows-x64`, `windows-arm64` — every release binary is built natively on its own runner, with llama.cpp in it. Two notes: macOS binaries are unsigned (a `curl` install is clean; for a browser download, `apogee check` detects the quarantine attribute and prints the exact fix), and on Windows the vendor-CLI backends are not available yet — use a direct-API backend there.
 
@@ -93,4 +93,8 @@ That builds every application for the host's native target and runs its suite �
 
 ## Status
 
-Young and moving fast: [v0.1.0](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.0) (the harness), [v0.1.1](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.1) (the release pipeline), [v0.1.2](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.2) (the terminal and the model directory), [v0.1.3](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.3) (local agent tools and small-model depth), [v0.1.4](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.4) (MLX inference, model suites, autonomous tasks and code knowledge graphs), [v0.1.5](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.5) (provider detection and machine-mode integrations), [v0.1.6](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.6) (system insight and the full-screen TUI) and [v0.1.7](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.7) (the pre-shipped library) are out, and `v0.1.8` is in development on its branch. The running board of what's shipped, in flight, and next is [ROADMAP.md](lib/documentation/assistant/ROADMAP.md).
+Young and moving fast: [v0.1.0](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.0) (the harness), [v0.1.1](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.1) (the release pipeline), [v0.1.2](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.2) (the terminal and the model directory), [v0.1.3](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.3) (local agent tools and small-model depth), [v0.1.4](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.4) (MLX inference, model suites, autonomous tasks and code knowledge graphs), [v0.1.5](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.5) (provider detection and machine-mode integrations), [v0.1.6](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.6) (system insight and the full-screen TUI), [v0.1.7](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.7) (the pre-shipped library) and [v0.1.8](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.8) (the doors made law) are out, and `v0.1.9` is in development on its branch. The running board of what's shipped, in flight, and next is [ROADMAP.md](lib/documentation/assistant/ROADMAP.md).
+
+## License
+
+[MIT](LICENSE).

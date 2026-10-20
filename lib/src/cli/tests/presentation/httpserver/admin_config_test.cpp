@@ -13,6 +13,7 @@
 
 #include "cli/registry.h"
 #include "cli/root.h"
+#include "contracts/assets.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "events/bus.h"
@@ -23,6 +24,7 @@
 #include "httpserver/jobs.h"
 #include "httpserver/mux.h"
 #include "support/env_guard.h"
+#include "training/python_env.h"
 
 /// The config slice of the control plane, and THE parity proof: an HTTP edit
 /// and a CLI edit on the same starting file leave byte-identical files.
@@ -588,6 +590,44 @@ TEST_CASE("the MCP server twins leave the same bytes the CLI leaves, and never l
     fixture.cli({"config", "delete-mcp-server", "ext"});
     CHECK(Fixture::bytes(fixture.http_config) == Fixture::bytes(fixture.cli_config));
     CHECK(admin_delete_mcp_server(fixture.context(), "ext").status == 404);
+}
+
+TEST_CASE("a preset registered over HTTP is byte-identical to the CLI's --from and typed twin",
+          "[httpserver][admin][mcp][presets]") {
+    // 47c: `from` resolves the preset through the same core `mcp create
+    // --from` reaches. Both configs share one data directory, so the preset
+    // resolves to the same script and interpreter on either surface.
+    const Fixture fixture;
+    const std::filesystem::path script =
+        fixture.home.path() / apogee::harness::bundled_code_exec_server_relative_path();
+    std::filesystem::create_directories(script.parent_path());
+    std::ofstream{script, std::ios::binary} << apogee::harness::bundled_mcp_scripts()[0].text;
+    const std::filesystem::path python =
+        apogee::training::PythonEnv{fixture.home.path() / "training" / "venv"}.interpreter();
+    std::filesystem::create_directories(python.parent_path());
+    std::ofstream{python, std::ios::binary} << "#!fake";
+
+    const HttpResponse created = admin_create_mcp_server(
+        fixture.context(), post(nlohmann::json{{"name", "code"}, {"from", "code-exec"}}));
+    REQUIRE(created.status == 201);
+    CHECK(parsed(created)["command"] == python.string());
+    fixture.cli({"mcp", "create", "code", "--command", python.string(), "--args", script.string()});
+    CHECK(Fixture::bytes(fixture.http_config) == Fixture::bytes(fixture.cli_config));
+
+    // self is refused with its reason; a preset takes no command; an
+    // unknown one names the presets.
+    const HttpResponse self = admin_create_mcp_server(
+        fixture.context(), post(nlohmann::json{{"name", "me"}, {"from", "self"}}));
+    CHECK(self.status == 400);
+    CHECK(self.body.find("already has natively") != std::string::npos);
+    CHECK(admin_create_mcp_server(
+              fixture.context(),
+              post(nlohmann::json{{"name", "x"}, {"from", "code-exec"}, {"command", "/bin/true"}}))
+              .status == 400);
+    const HttpResponse unknown = admin_create_mcp_server(
+        fixture.context(), post(nlohmann::json{{"name", "x"}, {"from", "nope"}}));
+    CHECK(unknown.status == 400);
+    CHECK(unknown.body.find("the presets: code-exec, self") != std::string::npos);
 }
 
 TEST_CASE("a backend renamed over HTTP is byte-identical to the CLI's, every reference with it",

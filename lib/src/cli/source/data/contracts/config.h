@@ -207,6 +207,15 @@ struct BackendConfig {
     /// a long-lived `apogee chat` that has switched to a cloud backend should
     /// not keep 16GB pinned for a conversation it is no longer having.
     std::optional<std::int64_t> idle_unload_seconds;
+
+    /// The vendor's own server-side tools this entry may run (47a):
+    /// `web_search`, `code_execution` -- `contracts/server_tools.h` holds each
+    /// vendor's set. Empty, the default, sends none. Listing one is recorded
+    /// consent for that vendor to browse or execute on the user's behalf under
+    /// the user's key, beyond what the host gate can see (SPEC.md ->
+    /// Principles, 2026-10-16). The loader refuses a name the vendor does not
+    /// offer, and any list on a backend whose API runs none.
+    std::vector<std::string> server_tools{};
 };
 
 /// The `models:` role pointers.
@@ -235,6 +244,12 @@ struct ModelsConfig {
     /// `suites:` entry fails the load, as a typo here would otherwise run
     /// every command on the global pointers without a word.
     std::string default_suite;
+
+    /// The pipeline `apogee video generate` runs when `--model` names none
+    /// (49c): a store handle (`<model>/pipeline/<id>`), id or model, or a
+    /// path. Not a role -- no backend runs a pipeline, so nothing here goes
+    /// through `harness/roles.h`; the verb reads it and nothing else does.
+    std::string default_video;
 };
 
 /// The roles a suite names members for (27d), as `suites.<name>.members`
@@ -629,6 +644,35 @@ struct McpServerConfig {
     std::vector<std::string> env;
     /// A disabled server is listed by `mcp list` and never dialled.
     bool enabled = true;
+};
+
+/// One entry under `review:` (48d) -- what a `review sweep` watches: one
+/// repository, or an owner whose repositories are listed at sweep time,
+/// on GitHub or GitLab, with the lenses it runs, whether a sweep may post
+/// there, and whether drafts count.
+///
+/// Keyed by name in a map like every other section. Exactly one of `repo`
+/// and `owner` is set. `post` is the target's declared grant: a sweep posts
+/// with nobody at the terminal, so it posts only where the config or the
+/// run's `--allow-post` says it may, and otherwise reviews into documents.
+struct ReviewTargetConfig {
+    /// `github` or `gitlab`.
+    std::string forge = "github";
+    /// The forge's host; empty for its default (`github.com`, `gitlab.com`).
+    std::string host;
+    /// `owner/repo` on GitHub, `group/project` on GitLab.
+    std::string repo;
+    /// An organization, a user or a group whose repositories are swept.
+    std::string owner;
+    /// The lenses to run; empty lets each merge request's plan decide.
+    std::vector<std::string> skills;
+    bool post = false;
+    bool drafts = false;
+    /// The backend that reviews; empty for the chat role.
+    std::string model;
+    /// The forge CLI to spawn -- `gh` or `glab` -- by path; empty for its
+    /// name on PATH.
+    std::string cli;
 };
 
 /// What an agent may call. **This is the agent's permission model**: a policy
@@ -1069,6 +1113,10 @@ struct Config {
     /// for the same reason `backends` is.
     std::map<std::string, McpServerConfig, CaseInsensitiveLess> mcp_servers;
 
+    /// Review sweep targets (48d) keyed by name AS WRITTEN, compared
+    /// case-insensitively.
+    std::map<std::string, ReviewTargetConfig, CaseInsensitiveLess> review_targets;
+
     /// Agents keyed by name AS WRITTEN, compared case-insensitively. The
     /// bundled agents are not here unless the file overrides one: they are
     /// compiled in (see `harness/assets.h`) and a same-named entry wins.
@@ -1111,6 +1159,8 @@ struct Config {
 
     /// Case-insensitive lookup of an MCP server entry. nullptr when absent.
     [[nodiscard]] const McpServerConfig* find_mcp_server(std::string_view name) const noexcept;
+    [[nodiscard]] const ReviewTargetConfig* find_review_target(
+        std::string_view name) const noexcept;
 
     /// Server names as written, in the map's (case-folded) order.
     [[nodiscard]] std::vector<std::string> mcp_server_names() const;

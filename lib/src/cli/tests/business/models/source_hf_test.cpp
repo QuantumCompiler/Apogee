@@ -375,3 +375,96 @@ TEST_CASE("a cancelled download is a failure the ladder cleans up after, never a
     CHECK_FALSE(source([](std::string_view) { return true; }, error));
     CHECK(error == "cancelled");
 }
+
+TEST_CASE("a pipeline repository is the one with model_index.json at its root",
+          "[models][hf][pipeline]") {
+    // 49a: a file the repository holds, never its name or its tags.
+    const auto listing_of = [](const std::vector<std::string>& files) {
+        const auto client = client_for({{.status = 200, .body = repo_json(files)}});
+        return apogee::models::list_gguf_files(*client, *parse_hf_ref("Wan-AI/Wan2.2"), "", {});
+    };
+    CHECK(listing_of({"model_index.json", "vae/diffusion_pytorch_model.safetensors"}).pipeline());
+    // One deeper is a component's own file, not the pipeline's index.
+    CHECK_FALSE(listing_of({"sub/model_index.json", "model.safetensors"}).pipeline());
+    CHECK_FALSE(listing_of({"config.json", "model.safetensors"}).pipeline());
+}
+
+TEST_CASE("a pipeline pull takes the index and the components it names, never a copy",
+          "[models][hf][pipeline]") {
+    using apogee::models::HfFile;
+    const std::vector<HfFile> tree{
+        {.path = "model_index.json", .size = 1},
+        {.path = "README.md", .size = 1},
+        {.path = "svd_xt.safetensors", .size = 9},  // a single-file checkpoint beside it
+        {.path = "assets/sample.json", .size = 1},  // a directory the index does not name
+        {.path = "scheduler/scheduler_config.json", .size = 1},
+        {.path = "unet/config.json", .size = 1},
+        {.path = "unet/diffusion_pytorch_model.safetensors", .size = 4},
+        {.path = "unet/diffusion_pytorch_model.fp16.safetensors", .size = 2},  // a copy
+        {.path = "unet/diffusion_pytorch_model.bin", .size = 4},  // never PyTorch pickles
+        {.path = "vae/config.json", .size = 1},
+        {.path = "vae/diffusion_pytorch_model.fp16.safetensors", .size = 2},  // the only weights
+        {.path = "image_encoder/model.safetensors", .size = 2},  // not named: not taken
+    };
+    std::vector<std::string> taken;
+    for (const HfFile& file : apogee::models::pipeline_wanted(tree, {"scheduler", "unet", "vae"})) {
+        taken.push_back(file.path);
+    }
+    CHECK(taken == std::vector<std::string>{
+                       "model_index.json", "scheduler/scheduler_config.json", "unet/config.json",
+                       "unet/diffusion_pytorch_model.safetensors", "vae/config.json",
+                       "vae/diffusion_pytorch_model.fp16.safetensors"});
+}
+
+TEST_CASE("a repository's small file is read whole, refused when it is not small",
+          "[models][hf][pipeline]") {
+    const HfRef ref = *parse_hf_ref("org/video");
+    const apogee::models::HfText text = apogee::models::fetch_repo_text(
+        *client_for({{.status = 200, .body = R"({"_class_name": "WanPipeline"})"}}), ref,
+        apogee::models::HfRepoKind::Model, "model_index.json", "", {});
+    REQUIRE(text.ok);
+    CHECK(text.text == R"({"_class_name": "WanPipeline"})");
+
+    const apogee::models::HfText missing = apogee::models::fetch_repo_text(
+        *client_for({{.status = 404, .body = "Entry not found"}}), ref,
+        apogee::models::HfRepoKind::Model, "model_index.json", "", {});
+    CHECK_FALSE(missing.ok);
+    CHECK(missing.error ==
+          "could not read model_index.json from 'org/video' (Hugging Face returned status 404)");
+
+    const apogee::models::HfText large = apogee::models::fetch_repo_text(
+        *client_for({{.status = 200, .body = std::string(64, 'x')}}), ref,
+        apogee::models::HfRepoKind::Model, "model_index.json", "", {}, 16);
+    CHECK_FALSE(large.ok);
+    CHECK(large.error.ends_with("is larger than 16 bytes -- not the small file it should be"));
+}
+
+TEST_CASE("a voice model repository is the one laid out as Kokoro's, and only its weights move",
+          "[models][hf][voice]") {
+    // 50a: config.json and a checkpoint at the root, packs under voices/.
+    const auto listing_of = [](const std::vector<std::string>& files) {
+        const auto client = client_for({{.status = 200, .body = repo_json(files)}});
+        return apogee::models::list_gguf_files(*client, *parse_hf_ref("hexgrad/Kokoro-82M"), "",
+                                               {});
+    };
+    CHECK(listing_of({"config.json", "kokoro-v1_0.pth", "voices/af_heart.pt"}).voice());
+    CHECK_FALSE(listing_of({"config.json", "kokoro-v1_0.pth"}).voice());
+    CHECK_FALSE(listing_of({"config.json", "sub/model.pth", "voices/af_heart.pt"}).voice());
+    CHECK_FALSE(listing_of({"config.json", "model.safetensors"}).voice());
+
+    using apogee::models::HfFile;
+    std::vector<std::string> taken;
+    for (const HfFile& file : apogee::models::voice_wanted({
+             {.path = "config.json", .size = 1},
+             {.path = "kokoro-v1_0.pth", .size = 9},
+             {.path = "README.md", .size = 1},
+             {.path = "samples/HEARME.wav", .size = 5},
+             {.path = "voices/af_heart.pt", .size = 2},
+             {.path = "voices/nested/x.pt", .size = 2},
+             {.path = "eval/ArtificialAnalysis.png", .size = 2},
+         })) {
+        taken.push_back(file.path);
+    }
+    CHECK(taken ==
+          std::vector<std::string>{"config.json", "kokoro-v1_0.pth", "voices/af_heart.pt"});
+}

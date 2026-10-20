@@ -28,11 +28,20 @@ from pty_startup_check import drive, render  # noqa: E402
 
 FAKE_FFPROBE = """#!/bin/sh
 echo "NOISE_FFPROBE_BANNER ffprobe version 8.1 Copyright (c) the FFmpeg developers" >&2
+echo '[STREAM]'
+echo codec_name=h264
 echo codec_type=video
-echo codec_type=audio
 echo width=640
 echo height=360
+echo r_frame_rate=24/1
+echo '[/STREAM]'
+echo '[STREAM]'
+echo codec_name=aac
+echo codec_type=audio
+echo '[/STREAM]'
+echo '[FORMAT]'
 echo duration=12
+echo '[/FORMAT]'
 """
 
 FAKE_FFMPEG = """#!/bin/sh

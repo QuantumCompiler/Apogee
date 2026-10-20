@@ -66,8 +66,38 @@ using MlxConverter = std::function<std::string(
 /// The driver under `interpreter`, as an MlxConverter. Its `{"message"}`
 /// lines go to the sink; its stderr is captured as a tail and folded into
 /// the error, never inherited.
+///
+/// `mlx_lm` is the environment's installed package directory (M15): when a
+/// conversion fails because mlx-lm knows no converter for the snapshot's
+/// `model_type`, its own lists of the types it does are read from there to
+/// name the way out (`fold_model_type_failure`). Empty: the door alone.
 [[nodiscard]] MlxConverter script_mlx_converter(std::filesystem::path interpreter,
                                                 std::filesystem::path script,
-                                                const MlxPrecision& precision);
+                                                const MlxPrecision& precision,
+                                                std::filesystem::path mlx_lm = {});
+
+/// The model types an installed mlx-lm converts (M15), read from its files,
+/// never imported: each module under `models/` that defines a `Model`, and every key of
+/// `utils.py`'s `MODEL_REMAPPING`. Sorted, each once; empty when there is no
+/// such directory. Apogee keeps no table of its own: it would rot with every
+/// release and every vendor's variant.
+[[nodiscard]] std::vector<std::string> mlx_model_types(const std::filesystem::path& mlx_lm);
+
+/// The type in an mlx-lm failure saying `Model type <type> not supported`, or
+/// empty.
+[[nodiscard]] std::string unsupported_model_type(std::string_view error);
+
+/// `types` nearest `wanted` first -- by the prefix they share, longest
+/// first, then the shorter name -- at most `most`, none sharing fewer than
+/// three characters.
+[[nodiscard]] std::vector<std::string> nearest_model_types(std::string_view wanted,
+                                                           const std::vector<std::string>& types,
+                                                           std::size_t most = 5);
+
+/// `error`, and when it is mlx-lm refusing a `model_type`, its door: the
+/// `--model-type` override named, and the nearest of `types` -- suggested,
+/// never applied.
+[[nodiscard]] std::string fold_model_type_failure(const std::string& error,
+                                                  const std::vector<std::string>& types);
 
 }  // namespace apogee::training

@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "backends/mlx_local.h"
+#include "cli/config_cmd.h"
 #include "cli/helpers.h"
 #include "cli/interrupt.h"
 #include "cli/model_chain.h"
@@ -34,8 +35,10 @@
 #include "models/source_ollama.h"
 #include "modelstore/gguf_inspect.h"
 #include "modelstore/mlx_info.h"
+#include "modelstore/pipeline_info.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
+#include "modelstore/voice_info.h"
 #include "operations/renames.h"
 #include "platform/platform.h"
 #include "training/convert.h"
@@ -246,6 +249,48 @@ void print_backend_hint(const std::filesystem::path& model_file,
     return names;
 }
 
+}  // namespace
+
+bool remove_backends_too(
+    bool and_backends, const std::vector<std::string>& backends,
+    const std::function<std::optional<std::string>(const std::string& question)>& ask) {
+    if (backends.empty()) {
+        return false;
+    }
+    if (and_backends) {
+        return true;
+    }
+    if (!ask) {
+        return false;
+    }
+    std::string named;
+    for (const std::string& backend : backends) {
+        named += (named.empty() ? "" : ", ") + backend;
+    }
+    const std::optional<std::string> answer =
+        ask(std::string{"Remove the backend "} + (backends.size() == 1 ? "entry " : "entries ") +
+            named + " too? [y/N] ");
+    return answer.has_value() && (*answer == "y" || *answer == "Y" || *answer == "yes");
+}
+
+std::string backend_doors(const std::string& name) {
+    return "repoint it: apogee config set-backend " + name +
+           " --model-path <file>; or remove it: apogee config delete-backend " + name;
+}
+
+std::vector<std::string> settle_backends(const std::filesystem::path& config_path,
+                                         const std::vector<std::string>& backends, bool remove) {
+    std::vector<std::string> out;
+    for (const std::string& backend : backends) {
+        out.push_back(remove ? remove_backend(config_path, backend)
+                             : "kept backend '" + backend + "', which points at nothing now -- " +
+                                   backend_doors(backend));
+    }
+    return out;
+}
+
+namespace {
+
 /// Fetches a snapshot's files from where its record says it came -- the
 /// repository and revision it was pulled at -- each checked by the ladder
 /// against the size and sha256 the record holds. Only a Hugging Face pull can
@@ -323,6 +368,16 @@ PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& r
         models::list_repo_tree(client, *parsed, models::HfRepoKind::Model, token, cancellation);
     if (!tree.ok) {
         fail(tree.error);
+    }
+    // A pipeline's shards sit in its components' directories, and a
+    // snapshot holds a model's at its root: taken as one, it would land
+    // where nothing lists it (49a).
+    if (std::ranges::any_of(tree.files, [](const models::HfFile& file) {
+            return file.path == models::kModelIndex;
+        })) {
+        fail("'" + parsed->repo_id() +
+             "' is a diffusion pipeline (model_index.json at its root) -- pull it without "
+             "--safetensors; it lands whole in the store's pipeline/ format");
     }
     std::vector<models::HfFile> wanted;
     std::vector<models::SnapshotFile> published;
@@ -476,9 +531,22 @@ DeletePlan plan_delete(const models::StoreRoots& roots, std::string_view name) {
             plan.removes.push_back(stored.dir);
         }
     }
-    // An MLX model goes whole -- the directory, never a shard alone (27b).
+    // An MLX model goes whole -- the directory, never a shard alone (27b) --
+    // and so does a pipeline, never one component (49a).
     for (const models::StoredMlx& stored : models::list_store_mlx(roots, target.model)) {
         if ((target.format.empty() || target.format == models::kMlxFormat) &&
+            (target.id.empty() || target.id == stored.id)) {
+            plan.removes.push_back(stored.dir);
+        }
+    }
+    for (const models::StoredPipeline& stored : models::list_store_pipelines(roots, target.model)) {
+        if ((target.format.empty() || target.format == models::kPipelineFormat) &&
+            (target.id.empty() || target.id == stored.id)) {
+            plan.removes.push_back(stored.dir);
+        }
+    }
+    for (const models::StoredVoice& stored : models::list_store_voices(roots, target.model)) {
+        if ((target.format.empty() || target.format == models::kVoiceFormat) &&
             (target.id.empty() || target.id == stored.id)) {
             plan.removes.push_back(stored.dir);
         }
@@ -651,6 +719,13 @@ SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view
                        "' is an MLX model; this reads full-weight SafeTensors weights";
         return choice;
     }
+    if (target.format == models::kPipelineFormat || target.format == models::kVoiceFormat) {
+        choice.error =
+            "'" + std::string{given} + "' is a " +
+            (target.format == models::kVoiceFormat ? "voice model" : "diffusion pipeline") +
+            "; this reads a language model's full-weight SafeTensors weights";
+        return choice;
+    }
     const std::string id = !target.id.empty() ? target.id : std::string{from_id};
     if (!id.empty()) {
         const std::filesystem::path dir =
@@ -716,6 +791,13 @@ GgufChoice choose_gguf(const models::StoreRoots& roots, std::string_view given,
         choice.error = "'" + std::string{given} +
                        "' is an MLX model, already quantized for the mlx backend; quantize "
                        "makes smaller GGUFs";
+        return choice;
+    }
+    if (target.format == models::kPipelineFormat || target.format == models::kVoiceFormat) {
+        choice.error =
+            "'" + std::string{given} + "' is a " +
+            (target.format == models::kVoiceFormat ? "voice model" : "diffusion pipeline") +
+            "; quantize makes GGUFs";
         return choice;
     }
     const std::string id = !target.id.empty() ? target.id : std::string{from_id};
@@ -882,7 +964,7 @@ void print_mlx_backend_hint(const models::StoredMlx& stored) {
 /// Which checks a tree pull ran, never the bare word: a repository that
 /// publishes no digest for a file is said to have published none.
 [[nodiscard]] std::string pull_verification(const models::AcquireTreeResult& result,
-                                            std::size_t shards) {
+                                            std::string_view read_whole) {
     std::size_t sized = 0;
     std::size_t digests = 0;
     for (const models::Sidecar& sidecar : result.sidecars) {
@@ -897,8 +979,7 @@ void print_mlx_backend_hint(const models::StoredMlx& stored) {
     }
     return "verified: " + std::to_string(result.files) + " file(s), " + human_size(result.bytes) +
            " -- " + std::to_string(sized) + " size(s) checked, " + std::to_string(digests) +
-           " against a published sha256" + none + "; config.json, a tokenizer and " +
-           std::to_string(shards) + " shard header(s) read whole";
+           " against a published sha256" + none + "; " + std::string{read_whole};
 }
 
 [[noreturn]] void cancelled_nothing_written(const std::filesystem::path& staging) {
@@ -1020,7 +1101,10 @@ PulledMlx pull_mlx(const std::string& ref, const models::StoreRoots& roots,
     } else {
         std::cout << "\n"
                   << stored.dir.string() << "\n"
-                  << pull_verification(result, pulled.info.shards.size()) << "\n";
+                  << pull_verification(result, "config.json, a tokenizer and " +
+                                                   std::to_string(pulled.info.shards.size()) +
+                                                   " shard header(s) read whole")
+                  << "\n";
     }
     std::cout << "mlx model: " << mlx_summary(pulled.info) << "\n";
     if (!pulled.info.mlx_format) {
@@ -1031,9 +1115,255 @@ PulledMlx pull_mlx(const std::string& ref, const models::StoreRoots& roots,
     return pulled;
 }
 
+std::string pipeline_summary(const models::PipelineInfo& info) {
+    return models::describe(info) + ", " +
+           format_progress_size(static_cast<std::int64_t>(info.bytes));
+}
+
+PulledPipeline pull_pipeline(const std::string& ref, const models::StoreRoots& roots,
+                             backends::HttpClient& client,
+                             const harness::CancellationToken& cancellation) {
+    const std::optional<models::HfRef> parsed = models::parse_hf_ref(ref);
+    if (!parsed.has_value() || !parsed->file.empty()) {
+        fail("'" + ref + "' is not a Hugging Face repository (owner/repo[@revision])");
+    }
+    const std::string token = models::hf_token({});
+    // The index first: it names the directories that are the pipeline, so a
+    // repository that also carries a single-file checkpoint or sample media
+    // does not spend them.
+    const models::HfText index = models::fetch_repo_text(client, *parsed, models::HfRepoKind::Model,
+                                                         models::kModelIndex, token, cancellation);
+    if (!index.ok) {
+        fail(index.error);
+    }
+    const std::vector<std::string> components = models::pipeline_components(index.text);
+    if (components.empty()) {
+        fail("'" + parsed->repo_id() +
+             "' has a model_index.json that names no components -- not a diffusion pipeline");
+    }
+    const models::HfTree tree =
+        models::list_repo_tree(client, *parsed, models::HfRepoKind::Model, token, cancellation);
+    if (!tree.ok) {
+        fail(tree.error);
+    }
+    const std::vector<models::HfFile> wanted = models::pipeline_wanted(tree.files, components);
+    std::vector<models::SnapshotFile> published;
+    std::int64_t total = 0;
+    for (const models::HfFile& file : wanted) {
+        total += file.size;
+        published.push_back({.path = file.path, .size = file.size, .sha256 = file.sha256});
+    }
+    // Refused before a byte moves: a component the index names that the
+    // repository holds nothing for is a pipeline that cannot load.
+    for (const std::string& component : components) {
+        if (std::ranges::none_of(wanted, [&component](const models::HfFile& file) {
+                return file.path.starts_with(component + "/");
+            })) {
+            fail("'" + parsed->repo_id() + "' names the " + component +
+                 " component in model_index.json but holds no " + component +
+                 "/ files -- nothing diffusers can load; nothing was downloaded");
+        }
+    }
+
+    PulledPipeline pulled;
+    pulled.model = models::repo_directory_name(*parsed);
+    // Hugging Face publishes every shard's sha256, so weights already here
+    // are found before a byte moves -- the SafeTensors rule's id.
+    if (const std::string known = models::snapshot_weight_id(published); !known.empty()) {
+        const std::filesystem::path existing =
+            models::weights_dir(roots, models::kPipelineFormat, pulled.model, known);
+        std::error_code code;
+        if (std::filesystem::is_directory(existing, code)) {
+            std::cout << "already here -- these exact weights are at\n  " << existing.string()
+                      << "\n";
+            pulled.dir = existing;
+            pulled.existed = true;
+            pulled.info = models::read_pipeline_info(existing);
+            return pulled;
+        }
+    }
+
+    // Claimed by this process from the moment it is named: an interrupted
+    // pull is a leftover `check` finds and `check --fix` removes.
+    const std::filesystem::path staging =
+        models::incoming_path(roots, models::kPipelineFormat, pulled.model);
+    std::cout << "a diffusion pipeline (" << components.size() << " components): downloading "
+              << wanted.size() << " file(s), " << human_size(total) << ", into "
+              << staging.parent_path().string() << "\n";
+    std::vector<models::TreeItem> items;
+    std::vector<models::SourcePromise> promises;
+    promises.reserve(wanted.size());
+    for (const models::HfFile& file : wanted) {
+        promises.emplace_back();
+        models::TreeItem item;
+        item.relative = file.path;
+        item.source = models::http_source(client, *parsed, models::HfRepoKind::Model, file, token,
+                                          cancellation, promises.back());
+        item.promise = promises.back();
+        items.push_back(std::move(item));
+    }
+    DownloadProgress progress{std::cout, stdout_download_options()};
+    const models::AcquireTreeResult result = models::acquire_tree(
+        staging, items,
+        [&progress](std::size_t index, std::size_t count, std::string_view relative,
+                    std::int64_t written,
+                    std::int64_t size) { progress.file(index, count, relative, written, size); });
+    progress.finish();
+    if (cancellation.stop_requested()) {
+        cancelled_nothing_written(staging);
+    }
+    if (!result.ok) {
+        (void)models::remove_weights(staging);
+        fail(result.error);
+    }
+
+    // The last rung: the files make a pipeline diffusers can load -- the
+    // index, every component it names with what its kind needs, every shard
+    // whole. A repository that is not one lands nothing.
+    pulled.info = models::read_pipeline_info(staging);
+    if (!pulled.info.complete) {
+        (void)models::remove_weights(staging);
+        fail("what '" + parsed->repo_id() + "' holds is not a loadable pipeline -- " +
+             pulled.info.problem + "; nothing was kept");
+    }
+
+    const models::StoredDirectory stored = models::commit_pipeline(
+        roots, pulled.model, staging, pulled_record(*parsed, wanted, result));
+    if (!stored.error.empty()) {
+        (void)models::remove_weights(staging);
+        fail(stored.error);
+    }
+    pulled.dir = stored.dir;
+    pulled.existed = stored.existed;
+    if (stored.existed) {
+        std::cout << "\nalready here -- these exact weights are at\n  " << stored.dir.string()
+                  << "\n";
+    } else {
+        std::cout << "\n"
+                  << stored.dir.string() << "\n"
+                  << pull_verification(result, "model_index.json and " +
+                                                   std::to_string(pulled.info.components.size()) +
+                                                   " component(s) read whole, " +
+                                                   std::to_string(pulled.info.shard_count()) +
+                                                   " shard header(s) among them")
+                  << "\n";
+    }
+    std::cout << "pipeline: " << pipeline_summary(pulled.info) << "\n";
+    return pulled;
+}
+
+std::string voice_summary(const models::VoiceInfo& info) {
+    return models::describe(info) + ", " +
+           format_progress_size(static_cast<std::int64_t>(info.bytes));
+}
+
+PulledVoice pull_voice(const std::string& ref, const models::StoreRoots& roots,
+                       backends::HttpClient& client,
+                       const harness::CancellationToken& cancellation) {
+    const std::optional<models::HfRef> parsed = models::parse_hf_ref(ref);
+    if (!parsed.has_value() || !parsed->file.empty()) {
+        fail("'" + ref + "' is not a Hugging Face repository (owner/repo[@revision])");
+    }
+    const std::string token = models::hf_token({});
+    const models::HfTree tree =
+        models::list_repo_tree(client, *parsed, models::HfRepoKind::Model, token, cancellation);
+    if (!tree.ok) {
+        fail(tree.error);
+    }
+    const std::vector<models::HfFile> wanted = models::voice_wanted(tree.files);
+    std::vector<models::SnapshotFile> published;
+    std::int64_t total = 0;
+    std::size_t packs = 0;
+    for (const models::HfFile& file : wanted) {
+        total += file.size;
+        packs += file.path.starts_with("voices/") ? 1U : 0U;
+        published.push_back({.path = file.path, .size = file.size, .sha256 = file.sha256});
+    }
+
+    PulledVoice pulled;
+    pulled.model = models::repo_directory_name(*parsed);
+    // The repository publishes every LFS file's sha256, so a voice model
+    // already here is found before a byte moves.
+    if (const std::string known = models::voice_weight_id(published); !known.empty()) {
+        const std::filesystem::path existing =
+            models::weights_dir(roots, models::kVoiceFormat, pulled.model, known);
+        std::error_code code;
+        if (std::filesystem::is_directory(existing, code)) {
+            std::cout << "already here -- these exact weights are at\n  " << existing.string()
+                      << "\n";
+            pulled.dir = existing;
+            pulled.existed = true;
+            pulled.info = models::read_voice_info(existing);
+            return pulled;
+        }
+    }
+
+    const std::filesystem::path staging =
+        models::incoming_path(roots, models::kVoiceFormat, pulled.model);
+    std::cout << "a voice model (" << packs << " voices): downloading " << wanted.size()
+              << " file(s), " << human_size(total) << ", into " << staging.parent_path().string()
+              << "\n";
+    std::vector<models::TreeItem> items;
+    std::vector<models::SourcePromise> promises;
+    promises.reserve(wanted.size());
+    for (const models::HfFile& file : wanted) {
+        promises.emplace_back();
+        models::TreeItem item;
+        item.relative = file.path;
+        item.source = models::http_source(client, *parsed, models::HfRepoKind::Model, file, token,
+                                          cancellation, promises.back());
+        item.promise = promises.back();
+        items.push_back(std::move(item));
+    }
+    DownloadProgress progress{std::cout, stdout_download_options()};
+    const models::AcquireTreeResult result = models::acquire_tree(
+        staging, items,
+        [&progress](std::size_t index, std::size_t count, std::string_view relative,
+                    std::int64_t written,
+                    std::int64_t size) { progress.file(index, count, relative, written, size); });
+    progress.finish();
+    if (cancellation.stop_requested()) {
+        cancelled_nothing_written(staging);
+    }
+    if (!result.ok) {
+        (void)models::remove_weights(staging);
+        fail(result.error);
+    }
+
+    // The last rung: a configuration, one checkpoint and every voice whole.
+    pulled.info = models::read_voice_info(staging);
+    if (!pulled.info.complete) {
+        (void)models::remove_weights(staging);
+        fail("what '" + parsed->repo_id() + "' holds is not a loadable voice model -- " +
+             pulled.info.problem + "; nothing was kept");
+    }
+    const models::StoredDirectory stored =
+        models::commit_voice(roots, pulled.model, staging, pulled_record(*parsed, wanted, result));
+    if (!stored.error.empty()) {
+        (void)models::remove_weights(staging);
+        fail(stored.error);
+    }
+    pulled.dir = stored.dir;
+    pulled.existed = stored.existed;
+    if (stored.existed) {
+        std::cout << "\nalready here -- these exact weights are at\n  " << stored.dir.string()
+                  << "\n";
+    } else {
+        std::cout << "\n"
+                  << stored.dir.string() << "\n"
+                  << pull_verification(result, "config.json, the checkpoint and " +
+                                                   std::to_string(pulled.info.voices.size()) +
+                                                   " voice(s) read whole")
+                  << "\n";
+    }
+    std::cout << "voice model: " << voice_summary(pulled.info) << "\n";
+    return pulled;
+}
+
 ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_view given,
                                   std::string_view from, const training::MlxPrecision& precision,
-                                  const training::MlxConverter& converter) {
+                                  const training::MlxConverter& converter,
+                                  std::string_view model_type, bool chained) {
     const SnapshotChoice source = choose_snapshot(roots, given, from);
     if (!source.error.empty()) {
         fail(source.error);
@@ -1055,6 +1385,19 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
         source.id.empty() ? source.path.string() : source.model + "/safetensors/" + source.id;
     record.source = "convert";
     record.transform = "mlx_lm.convert " + std::string{precision.name};
+    // The user's word on the type (M15), recorded for good.
+    std::string declared;
+    if (!model_type.empty()) {
+        declared = models::snapshot_model_type(source.path);
+        if (declared == model_type) {
+            std::cout << "the snapshot's config.json already says model_type " << model_type
+                      << " -- converting it as it is\n";
+            model_type = {};
+        } else {
+            record.transform += ", converted as " + std::string{model_type} + " (model_type was " +
+                                (declared.empty() ? std::string{"unstated"} : declared) + ")";
+        }
+    }
 
     // Recognised before it runs: the same set at the same precision is the
     // same weights.
@@ -1069,7 +1412,9 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
             out.dir = stored.dir;
             out.existed = true;
             out.info = models::read_mlx_info(stored.dir);
-            print_mlx_backend_hint(stored);
+            if (!chained) {
+                print_mlx_backend_hint(stored);
+            }
             return out;
         }
     }
@@ -1079,6 +1424,36 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
     std::cout << "converting " << source.path.string() << " to MLX (" << precision.name
               << (estimate > 0 ? ", about " + format_progress_size(estimate) : std::string{})
               << ") -- mlx-lm's converter, in Apogee's Python environment\n";
+    // A view the converter reads as the named type, gone however this ends.
+    std::filesystem::path overlay;
+    if (!model_type.empty()) {
+        std::cout << "converting it as model_type " << model_type << " (its config.json says "
+                  << (declared.empty() ? std::string{"none"} : declared)
+                  << ") -- through a view of it; the snapshot itself is untouched\n";
+        overlay = models::incoming_path(roots, models::kMlxFormat, source.model);
+        if (std::string staged = models::stage_model_type_overlay(source.path, overlay, model_type);
+            !staged.empty()) {
+            (void)models::remove_weights(overlay);
+            fail(staged);
+        }
+    }
+
+    const struct OverlayRemoved {
+        std::filesystem::path dir;
+
+        explicit OverlayRemoved(std::filesystem::path path) : dir{std::move(path)} {}
+
+        ~OverlayRemoved() {
+            if (!dir.empty()) {
+                (void)models::remove_weights(dir);
+            }
+        }
+
+        OverlayRemoved(const OverlayRemoved&) = delete;
+        OverlayRemoved& operator=(const OverlayRemoved&) = delete;
+        OverlayRemoved(OverlayRemoved&&) = delete;
+        OverlayRemoved& operator=(OverlayRemoved&&) = delete;
+    } overlay_removed{overlay};
 
     // Named and claimed, never created: mlx_lm.convert makes the directory
     // itself and refuses one that exists.
@@ -1094,10 +1469,11 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
             const InterruptScope interrupt;
             result = models::convert_snapshot_to_mlx(
                 source.path, staging, precision.bits,
-                [&converter](const std::filesystem::path& snapshot,
-                             const std::filesystem::path& output,
-                             const harness::CancellationToken& cancellation) {
-                    return converter(snapshot, output, {}, cancellation);
+                [&converter, &overlay](const std::filesystem::path& snapshot,
+                                       const std::filesystem::path& output,
+                                       const harness::CancellationToken& cancellation) {
+                    return converter(overlay.empty() ? snapshot : overlay, output, {},
+                                     cancellation);
                 },
                 InterruptScope::token());
         }
@@ -1144,10 +1520,12 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
               << "verified: config.json, a tokenizer and " << out.info.shards.size()
               << " shard header(s) read whole\n"
               << "mlx model: " << mlx_summary(out.info) << "\n";
-    if (!models::snapshot_has_chat_template(source.path)) {
-        std::cout << base_model_note() << "\n";
+    if (!chained) {
+        if (!models::snapshot_has_chat_template(source.path)) {
+            std::cout << base_model_note() << "\n";
+        }
+        print_mlx_backend_hint(stored_at(roots, out.model, out.dir));
     }
-    print_mlx_backend_hint(stored_at(roots, out.model, out.dir));
     return out;
 }
 
@@ -1536,7 +1914,8 @@ QuantizedModel quantize_model(const models::StoreRoots& roots, std::string_view 
 /// backend that is not this model's. One a previous run of this chain made
 /// -- pointing inside this model's directory -- is not in the way.
 void check_registrations(const models::StoreRoots& roots, const std::filesystem::path& config_path,
-                         const std::string& model, const std::vector<std::string>& names) {
+                         const std::string& model, const std::vector<std::string>& names,
+                         std::string_view format = models::kGgufFormat) {
     std::error_code code;
     if (!std::filesystem::exists(config_path, code)) {
         fail("there is no config to register into at " + config_path.string() +
@@ -1558,8 +1937,7 @@ void check_registrations(const models::StoreRoots& roots, const std::filesystem:
     for (const auto& [name, backend] : config.backends) {
         existing.push_back(name);
     }
-    const std::filesystem::path home =
-        models::model_dir(roots, models::kGgufFormat, model).lexically_normal();
+    const std::filesystem::path home = models::model_dir(roots, format, model).lexically_normal();
     for (const std::string& name : names) {
         if (const std::optional<std::string> clash = harness::fold_collision(existing, name);
             clash.has_value()) {
@@ -1814,16 +2192,131 @@ void run_register_chain(const RegisterChainRequest& request, const ChainTools& t
 
 namespace {
 
+/// Adds `name` as an `mlx` backend on `dir` through the one config editor --
+/// the edit `config add-backend <name> --type mlx --model-path <dir>` makes,
+/// byte for byte (M16). An entry already naming the same directory is left
+/// as it is: a resumed chain registers what is missing and nothing twice.
+void register_mlx_backend(const std::filesystem::path& config_path, const std::string& name,
+                          const std::filesystem::path& dir, ChainLog& log) {
+    harness::Config config;
+    try {
+        config = harness::load_config(config_path);
+    } catch (const std::exception& e) {
+        fail(e.what());
+    }
+    if (const auto found = config.backends.find(name); found != config.backends.end()) {
+        if (found->second.type != harness::BackendType::Mlx ||
+            configured_path(found->second.model_path) != dir.lexically_normal()) {
+            fail("backend '" + name +
+                 "' already exists and points elsewhere -- remove it with 'apogee config "
+                 "delete-backend " +
+                 name + "', then resume");
+        }
+        std::cout << "already registered: " << name << "\n";
+    } else {
+        harness::BackendConfig backend;
+        backend.type = harness::BackendType::Mlx;
+        backend.model_path = dir.string();
+        try {
+            harness::edit_config_file(config_path, [&name, &backend](std::string_view content) {
+                return harness::append_backend(content, name, backend, false);
+            });
+        } catch (const std::exception& e) {
+            fail(e.what());
+        }
+        std::cout << "registered " << name << "\n";
+    }
+    log.ready.push_back(name);
+    log.next = "chat with one:  apogee chat -m " + name;
+}
+
+}  // namespace
+
+std::vector<std::string> register_mlx_precisions(const std::vector<std::string>& given) {
+    std::vector<std::string> out;
+    for (const std::string& name : given) {
+        if (training::find_mlx_precision(name) == nullptr) {
+            std::string names;
+            for (const std::string& known : training::mlx_precision_names()) {
+                names += (names.empty() ? "" : ", ") + known;
+            }
+            fail("--register-with with --mlx takes the MLX precisions (" + names + "); '" + name +
+                 "' is " +
+                 (models::canonical_quant_type(name).has_value() ? std::string{"a GGUF level"}
+                                                                 : std::string{"neither"}));
+        }
+        if (std::ranges::find(out, name) == out.end()) {
+            out.push_back(name);
+        }
+    }
+    return out;
+}
+
+void run_mlx_register_chain(const MlxRegisterRequest& request,
+                            const MlxConverterFor& converter_for) {
+    const models::StoreRoots& roots = request.roots;
+    const SnapshotChoice source = choose_snapshot(roots, request.snapshot, request.snapshot_from);
+    if (!source.error.empty()) {
+        fail(source.error);
+    }
+    std::string snapshot = request.snapshot;
+    std::string snapshot_from = request.snapshot_from;
+    if (!source.id.empty()) {
+        snapshot = source.model + "/safetensors/" + source.id;
+        snapshot_from.clear();
+    }
+    // Every name known before anything runs: a chain that would refuse at
+    // its end refuses now.
+    const std::string base =
+        request.base_name.empty() ? display_name(source.model) : request.base_name;
+    std::vector<std::string> names;
+    std::string joined;
+    for (const std::string& precision : request.precisions) {
+        names.push_back(base + "-" + precision);
+        joined += (joined.empty() ? "" : ",") + precision;
+    }
+    check_registrations(roots, request.config_path, source.model, names, models::kMlxFormat);
+
+    ChainLog log;
+    log.resume =
+        "apogee models convert " + snapshot + " --mlx" +
+        (request.listed ? " --register-with " + joined
+                        : " --register --type " + request.precisions.front()) +
+        (request.base_name.empty() ? std::string{} : " --base-name " + request.base_name) +
+        (request.model_type.empty() ? std::string{} : " --model-type " + request.model_type);
+
+    std::vector<ChainStage> stages;
+    std::vector<ConvertedMlx> made(request.precisions.size());
+    for (std::size_t index = 0; index < request.precisions.size(); ++index) {
+        const training::MlxPrecision& precision =
+            *training::find_mlx_precision(request.precisions[index]);
+        stages.push_back(
+            {"convert to MLX " + std::string{precision.name}, [&, index](ChainLog& chain) {
+                 made[index] = convert_model_to_mlx(roots, snapshot, snapshot_from, precision,
+                                                    converter_for(precision), request.model_type,
+                                                    /*chained=*/true);
+                 if (!models::snapshot_has_chat_template(source.path)) {
+                     chain.note(base_model_note());
+                 }
+             }});
+        stages.push_back({"register " + names[index], [&, index](ChainLog& chain) {
+                              register_mlx_backend(request.config_path, names[index],
+                                                   made[index].dir, chain);
+                          }});
+    }
+    std::cout << "converting it to MLX at " << joined << " and registering "
+              << (names.size() == 1 ? "it" : std::to_string(names.size()) + " backends") << "\n\n";
+    (void)run_chain(stages, std::move(log), std::cout);
+}
+
+namespace {
+
 /// `models convert <model> --mlx [--type <precision>]` (27b): the
 /// precision, the runtime -- the backend's own ladder, file facts only --
 /// and the seeded driver asked before anything is announced, then the core.
 void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& given,
-                            const std::string& from, const std::string& type, bool registers) {
-    if (registers) {
-        fail(
-            "--register makes GGUF backends; an MLX model is registered with the "
-            "'config add-backend' line --mlx prints");
-    }
+                            const std::string& from, const std::string& type,
+                            const std::string& model_type, const MlxRegisterRequest* registers) {
     const training::MlxPrecision* precision = training::find_mlx_precision(type);
     if (precision == nullptr) {
         std::string names;
@@ -1843,9 +2336,19 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
         fail("the MLX converter is missing: " + script.string() +
              " -- run 'apogee check --fix' to seed it");
     }
+    const std::filesystem::path mlx_lm = training::find_site_package(host.venv, "mlx_lm");
+    if (registers != nullptr) {
+        // M16: the hint executed -- each precision converted and registered.
+        run_mlx_register_chain(
+            *registers, [&runtime, &script, &mlx_lm](const training::MlxPrecision& wanted) {
+                return training::script_mlx_converter(runtime.interpreter, script, wanted, mlx_lm);
+            });
+        return;
+    }
     (void)convert_model_to_mlx(
         roots, given, from, *precision,
-        training::script_mlx_converter(runtime.interpreter, script, *precision));
+        training::script_mlx_converter(runtime.interpreter, script, *precision, mlx_lm),
+        model_type);
 }
 
 }  // namespace
@@ -1964,10 +2467,24 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
             const std::string token = models::hf_token({});
 
             if (hf.file.empty()) {
-                // An MLX model is a directory, pulled whole, when its model
-                // card says it is one and there is no GGUF to prefer (27b).
+                // A diffusion pipeline is a directory, pulled whole, when
+                // its root carries model_index.json (49a); an MLX model is
+                // one when its model card says so and there is no GGUF to
+                // prefer (27b).
                 const models::HfListing listing =
                     models::list_gguf_files(*client, hf, token, cancellation);
+                if (listing.ok && listing.pipeline()) {
+                    const InterruptScope interrupt;
+                    (void)pull_pipeline(ref, roots, *client, InterruptScope::token());
+                    return;
+                }
+                // A voice model is a directory too, pulled whole when its
+                // files are laid out as one (50a).
+                if (listing.ok && listing.gguf_files.empty() && listing.voice()) {
+                    const InterruptScope interrupt;
+                    (void)pull_voice(ref, roots, *client, InterruptScope::token());
+                    return;
+                }
                 if (listing.ok && listing.gguf_files.empty() && listing.mlx()) {
                     const InterruptScope interrupt;
                     (void)pull_mlx(ref, roots, *client, InterruptScope::token());
@@ -2106,6 +2623,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
     // ---- delete -------------------------------------------------------------
     auto delete_name = std::make_shared<std::string>();
     auto delete_yes = std::make_shared<bool>(false);
+    auto delete_backends = std::make_shared<bool>(false);
     CLI::App* remove = models.add_subcommand("delete", "Remove a model, or one set of its weights");
     remove
         ->add_option("name", *delete_name,
@@ -2114,8 +2632,11 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         ->type_name(kModelOrBackendValue)
         ->required();
     remove->add_flag("-y,--yes", *delete_yes, "Do not ask for confirmation");
+    remove->add_flag("--and-backends", *delete_backends,
+                     "Also remove the backend entries that point into what goes, through the "
+                     "config editor (asked at a terminal otherwise; -y never implies it)");
 
-    remove->callback([delete_name, delete_yes, models_dir, &context]() {
+    remove->callback([delete_name, delete_yes, delete_backends, models_dir, &context]() {
         const models::StoreRoots roots = store_roots(models_dir, context.config_path);
         // The config, for a backend's name (M7); without one, names mean the
         // store alone, as they always did.
@@ -2143,10 +2664,25 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         for (const std::filesystem::path& dir : plan.removes) {
             std::cout << "  " << dir.string() << "\n";
         }
-        // A backend pointing into what goes stops working: say which, before.
-        for (const std::string& backend : backends_inside(context.config_path, plan.removes)) {
+        // A backend pointing into what goes stops working: say which, and
+        // what will be done about it, before (M14).
+        const std::vector<std::string> affected =
+            backends_inside(context.config_path, plan.removes);
+        for (const std::string& backend : affected) {
             std::cout << "\nbackend '" << backend
                       << "' points into this and will stop working until it is repointed.\n";
+        }
+        if (!affected.empty()) {
+            const bool one = affected.size() == 1;
+            std::cout << (*delete_backends ? std::string{"--and-backends: "} +
+                                                 (one ? "its entry goes"
+                                                      : "their " + std::to_string(affected.size()) +
+                                                            " entries go") +
+                                                 " too, through the config editor.\n"
+                                           : std::string{"the backend "} +
+                                                 (one ? "entry stays" : "entries stay") +
+                                                 " unless you say -- --and-backends removes " +
+                                                 (one ? "it" : "them") + " with the weights.\n");
         }
         if (plan.ollama_sourced) {
             // Apogee's copy only. Ollama's blobs are shared between models, so
@@ -2160,12 +2696,40 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
             std::cout << "\nre-run with --yes to remove.\n";
             return;
         }
+        // The config half on its own consent: the flag, or a yes at a
+        // terminal -- never -y alone, never on a pipe without the flag.
+        const bool interactive =
+            platform::is_terminal(platform::StandardStream::In) && !stdin_is_piped();
+        const bool remove_entries = remove_backends_too(
+            *delete_backends, affected,
+            [interactive](const std::string& question) -> std::optional<std::string> {
+                if (!interactive) {
+                    return std::nullopt;
+                }
+                std::cerr << "\n" << question << std::flush;
+                std::string answer;
+                if (!std::getline(std::cin, answer)) {
+                    return std::string{};
+                }
+                return answer;
+            });
         for (const std::filesystem::path& dir : plan.removes) {
             if (const std::string error = models::remove_weights(dir); !error.empty()) {
                 fail(error);
             }
         }
         std::cout << "\nremoved.\n";
+        if (affected.empty()) {
+            return;
+        }
+        try {
+            for (const std::string& line : settle_backends(
+                     harness::resolve_config_path(context.config_path), affected, remove_entries)) {
+                std::cout << line << "\n";
+            }
+        } catch (const std::exception& e) {
+            fail(e.what());
+        }
     });
 
     // ---- quantize -----------------------------------------------------------
@@ -2238,33 +2802,72 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                       "--type, into the model's mlx/");
     convert->add_option("--from", *convert_from, "Which of the model's SafeTensors sets, by id")
         ->type_name(kSnapshotIdValue);
+    auto convert_model_type = std::make_shared<std::string>();
+    convert
+        ->add_option("--model-type", *convert_model_type,
+                     "With --mlx: convert these weights as a type mlx-lm knows -- your word, for "
+                     "a vendor's variant its converter does not list; the snapshot is untouched "
+                     "and the record says so")
+        ->type_name(kMlxModelTypeValue);
     auto convert_register = std::make_shared<bool>(false);
     auto convert_register_with = std::make_shared<std::vector<std::string>>();
     convert->add_flag("--register", *convert_register,
-                      "Register the F16 as a backend once it is made");
+                      "Register what is made as a backend: the F16, or with --mlx the --type "
+                      "build");
     const CLI::Option* register_with_option =
         convert
             ->add_option("--register-with", *convert_register_with,
                          "--register, and quantize to each of these levels too, each its own "
-                         "backend (comma-separated)")
+                         "backend (comma-separated) -- with --mlx the MLX precisions, one "
+                         "conversion each")
             ->delimiter(',')
-            ->type_name(words_value(models::quant_type_names()));
+            ->type_name(kRegisterLevelValue);
     auto convert_base_name = std::make_shared<std::string>();
     const CLI::Option* convert_base_name_option = convert->add_option(
         "--base-name", *convert_base_name,
-        "With --register: what each backend's name begins with, before -F16, -Q4KM ... "
-        "(default: the model's name)");
+        "With --register: what each backend's name begins with, before -F16, -Q4KM ... -- or "
+        "with --mlx -4bit, -8bit ... (default: the model's name)");
 
     convert->callback([convert_in, convert_type, convert_type_option, convert_mlx, convert_from,
-                       convert_register, convert_register_with, register_with_option,
-                       convert_base_name, convert_base_name_option, models_dir, &context]() {
+                       convert_model_type, convert_register, convert_register_with,
+                       register_with_option, convert_base_name, convert_base_name_option,
+                       models_dir, &context]() {
         const models::StoreRoots roots = store_roots(models_dir, context.config_path);
         const bool registers = *convert_register || register_with_option->count() > 0;
         if (*convert_mlx) {
-            convert_to_mlx_command(roots, *convert_in, *convert_from,
-                                   convert_type_option->count() > 0 ? *convert_type : "4bit",
-                                   registers);
+            const std::string type = convert_type_option->count() > 0 ? *convert_type : "4bit";
+            check_base_name(*convert_base_name, convert_base_name_option->count() > 0, registers);
+            if (!registers) {
+                convert_to_mlx_command(roots, *convert_in, *convert_from, type, *convert_model_type,
+                                       nullptr);
+                return;
+            }
+            // M16: with --mlx the chain converts once a precision.
+            const bool listed = register_with_option->count() > 0;
+            if (listed && convert_type_option->count() > 0) {
+                fail(
+                    "with --mlx, --register-with names every precision to convert -- drop "
+                    "--type, or name it in the list");
+            }
+            const MlxRegisterRequest request{
+                .roots = roots,
+                .config_path = harness::resolve_config_path(context.config_path),
+                .snapshot = *convert_in,
+                .snapshot_from = *convert_from,
+                .precisions = listed ? register_mlx_precisions(*convert_register_with)
+                                     : std::vector<std::string>{type},
+                .base_name = *convert_base_name,
+                .model_type = *convert_model_type,
+                .listed = listed,
+            };
+            convert_to_mlx_command(roots, *convert_in, *convert_from, request.precisions.front(),
+                                   *convert_model_type, &request);
             return;
+        }
+        if (!convert_model_type->empty()) {
+            fail(
+                "--model-type names the type mlx-lm converts these weights as -- it works with "
+                "--mlx; the GGUF converter finds a model by its architectures");
         }
         if (std::ranges::find(training::converter_out_types(), *convert_type) ==
             training::converter_out_types().end()) {
@@ -2273,6 +2876,15 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                  "precision (f16, bf16, f32, q8_0, auto)");
         }
         check_base_name(*convert_base_name, convert_base_name_option->count() > 0, registers);
+        // An MLX precision is --mlx's: said by name (M16).
+        for (const std::string& level : *convert_register_with) {
+            if (!models::canonical_quant_type(level).has_value() &&
+                training::find_mlx_precision(level) != nullptr) {
+                fail("'" + level +
+                     "' is an MLX precision -- add --mlx to register MLX builds, or name "
+                     "quantization levels for --register-with");
+            }
+        }
         if (registers) {
             if (*convert_type != "f16") {
                 fail(
@@ -2348,6 +2960,48 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                 const models::MlxInfo info = models::read_mlx_info(stored.dir);
                 std::cout << "files:    "
                           << (info.complete ? "whole -- " + mlx_summary(info) : info.problem)
+                          << "\n";
+            }
+        }
+        // A pipeline the same way, every component's files against the one
+        // record, then read whole (49a).
+        if (target.format.empty() || target.format == models::kPipelineFormat) {
+            for (const models::StoredPipeline& stored :
+                 models::list_store_pipelines(roots, target.model)) {
+                if (!target.id.empty() && target.id != stored.id) {
+                    continue;
+                }
+                std::cout << (any ? "\n" : "") << "pipeline: "
+                          << models::weights_handle(stored.model, models::kPipelineFormat,
+                                                    stored.id)
+                          << "\n";
+                any = true;
+                if (!repair_snapshot_in_place(stored.dir)) {
+                    throw CLI::RuntimeError(1);
+                }
+                const models::PipelineInfo info = models::read_pipeline_info(stored.dir);
+                std::cout << "files:    "
+                          << (info.complete ? "whole -- " + pipeline_summary(info) : info.problem)
+                          << "\n";
+            }
+        }
+        // A voice model the same way (50a).
+        if (target.format.empty() || target.format == models::kVoiceFormat) {
+            for (const models::StoredVoice& stored :
+                 models::list_store_voices(roots, target.model)) {
+                if (!target.id.empty() && target.id != stored.id) {
+                    continue;
+                }
+                std::cout << (any ? "\n" : "") << "voice:    "
+                          << models::weights_handle(stored.model, models::kVoiceFormat, stored.id)
+                          << "\n";
+                any = true;
+                if (!repair_snapshot_in_place(stored.dir)) {
+                    throw CLI::RuntimeError(1);
+                }
+                const models::VoiceInfo info = models::read_voice_info(stored.dir);
+                std::cout << "files:    "
+                          << (info.complete ? "whole -- " + voice_summary(info) : info.problem)
                           << "\n";
             }
         }

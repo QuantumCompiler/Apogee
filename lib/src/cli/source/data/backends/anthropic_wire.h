@@ -67,10 +67,15 @@ struct RequestOptions {
     /// none but its own -- and keeps `max_tokens` above the budget.
     std::int64_t thinking_budget_tokens = 0;
 
-    /// Adds Anthropic's server-side web_search tool.
+    /// Adds Anthropic's server-side web_search tool: the run's `--search`.
     bool web_search = false;
     /// Cap on server-side searches per request; 0 leaves it to the API.
     std::int64_t web_search_max_uses = 0;
+
+    /// The entry's `server_tools:` (47a), each Anthropic runs on its own
+    /// servers: `web_search` (the same block `web_search` sends, once) and
+    /// `code_execution`. Empty sends none.
+    std::vector<std::string> server_tools;
 
     bool stream = false;
 
@@ -98,6 +103,19 @@ inline constexpr std::string_view kStructuredOutputsBeta = "structured-outputs-2
 /// become the message text, the call is removed, and the finish reason is
 /// `Stop` when no other call remains.
 void fold_structured_output(harness::ChatResponse& response);
+
+/// The block types Anthropic's server tools are declared with. The search
+/// block stays the basic variant, which every model takes; the dynamic-
+/// filtering one runs its own code execution and is model-gated.
+inline constexpr std::string_view kWebSearchToolType = "web_search_20250305";
+inline constexpr std::string_view kCodeExecutionToolType = "code_execution_20260521";
+
+/// The narration line for one server-side content block (47a): a
+/// `server_tool_use` (what Anthropic is running) or one of its result blocks
+/// (what came of it), worded through `harness::server_tool_line`. Nullopt for
+/// any other block. Never the block's content: a search result's page text
+/// or a run's output stays out of every line.
+[[nodiscard]] std::optional<std::string> server_tool_line(const nlohmann::json& block);
 
 /// Builds the JSON body for POST /v1/messages.
 [[nodiscard]] nlohmann::json build_request(const harness::ChatRequest& request,

@@ -71,6 +71,26 @@ struct HfListing {
     /// or the `mlx` tag -- and holds SafeTensors weights to pull whole. A
     /// fact the repository states, never a guess from its name.
     [[nodiscard]] bool mlx() const;
+
+    /// `model_index.json` sits at the repository's root (49a): a diffusion
+    /// pipeline, pulled whole into the store's `pipeline/` format. A file
+    /// the repository holds, never a guess from its name or its tags.
+    bool has_model_index = false;
+
+    [[nodiscard]] bool pipeline() const noexcept {
+        return has_model_index;
+    }
+
+    /// A voice model as Kokoro publishes one (50a): `config.json` and a
+    /// checkpoint (`*.pth`) at the root, voice packs under `voices/`. Files
+    /// the repository holds, never a guess from its name.
+    bool has_root_config = false;
+    bool has_root_checkpoint = false;
+    bool has_voice_packs = false;
+
+    [[nodiscard]] bool voice() const noexcept {
+        return has_root_config && has_root_checkpoint && has_voice_packs;
+    }
 };
 
 /// Which kind of repository a ref names. Models and datasets live under
@@ -110,6 +130,37 @@ struct HfTree {
 /// code -- never a GGUF, a PyTorch checkpoint, an image or the repository's
 /// housekeeping.
 [[nodiscard]] bool snapshot_wanted(std::string_view path) noexcept;
+
+/// What a pipeline pull takes of a repository's `tree` (49a): the root's
+/// `model_index.json`, and under each of `components` (the index's names)
+/// the files `snapshot_wanted` takes -- a weights variant
+/// (`diffusion_pytorch_model.fp16.safetensors` and its index) left out
+/// wherever the plain weights sit beside it, since a load reads one or the
+/// other. Nothing else at the root, and no directory the index does not
+/// name: a repository that also carries a single-file checkpoint or sample
+/// media does not spend them.
+[[nodiscard]] std::vector<HfFile> pipeline_wanted(const std::vector<HfFile>& tree,
+                                                  const std::vector<std::string>& components);
+
+/// What a voice model pull takes of a repository's `tree` (50a): the root's
+/// `config.json` and checkpoint (`*.pth`), and every voice pack under
+/// `voices/` -- never the samples, the model card or anything else.
+[[nodiscard]] std::vector<HfFile> voice_wanted(const std::vector<HfFile>& tree);
+
+/// A small text file of the repository -- `model_index.json` -- read whole
+/// into memory and written nowhere: what a pipeline pull reads to know its
+/// components before a byte of weights moves (49a). Larger than `limit`, or
+/// not there, is an error.
+struct HfText {
+    bool ok = false;
+    std::string error;
+    std::string text;
+};
+
+[[nodiscard]] HfText fetch_repo_text(backends::HttpClient& client, const HfRef& ref,
+                                     HfRepoKind kind, std::string_view path, std::string_view token,
+                                     const harness::CancellationToken& cancellation,
+                                     std::size_t limit = 1024 * 1024);
 
 /// Whether `path` is a dataset data file worth downloading.
 [[nodiscard]] bool dataset_file_wanted(std::string_view path) noexcept;

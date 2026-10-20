@@ -98,6 +98,13 @@ struct MlxInfo {
 /// with the reason.
 [[nodiscard]] MlxInfo read_mlx_info(const std::filesystem::path& dir);
 
+/// Whether the SafeTensors file `shard`, `size` bytes, is whole: its header
+/// reads and every tensor it lists lies within the file -- what tells a
+/// whole shard from a half-downloaded one with a perfectly good start. The
+/// problem, naming the file, or empty. The pipeline reader's check too (49a).
+[[nodiscard]] std::string safetensors_shard_problem(const std::filesystem::path& shard,
+                                                    std::uintmax_t size);
+
 /// What `config.json` alone says -- the window, the quantization, the model
 /// type -- with no shard opened, and `complete` false: for what is asked at
 /// every startup (the backend's window), where the files' wholeness is the

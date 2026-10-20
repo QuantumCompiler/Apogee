@@ -459,3 +459,39 @@ TEST_CASE("list_catalog reads the vendor's one-page models document",
     CHECK(requests[0].method == "GET");
     CHECK(requests[0].url.find("/v1/models") != std::string::npos);
 }
+
+TEST_CASE("an entry's server tools are OpenAI's blocks, said as OpenAI runs them",
+          "[backends][openai][server-tools]") {
+    constexpr std::string_view kServerStream =
+        R"j(data: {"type":"response.output_item.done","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"apogee harness"}}})j"
+        "\n\n"
+        R"j(data: {"type":"response.output_item.done","output_index":1,"item":{"type":"code_interpreter_call","id":"ci_1","code":"import math\nprint(math.pi)","container_id":"cntr_1"}})j"
+        "\n\n"
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Pi is 3.14.\"}\n\n"
+        R"j(data: {"type":"response.completed","response":{"model":"gpt-5","status":"completed","usage":{"input_tokens":5,"output_tokens":4}}})j"
+        "\n\n";
+    OpenAIProvider::Options options;
+    options.server_tools = {"web_search", "code_execution"};
+    Fixture f = make_provider({sse(kServerStream)}, options);
+    std::vector<std::string> said;
+    StreamOptions stream;
+    stream.on_status = [&said](const apogee::harness::StatusEvent& event) {
+        if (event.type == apogee::harness::StatusEvent::Type::ToolCall) {
+            said.push_back(event.detail);
+        }
+    };
+    const auto response = f.provider->stream_chat(chat_request(), stream);
+
+    const json tools = json::parse(f.transport->requests()[0].body).at("tools");
+    CHECK(tools == json::parse(R"([{"type":"web_search"},
+                                   {"type":"code_interpreter","container":{"type":"auto"}}])"));
+    CHECK(said == std::vector<std::string>{R"(web_search, run by OpenAI: "apogee harness")",
+                                           "code_execution, run by OpenAI: import math…"});
+    CHECK(response.message.content.plain_text() == "Pi is 3.14.");
+    CHECK(response.message.tool_calls.empty());
+
+    // None without the entry's list.
+    Fixture bare = make_provider({sse(kTextStream)});
+    (void)bare.provider->stream_chat(chat_request(), {});
+    CHECK_FALSE(json::parse(bare.transport->requests()[0].body).contains("tools"));
+}

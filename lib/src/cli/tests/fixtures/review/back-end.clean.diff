@@ -1,0 +1,26 @@
+diff --git a/server/handlers/invoices.go b/server/handlers/invoices.go
+--- a/server/handlers/invoices.go
++++ b/server/handlers/invoices.go
+@@ -10,8 +10,22 @@ func GetInvoice(w http.ResponseWriter, r *http.Request) {
+ 	user := auth.UserFrom(r.Context())
+ 	inv, err := store.Invoice(r.Context(), chi.URLParam(r, "id"))
+ 	if err != nil || inv.OwnerID != user.ID {
+ 		http.NotFound(w, r)
+ 		return
+ 	}
+ 	writeJSON(w, inv)
+ }
++
++func DeleteInvoice(w http.ResponseWriter, r *http.Request) {
++	user := auth.UserFrom(r.Context())
++	inv, err := store.Invoice(r.Context(), chi.URLParam(r, "id"))
++	if err != nil || inv.OwnerID != user.ID {
++		http.NotFound(w, r)
++		return
++	}
++	if err := store.DeleteInvoice(r.Context(), inv.ID); err != nil {
++		http.Error(w, "delete failed", http.StatusInternalServerError)
++		return
++	}
++	w.WriteHeader(http.StatusNoContent)
++}

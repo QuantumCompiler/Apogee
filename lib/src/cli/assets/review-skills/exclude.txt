@@ -1,0 +1,36 @@
+# Files a review leaves out of the diff it reads (48c): lockfiles, generated
+# code, vendored code, minified bundles. One glob a line over repository paths
+# -- `*` within a segment, `**` across segments -- and `#` starts a comment.
+# Binary files are always left out. Edit this file to add your own: an edited
+# copy is yours, and seeding never overwrites it.
+
+# Lockfiles
+**/package-lock.json
+**/yarn.lock
+**/pnpm-lock.yaml
+**/Cargo.lock
+**/go.sum
+**/poetry.lock
+**/Pipfile.lock
+**/uv.lock
+**/Gemfile.lock
+**/composer.lock
+**/*.lock
+
+# Vendored and installed code
+**/vendor/**
+**/node_modules/**
+**/third_party/**
+**/.venv/**
+
+# Build output and generated code
+**/dist/**
+**/build/**
+**/generated/**
+**/*.generated.*
+**/*.pb.go
+**/*_pb2.py
+**/*.min.js
+**/*.min.css
+**/*.map
+**/*.snap

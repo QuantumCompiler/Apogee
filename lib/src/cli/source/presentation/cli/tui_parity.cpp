@@ -52,6 +52,20 @@ constexpr std::array kSurfaces{
                  "conversation, and the exec line (37h) runs the command as typed"},
     ShellSurface{"analyze", RunnerCovered,
                  "a one-shot agent workflow over an input: the exec line (37h) runs it as typed"},
+    ShellSurface{"review", RunnerCovered,
+                 "reviewing merge requests and the skills they run (48): the exec line (37h) "
+                 "runs it as typed; a Review view is a recorded later item"},
+    ShellSurface{"video", RunnerCovered,
+                 "generating video locally (49) and composing it from a brief and editing it by "
+                 "instruction (50c, 50d): the exec "
+                 "line (37h) runs it as typed, its narration streamed; a Video view is a "
+                 "recorded later item"},
+    ShellSurface{"voice", RunnerCovered,
+                 "speech from a voice model in the store (50a): the exec line (37h) runs it as "
+                 "typed"},
+    ShellSurface{"bootstrap", RunnerCovered,
+                 "the runtimes installed and what the machine has registered (51): the exec "
+                 "line (37h) runs it as typed, each step said"},
     // --- hidden plumbing: protocols other programs speak, never a person's ----
     ShellSurface{"__complete", RunnerCovered,
                  "the shell stubs' completion protocol -- the exec line's Tab asks the same "

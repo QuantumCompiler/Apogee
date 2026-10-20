@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "contracts/errors.h"
+#include "contracts/server_tools.h"
 
 namespace apogee::backends::openai {
 namespace {
@@ -175,8 +176,16 @@ nlohmann::json build_request(const harness::ChatRequest& request, const RequestO
                          {"description", tool.description},
                          {"parameters", std::move(parameters)}});
     }
-    if (options.web_search) {
+    const auto enabled = [&options](std::string_view tool) {
+        return std::ranges::find(options.server_tools, tool) != options.server_tools.end();
+    };
+    if (options.web_search || enabled(harness::kServerWebSearch)) {
         tools.push_back({{"type", "web_search"}});
+    }
+    if (enabled(harness::kServerCodeExecution)) {
+        // The entry's consent (47a): code OpenAI runs in a container of its
+        // own, made for the request.
+        tools.push_back({{"type", "code_interpreter"}, {"container", {{"type", "auto"}}}});
     }
     if (!tools.empty()) {
         body["tools"] = std::move(tools);
@@ -302,6 +311,29 @@ std::string error_message(long status, std::string_view body) {
         }
     }
     return "HTTP " + std::to_string(status);
+}
+
+std::optional<std::string> server_tool_line(const nlohmann::json& item) {
+    if (!item.is_object()) {
+        return std::nullopt;
+    }
+    constexpr std::string_view kVendor = "OpenAI";
+    const std::string type = item.value("type", std::string{});
+    if (type == "web_search_call") {
+        std::string query;
+        if (const auto action = item.find("action"); action != item.end() && action->is_object()) {
+            query = action->value("query", std::string{});
+        }
+        return harness::server_tool_line(
+            harness::kServerWebSearch, kVendor,
+            query.empty() ? std::string{} : "\"" + harness::narration_excerpt(query) + "\"");
+    }
+    if (type == "code_interpreter_call") {
+        return harness::server_tool_line(
+            harness::kServerCodeExecution, kVendor,
+            harness::narration_excerpt(item.value("code", std::string{})));
+    }
+    return std::nullopt;
 }
 
 }  // namespace apogee::backends::openai

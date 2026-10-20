@@ -8,6 +8,7 @@
 #include "cli/agents_cmd.h"
 #include "cli/analyze.h"
 #include "cli/auth_cmd.h"
+#include "cli/bootstrap_cmd.h"
 #include "cli/chat.h"
 #include "cli/chat_history.h"
 #include "cli/check.h"
@@ -24,6 +25,7 @@
 #include "cli/models.h"
 #include "cli/providers_cmd.h"
 #include "cli/reset.h"
+#include "cli/review_cmd.h"
 #include "cli/serve_cmd.h"
 #include "cli/symphonies_cmd.h"
 #include "cli/system_cmd.h"
@@ -32,6 +34,8 @@
 #include "cli/tui_cmd.h"
 #include "cli/uninstall.h"
 #include "cli/version_command.h"
+#include "cli/video_cmd.h"
+#include "cli/voice_cmd.h"
 
 namespace apogee::commands {
 
@@ -94,6 +98,10 @@ CommandRegistry default_registry(ShellEntry shell) {
     registry.add(std::make_unique<ModelsCommand>());
     registry.add(std::make_unique<ProvidersCommand>());
     registry.add(std::make_unique<ResetCommand>());
+    registry.add(std::make_unique<ReviewCommand>());
+    registry.add(std::make_unique<VideoCommand>());
+    registry.add(std::make_unique<VoiceCommand>());
+    registry.add(std::make_unique<BootstrapCommand>());
     registry.add(std::make_unique<ServeCommand>());
     registry.add(std::make_unique<SymphoniesCommand>());
     registry.add(std::make_unique<SystemCommand>());

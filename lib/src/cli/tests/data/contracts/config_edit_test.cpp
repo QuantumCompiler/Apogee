@@ -1392,6 +1392,26 @@ TEST_CASE("the default suite is set like a pointer, and the loader holds it to a
         apogee::harness::ConfigError);
 }
 
+TEST_CASE("the default video pipeline is set like a pointer, read back, and cleared",
+          "[config_edit][video]") {
+    // 49c: `models.default_video` -- the pipeline `video generate` runs --
+    // written as the suite's pointer is, beside the roles, never one of them.
+    using apogee::harness::set_default_video;
+    const std::string hand{kHandSuite};
+    const std::string set = set_default_video(hand, "org--clip/pipeline/aaaaaaaaaaaa");
+    CHECK(set == "models:\n  default: claude\n  default_video: org--clip/pipeline/aaaaaaaaaaaa\n" +
+                     hand.substr(std::string{"models:\n  default: claude\n"}.size()));
+    const apogee::harness::Config config = apogee::harness::parse_config(set, "<test>");
+    CHECK(config.models.default_video == "org--clip/pipeline/aaaaaaaaaaaa");
+    CHECK(config.models.default_backend == "claude");
+    // Replaced in place, then cleared.
+    const std::string cleared = set_default_video(set_default_video(set, "org--clip"), "");
+    CHECK(cleared.find("  default_video: \"\"\n") != std::string::npos);
+    CHECK(apogee::harness::parse_config(cleared, "<test>").models.default_video.empty());
+    // Not a role: the role editor refuses the field.
+    CHECK_THROWS_AS(apogee::harness::set_models_role(hand, "default_video", "x"), ConfigEditError);
+}
+
 TEST_CASE("a suite's consultable members and caps are written after its members, and round-trip",
           "[config_edit][golden][suites]") {
     using apogee::harness::append_suite;
@@ -1882,7 +1902,11 @@ TEST_CASE("the editable fields are the loader's, and every one add-backend write
                                                           {"binary", "/bin/x"},
                                                           {"mode", "m"},
                                                           {"host", "h"},
-                                                          {"idle_unload_seconds", "30"}};
+                                                          {"idle_unload_seconds", "30"},
+                                                          {"server_tools", "web_search"}};
+    // Only a vendor API runs server-side tools (47a): that field is set on an
+    // anthropic entry, alone, since the chain below turns its entry local.
+    constexpr std::string_view kVendorBase = "backends:\n  all:\n    type: anthropic\n";
     const std::string base_json = [&]() {
         const apogee::harness::Config base = apogee::harness::parse_config(kBase, "base");
         return apogee::harness::append_backend("", "all", *base.find_backend("all"), false);
@@ -1891,6 +1915,14 @@ TEST_CASE("the editable fields are the loader's, and every one add-backend write
     for (const std::string_view field : apogee::harness::backend_editable_fields()) {
         INFO(field);
         REQUIRE(samples.contains(field));  // every field has a sample here
+        if (field == "server_tools") {
+            const apogee::harness::Config config = apogee::harness::parse_config(
+                apogee::harness::set_backend_field(kVendorBase, "all", field, samples.at(field)),
+                "edited");
+            CHECK(config.find_backend("all")->server_tools ==
+                  std::vector<std::string>{"web_search"});
+            continue;
+        }
         const std::string edited =
             apogee::harness::set_backend_field(kBase, "all", field, samples.at(field));
         const apogee::harness::Config config = apogee::harness::parse_config(edited, "edited");

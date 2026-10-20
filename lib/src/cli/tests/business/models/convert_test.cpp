@@ -1,10 +1,12 @@
 #include "models/convert.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <random>
 #include <string>
 #include <utility>
@@ -431,4 +433,59 @@ TEST_CASE("the MLX size estimate follows the bits", "[models][convert][mlx]") {
     CHECK(apogee::models::estimated_mlx_bytes(1'000'000'000, 4) == 500'000'000 + 62'500'000);
     CHECK(apogee::models::estimated_mlx_bytes(1'000'000'000, 8) == 1'000'000'000 + 62'500'000);
     CHECK(apogee::models::estimated_mlx_bytes(1'000'000'000, 0) == 2'000'000'000);
+}
+
+namespace {
+
+[[nodiscard]] std::string read_all(const std::filesystem::path& path) {
+    std::ifstream in{path, std::ios::binary};
+    return {std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+}
+
+}  // namespace
+
+TEST_CASE("a model_type overlay is the snapshot linked, its config.json alone written anew",
+          "[models][convert][mlx][model_type]") {
+    // M15: the view a conversion under --model-type reads. The snapshot is
+    // never written; every other file is the snapshot's own, linked.
+    const apogee::testing::TempDir dir{"model-type-overlay-" +
+                                       std::to_string(std::random_device{}())};
+    const std::filesystem::path snapshot = dir.path() / "snapshot";
+    apogee::testing::write_mlx_model(
+        snapshot, {.bits = 0, .model_type = "gemma4_unified_assistant", .format = "pt"});
+    std::filesystem::create_directories(snapshot / "extra");
+    std::ofstream{snapshot / "extra" / "notes.txt"} << "kept";
+    const std::string config_before = read_all(snapshot / "config.json");
+    CHECK(apogee::models::snapshot_model_type(snapshot) == "gemma4_unified_assistant");
+
+    const std::filesystem::path overlay = dir.path() / "overlay";
+    REQUIRE(apogee::models::stage_model_type_overlay(snapshot, overlay, "gemma4_unified").empty());
+    CHECK(apogee::models::snapshot_model_type(overlay) == "gemma4_unified");
+    CHECK(read_all(snapshot / "config.json") == config_before);
+    // Every other file: there, the snapshot's own bytes -- linked, so no copy.
+    std::size_t files = 0;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(snapshot)) {
+        if (!entry.is_regular_file() || entry.path().filename() == "config.json") {
+            continue;
+        }
+        const std::filesystem::path twin = overlay / entry.path().lexically_relative(snapshot);
+        INFO(twin.string());
+        REQUIRE(std::filesystem::is_regular_file(twin));
+        CHECK(std::filesystem::equivalent(entry.path(), twin));
+        ++files;
+    }
+    CHECK(files >= 3);  // a shard, the tokenizer files, the notes
+    CHECK_FALSE(std::filesystem::equivalent(snapshot / "config.json", overlay / "config.json"));
+    // Everything but the type, kept.
+    nlohmann::json was = nlohmann::json::parse(config_before);
+    nlohmann::json now = nlohmann::json::parse(read_all(overlay / "config.json"));
+    was.erase("model_type");
+    now.erase("model_type");
+    CHECK(now == was);
+
+    // Removing the view leaves the snapshot whole.
+    std::filesystem::remove_all(overlay);
+    CHECK(read_all(snapshot / "extra" / "notes.txt") == "kept");
+    CHECK(apogee::models::stage_model_type_overlay(dir.path() / "none", dir.path() / "o", "x") ==
+          (dir.path() / "none").string() + "/config.json cannot be read as JSON");
 }

@@ -8,6 +8,7 @@
 #include <fstream>
 #include <optional>
 #include <random>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -17,6 +18,8 @@
 #include "support/env_guard.h"
 #include "support/file_time.h"
 #include "support/mlx_model.h"
+#include "support/pipeline_model.h"
+#include "support/voice_model.h"
 
 using apogee::models::StoreRoots;
 using apogee::models::StoreTarget;
@@ -731,4 +734,155 @@ TEST_CASE("an MLX directory is committed by its shards' digests, with every file
                                    [](std::int64_t) { return false; });
     CHECK(halted.error == apogee::models::kStopped);
     CHECK(std::filesystem::exists(stopped / "config.json"));
+}
+
+// ---- the pipeline/ row (49a) --------------------------------------------------------
+
+TEST_CASE("a pipeline lands under its model's pipeline/ by id, named and removed whole",
+          "[models][store][pipeline]") {
+    // What video generation runs, so under the models directory -- never
+    // under paths.hf_dir -- and no backend type runs one.
+    const Store store;
+    StoreRoots split = store.roots;
+    split.safetensors = store.root.path() / "hf";
+    const std::filesystem::path model = split.models / "Wan-AI--Wan2.2-TI2V-5B-Diffusers";
+    const std::filesystem::path dir = apogee::models::weights_dir(
+        split, apogee::models::kPipelineFormat, "Wan-AI--Wan2.2-TI2V-5B-Diffusers", "dddddddddddd");
+    CHECK(dir == model / "pipeline" / "dddddddddddd");
+    apogee::testing::write_pipeline_model(dir);
+    write_file(model / "pipeline" / ".incoming-0123456789ab" / "model_index.json");
+    write_file(model / "gguf" / "111111111111" / "m.gguf");
+
+    const std::vector<apogee::models::StoredPipeline> stored =
+        apogee::models::list_store_pipelines(split);
+    REQUIRE(stored.size() == 1);  // work in progress is never listed
+    CHECK(stored.front().model == "Wan-AI--Wan2.2-TI2V-5B-Diffusers");
+    CHECK(stored.front().id == "dddddddddddd");
+    CHECK(apogee::models::list_store_pipelines(split, "other").empty());
+    CHECK(apogee::models::stored_pipeline_at(stored, std::filesystem::path{dir.string() + "/"})
+              .has_value());
+    CHECK(apogee::models::list_store_models(split) ==
+          std::vector<std::string>{"Wan-AI--Wan2.2-TI2V-5B-Diffusers"});
+    CHECK(apogee::models::backend_type_for_format(apogee::models::kPipelineFormat).empty());
+
+    // The one list of formats a verb walks, and the one question.
+    const std::span<const std::string_view> formats = apogee::models::store_formats();
+    CHECK(std::vector<std::string_view>(formats.begin(), formats.end()) ==
+          std::vector<std::string_view>{"gguf", "safetensors", "mlx", "pipeline", "voice"});
+    CHECK(apogee::models::is_store_format("pipeline"));
+    CHECK_FALSE(apogee::models::is_store_format("pipelines"));
+
+    // Named like every other weights: by model, handle, bare id or path.
+    using apogee::models::resolve_store_target;
+    CHECK(resolve_store_target(split, "Wan-AI/Wan2.2-TI2V-5B-Diffusers").path == model);
+    const StoreTarget by_id = resolve_store_target(split, "dddddddddddd");
+    CHECK(by_id.format == "pipeline");
+    CHECK(by_id.path == dir);
+    const StoreTarget by_handle =
+        resolve_store_target(split, "Wan-AI--Wan2.2-TI2V-5B-Diffusers/pipeline/dddddddddddd");
+    CHECK(by_handle.format == "pipeline");
+    CHECK(by_handle.id == "dddddddddddd");
+    const StoreTarget by_path = resolve_store_target(split, (dir / "vae" / "config.json").string());
+    CHECK(by_path.format == "pipeline");
+    CHECK(by_path.id == "dddddddddddd");
+    REQUIRE(apogee::models::parse_weights_handle(
+                "Wan-AI--Wan2.2-TI2V-5B-Diffusers/pipeline/dddddddddddd")
+                .has_value());
+
+    // Removed whole, never a component alone; another format stays.
+    REQUIRE(apogee::models::remove_weights(dir).empty());
+    CHECK_FALSE(std::filesystem::exists(dir));
+    CHECK(std::filesystem::exists(model / "gguf"));
+}
+
+TEST_CASE("an interrupted pipeline download is found as a leftover, by its owner",
+          "[models][store][pipeline][staging]") {
+    const Store store;
+    const std::filesystem::path dead =
+        store.roots.models / "org--video" / "pipeline" / ".incoming-222222222222";
+    write_file(dead / "transformer" / "diffusion_pytorch_model.safetensors", std::string(100, 'x'));
+    std::ofstream{apogee::models::staging_owner_path(dead)} << 999999999 << "\n";
+    const std::vector<apogee::models::AbandonedStaging> found =
+        apogee::models::find_abandoned_staging(store.roots);
+    REQUIRE(found.size() == 1);
+    CHECK(found.front().dir == dead);
+    CHECK(found.front().bytes == 100);
+}
+
+TEST_CASE("a pipeline is committed by every component's shards, with every file on record",
+          "[models][store][pipeline]") {
+    const Store store;
+    const auto stage = [&store]() {
+        const std::filesystem::path staging =
+            apogee::models::incoming_path(store.roots, apogee::models::kPipelineFormat, "org--v");
+        apogee::testing::write_pipeline_model(staging);
+        return staging;
+    };
+    apogee::models::Snapshot record;
+    record.ref = "org/v";
+    record.source = "huggingface";
+    const apogee::models::StoredDirectory stored =
+        apogee::models::commit_pipeline(store.roots, "org--v", stage(), record);
+    REQUIRE(stored.error.empty());
+    CHECK_FALSE(stored.existed);
+    CHECK(stored.dir.parent_path() == store.roots.models / "org--v" / "pipeline");
+    const std::optional<apogee::models::Snapshot> written =
+        apogee::models::load_snapshot(stored.dir);
+    REQUIRE(written.has_value());
+    CHECK(written->ref == "org/v");
+    // Every file of every component, by its path under the pipeline.
+    std::vector<std::string> shards;
+    for (const apogee::models::SnapshotFile& file : written->files) {
+        CHECK(file.sha256 == apogee::models::file_sha256(stored.dir / file.path));
+        if (file.path.ends_with(".safetensors")) {
+            shards.push_back(file.path);
+        }
+    }
+    CHECK(shards == apogee::testing::pipeline_shard_names({}));
+    CHECK(written->files.size() == 12);
+    CHECK(stored.dir.filename() == apogee::models::snapshot_weight_id(written->files));
+
+    // The same weights again find the directory they occupy.
+    const apogee::models::StoredDirectory twice =
+        apogee::models::commit_pipeline(store.roots, "org--v", stage(), record);
+    REQUIRE(twice.error.empty());
+    CHECK(twice.existed);
+    CHECK(twice.dir == stored.dir);
+    CHECK(apogee::models::list_store_pipelines(store.roots).size() == 1);
+}
+
+// ---- the voice/ row (50a) -----------------------------------------------------------
+
+TEST_CASE("a voice model lands under its model's voice/ by the digest over its weights",
+          "[models][store][voice]") {
+    const Store store;
+    const std::filesystem::path staging =
+        apogee::models::incoming_path(store.roots, apogee::models::kVoiceFormat, "hexgrad--K");
+    apogee::testing::write_voice_model(staging);
+    apogee::models::Snapshot record;
+    record.ref = "hexgrad/K";
+    record.source = "huggingface";
+    const apogee::models::StoredDirectory stored =
+        apogee::models::commit_voice(store.roots, "hexgrad--K", staging, record);
+    REQUIRE(stored.error.empty());
+    CHECK(stored.dir.parent_path() == store.roots.models / "hexgrad--K" / "voice");
+    const std::optional<apogee::models::Snapshot> written =
+        apogee::models::load_snapshot(stored.dir);
+    REQUIRE(written.has_value());
+    // The id is the checkpoint's and the voices' digest, never random.
+    CHECK(stored.dir.filename() == apogee::models::voice_weight_id(written->files));
+    CHECK(apogee::models::snapshot_weight_id(written->files).empty());
+
+    const std::vector<apogee::models::StoredVoice> voices =
+        apogee::models::list_store_voices(store.roots);
+    REQUIRE(voices.size() == 1);
+    CHECK(apogee::models::stored_voice_at(voices, stored.dir).has_value());
+    const StoreTarget by_id =
+        apogee::models::resolve_store_target(store.roots, stored.dir.filename().string());
+    CHECK(by_id.format == "voice");
+    CHECK(apogee::models::resolve_store_target(store.roots, "hexgrad/K").path ==
+          store.roots.models / "hexgrad--K");
+    CHECK(apogee::models::backend_type_for_format(apogee::models::kVoiceFormat).empty());
+    REQUIRE(apogee::models::remove_weights(stored.dir).empty());
+    CHECK(apogee::models::list_store_voices(store.roots).empty());
 }

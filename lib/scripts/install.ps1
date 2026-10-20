@@ -87,6 +87,13 @@ try {
     & (Join-Path $binDir 'apogee.exe') check --fix
     if ($LASTEXITCODE -ne 0) { throw "post-install check failed" }
 
+    # Then it arrives ready (51): the runtime sets, the providers and the
+    # stored models -- each step said, never fatal. APOGEE_MINIMAL_INSTALL=1
+    # skips it; `apogee bootstrap` runs it again any time.
+    Write-Host ""
+    & (Join-Path $binDir 'apogee.exe') bootstrap
+    if ($LASTEXITCODE -ne 0) { Write-Host "note: the bootstrap did not finish -- 'apogee bootstrap' runs it again" }
+
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     if ($userPath -notlike "*$binDir*") {
         Write-Host ""

@@ -49,6 +49,14 @@ enum class RequirementSet : std::uint8_t {
     /// it (27c). Installed on demand, never with `mlx`: only a vision model
     /// needs it, and without it such a model's images go to the vision role.
     MlxVlm,
+    /// `torch` and `diffusers` with what a diffusion pipeline loads through
+    /// (49b): what `video_generate.py` runs a pipeline on. Installed on
+    /// demand -- asked for at a terminal, named on a pipe -- or by `train
+    /// setup --with video`; several gigabytes, so never with anything else.
+    Video,
+    /// `kokoro` and what it speaks through (50a): what `voice_say.py` runs a
+    /// voice model on. Installed on demand, as the video set is.
+    Voice,
 };
 
 [[nodiscard]] std::string_view to_string(RequirementSet set) noexcept;
@@ -58,6 +66,12 @@ enum class RequirementSet : std::uint8_t {
 [[nodiscard]] std::span<const std::string_view> requirement_set_names() noexcept;
 /// The pip requirement specifiers `set` installs.
 [[nodiscard]] std::span<const std::string_view> packages_for(RequirementSet set) noexcept;
+
+/// Why `set` is not for a host with these facts (51) -- the table's own
+/// column, so a set added to it says there where it runs: `mlx` and
+/// `mlx-vlm` are Apple silicon's, `peft` an NVIDIA GPU's, every other set
+/// any host's. Empty when it is for this one.
+[[nodiscard]] std::string set_unfit_reason(RequirementSet set, bool apple_silicon, bool nvidia_smi);
 
 /// What the environment holds, read from `apogee.json` and the filesystem.
 struct PythonEnvStatus {
@@ -108,6 +122,17 @@ private:
     std::filesystem::path dir_;
     CommandRunner runner_;
 };
+
+/// `<venv>`'s installed package `name` -- its directory in the
+/// environment's site-packages (`lib/python*/site-packages/<name>/`, or
+/// `Lib/site-packages/<name>/` on Windows) holding an `__init__.py` -- or
+/// empty. Read from files, never by importing anything (27a's rule).
+[[nodiscard]] std::filesystem::path find_site_package(const std::filesystem::path& venv,
+                                                      std::string_view name);
+
+/// The version a package's distribution record names in its own directory
+/// name -- `diffusers-0.35.1.dist-info` beside `diffusers/` -- or empty.
+[[nodiscard]] std::string installed_package_version(const std::filesystem::path& package);
 
 /// The interpreter an environment is seeded from: `configured` (with `${ENV}`
 /// and `~` expanded) when non-empty, else `python3` then `python` on PATH.

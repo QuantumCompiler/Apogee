@@ -16,6 +16,7 @@
 
 #include "cli/config_suites.h"
 #include "cli/graph.h"
+#include "cli/video_generate.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/config_migrate.h"
@@ -23,6 +24,7 @@
 #include "contracts/jsonc.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "contracts/server_tools.h"
 #include "graph/code_languages.h"
 #include "modelstore/store.h"
 #include "operations/backend_fields.h"
@@ -138,6 +140,9 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
     }
     if (key == "models.default_utility") {
         return render(config.models.default_utility);
+    }
+    if (key == "models.default_video") {
+        return render(config.models.default_video);
     }
     if (key == "paths.gguf_dir") {
         return render(config.paths.gguf_dir);
@@ -1011,6 +1016,9 @@ void bind_set_backend(CLI::App& parent, const RootContext& context) {
     for (const std::string_view type : harness::backend_type_names()) {
         types.emplace_back(type);
     }
+    // A comma-separated list of the vendors' server-side tools (47a): the
+    // loader refuses a name the entry's vendor does not run.
+    static const std::string kServerToolsType = word_list_value(harness::server_tool_names());
     // One flag per editable field, spelled as `add-backend` spells it.
     const std::vector<FieldFlag> flags{
         {"type", "", "Backend type", types},
@@ -1037,7 +1045,11 @@ void bind_set_backend(CLI::App& parent, const RootContext& context) {
          "The vendor CLI's mode: subscription, or bare (claude-cli alone)",
          {"subscription", "bare"}},
         {"host", "", "The host the backend reaches"},
-        {"idle_unload_seconds", "INT", "Seconds idle before a local model is unloaded"}};
+        {"idle_unload_seconds", "INT", "Seconds idle before a local model is unloaded"},
+        {"server_tools", kServerToolsType,
+         "The vendor's own server-side tools this entry may run, comma-separated: "
+         "web_search, code_execution -- consent for that vendor to search or run code "
+         "under your key, where the host gate cannot see"}};
     for (const FieldFlag& flag : flags) {
         std::string spelling = "--" + std::string{flag.field};
         std::ranges::replace(spelling, '_', '-');
@@ -1113,6 +1125,19 @@ void bind_set_role(CLI::App& parent, const RootContext& context, const std::stri
         ->required();
     cmd->callback([&context, name, field]() {
         std::cout << point_role(config_path_for(context), field, *name) << "\n";
+    });
+}
+
+void bind_set_default_video(CLI::App& parent, const RootContext& context) {
+    auto name = std::make_shared<std::string>();
+    CLI::App* cmd = parent.add_subcommand(
+        "set-default-video",
+        "Set the pipeline 'video generate' runs when --model names none, or off for none");
+    cmd->add_option("name", *name, "A stored pipeline -- handle, id or model -- or off")
+        ->type_name(kVideoPipelineValue)
+        ->required();
+    cmd->callback([&context, name]() {
+        std::cout << point_default_video(config_path_for(context), *name) << "\n";
     });
 }
 
@@ -1352,6 +1377,29 @@ std::string point_role(const std::filesystem::path& path, std::string_view field
     return "models." + std::string{field} + " = " + name;
 }
 
+std::string point_default_video(const std::filesystem::path& path, const std::string& name) {
+    std::string value;
+    if (name != harness::kSuiteOff) {
+        Config config;
+        try {
+            config = harness::load_config(path);
+        } catch (const ConfigError& e) {
+            fail(e.what());
+        }
+        ResolvedPipeline pipeline;
+        if (const std::string refused =
+                resolve_video_pipeline(store_roots_of(config), name, {}, pipeline);
+            !refused.empty()) {
+            fail(refused);
+        }
+        value = name;
+    }
+    apply_edit(path, [&value](std::string_view content) {
+        return harness::set_default_video(content, value);
+    });
+    return "models.default_video = " + (value.empty() ? std::string{"(none)"} : value);
+}
+
 std::string remove_backend(const std::filesystem::path& path, const std::string& name) {
     apply_edit(
         path, [&name](std::string_view content) { return harness::delete_backend(content, name); });
@@ -1368,6 +1416,7 @@ std::vector<std::string> config_keys(const harness::Config& config) {
                                   "models.default_vision",
                                   "models.default_transcription",
                                   "models.default_utility",
+                                  "models.default_video",
                                   "paths.gguf_dir",
                                   "paths.hf_dir",
                                   "paths.mcp_dir",
@@ -1456,6 +1505,7 @@ void ConfigCommand::bind(CLI::App& root, const RootContext& context) {
                   "Set the backend for chores: titles, compaction, search queries, large tool "
                   "results");
     bind_suite_verbs(*cmd, context);
+    bind_set_default_video(*cmd, context);
     bind_set_permission(*cmd, context);
     bind_add_allowed_host(*cmd, context);
     bind_delete_allowed_host(*cmd, context);

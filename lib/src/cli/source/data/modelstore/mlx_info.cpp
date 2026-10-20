@@ -326,6 +326,11 @@ bool read_config(const std::filesystem::path& dir, MlxInfo& info) {
 
 }  // namespace
 
+std::string safetensors_shard_problem(const std::filesystem::path& shard, std::uintmax_t size) {
+    bool mlx = false;
+    return check_shard(shard, size, mlx);
+}
+
 MlxInfo read_mlx_config(const std::filesystem::path& dir) {
     MlxInfo info;
     (void)read_config(dir, info);

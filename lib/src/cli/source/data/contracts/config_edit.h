@@ -205,6 +205,15 @@ public:
 /// Removes the entry and its fields; the exact inverse of the append.
 [[nodiscard]] std::string delete_mcp_server(std::string_view content, std::string_view name);
 
+/// Appends a review sweep target under `review:` (48d, creating the
+/// section), its fields alphabetical after the name, only the ones set
+/// written. Same collision and `force` rules as `append_backend`.
+[[nodiscard]] std::string append_review_target(std::string_view content, std::string_view name,
+                                               const ReviewTargetConfig& target, bool force);
+
+/// Removes the target and its fields; the exact inverse of the append.
+[[nodiscard]] std::string delete_review_target(std::string_view content, std::string_view name);
+
 /// Sets `mcp_servers.<name>.enabled`, replacing the line in place (keeping
 /// its trailing comment) or inserting one right after the name.
 [[nodiscard]] std::string set_mcp_server_enabled(std::string_view content, std::string_view name,
@@ -318,6 +327,12 @@ public:
 /// as `set_models_role` sets a pointer; "" clears it. The re-parse refuses a
 /// name with no `suites:` entry.
 [[nodiscard]] std::string set_default_suite(std::string_view content, std::string_view name);
+
+/// Sets `models.default_video` -- the pipeline `video generate` runs when
+/// `--model` names none (49c) -- as `set_default_suite` sets its pointer;
+/// "" clears it. What it names is the caller's to check: a pipeline in the
+/// store, never a backend.
+[[nodiscard]] std::string set_default_video(std::string_view content, std::string_view name);
 
 /// Sets `attachments.graph` -- the method an attach takes when nothing on the
 /// line says otherwise (27p) -- to `method`, `code` or `off`: the line

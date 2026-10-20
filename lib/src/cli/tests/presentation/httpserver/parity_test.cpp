@@ -160,6 +160,10 @@ const std::map<std::string, Classification>& table() {
         {"serve", carve_out("it is the server")},
         {"train setup",
          carve_out("creates the Python environment on the host; training control is CLI-only")},
+        {"bootstrap",
+         carve_out("installs runtime sets into the host's Python environment and registers the "
+                   "host's providers and models, on the install's own act; CLI-only, the "
+                   "training precedent")},
         {"train run",
          carve_out("an expensive GPU job with live progress; training control is CLI-only over "
                    "HTTP, forever -- the reads are served under /v1/admin/training/*")},
@@ -194,6 +198,34 @@ const std::map<std::string, Classification>& table() {
         {"task halt", carve_out("steers the task running on the host; task control is CLI-only")},
         {"task cancel",
          carve_out("ends the turn of the task running on the host; task control is CLI-only")},
+        {"review sweep",
+         carve_out("the scheduler-invoked pass over the host's own watermarks and lock, posting "
+                   "through the host's own gh or glab login; review control is CLI-only, the "
+                   "cycle's precedent")},
+        {"review targets add",
+         carve_out("the sweep's own config unit, read by review control on the host alone; review "
+                   "control is CLI-only")},
+        {"review targets delete",
+         carve_out("the sweep's own config unit, read by review control on the host alone; review "
+                   "control is CLI-only")},
+        {"review mr",
+         carve_out("reviews with the host's own models and posts through the host's own gh or "
+                   "glab login, on a user's act; review control is CLI-only, the training "
+                   "precedent")},
+        {"video generate",
+         carve_out("runs a diffusion pipeline on the host's own GPU for minutes, on a user's act, "
+                   "writing the clip on the host; generating is CLI-only, the training "
+                   "precedent")},
+        {"voice say",
+         carve_out("speaks with a voice model on the host, writing the WAV on the host, on a "
+                   "user's act; generating is CLI-only, the training precedent")},
+        {"video compose",
+         carve_out("plans, speaks and renders scene after scene on the host's own GPU for a long "
+                   "while, on a user's act, writing the video and its project on the host; "
+                   "generating is CLI-only, the training precedent")},
+        {"config set-default-video",
+         carve_out("the pointer only video generate reads, which is CLI-only; set on the host "
+                   "alone")},
         {"symphonies play",
          carve_out("runs the host's own models, stage by stage, on a user's act; playing is "
                    "CLI-only, the training precedent -- the definitions are served under "
@@ -232,6 +264,13 @@ const std::map<std::string, Classification>& table() {
         {"config path", read_only()},
         {"mcp list", read_only()},
         {"mcp test", read_only()},
+        // The shipped presets (47c): a read of compiled-in data resolved on
+        // this machine; `create --from` is `mcp create`'s twin's `from`.
+        {"mcp presets", read_only()},
+        // The review skills (48b): reads of the shipped lenses and the
+        // user's own files, beside `task recipes`.
+        {"review skills list", read_only()},
+        {"review skills show", read_only()},
         {"auth list", read_only()},
         {"embed query", read_only()},
         {"embed list", read_only()},

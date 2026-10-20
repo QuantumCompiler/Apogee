@@ -140,6 +140,18 @@ struct MlxConvertResult {
 ///      the converter did not quantize as asked, is never committed
 /// A failure at any rung, cancellation included, removes `out`. Committing
 /// it under its id is the store's (`commit_mlx`).
+/// The `model_type` a snapshot's `config.json` declares, or empty.
+[[nodiscard]] std::string snapshot_model_type(const std::filesystem::path& snapshot);
+
+/// A view of `snapshot` at `overlay` (M15), for converting it as
+/// `model_type`: every file linked -- copied where no link can be made --
+/// and `config.json` written anew, its `model_type` replaced. The snapshot
+/// is never written; the overlay is the caller's to remove. The error, or
+/// empty.
+[[nodiscard]] std::string stage_model_type_overlay(const std::filesystem::path& snapshot,
+                                                   const std::filesystem::path& overlay,
+                                                   std::string_view model_type);
+
 [[nodiscard]] MlxConvertResult convert_snapshot_to_mlx(
     const std::filesystem::path& snapshot, const std::filesystem::path& out, int bits,
     const MlxConvertFn& convert, const harness::CancellationToken& cancellation);

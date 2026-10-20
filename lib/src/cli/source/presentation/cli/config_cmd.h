@@ -35,6 +35,14 @@ struct WrittenDefaults {
 [[nodiscard]] std::string point_role(const std::filesystem::path& path, std::string_view field,
                                      const std::string& name);
 
+/// Points `models.default_video` at the pipeline `name` names -- a store
+/// handle, id or model holding one pipeline, or a pipeline's path -- or
+/// clears it for `off` (49c), through the one editor: what `config
+/// set-default-video` runs. Refused, naming why, when `name` resolves to no
+/// one pipeline. Returns what was set: `models.default_video = <name>`.
+[[nodiscard]] std::string point_default_video(const std::filesystem::path& path,
+                                              const std::string& name);
+
 /// Removes backend `name`'s entry from the config at `path` through the one
 /// editor -- `config delete-backend`, and the shell's remove (32d). Returns
 /// what was done: `removed backend 'local' from <path>`.

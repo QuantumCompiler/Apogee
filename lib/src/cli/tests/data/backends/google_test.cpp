@@ -443,3 +443,40 @@ TEST_CASE("list_catalog pages by nextPageToken and keeps ids past the models/ pr
     CHECK(requests[0].method == "GET");
     CHECK(requests[1].url.find("pageToken=page2") != std::string::npos);
 }
+
+TEST_CASE("an entry's server tools are Gemini's blocks, said as Gemini runs them",
+          "[backends][google][server-tools]") {
+    constexpr std::string_view kServerStream =
+        R"j(data: {"candidates":[{"content":{"parts":[{"executableCode":{"language":"PYTHON","code":"print(2 + 2)"}}],"role":"model"}}]})j"
+        "\n\n"
+        R"j(data: {"candidates":[{"content":{"parts":[{"codeExecutionResult":{"outcome":"OUTCOME_OK","output":"4\n"}}],"role":"model"}}]})j"
+        "\n\n"
+        R"j(data: {"candidates":[{"content":{"parts":[{"text":"It is 4."}],"role":"model"},"groundingMetadata":{"webSearchQueries":["two plus two"]}}]})j"
+        "\n\n"
+        R"j(data: {"candidates":[{"content":{"parts":[]},"finishReason":"STOP","groundingMetadata":{"webSearchQueries":["two plus two"]}}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":3}})j"
+        "\n\n";
+    GoogleProvider::Options options;
+    options.server_tools = {"web_search", "code_execution"};
+    Fixture f = make_provider({sse(kServerStream)}, options);
+    std::vector<std::string> said;
+    StreamOptions stream;
+    stream.on_status = [&said](const apogee::harness::StatusEvent& event) {
+        if (event.type == apogee::harness::StatusEvent::Type::ToolCall) {
+            said.push_back(event.detail);
+        }
+    };
+    const auto response = f.provider->stream_chat(chat_request(), stream);
+
+    const json tools = json::parse(f.transport->requests()[0].body).at("tools");
+    CHECK(tools == json::parse(R"([{"google_search":{}},{"code_execution":{}}])"));
+    // The search said once, though Gemini restates its grounding.
+    CHECK(said == std::vector<std::string>{"code_execution, run by Google: print(2 + 2)",
+                                           "code_execution, run by Google: ok",
+                                           R"(web_search, run by Google: "two plus two")"});
+    CHECK(response.message.content.plain_text() == "It is 4.");
+    CHECK(response.message.tool_calls.empty());
+
+    Fixture bare = make_provider({sse(kTextStream)});
+    (void)bare.provider->stream_chat(chat_request(), {});
+    CHECK_FALSE(json::parse(bare.transport->requests()[0].body).contains("tools"));
+}

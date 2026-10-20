@@ -24,12 +24,14 @@
 #include "knowledge/record.h"
 #include "knowledge/store.h"
 #include "modelstore/store.h"
+#include "operations/code_exec_server.h"
 #include "platform/platform.h"
 #include "secrets/store.h"
 #include "support/env_guard.h"
 #include "support/fake_existence_view.h"
 #include "support/gguf_builder.h"
 #include "support/mlx_model.h"
+#include "support/pipeline_model.h"
 #include "training/python_env.h"
 
 /// The doctor, against a matrix of deliberately broken installs.
@@ -224,7 +226,11 @@ TEST_CASE("a dangling model_path fails and names the command to fix it", "[comma
     REQUIRE(row != nullptr);
     CHECK(row->status == Status::Fail);
     CHECK(row->detail.find("/nope/missing.gguf") != std::string::npos);
-    CHECK_FALSE(row->remedy.empty());
+    // Its two real doors (M14) -- never `add-backend` on a name that exists,
+    // which the binary refuses.
+    CHECK(row->remedy ==
+          "apogee config set-backend local --model-path <an existing .gguf> to repoint it, or "
+          "apogee config delete-backend local to remove it");
 }
 
 TEST_CASE("a present but unloadable GGUF fails", "[commands][check]") {
@@ -2338,6 +2344,83 @@ TEST_CASE("stored MLX models are validated by their files, and a broken one name
     CHECK(std::filesystem::exists(whole / "model.safetensors"));
 }
 
+TEST_CASE("the video runtime is a skip until set up, then its packages and driver are said",
+          "[commands][check][video]") {
+    // 49b: torch and diffusers read from their files, never imported; the
+    // seeded driver against its compiled-in copy.
+    const Install install;
+    install.seed();
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    load_into(inputs);
+    const auto video_row = [](const CheckReport& report, std::string_view name) {
+        for (const apogee::commands::CheckRow& row : report.rows) {
+            if (row.section == "Video" && row.name == name) {
+                return &row;
+            }
+        }
+        return static_cast<const apogee::commands::CheckRow*>(nullptr);
+    };
+    const CheckReport fresh = run_checks(inputs);
+    INFO(render_report(fresh, false));
+    const apogee::commands::CheckRow* runtime = video_row(fresh, "runtime");
+    REQUIRE(runtime != nullptr);
+    CHECK(runtime->status == Status::Skipped);
+    CHECK(runtime->detail.starts_with("not set up -- there is no Python environment at "));
+    CHECK(runtime->remedy == "apogee train setup --with video");
+    const apogee::commands::CheckRow* driver = video_row(fresh, "driver");
+    REQUIRE(driver != nullptr);
+    CHECK(driver->status == Status::Ok);
+    CHECK(driver->detail == "video_generate.py matches the shipped copy");
+
+    // Set up: both packages found by their files, their versions said.
+    write_fake_interpreter(install);
+    const std::filesystem::path site =
+        install.root / "training" / "venv" / "lib" / "python3.13" / "site-packages";
+    for (const std::string name : {"torch", "diffusers"}) {
+        std::filesystem::create_directories(site / name);
+        std::ofstream{site / name / "__init__.py"};
+    }
+    std::filesystem::create_directories(site / "diffusers-0.35.1.dist-info");
+    const CheckReport ready = run_checks(inputs);
+    runtime = video_row(ready, "runtime");
+    REQUIRE(runtime != nullptr);
+    CHECK(runtime->detail.starts_with("torch (version unstated) and diffusers 0.35.1 in " +
+                                      (install.root / "training" / "venv").string() +
+                                      " (their files, not imported by check)"));
+}
+
+TEST_CASE("stored pipelines are validated by their files, and a broken one names its repair",
+          "[commands][check][pipeline][store]") {
+    // 49a: the store's pipeline/ row in the doctor -- every component there
+    // with what its kind needs passes, a component missing fails naming it
+    // with the handle to repair.
+    const Install install;
+    install.seed();
+    const std::filesystem::path whole =
+        install.root / "models" / "Wan-AI--Wan2.2-TI2V-5B-Diffusers" / "pipeline" / "aaaaaaaaaaaa";
+    const std::filesystem::path broken =
+        install.root / "models" / "org--v" / "pipeline" / "bbbbbbbbbbbb";
+    apogee::testing::write_pipeline_model(whole);
+    apogee::testing::write_pipeline_model(broken, {.missing = "vae"});
+    CheckInputs inputs = inputs_for(install);
+    load_into(inputs);
+    const CheckReport report = run_checks(inputs);
+    INFO(render_report(report, false));
+    const apogee::commands::CheckRow* ok =
+        row_with(report, "Wan-AI--Wan2.2-TI2V-5B-Diffusers/pipeline/aaaaaaaaaaaa");
+    REQUIRE(ok != nullptr);
+    CHECK(ok->status == Status::Ok);
+    CHECK(ok->detail == "WanPipeline, 5 components, files whole");
+    const apogee::commands::CheckRow* bad = row_with(report, "org--v/pipeline/bbbbbbbbbbbb");
+    REQUIRE(bad != nullptr);
+    CHECK(bad->status == Status::Fail);
+    CHECK(bad->detail ==
+          "pipeline that cannot load: the vae component (AutoencoderKLWan) is missing -- no vae/ "
+          "directory");
+    CHECK(bad->remedy == "apogee models repair org--v/pipeline/bbbbbbbbbbbb");
+}
+
 TEST_CASE("each suite has a row: its members named, a member at nothing failed",
           "[commands][check][suites]") {
     // 27d: a suite naming a backend that is not there is found here, in the
@@ -2711,4 +2794,106 @@ TEST_CASE("an API backend's missing key is the Config row's warning, said once",
     CHECK(render_report(report, false).find("openai -- credentials found (key from config)") !=
           std::string::npos);
     CHECK(render_report(report, false).find("sk-in-config") == std::string::npos);
+}
+
+TEST_CASE("the doctor says where the code-execution server stands and the line that registers it",
+          "[commands][check][mcp][code-exec]") {
+    // 47b: the seeded script against the shipped copy, then registered under
+    // a name, or the one `mcp create` line with the interpreter it would run
+    // under -- said, never guessed. Not registered is a skip, not a defect.
+    const Install install;
+    const std::string config = "backends:\n  mock:\n    type: mock\n";
+    const std::filesystem::path script =
+        install.root / apogee::harness::bundled_code_exec_server_relative_path();
+    const apogee::harness::BundledScript& shipped = apogee::harness::bundled_mcp_scripts()[0];
+
+    // Not seeded: the doctor's own repair.
+    {
+        const CheckReport report = run_checks(inputs_with_config(install, config));
+        const apogee::commands::CheckRow* row = row_with(report, "code-exec");
+        REQUIRE(row != nullptr);
+        CHECK(row->section == "MCP");
+        CHECK(row->status == Status::Warn);
+        CHECK(row->detail.find("code_exec_server.py is missing") != std::string::npos);
+        CHECK(row->remedy == "apogee check --fix");
+    }
+
+    install.write(apogee::harness::bundled_code_exec_server_relative_path(), shipped.text);
+    write_fake_interpreter(install);
+    const std::filesystem::path venv =
+        apogee::training::PythonEnv{install.root / "training" / "venv"}.interpreter();
+    {
+        const CheckReport report = run_checks(inputs_with_config(install, config));
+        const apogee::commands::CheckRow* row = row_with(report, "code-exec");
+        REQUIRE(row != nullptr);
+        CHECK(row->status == Status::Skipped);
+        CHECK(row->detail ==
+              "code_exec_server.py matches the shipped copy; not registered -- it "
+              "would run under " +
+                  venv.string() + " (the training environment)");
+        // The paths as the line quotes them where a shell needs it (a Windows
+        // path's backslashes): the words, in order, whatever the quoting.
+        CHECK(row->remedy.starts_with("apogee mcp create code --command "));
+        CHECK(row->remedy.find(venv.string()) < row->remedy.find(" --args "));
+        CHECK(row->remedy.find(" --args ") < row->remedy.find(script.string()));
+    }
+
+    // Registered by that line: named, with the tools it brings.
+    const std::string registered = config + "mcp_servers:\n  code:\n    command: " + venv.string() +
+                                   "\n    args: [" + script.string() + "]\n";
+    {
+        const CheckReport report = run_checks(inputs_with_config(install, registered));
+        const apogee::commands::CheckRow* row = row_with(report, "code-exec");
+        REQUIRE(row != nullptr);
+        CHECK(row->status == Status::Ok);
+        CHECK(row->detail.find("registered as 'code' (its tools: mcp__code__run_python, "
+                               "mcp__code__write_input)") != std::string::npos);
+    }
+
+    // An edited copy runs, and is said.
+    install.write(apogee::harness::bundled_code_exec_server_relative_path(), "# my server\n");
+    {
+        const CheckReport report = run_checks(inputs_with_config(install, registered));
+        const apogee::commands::CheckRow* row = row_with(report, "code-exec");
+        REQUIRE(row != nullptr);
+        CHECK(row->status == Status::Warn);
+        CHECK(row->detail.find("differs from the shipped copy (your edit runs)") !=
+              std::string::npos);
+    }
+
+    // No interpreter at all: no environment, nothing on PATH -- refused with
+    // what would provide one, never a guessed command.
+    install.write(apogee::harness::bundled_code_exec_server_relative_path(), shipped.text);
+    std::filesystem::remove_all(install.root / "training" / "venv");
+    const apogee::testing::EnvGuard path{"PATH", (install.root / "empty-bin").string()};
+    {
+        const CheckReport report = run_checks(inputs_with_config(install, config));
+        const apogee::commands::CheckRow* row = row_with(report, "code-exec");
+        REQUIRE(row != nullptr);
+        CHECK(row->status == Status::Skipped);
+        CHECK(row->detail.find("not registered, and no Python to run it: no training "
+                               "environment ('apogee train setup') and no python3 on PATH") !=
+              std::string::npos);
+        CHECK(row->remedy == "apogee train setup");
+    }
+}
+
+TEST_CASE("the code-execution server's registration line quotes a path only where a shell needs it",
+          "[commands][check][mcp][code-exec]") {
+    apogee::operations::CodeExecRegistration registration;
+    registration.script = "/home/me/.apogee/training/scripts/code_exec_server.py";
+    registration.interpreter = "/opt/my python/bin/python3";
+    CHECK(registration.mcp_create_arguments("code") ==
+          std::vector<std::string>{"mcp", "create", "code", "--command",
+                                   "/opt/my python/bin/python3", "--args",
+                                   "/home/me/.apogee/training/scripts/code_exec_server.py"});
+    CHECK(registration.mcp_create_line("code") ==
+          "apogee mcp create code --command '/opt/my python/bin/python3' --args "
+          "/home/me/.apogee/training/scripts/code_exec_server.py");
+    registration.interpreter = "/opt/it's/python3";
+    CHECK(registration.mcp_create_line("code").find(R"('/opt/it'\''s/python3')") !=
+          std::string::npos);
+    // No interpreter, no line: never a guessed command.
+    registration.interpreter.clear();
+    CHECK(registration.mcp_create_arguments("code").empty());
 }

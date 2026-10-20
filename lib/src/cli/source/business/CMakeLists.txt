@@ -294,6 +294,46 @@ apogee_add_module(symphony
 )
 target_link_libraries(apogee_business_symphony PUBLIC nlohmann_json::nlohmann_json)
 
+apogee_add_module(forge
+    forge/forge.h
+    forge/forge.cpp
+    forge/cli_call.h
+    forge/cli_call.cpp
+    forge/cli_forge.h
+    forge/cli_forge.cpp
+    forge/gh_transport.h
+    forge/gh_transport.cpp
+    forge/glab_transport.h
+    forge/glab_transport.cpp
+)
+target_link_libraries(apogee_business_forge PUBLIC nlohmann_json::nlohmann_json)
+
+apogee_add_module(review
+    review/diff.h
+    review/diff.cpp
+    review/identity.h
+    review/identity.cpp
+    review/engine.h
+    review/engine.cpp
+    review/sweep.h
+    review/sweep.cpp
+)
+target_link_libraries(apogee_business_review PUBLIC nlohmann_json::nlohmann_json)
+
+apogee_add_module(video
+    video/runtime.h
+    video/runtime.cpp
+    video/generation.h
+    video/generation.cpp
+    video/work_dir.h
+    video/work_dir.cpp
+    video/voice.h
+    video/voice.cpp
+    video/compose.h
+    video/compose.cpp
+)
+target_link_libraries(apogee_business_video PUBLIC nlohmann_json::nlohmann_json)
+
 apogee_add_module(scaffold
     scaffold/mcp_server.h
     scaffold/mcp_server.cpp

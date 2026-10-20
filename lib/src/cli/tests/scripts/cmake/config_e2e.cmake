@@ -266,6 +266,60 @@ endif()
 apogee_run(1 config set-backend claude)
 apogee_run(1 config set-backend claude --api-key sk-never)
 
+# A vendor's own server-side tools (47a): consent written per entry, a tool
+# the vendor does not run refused, and cleared -- the file as it was.
+apogee_run(0 config set-backend claude --server-tools web_search,code_execution)
+file(READ "${CONFIG_FILE}" WITH_SERVER_TOOLS)
+string(FIND "${WITH_SERVER_TOOLS}" "\"server_tools\"" SERVER_TOOLS_AT)
+string(FIND "${WITH_SERVER_TOOLS}" "\"code_execution\"" CODE_EXECUTION_AT)
+if(SERVER_TOOLS_AT EQUAL -1 OR CODE_EXECUTION_AT EQUAL -1)
+    message(FATAL_ERROR "set-backend --server-tools did not write the list:\n${WITH_SERVER_TOOLS}")
+endif()
+apogee_run(1 config set-backend claude --server-tools image_generation)
+file(READ "${CONFIG_FILE}" AFTER_REFUSAL)
+if(NOT AFTER_REFUSAL STREQUAL WITH_SERVER_TOOLS)
+    message(FATAL_ERROR "a refused --server-tools touched the file")
+endif()
+# Clearing takes an empty value, which CMake cannot pass; backend_fields_test
+# clears it. The file goes back as it was for the steps below.
+file(WRITE "${CONFIG_FILE}" "${BEFORE_RENAME}")
+
+# --- MCP presets (47c): listed, registered byte for byte as typed, self refused
+# The code-exec preset resolves by path: a planted script and a training
+# environment's interpreter are enough for it to list as runnable. The typed
+# twin spells exactly what the listing says it runs, so the pin holds on every
+# target's path spelling.
+file(WRITE "${APOGEE_WORK_DIR}/training/scripts/code_exec_server.py" "# planted\n")
+if(CMAKE_HOST_WIN32)
+    set(FAKE_PYTHON "${APOGEE_WORK_DIR}/training/venv/Scripts/python.exe")
+else()
+    set(FAKE_PYTHON "${APOGEE_WORK_DIR}/training/venv/bin/python")
+endif()
+file(WRITE "${FAKE_PYTHON}" "fake\n")
+apogee_run(0 mcp presets --output-format json)
+string(JSON PRESET_COUNT LENGTH "${APOGEE_OUT}" data)
+expect_equal("${PRESET_COUNT}" "2" "mcp presets lists two presets")
+string(JSON PRESET_RUNNABLE GET "${APOGEE_OUT}" data 0 runnable)
+expect_equal("${PRESET_RUNNABLE}" "ON" "the code-exec preset is runnable here")
+string(JSON PRESET_COMMAND GET "${APOGEE_OUT}" data 0 command)
+string(JSON PRESET_ARG GET "${APOGEE_OUT}" data 0 args 0)
+file(READ "${CONFIG_FILE}" BEFORE_PRESET)
+apogee_run(0 mcp create code --from code-exec)
+file(READ "${CONFIG_FILE}" FROM_PRESET)
+file(WRITE "${CONFIG_FILE}" "${BEFORE_PRESET}")
+apogee_run(0 mcp create code --command "${PRESET_COMMAND}" --args "${PRESET_ARG}")
+file(READ "${CONFIG_FILE}" TYPED_TWIN)
+if(NOT FROM_PRESET STREQUAL TYPED_TWIN)
+    message(FATAL_ERROR "create --from code-exec differs from its typed twin:\n${FROM_PRESET}\n---\n${TYPED_TWIN}")
+endif()
+apogee_run(1 mcp create me --from self)
+file(READ "${CONFIG_FILE}" AFTER_SELF)
+if(NOT AFTER_SELF STREQUAL TYPED_TWIN)
+    message(FATAL_ERROR "a refused --from self touched the file")
+endif()
+file(WRITE "${CONFIG_FILE}" "${BEFORE_PRESET}")
+file(REMOVE "${APOGEE_WORK_DIR}/training/scripts/code_exec_server.py" "${FAKE_PYTHON}")
+
 # --- auto_rag: injection with no flag, reported, and switchable off --------
 apogee_run(0 config add-backend mock --type mock --model mock-1)
 file(READ "${CONFIG_FILE}" BEFORE_AUTO_RAG)

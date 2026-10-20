@@ -24,6 +24,7 @@ add_library(apogee_tests_infrastructure OBJECT
     infrastructure/platform/pid_lock_test.cpp
     infrastructure/platform/child_process_test.cpp
     infrastructure/platform/ffmpeg_test.cpp
+    infrastructure/platform/ffmpeg_assembly_test.cpp
     infrastructure/platform/system_info_test.cpp
     infrastructure/ansi/ansi_test.cpp
     infrastructure/events/bus_test.cpp
@@ -36,6 +37,8 @@ add_library(apogee_tests_infrastructure OBJECT
     support/fake_ffmpeg.h
     support/gguf_builder.h
     support/mlx_model.h
+    support/pipeline_model.h
+    support/voice_model.h
     support/terminal_model.h
     support/terminal_model.cpp
     support/embedding_fixtures.h
@@ -54,7 +57,12 @@ add_library(apogee_tests_data OBJECT
     data/contracts/symphony_spec_test.cpp
     data/contracts/symphony_walk_test.cpp
     data/contracts/host_test.cpp
+    data/contracts/server_tools_test.cpp
+    data/contracts/review_skill_test.cpp
+    data/contracts/review_targets_test.cpp
     data/contracts/utf8_test.cpp
+    data/contracts/captions_test.cpp
+    data/contracts/video_project_test.cpp
     data/contracts/todo_test.cpp
     data/contracts/paths_test.cpp
     data/contracts/types_test.cpp
@@ -88,6 +96,8 @@ add_library(apogee_tests_data OBJECT
     data/modelstore/kv_cache_test.cpp
     data/modelstore/footprint_test.cpp
     data/modelstore/mlx_info_test.cpp
+    data/modelstore/pipeline_info_test.cpp
+    data/modelstore/voice_info_test.cpp
     data/contracts/sha256_test.cpp
     data/modelstore/store_test.cpp
     data/modelstore/sidecar_test.cpp
@@ -181,6 +191,19 @@ add_library(apogee_tests_business OBJECT
     business/mcp/client_test.cpp
     business/mcp/registry_test.cpp
     business/mcp/serve_stdio_test.cpp
+    business/mcp/code_exec_server_test.cpp
+    business/forge/forge_test.cpp
+    business/forge/gh_transport_test.cpp
+    business/forge/glab_transport_test.cpp
+    business/review/diff_test.cpp
+    business/review/engine_test.cpp
+    business/review/sweep_test.cpp
+    business/video/runtime_test.cpp
+    business/video/generation_test.cpp
+    business/video/video_driver_test.cpp
+    business/video/voice_test.cpp
+    business/video/voice_driver_test.cpp
+    business/video/compose_test.cpp
     business/scaffold/mcp_server_test.cpp
     business/scaffold/agent_test.cpp
     business/scaffold/symphony_test.cpp
@@ -246,6 +269,9 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/registry_test.cpp
     presentation/cli/provider_offer_test.cpp
     presentation/cli/read_documents_test.cpp
+    presentation/cli/mcp_presets_cmd_test.cpp
+    presentation/cli/review_cmd_test.cpp
+    presentation/cli/review_mr_test.cpp
     presentation/cli/system_cmd_test.cpp
     presentation/cli/tui_cmd_test.cpp
     presentation/cli/line_tokens_test.cpp
@@ -263,6 +289,14 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/models_migrate_test.cpp
     presentation/cli/models_convert_test.cpp
     presentation/cli/models_mlx_test.cpp
+    presentation/cli/models_pipeline_test.cpp
+    presentation/cli/models_voice_test.cpp
+    presentation/cli/video_runtime_test.cpp
+    presentation/cli/video_generate_test.cpp
+    presentation/cli/video_cmd_test.cpp
+    presentation/cli/voice_say_test.cpp
+    presentation/cli/video_compose_test.cpp
+    presentation/cli/bootstrap_cmd_test.cpp
     presentation/cli/model_chain_test.cpp
     presentation/cli/complete_sources_test.cpp
     presentation/cli/models_test.cpp
@@ -300,6 +334,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/operations/graph_sources_test.cpp
     presentation/operations/renames_test.cpp
     presentation/operations/backend_fields_test.cpp
+    presentation/operations/mcp_presets_test.cpp
     presentation/cli/chat_completer_test.cpp
     presentation/cli/chat_roster_test.cpp
     presentation/cli/chat_session_test.cpp
@@ -843,6 +878,51 @@ if(UNIX)
     )
     set_tests_properties(cli.mcp_lifecycle PROPERTIES TIMEOUT 120)
 
+    # The code-execution server (47b) on the real binary: seeded byte for byte,
+    # its registration line said by the doctor, registered by hand, and a
+    # model's call through the gate -- refused unasked, run under --allow with
+    # its file returned as a path, refused by plan and dont-ask, never passed
+    # by accept-edits -- the session directory gone after. Skips (77) without
+    # python3.
+    add_test(NAME cli.code_exec_server
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/code_exec_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/code-exec-e2e-home
+            ${CMAKE_CURRENT_SOURCE_DIR}/../assets
+    )
+    set_tests_properties(cli.code_exec_server PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+
+    # `review mr` (48c) on the real binary: a fake gh first on PATH answering
+    # from the planted fixtures, a scripted mock reviewer -- --dry-run posting
+    # nothing, a piped run refused posting and naming --yes, --yes posting one
+    # review with the finding and the head marker. Skips (77) without python3.
+    add_test(NAME cli.review_mr
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/review_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/review-e2e
+            ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+    )
+    set_tests_properties(cli.review_mr PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+
+    # `video generate` (49c) on the real binary over a fake runtime -- the
+    # seeded driver under stub torch and diffusers behind the venv's shim, a
+    # fake ffmpeg -- and a pipeline built in the store: the pointer, the
+    # document on stdout alone, the sidecar, a given seed kept, the caps and
+    # an existing output refused, a failure and a real Ctrl-C leaving
+    # nothing, no listener in the tree while the driver runs, a library's
+    # print on neither stream, the loop (49d: a draft, its final over the
+    # same seed, a continuation, a clip with no record refused), `voice
+    # say` (50a: one WAV, its sentences timed, no listener while the speech
+    # driver runs, Ctrl-C), and a missing runtime refused on a pipe.
+    # Skips (77) without python3.
+    add_test(NAME cli.video_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/video_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/video-e2e
+            ${CMAKE_CURRENT_SOURCE_DIR}/business/video/scripts
+    )
+    set_tests_properties(cli.video_lifecycle PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+
     # `analyze` on the real binary: the bundled agents on the mock backend
     # against a fixture repository -- a ref reviewed without being checked out,
     # the refs decided by flags, the report rendered and saved, the validator's
@@ -978,7 +1058,8 @@ if(UNIX)
         # in a unit test.
         # A noisy, dying MCP server under a PTY: its stderr never paints the
         # terminal, the failure carries its tail, and startup does not wait
-        # out the connect timeout.
+        # out the connect timeout. Since 47b also a noisy run through the
+        # code-execution server: none of the code's output reaches the screen.
         add_test(NAME cli.mcp_server_stderr_stays_off_the_terminal
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_mcp_check.py"

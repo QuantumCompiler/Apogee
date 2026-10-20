@@ -19,11 +19,14 @@
 #include "contracts/cancellation.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "contracts/review_skill.h"
 #include "knowledge/store.h"
 #include "logger/session.h"
+#include "models/quantize.h"
 #include "models/source_ollama.h"
 #include "modelstore/kv_cache.h"
 #include "modelstore/store.h"
+#include "modelstore/voice_info.h"
 #include "operations/knowledge_core.h"
 #include "operations/renames.h"
 #include "platform/child_process.h"
@@ -36,6 +39,7 @@
 #include "training/datasets.h"
 #include "training/kit.h"
 #include "training/mlx_convert.h"
+#include "training/python_env.h"
 #include "training/regime_specs.h"
 #include "training/script_runner.h"
 #include "training/store.h"
@@ -119,13 +123,25 @@ void note_store(const models::StoreRoots& roots, NameList& list) {
         list.notes[models::weights_handle(stored.model, models::kMlxFormat, stored.id)] = {
             .group = "MLX", .description = "an MLX directory"};
     }
+    for (const models::StoredPipeline& stored : models::list_store_pipelines(roots)) {
+        list.notes.try_emplace(stored.model, CandidateNote{.group = "Pipelines"});
+        list.notes[models::weights_handle(stored.model, models::kPipelineFormat, stored.id)] = {
+            .group = "Pipelines", .description = "a diffusion pipeline"};
+    }
+    for (const models::StoredVoice& stored : models::list_store_voices(roots)) {
+        list.notes.try_emplace(stored.model, CandidateNote{.group = "Voices"});
+        list.notes[models::weights_handle(stored.model, models::kVoiceFormat, stored.id)] = {
+            .group = "Voices", .description = "a voice model"};
+    }
 }
 
 /// Models in the store, and each set of their weights by handle
 /// (`<model>/<format>/<id>`), for the formats asked -- by format, then name
-/// (45a), the formats in `models list`'s order: SafeTensors, GGUF, MLX.
+/// (45a), the formats in `models list`'s order: SafeTensors, GGUF, MLX,
+/// pipelines (49a).
 [[nodiscard]] std::vector<std::string> stored_models(const models::StoreRoots& roots, bool ggufs,
-                                                     bool snapshots, bool mlx = false) {
+                                                     bool snapshots, bool mlx = false,
+                                                     bool pipelines = false, bool voices = false) {
     std::vector<std::string> out;
     if (snapshots) {
         std::vector<std::pair<std::string, std::string>> found;
@@ -149,6 +165,22 @@ void note_store(const models::StoreRoots& roots, NameList& list) {
         for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
             found.emplace_back(stored.model,
                                models::weights_handle(stored.model, models::kMlxFormat, stored.id));
+        }
+        push_format(out, std::move(found));
+    }
+    if (pipelines) {
+        std::vector<std::pair<std::string, std::string>> found;
+        for (const models::StoredPipeline& stored : models::list_store_pipelines(roots)) {
+            found.emplace_back(stored.model, models::weights_handle(
+                                                 stored.model, models::kPipelineFormat, stored.id));
+        }
+        push_format(out, std::move(found));
+    }
+    if (voices) {
+        std::vector<std::pair<std::string, std::string>> found;
+        for (const models::StoredVoice& stored : models::list_store_voices(roots)) {
+            found.emplace_back(stored.model, models::weights_handle(
+                                                 stored.model, models::kVoiceFormat, stored.id));
         }
         push_format(out, std::move(found));
     }
@@ -391,6 +423,17 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
             list.names.push_back(entry.recipe.name);
         }
         list.none = "no recipes -- 'apogee check --fix' seeds the shipped ones";
+    } else if (kind == kReviewSkillValue) {
+        for (const harness::ReviewSkillEntry& entry :
+             harness::review_skill_book(harness::review_skills_dir()).skills) {
+            list.names.push_back(entry.skill.name);
+        }
+        list.none = "no review skills -- 'apogee check --fix' seeds the shipped ones";
+    } else if (kind == kReviewTargetValue) {
+        for (const auto& [name, target] : config.review_targets) {
+            list.names.push_back(name);
+        }
+        list.none = "no review targets -- 'apogee review targets add' adds one";
     } else if (kind == kSymphonyEntryValue) {
         for (const auto& [name, spec] : config.symphonies) {
             list.names.push_back(name);
@@ -411,7 +454,7 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         }
         list.paths = true;
     } else if (kind == kModelValue) {
-        list.names = stored_models(store_roots(config), true, true, true);
+        list.names = stored_models(store_roots(config), true, true, true, true, true);
         list.none = "the model store is empty -- 'apogee models pull'";
         list.as_listed = true;  // by format, then name (45a)
         note_store(store_roots(config), list);
@@ -434,7 +477,8 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         // The configured first, then the store's weights by format (45a).
         list.names = config.backend_names();
         order_names(list.names);
-        for (const std::string& name : stored_models(store_roots(config), true, true, true)) {
+        for (const std::string& name :
+             stored_models(store_roots(config), true, true, true, true, true)) {
             if (name.find('/') != std::string::npos) {
                 list.names.push_back(name);  // a handle; a bare model name is no weights
             }
@@ -458,11 +502,44 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
             }
         }
         order_names(list.names);
-        for (std::string& name : stored_models(roots, true, true, true)) {
+        for (std::string& name : stored_models(roots, true, true, true, true, true)) {
             list.names.push_back(std::move(name));
         }
         list.none = "the model store is empty -- 'apogee models pull'";
         list.as_listed = true;
+    } else if (kind == kVideoPipelineValue) {
+        // The store's pipelines, by model then handle (49c).
+        list.names = stored_models(store_roots(config), false, false, false, true);
+        list.none = "no pipeline in the store -- 'apogee models pull <owner>/<repo>' stores one";
+        list.as_listed = true;
+        note_store(store_roots(config), list);
+    } else if (kind == kVoiceModelValue) {
+        // The store's voice models, by model then handle (50a).
+        list.names = stored_models(store_roots(config), false, false, false, false, true);
+        list.none = "no voice model in the store -- 'apogee models pull hexgrad/Kokoro-82M'";
+        list.as_listed = true;
+        note_store(store_roots(config), list);
+    } else if (kind == kRegisterLevelValue) {
+        // Each engine's own (M16): what `--mlx`, earlier on the line, chose.
+        list.names = context.flags.contains("--mlx") ? training::mlx_precision_names()
+                                                     : models::quant_type_names();
+    } else if (kind == kMlxModelTypeValue) {
+        // M15: the types the installed mlx-lm converts, read from its files.
+        list.names = training::mlx_model_types(
+            training::find_site_package(harness::training_venv_dir(), "mlx_lm"));
+        list.none = "no mlx-lm in Apogee's Python environment -- 'apogee train setup --with mlx'";
+    } else if (kind == kVoiceValue) {
+        // Every voice the store's voice models carry, each with its language.
+        for (const models::StoredVoice& stored : models::list_store_voices(store_roots(config))) {
+            for (const models::VoicePack& voice : models::read_voice_info(stored.dir).voices) {
+                if (std::ranges::find(list.names, voice.name) == list.names.end()) {
+                    list.names.push_back(voice.name);
+                    list.notes[voice.name] = {.group = voice.language, .description = {}};
+                }
+            }
+        }
+        std::ranges::sort(list.names);
+        list.none = "no voice model in the store -- its voices complete here once one is";
     } else if (kind == kNewBackendValue) {
         list.names = unregistered_gguf_names(config);
     } else if (kind == kSnapshotIdValue) {

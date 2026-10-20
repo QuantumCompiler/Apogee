@@ -1261,6 +1261,47 @@ The `/model`-carries-history claim was verified rather than assumed. `/model` on
 
 **Standing caveat, unchanged.** The live-API half of these acceptance criteria is unverified for all three vendors — every test here runs against recorded fixtures through `FakeTransport`. Confirming real traffic needs the user's keys.
 
+### 2026-10-18 — `vendor-server-tools` (backlog item 47a): the vendors' own tools, behind consent
+
+**Why.** Much of Claude Desktop's and ChatGPT's edge is not MCP but the vendors' **server-side tools**: web search and code execution, run on the vendor's infrastructure. The built-in-MCP parity spike (2026-10-16) found Apogee's wires carrying only the vendors' search, and only behind the run's `--search`. The spike also named the collision: a vendor-side search reaches sites the host gate never sees. The user settled it the same day, as a dated SPEC principle: **allowed, default-off, per backend entry**, enabling one being recorded consent for that vendor.
+
+- [x] **The vendors' sets, as data** (`contracts/server_tools`): each API vendor's names, `web_search` and `code_execution`, with a reviewed date per row (ADR 0009's discipline). The loader's refusals live here too, as does the one narration wording every wire speaks.
+- [x] **The consent, per entry** (`BackendConfig::server_tools`):
+  - `server_tools: [web_search, code_execution]` on an anthropic, openai or google entry, read once in order, empty by default;
+  - refused at load with the vendor's known set named (`'image_generation' is not a server-side tool Anthropic runs (known: web_search, code_execution)`), and refused on any backend that runs none (`a llamacpp backend runs no server-side tools`);
+  - written by `config set-backend <name> --server-tools web_search,code_execution` through the one editor, as a YAML flow list or a JSONC array, in place. It completes its names, and `""` clears it;
+  - shown by the admin plane's backend view, and documented in the starter config, compiled-in copy included.
+- [x] **The vendors' blocks, only when listed**:
+  - Anthropic: `code_execution_20260521`, and the same `web_search_20250305` block `--search` sends, once;
+  - OpenAI: `code_interpreter` with an `auto` container, beside `web_search`;
+  - Gemini: `code_execution` beside `google_search`.
+  - A fresh config sends none: every existing request golden is byte-identical.
+- [x] **Every use said, none dispatched**:
+  - each wire turns its vendor's blocks into one line through `server_tool_line`: Anthropic's `server_tool_use` and its result blocks, OpenAI's finished `web_search_call` and `code_interpreter_call` items, Gemini's `executableCode` and `codeExecutionResult` parts and grounding queries (each said once a stream);
+  - the provider sends each line as a `ToolCall` status;
+  - the loop relays it as a tool line, `web_search, run by Anthropic: "apogee harness"`, then `web_search, run by Anthropic: 2 results`, in the terminal, the shell, machine mode's `tool_status` and a served stream alike.
+  - A line falling mid-answer ends the answer so far, and the next token opens the rest, so a surface whose answer view closes keeps both halves.
+  - A tool event with no line (a vendor CLI's) is said nowhere, as before.
+- [x] **A paused turn, whole**: Anthropic stops a long server-side loop with `pause_turn`. The provider resends the turn so far (its server blocks verbatim, no "continue" added), streaming and not, up to `kMaxPauseContinuations` (5) times. The answer, the usage and the replay cache are the whole turn's, and past the bound a notice says the answer stops where it got to.
+- [x] **The rule, where it binds**: CLAUDE.md's host-gate ⚠ gains the consent sub-rule beside the SPEC principle; machine-mode.md says a vendor-run tool's lines; DEVELOPER.md's carried-list recipe covers the server-tool sets.
+- [x] **The tests**:
+  - `server_tools_test`: the table and its dates, the loader's refusals in both formats, the editor's list, the wording;
+  - the `[server-tools]` cases in `anthropic_test`, `openai_test` and `google_test`: no block without the list, the exact blocks with it, every use said in order around the answer, no call dispatched, the paused turn resent with its blocks and its answer whole;
+  - `loop_test`: the line between two answer halves, both kept, and a vendor CLI's line-less event unsaid;
+  - `backend_fields_test`: the flag completed, a local entry refused with the file untouched, cleared back to the file as it was;
+  - the editor's enumeration tie, with `server_tools` on a vendor entry;
+  - `cli.config_lifecycle` on the real binary: the list written and a tool the vendor does not run refused, the file untouched.
+
+Decisions taken while building, for veto:
+- **`--search` stays.** The 2026-08-26 decision made the vendors' search a per-run flag on purpose, and it predates the principle. A flag the user types for one run is explicit consent for that run, so it keeps sending the vendor's search block. `server_tools:` is the standing consent, and the two never send the block twice. The SPEC principle says "only behind a per-backend-entry switch", so this needs your word.
+- **The basic search block.** Anthropic's dynamic-filtering search (`web_search_20260209`) runs code execution of its own and takes only the newer models. The basic variant every model accepts stays the block, so `--search` behaves as before and listing both tools never makes two execution environments.
+- **Narration through the existing tool vocabulary**: a `ToolCall` status with a line, relayed as `on_tool_status`. No new Reporter callback and no new machine-mode event, so `cli.machine_schema_conformance` holds unchanged.
+- **The answer split at the line**: a vendor tool mid-answer ends the answer segment and the next token opens a new one. The terminal's answer view ignores text once finished, so carrying on in the same segment would have dropped the rest.
+- **A paused turn is continued inside the provider**, bounded at 5, rather than surfacing `pause_turn` to the loop: it is Anthropic's own server loop, and the loop has nothing to dispatch for it.
+- **No live vendor call was made.** Every case runs against recorded shapes through `FakeTransport`, as the cloud backends always have. The block types and result shapes are Anthropic's current documentation (the Messages API server tools), OpenAI's Responses API and Gemini's API as checked 2026-10-18.
+
+**Verified.** `lib/scripts/cicd.sh --test`: all 3331 tests pass (one skipped where it always is, `pdftotext` being installed here), the build warning-free on AppleClang and the format clean.
+
 ## Milestone J — Local inference
 
 **Goal.** Link llama.cpp into the process and let the KV cache simply *stay alive* between turns. This is the largest single simplification in the design: out of process, keeping KV state across turns can take an entire on-disk prompt-cache apparatus — cache files, fingerprinting, an M-RoPE replay self-heal, rules about what may never be written into a cache — whose only job is to move KV state between processes that cannot share memory. In-process, all of it collapses into arithmetic over a token prefix.
@@ -2390,6 +2431,32 @@ Asked for directly (Taylor), in three reports: "Not all subcommands have tab aut
 - [x] **Tests**: the seed-if-absent table in `check_test.cpp` (absent -> created, said, byte-equal to the template; present YAML and JSONC -> untouched byte-for-byte; a path named elsewhere -> never seeded; a second pass -> a no-op), the venv skip's wording, the existing `--fix`-never-touches-config case unchanged and green. Full suite: 2,996 ctest cases, 100% passed.
 
 Trade-off, recorded: `warn` is now reserved for real defects -- a fresh install shows only `ok` and `skip` rows, and every skip carries the command that changes it.
+
+### 2026-10-19 — `install-bootstrap` (backlog item 51): a fresh install that arrives ready
+
+**Why.** A fresh install ended with a ritual the user ran by hand and rejected: four `apogee train setup --with …` runs, then `providers scan --register` and `config scan --register` -- six commands before the machine did what it could. M11 made installs end healthy; this makes them end ready.
+
+- [x] **`apogee bootstrap`** (`cli/bootstrap_cmd`).
+  - Every requirement set of `train setup`'s one table this host is for, in the table's order, each by `apogee train setup --with <set>`. Then `apogee providers scan --register` and `apogee config scan --register`.
+  - Each step is the shipped command run as a captured child of the binary -- the shell's precedent (`self_command`, `run_child_lines`) -- so bootstrap composes and reimplements nothing. A set added to the table joins with no edit here; the voice set already has.
+  - Each step is said as it runs, its own lines passed through. Idempotence is the commands' own: a second run says the environment already exists, and pip finds each set satisfied without the network.
+- [x] **Never fatal.** A step that fails or cannot start (offline, nothing to register, no child processes on this platform) is skipped with its last line, and the rest still run. The exit is 0, M11's green, and the last line names `apogee bootstrap`, which runs it again any time.
+- [x] **The host decides the sets, and the table says how**: `training::set_unfit_reason` reads a column declared beside the set names. `mlx` and `mlx-vlm` are Apple silicon's; `peft`, the CUDA trainer's stack, needs an NVIDIA GPU (`nvidia-smi` on PATH); every other set is any host's. A set this host is not for is listed as skipped with that reason.
+- [x] **One minimal switch**: `--minimal`, or `APOGEE_MINIMAL_INSTALL` set to anything but empty, `0` or `false`, skips it whole, said with the re-run door. `--output-format json` prints the `apogee.bootstrap` summary (machine-mode.md), the narration then on stderr.
+- [x] **Every install path runs it right after `check --fix`**: `install.sh`, `install.ps1` and `make install`, each non-fatally. `cli.install_parity` runs it on every path under the minimal switch -- the same skip said on the release paths and the channel's, the trees compared after it -- and reads the three scripts to require the `bootstrap` invocation right after each one's `check --fix`. `check` is untouched: it still never edits config, and `--fix` still never downloads.
+- [x] **The tests**: `cli/bootstrap_cmd_test` over a scripted runner -- never a real install, never the network -- covering the plan from the table on two hosts, each step once and in order, a failing set skipped while the rest run, a step that cannot start, the JSON summary, both minimal switches, the real tree under the switch, and **the one-declaration scan**: no source but the table names three or more sets as literals on a line, so a planted second list fails.
+
+Decisions taken while building, for veto:
+- **Where sets run is a column of the table**, not a rule in bootstrap. On Apple silicon a bootstrap installs `prepare`, `mlx`, `convert`, `mlx-vlm`, `video` and `voice` -- the transcript's four, plus Parquet's `datasets` and the voice runtime. On an NVIDIA box it installs `peft` instead of the two mlx sets.
+- **One child per set.** One failing set never stops the next.
+- **The narration is stdout** in text mode, so an installer shows it, and stderr under JSON.
+- **`make install` bootstraps too**, as the item said every path does. A developer who installs often can skip it with `APOGEE_MINIMAL_INSTALL=1 make install`.
+- **Windows runs no child processes yet**, so there each step is skipped with its reason. The guarantee holds; the work waits for that platform's children.
+- **The re-run door's words**: "'apogee bootstrap' runs it again any time", the last line of every run.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3538 of 3538, two skipped and said (the real caption burn without libass, and the existing pdftotext case); `cli.install_parity` ran every path's minimal bootstrap.
+
+**Not run here**: a real bootstrap. It installs gigabytes into the real environment and registers into the real config, so no test or check in this run ran one; the minimal switch was on every time. The user's next install is its first real run.
 
 ## Milestone L — The vendor-CLI family
 
@@ -3664,6 +3731,92 @@ Decisions taken while building, for veto:
 
 **Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,291 tests, one skipped for want of `pdftotext`. The shells' completion checks (`cli.complete_e2e` and the rest of the 91 completion cases) are among them. `make format-check` is clean for every file touched.
 
+### 2026-10-19 — `weights-delete-backend-cleanup` (maintenance item M14): the delete offers the cleanup, the doctor names real doors
+
+**Why.** The user removed 26 GGUF sets in bulk and was left with 32 dangling backends, each two broken lines in `models list`. The delete had warned about every one of them and offered no way out, and `check`'s hint for each named `config add-backend <name> …` -- a command the binary refuses on a name that exists ("already exists; pass --force").
+
+- [x] **`models delete --and-backends`** removes the backend entries pointing into what goes, through the one config editor: each is `config delete-backend`'s own removal (`remove_backend`), byte for byte, and said per name. The plan says before anything runs what happens to them: "--and-backends: their N entries go too", or that they stay unless you say.
+- [x] **The config half has its own consent** (`remove_backends_too`): the flag, or a yes at a terminal, asked before anything is removed and default no. `-y` keeps its meaning -- remove the weights -- and never implies the config. On a pipe without the flag the entries stay, and each one is said with its two doors (`backend_doors`): repoint with `config set-backend <name> --model-path <file>`, or remove with `config delete-backend <name>`.
+- [x] **The doctor's doors run as printed.** A llamacpp entry whose model is gone now names both doors; one with no `model_path` names `set-backend --model-path`. Neither names `add-backend` on an existing name. The mlx entry's door already passes `--force` and is accepted, so it is unchanged.
+- [x] **The tests** (`models_pull_test`, `check_test`) over a planted GGUF set with three entries, two on it and one elsewhere, a comment and an inline comment in the config:
+  - the plan alone and the flag without `--yes` leave everything;
+  - `--yes` alone removes the weights and leaves the config byte-identical, the doors said;
+  - `--yes --and-backends` leaves the config equal, byte for byte, to two hand-typed `config delete-backend`s;
+  - the ask's every answer;
+  - the doctor's doors are run as printed against the same state, and the old `add-backend` door is shown still refused.
+
+Decisions taken while building, for veto:
+- **The wording**:
+  - the ask is "Remove the backend entries first, second too? [y/N]";
+  - the plan says "the backend entries stay unless you say -- --and-backends removes them with the weights.";
+  - a kept entry is said as "kept backend 'X', which points at nothing now -- repoint it: …; or remove it: …";
+  - a removed one is `delete-backend`'s own "removed backend 'X' from <config>".
+- **The ask comes before anything is removed**, so one decision covers both halves.
+- **Role pointers and suite members** naming a removed entry are left for `check` to report, exactly as after a hand-typed `config delete-backend`.
+- **The `model_path not set` hint was fixed too**: the same refused-door bug in the same seam.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3540 of 3542. The two failures were one cause: a new test named starting with `--and-backends`, which `cli.test_names` forbids and ctest cannot select. Renamed, both pass with every delete case (47); M15's full run covers it whole.
+
+### 2026-10-19 — `mlx-convert-vendor-model-types` (maintenance item M15): a vendor's model_type, an explicit door
+
+**Why.** `models convert --mlx` refused the user's four Assistant models with mlx-lm's own words and no way out: `ValueError: Model type gemma4_unified_assistant not supported.`. The snapshot's `config.json` carries the vendor's variant spelling, and mlx-lm resolves a converter by `model_type` through a remap table that knows the base (`gemma4_unified`) and not the variant. The GGUF path coped with the same weights because it resolves by `architectures`.
+
+- [x] **`models convert --mlx <model> --model-type <type>`**: the user's word that these weights are a type mlx-lm knows.
+  - The converter reads an overlay view of the snapshot (`models::stage_model_type_overlay`): every file hard-linked (copied only where no link can be made), `config.json` alone written anew with its `model_type` replaced.
+  - The overlay is staged under the store's own staging (`incoming_path`, so an abandoned one is swept like any) and removed however the run ends. The snapshot is never written.
+  - The record's `transform` says it for good -- `mlx_lm.convert 4bit, converted as gemma4_unified (model_type was gemma4_unified_assistant)` -- so `models info`'s lineage explains the model forever. The same set converted plainly and under an override are two different conversions.
+  - Naming the type the snapshot already declares just converts it as it is, said. `--model-type` without `--mlx` is refused, saying why.
+- [x] **The refusal names its door** (`training::fold_model_type_failure`): a failure saying `Model type <X> not supported` gains `--model-type <type>` and the nearest types the installed mlx-lm knows -- suggested, never applied.
+  - The types are read from the environment's `mlx_lm` at failure time, never imported (`mlx_model_types`): each module under `models/` that defines a `Model` (so `cache` and `base` are no types), and `utils.py`'s `MODEL_REMAPPING` keys.
+  - Nearest first by shared prefix, then shorter, at most five, none sharing under three characters.
+  - Apogee keeps no equivalence table of its own. The same list completes `--model-type` (a new name kind, `MLX_MODEL_TYPE`).
+- [x] **The tests**:
+  - `training/mlx_convert_test`: the lists read from the stub mlx-lm, the nearest ordering, and the transcript's bytes over the real driver now carrying the door with `gemma4_unified` first;
+  - `models/convert_test`: the overlay file by file -- linked, the config the only file written, everything else kept, the snapshot byte-identical;
+  - `cli/models_mlx_test`, on the command line: the user's exact command refused with the door, then converted as the base type, the driver seeing the overlay, the snapshot untouched, no staging left, the record and `models info` telling, the flag refused without `--mlx`, and completion.
+  - The stub mlx-lm gained model modules, a remap table and a refusal of a listed type.
+
+Decisions taken while building, for veto:
+- **The hint's words**: "if these weights are a type this mlx-lm knows, convert them as it: --model-type <type> (nearest here: …)", appended to mlx-lm's own message.
+- **A model module is one defining `class Model(`.** Every mlx-lm architecture module does; its helpers do not.
+- **The overlay lives in the store's staging**, not a temporary directory, so hard links stay on one filesystem and the store's sweep covers a crash.
+- **The driver is unchanged.** The fold reads the environment's files from C++, so there is no new digest.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3547 of 3547, two skipped and said (the real caption burn without libass, and the existing pdftotext case) -- M14's renamed case included.
+
+**Not run on real weights**: converting the four Assistant models under the override is the user's run.
+
+### 2026-10-19 — `mlx-convert-register-chain` (maintenance item M16): convert-and-register covers MLX
+
+**Why.** M3's one command from SafeTensors to runnable backends was GGUF-only, a 27b design decision. The user hit both refusals the same hour -- `--register` with `--mlx`, and `--register-with` speaking GGUF levels alone -- and asked for it to work with `--mlx`. Every piece already existed: the verified `mlx/` conversion, the exact `config add-backend <name> --type mlx --model-path <dir>` line it printed, and M12's register core.
+
+- [x] **`models convert --mlx <model> --register`** converts once at `--type` (default `4bit`) and registers `<base>-<precision>` as an `mlx` backend. **`--register-with p1,p2,…`** takes `--type`'s own MLX precisions and runs one conversion per precision -- MLX quantizes as it converts -- each registered as its own backend. `--base-name` defaults to the model's name.
+- [x] **The hint executed, byte for byte** (`run_mlx_register_chain`, `register_mlx_backend`): each entry goes through the one config editor exactly as the printed `config add-backend … --type mlx --model-path <dir>` writes it, pinned by a twin home running that line.
+- [x] **M3's honesty, whole.**
+  - Each precision is two stages, its conversion (`convert_model_to_mlx`, the standalone core) then its registration, each said as `[i/n]`.
+  - A registration that would refuse at the end refuses before the first conversion (`check_registrations`, now told the engine's directory).
+  - A failure says where it stopped and the one command that resumes it, every finished build and entry kept. The resumed chain finds stored builds rather than converting again, and skips entries already registered on the same directory.
+  - A bare `--mlx` conversion still prints its hint, unchanged.
+- [x] **Each engine's levels are its own.**
+  - With `--mlx`, `--register-with` refuses a GGUF level by name, naming the MLX set; without it, an MLX precision is refused naming `--mlx`.
+  - `--type` beside `--register-with` under `--mlx` is refused, since the list names every precision.
+  - Completion answers per engine: a new name kind, `REGISTER_LEVEL`, reads `--mlx` earlier on the line, as `--type` already did.
+  - The flags' help tells both engines' stories.
+- [x] **The tests** (`cli/models_mlx_test`) over a scripted converter that writes each precision's own weights:
+  - `--register` registering the hand-typed line's bytes, then again finding and skipping both halves;
+  - `--register-with 4bit,8bit --base-name` failing at 8bit with the 4bit build and entry kept and the resume line said, then resumed converting only 8bit;
+  - the per-engine refusals before anything runs, and completion each way.
+
+Decisions taken while building, for veto:
+- **The suffix is the precision as `--type` spells it**: `-4bit`, `-8bit`, `-mxfp4`, `-bf16`. That matches `stored_mlx_name` for quantized builds. An unquantized build's stored label is its torch dtype, so the chain's `-bf16` differs there.
+- **`--register-with` under `--mlx` is exactly its list**, unlike GGUF, where the F16 is always made too, because every MLX precision is its own conversion.
+- **Two stages a precision**, so a failed conversion never strands an unregistered finished build and a failed registration says which.
+- **An MLX conversion under `--model-type` (M15) chains unchanged**, its flag carried into the resume line.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3550 of 3550, two skipped and said (the real caption burn without libass, and the existing pdftotext case). The first full run failed one case: the lifecycle suite completed `convert --register-with` from its fixed set, which is now a name kind; the test moved to the live sources, with an MLX case.
+
+**Not run on real weights**: a real multi-precision MLX run is the user's.
+
 ## Milestone O — Local multimodal
 
 **Goal.** Make `VisionCapable` tell the truth on the local backend: wire llama.cpp's `mtmd`, add `mmproj_path`, and close the cross-surface guard gap that let one surface accept a picture the other refused.
@@ -4717,6 +4870,97 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,278
 **Guardrails, each mutation-tested (33 mutations: 31 caught outright, 1 caught after its test was strengthened, 1 that exposed a redundant branch, since removed).** `done` not closed from the read loop's error path; the reader started after the handshake; tools not cached; cancellation and the call deadline ignored; notifications treated as responses; the initialized notification not sent; disabled servers dialled; no progress before the dial; the failure reason dropped; tools not namespaced; MCP tools never gated; the connected event not published; the stderr tail unbounded; the sink not teed; the last line lost at EOF; an unknown method silently ignored; writing tools served, or dispatchable over stdio; namespacing split on the last delimiter; a leading tilde not expanded; `enabled` accepting any word; `enabled` inserted instead of replaced; a double underscore allowed in a server name; `server.py` written without the execute bit; a missing command passing the doctor; env values listed by the admin view; a collision not a `409`; MCP tools not registered into the loop; the `PUT` row ungated; `mcp/` not a layout row; and `mcp/` including a provider.
 
 **The survivor, and what it taught.** "`done` not closed from the read loop's error path" survived its first run because the dying fake *refused the write*, so the send path released the waiter and the read loop never had to. A real child that dies mid-handshake takes the `initialize` frame into its pipe buffer and only the read hits EOF — that is the path the fix exists for. The fake now takes the frame and hangs up, and the mutant costs the full twenty-second bound, which the test refuses. A fixture that fails earlier than the real thing tests the wrong path. The other survivor, an extra quoting check on flow-list items, was dead code: `yaml_scalar` already quotes every character a flow list could misread. The check was removed rather than tested.
+
+### 2026-10-18 — `code-exec-server` (backlog item 47b): the interpreter in the box
+
+**Why.** The built-in-MCP parity spike (2026-10-16) measured the biggest honest gap to ChatGPT: code execution. `run_command` is a gated raw shell, not an interpreter with a working directory and files coming back, and a fresh install configures no MCP server at all. The spike's reframe also set the shape: one generic server serving every provider alike, since the host already translates tools per vendor.
+
+- [x] **The server** (`assets/mcp/code_exec_server.py`): an MCP server on stdio, standard library only, Python 3.8 or later. It has two tools:
+  - **`run_python`** runs a script in the session's working directory. It returns stdout, `[stderr]`, `[exit N]` and `[files written]` with each new or changed file's full path and size. An error is the interpreter's own traceback, trimmed to the code's lines.
+  - **`write_input`** writes a data file there, as text or base64.
+
+  Files persist between calls. Variables do not, since each call is a new process.
+- [x] **The sandbox, honest about what it is**:
+  - **The working directory** is new for each session, under `cache/code-exec/`, and deleted when the session ends. A lock held for the server's life lets the next server's start sweep a killed one's leftovers, and never a live one's.
+  - **The bounds** are named constants each result quotes when hit:
+    - `MAX_SECONDS`, 30: the run and every process it started are stopped;
+    - `OUTPUT_KEEP`, the first and last 8 KB, in `run_command`'s idiom;
+    - `MAX_SESSION_BYTES`, 256 MiB: what a run wrote past it is removed, and a `write_input` that would cross it is refused.
+  - **The network guard**: the code cannot import `socket`, so urllib and http.client fail saying the network is off. It is recorded as best effort, not a boundary.
+  - **A write guard**: an audit hook refuses the code's writes outside the working directory, naming the path, `/dev/null` kept. It is best effort too.
+  - **An allow-listed environment**: `HOME` and the temporary directory point at the working directory, so no key in Apogee's environment reaches the code.
+  - **The boundary is the gate**: both tools say they are not read-only, so the MCP client gates them like any writer, and the permission modes govern them. Nothing new was needed: zero new protocol or gate code.
+- [x] **Seeded on the drivers' precedent**: compiled in by `generate_training_assets.py` as a fourth unit (`assets_mcp.cpp`, `bundled_mcp_scripts()`), held byte-identical by test, and seeded skip-if-present beside the drivers under `training/scripts/`. A stale copy refreshes from the same retired digests, and an edit is kept.
+- [x] **Said, never guessed**: the doctor's `MCP` section gains a `code-exec` row (`cli/code_exec_server.h/.cpp`). It reports the seeded copy against the shipped one, then one of:
+  - registered under which name, with its tools;
+  - the one `apogee mcp create code --command <interpreter> --args <script>` line, with the interpreter it would run under: the training environment's when there is one, else `python3` on PATH;
+  - with neither, the reason, pointing at `apogee train setup`.
+
+  Code runs under the training environment's interpreter when there is one, else under the server's own.
+- [x] **The reference**: tools.md gains *Running code*: the registration line, what the model gets, and the sandbox's table, with the guards called best effort and the gate the boundary. Its *Every backend* paragraph now names 47a's `server_tools:` beside `--search`, a drift 47a left.
+- [x] **The tests**:
+  - `mcp/code_exec_server_test` drives the real compiled-in script through the shipped client: both tools gated; output, exit status and files as paths; inputs and modules persisting; each bound against a planted violation (a grandchild stopped with the run, 60 KB of output cut to 8 KB a side, a 200 KB file past a 100 KB cap); the jail, the socket guard, a planted key; the server's stderr in the sink and none of the code's; the directory gone at the end and a dead session swept;
+  - `assets_test`: the byte match, seeding and the stale refresh;
+  - `check_test`: the row's five states;
+  - `cli.code_exec_server` on the real binary: seeded byte for byte, the line said then the registration seen, two tools connected, and the gate on real turns (refused with nobody to ask, run under `--allow` with the file's path, refused by plan over an allow and by dont-ask, never passed by accept-edits), no session directory left;
+  - `cli.complete_opens_no_listening_socket` gains a phase sampling a code-exec turn's whole tree, the server required to be seen, verified against a copy that listens at start;
+  - `cli.mcp_server_stderr_stays_off_the_terminal` gains a phase where a run printing two hundred lines on each stream paints nothing, proved to have run by a second call listing the file it left.
+
+Decisions taken while building, for veto:
+- **Seeded under `training/scripts/`, not a new `mcp/code-exec/` directory.** The drivers' precedent whole: no new layout row, the retired-digest refresh for free, and it sits beside the environment it runs under. The `mcp/` row stays the user's scaffolds.
+- **The session directory is the server's own.** It is created at start and removed at exit, with a lock for the sweep. The `cli/` composition the document sketched has nothing to compose for a server registered by hand like any other: what `cli/` gained is the doctor's row and the registration line 47c's preset will reuse.
+- **A write guard the document did not ask for**: an audit hook refusing writes outside the working directory, under the same "best effort, said so" label as the socket guard. Without it, the "jail" would have covered only `write_input`'s path.
+- **An allow-listed environment**, so a key exported for Apogee never reaches model-written code (the secrets invariant, applied to a child the model drives).
+- **The disk cap is 256 MiB**, enforced after a run by removing what that run wrote or changed, and before a `write_input`. A cap that refused the next run instead would leave no way to delete anything.
+- **An exit status is data, not a tool failure**: `isError` is set for refusals and the time cap, never for code that raised. That matches `run_command`'s output.
+- **"Said in the server's registration detail"** reads as the doctor's row, which names the interpreter, plus the server's `instructions` and `run_python`'s description, which name the version and the working directory.
+
+**Verified.** `lib/scripts/cicd.sh --test`: all 3340 tests pass, with the one test skipped where it always is. The build is warning-free and the format clean. The registration line's quoting case, added after that run so a Windows path's backslashes are quoted and the doctor's test reads either form, passes on its own.
+
+**On real weights**, each family's local model in its own scratch home, one at a time, asked to sum the squares of 1 to 100 with `run_python`, write it to `sum.txt` and give the path the tool reported:
+- **Google**, Gemma4-12B Q4_K_M: 338,350 and the exact session path, in 102 s.
+- **Qwen**, Qwen3-VL-8B Q4_K_M: 338350 and the exact path, in 19 s.
+- **OpenAI**, GPT-OSS-20B (F16; no Q4_K_M build is installed): 338350 and the exact path, in 26 s.
+- **Meta**, Llama3.1-8B Q4_K_M: it called the tool and had the number both times. In one of two runs it named its own working folder as the file's path instead of the one the tool reported.
+
+**Not run: a cloud backend.** Its code-running half needs your API key and spends money, and this run had nobody to approve that. The server is the same child for any provider, since MCP tools reach every backend through the one registry, but the cloud half of that acceptance line is still yours to see.
+
+### 2026-10-18 — `mcp-presets` (backlog item 47c): the box says what it holds
+
+**Why.** A fresh install configured no MCP server, and its only guidance was one line pointing at the scaffold (the parity spike's W1, 2026-10-16). Meanwhile the box now ships a server worth registering (47b). This makes the built-ins discoverable and one command away, without a second registration path.
+
+- [x] **The presets, as data** (`operations/mcp_presets`). Two ship:
+  - `code-exec`, the code-execution server, registered as `code`;
+  - `self`, Apogee's own read-only tools over `apogee __mcp-tools`.
+
+  Each is a name, a description, what it provides, its documented server name and how `mcp test` tries it. Its command and arguments resolve on this machine: the training environment's interpreter or `python3` on PATH with the seeded script; this binary's own path for `self`. A preset this machine cannot run still lists, naming what is missing and the command that provides it (`apogee check --fix` for an unseeded server, `apogee train setup` for no Python).
+- [x] **`apogee mcp presets`** prints each preset with what it provides, then one of:
+  - its `register:` line, `apogee mcp create code --from code-exec`, and what it runs here;
+  - for `self`, the entry another MCP host takes, and why it is not registered into Apogee.
+
+  `--output-format json` gives the document, in machine-mode.md.
+- [x] **`apogee mcp create <name> --from <preset>`** registers the resolved command and arguments through the same create core a typed `--command` reaches. The config is byte for byte the hand-typed twin's. It is exclusive with `--command`, and Tab completes the preset names. The refusals:
+  - `--from self`, with the circularity (Apogee already has those tools natively);
+  - an unknown name, naming the presets;
+  - a preset that cannot run here, with its fix.
+
+  The admin plane's `POST /v1/admin/mcp-servers` takes `from` the same way (http-api.md).
+- [x] **The empty state**: `mcp list` and the shell's MCP view share one line (`kNoMcpServers`) that names `apogee mcp presets` before the scaffold.
+- [x] **The reference**: tools.md gains *MCP presets*: the two, `--from`'s byte-for-byte promise, and web search left yours, pointing at the SearXNG chapter. *Running code* now registers with `--from code-exec`, its typed twin beside it.
+- [x] **The tests**:
+  - `operations/mcp_presets_test`: the table, `code-exec` resolved on a faked machine in each state, `self` and its refusal, the document;
+  - `cli/mcp_presets_cmd_test`: the listing and its document, **the composition pin** (`--from code-exec` against its typed twin, byte for byte), the refusals with the file untouched, the empty state, the completion;
+  - `admin_config_test`: `from` over HTTP byte-identical to the CLI's typed twin, and its refusals;
+  - the parity table classifying `mcp presets` as a read;
+  - `cli.config_lifecycle` on the real binary: the document's two rows, the pin against the command the listing reports, `--from self` refused with the file untouched.
+
+Decisions taken while building, for veto:
+- **The presets live in `operations/`, not `business/mcp/`.** The `code-exec` preset needs the interpreter resolution, which reads the training environment, and the admin plane needs it too. So 47b's registration helper moved from `cli/` to `operations/` with it, and the doctor reads it from there.
+- **`from` on the admin route, but no `GET /v1/admin/mcp-presets`.** The verb's twin is the route's `from`, since one create core serves both surfaces. The listing's twin is its JSON document, which is what the item asked for (ADR 0002, the skipped route named here).
+- **`self`'s host entry** is the generic `{"command": …, "args": ["__mcp-tools"]}` server entry MCP hosts take, under the name `apogee`. Apogee does not write any other host's config file: that file is the other host's.
+- **A preset's `mcp test` hint** is its own tool, `run_python` for `code-exec`, not the scaffold's `echo`. A register-only entry without a preset keeps the existing hint.
+
+**Verified.** `lib/scripts/cicd.sh --test`: all 3350 tests pass, with the one test skipped where it always is. The build is warning-free and the format clean. On the real binary, `mcp presets` lists both, `mcp create code --from code-exec` connects the server's two tools, and `mcp test code run_python` answers.
 
 ## Milestone X — Agents as data
 
@@ -6931,6 +7175,12 @@ The roster test now holds that each reviewed date is a real date.
 
 Both `...Reviewed` dates moved to 2026-10-16.
 
+**Reviewed 2026-10-19, at v0.1.9's pre-merge docs pass**, since that branch touched the backends (47a's server tools) and completion (M15's and M16's name kinds). Both lists were current, and no row changed:
+- Anthropic's models overview still lists the same four current models and nine legacy ones, the thirteen ids carried; Claude Mythos 5.1 is still named only in a pricing note, so it is still not carried.
+- The installed Gemini CLI, still 0.46.0, aliases `pro`, `flash` and `flash-lite` beside `auto`.
+
+Both `...Reviewed` dates moved to 2026-10-19.
+
 ### 2026-10-10 — `models-list-sections` (backlog item 36): cloud by provider, local by format
 
 **Why.** With item 35's rows in place, the user's `models list` was one table of 50 rows: local GGUFs, three vendor CLIs and their sub-models, sorted together by name. Their ask was cloud backends tabled by provider, adaptable to any number of providers and backends, and local backends split by format: SafeTensors, GGUF, then MLX.
@@ -7944,3 +8194,574 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,249
 - Linux and Windows.
 
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,261 tests, none failing, one skipped for want of `pdftotext` -- `cli.machine_schema_conformance` (no event added) and `cli.unit_suite_under_a_tty` among them. `clang-format` is clean on every touched file.
+
+## Milestone AL — The review agent
+
+**Goal.** Apogee reviewing GitHub pull requests and GitLab merge requests (track 48, opened 2026-10-18 from that day's review-agent spike): one merge request on demand, or a repository's or an owner's whole set swept, inside the house's own laws. Auth goes through spawned `gh` and `glab`, never a token Apogee reads. The watch is a one-shot sweep over a watermark, never a daemon or a listener. The temperament is pinned: silence is correct, and a repeat review flags only what the new push added.
+
+### 2026-10-18 — `forge-seam` (backlog item 48a): GitHub and GitLab behind one interface
+
+**Why.** The spike measured no forge-client code anywhere in `source/`. Everything the review track needs from a forge is four verbs, and the house already owns the auth answer as a principle: a vendor CLI is spawned, never opened.
+
+- [x] **The seam** (`business/forge/forge.h`), a new business module: `ForgeClient`'s four verbs over plain structs.
+  - `merge_request` returns the metadata: title, description, author, state, draft, branches, the three commits a comment anchors to, URL, update time.
+  - `diff` returns one unified diff.
+  - `create_comment` posts one inline comment.
+  - `publish_batch` posts the comments and a summary as one notification.
+
+  A refusal is a `ForgeError` of a named kind (missing, logged out, not found, API, malformed), its words the CLI's own and its fix named.
+- [x] **One spelling of a merge request** (`parse_ref`), pinned by a table:
+  - a full URL of either forge, self-hosted included, the path's shape saying which (`/pull/N`, `/-/merge_requests/N`), trailing tabs, queries and fragments ignored;
+  - `owner/repo#12` (GitHub) and `group/project!4` (GitLab), the separator choosing;
+  - either prefixed `github:` or `gitlab:`, the prefix choosing.
+
+  The canonical form is `github.com/owner/repo#12`, what a watermark will be keyed by. A near miss is refused naming the forms.
+- [x] **The transports, each verb one bounded child** (`cli_call`, `cli_forge`, `gh_transport`, `glab_transport`).
+  - The CLI is an explicit path or its name on PATH, never bundled.
+  - The request body goes on stdin (`--input -`), stdout is kept to 64 MiB (a larger answer is refused, never cut short), and stderr is captured to its last 8 KiB for the refusal. Nothing reaches the terminal as itself.
+  - A host that is not the forge's default adds `--hostname`.
+- [x] **GitHub, through `gh api`**:
+  - the pull request: `repos/o/r/pulls/N`;
+  - the diff: with `Accept: application/vnd.github.diff`;
+  - one comment: to `…/comments`;
+  - a batch: one review to `…/reviews`, `event: COMMENT`, its body the summary.
+- [x] **GitLab, through `glab api`**:
+  - the merge request: under the encoded project path, `projects/group%2Fproject/merge_requests/N`;
+  - the diff: `--paginate …/diffs`, each file's hunks joined under its own `diff --git` header into one unified diff (new, deleted and renamed files said as git says them);
+  - one comment: a discussion anchored by base, start and head;
+  - a batch: draft notes, then `…/draft_notes/bulk_publish`. A failure part-way says how many drafts it left as the login's own, never published.
+- [x] **The refusal ladder** names the fix at each rung:
+  - not installed: `install the GitHub CLI (https://cli.github.com), then: gh auth login`;
+  - not logged in: `gh auth login`, with `--hostname` for a self-hosted host;
+  - not found or not visible: `gh auth status`;
+  - any other failure, its tail folded in;
+  - an answer that is not JSON.
+- [x] **Data, never instructions**: every string a forge sends is made valid UTF-8 at entry, the diff included.
+- [x] **The module's law, in the same change**: its row in `cmake/modules.cmake` (`forge` links `contracts` and `platform` only), ADR 0008's table, the business layer's card, and a named rule in `harness.layering` holding `forge/` to `contracts/`, `platform/` and itself, never a backend. A planted include of the secrets store fails the check.
+- [x] **The tests** (`tests/business/forge/`, over `support/scripted_forge_cli`, scripted children behind the spawn seam):
+  - the reference table, both ways;
+  - every verb's argv and request body byte for byte, on both forges;
+  - the answers read into the structs, a Latin-1 byte in a diff mended;
+  - GitLab's pages joined and its files rebuilt into one diff;
+  - the batch as one review, and as drafts published in bulk, with a part-way failure said;
+  - every rung of both ladders;
+  - only ever `<cli> api` run, never `auth token`.
+
+Decisions taken while building, for veto:
+- **`forge` links `contracts` and `platform` only.** The document allowed `transport/` for JSON plumbing, but nothing here needs the framer: each answer is one document, parsed whole. An unused link would fail the map's check.
+- **No config key for the CLI's path yet.** The transports take an explicit path or the name on PATH. The `review:` config unit is 48d's, and the path joins it there, so the config grows once.
+- **Every request body goes on stdin as JSON**, with `Content-Type: application/json` said explicitly, rather than as `-f`/`-F` fields: a comment body's text is never an argument, and nested positions need no field syntax.
+- **GitLab's diff is its `/diffs` endpoint**, paginated, rebuilt into a unified diff. `/changes` is deprecated, and `glab mr diff` prints for a terminal.
+- **A comment may carry its old-side line** (`InlineComment::old_line`). GitLab anchors an unchanged line by both sides, and 48c's diff map knows both. GitHub needs only the new side.
+- **Both forges batch natively**, so `publish_batch`'s serial path ("a forge without one posts one by one, and says so") is the contract's, unexercised today.
+
+**Live, on this machine**, read-only, `gh` 2.101.0 against this repository's own merged pull request #9:
+- the metadata keys the transport reads (`title`, `body`, `user.login`, `state`, `draft`, `merged_at`, `head`/`base` `ref` and `sha`, `html_url`, `updated_at`) are all there;
+- the diff call returns a unified diff (`diff --git`, `index`, `---`, `+++`);
+- an unknown pull request exits 1 saying `gh: Not Found (HTTP 404)`, the not-found rung's words.
+
+Nothing was posted. **Not run: `glab`**, which is not installed here (as the spike measured). Its transport is held by the scripted suite alone.
+
+**Verified.** `lib/scripts/cicd.sh --test`: all 3362 tests pass, with the one test skipped where it always is. The build is warning-free, the format clean, and `harness.layering` and `harness.layer_context` hold the new module's row, card and table.
+
+### 2026-10-18 — `review-skills` (backlog item 48b): local lenses, one finding contract
+
+**Why.** A good automated review is a set of lenses, each hunting one domain's failure modes, selectable per repository and extendable without hosting anything. Apogee already owned the shape: the recipes' source ladder, and the shipped `code-review` agent's finding (severity, kind, file, location, claim, suggested fix, confidence), fields made for inline comments.
+
+- [x] **A skill is a markdown file** (`contracts/review_skill`): a front matter with its `description` and optional `applies` hints, then the hunt prompt.
+  - The hints are `extensions`, `paths` (globs over repository paths: `*` within a segment, `**` across, `?` one character) and `languages` (sixteen named, each standing for its extensions).
+  - One parser refuses, naming the file, anything else: no front matter or an unclosed one, a front matter that is not YAML or holds an unknown key, no description, an extension without its dot, an absolute or climbing glob, an unknown language, an empty prompt, a `name:` that disagrees with the file.
+  - A skill is a prompt, not an agent: no tools, no model, no schema of its own.
+- [x] **Applies, deterministically**: a skill applies to a changed file whose extension it lists (directly or through a language) or whose path matches a glob. A skill with no hints applies everywhere. `ReviewSkillBook::applicable` gives a change's lenses in the book's order, for 48c's plan.
+- [x] **The ladder, the recipes' exactly**:
+  - a file under the new `review-skills/` layout row, run by its name;
+  - over the shipped skill of that name: its seeded file while it is there (`seeded` while it is the shipped bytes, the user's once edited), its compiled-in text while it is not;
+  - a dropped file is a new lens, listed after the shipped ones, and one that does not parse is said and left out.
+
+  The skills are compiled in by `scripts/generate_review_skill_assets.py` and seeded skip-if-present, so install parity learns the row.
+- [x] **The one finding contract** (`review_finding_schema_text()`): `{"findings": [...]}`, each finding the `code-review` agent's, read from that agent's compiled-in schema and never restated. An empty list is a complete answer.
+- [x] **The seven shipped**, each a lens with a short hunt list and the same rules (grounded in the shown lines, nothing judged from code not shown, `kind` is `correctness`), and each carrying the prime directive word for word: *silence is correct*, the empty answer a complete review, a false positive the worse failure.
+  - `general-correctness` and `security` apply everywhere. `security` is the `security-review` agent's substance re-cut to the precision bias.
+  - `front-end` and `back-end` apply by extension and well-known paths.
+  - `embedded` and `ai-ml` apply by paths and a few telling extensions (`.ino`, `.ld`, `.ipynb`), not every `.c` or `.py`.
+  - `concurrency` applies by nine languages.
+- [x] **`apogee review skills list|show`**, the new `review` command's first verbs. `list` gives a row per skill (its source, what it applies to, its description), and `show` gives its hints and prompt whole. Both have `--output-format json` documents (machine-mode.md), and the names complete from the book. The shell classifies `review` runner-covered: the exec line runs it, and a Review view is a recorded later item.
+- [x] **The planted fixtures** (`tests/fixtures/review/`): per skill a defect, its clean twin and the canned answer:
+  - `general-correctness`: an off-by-one range;
+  - `front-end`: user text through `dangerouslySetInnerHTML`;
+  - `back-end`: a delete without the owner check its sibling has;
+  - `embedded`: an ISR-shared counter without `volatile`;
+  - `ai-ml`: a scaler fitted before the split;
+  - `concurrency`: a map written from goroutines without the struct's mutex;
+  - `security`: a request value in a `shell=True` command.
+
+  The hunk headers are well-formed and the canned lines are added ones, ready for 48c's engine goldens.
+- [x] **The tests**:
+  - `contracts/review_skill_test`: the parser's table, the globs, applies, the seven and their directive, the ladder, the contract equal to the agent's finding;
+  - `assets_test`: the files byte for byte, the count, seeding;
+  - `cli/review_cmd_test`: the verbs, the documents, a dropped and an edited skill, the completion, and the goldens: each skill applies to its fixture, its canned answer conforms to the contract (through the structured-output validator) and names an added line, silence conforms, a finding missing a field does not;
+  - the parity tables classifying `review` and its two reads.
+
+Decisions taken while building, for veto:
+- **Front matter, then prompt.** The document named the fields, not the format. YAML between `---` lines is the markdown convention, and the prompt reads naturally below it.
+- **The contract is derived, not copied**: built at runtime from the `code-review` schema's `findings` property, so a change there is a change here. `kind` keeps that schema's two values, and every shipped lens says `correctness`: a review that posts comments has no place for simplification notes, under the precision bias.
+- **"Conservative" hints** read as narrow: `embedded` and `ai-ml` match well-known paths and telling extensions, not every C or Python file. `concurrency` matches its languages, and its prompt answers empty where nothing concurrent changed. 48c's plan narrows further when too many apply.
+- **Skills are told the diff's new-side lines come numbered.** The engine (48c) numbers them, so a `location` is a line a comment can anchor to; the real-weights check below numbered them the same way.
+- **No doctor rows for the seeded skills**, as for recipes: an edited skill is the user's lens, and `review skills list` says which are.
+- **SPEC is untouched here.** The review agent's scope line lands with the engine (48c), when `review mr` exists.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3372 of 3373 pass, with the one test skipped where it always is. The one failure was `cli.bare_help`: the committed root help moved by exactly the new `review` line. It was regenerated, and it and the layout, install-parity and reset checks pass on their own. The build is warning-free and the format clean.
+
+**On real weights**, the sanity check the item asks for: each skill over its planted defect and its clean twin, on one local Q4 model. Google's Gemma4-12B Q4_K_M ran in a scratch home, served once on loopback. Each request carried the skill's prompt with the contract as its output format, and the change came with its new-side lines numbered.
+- **Thinking left on**, the answers ran out of their 1500 tokens before writing JSON in eleven of fourteen calls. The hunt passes want thinking off, a note left for 48c.
+- **Round one** (thinking off, the prompts as first written): all seven planted defects found. Only two clean twins drew silence (`ai-ml`, `back-end`). The others drew a false positive:
+  - React's escaped `{comment.body}` called XSS;
+  - a `volatile` counter called unprotected;
+  - `Path(x).name` called traversal;
+  - a lock held across `load` called a hazard;
+  - a real edge case in the general-correctness twin (`n > len(items)` wrapped the index), which the fixture now guards.
+- **Tightened twice.** Every lens gained a last check: drop a candidate on a line without `+`, drop one the shown code already guards, and judge an unseen call by what the shown lines say. `front-end`, `embedded`, `security` and `concurrency` each gained the one domain fact their false positive missed.
+- **Round three**: all seven defects found, `security`'s answer right but not valid JSON (unescaped quotes, which the engine's grammar-held structured output prevents). Five of seven clean twins drew silence. `concurrency` still calls a lock held across `load` contention, and `embedded` still ignores the twin's `volatile`, both on a 12B Q4. The confirm pass (48c) is the next defense.
+
+**Not run: a cloud model.** It spends money under your key, and this run had nobody to approve that. The cloud half of the sanity check is yours to see.
+
+### 2026-10-18 — `review-core` (backlog item 48c): one merge request, reviewed and commented
+
+**Why.** The seam and the skills existed. What was missing was the engine: something that fetches a diff, chunks it, runs the lenses, dedups, filters to what the push changed, and posts. `analyze --agent code-review` reviews pasted text once, and nothing more.
+
+- [x] **`apogee review mr <ref>`**: a merge request's URL, `owner/repo#12` or `group/project!4`.
+  - Its metadata and diff come through the seam (`gh` or `glab` by the forge).
+  - The files the exclusion list names are left out with the binary ones. The list is lockfiles, vendored, built and generated code, minified bundles, shipped beside the skills as `review-skills/exclude.txt`, seeded, an edit the user's.
+  - The rest is chunked to the reviewing model's window, whole files where they fit and a large file at its hunks.
+  - `--dry-run` reviews and posts nothing. `--skills` names the lenses outright. `--output-format json` gives the `review.run` document (machine-mode.md). The narration goes to stderr.
+- [x] **The review core** (`business/review/`, a new module standing on the contracts alone, its model calls closures):
+  - **plan**: the lenses whose hints apply to the changed files, or those named. Past four, one narrowing pass on a utility member the config names picks among them, held to what applies, and with no utility member every applicable lens runs.
+  - **hunt**: one pass per lens per chunk, its lens prompt, the rule that the material is data, never instructions, and the finding contract as its output format. The title, the description and the numbered change arrive fenced as data.
+  - **after the model, whatever it said**:
+    - a finding not on a line the change added is dropped;
+    - on a re-review, one not on a line the new push added;
+    - and one this login already posted.
+  - **dedup** by identity: file, first line, kind. The most severe is kept and every lens that found it credited.
+  - **confirm**: one pass over what is left, which may confirm, dismiss or tighten, never add or widen, and never a verdict for a finding it was not given.
+  - **cap**: the ten most severe post inline, the rest a line each in the one summary.
+- [x] **Silence is correct**: no finding means no comment, no summary and no confirm pass, exit 0.
+- [x] **Re-reviews read themselves back from the forge.**
+  - Each posted comment carries its finding's identity in an HTML comment, and the summary carries the head it reviewed. The seam gained three reads for it: `current_user`, `comments`, `compare`.
+  - Markers count only from this login: anyone who can comment can write the same text, and a forged marker could otherwise silence a review. A head is read only when it is a commit id, and checked again before it reaches an API path.
+  - A new head is reviewed `incremental` from the head read last, its own earlier findings told to the hunt as known.
+  - The same head again is `already reviewed`, and no pass runs.
+- [x] **Posting is an outbound write through the gate**, as `review_post`:
+  - `permissions.review_post`, the run's `--yes` and `--permission-mode` (plan and dont-ask refuse);
+  - on a terminal, the question, answered through the one path every prompt answers by (yes, no, always, session);
+  - with nobody to ask, a refusal naming `--yes` or `--dry-run`, the review still printed.
+
+  One batch: GitHub's review, GitLab's draft notes published in bulk.
+- [x] **The law, in the same change**: `review` in `cmake/modules.cmake` (links `contracts`; `cli` links it and `forge`), ADR 0008's table, the business card, and a named rule in `harness.layering` holding `review/` to `contracts/` and itself. In the parity tables `review mr` is a CLI-only carve-out (the training precedent), and `review` is runner-covered in the shell. SPEC gains the code-review scope line, dated.
+- [x] **The tests**:
+  - `review/diff_test`: the parser over the fixtures and git's shapes, the exclusions, the chunks, identities and markers (a forged one refused);
+  - `review/engine_test`: each lens's planted defect found once and its clean twin silent, the prompts, each post-model filter, dedup, the confirm pass dismissing and tightening and unable to add, a failed pass said, the cap and the summary, the plan;
+  - `forge/*_transport_test`: the three new reads, argv pinned, a non-commit id refused;
+  - `cli/review_mr_test`: in process over the real `gh` transport: the batch byte for byte, dry run and gate refusal posting nothing, silence, a re-review comparing from its own head and ignoring another login's markers, the same head with no pass;
+  - `cli.review_mr`: the real binary over a fake `gh` on PATH and a mock reviewer: dry run, refused unasked, one batch under `--yes` with the head marker.
+
+Decisions taken while building, for veto:
+- **The structural filters and dedup run before the confirm pass**, not after it as the document listed the steps. They cost nothing and cut what the confirm pass reads, and since it can only remove or reword, the result is the same.
+- **A finding must sit on a line the change added**, on every review, not only re-reviews. The skills are told so, an inline comment can only anchor there, and the precision bias wants it. 48b's real-weights check showed a model reaching for an unchanged line.
+- **Re-review state lives on the forge** (markers), so a review run from any machine knows what this login said. It is trusted from this login only, after the seam's `current_user`.
+- **Identity is per line**: the same defect named at two lines is two findings (the real-weights run below shows one). A semantic merge would be a model call the confirm pass does not make.
+- **The run document's shape** is built where the run is composed (`cli/review_mr`), not in `contracts/`: no other surface writes one yet, and 48d's sweep composes the same function.
+- **`review mr` takes no config yet**: the CLI's path, per-repository lenses and the post grant are the `review:` unit's (48d), so the config grows once.
+- **Not covered by a test: the terminal question itself.** The gate's question on a terminal goes through the same `answer_permission` every prompt uses, which is tested. The piped refusal and `--yes` are tested on the real binary.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3388 of 3391 pass, with the one test skipped where it always is. The three that failed were the suite's own rules catching mine:
+- a test name that began with `--` (`cli.test_names`, and the case Catch2 then could not select);
+- the new `ref` argument, which completes to nothing (`review mr ref` added to the reviewed free-text list: a merge request on a remote forge has nothing local to offer).
+
+Renamed and listed, all three pass on their own, as do the regenerated root help, `harness.layering` and `harness.layer_context` (the business card trimmed under its 3000 bytes). The build is warning-free and the format clean. (This line was written after the commit that shipped 48c had gone out with a placeholder here; it rides with 48d's commit rather than rewrite a pushed one.)
+
+**On real weights**, the optional pass: one family (Google's Gemma4-12B Q4_K_M), one fixture merge request, through the real binary, with a fake `gh` serving the planted security change and then its clean twin, `--dry-run`, every lens the hints chose (`back-end`, `general-correctness`, `security`).
+- **The planted injection** (45 s): found and kept.
+  - `general-correctness` and `security` named line 9, the shell command, and it posted once, both credited.
+  - `back-end` named line 7, where the request's value is read: the same defect at another line, so a second finding (identity is per line, as decided above).
+- **The clean twin** (65 s): two false positives.
+  - All three lenses named line 8, the confined `Path(...).name` passed as a list with no shell, and it posted once, all three credited.
+  - `back-end` added an argument-injection worry at line 10.
+  - The confirm pass tightened one wording and dismissed neither.
+
+So on a 12B Q4 the pipeline does what it is built to: dedup, the filters, a confirm pass that cannot add. But the precision the track promises is not there on the clean twin, with three lenses and the merge request's own text in the prompt. A larger or cloud model is the next thing to measure, with the confirm pass on the stronger of two members, a suite's verifier. **Not run: a cloud model**, which spends money under your key with nobody here to approve it.
+
+### 2026-10-18 — `review-sweep` (backlog item 48d): repos watched without a daemon
+
+**Why.** One merge request on demand was 48c's. This is the watch: a repository, a list of them, or an owner's whole set reviewed as merge requests appear. It is built inside the standing laws: interactive turns never listen, and nothing here is a daemon.
+
+- [x] **The `review:` config unit** (`contracts/config`):
+  - a target per name, either a `repo` or an `owner` (an organization, a group or a user, listed at sweep time);
+  - its `forge` (`github`, `gitlab`) and `host`, the `skills` it runs, `post` (its declared grant), `drafts`, a `model` and the `cli` to spawn;
+  - every shape refused at load, naming the target;
+  - written by `apogee review targets add|delete` through the one editor, in both formats, and listed by `review targets` with its document.
+
+  The starter config carries a commented example, compiled-in copy included.
+- [x] **The seam's two listings** (`forge/`):
+  - a repository's open merge requests updated after a time, oldest first (GitLab's time carried into the query only when it is a timestamp);
+  - an owner's repositories: an organization's or group's (subgroups included) else a user's, the archived left out.
+- [x] **The sweep** (`review/sweep`, one shot):
+  - each repository's open merge requests past its watermark;
+  - each a `review mr` run, re-review rules and all;
+  - the watermark advanced and saved after each one, so a crash resumes exactly where it stopped, and a merge request that failed is not advanced past;
+  - then exit, with the user's cron or CI the cadence.
+
+  A repository seen for the first time starts at now, so history stays unreviewed unless `--since` asks. Drafts skip unless the target counts them. Past `kMaxMergeRequestsPerSweep` (20) the rest wait for the next sweep, counted in the document.
+- [x] **Unattended consent, 27i's ceiling**:
+  - posting is the target's `post: true` or the run's `--allow-post`, seeded as the run's answer to `review_post` in the one checker, never widened, and `permissions.review_post: deny` over both;
+  - without a grant, the merge request is reviewed into the document, which says it posted nothing and how to grant it;
+  - each target's grant (`target`, `--allow-post`, `none`) is recorded.
+- [x] **One sweep at a time**: `review/sweep.lock` through `PidLock`. A second refuses, naming the live holder's pid, and a dead holder's lock is taken over: a killed sweep must not block the next cron run.
+- [x] **The record**: the `review.sweep` document (machine-mode.md) on stdout, and kept under `review/sweeps/` posted or not, since an ungranted sweep's findings are read there. A new private layout row, `review`, holds the watermarks, the lock and the documents. A sweep with errors exits 1 so a scheduler notices.
+- [x] **The tests**:
+  - `contracts/review_targets_test`: the unit loaded and refused, the editor in both formats;
+  - `forge/*_transport_test`: the listings, argv pinned;
+  - `review/sweep_test`: first sweep at now, `--since`, the watermark kept, a crash resumed, the cap, drafts, an owner expanded, every grant, `--target`;
+  - `cli/review_cmd_test`: `targets` add, list, delete, refusals with the file untouched, the completion, a sweep with nothing to sweep;
+  - `cli.review_mr` grown on the real binary: first sweep at now, `--since` into the document without a grant, nothing reviewed twice, the lock refusing a live holder by pid, `--allow-post` posting once;
+  - the parity tables classifying `review sweep`, `review targets add` and `delete`.
+
+Decisions taken while building, for veto:
+- **Targets are a map keyed by name, the top-level `review:` section**, like every other section, so the one editor writes them as it writes MCP servers. The CLI's path is a target's `cli:`, the 48a decision's "joins the review unit" made per target.
+- **The watermark advances per merge request, not per target.** That is finer than the document's "after that target's merge requests are handled", and it is what makes a crash resume exactly where it stopped.
+- **A posted review touches its merge request's update time**, so the next sweep lists it again. 48c's markers make that re-review `already reviewed`, with no pass and nothing posted, so it costs a few reads.
+- **A dead holder's lock is taken over** (the task runner's choice, not the cycle's): a scheduler's next run must not wait on a human to delete a file.
+- **`review targets add|delete` have no admin-plane twins**: carved out in the parity table as review control, CLI-only on the training and task precedent. The listing's twin is its document.
+- **No `--since` on targets already swept**: `--since` only seeds a repository seen for the first time. To reach back on one already swept, move `review/watermarks.json` aside, as the store's own refusal says.
+
+**Verified.** `lib/scripts/cicd.sh --test`: all 3401 tests pass, with the one test skipped where it always is. The build is warning-free and the format clean, and the root help is regenerated for `review`'s summary.
+
+**Not run on real weights**: a sweep is `review mr` runs (48c's real-weights pass above) over listings the scripted forge holds. **Not run live**: `gh`'s listing and owner endpoints, which would read a real organization's repositories, and posting, which would comment on a real pull request.
+
+## Milestone AM — Video generation
+
+**Goal.** Apogee generating video locally (track 49, opened 2026-10-18 from that day's video-generation spike, behind the dated SPEC scope amendment the user approved the same day): diffusion pipelines in the store, a runtime Apogee owns and never links, and one honest verb. The MLX backend's discipline carries over whole: a heavy Python runtime reached through a seeded driver over the one script runner, its packages in the venv Apogee owns, refused by a ladder of file facts each naming its fix. Tests never touch the network or real weights; the reference generation is the user's run.
+
+### 2026-10-19 — `video-store` (backlog item 49a): diffusion pipelines as model directories
+
+**Why.** A video model is a pipeline, not one weights file: a repository whose root carries `model_index.json`, with each component (`transformer/`, `vae/`, `text_encoder/`, the tokenizer, the scheduler) in a directory of its own. The spike found the store refusing one outright: the snapshot rule wants a root `config.json` (`snapshot.cpp:85`).
+
+- [x] **The `pipeline/` format** (`modelstore/store.h`): `<models>/<model>/pipeline/<id>/`, under the models directory beside `gguf/`, `safetensors/` and `mlx/`, with no backend type over it.
+  - The id is the SafeTensors rule's: a digest over every component's shards.
+  - It is listed, committed and named by model, handle, bare id or path like the other formats. MLX's listing and commit became one whole-directory implementation that both formats call.
+  - **One list of formats**: `store_formats()` and `is_store_format`. Every walk of the store reads it, and so does the rename core, which kept its own list before.
+- [x] **The reader** (`modelstore/pipeline_info`), `mlx_info`'s shape and honesty rule: `read_pipeline_info` reads `model_index.json`'s class and version and each component it declares.
+  - A component's kind comes from its class name (scheduler, tokenizer, processor, else a model), and the kind says which file it needs. A model needs its `config.json` and its SafeTensors: every shard its index names present, each shard's header within its file.
+  - `[null, null]` is an optional component the checkpoint does not ship; it is listed as not shipped, never required.
+  - Anything missing is "cannot load", naming the piece: `the vae component (AutoencoderKLWan) is missing -- no vae/ directory`.
+- [x] **The pull**: `models pull <owner>/<repo>` on a repository with `model_index.json` at its root lands it whole (`pull_pipeline`), with no new flag.
+  - The index is read first; only the components it names are downloaded.
+  - A component the index names with no files in the repository is refused before a byte moves.
+  - Each file is checked against the published size and sha256, and the staging directory is read whole before it is committed. A failure or Ctrl-C at any rung leaves nothing behind.
+  - Weights already here are found by the published digests before a byte of weights moves.
+- [x] **Every verb learns it**:
+  - `models list` has a **Pipelines** table: class, components and size in the note, and `components` and `bytes` in the JSON.
+  - `models info` prints the component table: kind, class, files, shards and variant, size.
+  - `delete` and `repair` take a pipeline whole, `check` validates it (a broken one names its repair), and completion offers it.
+  - `convert` and `quantize` refuse one by name. `models rename` moves it with its model's directory.
+- [x] **The tests**, over pipelines built in Wan 2.2 TI2V-5B's layout (`support/pipeline_model.h`, real SafeTensors headers, never real weights):
+  - `pipeline_info_test`: every way a pipeline cannot load;
+  - `store_test`: the row;
+  - `source_hf_test`: detection and selection;
+  - `models_pipeline_test`: the pull against a fixture Hugging Face source through the real HTTP client, every failing rung, the listing, `info`, delete, repair, the convert refusal and rename;
+  - `check_test`: the doctor's rows.
+
+Decisions taken while building, for veto:
+- **The index decides what is pulled.** Only the directories `model_index.json` names are taken, so a repository that also carries a single-file checkpoint at its root (Stable Video Diffusion's 9 GB `svd_xt.safetensors`) or sample media does not spend them. A weights variant (`*.fp16.safetensors`) is left out where the plain weights sit beside it, and kept where it is the only weights; the reader says the variant.
+- **`model_index.json` at the root is the decision**, asked before the MLX model card and before any GGUF. An explicit `owner/repo:file.gguf` stays a file pull.
+- **`--safetensors` on a pipeline repository is refused**, naming the plain pull. The store map found it would otherwise land a directory nothing lists. This refusal has no unit test: `pull_snapshot` builds its own network client.
+- **Components are classified by their class names**, so a scheduler needs only its configuration and a tokenizer only its files. Weights are required of model components alone.
+- **The id ignores configuration files**, as MLX's does, so two pipelines with identical shards and different configurations share a directory.
+- **`models list` gains two numeric JSON fields**, `components` and `bytes`, on pipeline rows only. The change is additive.
+
+**Verified.** `lib/scripts/cicd.sh --test`: all 3416 tests pass. The build is warning-free and the format clean.
+
+**Not run: a live pull.** The reference pipeline, Wan 2.2 TI2V-5B, is the user's to pull (the standing testing rule). The fixture mirrors its layout, and the pull's code is the one a live repository meets.
+
+### 2026-10-19 — `video-runtime` (backlog item 49b): diffusers behind the driver discipline
+
+**Why.** Generating video locally means a diffusion pipeline run in Python, torch and diffusers, which the spike found absent from every environment Apogee owns. The house already owned the template: the MLX backend reaches mlx-lm through a seeded driver over the one script runner, never linked, refused by a ladder of file facts.
+
+- [x] **The driver** (`assets/video/video_generate.py`), seeded beside the others under `training/scripts/`, compiled in and byte-identical by test.
+  - It runs one pipeline from the store on a request: device auto (CUDA, MPS, then CPU, as torch reports), the pipeline loaded by the class its index names, local files only.
+  - Image-to-video goes through the pipeline's sibling class over the same components (`WanPipeline` to `WanImageToVideoPipeline`), refused by name when there is none.
+  - The seed runs on a CPU generator, and progress is one `step` record per denoising step. The frames are written as numbered PNGs, with `ready` and `done` records around them.
+  - Before anything is imported, the house's guards are in place: offline, SIGINT ignored, descriptor 1 on stderr.
+- [x] **The request is a JSON file the driver reads** (`video/generation`'s `request_document`), so a prompt is never an argument.
+- [x] **The ladder** (`video/runtime`'s `probe_video`), read from files and refused at its first missing rung with its fix: the environment, torch, diffusers, the pipeline read whole, the driver, ffmpeg. The package probe is `training/python_env`'s new `find_site_package` (either site-packages layout, never an import), with the version from the distribution record.
+- [x] **The `video` requirement set** (torch, diffusers, transformers, accelerate, ftfy, sentencepiece, as floors), installed by `apogee train setup --with video` or on demand (`cli/video_runtime`):
+  - at a terminal the person is asked, with the packages named and the size said, and a yes installs through the environment's own pip;
+  - on a pipe, or on a no, the refusal names `train setup --with video`.
+- [x] **One generation** (`video::generate_video`):
+  - A working directory under `cache/video` (`run-<pid>-<random>`, a new layout accessor). A directory a dead run left is swept first.
+  - The driver runs over the script runner with every event said.
+  - The frames are assembled by `platform::encode_video`: H.264 in `yuv420p`, the index at the front, even sides, and MPEG-4 Part 2 when the ffmpeg has no x264.
+  - The clip is moved to the output. The working directory is removed on every path, and the output is touched only on success.
+- [x] **The doctor**: a **Video** section with `runtime` (a skip naming the set until it is installed, then the versions found) and `driver` (the seeded copy against this build's).
+- [x] **The module's law**: a new business module, `video` (links `training`, `modelstore`, `contracts`, `platform`). It has its row, ADR 0008's table, the business card, and a named rule in `harness.layering`.
+- [x] **The tests**, never real weights:
+  - `video/runtime_test`: the ladder, every rung with its exact fix, in order;
+  - `video/generation_test`: over a scripted driver writing real frame files. Covers the request contract, the events in order, the clip in place, and every way a run ends without one (a crash with its stderr tail, the driver's own refusal, no frames, a failed assembly, a cancel), each leaving an existing output as it was and no working directory. Also the dead run's frames swept;
+  - `video/video_driver_test`: the shipped driver under `python3` over stub `torch` and `diffusers`. Covers the device and type, the call built from the request, each step, every frame, image-to-video, every refusal with its exit code, a stop mid-denoise, a whole generation, and a library's print kept off the protocol;
+  - `ffmpeg_test`: the encode with its fallback;
+  - `cli/video_runtime_test`: the consent;
+  - the asset, environment and doctor suites.
+
+Decisions taken while building, for veto:
+- **Floors, not exact pins.** The document asked for versions pinned in the driver's header, reproducible. The environment's rule is floors, because an exact pin ages into an uninstallable one the day it is yanked. So the set states floors and the driver's header names them, and reproducibility comes from the versions that actually ran: the `ready` line reports them, and the run's document keeps them (49c).
+- **The request is a file, not arguments**: a prompt stays off a process listing and out of Windows' command-line limit, its UTF-8 intact.
+- **No platform rung.** The ladder's facts are the environment, the packages, the pipeline, the driver and ffmpeg. torch runs wherever its wheels install, and the device is torch's to report, said on the `ready` line (the CPU is hours, and 49c says so).
+- **The consent question is new.** The house's mlx-vlm precedent is a refusal naming `train setup --with mlx-vlm`. The document asked for on-demand install with consent, so the environment's own question (`require_python_env`) is asked one level down, and a pipe still refuses.
+- **The seed's noise is drawn on the CPU** whatever the device, so one seed is one clip across devices at the same versions, as far as the denoise itself is deterministic there.
+- **Weights load at bfloat16 on CUDA and MPS, float32 on the CPU.** The VAE is not upcast separately and memory offload is not offered: both are later questions once a real generation measures them.
+- **The no-listener sample and the terminal check move to 49c.** Both drive the binary through a generation, and the binary has no generating path until the verb. The C++ suite holds the stderr capture and the stdout guard here.
+
+**Verified.** `lib/scripts/cicd.sh --test`: all 3438 tests pass. The real-driver cases ran under the host's `python3`, not skipped. The build is warning-free and the format clean, and `harness.layering` and `harness.layer_context` hold the new module's row, card and table.
+
+**Not run on real weights**, by the document's own rule: a genuine Wan 2.2 TI2V-5B generation is the user's run. diffusers is absent on this machine (the spike's measurement), so the driver's calls are written against diffusers' documented pipeline API and exercised only through the stubs. The first real run is where a mismatch would show.
+
+### 2026-10-19 — `video-generate` (backlog item 49c): the clip, honestly priced
+
+**Why.** The store could hold a pipeline and the runtime could run one; this is the door. It also carries the iteration amendment: every clip is a reproducible record, its seed captured and its document written beside it.
+
+- [x] **`apogee video generate "<prompt>" -o <clip>`** (`cli/video_cmd`, composed in `cli/video_generate` over seams):
+  - from text, or from a seed image with `--image`;
+  - `--model`, else `models.default_video`;
+  - `--seed`, `--duration`, `--resolution`, `--steps`, `--fps`, and `--output-format json`.
+- [x] **The pipeline by any name the store gives it**: a handle, a bare id, a model holding exactly one pipeline, or a pipeline's path. Two under one model are refused, naming both.
+- [x] **The pointer** `models.default_video` holds what was written, checked against the store when it is set.
+  - It is no seventh role: nothing in `harness/roles.h`, read by the verb alone.
+  - `config set-default-video <pipeline|off>` writes it through the one editor (`set_default_video`), and `config get` reads it. The starter config documents it, commented.
+  - `models rename` carries it with the directory in the same edit.
+- [x] **The caps as named constants**, each quoted in its refusal before anything runs: 10 seconds, 1920 pixels a side (128 the least, a multiple of 16), 100 steps, 4-60 fps. The defaults are the reference pipeline's own: 1280x704, 5 s at 24 fps (121 frames, rounded to the pipelines' `4k+1`), 50 steps.
+- [x] **Output honesty**:
+  - An existing output is never written over.
+  - The clip lands whole, through 49b's working directory, or not at all.
+  - A failed run exits 1 and a cancelled one 130, each saying the output was left untouched and writing no sidecar.
+- [x] **The record** (`contracts/video_run`): the `video.generation` document (machine-mode.md), with the pipeline, prompt, image and mode, the seed and whether it was given or drawn, every setting, the device and type torch reported, this build's target, the versions that ran, the codec and the time.
+  - It is printed under `--output-format json` whether or not the clip landed.
+  - It is written beside a clip that landed as `<clip>.json`.
+- [x] **The narration on stderr**: the pipeline, settings and seed first, then the device and the scale to expect once the driver says where it runs. Apple silicon is "minutes per clip"; the CPU is "hours", and says a GPU is far faster. Then each step: a busy line counting on a terminal, a line every tenth on a pipe.
+- [x] **Every mode**:
+  - the shell classifies `video` as the exec line's (a Video view is a recorded later item);
+  - the HTTP parity table carves out `video generate` and `config set-default-video` (CLI-only, the training precedent);
+  - completion offers the store's pipelines (`VIDEO_PIPELINE`) for `--model` and the pointer;
+  - the root help golden is regenerated.
+- [x] **The tests**:
+  - `cli/video_generate_test`: in process over the seams, with a scripted driver writing real frame files. Covers the pointer and every spelling of a pipeline, each cap, the output rules, the document field by field and the sidecar that is it, a failure, a cancel, a given seed and a seed image, and the narration's words per device;
+  - `cli/video_cmd_test`: through the real command tree. Covers the pointer written, read, refused and cleared, completion, the refusals, and the rename;
+  - the editor's goldens, YAML and JSONC;
+  - `cli.video_lifecycle` on the real binary over a fake runtime, with the real seeded driver under stub libraries. Covers the document on stdout alone and equal to its sidecar, the narration, no library's print on either stream, the refusals, a failing run, and a real Ctrl-C mid-denoise leaving nothing. While the driver runs, the process tree is sampled with `lsof` for a listener (the sample is required to have seen the driver); a missing runtime is refused on a pipe.
+
+Decisions taken while building, for veto:
+- **The caps' first values** (10 s, 1920 px, 100 steps, 4-60 fps) are conservative and the defaults are Wan 2.2 TI2V-5B's own. Both are tuned on the first real run, which is the user's.
+- **`--steps` and `--fps` are flags too.** The document listed the caps as duration, resolution and steps, and a duration needs a rate to become frames; both are kept in the record. Guidance is not a flag: the pipeline's own default runs, and the record says `null`.
+- **`-o` is required**, an existing file is never replaced, and the clip's directory must exist.
+- **The sidecar is `<clip>.json`**, appended, never the clip's stem with its extension replaced, so it cannot take a name the folder already gives something else.
+- **The pointer keeps what was written.** A model name that later holds two pipelines is refused at run time, naming both, rather than guessed.
+- **A refusal before the run prints no document**: one line on stderr naming the fix, exit 1. Every run that started prints one.
+- **A drawn seed is 31 bits** from the system's random device, kept in the record.
+- **No admin twins**: generating runs the host's GPU for minutes on a user's act, and the pointer serves only that, so both are carved out.
+- **The no-listener sample and the noisy-library check deferred from 49b** live in `cli.video_lifecycle`. That is a script of its own rather than another phase of `cli.complete_opens_no_listening_socket`, whose later phases are gated on the MLX stubs.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3448 of 3450 tests passed. The two failures had one cause: a test name of mine began with `--model`, which `cli.test_names` refuses and which ctest's filter then read as an option. After the rename, both cases, `cli.video_lifecycle` and `cli.bare_help` pass when run again. The build is warning-free and the format clean.
+
+**Not run on real weights**: a genuine clip is the user's run, per the document. Every narration line and every document field was exercised over the stub runtime.
+
+### 2026-10-19 — `video-iterate` (backlog item 49d): the next run, seeded from the last
+
+**Why.** One clip is never the clip: every video harness lives on the loop of regenerating with one thing changed, extending the shot, and previewing cheap before rendering the winner. 49c's record makes it nearly free. This is the loop over that record, built as new runs rather than a session.
+
+- [x] **`video generate --from <record | clip>`** runs a recorded run again.
+  - The record is named itself, or found beside a clip as `<clip>.json`. A clip with no record is refused by name: settings are never guessed from pixels.
+  - Every setting the flags leave alone is taken from the record, and the seed is held unless `--seed` changes it. A new prompt is the positional, as on any run.
+  - Before the run, stderr says what came from where, for example `from <record>: model …, 1280x704, 24 fps, 5 s, 50 steps, seed 4242 (held)`, then `changed: the prompt` (or `nothing -- the same run again`).
+  - A record made on another platform runs, and says the same seed may not make the same clip here.
+- [x] **`--extend <clip>`** continues a clip.
+  - Its last frame is taken through the ffmpeg seam (`platform::extract_last_frame`, from the last second) into `cache/video` and removed after the run, and it seeds the image-to-video path.
+  - The clip's record, when it has one, supplies its model, frame size and rate, so the continuation matches. The seed is new unless given.
+  - A record that continued a clip, run again with `--from`, continues the same clip again.
+- [x] **`--draft` / `--final`**: named presets beside the caps (`kDraftPreset` 16 steps, `kFinalPreset` the default 50), mutually exclusive, over the same frame and seed. A draft that moves right, run again with `--from <draft> --final`, is that clip at full quality. `--steps` given wins over a preset.
+- [x] **The record grows** (`contracts/video_run`):
+  - `parent` (null, or `move` -- `from`, `extend` -- with the record read, its clip, and the clip continued);
+  - `preset`;
+  - `seed_source` `held`;
+  - a reader, `parse_video_run`/`read_video_run`, that the verb and the tests share.
+
+  A final render traces back to its drafts, and the chain is data in the records, stored nowhere else.
+- [x] **The tests**:
+  - `cli/video_generate_test`: over the seams. Covers the seed held and changed, nothing changed, every refusal, a record from elsewhere, a continuation matching its parent and continued again from its record, a frame that cannot be taken, a draft then its final over one seed and frame, `--steps` over a preset, and a record read back;
+  - `ffmpeg_test`: the last frame;
+  - `cli.video_lifecycle` on the real binary: a draft, its final holding the seed and frames and chaining to the draft's record, a continuation as image-to-video, and a clip with no record refused.
+
+Decisions taken while building, for veto:
+- **The presets change steps, not the frame size.** The document described them as steps-by-resolution pairs. Under one seed, though, only the same frame size and frame count draw the same starting noise, so a smaller draft would be a different clip, not a preview of this one. The draft is the final's own frame at 16 steps; the values are first guesses, to tune on the first real run.
+- **A prompt is changed with the positional**, `video generate "…at dusk" --from clip.mp4`, one spelling as on every run. The document's example wrote it as `--prompt`.
+- **`--extend` draws a new seed**: the document holds the seed for `--from` and `--final` only. It takes the parent's model, frame and rate when the parent has a record, and its prompt too when none is given.
+- **The continued frame is never kept.** The record says `continued: <clip>` and `--from` takes the frame again, so a record stays a reproducible instruction rather than pointing at a temporary file.
+- **`--from` with `--extend`, and `--extend` with `--image`, are refused** as two moves at once.
+
+**Verified.** `lib/scripts/cicd.sh --test`: all 3457 tests pass. This run also covers 49c: its two renamed cases pass inside it. The build is warning-free and the format clean.
+
+**Not run on real weights**: whether a 16-step draft previews the 50-step final well enough is the reference pipeline's to show, on the user's run.
+
+### 2026-10-19 — `video-lora` (backlog item 49e): LoRAs at generation
+
+**Why.** For a niche genre or style, the quality ceiling of an open video model is set by community fine-tunes, not the base weights, and the Wan family's LoRAs are the largest of any open video model. Apogee loaded a pipeline exactly as its repository ships it: no LoRA handling anywhere in `business/video/` or the driver, while diffusers carries the capability natively.
+
+- [x] **`video generate --lora <path>[:<scale>]`**, repeatable, at most 4, each strength in (0, 2], 1 when none is given. Only a number after the last colon is a strength, so `C:\loras\x.safetensors` and a name holding a colon stay paths. Each LoRA is a user-supplied file -- Apogee never pulls one -- and is named by file facts alone (`video::lora_file`): a `.safetensors` file, or a directory holding exactly one, every refusal naming the path before anything runs.
+- [x] **Applied inside the driver by diffusers' own loader.** `video_generate.py` takes `loras` in its request and calls the pipeline's `load_lora_weights` for each, under its own adapter, then `set_adapters` with every strength, before the first step. A pipeline whose base model has no LoRA loader is the driver's refusal, naming its class. Apogee's C++ side never reads a LoRA's weights. The request carries `loras` only when there are some, so a run without asks exactly what it asked before.
+- [x] **`peft` joins the video set** (`peft>=0.13`): diffusers loads a LoRA through it. The ladder notes it without making it a rung, since only a run asked for a LoRA needs it. Such a run refuses without it, naming `train setup --with video`.
+- [x] **The record is the reproducibility contract.** The `video.generation` document gains `loras` (each `path`, `sha256` and `scale`) and `versions.peft`. A `--from` rerun holds the LoRAs as it holds the seed and verifies each by its hash: a changed file or a vanished one is refused by name. `--lora` on a rerun replaces the whole set and `--no-lora` clears it, each said in the rerun's changes.
+- [x] **The seeded driver stays governed**: the compiled-in copy regenerated byte-identical, and 49d's driver digest recorded in `assets/retired-scripts.txt`, so an unedited earlier copy is brought forward by `check --fix`. The assets test now walks every driver the refresh walks -- the code-execution server's and video's included -- since video's first retirement made the narrower list wrong.
+- [x] **The tests**: `video/runtime_test` (the file facts, peft noted), `video/generation_test` (the request's `loras`), `video/video_driver_test` (the real driver under a stub loader: each LoRA and its adapter, the strengths set together, a pipeline without a loader, a missing file, the library's refusal), `cli/video_generate_test` (`parse_lora`'s table, the request and the record, every refusal before a spawn, the rerun matrix), `python_env_test` (the set), and `cli.video_lifecycle` grown -- `--lora` on the real binary over the stub loader, its hash and strength recorded, held on a rerun, a changed file refused.
+
+Decisions taken while building, for veto:
+- **The flag grammar**: repeatable `--lora <path>[:<scale>]`; strengths in (0, 2]; at most 4 a run (`kMaxVideoLoras`). Negative strengths, which some use to subtract a style, are refused for now.
+- **peft added to the video set.** The item did not name it, but diffusers cannot load a LoRA without it; it is small and pure Python.
+- **`--extend` carries no LoRAs.** A continuation takes its parent's model, frame and rate, but its LoRAs only when `--lora` names them again: holding them would add a refusal (a moved file) to the continuation path.
+- **A directory is resolved to its one file**, recorded as that file; a directory of several is refused, naming them.
+- **The adapters are named `lora1`, `lora2`, ...** in the order given.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3532 of 3532, two skipped and said (the real caption burn without libass, and the existing pdftotext case); `cli.video_lifecycle`'s LoRA phase ran on the real binary.
+
+**Not run on real weights**: one community LoRA on the reference Wan 2.2 pipeline is the user's run.
+
+## Milestone AN — The composer
+
+**Goal.** One brief becoming a scripted, narrated, captioned, assembled video, edited afterwards by typed instruction (track 50, opened 2026-10-19 from that day's composer spike, which verified the market leader's reviewed feature set and measured the two gaps under track 49: no text-to-speech anywhere, and an ffmpeg seam with no concat, mix or caption burn). Everything is built over 49's pieces and the house's laws: local, never linked, every run a record.
+
+### 2026-10-19 — `voice-runtime` (backlog item 50a): speech in the box
+
+**Why.** A narrated video needs a voice, and Apogee had none: no text-to-speech anywhere in `source/`. This is the composer track's one genuinely new runtime, built on the video runtime's template whole.
+
+- [x] **The `voice/` store format** (`modelstore/store.h`, `modelstore/voice_info`).
+  - Kokoro-82M's repository holds a `.pth` checkpoint and `voices/*.pt` packs and no SafeTensors at all, so no existing kind fits. A minimal row was the grooming default for that case.
+  - The id is the SafeTensors digest rule over the checkpoint and the voices; the two id rules now share one digest.
+  - The reader is honest about wholeness: a PyTorch save is a zip archive, and a whole one ends in its end record, which a cut-short download never has.
+  - `models pull` recognises the layout by its files (a root `config.json` and `.pth`, packs under `voices/`) and moves those files only, never the samples or the card.
+  - List, `info` (voices by language), `check`, `delete`, `repair` and completion all learn it; `convert` and `quantize` refuse one by name.
+- [x] **The driver** (`assets/video/voice_say.py`), seeded beside `video_generate.py`.
+  - It loads the model from its own files and speaks each segment sentence by sentence. Sentences are split by a plain rule (an end mark then space), never by a model.
+  - It writes 16-bit mono WAVs through Python's own `wave`, and reports each sentence's seconds counted from its samples.
+  - The house guards are in place before anything is imported.
+- [x] **The voice ladder** (`video::probe_voice`): environment, torch, kokoro, the model read whole, the driver. The environment rungs are shared with the video ladder through one helper, grown rather than duplicated. The `voice` requirement set is installed by `train setup --with voice`, or on demand with consent: the consent flow is now `install_runtime_set`, with video its first use.
+- [x] **Speech** (`video::speak`): a working directory (the run helpers moved to `video/work_dir`, shared), the driver over the one script runner, and every segment read back and **measured from its own WAV header** before any is kept. `join_segments` puts the samples one after another into one WAV, renamed into place.
+- [x] **`apogee voice say "<text>" -o file.wav`** (`cli/voice_cmd`, composed in `cli/voice_say`).
+  - `--model`, else the store's one voice model.
+  - `--voice` from the model's own set, completed and refused naming the set. The default is `af_heart` (Kokoro's own recommendation) when the model has it.
+  - `--speed` 0.5-2.0, the text capped at 4000 characters, the file never written over.
+  - Its record is the `voice.speech` document (machine-mode.md): segments and sentences with their seconds and offsets. It is printed under `--output-format json` and kept beside the file.
+  - Classified as the exec line's in the shell, carved out of the HTTP parity table, and in the root help.
+- [x] **The doctor**: `voice runtime` (a skip naming the set until installed) and `voice driver` (the seeded copy).
+- [x] **The tests**, never weights:
+  - `voice_info_test`, plus the store and HF source cases;
+  - `models_voice_test`: the pull against a fixture source;
+  - `video/voice_test`: the core over a scripted driver writing real WAVs, and the WAV reader;
+  - `video/voice_driver_test`: the shipped driver under `python3` over stub `torch` and `kokoro`, covering the sentence rule, every sample counted and in the file, a library's print kept off the protocol, and each refusal with its code;
+  - the voice ladder in `runtime_test`;
+  - `cli/voice_say_test`: the verb in process and through the tree;
+  - `cli.video_lifecycle` grown: `voice say` on the real binary, its document and WAV, an unknown voice refused, and the process tree sampled with `lsof` while the speech driver runs (required to have seen it), then a Ctrl-C leaving nothing.
+
+Decisions taken while building, for veto:
+- **A `voice/` row**, recognised by the files Kokoro publishes. No existing kind takes a `.pth` checkpoint, and the grooming default was exactly this.
+- **No config pointer for voices.** `--model` names one; with none named the store's single voice model runs, and several are refused, naming them. The composer resolves the same way.
+- **CUDA when present, else the CPU, never MPS.** An 82M-parameter model speaks faster than real time on a CPU, and MPS's operator gaps are a cost with nothing to buy.
+- **The set is floors**: `torch>=2.6` (whose loads default to weights-only, which matters for a pickled checkpoint), `kokoro>=0.9.4`, `misaki[en]>=0.9.4`. One caveat for the first real run: misaki fetches spaCy's English model on first use, outside Apogee.
+- **Two kinds of duration.** A sentence's seconds are counted by the driver from the samples it wrote. A segment's seconds are measured by Apogee from the file's own header. The composer times captions from both.
+- **`voice say` speaks its text as one segment**, its sentences timed inside it.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3472 of 3473 -- `cli.mlx_lifecycle` failed once in the full run (its `check` row not stating the entry's window), then passed alone and three times under a parallel load of the other end-to-end scripts; this item touches none of the mlx rows. `cli.video_lifecycle` (with its voice phase) and the new unit cases passed in it.
+
+**Not run on real weights**: speech from the real Kokoro-82M, pulled by the user, is the user's run. No `kokoro` is installed here, so the driver's calls follow kokoro's documented `KModel`/`KPipeline` API and are exercised through the stub.
+
+### 2026-10-19 — `video-assembly` (backlog item 50b): scenes into one video
+
+**Why.** The ffmpeg seam could probe, extract frames, decode audio and assemble one frame sequence, and nothing more. A folder of scene clips becomes one watchable video only by joining them, laying a narration over them and burning the captions in. This grows the seam by exactly those three operations, scene-ignorant: paths in, one video out.
+
+- [x] **Three operations on the seam** (`platform/ffmpeg`), each a pure builder of its command line beside a thin executor that probes its inputs and runs the builder's argv through the seam's one bounded child (deadline, output cap, stop, the stderr tail folded into a failure). A failed or stopped run leaves nothing at its output.
+  - **`concat_clips`**: every picture scaled and padded into the first clip's even size at its frame rate; every sound -- or a silence as long as a clip without one, so sound stays with its pictures -- at 48 kHz stereo; `xfade` and `acrossfade` at each boundary, the offsets summed from the probed lengths; `concat` for a hard cut. `kDefaultCrossfade` is 0.5 s, 0 allowed.
+  - **Copied only when the probe allows** (`concat_can_copy`): no fade to draw, and every clip alike in codec, size, frame rate and sound, in a codec an mp4 holds as it is. Then the concat demuxer copies the streams, its list written beside the output and removed after.
+  - **`mix_audio`**: each narration piece delayed to its offset and mixed at its own level (`normalize=0`), the video's own sound kept, a bed looped to the video's length, lowered (`kBedVolume`) and ducked under the narration by the one fixed shape (`kDuckFilter`, a sidechain compressor keyed by the narration), the whole padded to the video's length. The picture is copied as it is.
+  - **`burn_captions`**: the `subtitles` filter, the SRT's path escaped for both levels of a filter graph's parsing (`filter_path`). An ffmpeg built without libass has no such filter; that is refused by name, and `ffmpeg_has_filter` lets a caller ask before promising a burn.
+  - **One named encode profile**, `kFinalRender`: H.264 at crf 20, preset medium, `yuv420p`, the index at the front, AAC 192k at 48 kHz; MPEG-4 Part 2 when the build has no x264, as `encode_video` already falls back. Every result is an `Assembled` naming the codec and the settings in words, so no encode is hidden.
+  - **`probe_media` reads ffprobe's stream blocks**: the video's codec and frame rate, the sound's codec, rate and channels -- the facts the copy decision stands on -- each read with its own stream.
+- [x] **`write_srt`** (`contracts/captions`): timed cues as SubRip text, numbered from one, times rounded to the millisecond, a cue with no text or no length left out. Caption text is data: valid UTF-8, blank lines closed (a blank line would end a cue), and the characters a renderer reads as markup written fullwidth.
+- [x] **The tests**: `ffmpeg_assembly_test` -- the builders argv-exact (every boundary for one, two and three clips, zero and nonzero crossfade, a bed present and absent, each refusal, both levels of path escaping), the executors over the fake (the copy decided by the probe, the x264 fallback said, a failure, the deadline and the stop each leaving nothing behind, a mix probing every track, an ffmpeg without libass), and a **real-fixture pass** where `ffmpeg` is on PATH: generated clips joined with a fade and probed again (3 s from 1.5 + 2 - 0.5), alike clips copied, narration mixed over a bed with the picture kept. `captions_test` for the SRT. The fake ffprobe now answers in stream blocks as the real one does, and so does `pty_ffmpeg_check.py`'s.
+
+Decisions taken while building, for veto:
+- **Captions as data means fullwidth markup.** SubRip's `<i>`-style tags, ASS's `{...}` override blocks and its `\N`-style escapes would otherwise be read as styling or swallowed by the burn. They are written as `＜ ＞ ｛ ｝ ＼`, which look the same and mean nothing to a renderer. SRT has no escape of its own, so this is the only way caption text stays text.
+- **No burn without libass, and no soft-track fallback.** The ffmpeg on this machine (Homebrew's 8.1) has no `subtitles` filter, so the burn is refused by name rather than quietly done another way. The soft subtitle track the grooming recorded as a later option would be the natural fallback; it stays out of scope here. 50c keeps the SRT beside the video when it cannot burn.
+- **Normalisation is not a filter.** Every clip is scaled and padded into the first one's size and rate before a fade or a cut, because `xfade` and `concat` refuse unlike inputs. That is a precondition of joining, not one of the per-clip filters the item ruled out.
+- **A crossfade at most half of any clip.** A middle clip fades at both ends; a longer fade is refused with the clip and its length named, rather than shortened quietly.
+- **The profile's values are reasoned, not measured.** crf 20 and preset medium at the reference pipeline's 1280x704 and 24 frames a second, AAC 192k: no real Wan output exists here to tune against. The grooming called for tuning at build; that tuning waits for the first real run.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3491 of 3491, two skipped and said: the real caption burn (this ffmpeg has no libass) and the existing pdftotext case. The real-fixture join and mix ran against Homebrew's ffmpeg 8.1.
+
+**Not run here**: the real caption burn, since this ffmpeg is built without libass -- the test says so and skips; its builder and the refusal are covered.
+
+### 2026-10-19 — `video-compose` (backlog item 50c): a brief into a narrated video
+
+**Why.** Every piece of the composer stood -- clips with records (49), a voice with measured lengths (50a), the assembly operations (50b), structured planning (26f) -- but nothing joined them. This is the glue: `apogee video compose "<brief>" -o video.mp4`.
+
+- [x] **The plan** (`video/compose`): one structured member call, arriving as a closure (`PlanFn`), so the composer names no backend. The caps are written into the schema: at most 8 scenes of 2-10 s, narration at most 240 characters, a visual at most 600. With `--assets`, a scene's `asset` is an enum of the directory's names, so an asset the directory lacks fails the plan's validation and earns the one correction. An answer that still does not hold is refused with the caps quoted. The command's planner is `plan_on` in `video_cmd`: the chat role's backend or `--planner`, `run_structured` with thinking off, a side request.
+- [x] **Spend said first** (`plan_lines`): the title and length, each scene's narration and what it shows, then the runs it takes -- narrations, clips at 1280x704 and 50 steps, assets taken as they are -- and what becomes of the captions, all before anything renders.
+- [x] **The walk** (`render_project`, over `ComposeSeams`):
+  - **Every narration first.** It is cheap, and its measured length decides each clip's: a scene is stretched to hold its narration's lead, speech, the room after it and the next fade (`scene_length`). A narration no scene can hold stops the run there, before any clip renders.
+  - **Then every clip**, through `generate_clip` with a seed drawn per scene at plan time. An asset clip is copied in as it is (one too short for its narration is refused in the narration pass); an asset still seeds its scene's clip through image-to-video. An existing clip is kept when it is long enough for its narration, else rendered again with its seed held.
+  - **Captions are arithmetic**: each sentence of each narration one cue, at its scene's start (the probed clip lengths less a crossfade at each boundary), the lead and its offset, for its counted seconds (`caption_cues`), written by `write_srt`.
+  - **Then the assembly** on the seam: joined with 0.5 s crossfades, the narration laid at each scene's start over the optional `--music` bed, the captions burned -- or, by an ffmpeg without libass, kept beside the video as `<stem>.srt`. The output is touched once, by a rename.
+- [x] **The project document** (`contracts/video_project`, `video.project` in machine-mode.md): the brief, the settings, the plan's backend and attempts, every scene with its seed, its narration (measured, with its sentences) and its clip (probed). It is written beside the video from the first step and saved after every one. Each scene's files sit in `<stem>.scenes/` with their own records (`video.generation`, `voice.speech`).
+- [x] **Resumable by the same command.** A project beside the output for the same brief renders only what it does not hold, with its own settings: flags that would change them are said and not applied, and another brief's project is refused. A stopped run's file the document never recorded is replaced. A failure exits 1 and a cancel 130, every finished scene kept either way.
+- [x] **The verb**: `video compose` with `--music`, `--assets`, `--no-captions`, `-m` (the pipeline), `--voice-model`, `--voice`, `--planner` and `--output-format`. It is completed, classified as the exec line's (the `video` row), carved out of the HTTP parity table, its brief free text, and named in `video`'s summary (the root help golden regenerated).
+- [x] **The tests**: `video/compose_test` (the schema, the plan, the timing arithmetic, the walk's matrix, the assembly through the fake ffmpeg argv-pinned), `cli/video_compose_test` (every refusal, a whole run with its plan said first and its document beside the video, `plan_lines` golden, a failure resumed, captions kept beside, an asset slotted, completion), `contracts/video_project_test`, and `cli.video_lifecycle` grown: compose on the real binary over a mock planner whose first answer is not JSON, the stub drivers and a fake ffmpeg without libass, then resumed.
+
+Decisions taken while building, for veto:
+- **Narration before clips, and narration sets the length.** The voice is faster than real time and its measured length is the ground truth for timing, so every narration is spoken first. A scene runs as long as the plan says or as its narration needs, whichever is longer; a narration that needs more than 10 s refuses the run before any clip renders.
+- **The timing constants**: the narration starts 0.25 s into its scene and ends at least 0.25 s before the next fade; the crossfade is 50b's 0.5 s default, with no flag for it.
+- **The caps**: 8 scenes, 2-10 s each (one clip run's limit), narration 240 characters (about ten seconds of speech), a visual 600, the brief 2000.
+- **Resume is the same command.** No `--resume` flag: a project beside the output for the same brief is resumed, keeping its own settings. That never regenerates what stands and never writes over a video.
+- **Assets**: a clip is copied in and taken whole, its length from the probe; a still seeds an image-to-video clip run, so its scene moves and is recorded like any other. Trimming a long asset clip is not done.
+- **Captions without libass are kept beside the video** as `<stem>.srt`, said in the plan and the final line, and a file already there refuses the run (50b's decision carried through).
+- **The output is an `.mp4`**, since every assembly step writes one.
+- **No draft path yet.** Every clip renders at the defaults (1280x704, 50 steps). 49d's `--draft` over a whole composition is a natural later option, recorded here.
+- **Absolute paths in the document.** A project moved elsewhere no longer resumes; it is a record, not a portable bundle.
+- **The spend is said in runs and scale, not as a time estimate.** There is no measured per-device rate to quote.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3515 of 3515, two skipped and said (the real caption burn without libass, and the existing pdftotext case); `cli.video_lifecycle`'s compose phase ran on the real binary.
+
+**Not run on real weights**: a real brief through the reference pipeline (Wan 2.2 TI2V-5B), Kokoro-82M and a real planner is the user's run. The real burn waits on an ffmpeg with libass.
+
+### 2026-10-19 — `compose-edit` (backlog item 50d): editing by instruction
+
+**Why.** The feature the composer track was opened for: a finished video edited by typed command -- "remove scene 2", "make the second scene the moon" -- rather than on a timeline. The project document is the only state (50c), and 49d made selective re-rendering the law, so an edit is a document rewrite plus record comparison.
+
+- [x] **`video compose --from <video or project>`** takes the project's brief and settings; `-m`, `--voice-model`, `--voice`, `--music`, `--assets` and `--no-captions` change them.
+  - `--edit "<instruction>"` runs **one structured pass** (`edit_scenes`) over the same planner closure. The editor sees the brief, the plan with every scene numbered, and the instruction. It answers with the whole plan, each scene naming the scene it came `from` (null for a new one) -- `edit_schema` is the plan's with that field first. An answer that does not hold changes nothing, said.
+  - `--redo-scene <n>` (repeatable) re-rolls one scene's seed: the deterministic knob beside the natural-language one.
+  - `--dry-run` says the diff and prints the edited project as `planned`, rendering and writing nothing.
+- [x] **The diff before anything renders** (`diff_lines`): every scene of the edited plan as new, untouched, moved, or with what changed -- its narration, its prompt, its length, its asset, a new seed -- and every scene removed. A scene is "moved" only when it is outside the longest run still in the parent's order, so an added intro moves nothing.
+- [x] **Record comparison, not heuristics** (`carry_scenes`):
+  - A scene's narration speaks again exactly when its text changed (or the voice did).
+  - Its clip renders again exactly when its prompt, length, asset or seed changed (or the pipeline did), its seed held otherwise -- 49d's move, the same seed with a new prompt.
+  - Everything unchanged is copied byte for byte, with its record, under the scene's new number. The walk then renders only what is missing.
+  - The spend line counts only what will run ("2 clips already made"), so a resume's and an edit's spend are honest too.
+- [x] **Chained**: the new project names its `parent` and carries `edits` -- every instruction and re-roll from the original brief to it, each naming the project it came from. The parent is never touched. A failed edit run resumes by the same command, without editing again.
+- [x] **The tests**: `video/compose_test` (the schema's `from`, the diff matrix -- no-op, removal, an intro, a reorder, narration, prompt and length changes, a re-roll -- each golden, an edit that does not hold, the byte-for-byte carry and the exact render set, and no carry under another voice or pipeline), `cli/video_compose_test` (an edit end to end with its parent untouched, `--redo-scene`, a voice override, a failed edit and a dry run writing nothing, the refusals, a failed edit resumed), and `cli.video_lifecycle` grown: `--edit` on the real binary over a mock editor, a dry run first, then only the changed scene rendered and the rest carried (`cmp`).
+
+Decisions taken while building, for veto:
+- **Narration and clip are compared apart.** The document's rule says a scene re-renders when any of its fields change; this splits it: a narration-only change speaks again and keeps the clip -- unless the kept clip is now too short for it, which the walk already renders again. A prompt-only change keeps the narration.
+- **The diff's words**: `the edit: N scenes, were M`, then `  i. new`, `  i. scene k, untouched`, `  i. scene k, moved`, `  i. scene k; its narration changed, its prompt changed, its length changed, its asset changed, a new seed`, and `  scene k removed`.
+- **The chain's shape**: `parent` (the parent's document) and `edits` (each `instruction`, `redo`, `from`), additive to version 1.
+- **Copied, not linked or referenced.** Each project's scenes are its own, so a parent can be removed without breaking its child; the cost is the copies' disk space.
+- **The editor is the chat role's backend or `--planner`**, as the planner is. An edit with no instruction (re-rolls, overrides) makes no model call at all.
+- **A new video, never in place.** `-o` names a new file like every run; the parent and its video stay as they were.
+- **A dry run checks no runtime**: it only plans. A real edit checks both ladders before its model call.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3524 of 3524, two skipped and said (the real caption burn without libass, and the existing pdftotext case); `cli.video_lifecycle`'s edit phase ran on the real binary.
+
+**Not run on real weights**: an edit of a real composition is the user's run, after the real compose.

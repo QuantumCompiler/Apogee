@@ -14,7 +14,15 @@
 namespace apogee::training {
 namespace {
 
-constexpr std::array<std::string_view, 5> kSetNames{"prepare", "mlx", "peft", "convert", "mlx-vlm"};
+constexpr std::array<std::string_view, 7> kSetNames{"prepare", "mlx",   "peft", "convert",
+                                                    "mlx-vlm", "video", "voice"};
+
+/// Where each set runs, in the names' order (51): what `apogee bootstrap`
+/// installs on a host is the table's own word.
+enum class SetHost : std::uint8_t { Any, AppleSilicon, NvidiaGpu };
+constexpr std::array<SetHost, kSetNames.size()> kSetHosts{
+    SetHost::Any,          SetHost::AppleSilicon, SetHost::NvidiaGpu, SetHost::Any,
+    SetHost::AppleSilicon, SetHost::Any,          SetHost::Any};
 
 constexpr std::array<std::string_view, 1> kPrepare{"datasets>=3.0"};
 constexpr std::array<std::string_view, 1> kMlx{"mlx-lm>=0.21"};
@@ -33,6 +41,21 @@ constexpr std::array<std::string_view, 5> kPeft{"torch>=2.6", "transformers>=4.4
 constexpr std::array<std::string_view, 6> kConvert{"torch>=2.11",        "transformers>=4.57",
                                                    "gguf>=0.19",         "numpy>=2.2",
                                                    "sentencepiece>=0.2", "protobuf>=4.21"};
+
+// The video driver's stack (49b): a pipeline loads through diffusers, its
+// text encoder and tokenizer through transformers (sentencepiece for the
+// tokenizers that need it), accelerate for the loading, and ftfy for the
+// prompt cleaning Wan's pipelines do. Floors, as every set's are; the
+// versions that ran go into each clip's document.
+// peft since 49e: what diffusers loads a LoRA through.
+constexpr std::array<std::string_view, 7> kVideo{
+    "torch>=2.6", "diffusers>=0.35",    "transformers>=4.46", "accelerate>=1.0",
+    "ftfy>=6.1",  "sentencepiece>=0.2", "peft>=0.13"};
+
+// The voice driver's stack (50a): Kokoro, and misaki -- its grapheme to
+// phoneme layer -- with the English extra its English voices read through.
+constexpr std::array<std::string_view, 3> kVoice{"torch>=2.6", "kokoro>=0.9.4",
+                                                 "misaki[en]>=0.9.4"};
 
 std::string now_rfc3339() {
     const std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
@@ -72,6 +95,19 @@ std::string_view to_string(RequirementSet set) noexcept {
     return kSetNames.at(static_cast<std::size_t>(set));
 }
 
+std::string set_unfit_reason(RequirementSet set, bool apple_silicon, bool nvidia_smi) {
+    switch (kSetHosts.at(static_cast<std::size_t>(set))) {
+        case SetHost::Any:
+            return {};
+        case SetHost::AppleSilicon:
+            return apple_silicon ? std::string{} : "for Apple silicon, which this host is not";
+        case SetHost::NvidiaGpu:
+            return nvidia_smi ? std::string{}
+                              : "for an NVIDIA GPU, and nvidia-smi is not on PATH here";
+    }
+    return {};
+}
+
 std::optional<RequirementSet> requirement_set_from_string(std::string_view name) noexcept {
     for (std::size_t i = 0; i < kSetNames.size(); ++i) {
         if (kSetNames.at(i) == name) {
@@ -97,6 +133,10 @@ std::span<const std::string_view> packages_for(RequirementSet set) noexcept {
             return kConvert;
         case RequirementSet::MlxVlm:
             return kMlxVlm;
+        case RequirementSet::Video:
+            return kVideo;
+        case RequirementSet::Voice:
+            return kVoice;
     }
     return {};
 }
@@ -250,6 +290,44 @@ std::filesystem::path locate_base_python(std::string_view configured, std::strin
         }
     }
     error = "no python3 on PATH -- install Python 3, or set training.python in the config";
+    return {};
+}
+
+std::filesystem::path find_site_package(const std::filesystem::path& venv, std::string_view name) {
+    std::error_code code;
+    // Windows keeps one site-packages under `Lib/`; POSIX one per version
+    // under `lib/python3.N/`.
+    const std::filesystem::path windows = venv / "Lib" / "site-packages" / std::string{name};
+    if (std::filesystem::is_regular_file(windows / "__init__.py", code)) {
+        return windows;
+    }
+    const std::filesystem::path lib = venv / "lib";
+    if (!std::filesystem::is_directory(lib, code)) {
+        return {};
+    }
+    for (const auto& entry : std::filesystem::directory_iterator(lib, code)) {
+        if (!entry.path().filename().string().starts_with("python")) {
+            continue;
+        }
+        const std::filesystem::path package = entry.path() / "site-packages" / std::string{name};
+        if (std::filesystem::is_regular_file(package / "__init__.py", code)) {
+            return package;
+        }
+    }
+    return {};
+}
+
+std::string installed_package_version(const std::filesystem::path& package) {
+    const std::string prefix = package.filename().string() + "-";
+    constexpr std::string_view suffix = ".dist-info";
+    std::error_code code;
+    for (const auto& entry : std::filesystem::directory_iterator(package.parent_path(), code)) {
+        const std::string name = entry.path().filename().string();
+        if (name.starts_with(prefix) && name.ends_with(suffix) &&
+            name.size() > prefix.size() + suffix.size()) {
+            return name.substr(prefix.size(), name.size() - prefix.size() - suffix.size());
+        }
+    }
     return {};
 }
 

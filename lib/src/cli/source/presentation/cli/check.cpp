@@ -48,8 +48,11 @@
 #include "modelstore/gguf_inspect.h"
 #include "modelstore/kv_cache.h"
 #include "modelstore/mlx_info.h"
+#include "modelstore/pipeline_info.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
+#include "modelstore/voice_info.h"
+#include "operations/code_exec_server.h"
 #include "operations/graph_sources.h"
 #include "operations/suites.h"
 #include "platform/child_process.h"
@@ -66,6 +69,7 @@
 #include "training/store.h"
 #include "training/trainer.h"
 #include "version/version.h"
+#include "video/runtime.h"
 #include "views/download_progress.h"
 
 namespace apogee::commands {
@@ -444,10 +448,10 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
 
         if (backend.type == harness::BackendType::LlamaCpp) {
             if (backend.model_path.empty()) {
+                // The entry exists: a door the binary accepts on it (M14).
                 add(report, Status::Warn, "Config", label,
                     std::string{type} + " -- model_path not set",
-                    "apogee config add-backend " + name +
-                        " --type llamacpp --model-path <file.gguf>");
+                    "apogee config set-backend " + name + " --model-path <file.gguf>");
                 continue;
             }
             const std::filesystem::path model = harness::expand_env(backend.model_path);
@@ -456,10 +460,14 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
             if (!std::filesystem::exists(model, code)) {
                 // A dangling model_path is a real failure -- the backend cannot
                 // answer -- but check does NOT edit it out. It says what to run.
+                // Its two real doors (M14): add-backend on an existing name
+                // is refused, so the hint never names it.
                 add(report, Status::Fail, "Config", label,
                     "model_path does not exist: " + model.string(),
-                    "apogee config add-backend " + name +
-                        " --type llamacpp --model-path <an existing .gguf>");
+                    "apogee config set-backend " + name +
+                        " --model-path <an existing .gguf> to repoint it, or apogee config "
+                        "delete-backend " +
+                        name + " to remove it");
                 continue;
             }
             // A full header read rather than the 4-byte magic check this used
@@ -781,7 +789,10 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
     const std::vector<models::StoredGguf> ggufs = models::list_store_ggufs(roots);
     const std::vector<models::StoredSnapshot> snapshots = models::list_store_snapshots(roots);
     const std::vector<models::StoredMlx> mlx = models::list_store_mlx(roots);
-    const std::size_t total = ggufs.size() + snapshots.size() + mlx.size();
+    const std::vector<models::StoredPipeline> pipelines = models::list_store_pipelines(roots);
+    const std::vector<models::StoredVoice> voices = models::list_store_voices(roots);
+    const std::size_t total =
+        ggufs.size() + snapshots.size() + mlx.size() + pipelines.size() + voices.size();
     std::size_t read = 0;
     for (const models::StoredGguf& stored : ggufs) {
         ++found;
@@ -829,6 +840,40 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
             add(report, Status::Ok, "Models", name,
                 (info.model_type.empty() ? std::string{} : info.model_type + ", ") + "MLX, " +
                     info.quantization.describe() + ", files whole");
+        }
+    }
+    // A diffusion pipeline the same way: every component the index names
+    // there with what its kind needs, every shard within its file (49a).
+    for (const models::StoredPipeline& stored : pipelines) {
+        ++found;
+        const std::string name =
+            models::weights_handle(stored.model, models::kPipelineFormat, stored.id);
+        say(inputs, "checking models: " + name, ++read, total);
+        const models::PipelineInfo info = models::read_pipeline_info(stored.dir);
+        if (!info.complete) {
+            add(report, Status::Fail, "Models", name, "pipeline that " + info.problem,
+                "apogee models repair " + name);
+        } else {
+            add(report, Status::Ok, "Models", name,
+                info.class_name + ", " + std::to_string(info.components.size()) +
+                    " components, files whole");
+        }
+    }
+    // A voice model the same way: the configuration, one checkpoint and
+    // every voice whole (50a).
+    for (const models::StoredVoice& stored : voices) {
+        ++found;
+        const std::string name =
+            models::weights_handle(stored.model, models::kVoiceFormat, stored.id);
+        say(inputs, "checking models: " + name, ++read, total);
+        const models::VoiceInfo info = models::read_voice_info(stored.dir);
+        if (!info.complete) {
+            add(report, Status::Fail, "Models", name, "voice model that " + info.problem,
+                "apogee models repair " + name);
+        } else {
+            add(report, Status::Ok, "Models", name,
+                info.checkpoint + ", " + std::to_string(info.voices.size()) +
+                    " voices, files whole");
         }
     }
 
@@ -1090,6 +1135,60 @@ void check_tools(CheckReport& report, const CheckInputs& inputs) {
 /// Each enabled MCP server's command: a bare name is looked up on PATH; a
 /// path must exist and be executable. `--fix` adds the execute bit and never
 /// edits the config -- a dangling entry is the user's to delete.
+/// A seeded driver an earlier Apogee wrote and nobody edited (27c): it runs,
+/// but as that Apogee shipped it, and the fix replaces it in place.
+[[nodiscard]] std::string stale_script_detail(const std::string& script) {
+    return script +
+           " is an earlier Apogee's copy, unedited -- 'apogee check --fix' brings it up to this "
+           "build's";
+}
+
+/// The code-execution server (47b): the seeded script against the shipped
+/// copy, then where it stands -- registered under which name, or the one
+/// line that registers it with the interpreter it would run under, said
+/// rather than guessed. Not registered is not a defect: it is optional.
+void check_code_exec(CheckReport& report, const CheckInputs& inputs) {
+    const operations::CodeExecRegistration registration =
+        operations::code_exec_registration(inputs.home);
+    const std::string script = registration.script.filename().string();
+    const harness::SeededScript seeded =
+        harness::inspect_seeded_script(inputs.home, script, inputs.retired_scripts);
+    switch (seeded) {
+        case harness::SeededScript::Missing:
+            add(report, Status::Warn, "MCP", "code-exec",
+                script + " is missing from " + registration.script.parent_path().string(),
+                "apogee check --fix");
+            return;
+        case harness::SeededScript::Stale:
+            add(report, Status::Warn, "MCP", "code-exec", stale_script_detail(script),
+                "apogee check --fix");
+            return;
+        case harness::SeededScript::Edited:
+        case harness::SeededScript::Current:
+            break;
+    }
+    const bool edited = seeded == harness::SeededScript::Edited;
+    const std::string copy = edited ? script + " differs from the shipped copy (your edit runs)"
+                                    : script + " matches the shipped copy";
+    if (const std::string name =
+            operations::registered_code_exec_server(inputs.config, registration.script);
+        !name.empty()) {
+        add(report, edited ? Status::Warn : Status::Ok, "MCP", "code-exec",
+            copy + "; registered as '" + name + "' (its tools: mcp__" + name +
+                "__run_python, mcp__" + name + "__write_input)");
+        return;
+    }
+    if (registration.interpreter.empty()) {
+        add(report, Status::Skipped, "MCP", "code-exec",
+            copy + "; not registered, and " + registration.missing, "apogee train setup");
+        return;
+    }
+    add(report, Status::Skipped, "MCP", "code-exec",
+        copy + "; not registered -- it would run under " + registration.interpreter.string() +
+            " (" + registration.interpreter_source + ")",
+        registration.mcp_create_line(operations::kCodeExecServerName));
+}
+
 void check_mcp(CheckReport& report, const CheckInputs& inputs) {
     if (inputs.config_missing || !inputs.config_error.empty()) {
         return;
@@ -1136,6 +1235,7 @@ void check_mcp(CheckReport& report, const CheckInputs& inputs) {
         }
         add(report, Status::Ok, "MCP", label, server.command);
     }
+    check_code_exec(report, inputs);
 }
 
 /// The `Agents` section: the bundled assets present, and every configured
@@ -1605,14 +1705,6 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
     }
 }
 
-/// A seeded driver an earlier Apogee wrote and nobody edited (27c): it runs,
-/// but as that Apogee shipped it, and the fix replaces it in place.
-[[nodiscard]] std::string stale_script_detail(const std::string& script) {
-    return script +
-           " is an earlier Apogee's copy, unedited -- 'apogee check --fix' brings it up to this "
-           "build's";
-}
-
 /// The MLX runtime (27a): whether this host can run an `mlx` backend at all,
 /// and the seeded driver against its compiled-in copy. Off Apple silicon it
 /// is skipped, never passed; an environment without mlx-lm is a warning only
@@ -1709,6 +1801,81 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
                 break;
             case harness::SeededScript::Edited:
                 add(report, Status::Warn, "MLX", label,
+                    script +
+                        " differs from the shipped copy -- your edit is kept and runs; delete the "
+                        "file and run 'apogee check --fix' to restore the shipped one");
+                break;
+        }
+    }
+}
+
+/// The video runtime (49b): torch and diffusers in the environment Apogee
+/// owns, read from their files (not set up is a skip naming the set, as the
+/// MLX rows are), and the seeded driver against its compiled-in copy.
+void check_video(CheckReport& report, const CheckInputs& inputs) {
+    const video::VideoHost host = video::VideoHost::at(inputs.home);
+    const video::VideoReadiness ready = video::probe_video(host);
+    switch (ready.refusal) {
+        case video::VideoRefusal::NoEnvironment:
+        case video::VideoRefusal::NoTorch:
+        case video::VideoRefusal::NoDiffusers:
+            add(report, Status::Skipped, "Video", "runtime", "not set up -- " + ready.reason,
+                std::string{video::kVideoSetupRemedy});
+            break;
+        default: {
+            const std::string found =
+                "torch " +
+                (ready.torch_version.empty() ? "(version unstated)" : ready.torch_version) +
+                " and diffusers " +
+                (ready.diffusers_version.empty() ? "(version unstated)" : ready.diffusers_version) +
+                " in " + host.venv.string() + " (their files, not imported by check)";
+            if (ready.refusal == video::VideoRefusal::NoFfmpeg) {
+                add(report, Status::Warn, "Video", "runtime", found + ", but " + ready.reason,
+                    ready.remedy);
+            } else {
+                add(report, Status::Ok, "Video", "runtime", found);
+            }
+            break;
+        }
+    }
+    // The speech runtime (50a): the same reading of files, its own set.
+    const video::VideoReadiness voice = video::probe_voice(host);
+    switch (voice.refusal) {
+        case video::VideoRefusal::NoEnvironment:
+        case video::VideoRefusal::NoTorch:
+        case video::VideoRefusal::NoKokoro:
+            add(report, Status::Skipped, "Video", "voice runtime", "not set up -- " + voice.reason,
+                std::string{video::kVoiceSetupRemedy});
+            break;
+        default:
+            add(report, Status::Ok, "Video", "voice runtime",
+                "torch " +
+                    (voice.torch_version.empty() ? "(version unstated)" : voice.torch_version) +
+                    " and kokoro " +
+                    (voice.kokoro_version.empty() ? "(version unstated)" : voice.kokoro_version) +
+                    " in " + host.venv.string() + " (their files, not imported by check)");
+            break;
+    }
+    // The two seeded drivers: the video one (49b) and the speech one (50a).
+    for (const auto& [label, file] :
+         {std::pair<std::string, std::filesystem::path>{"driver", host.driver},
+          std::pair<std::string, std::filesystem::path>{"voice driver", host.voice_driver}}) {
+        const std::string script = file.filename().string();
+        switch (harness::inspect_seeded_script(inputs.home, script, inputs.retired_scripts)) {
+            case harness::SeededScript::Missing:
+                add(report, Status::Warn, "Video", label,
+                    script + " is missing from " + file.parent_path().string(),
+                    "apogee check --fix");
+                break;
+            case harness::SeededScript::Current:
+                add(report, Status::Ok, "Video", label, script + " matches the shipped copy");
+                break;
+            case harness::SeededScript::Stale:
+                add(report, Status::Warn, "Video", label, stale_script_detail(script),
+                    "apogee check --fix");
+                break;
+            case harness::SeededScript::Edited:
+                add(report, Status::Warn, "Video", label,
                     script +
                         " differs from the shipped copy -- your edit is kept and runs; delete the "
                         "file and run 'apogee check --fix' to restore the shipped one");
@@ -2051,6 +2218,8 @@ CheckReport run_checks(const CheckInputs& inputs) {
     check_training(report, inputs);
     say(inputs, "checking MLX");
     check_mlx(report, inputs);
+    say(inputs, "checking video");
+    check_video(report, inputs);
     say(inputs, "checking the data directory");
     check_filesystem(report, inputs);
     say(inputs, "checking secrets");

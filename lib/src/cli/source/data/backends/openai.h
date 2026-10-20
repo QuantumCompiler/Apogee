@@ -36,6 +36,9 @@ public:
         /// Translated to `reasoning.effort` at the boundary.
         std::int64_t thinking_budget_tokens = 0;
         bool web_search = false;
+        /// The entry's `server_tools:` (47a): the server-side tools it has
+        /// consented to the vendor running. Empty sends none.
+        std::vector<std::string> server_tools;
     };
 
     OpenAIProvider(Options options, std::unique_ptr<HttpClient> client);

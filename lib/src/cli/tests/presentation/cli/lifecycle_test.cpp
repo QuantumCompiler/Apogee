@@ -977,8 +977,13 @@ TEST_CASE("a fixed set the parser splits at commas completes its last word",
     CHECK(complete_line(pull, "Q4_K_M,Q") ==
           std::vector<std::string>{"Q4_K_M,Q2_K", "Q4_K_M,Q3_K_M", "Q4_K_M,Q5_K_M", "Q4_K_M,Q6_K",
                                    "Q4_K_M,Q8_0"});
-    CHECK(complete_line({"models", "convert", "snap", "--register-with"}, "Q8_0,Q4") ==
-          std::vector<std::string>{"Q8_0,Q4_K_M"});
+    // convert's levels are each engine's own since M16, answered by the live
+    // sources rather than a fixed set -- and split at commas the same way.
+    const apogee::commands::CompletionSources live = apogee::commands::default_completion_sources();
+    CHECK(complete_full({"models", "convert", "snap", "--register-with"}, "Q8_0,Q4", live)
+              .candidates == std::vector<std::string>{"Q8_0,Q4_K_M"});
+    CHECK(complete_full({"models", "convert", "snap", "--mlx", "--register-with"}, "4bit,8", live)
+              .candidates == std::vector<std::string>{"4bit,8bit"});
     // A set that takes one word is not a list.
     CHECK(complete_line({"models", "convert", "snap", "--type"}, "f16,").empty());
 }
@@ -1013,79 +1018,43 @@ namespace {
 /// entity in a graph -- and since 27l a relation in one, or a question). Everything else must
 /// complete to something. A new TEXT argument fails the test below until it is tagged -- or added
 /// here, on purpose.
-const std::vector<std::string> kFreeText{"agents create name",
-                                         "agents create --description",
-                                         "agents create --save-name",
-                                         "agents create --save-subdir",
-                                         "analyze INPUT",
-                                         "analyze --input",
-                                         "analyze --save-name",
-                                         "chat -s",
-                                         "chat --system",
-                                         "chat --allow-host",
-                                         "chats title title",
-                                         "complete prompt",
-                                         "complete -s",
-                                         "complete --system",
-                                         "complete --context",
-                                         "complete --allow-host",
-                                         "execute -s",
-                                         "execute --system",
-                                         "execute --allow-host",
-                                         "config add-backend --api-key",
-                                         "config add-backend --model",
-                                         "config add-backend --embedding-model",
-                                         "config add-backend --system-prompt",
-                                         "config add-allowed-host host",
-                                         "config add-graph name",
-                                         "config add-suite name",
-                                         "config add-suite --description",
-                                         "datasets prepare --map",
-                                         "datasets prepare --split",
-                                         "datasets create name",
-                                         "datasets create --since",
-                                         "datasets create --until",
-                                         "datasets synth name",
-                                         "datasets synth --topic",
-                                         "datasets pull ref",
-                                         "embed query text",
-                                         "embed delete --source",
-                                         "graph show ENTITY",
-                                         "graph path FROM",
-                                         "graph path TO",
-                                         "graph path --relation",
-                                         "graph explain NODE",
-                                         "graph neighbors NODE",
-                                         "graph neighbors --relation",
-                                         "graph query QUESTION",
-                                         "knowledge capture TEXT",
-                                         "knowledge capture --source",
-                                         "knowledge query TEXT",
-                                         "mcp create name",
-                                         "mcp create --args",
-                                         "mcp test tool",
-                                         "mcp test arguments",
-                                         "models convert --base-name",
-                                         "models pull --base-name",
-                                         "serve --bind",
-                                         "task run goal",
-                                         "task run --require",
-                                         "task run --input",
-                                         "symphonies create name",
-                                         "symphonies create --description",
-                                         "symphonies create --input-description",
-                                         "symphonies create --stage",
-                                         "symphonies create --play",
-                                         "symphonies play --input",
-                                         "config rename-backend new-name",
-                                         "config set-backend --model",
-                                         "config set-backend --embedding-model",
-                                         "config set-backend --system-prompt",
-                                         "config set-backend --host",
-                                         "models rename new-name",
-                                         "tui -s",
-                                         "tui --system",
-                                         "tui --allow-host"};
+const std::vector<std::string> kFreeText{
+    "agents create name", "agents create --description", "agents create --save-name",
+    "agents create --save-subdir", "analyze INPUT", "analyze --input", "analyze --save-name",
+    "chat -s", "chat --system", "chat --allow-host", "chats title title", "complete prompt",
+    "complete -s", "complete --system", "complete --context", "complete --allow-host", "execute -s",
+    "execute --system", "execute --allow-host", "config add-backend --api-key",
+    "config add-backend --model", "config add-backend --embedding-model",
+    "config add-backend --system-prompt", "config add-allowed-host host", "config add-graph name",
+    "config add-suite name", "config add-suite --description", "datasets prepare --map",
+    "datasets prepare --split", "datasets create name", "datasets create --since",
+    "datasets create --until", "datasets synth name", "datasets synth --topic", "datasets pull ref",
+    "embed query text", "embed delete --source", "graph show ENTITY", "graph path FROM",
+    "graph path TO", "graph path --relation", "graph explain NODE", "graph neighbors NODE",
+    "graph neighbors --relation", "graph query QUESTION", "knowledge capture TEXT",
+    "knowledge capture --source", "knowledge query TEXT", "mcp create name", "mcp create --args",
+    "mcp test tool", "mcp test arguments", "models convert --base-name", "models pull --base-name",
+    "serve --bind",
+    // A merge request on a remote forge (48c):
+    // a URL or owner/repo#12, nothing local to offer.
+    "review mr ref",
+    // A sweep's start (a date) and a new target's name, host and remote
+    // paths (48d).
+    "review sweep --since", "review targets add name", "review targets add --host",
+    "review targets add --owner", "review targets add --repo", "task run goal",
+    "task run --require", "task run --input", "symphonies create name",
+    "symphonies create --description", "symphonies create --input-description",
+    "symphonies create --stage", "symphonies create --play", "symphonies play --input",
+    "config rename-backend new-name", "config set-backend --model",
+    "config set-backend --embedding-model", "config set-backend --system-prompt",
+    "config set-backend --host", "models rename new-name", "tui -s", "tui --system",
+    "tui --allow-host",
+    // A clip's description and its frame size (49c).
+    "video generate prompt", "video generate --resolution",
+    // What to say (50a).
+    "voice say text",
+    // What a composed video is about (50c), and how to edit it (50d).
+    "video compose brief", "video compose --edit"};
 
 /// The type names CLI11 gives a number: an untagged value of any other type
 /// is free text.

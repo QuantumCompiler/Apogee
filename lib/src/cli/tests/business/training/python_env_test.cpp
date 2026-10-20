@@ -60,12 +60,22 @@ struct Fixture {
 }  // namespace
 
 TEST_CASE("requirement sets are named and carry packages", "[training][python]") {
-    CHECK(requirement_set_names().size() == 5);
+    CHECK(requirement_set_names().size() == 7);
+    // The speech driver's stack (50a).
+    CHECK(requirement_set_from_string("voice") == RequirementSet::Voice);
+    CHECK(packages_for(RequirementSet::Voice)[1] == "kokoro>=0.9.4");
     CHECK(requirement_set_from_string("prepare") == RequirementSet::Prepare);
     CHECK(requirement_set_from_string("convert") == RequirementSet::Convert);
     // The mlx backend's vision path, installed on demand (27c).
     CHECK(requirement_set_from_string("mlx-vlm") == RequirementSet::MlxVlm);
     CHECK(packages_for(RequirementSet::MlxVlm)[0] == "mlx-vlm>=0.3");
+    // The video driver's stack (49b), never installed with anything else.
+    CHECK(requirement_set_from_string("video") == RequirementSet::Video);
+    CHECK(to_string(RequirementSet::Video) == "video");
+    CHECK(packages_for(RequirementSet::Video)[0] == "torch>=2.6");
+    CHECK(packages_for(RequirementSet::Video)[1] == "diffusers>=0.35");
+    // What diffusers loads a LoRA through (49e).
+    CHECK(packages_for(RequirementSet::Video).back() == "peft>=0.13");
     CHECK_FALSE(requirement_set_from_string("nope").has_value());
     for (const std::string_view name : requirement_set_names()) {
         const auto set = requirement_set_from_string(name);
@@ -161,4 +171,28 @@ TEST_CASE("a configured interpreter that exists is used as given", "[training][p
     std::string error;
     CHECK(locate_base_python(fake.string(), error) == fake);
     CHECK(error.empty());
+}
+
+TEST_CASE("an installed package is found by its files, on either layout, with its version",
+          "[training][python][video]") {
+    // 49b: the video ladder's probe -- never an import.
+    Fixture fixture;
+    const std::filesystem::path venv = fixture.root.path() / "venv";
+    CHECK(apogee::training::find_site_package(venv, "torch").empty());
+    const std::filesystem::path posix = venv / "lib" / "python3.13" / "site-packages";
+    std::filesystem::create_directories(posix / "torch");
+    std::ofstream{posix / "torch" / "__init__.py"};
+    std::filesystem::create_directories(posix / "torch-2.9.1.dist-info");
+    const std::filesystem::path torch = apogee::training::find_site_package(venv, "torch");
+    CHECK(torch == posix / "torch");
+    CHECK(apogee::training::installed_package_version(torch) == "2.9.1");
+    // A directory without __init__.py is no package.
+    std::filesystem::create_directories(posix / "diffusers");
+    CHECK(apogee::training::find_site_package(venv, "diffusers").empty());
+    // Windows keeps one site-packages under Lib/.
+    const std::filesystem::path windows = venv / "Lib" / "site-packages" / "diffusers";
+    std::filesystem::create_directories(windows);
+    std::ofstream{windows / "__init__.py"};
+    CHECK(apogee::training::find_site_package(venv, "diffusers") == windows);
+    CHECK(apogee::training::installed_package_version(windows).empty());
 }
