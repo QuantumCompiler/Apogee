@@ -125,13 +125,31 @@ void JsonReporter::on_side_call(const agentloop::SideCall& call) {
     write(object);
 }
 
-void JsonReporter::on_recall(int chats, int decisions) {
-    if (chats <= 0 && decisions <= 0) {
+void JsonReporter::on_recall(const std::vector<agentloop::RecalledChat>& chats, int decisions) {
+    if (chats.empty() && decisions <= 0) {
         return;
     }
     nlohmann::json object = event("memory");
-    object["chats"] = chats;
+    object["chats"] = static_cast<int>(chats.size());
     object["decisions"] = decisions;
+    if (!chats.empty()) {
+        // Which chats (52a): what the model was handed, so a host can link
+        // each to its saved session.
+        nlohmann::json sessions = nlohmann::json::array();
+        for (const agentloop::RecalledChat& chat : chats) {
+            sessions.push_back({{"id", chat.id}, {"name", chat.name}, {"updated", chat.updated}});
+        }
+        object["sessions"] = std::move(sessions);
+    }
+    write(object);
+}
+
+void JsonReporter::on_sources(const std::vector<harness::ExcerptSource>& sources) {
+    if (sources.empty()) {
+        return;
+    }
+    nlohmann::json object = event("sources");
+    object["sources"] = sources;
     write(object);
 }
 

@@ -1,9 +1,12 @@
 #pragma once
 
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include "agentloop/side_call.h"
 #include "contracts/todo.h"
+#include "contracts/types.h"
 
 /// Everything the loop wants to say, said through here.
 ///
@@ -19,6 +22,15 @@
 /// reaches only one surface is a bug, and that stays true structurally because
 /// there is only one loop and it can only speak through this.
 namespace apogee::agentloop {
+
+/// One past chat a turn's recall handed the model (52a): its id, and its
+/// name and last update as the recall index recorded them when it was
+/// summarised -- the record the model was given.
+struct RecalledChat {
+    std::string id;
+    std::string name;
+    std::string updated;
+};
 
 class Reporter {
 public:
@@ -81,10 +93,6 @@ public:
     /// The terminal prints it under `--verbose`; everything else drops it.
     virtual void on_progress(std::string_view) {}
 
-    /// What a turn was handed from earlier conversations (26l): how many
-    /// past chats, and how many recorded decisions. Said before the turn
-    /// runs, so a user can see why the model knows something; never on
-    /// `serve`, which never recalls.
     /// A model call besides the chat model's own (26n) -- when it starts,
     /// and again when it is over, with what it took when known. The terminal
     /// draws it inside the thinking block; machine mode says it as a
@@ -93,9 +101,24 @@ public:
         (void)call;
     }
 
-    virtual void on_recall(int chats, int decisions) {
+    /// What a turn was handed from earlier conversations (26l): each past
+    /// chat recalled (52a), and how many recorded decisions. Said before the
+    /// turn runs, so a user can see why the model knows something; never on
+    /// `serve`, which never recalls.
+    virtual void on_recall(const std::vector<RecalledChat>& chats, int decisions) {
         (void)chats;
         (void)decisions;
+    }
+
+    /// The excerpts a turn's retrieval sent the model (52a) -- attachments'
+    /// and a collection's, in the order sent; never what was found and
+    /// trimmed. Before the answer, and only when something was sent. Machine
+    /// mode says it as a `sources` event, a served stream inside its
+    /// `rag_result` frame, the terminal under `--verbose` beside the
+    /// retrieval line it already prints; the shell's retrieval line is all
+    /// it says.
+    virtual void on_sources(const std::vector<harness::ExcerptSource>& sources) {
+        (void)sources;
     }
 
     /// The session's todo, whole, after `todo_write` changed it -- or, at a

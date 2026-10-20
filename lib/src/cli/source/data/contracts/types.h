@@ -323,6 +323,25 @@ struct ModelInfo {
 // Observability
 // ---------------------------------------------------------------------------
 
+/// One excerpt a turn's retrieval sent the model (52a) -- what was sent,
+/// never what was merely found or trimmed to fit: where it came from, the
+/// span its chunks record, and its score on its retriever's own scale.
+struct ExcerptSource {
+    /// The file as its index names it: an attachment's file name, a
+    /// collection's source path, a recalled chat's id.
+    std::string file;
+    /// First and last, 1-based, when the chunks record them: a PDF's pages,
+    /// a text's lines.
+    std::optional<std::array<std::int64_t, 2>> pages;
+    std::optional<std::array<std::int64_t, 2>> lines;
+    /// A recording's span, in seconds.
+    std::optional<std::array<double, 2>> times;
+    double score = 0.0;
+    /// `lexical`, `vector` or `hybrid`: the scale `score` is on. Always
+    /// carried -- the scales are not comparable.
+    std::string retriever;
+};
+
 /// Metadata about one RAG retrieval, carried alongside injected context.
 struct RAGMeta {
     std::string db;
@@ -337,6 +356,8 @@ struct RAGMeta {
     /// highest retrieval score in the set, and not a measure of match quality.
     bool reranked = false;
     int graph_entities = 0;
+    /// Each excerpt injected, in the order sent (52a).
+    std::vector<ExcerptSource> sources;
 };
 
 /// A point-in-time activity, rendered by the terminal status line and (later)
@@ -404,6 +425,9 @@ void to_json(nlohmann::json& out, const ChatResponse& value);
 void from_json(const nlohmann::json& in, ChatResponse& value);
 void to_json(nlohmann::json& out, const ModelInfo& value);
 void from_json(const nlohmann::json& in, ModelInfo& value);
+/// `{file, pages?, lines?, times?, score, retriever}` -- the one shape every
+/// surface reports a sent excerpt in (52a).
+void to_json(nlohmann::json& out, const ExcerptSource& value);
 
 bool operator==(const ContentPart& lhs, const ContentPart& rhs);
 bool operator==(const ToolCall& lhs, const ToolCall& rhs);

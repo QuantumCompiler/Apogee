@@ -11,6 +11,7 @@
 #include "cli/execute.h"
 #include "cli/tui_common.h"
 #include "contracts/config.h"
+#include "contracts/text_diff.h"
 #include "harness/roles.h"
 #include "logger/session.h"
 #include "views/ask_prompt.h"
@@ -140,8 +141,13 @@ agent::ConfirmFn TuiOutput::confirm_fn(std::filesystem::path config_path,
             style_.tag(ansi::Role::Permission) + " " + std::string{request.tool} +
             (request.target.empty() ? "" : " -> " + std::string{request.target}));
         if (!request.detail.empty()) {
-            // The whole URL: what would leave the machine is in it.
-            prompt.lines.push_back(style_.dim("  " + std::string{request.detail}));
+            // The whole URL: what would leave the machine is in it. A file
+            // writer's diff is said by its counts, as the terminal says it
+            // (52a).
+            prompt.lines.push_back(style_.dim(
+                "  " + (request.edits
+                            ? harness::describe_diff_counts(harness::diff_counts(request.detail))
+                            : std::string{request.detail})));
         }
         prompt.lines.push_back(request.outbound ? "Allow reaching this website?" : "Allow?");
         prompt.choices = {tui::Choice{.key = "y", .label = "yes"},

@@ -6,7 +6,7 @@
 
 **Seam + files.** `source/presentation/sessions/` (the list, the inspector, their view-models), `source/business/session/` (the resume/lifecycle growth), `source/business/reads/` (chats/status reads). Tests: the library's view-model over scripted read documents and a scripted session stream (select/resume lifecycle, rename/delete read-back, the inspector's fields, the neutral-glyph fallback), hermetic.
 
-**Reference.** `ScreenSessionSources.dc.html`, `Inspector.dc.html`, the contract board's SESSIONS rows; [`../cli/backlog/v0.2.0/session-event-fields.md`](../../cli/backlog/v0.2.0/session-event-fields.md) (52a — the glyph upgrade, cross-referenced, not gated); the shipped 1b/1c cores `(consumed decision)`.
+**Reference.** `ScreenSessionSources.dc.html`, `Inspector.dc.html`, the contract board's SESSIONS rows; [52a](../../cli/assistant/MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths) (shipped 2026-10-20: `chats list` rows carry `backend` and `model` — the glyph upgrade, cross-referenced, not gated); the shipped 1b/1c cores `(consumed decision)`.
 
 **Decisions made** (dated):
 - 2026-10-20 — From the design-completion spike (the user's call). Fallbacks are the contract board's own, upgraded when the CLI items land — never a gate on the CLI queue.

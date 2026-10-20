@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <string>
@@ -1124,6 +1125,35 @@ TEST_CASE("a finished chat is recalled in a new one, and never written into it",
             CHECK(message.content.plain_text().find("Postgres 16") == std::string::npos);
         }
     }
+}
+
+TEST_CASE("a driven chat's memory event names the chats it recalled",
+          "[chat][cli][recall][helpers][machine]") {
+    // 52a: the id the driver can open, and the title and date the model was
+    // handed in the summary.
+    HelperChat chat{texts({"Noted.", "Fine."}), {"Title", "The project uses Postgres 16."}};
+    const std::string first = first_chat(chat);
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat", "--input-format", "stream-json", "--output-format", "stream-json"},
+                     R"({"type":"user","text":"Which Postgres version does the project use?"})"
+                     "\n") == 0);
+    std::optional<nlohmann::json> memory;
+    std::istringstream lines{chat.out};
+    for (std::string line; std::getline(lines, line);) {
+        const nlohmann::json event = nlohmann::json::parse(line);
+        if (event.at("type") == "memory") {
+            memory = event;
+        }
+    }
+    REQUIRE(memory.has_value());
+    CHECK(memory->at("chats") == 1);
+    REQUIRE(memory->at("sessions").size() == 1);
+    const nlohmann::json& recalled = memory->at("sessions")[0];
+    CHECK(recalled.at("id") == first);
+    CHECK(recalled.at("name") == "Title");
+    // The file's date, stamped by the save after the chat's last turn.
+    CHECK(recalled.at("updated") ==
+          apogee::logger::load(first, apogee::logger::KnownDependencies{}).session.updated_at);
 }
 
 TEST_CASE("recall stops for a run, for a session, and for good when the chat is deleted",

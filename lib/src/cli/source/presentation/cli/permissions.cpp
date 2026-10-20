@@ -12,6 +12,7 @@
 #include "contracts/config_edit.h"
 #include "contracts/errors.h"
 #include "contracts/host.h"
+#include "contracts/text_diff.h"
 #include "machine/driver_input.h"
 #include "platform/platform.h"
 
@@ -323,8 +324,13 @@ agent::ConfirmFn terminal_confirm_fn(StatusLine& status, ansi::Style style,
         status.print_line(style.tag(ansi::Role::Permission) + " " + std::string{request.tool} +
                           (request.target.empty() ? "" : " -> " + std::string{request.target}));
         if (!request.detail.empty()) {
-            // The whole URL: what would leave the machine is in it.
-            status.print_line(style.dim("  " + std::string{request.detail}));
+            // The whole URL: what would leave the machine is in it. A file
+            // writer's diff is said by its counts (52a) -- the change's size
+            // at a glance; machine mode carries the diff itself.
+            status.print_line(style.dim(
+                "  " + (request.edits
+                            ? harness::describe_diff_counts(harness::diff_counts(request.detail))
+                            : std::string{request.detail})));
         }
         std::cerr << style.dim(request.outbound
                                    ? "Allow reaching this website? [y]es / [n]o / [a]lways / "

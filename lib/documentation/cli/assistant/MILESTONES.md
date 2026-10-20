@@ -8769,3 +8769,56 @@ Decisions taken while building, for veto:
 **Verified.** `lib/scripts/cicd.sh --test`: 3524 of 3524, two skipped and said (the real caption burn without libass, and the existing pdftotext case); `cli.video_lifecycle`'s edit phase ran on the real binary.
 
 **Not run on real weights**: an edit of a real composition is the user's run, after the real compose.
+
+## Milestone AO — The desktop client's CLI growths
+
+**Goal.** The additive machine-mode growths the desktop app's design needs (track 52, opened 2026-10-20 from that day's GUI design-completion spike): the design's contract board mapped all 61 of its parts against apogee 0.1.9 and found 15 gaps, and the spike's probes found 2 more. Each growth is a new field, event, inbound line or flag that older drivers ignore (ADR 0006), and each reaches a core the CLI already has. Until it lands, the app uses its recorded fallback.
+
+### 2026-10-20 — `session-event-fields` (backlog item 52a): diffs, recalled names, sources, each chat's model
+
+**Why.** Four of the design's parts had nothing in the protocol to draw from. A `write_file` or `edit_file` permission card had no change to show (G1). "Recalled 1 past session: …" had no session to name (G3). Source chips had no excerpts behind them (G4). The session list had no model for its glyph (G8). The design marks G1 and G8 as needed before the app's first release.
+
+- [x] **The file writers' question carries its diff.**
+  - `write_file` and `edit_file` each plan a call once: `plan_write` and `plan_edit` in `tools/fs.cpp`. The run writes from that plan, and the tool's new `describe_detail` diffs the file against the same plan. So the diff a question shows is exactly the change on disk afterwards, from the very arguments the gate judged. A test holds the two byte-equal for an edit, an overwrite and a new file.
+  - **The diff format** is `contracts/text_diff.h`'s `unified_diff`:
+    - three lines of context, the path relative to the tools' root;
+    - `/dev/null` for a new file, and git's `Binary files … differ` for a side holding a NUL byte;
+    - the lines both ends share are never searched, Myers diffs the middle up to a thousand edits, and beyond that the middle is shown removed then added — still a true diff;
+    - past **32 KB** the text stops at a line, the last hunk's header counting what it kept, and a last line gives the cap and the whole change's counts: `[diff cut at 32 KB: +1200 -45 lines in all]`.
+  - `diff_counts` reads `+12 -3` back off the diff's own text. The terminal and the shell show those counts, not the diff (`Allow? …` under `  +12 -3`). Machine mode carries the diff as the `question`'s `detail`, as `fetch_url` carries its URL.
+  - **Worked out only when someone is asked.** The gate's `permitted` now runs `describe_detail` only after the checker says `Ask` and someone is there to answer. A call the config, accept-edits or an `always` allows never reads its file for a question, and a checker never sees a diff. A test counts the calls.
+  - No diff is shown for a call that cannot run as given (an `old_string` not in the file), or for a file past 16 MB.
+- [x] **`memory` names its sessions.** The Reporter's `on_recall` now takes the recalled chats themselves (`RecalledChat`: id, name, updated) instead of a count. The `memory` event gains `sessions`, in the order sent, absent when only decisions were recalled. Each entry is read from the record its summary was indexed with, so it is the title and date the model was handed.
+  - **A latent 26l defect fixed on the way.** A chat summarised at its own clean exit holds no dates in memory, because `logger::save` stamps the file, not the session. Its index record therefore went undated, as did the "(date)" the model was shown. The summariser now reads the saved file's dates when memory has none.
+- [x] **A `sources` event.**
+  - Retrieval records each excerpt it actually sent as `RagResult::sources`: read from the chunks that survived the budget, never the ones it trimmed. A test pins 2 of 6 sent and 2 reported.
+  - The shape is one type, `contracts/types.h`'s `ExcerptSource` (`{file, pages?, lines?, times?, score, retriever}`), with one `to_json`. An attachment's excerpt takes its file, pages, lines or times from the same chunk metadata its label reads (`excerpt_source`). A collection's chunk takes its source path.
+  - Chat and the one-shot (`complete`, `analyze`) pass the turn's sent excerpts to the Reporter's new `on_sources` before the answer, attachments first: in their order in the transient prefix. Nothing sent means no event.
+  - The four adapters relay it:
+    - machine mode writes the `sources` event;
+    - a served stream's `rag_result` frame gains `sources`;
+    - the terminal says it under `--verbose` (`sources: report.pdf pp. 41–42 (vector 0.81), notes.md:12 (lexical 0.40)`);
+    - the shell's retrieval line is all it says (the skip named in the Reporter's comment).
+- [x] **`chats list` rows carry `backend` and `model`**: the backend the session file records, and the roster model it pinned there with `-m` or `/model`, empty for a chat on its backend's own model. The text rows are unchanged.
+- [x] **The vocabulary grew in one change.** `protocol.cpp` declares `memory.sessions`, the `sources` event and the question `detail`'s new meaning. The schema's date moved to `2026-10-20`, and `machine-mode.md` and `http-api.md` grew with them. `cli.machine_schema_conformance` and the declaration test hold all three to the emitter.
+- [x] **The tests**:
+  - `contracts/text_diff_test` (new): the format cases, the cut, the counts, and 300 random edits each applying back through a patch(1)-style applier.
+  - `tools/fs_test`: the byte-equality, the checker never seeing a diff, and no diff for an allowed call.
+  - `agentloop/rag_test`: sources only for what was sent, an attachment's lines.
+  - `machine/machine_mode_test`: `sessions`, the `sources` golden, the diff `detail`, and every emitter held to the declaration with the new event.
+  - `views/cli_reporter_test`: the verbose-only line.
+  - `cli/chat_test`: a driven chat's `memory` naming the chat it recalled, end to end.
+  - `cli/read_documents_test`: the rows' new fields.
+  - The chat and execute surface goldens (`fixtures/cli/chat_session.golden`, `execute_session.golden`) were re-recorded: only their `session` lines changed, announcing `sources` and the new schema date.
+
+Decisions taken while building, for veto:
+- **The cap is 32 KB**, said in the cut line with the whole change's counts. The cut stops at a line, not a hunk boundary, and the kept hunk's header is rewritten to count what it holds, so the text is still a diff a parser reads.
+- **`pages`, `lines` and `times` are `[first, last]` pairs**, not the document's working `page?`: an excerpt merges adjacent chunks, so it spans. `times` was added for recordings, whose excerpts carry no page or line.
+- **`model` is always present in a `chats list` row, empty when unpinned**, rather than absent. The session file records no model for a chat on its backend's own, and a guess from the config would be a second source.
+- **The terminal and the shell show the diff's counts, not the diff**; the terminal shows sources only under `--verbose`; the shell does not show sources (its retrieval line already says how many and how well).
+- **Recall's `name` and `updated` come from the index record**, the title and date the model was handed, not the session file's current name: a chat renamed since shows its new name once it is summarised again.
+- **`delete_file` carries no diff**: out of the item's scope (G1 names the two writers), and its target already says the whole change.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3566 of 3566, two skipped and said (the real caption burn without libass, and the existing pdftotext case); the darwin suite's 102 cases passed. `cli.machine_schema_conformance` holds the new event and fields.
+
+**Not run on real weights**: nothing here touches a model; every test runs on the mock backend and fixtures.

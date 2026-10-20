@@ -192,6 +192,8 @@ ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& s
     // just sent, and the others' excerpts are retrieved -- ahead of a
     // collection's, which gets what they leave of the share.
     std::int64_t share_used = 0;
+    // What the turn's retrievals send, in the order sent (52a).
+    std::vector<harness::ExcerptSource> sent;
     if (attached != nullptr) {
         ChatAttachments::Turn turn =
             attached->for_turn(session.messages.size() - 1, query, budget, rag.limit, {}, side);
@@ -200,6 +202,7 @@ ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& s
             if (turn.retrieved->error.empty() && !turn.retrieved->prefix.empty()) {
                 loop_options.transient_prefix = turn.retrieved->prefix;
                 share_used = turn.retrieved->tokens;
+                sent = turn.retrieved->sources;
             }
             notice(describe_attachment_retrieval(*turn.retrieved));
         }
@@ -217,8 +220,12 @@ ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& s
             loop_options.transient_prefix.insert(loop_options.transient_prefix.end(),
                                                  retrieved.prefix.begin(), retrieved.prefix.end());
             share_used += retrieved.tokens;
+            sent.insert(sent.end(), retrieved.sources.begin(), retrieved.sources.end());
         }
         notice(describe_retrieval(rag_choice, retrieved));
+    }
+    if (!sent.empty()) {
+        reporter.on_sources(sent);
     }
     // What earlier chats established, within what the share has left (26l):
     // transient like the rest, and said, so the user can see why the model
@@ -230,7 +237,7 @@ ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& s
         if (!recalled.prefix.empty()) {
             loop_options.transient_prefix.insert(loop_options.transient_prefix.end(),
                                                  recalled.prefix.begin(), recalled.prefix.end());
-            reporter.on_recall(recalled.chats, recalled.decisions);
+            reporter.on_recall(recalled.sessions, recalled.decisions);
         }
     }
     if (tools != nullptr && gate.approvals != nullptr) {

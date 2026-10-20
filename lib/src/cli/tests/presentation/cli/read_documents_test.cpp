@@ -70,11 +70,14 @@ struct Read {
     return out;
 }
 
-void save_chat(const std::string& id, const std::string& title, int turns) {
+void save_chat(const std::string& id, const std::string& title, int turns,
+               const std::string& backend = "local", const std::string& model = {}) {
     apogee::logger::Session session;
     session.chat_id = id;
     session.title = title;
     session.turns = turns;
+    session.backend = backend;
+    session.model = model;
     session.started_at = "2026-10-07T10:00:00Z";
     session.updated_at = "2026-10-07T10:0" + std::to_string(turns) + ":00Z";
     apogee::logger::save(session);
@@ -139,10 +142,19 @@ TEST_CASE("chats list: every saved chat, newest first, the row's facts", "[reads
     CHECK(document(read(home, {"chats", "list", "--output-format", "json"})) ==
           nlohmann::json::parse(R"({"object":"list","data":[]})"));
     save_chat("20261007-100000-aaaa", "first", 1);
-    save_chat("20261007-100500-bbbb", "second", 2);
+    save_chat("20261007-100500-bbbb", "second", 2, "claude", "claude-opus-5-5");
     const nlohmann::json listed =
         document(read(home, {"chats", "list", "--output-format", "json"}));
     REQUIRE(listed.at("data").size() == 2);
+    // Each row's backend, and the roster model it pinned -- empty on the
+    // backend's own -- as its session file records them (52a).
+    nlohmann::json newest = listed.at("data")[0];
+    newest.erase("updated");  // the save's own stamp
+    CHECK(newest == nlohmann::json::parse(R"({"id":"20261007-100500-bbbb","turns":2,)"
+                                          R"("name":"second","backend":"claude",)"
+                                          R"("model":"claude-opus-5-5"})"));
+    CHECK(listed.at("data")[1].at("backend") == "local");
+    CHECK(listed.at("data")[1].at("model") == "");
     const Read text = read(home, {"chats", "list"});
     const std::vector<std::string> rows = lines(text.out);
     REQUIRE(rows.size() == 2);

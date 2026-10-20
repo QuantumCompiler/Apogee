@@ -1,6 +1,8 @@
 #include "agentloop/rag.h"
 
 #include <algorithm>
+#include <array>
+#include <cstdio>
 #include <optional>
 #include <stdexcept>
 #include <system_error>
@@ -63,6 +65,10 @@ namespace {
     }
     result.chunks = static_cast<std::int64_t>(excerpts.size());
     result.top_score = excerpts.empty() ? 0.0 : excerpts.front().score;
+    for (const AttachmentExcerpt& excerpt : excerpts) {
+        result.sources.push_back(excerpt.origin);
+        result.metadata.emplace_back();
+    }
     result.prefix.push_back(
         harness::ChatMessage::system(render_attachment_excerpts(excerpts, graph_section)));
     result.tokens = prefix_tokens(turn.budget, result.prefix);
@@ -114,6 +120,31 @@ std::string render_rag_context(const std::vector<std::string>& chunks,
     return render_rag_context(chunks) + "\n" + std::string{graph_section} + "\n";
 }
 
+std::string describe_sources(const std::vector<harness::ExcerptSource>& sources) {
+    const auto span = [](std::string_view one, std::string_view many, const auto& range) {
+        if (!range.has_value()) {
+            return std::string{};
+        }
+        const auto [first, last] = *range;
+        return " " + std::string{last > first ? many : one} + std::to_string(first) +
+               (last > first ? "–" + std::to_string(last) : std::string{});
+    };
+    std::string out = "sources:";
+    for (std::size_t i = 0; i < sources.size(); ++i) {
+        const harness::ExcerptSource& source = sources[i];
+        std::array<char, 16> score{};
+        std::snprintf(score.data(), score.size(), "%.2f", source.score);
+        out += (i == 0 ? " " : ", ") + source.file + span("p. ", "pp. ", source.pages) +
+               (source.lines.has_value() ? ":" + std::to_string((*source.lines)[0]) +
+                                               ((*source.lines)[1] > (*source.lines)[0]
+                                                    ? "–" + std::to_string((*source.lines)[1])
+                                                    : std::string{})
+                                         : std::string{}) +
+               " (" + source.retriever + " " + score.data() + ")";
+    }
+    return out;
+}
+
 RagResult build_rag_prefix(const std::filesystem::path& store_path, const std::string& question,
                            int limit) {
     RagResult result;
@@ -145,10 +176,17 @@ RagResult build_rag_prefix(const std::filesystem::path& store_path, const std::s
         result.chunks = static_cast<std::int64_t>(hits.size());
         result.top_score = hits.front().score;
         result.retriever = hits.front().retriever;
+        for (const embedstore::SearchHit& hit : hits) {
+            result.sources.push_back(
+                excerpt_source(hit.chunk, hit.chunk, hit.score, hit.retriever));
+            result.metadata.push_back(hit.chunk.metadata);
+        }
         result.prefix.push_back(harness::ChatMessage::system(render_rag_context(texts)));
     } catch (const std::exception& e) {
         result.prefix.clear();
         result.chunks = 0;
+        result.sources.clear();
+        result.metadata.clear();
         result.error = e.what();
     }
     return result;
@@ -432,6 +470,10 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
     }
     result.chunks = static_cast<std::int64_t>(hits.size());
     result.top_score = hits.empty() ? 0.0 : hits.front().score;
+    for (const embedstore::SearchHit& hit : hits) {
+        result.sources.push_back(excerpt_source(hit.chunk, hit.chunk, hit.score, hit.retriever));
+        result.metadata.push_back(hit.chunk.metadata);
+    }
     // The retriever that RAN, which on a hybrid turn is hybrid and its scores
     // RRF -- small numbers are normal there, and the label says which scale.
     // The graph section rides after the chunk list, in the same transient

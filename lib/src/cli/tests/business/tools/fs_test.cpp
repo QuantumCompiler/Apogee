@@ -12,6 +12,7 @@
 #include <string>
 
 #include "agent/tool.h"
+#include "contracts/text_diff.h"
 #include "support/env_guard.h"
 
 /// The filesystem toolset: the sandbox above all, then each tool's contract.
@@ -522,4 +523,89 @@ TEST_CASE("grep_files finds lines by content under the root, and stops at its ca
         const ToolOutcome found = files.run("grep_files", R"({"pattern":"var a","path":"min.js"})");
         CHECK(found.content == "min.js:1: var a=" + std::string(234, 'x') + " ...");
     }
+}
+
+TEST_CASE("a file writer's question carries the change it would make, byte for byte",
+          "[tools][fs][permission][diff]") {
+    // 52a: the diff a question shows is made from the arguments the call then
+    // runs with -- so it is exactly the change on disk afterwards.
+    const Files files;
+    const std::string before = numbered_lines(30);
+    files.write("notes/plan.md", before);
+
+    std::string shown;
+    apogee::agent::DispatchContext context;
+    context.permission = [](const apogee::agent::GateRequest& request) {
+        CHECK(request.detail.empty());  // a checker never sees it
+        return apogee::agent::Permission::Ask;
+    };
+    context.confirm = [&](const apogee::agent::GateRequest& request) {
+        shown = std::string{request.detail};
+        return true;
+    };
+    const auto dispatch = [&](std::string name, std::string arguments) {
+        return apogee::agent::dispatch(
+            files.registry,
+            apogee::harness::ToolCall{
+                .id = "c", .name = std::move(name), .arguments = std::move(arguments)},
+            context);
+    };
+
+    SECTION("edit_file: the diff is the edit's") {
+        REQUIRE_FALSE(dispatch("edit_file", R"({"path":"notes/plan.md","old_string":"row 12\n",)"
+                                            R"("new_string":"row twelve\nrow 12b\n"})")
+                          .is_error);
+        CHECK(shown ==
+              apogee::harness::unified_diff("notes/plan.md", before, files.read("notes/plan.md")));
+        CHECK(shown.starts_with("--- a/notes/plan.md\n+++ b/notes/plan.md\n@@ -9,7 +9,8 @@\n"));
+        const apogee::harness::DiffCounts counts = apogee::harness::diff_counts(shown);
+        CHECK(counts.added == 2);
+        CHECK(counts.removed == 1);
+    }
+    SECTION("write_file over a file: the diff against what was there") {
+        REQUIRE_FALSE(
+            dispatch("write_file", R"({"path":"notes/plan.md","content":"one line\n"})").is_error);
+        CHECK(shown == apogee::harness::unified_diff("notes/plan.md", before, "one line\n"));
+        CHECK(apogee::harness::diff_counts(shown).removed == 30);
+    }
+    SECTION("write_file of a new file: from /dev/null") {
+        REQUIRE_FALSE(
+            dispatch("write_file", R"({"path":"fresh/x.txt","content":"a\nb\n"})").is_error);
+        CHECK(shown == "--- /dev/null\n+++ b/fresh/x.txt\n@@ -0,0 +1,2 @@\n+a\n+b\n");
+    }
+    SECTION("a call that cannot run as given shows no diff, and changes nothing") {
+        const ToolOutcome missing = dispatch(
+            "edit_file", R"({"path":"notes/plan.md","old_string":"absent","new_string":"x"})");
+        CHECK(missing.is_error);
+        CHECK(shown.empty());
+        CHECK(files.read("notes/plan.md") == before);
+    }
+}
+
+TEST_CASE("an allowed write never works out its diff", "[tools][fs][permission][diff]") {
+    // Accept-edits, `always`, the config's allow: the checker settles the
+    // call, nobody is asked, and nothing is read for a question (52a).
+    const Files files;
+    files.write("a.txt", "x\n");
+    apogee::agent::Tool counted = *files.registry.find("write_file");
+    int described = 0;
+    const auto describe = counted.describe_detail;
+    counted.describe_detail = [&](std::string_view arguments) {
+        ++described;
+        return describe(arguments);
+    };
+    apogee::agent::DispatchContext allow;
+    allow.permission = [](const apogee::agent::GateRequest&) {
+        return apogee::agent::Permission::Allow;
+    };
+    allow.confirm = [](const apogee::agent::GateRequest&) { return true; };
+    CHECK(apogee::agent::permitted(counted, R"({"path":"a.txt","content":"y\n"})", allow));
+    CHECK(described == 0);
+
+    apogee::agent::DispatchContext ask = allow;
+    ask.permission = [](const apogee::agent::GateRequest&) {
+        return apogee::agent::Permission::Ask;
+    };
+    CHECK(apogee::agent::permitted(counted, R"({"path":"a.txt","content":"y\n"})", ask));
+    CHECK(described == 1);
 }

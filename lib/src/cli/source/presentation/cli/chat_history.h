@@ -13,11 +13,13 @@
 /// `apogee chats` — list, inspect, and rename saved conversations.
 namespace apogee::commands {
 
-/// One row of `apogee chats list`.
 /// One saved conversation as `chats list --output-format json` carries it
-/// (28h): the row's facts -- `id`, `updated`, `turns`, `name`.
+/// (28h): the row's facts -- `id`, `updated`, `turns`, `name` -- and since
+/// 52a the `backend` it ran on and the roster `model` it pinned there (empty
+/// for the backend's own), as its session file records them.
 [[nodiscard]] nlohmann::json session_row_view(const logger::Session& session);
 
+/// One row of `apogee chats list`.
 [[nodiscard]] std::string format_session_row(const logger::Session& session);
 
 /// The body of `apogee chats info <name>`.

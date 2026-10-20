@@ -57,9 +57,39 @@ constexpr std::array<FieldSpec, 1> kText{{
     {"text", "string", true, "The text, to concatenate or display as it arrives.", {}, {}},
 }};
 
-constexpr std::array<FieldSpec, 2> kMemory{{
+constexpr std::array<FieldSpec, 3> kRecalledChat{{
+    {"id", "string", true, "The chat's id, as chats list and --resume take it.", {}, {}},
+    {"name", "string", true, "Its title when it was summarised; empty when it had none.", {}, {}},
+    {"updated", "string", true, "When it was last updated before that, ISO 8601.", {}, {}},
+}};
+
+constexpr std::array<FieldSpec, 3> kMemory{{
     {"chats", "integer", true, "Past chats' summaries recalled for this turn.", {}, {}},
     {"decisions", "integer", true, "Knowledge records recalled for this turn.", {}, {}},
+    {"sessions",
+     "array",
+     false,
+     "Each past chat recalled, in the order sent; absent when chats is 0.",
+     kRecalledChat,
+     {}},
+}};
+
+constexpr std::array<FieldSpec, 6> kSource{{
+    {"file", "string", true, "The file as its index names it.", {}, {}},
+    {"pages", "array", false, "First and last page, when the excerpt records them.", {}, "integer"},
+    {"lines", "array", false, "First and last line, when the excerpt records them.", {}, "integer"},
+    {"times", "array", false, "A recording's span, in seconds.", {}, "number"},
+    {"score", "number", true, "Its score, on its retriever's scale.", {}, {}},
+    {"retriever",
+     "string",
+     true,
+     "lexical, vector or hybrid: the scale the score is on; scales do not compare.",
+     {},
+     {}},
+}};
+
+constexpr std::array<FieldSpec, 1> kSources{{
+    {"sources", "array", true, "Each excerpt sent, in the order sent.", kSource, {}},
 }};
 
 constexpr std::array<FieldSpec, 2> kTodoItem{{
@@ -123,7 +153,13 @@ constexpr std::array<FieldSpec, 6> kQuestion{{
     {"tool", "string", false, "A permission question: the tool asking.", {}, {}},
     {"target", "string", false, "A permission question: its path, command or host.", {}, {}},
     {"outbound", "boolean", false, "A permission question about data leaving the machine.", {}, {}},
-    {"detail", "string", false, "An outbound question: the whole URL.", {}, {}},
+    {"detail",
+     "string",
+     false,
+     "An outbound question: the whole URL. A write_file or edit_file question: the change as "
+     "a unified diff, cut at 32 KB with a last line saying so.",
+     {},
+     {}},
 }};
 
 constexpr std::array<FieldSpec, 1> kError{{
@@ -201,7 +237,7 @@ constexpr std::array<FieldSpec, 2> kHelloLine{{
 
 // --- the lines -----------------------------------------------------------------
 
-constexpr std::array<LineSpec, 18> kOutbound{{
+constexpr std::array<LineSpec, 19> kOutbound{{
     LineSpec{"session",
              "Once, first, unprompted: the protocol version, the model, the session's "
              "capabilities.",
@@ -210,6 +246,7 @@ constexpr std::array<LineSpec, 18> kOutbound{{
              kThinking},
     LineSpec{"thinking_delta", "A chunk of reasoning -- droppable.", kText},
     LineSpec{"memory", "What a turn was handed from earlier conversations.", kMemory},
+    LineSpec{"sources", "The excerpts retrieval sent the model, before the answer.", kSources},
     LineSpec{"tool_status", "A tool running, or another model call the turn makes.", kText},
     LineSpec{"notice", "A line for the user that is neither progress nor an error.", kText},
     LineSpec{"todo", "The session's todo, whole, as the model last wrote it.", kTodo},

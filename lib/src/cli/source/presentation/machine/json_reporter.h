@@ -129,7 +129,10 @@ public:
     /// A `thinking` event carrying `budget_reached: true` (26i).
     void on_thinking_budget_reached() override;
     /// A `memory` event: the past chats and decisions a turn was handed (26l).
-    void on_recall(int chats, int decisions) override;
+    /// A `memory` event, naming each recalled chat (52a).
+    void on_recall(const std::vector<agentloop::RecalledChat>& chats, int decisions) override;
+    /// A `sources` event, before the answer, when anything was sent (52a).
+    void on_sources(const std::vector<harness::ExcerptSource>& sources) override;
     /// `todo` (41d): the session's todo, whole, `items` an array of
     /// `{text, state}`; empty when cleared.
     void on_todo(const harness::TodoList& todo) override;

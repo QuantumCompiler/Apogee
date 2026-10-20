@@ -51,10 +51,11 @@ namespace {
 }  // namespace
 
 nlohmann::json session_row_view(const logger::Session& session) {
-    return nlohmann::json{{"id", session.chat_id},
-                          {"updated", session.updated_at},
-                          {"turns", session.turns},
-                          {"name", session.display_name()}};
+    // The backend and the roster model it pinned (52a), as the session file
+    // records them -- the model empty for a chat on its backend's own.
+    return nlohmann::json{{"id", session.chat_id},      {"updated", session.updated_at},
+                          {"turns", session.turns},     {"name", session.display_name()},
+                          {"backend", session.backend}, {"model", session.model}};
 }
 
 std::string format_session_row(const logger::Session& session) {

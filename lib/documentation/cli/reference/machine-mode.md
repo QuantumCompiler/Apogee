@@ -43,10 +43,11 @@ as chat does (see
 One JSON object per line on stdout. Every object has a `type`.
 
 ```jsonl
-{"type":"session","protocol_version":1,"model":"claude-sonnet-5","next_turn":1,"capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello","cancel"],"tools":true,"ask":true,"schema":"2026-10-13"}}
+{"type":"session","protocol_version":1,"model":"claude-sonnet-5","next_turn":1,"capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello","cancel"],"tools":true,"ask":true,"schema":"2026-10-20"}}
 {"type":"thinking"}
 {"type":"thinking_delta","text":"…"}
-{"type":"memory","chats":2,"decisions":1}
+{"type":"memory","chats":1,"decisions":1,"sessions":[{"id":"20261019-142233-a1b2c3","name":"asyncio timeouts in the scraper","updated":"2026-10-19T14:40:02Z"}]}
+{"type":"sources","sources":[{"file":"report.pdf","pages":[41,42],"score":0.81,"retriever":"vector"},{"file":"notes.md","lines":[12,40],"score":0.4,"retriever":"lexical"}]}
 {"type":"tool_status","text":"fetch_url https://…"}
 {"type":"answer_start"}
 {"type":"answer_delta","text":"…"}
@@ -62,7 +63,8 @@ One JSON object per line on stdout. Every object has a `type`.
 | `session` | Once, first, unprompted. Names the protocol version, the model and the session's `capabilities` (below). |
 | `thinking` | The model began reasoning. No text. Sent again with `"budget_reached": true` when the reasoning reached its thinking budget and was ended there (`--think-budget`, an `--effort` level's budget, or the backend's `thinking_budget`). Machine mode carries the reasoning as it streams whatever `ui.thinking_display` says: the terminal's and the shell's one-line summary (43) is theirs alone, and is never asked for here. |
 | `thinking_delta` | A chunk of reasoning. **Droppable** — see below. |
-| `memory` | `chat` only: what a turn was handed from earlier conversations -- `chats`, past chats' summaries, and `decisions`, recorded knowledge records -- injected for this turn and never into the transcript (26l). Sent before the turn, only when it recalled something. |
+| `memory` | `chat` only: what a turn was handed from earlier conversations -- `chats`, past chats' summaries, and `decisions`, recorded knowledge records -- injected for this turn and never into the transcript (26l). Sent before the turn, only when it recalled something. Since 52a `sessions` names each past chat recalled, in the order sent: its `id` (what `chats list` and `--resume` take), and the `name` and `updated` time the recall index recorded when it summarised the chat -- what the model was handed, so a later rename shows only once the chat is summarised again. Absent when `chats` is 0. |
+| `sources` | The excerpts retrieval sent the model this turn (52a), before the answer: `sources`, each `{file, pages?, lines?, times?, score, retriever}` in the order sent -- the chat's attachments' excerpts first, then a collection's. `file` is the file as its index names it (an attachment's file name, a collection's source path); `pages`, `lines` and `times` (seconds, for a recording) are `[first, last]` when the excerpt's chunks record them. **What was sent, never what was found**: an excerpt the context budget trimmed is not here, and with nothing sent there is no event. `score` is on its `retriever`'s scale -- `lexical`, `vector` or `hybrid` scores do not compare. Number them in order to draw citations. Past chats' recall is `memory`'s, not this. |
 | `tool_status` | A tool is running, described in `text` for display -- or another model call the turn makes besides the chat model's own (the embedder, the utility model, the rerank judge, the knowledge clerk, a suite member the model consults), as `<role> — <what it is doing>` (26n). A `consult` (27f) is an ordinary tool call: `[tool] consult`, then `consult — asking utility (<backend>): <the question's first words>` while the member answers, and the answer reaches the model as the tool's result. A suite's verifier checking a tool call or an answer (27g) is said the same way: `validate — asking utility (<backend>): Check …`. A symphony the root model plays on its own (27t, an orchestrating `execute` session) is an ordinary tool call too: `[tool] play_<symphony>`, then `play — the model chose <symphony>: <n> member calls, <roles>`, then a line per stage. A tool the **vendor** ran on its own servers (47a: an entry's `server_tools:`, or the run's `--search`) is said here too, never dispatched: `<tool>, run by <vendor>: <what>` -- `web_search, run by Anthropic: "apogee harness"`, then `web_search, run by Anthropic: 5 results` -- and since it can fall between two parts of an answer, the answer's events end before it and start again after. |
 | `notice` | A line for the user in `text` that is neither progress nor an error — a local model answering without the tools it was given because its chat template cannot take them, or a reply kept as text because it did not match the template's format, or a request trimmed to fit the model's window (`context budget: 2 earlier exchanges not sent`), or what a suite's verifier said (27g): an objection to a tool call returned to the model, a dispute the call runs over, the two positions on an answer under `answers: always` (`validate: …`), a check that could not be made. Show it and keep it; it never ends the turn. |
 | `todo` | The session's todo, whole (41d): `items`, an array of `{text, state}` -- `state` `pending`, `active` (being done now) or `done` -- in the model's order, empty when it cleared it. Sent each time the model rewrites it with `todo_write` (a session with tools), and once as a resumed session opens, right after `session`, when it was left holding one. Draw it in place of the last: it is the plan, not a log. |
@@ -480,6 +482,23 @@ The answers are the same words: `session` allows that host for the rest of the
 run, and `always` adds it to `tools.allowed_hosts`. With no driver, only the
 listed hosts are reached.
 
+`write_file` and `edit_file` carry the change itself (52a): `detail` is a
+unified diff of the file as it is against what the call would leave, computed
+from the very arguments the call runs with — `--- a/<path>` (`--- /dev/null`
+for a new file), `+++ b/<path>`, `@@` hunks with three lines of context, the
+path relative to the tools' root. A binary side is `Binary files a/<path> and
+b/<path> differ`. Past **32 KB** the diff stops at a line, its last hunk's
+header counting the lines it kept, and a last line says the cap and the whole
+change's counts: `[diff cut at 32 KB: +1200 -45 lines in all]`. Count `+` and
+`-` lines inside the hunks for a card's `+12 −3` (or read that last line);
+`detail` is absent when the call cannot run as given (an `old_string` that is
+not in the file) or the file is past 16 MB. The terminal and the shell show
+the counts, not the diff.
+
+```jsonl
+{"type":"question","kind":"permission","tool":"edit_file","target":"src/app.py","detail":"--- a/src/app.py\n+++ b/src/app.py\n@@ -3,7 +3,7 @@\n import os\n \n def main():\n-    run(timeout=5)\n+    run(timeout=30)\n \n if __name__ == \"__main__\":\n     main()\n","questions":[…]}
+```
+
 **The session's permission mode** decides what is asked at all. It is set at
 launch with `--permission-mode manual|accept-edits|plan|dont-ask|bypass`, the
 same modes a terminal session moves between with `/permission-mode` and
@@ -786,7 +805,7 @@ Since 28h the listings a host UI renders are reads of the same kind:
 apogee models list --output-format json     # {"object":"list","data":[…],"folded":N}; --all for the folded ones too
 apogee models info <backend> --output-format json    # {"name":…,"fields":[{"field":"backend","value":…},…]}
 apogee models status --output-format json            # {"fields":[{"field":"chat","value":…},…]}
-apogee chats list --output-format json      # {"object":"list","data":[{"id","updated","turns","name"},…]}
+apogee chats list --output-format json      # {"object":"list","data":[{"id","updated","turns","name","backend","model"},…]}
 apogee agents list --output-format json     # byte for byte GET /v1/admin/agents
 apogee mcp list --output-format json        # GET /v1/admin/mcp-servers's entries, with what connecting found
 apogee mcp presets --output-format json     # {"object":"list","data":[{"name","description","provides","registers_into_apogee","command","args","runnable",…}]}
@@ -826,7 +845,9 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   joined to it with a newline. The values are the same words the human view
   prints.
 - **`chats list`**: newest first, each conversation's `id`, `updated`, `turns`
-  and `name`.
+  and `name`, and since 52a the `backend` it runs on and the roster `model` it
+  pinned there with `-m` or `/model` — empty when it runs on the backend's own
+  model — as its session file records them.
 - **`agents list`** is exactly the body `GET /v1/admin/agents` serves; **`mcp
   list`** each server as `GET /v1/admin/mcp-servers` serves it — `name`,
   `command`, `args`, `enabled`, `env_set` (never the environment itself) — plus

@@ -64,6 +64,7 @@ add_library(apogee_tests_data OBJECT
     data/contracts/captions_test.cpp
     data/contracts/video_project_test.cpp
     data/contracts/todo_test.cpp
+    data/contracts/text_diff_test.cpp
     data/contracts/paths_test.cpp
     data/contracts/types_test.cpp
     support/channel_guard.h

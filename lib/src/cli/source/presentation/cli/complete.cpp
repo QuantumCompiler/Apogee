@@ -304,6 +304,9 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
             machine_options.inline_attachments = std::move(turn.inlined);
             if (turn.retrieved.has_value() && turn.retrieved->error.empty()) {
                 machine_options.transient_prefix = turn.retrieved->prefix;
+                if (!turn.retrieved->prefix.empty()) {
+                    reporter.on_sources(turn.retrieved->sources);
+                }
             }
         }
 
@@ -415,6 +418,8 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     const ansi::Style& style = reporter_options.style;
     std::optional<OneShotAttachments> attached;
     std::int64_t share_used = 0;
+    // What the retrievals send, in the order sent (52a).
+    std::vector<harness::ExcerptSource> sent;
     if (attaching) {
         // The same core as chat's: an attachment that fits rides the prompt
         // whole, and the others' excerpts are retrieved for it (26d).
@@ -447,6 +452,7 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
             if (turn.retrieved->error.empty() && !turn.retrieved->prefix.empty()) {
                 loop_options.transient_prefix = turn.retrieved->prefix;
                 share_used = turn.retrieved->tokens;
+                sent = turn.retrieved->sources;
             }
             reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " +
                                          describe_attachment_retrieval(*turn.retrieved));
@@ -472,9 +478,13 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         if (rag.error.empty() && !rag.prefix.empty()) {
             loop_options.transient_prefix.insert(loop_options.transient_prefix.end(),
                                                  rag.prefix.begin(), rag.prefix.end());
+            sent.insert(sent.end(), rag.sources.begin(), rag.sources.end());
         }
         reporter.status().print_line(reporter_options.style.tag(role) + " " +
                                      describe_retrieval(rag_choice, rag));
+    }
+    if (!sent.empty()) {
+        reporter.on_sources(sent);
     }
 
     agent::ToolRegistry registry;

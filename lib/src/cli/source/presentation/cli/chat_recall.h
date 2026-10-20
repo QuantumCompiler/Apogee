@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "agentloop/budget.h"
+#include "agentloop/reporter.h"
 #include "agentloop/side_call.h"
 #include "contracts/cancellation.h"
 #include "contracts/config.h"
@@ -50,6 +51,8 @@ void forget_recall(std::string_view chat_id);
 /// What a turn recalled.
 struct Recalled {
     std::vector<harness::ChatMessage> prefix;
+    /// Each past chat sent, in order (52a): the `memory` event's sessions.
+    std::vector<agentloop::RecalledChat> sessions;
     int chats = 0;
     int decisions = 0;
     std::int64_t tokens = 0;

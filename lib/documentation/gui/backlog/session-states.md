@@ -6,7 +6,7 @@
 
 **Seam + files.** `source/presentation/session/` grown (states, the input bar's attach/@/meter, the settings sheet, slash actions); `source/business/session/` (restart-with-resume, attach lines, usage tracking). Tests: the view-model over scripted event sequences per state; attach/@ line emission pinned; the meter's arithmetic over scripted usage; the restart path; fallback renders.
 
-**Reference.** The `ScreenSession*` boards, `ComponentsTurn`/`ComponentsPrompts`; the contract board's SESSIONS rows with fallbacks; [52a](../../cli/backlog/v0.2.0/session-event-fields.md) and [52d](../../cli/backlog/v0.2.0/session-inbound-lines.md) cross-referenced, not gated.
+**Reference.** The `ScreenSession*` boards, `ComponentsTurn`/`ComponentsPrompts`; the contract board's SESSIONS rows with fallbacks; [52a](../../cli/assistant/MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths) (shipped 2026-10-20) and [52d](../../cli/backlog/v0.2.0/session-inbound-lines.md) cross-referenced, not gated.
 
 **Decisions made** (dated):
 - 2026-10-20 — From the design-completion spike (the user's call); fallback-first, upgrades cross-referenced.

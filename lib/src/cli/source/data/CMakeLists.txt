@@ -32,6 +32,8 @@ apogee_add_module(contracts
     contracts/utf8.cpp
     contracts/todo.h
     contracts/todo.cpp
+    contracts/text_diff.h
+    contracts/text_diff.cpp
     contracts/server_tools.h
     contracts/server_tools.cpp
     contracts/assets.h

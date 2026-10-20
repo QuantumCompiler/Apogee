@@ -555,4 +555,19 @@ void from_json(const nlohmann::json& in, ModelInfo& value) {
     value.backend = optional_string(in, "backend");
 }
 
+void to_json(nlohmann::json& out, const ExcerptSource& value) {
+    out = nlohmann::json{{"file", value.file}};
+    if (value.pages.has_value()) {
+        out["pages"] = *value.pages;
+    }
+    if (value.lines.has_value()) {
+        out["lines"] = *value.lines;
+    }
+    if (value.times.has_value()) {
+        out["times"] = *value.times;
+    }
+    out["score"] = value.score;
+    out["retriever"] = value.retriever;
+}
+
 }  // namespace apogee::harness

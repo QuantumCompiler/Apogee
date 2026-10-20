@@ -2,8 +2,10 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -147,13 +149,69 @@ TEST_CASE("what a turn recalled is a memory event, and nothing when it recalled 
           "[commands][machine][recall]") {
     std::ostringstream out;
     JsonReporter reporter{out};
-    reporter.on_recall(0, 0);
-    reporter.on_recall(2, 1);
+    reporter.on_recall({}, 0);
+    reporter.on_recall({{.id = "20261019-142233-a1b2c3",
+                         .name = "asyncio timeouts in the scraper",
+                         .updated = "2026-10-19T14:40:02Z"},
+                        {.id = "20261018-090000-d4e5f6", .name = "", .updated = "2026-10-18"}},
+                       1);
+    reporter.on_recall({}, 2);
     const std::vector<nlohmann::json> all = events(out.str());
-    REQUIRE(all.size() == 1);
+    REQUIRE(all.size() == 2);
     CHECK(all[0].at("type") == "memory");
     CHECK(all[0].at("chats") == 2);
     CHECK(all[0].at("decisions") == 1);
+    // Which chats (52a), in the order sent, each linkable by its id.
+    CHECK(all[0].at("sessions") ==
+          nlohmann::json::parse(R"([{"id":"20261019-142233-a1b2c3",)"
+                                R"("name":"asyncio timeouts in the scraper",)"
+                                R"("updated":"2026-10-19T14:40:02Z"},)"
+                                R"({"id":"20261018-090000-d4e5f6","name":"",)"
+                                R"("updated":"2026-10-18"}])"));
+    // Decisions alone: the event as it always was, no sessions.
+    CHECK(all[1].dump() == R"({"chats":0,"decisions":2,"type":"memory"})");
+}
+
+TEST_CASE("the excerpts a turn sent are a sources event, and nothing when none were",
+          "[commands][machine][sources]") {
+    // 52a: what was sent, in order, each score beside its retriever -- the
+    // golden a driver numbers its citations from.
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.on_sources({});
+    reporter.on_sources({{.file = "report.pdf",
+                          .pages = std::array<std::int64_t, 2>{41, 42},
+                          .score = 0.81,
+                          .retriever = "vector"},
+                         {.file = "notes.md",
+                          .lines = std::array<std::int64_t, 2>{12, 40},
+                          .score = 0.5,
+                          .retriever = "lexical"},
+                         {.file = "talk.mp4",
+                          .times = std::array<double, 2>{270.0, 300.0},
+                          .score = 0.25,
+                          .retriever = "hybrid"},
+                         {.file = "docs/a.md", .score = 0.75, .retriever = "lexical"}});
+    CHECK(out.str() ==
+          R"({"sources":[{"file":"report.pdf","pages":[41,42],"retriever":"vector","score":0.81},)"
+          R"({"file":"notes.md","lines":[12,40],"retriever":"lexical","score":0.5},)"
+          R"({"file":"talk.mp4","retriever":"hybrid","score":0.25,"times":[270.0,300.0]},)"
+          R"({"file":"docs/a.md","retriever":"lexical","score":0.75}],"type":"sources"})"
+          "\n");
+}
+
+TEST_CASE("a file writer's permission question carries its diff as detail",
+          "[commands][machine][permission][diff]") {
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    const std::string diff = "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n";
+    apogee::agent::GateRequest request{"edit_file", "x", diff};
+    request.edits = true;
+    reporter.emit_permission_question(request);
+    const nlohmann::json event = nlohmann::json::parse(out.str());
+    CHECK(event["tool"] == "edit_file");
+    CHECK(event["detail"] == diff);
+    CHECK_FALSE(event.contains("outbound"));
 }
 
 TEST_CASE("a spent thinking budget is said on a thinking event", "[commands][machine][thinking]") {
@@ -1108,7 +1166,11 @@ TEST_CASE("every event every emitter writes is the declaration's, field for fiel
     capabilities.ask = true;
     reporter.begin_session("m", capabilities, 1);
     reporter.begin_turn(1);
-    reporter.on_recall(2, 1);
+    reporter.on_recall({{.id = "c1", .name = "one", .updated = "2026-10-19T10:00:00Z"}}, 1);
+    reporter.on_sources({{.file = "a.md",
+                          .lines = std::array<std::int64_t, 2>{1, 9},
+                          .score = 0.5,
+                          .retriever = "lexical"}});
     reporter.on_thinking();
     reporter.on_thinking_budget_reached();
     reporter.on_thinking_token("hmm");

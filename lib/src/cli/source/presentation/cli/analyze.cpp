@@ -672,6 +672,9 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
                     options.transient_prefix = rag.prefix;
                 }
                 note(describe_retrieval(rag_choice, rag), !rag.error.empty());
+                if (rag.error.empty() && !rag.prefix.empty() && !rag.sources.empty()) {
+                    reporter.on_sources(rag.sources);
+                }
             }
             TurnOutput turn;
             if (loaded.structured()) {

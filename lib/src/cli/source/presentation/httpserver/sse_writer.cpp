@@ -31,6 +31,10 @@ nlohmann::json status_event_json(const harness::StatusEvent& event) {
         if (event.rag->graph_entities > 0) {
             out["graph_entities"] = event.rag->graph_entities;
         }
+        if (!event.rag->sources.empty()) {
+            // Each excerpt sent (52a), each score beside its retriever.
+            out["sources"] = event.rag->sources;
+        }
     }
     if (event.tokens.has_value()) {
         out["tokens"] = *event.tokens;

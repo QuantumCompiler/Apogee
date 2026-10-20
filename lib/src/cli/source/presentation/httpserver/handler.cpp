@@ -498,6 +498,7 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
             meta.retriever = rag.retriever;
             meta.reranked = rag.reranked;
             meta.graph_entities = rag.graph_entities;
+            meta.sources = rag.error.empty() ? rag.sources : std::vector<harness::ExcerptSource>{};
             result.rag = meta;
             result.detail = rag.error.empty() ? join(rag.notes, "; ") : rag.error;
             sse->emit_meta(result);
