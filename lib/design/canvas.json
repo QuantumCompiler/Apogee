@@ -1,0 +1,542 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "BuildContract.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 5600,
+      "x": -3040,
+      "y": 0,
+      "title": "Build · how the app talks to Apogee",
+      "page": "build"
+    },
+    "BuildLayout.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 3700,
+      "x": -1520,
+      "y": 0,
+      "title": "Build · layout, navigation and native controls",
+      "page": "build"
+    },
+    "App.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "is_interactive": true,
+      "title": "Apogee · the whole app (interactive)",
+      "w": 1440,
+      "x": 0,
+      "y": 0,
+      "page": "build"
+    },
+    "BuildProcesses.dc.html": {
+      "w": 1440,
+      "h": 1040,
+      "x": 1520,
+      "y": 0,
+      "page": "build",
+      "title": "Build · how the app runs Apogee"
+    },
+    "ScreenSessionStreaming.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 0,
+      "y": 1400,
+      "title": "Session · streaming, thinking open",
+      "page": "build"
+    },
+    "ScreenSessionPermission.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 1520,
+      "y": 1400,
+      "title": "Session · asking permission",
+      "page": "build"
+    },
+    "ScreenSessionSources.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 3040,
+      "y": 1400,
+      "title": "Session · a source opened",
+      "page": "build"
+    },
+    "ScreenSessionError.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 4560,
+      "y": 1400,
+      "title": "Session · a model didn’t load",
+      "page": "build"
+    },
+    "ScreenSessionQuestion.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 6080,
+      "y": 1400,
+      "title": "Session · the model asks you",
+      "page": "build"
+    },
+    "ScreenSessionNew.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 7600,
+      "y": 1400,
+      "title": "Session · new and empty",
+      "page": "build"
+    },
+    "ScreenSessionPrivate.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 9120,
+      "y": 1400,
+      "title": "Session · private",
+      "page": "build"
+    },
+    "ScreenMonitor.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 10640,
+      "y": 1400,
+      "title": "System monitor",
+      "page": "build"
+    },
+    "ScreenModels.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 0,
+      "y": 2720,
+      "title": "Models · library, one open",
+      "page": "build"
+    },
+    "ScreenModelsDownloads.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 1520,
+      "y": 2720,
+      "title": "Models · downloads",
+      "page": "build"
+    },
+    "ScreenModelsRoles.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 3040,
+      "y": 2720,
+      "title": "Models · roles",
+      "page": "build"
+    },
+    "ScreenDownload.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 4560,
+      "y": 2720,
+      "title": "Models · downloading a pipeline",
+      "page": "build"
+    },
+    "ScreenSuites.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 6080,
+      "y": 2720,
+      "title": "Suites",
+      "page": "build"
+    },
+    "ScreenTasks.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 7600,
+      "y": 2720,
+      "title": "Tasks · running",
+      "page": "build"
+    },
+    "ScreenNewTask.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 9120,
+      "y": 2720,
+      "title": "Tasks · new task",
+      "page": "build"
+    },
+    "ScreenGraph.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 10640,
+      "y": 2720,
+      "title": "Code graph",
+      "page": "build"
+    },
+    "ScreenVideoClip.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 0,
+      "y": 4040,
+      "title": "Video · a clip and its record",
+      "page": "build"
+    },
+    "ScreenVideoRun.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 1520,
+      "y": 4040,
+      "title": "Video · generating a final",
+      "page": "build"
+    },
+    "ScreenVideoConsent.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 3040,
+      "y": 4040,
+      "title": "Video · LoRAs need peft",
+      "page": "build"
+    },
+    "ScreenCompose.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 4560,
+      "y": 4040,
+      "title": "Video · a composition",
+      "page": "build"
+    },
+    "ScreenComposeEdit.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 6080,
+      "y": 4040,
+      "title": "Video · previewing an edit",
+      "page": "build"
+    },
+    "ScreenComposeNew.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 7600,
+      "y": 4040,
+      "title": "Video · a new composition, planned",
+      "page": "build"
+    },
+    "ScreenComposeStopped.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 9120,
+      "y": 4040,
+      "title": "Video · a stopped composition",
+      "page": "build"
+    },
+    "ScreenVoice.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 10640,
+      "y": 4040,
+      "title": "Voice",
+      "page": "build"
+    },
+    "ScreenSettingsGeneral.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 0,
+      "y": 5360,
+      "title": "Settings · General",
+      "page": "build"
+    },
+    "ScreenSettingsAppearance.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 1520,
+      "y": 5360,
+      "title": "Settings · Appearance",
+      "page": "build"
+    },
+    "ScreenSettingsMedia.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 3040,
+      "y": 5360,
+      "title": "Settings · Video & voice",
+      "page": "build"
+    },
+    "ScreenSettingsBackends.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 4560,
+      "y": 5360,
+      "title": "Settings · Backends & keys",
+      "page": "build"
+    },
+    "ScreenSettingsPermissions.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 6080,
+      "y": 5360,
+      "title": "Settings · Permissions",
+      "page": "build"
+    },
+    "ColorTokens.dc.html": {
+      "expand": "fill",
+      "h": 1520,
+      "title": "Foundations · Color tokens",
+      "w": 1440,
+      "x": 0,
+      "y": 0,
+      "page": "foundations"
+    },
+    "TypeSpace.dc.html": {
+      "expand": "fill",
+      "h": 2850,
+      "title": "Foundations · Type, space, shape",
+      "w": 1440,
+      "x": 1520,
+      "y": 0,
+      "page": "foundations"
+    },
+    "ComponentsModel.dc.html": {
+      "expand": "fill",
+      "h": 2400,
+      "title": "Components · Model, context, sources",
+      "w": 1440,
+      "x": 3040,
+      "y": 0,
+      "page": "foundations"
+    },
+    "ComponentsTurn.dc.html": {
+      "expand": "fill",
+      "h": 2250,
+      "title": "Components · The turn",
+      "w": 1440,
+      "x": 4560,
+      "y": 0,
+      "page": "foundations"
+    },
+    "ComponentsPrompts.dc.html": {
+      "expand": "fill",
+      "h": 2050,
+      "title": "Components · Asking and failing",
+      "w": 1440,
+      "x": 6080,
+      "y": 0,
+      "page": "foundations"
+    },
+    "ComponentsMedia.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 3300,
+      "x": 7600,
+      "y": 0,
+      "page": "foundations",
+      "title": "Components · Making media"
+    },
+    "Main.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "title": "A · Console",
+      "w": 1440,
+      "x": 0,
+      "y": 0,
+      "page": "exploration"
+    },
+    "Inspector.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "title": "B · Inspector",
+      "w": 1440,
+      "x": 1520,
+      "y": 0,
+      "page": "exploration"
+    },
+    "Trace.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "title": "C · Trace",
+      "w": 1440,
+      "x": 3040,
+      "y": 0,
+      "page": "exploration"
+    },
+    "Chat.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "title": "Session · first merged pass",
+      "w": 1440,
+      "x": 0,
+      "y": 1400,
+      "page": "exploration"
+    },
+    "Appearance.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "is_interactive": true,
+      "title": "Settings · Appearance, first pass",
+      "w": 1440,
+      "x": 1520,
+      "y": 1400,
+      "page": "exploration"
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-10-04T17:00:00Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "view": "focused",
+    "file": "App.dc.html"
+  },
+  "notes": {
+    "app": {
+      "kind": "title1",
+      "maxW": 6000,
+      "text": "Build — the contract, the measurements, and the app itself",
+      "x": -3040,
+      "y": -300,
+      "page": "build"
+    },
+    "sessions": {
+      "kind": "title1",
+      "maxW": 12080,
+      "text": "Screens — sessions and the system monitor",
+      "x": 0,
+      "y": 1100,
+      "page": "build"
+    },
+    "library": {
+      "kind": "title1",
+      "maxW": 12080,
+      "text": "Screens — models, suites, tasks and the code graph",
+      "x": 0,
+      "y": 2420,
+      "page": "build"
+    },
+    "media": {
+      "kind": "title1",
+      "maxW": 12080,
+      "text": "Screens — video and voice",
+      "x": 0,
+      "y": 3740,
+      "page": "build"
+    },
+    "settings": {
+      "kind": "title1",
+      "maxW": 7520,
+      "text": "Screens — settings",
+      "x": 0,
+      "y": 5060,
+      "page": "build"
+    },
+    "foundations": {
+      "kind": "title1",
+      "maxW": 9040,
+      "text": "Foundations — color, type, space and components",
+      "w": 240,
+      "x": 0,
+      "y": -300,
+      "page": "foundations"
+    },
+    "dirs": {
+      "kind": "title1",
+      "maxW": 4480,
+      "text": "Session window — three directions, streaming with thinking open",
+      "w": 240,
+      "x": 0,
+      "y": -300,
+      "page": "exploration"
+    },
+    "chosen": {
+      "kind": "title1",
+      "maxW": 4480,
+      "text": "First merged pass — superseded by the app and its screens",
+      "w": 240,
+      "x": 0,
+      "y": 1100,
+      "page": "exploration"
+    }
+  },
+  "order": [
+    "BuildContract.dc.html",
+    "BuildLayout.dc.html",
+    "App.dc.html",
+    "BuildProcesses.dc.html",
+    "ScreenSessionStreaming.dc.html",
+    "ScreenSessionPermission.dc.html",
+    "ScreenSessionSources.dc.html",
+    "ScreenSessionError.dc.html",
+    "ScreenSessionQuestion.dc.html",
+    "ScreenSessionNew.dc.html",
+    "ScreenSessionPrivate.dc.html",
+    "ScreenMonitor.dc.html",
+    "ScreenModels.dc.html",
+    "ScreenModelsDownloads.dc.html",
+    "ScreenModelsRoles.dc.html",
+    "ScreenDownload.dc.html",
+    "ScreenSuites.dc.html",
+    "ScreenTasks.dc.html",
+    "ScreenNewTask.dc.html",
+    "ScreenGraph.dc.html",
+    "ScreenVideoClip.dc.html",
+    "ScreenVideoRun.dc.html",
+    "ScreenVideoConsent.dc.html",
+    "ScreenCompose.dc.html",
+    "ScreenComposeEdit.dc.html",
+    "ScreenComposeNew.dc.html",
+    "ScreenComposeStopped.dc.html",
+    "ScreenVoice.dc.html",
+    "ScreenSettingsGeneral.dc.html",
+    "ScreenSettingsAppearance.dc.html",
+    "ScreenSettingsMedia.dc.html",
+    "ScreenSettingsBackends.dc.html",
+    "ScreenSettingsPermissions.dc.html",
+    "ColorTokens.dc.html",
+    "TypeSpace.dc.html",
+    "ComponentsModel.dc.html",
+    "ComponentsTurn.dc.html",
+    "ComponentsPrompts.dc.html",
+    "ComponentsMedia.dc.html",
+    "Main.dc.html",
+    "Inspector.dc.html",
+    "Trace.dc.html",
+    "Chat.dc.html",
+    "Appearance.dc.html"
+  ],
+  "pages": [
+    {
+      "id": "build",
+      "name": "Build"
+    },
+    {
+      "id": "foundations",
+      "name": "Foundations"
+    },
+    {
+      "id": "exploration",
+      "name": "Exploration"
+    }
+  ],
+  "title": "Apogee Desktop"
+}

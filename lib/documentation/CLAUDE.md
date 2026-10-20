@@ -5,7 +5,7 @@ One directory per application. Decide which application your change touches, the
 | Working on | Code | Docs | Start at |
 |---|---|---|---|
 | **The CLI** — the harness itself: commands, backends, the TUI, `serve`, machine mode | `lib/src/cli/` | [`cli/`](cli/) | [`cli/assistant/CLAUDE.md`](cli/assistant/CLAUDE.md) |
-| **The GUI** — the desktop applications (macOS, Linux, Windows), front ends that drive the CLI | `lib/src/darwin/` · `linux/` · `windows/` | [`gui/`](gui/) | [`gui/README.md`](gui/README.md) |
+| **The GUI** — the desktop applications (macOS, Linux, Windows), front ends that drive the CLI | `lib/src/darwin/` · `linux/` · `windows/` | [`gui/`](gui/) | [`gui/assistant/CLAUDE.md`](gui/assistant/CLAUDE.md) |
 
 Two facts that cross the boundary:
 

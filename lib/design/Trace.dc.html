@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Apogee session · Trace</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:inherit}
+.c-dark{--bg:#0E1318;--side:#0A0E12;--surf:#141A21;--raise:#1B232C;--sel:#18212A;--line:#222C36;--line2:#33424F;--fg:#E2E7ED;--fg2:#A6B1BD;--fg3:#808C99;--acc:#5BC6E6;--think:#4A5D70;--helper:#4FB58A;--tool:#7FD8F0;--api:#F1B259;--sub:#B39DF6;--warn:#F1B259;--code:#0A0F14;--k:#C4A5F5;--s:#9FD49A;color-scheme:dark}
+.c-light{--bg:#F7F9FB;--side:#EDF1F5;--surf:#FFFFFF;--raise:#EAEFF4;--sel:#E0E7EE;--line:#DCE3EA;--line2:#C2CCD6;--fg:#111820;--fg2:#44505C;--fg3:#5F6D7A;--acc:#0A6E93;--think:#BFC9D3;--helper:#43B07F;--tool:#0A6E93;--api:#9E5800;--sub:#6649CC;--warn:#9E5800;--code:#F1F4F7;--k:#7A3FC0;--s:#2F7A1F;color-scheme:light}
+.ap .i{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
+.ap .mono{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace}
+.ap code{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-size:.82em;padding:1px 5px;border-radius:4px;background:var(--raise);color:var(--fg)}
+.ap .k{color:var(--k)}.ap .s{color:var(--s)}
+.ap input::placeholder,.ap textarea::placeholder{color:var(--fg3)}
+.ap button{font-family:inherit;cursor:pointer}
+.ap button:focus-visible,.ap a:focus-visible,.ap input:focus-visible,.ap textarea:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+@keyframes ap-blink{50%{opacity:0}}
+.ap .caret{animation:ap-blink 1.1s steps(1) infinite}
+@media (prefers-reduced-motion:reduce){.ap .caret{animation:none}}
+@media (max-width:760px){
+.ap{flex-direction:column!important;height:auto!important;overflow:visible!important}
+.ap .ap-side{flex:0 0 auto!important;border-right:0!important;border-bottom:1px solid var(--line)}
+.ap .ap-list,.ap .ap-mon{display:none!important}
+.ap .ap-tools{flex-wrap:wrap!important;height:auto!important;flex-basis:auto!important;padding:10px 16px!important}
+.ap .ap-scroll{overflow:visible!important;justify-content:flex-start!important;padding:16px!important}
+.ap .ap-row,.ap .ap-compose{grid-template-columns:minmax(0,1fr)!important}
+.ap .ap-rail,.ap .ap-cspace{display:none!important}
+.ap .ap-spine{border-right:0!important;text-align:left!important;padding-bottom:4px!important}
+.ap .ap-trace{grid-template-columns:76px minmax(0,1fr) 40px!important}
+.ap .ap-track{display:none!important}
+.ap .ap-compose{padding:0 16px 16px!important}
+}
+</style>
+</helmet>
+<div class="{{themeClass}}" style="height: 900px; display: flex; overflow: hidden; background: var(--bg); color: var(--fg); font-family: 'Instrument Sans', system-ui, sans-serif; font-size: 13px; line-height: 1.45; -webkit-font-smoothing: antialiased">
+
+<aside class="ap-side" aria-label="Sessions" style="flex: 0 0 248px; min-height: 0; display: flex; flex-direction: column; background: var(--side); border-right: 1px solid var(--line)">
+<div style="flex: 0 0 52px; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 18px">
+<span style="width: 12px; height: 12px; border-radius: 50%; background: #FF5F57"></span>
+<span style="width: 12px; height: 12px; border-radius: 50%; background: #FEBC2E"></span>
+<span style="width: 12px; height: 12px; border-radius: 50%; background: #28C840"></span>
+<span style="flex: 1 1 auto"></span>
+<button type="button" aria-label="New private session, not remembered afterwards (Shift Command N)" style="width: 30px; height: 28px; display: grid; place-items: center; padding: 0; background: transparent; border: 0; border-radius: 6px; color: var(--fg2)"><svg class="i" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8s2.2-4 6-4c1 0 1.9.3 2.7.7M14 8s-2.2 4-6 4c-1 0-1.9-.3-2.7-.7"></path><path d="M6.6 9.4a2 2 0 0 1 2.8-2.8"></path><path d="M3 13L13 3"></path></svg></button>
+<button type="button" aria-label="New session (Command N)" style="width: 30px; height: 28px; display: grid; place-items: center; padding: 0; background: transparent; border: 0; border-radius: 6px; color: var(--fg2)"><svg class="i" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3H4.5A1.5 1.5 0 0 0 3 4.5v7A1.5 1.5 0 0 0 4.5 13h7a1.5 1.5 0 0 0 1.5-1.5V8"></path><path d="M11.5 2.5l2 2L8 10H6V8z"></path></svg></button>
+</div>
+<label style="margin: 0 12px 10px; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surf); color: var(--fg3)"><svg class="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"></circle><path d="M10.2 10.2L13.5 13.5"></path></svg><input type="search" placeholder="Search sessions" aria-label="Search sessions" style="flex: 1 1 auto; min-width: 0; height: 26px; padding: 0; border: 0; background: transparent; font: inherit; font-size: 12.5px; color: var(--fg)"><span class="mono" style="font-size: 10.5px">⇧⌘F</span></label>
+
+<nav class="ap-list" aria-label="Past sessions" style="flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 0 8px; display: flex; flex-direction: column; gap: 2px">
+<div style="padding: 6px 10px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .07em; color: var(--fg3)">TODAY</div>
+<a href="#" aria-current="page" style="display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-radius: 6px; background: var(--sel); color: var(--fg); text-decoration: none"><span style="font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">TaskGroup timeouts in the ingest runner</span><span class="mono" style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--fg3)"><svg class="i" width="11" height="11" viewBox="0 0 16 16" aria-label="local"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg>gpt-oss-20b · 14:03</span></a>
+<a href="#" style="display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-radius: 6px; color: var(--fg2); text-decoration: none"><span style="font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Quantize Gemma 4 12B for the M3 Max</span><span class="mono" style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--fg3)"><svg class="i" width="11" height="11" viewBox="0 0 16 16" aria-label="local"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg>Gemma 4 12B · MLX · 11:20</span></a>
+<a href="#" style="display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-radius: 6px; color: var(--fg2); text-decoration: none"><span style="font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Review PR 482: retry budget for uploads</span><span class="mono" style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--fg3)"><svg class="i" width="11" height="11" viewBox="0 0 16 16" aria-label="subscription" style="color: var(--sub)"><path d="M12.5 6A4.75 4.75 0 0 0 3.6 5.2"></path><path d="M3.5 10a4.75 4.75 0 0 0 8.9.8"></path><path d="M3.3 2.6v2.8h2.8"></path><path d="M12.7 13.4v-2.8H9.9"></path></svg><span style="color: var(--sub)">Claude · subscription</span> · 09:41</span></a>
+<div style="padding: 10px 10px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .07em; color: var(--fg3)">YESTERDAY</div>
+<a href="#" style="display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-radius: 6px; color: var(--fg2); text-decoration: none"><span style="font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">RFC 9111 freshness rules, summarized</span><span class="mono" style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--fg3)"><svg class="i" width="11" height="11" viewBox="0 0 16 16" aria-label="cloud API, billed" style="color: var(--api)"><ellipse cx="8" cy="4.5" rx="5" ry="2"></ellipse><path d="M3 4.5V8c0 1.1 2.2 2 5 2s5-.9 5-2V4.5"></path><path d="M3 8v3.5c0 1.1 2.2 2 5 2s5-.9 5-2V8"></path></svg><span style="color: var(--api)">Claude Sonnet · API</span> · 48.2K tok</span></a>
+<a href="#" style="display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-radius: 6px; color: var(--fg2); text-decoration: none"><span style="font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Where llama.cpp sizes the KV cache</span><span class="mono" style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--fg3)"><svg class="i" width="11" height="11" viewBox="0 0 16 16" aria-label="local"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg>Qwen3-VL-8B · Q4_K_M · 16:47</span></a>
+<a href="#" style="display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-radius: 6px; color: var(--fg2); text-decoration: none"><span style="font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Transcribe standup-2026-10-02.m4a</span><span class="mono" style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--fg3)"><svg class="i" width="11" height="11" viewBox="0 0 16 16" aria-label="local"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg>Gemma 4 12B · MLX · 10:15</span></a>
+<div style="padding: 10px 10px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .07em; color: var(--fg3)">PREVIOUS 7 DAYS</div>
+<a href="#" style="display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-radius: 6px; color: var(--fg2); text-decoration: none"><span style="font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Embedding models for the docs search</span><span class="mono" style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--fg3)"><svg class="i" width="11" height="11" viewBox="0 0 16 16" aria-label="local"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg>gpt-oss-20b · Fri</span></a>
+<a href="#" style="display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-radius: 6px; color: var(--fg2); text-decoration: none"><span style="font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Postgres SKIP LOCKED vs advisory locks</span><span class="mono" style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--fg3)"><svg class="i" width="11" height="11" viewBox="0 0 16 16" aria-label="subscription" style="color: var(--sub)"><path d="M12.5 6A4.75 4.75 0 0 0 3.6 5.2"></path><path d="M3.5 10a4.75 4.75 0 0 0 8.9.8"></path><path d="M3.3 2.6v2.8h2.8"></path><path d="M12.7 13.4v-2.8H9.9"></path></svg><span style="color: var(--sub)">Claude · subscription</span> · Thu</span></a>
+<a href="#" style="display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-radius: 6px; color: var(--fg2); text-decoration: none"><span style="font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">asyncio timeouts in the scraper</span><span class="mono" style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--fg3)"><svg class="i" width="11" height="11" viewBox="0 0 16 16" aria-label="local"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg>gpt-oss-20b · Mon</span></a>
+</nav>
+
+<section class="ap-mon mono" aria-label="System" style="flex: 0 0 auto; border-top: 1px solid var(--line); padding: 12px 16px 16px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 14px; font-size: 10.5px; color: var(--fg3)">
+<div style="display: flex; flex-direction: column; gap: 4px"><span>CPU</span><span style="font-size: 12px; color: var(--fg)">31%</span><span style="height: 3px; border-radius: 2px; background: var(--line); overflow: hidden"><span style="display: block; width: 31%; height: 100%; background: var(--fg2)"></span></span></div>
+<div style="display: flex; flex-direction: column; gap: 4px"><span>MEM</span><span style="font-size: 12px; color: var(--fg)">22.4<span style="color: var(--fg3)">/36 GB</span></span><span style="height: 3px; border-radius: 2px; background: var(--line); overflow: hidden"><span style="display: block; width: 62%; height: 100%; background: var(--fg2)"></span></span></div>
+<div style="display: flex; flex-direction: column; gap: 4px"><span>GPU</span><span style="font-size: 12px; color: var(--fg)">64%</span><span style="height: 3px; border-radius: 2px; background: var(--line); overflow: hidden"><span style="display: block; width: 64%; height: 100%; background: var(--fg2)"></span></span></div>
+<div style="grid-column: 1 / -1; display: flex; justify-content: space-between"><span>apogee 13.0 GB · 2 models loaded</span><span>⌥⌘M</span></div>
+</section>
+</aside>
+
+<div style="flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column">
+<header class="ap-tools" style="flex: 0 0 52px; display: flex; align-items: center; gap: 16px; padding: 0 20px 0 28px; border-bottom: 1px solid var(--line)">
+<h1 style="flex: 1 1 auto; min-width: 0; margin: 0; font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">TaskGroup timeouts in the ingest runner</h1>
+<button type="button" aria-label="Model: gpt-oss-20b, local, runs on this Mac. Switch model" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px 0 10px; background: var(--surf); border: 1px solid var(--line2); border-radius: 7px; color: var(--fg); font-size: 13px"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="color: var(--fg2)"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg><span style="font-weight: 600">gpt-oss-20b</span><span class="mono" style="padding: 1px 6px; border-radius: 4px; background: var(--raise); font-size: 10.5px; color: var(--fg2)">local · this Mac</span><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" style="color: var(--fg3)"><path d="M4.5 6.5L8 10l3.5-3.5"></path></svg></button>
+<button type="button" aria-label="Thinking: automatic, 30 second budget" style="display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 8px 0 10px; background: transparent; border: 1px solid var(--line2); border-radius: 7px; color: var(--fg); font-size: 13px"><span>Thinking</span><span class="mono" style="font-size: 11px; color: var(--fg3)">auto · 30 s</span><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" style="color: var(--fg3)"><path d="M4.5 6.5L8 10l3.5-3.5"></path></svg></button>
+<div role="meter" aria-label="Context window, 84 percent full" aria-valuemin="0" aria-valuemax="100" aria-valuenow="84" style="display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--fg3)">
+<span>Context</span>
+<span aria-hidden="true" style="position: relative; display: block; width: 160px; height: 6px; border-radius: 3px; background: var(--line)"><span style="display: block; width: 84%; height: 100%; border-radius: 3px; background: var(--warn)"></span><span style="position: absolute; left: 80%; top: -4px; width: 1px; height: 14px; background: var(--fg3)"></span><span style="position: absolute; left: 90%; top: -4px; width: 1px; height: 14px; background: var(--fg3)"></span></span>
+<span class="mono" style="font-size: 11px; color: var(--fg2)">27.6K / 32.8K</span>
+<span class="mono" style="font-size: 11px; font-weight: 500; color: var(--warn)">84%</span>
+</div>
+</header>
+
+<section class="ap-scroll" aria-label="Conversation" style="flex: 1 1 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; padding: 0 28px 14px">
+<div style="display: flex; flex-direction: column">
+
+<div class="ap-row" style="display: grid; grid-template-columns: 72px minmax(0, 720px) 172px; column-gap: 24px; justify-content: center">
+<div class="ap-spine mono" style="position: relative; border-right: 1px solid var(--line); padding: 2px 14px 24px 0; text-align: right; font-size: 10.5px; line-height: 18px; color: var(--fg3)">14:00:12<span aria-hidden="true" style="position: absolute; top: 7px; right: -4px; width: 7px; height: 7px; box-sizing: border-box; border-radius: 50%; background: var(--bg); border: 1.5px solid var(--fg3)"></span></div>
+<div style="min-width: 0; padding-bottom: 24px">
+<div style="margin-bottom: 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .07em; color: var(--fg3)">YOU</div>
+<p style="margin: 0 0 8px; font-size: 14px; line-height: 1.55">Where do fetches start in this repo, and what cancels them?</p>
+<div style="display: inline-flex; align-items: center; gap: 10px; padding: 6px 12px 6px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--surf)"><svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" style="color: var(--fg2)"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.8l1.5 1.5h4.7A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"></path></svg><span style="display: flex; flex-direction: column; line-height: 1.35"><span class="mono" style="font-size: 11.5px">~/code/ingest/</span><span style="font-size: 11px; color: var(--fg3)">214 files · src/ tests/ scripts/ · .py 168 · .md 9 · .toml 4</span></span></div>
+</div>
+<div class="ap-rail" aria-hidden="true"></div>
+</div>
+
+<div class="ap-row" style="display: grid; grid-template-columns: 72px minmax(0, 720px) 172px; column-gap: 24px; justify-content: center">
+<div class="ap-spine mono" style="position: relative; border-right: 1px solid var(--line); padding: 2px 14px 24px 0; text-align: right; font-size: 10.5px; line-height: 18px; color: var(--fg3)">14:00:14<span aria-hidden="true" style="position: absolute; top: 7px; right: -4px; width: 7px; height: 7px; border-radius: 50%; background: var(--fg2)"></span></div>
+<div style="min-width: 0; padding-bottom: 24px">
+<button type="button" aria-expanded="false" style="display: inline-flex; align-items: center; gap: 10px; height: 24px; padding: 0 8px 0 4px; margin: 0 0 8px -4px; background: transparent; border: 0; border-radius: 5px; font-size: 12.5px; color: var(--fg3)"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 4.5L10 8l-3.5 3.5"></path></svg><span style="color: var(--fg2)">Thought for 9s</span><span aria-hidden="true" style="display: flex; gap: 1px; width: 120px; height: 5px; border-radius: 3px; overflow: hidden"><span style="width: 6%; background: var(--helper)"></span><span style="width: 18%; background: var(--think)"></span><span style="width: 20%; background: var(--tool)"></span><span style="width: 5%; background: var(--think)"></span><span style="width: 3%; background: var(--tool)"></span><span style="flex: 1 1 auto; background: var(--think)"></span></span><span class="mono" style="font-size: 10.5px">1 helper · 2 tools</span></button>
+<div style="font-family: 'Source Serif 4', Georgia, serif; font-size: 15.5px; line-height: 1.6; color: var(--fg)">
+<p style="margin: 0 0 10px">Fetches start in <code>Runner.run_batch()</code> at <code>src/ingest/runner.py:52</code>. Every URL in the batch becomes its own task inside a single <code>asyncio.TaskGroup</code>:</p>
+<figure style="margin: 0 0 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--code); overflow: hidden">
+<figcaption class="mono" style="display: flex; align-items: center; justify-content: space-between; height: 30px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--line); font-size: 10.5px; color: var(--fg3)"><span>python · src/ingest/runner.py:52–56</span><button type="button" class="mono" style="height: 22px; padding: 0 8px; background: transparent; border: 0; border-radius: 4px; font-size: 10.5px; color: var(--fg3)">Copy</button></figcaption>
+<div class="mono" style="padding: 10px 14px; font-size: 12px; line-height: 1.7; white-space: pre; overflow-x: auto">
+<div><span class="k">async def</span> run_batch(self, batch: list[str]) -&gt; <span class="k">None</span>:</div>
+<div style="padding-left: 4ch"><span class="k">async with</span> asyncio.TaskGroup() <span class="k">as</span> tg:</div>
+<div style="padding-left: 8ch"><span class="k">for</span> url <span class="k">in</span> batch:</div>
+<div style="padding-left: 12ch">tg.create_task(self._fetch(url))</div>
+<div style="padding-left: 4ch">log.info(<span class="s">"batch done: %d urls"</span>, len(batch))</div>
+</div>
+</figure>
+<p style="margin: 0 0 6px">Two things cancel a fetch:</p>
+<ol style="margin: 0; padding-left: 22px">
+<li style="margin-bottom: 4px"><code>asyncio.timeout(10)</code> inside <code>_fetch()</code> raises <code>TimeoutError</code> in that task only.</li>
+<li>The <code>TaskGroup</code> itself: when any child raises, it cancels every sibling and re-raises the failures together as an <code>ExceptionGroup</code>.</li>
+</ol>
+</div>
+</div>
+<div class="ap-rail mono" style="padding: 2px 0 24px; font-size: 10.5px; line-height: 18px; color: var(--fg3)">
+<div style="display: flex; align-items: center; gap: 6px; font-family: 'Instrument Sans', system-ui, sans-serif; font-size: 12.5px; font-weight: 600; color: var(--fg)"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" style="color: var(--fg2)"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg>gpt-oss-20b</div>
+<div style="margin-bottom: 8px">local · this Mac</div>
+<div style="display: grid; grid-template-columns: 40px auto; column-gap: 8px"><span>in</span><span style="color: var(--fg2)">3,214</span><span>out</span><span style="color: var(--fg2)">588</span><span>time</span><span style="color: var(--fg2)">14.1 s</span></div>
+</div>
+</div>
+
+<div class="ap-row" style="display: grid; grid-template-columns: 72px minmax(0, 720px) 172px; column-gap: 24px; justify-content: center">
+<div class="ap-spine mono" style="position: relative; border-right: 1px solid var(--line); padding: 2px 14px 24px 0; text-align: right; font-size: 10.5px; line-height: 18px; color: var(--fg3)">14:03:40<span aria-hidden="true" style="position: absolute; top: 7px; right: -4px; width: 7px; height: 7px; box-sizing: border-box; border-radius: 50%; background: var(--bg); border: 1.5px solid var(--fg3)"></span></div>
+<div style="min-width: 0; padding-bottom: 14px">
+<div style="margin-bottom: 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .07em; color: var(--fg3)">YOU</div>
+<p style="margin: 0 0 14px; font-size: 14px; line-height: 1.55">So one slow host takes the whole batch down. I want the other fetches to finish and just log the timeouts. What’s the idiomatic fix on 3.12?</p>
+<div role="note" class="mono" style="display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--fg3)"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"></circle><path d="M8 7.2v3.6M8 5.2v.1"></path></svg><span>2 earlier exchanges not sent — context budget</span><span style="flex: 1 1 auto; border-top: 1px dashed var(--line2)"></span></div>
+</div>
+<div class="ap-rail" aria-hidden="true"></div>
+</div>
+
+<div class="ap-row" style="display: grid; grid-template-columns: 72px minmax(0, 720px) 172px; column-gap: 24px; justify-content: center">
+<div class="ap-spine mono" style="position: relative; border-right: 1px solid var(--line); padding: 2px 14px 0 0; text-align: right; font-size: 10.5px; line-height: 18px; color: var(--acc)">14:03:41<span aria-hidden="true" style="position: absolute; top: 5px; right: -6px; width: 11px; height: 11px; box-sizing: border-box; border-radius: 50%; background: var(--acc); border: 3px solid var(--bg); box-shadow: 0 0 0 1px var(--acc)"></span></div>
+<div style="min-width: 0">
+<a href="#" style="display: inline-flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; color: var(--fg2); text-decoration: none"><svg class="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" style="color: var(--helper)"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9"></path><path d="M2.5 2.5v2.2h2.2"></path><path d="M8 5.5V8l1.8 1.2"></path></svg>Recalled 1 past session<span style="color: var(--fg3)">· asyncio timeouts in the scraper, Sep 28</span></a>
+<div style="border: 1px solid var(--line); border-radius: 8px; background: var(--surf)">
+<div style="display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 12px 0 6px; border-bottom: 1px solid var(--line); font-size: 12.5px">
+<button type="button" aria-expanded="true" style="display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 6px; background: transparent; border: 0; border-radius: 5px; font-size: 12.5px; font-weight: 600; color: var(--fg)"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" style="color: var(--fg3)"><path d="M4.5 6.5L8 10l3.5-3.5"></path></svg>Thinking</button>
+<span class="mono" style="font-size: 11px; color: var(--acc)">6.2 s</span><span style="color: var(--fg3)">of 30 s budget</span>
+<span style="flex: 1 1 auto"></span>
+<span class="mono" aria-hidden="true" style="display: flex; align-items: center; gap: 12px; font-size: 10px; color: var(--fg3)"><span style="display: inline-flex; align-items: center; gap: 5px"><span style="width: 8px; height: 8px; border-radius: 2px; background: var(--think)"></span>reasoning</span><span style="display: inline-flex; align-items: center; gap: 5px"><span style="width: 8px; height: 8px; border-radius: 2px; background: var(--helper)"></span>helper</span><span style="display: inline-flex; align-items: center; gap: 5px"><span style="width: 8px; height: 8px; border-radius: 2px; background: var(--tool)"></span>tool</span></span>
+</div>
+<div class="ap-trace mono" style="display: grid; grid-template-columns: 76px minmax(0, 1fr) 168px 40px; gap: 6px 12px; align-items: center; padding: 8px 12px 6px; font-size: 11px; line-height: 16px; color: var(--fg3)">
+<span></span><span></span><span class="ap-track" aria-hidden="true" style="display: flex; justify-content: space-between; font-size: 9.5px"><span>0</span><span>2</span><span>4</span><span>6</span><span>8 s</span></span><span></span>
+<span>embedding</span><span style="color: var(--fg2)">the question → Embedding-Gemma-300M</span><span class="ap-track" aria-hidden="true" style="position: relative; display: block; height: 12px; border-radius: 2px; background: var(--raise)"><span style="position: absolute; top: 3px; height: 6px; left: 0%; width: 5%; border-radius: 1px; background: var(--helper)"></span><span style="position: absolute; top: -3px; bottom: -3px; left: 77.5%; width: 1px; background: var(--acc)"></span></span><span style="text-align: right">0.4 s</span>
+<span>memory</span><span style="color: var(--fg2)">search past sessions → 1 match</span><span class="ap-track" aria-hidden="true" style="position: relative; display: block; height: 12px; border-radius: 2px; background: var(--raise)"><span style="position: absolute; top: 3px; height: 6px; left: 5%; width: 2px; border-radius: 1px; background: var(--helper)"></span><span style="position: absolute; top: -3px; bottom: -3px; left: 77.5%; width: 1px; background: var(--acc)"></span></span><span style="text-align: right">0.1 s</span>
+<span>fetch_url</span><span style="color: var(--fg2); overflow-wrap: anywhere">https://docs.python.org/3/library/asyncio-task.html</span><span class="ap-track" aria-hidden="true" style="position: relative; display: block; height: 12px; border-radius: 2px; background: var(--raise)"><span style="position: absolute; top: 3px; height: 6px; left: 11.25%; width: 22.5%; border-radius: 1px; background: var(--tool)"></span><span style="position: absolute; top: -3px; bottom: -3px; left: 77.5%; width: 1px; background: var(--acc)"></span></span><span style="text-align: right">1.8 s</span>
+<span>read_file</span><span style="color: var(--fg2)">src/ingest/runner.py  lines 40–80</span><span class="ap-track" aria-hidden="true" style="position: relative; display: block; height: 12px; border-radius: 2px; background: var(--raise)"><span style="position: absolute; top: 3px; height: 6px; left: 37.5%; width: 2px; border-radius: 1px; background: var(--tool)"></span><span style="position: absolute; top: -3px; bottom: -3px; left: 77.5%; width: 1px; background: var(--acc)"></span></span><span style="text-align: right">0.1 s</span>
+<span>reasoning</span><span style="color: var(--fg2)">gpt-oss-20b</span><span class="ap-track" aria-hidden="true" style="position: relative; display: block; height: 12px; border-radius: 2px; background: var(--raise)"><span style="position: absolute; top: 3px; height: 6px; left: 6.25%; width: 5%; border-radius: 1px; background: var(--think)"></span><span style="position: absolute; top: 3px; height: 6px; left: 33.75%; width: 3.75%; border-radius: 1px; background: var(--think)"></span><span style="position: absolute; top: 3px; height: 6px; left: 38.75%; width: 38.75%; border-radius: 1px; background: var(--think)"></span><span style="position: absolute; top: -3px; bottom: -3px; left: 77.5%; width: 1px; background: var(--acc)"></span></span><span style="text-align: right; color: var(--acc)">3.8 s</span>
+</div>
+<p style="margin: 0; padding: 6px 16px 14px 100px; font-size: 13.5px; line-height: 1.6; color: var(--fg2)">They want partial-failure tolerance. TaskGroup is all-or-nothing by design: the first child that raises cancels the rest. Two options. Catch <code>TimeoutError</code> inside <code>_fetch()</code> so the child never fails, or switch to <code>gather(…, return_exceptions=True)</code>. Catching in the child keeps structured cancellation for real errors, and <code>run_batch()</code> is also cancelled on shutdown (line 71), so that path has to keep working. <code>asyncio.timeout()</code> only turns its own deadline into <code>TimeoutError</code>; an outer cancel still arrives as <code>CancelledError</code>, so catching the timeout won’t swallow shutdown. Should also count the<span class="caret" aria-hidden="true" style="display: inline-block; width: 7px; height: 15px; margin-left: 2px; vertical-align: -2px; background: var(--acc)"></span></p>
+</div>
+</div>
+<div class="ap-rail mono" style="padding: 26px 0 0; font-size: 10.5px; line-height: 18px; color: var(--fg3)">
+<div style="display: flex; align-items: center; gap: 6px; font-family: 'Instrument Sans', system-ui, sans-serif; font-size: 12.5px; font-weight: 600; color: var(--fg)"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" style="color: var(--fg2)"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg>gpt-oss-20b</div>
+<div style="margin-bottom: 8px">local · this Mac</div>
+<div style="display: grid; grid-template-columns: 40px auto; column-gap: 8px"><span>think</span><span style="color: var(--acc)">6.2 s</span><span>budget</span><span style="color: var(--fg2)">30 s</span><span>usage</span><span>at end of turn</span></div>
+</div>
+</div>
+
+</div>
+</section>
+
+<div class="ap-compose" style="flex: 0 0 auto; padding: 0 28px 18px; display: grid; grid-template-columns: 72px minmax(0, 720px) 172px; column-gap: 24px; justify-content: center">
+<div class="ap-cspace" aria-hidden="true"></div>
+<div style="border: 1px solid var(--line2); border-radius: 10px; background: var(--surf)">
+<textarea aria-label="Message" rows="2" placeholder="Message gpt-oss-20b" style="display: block; width: 100%; box-sizing: border-box; resize: none; padding: 12px 14px 2px; border: 0; background: transparent; font: inherit; font-size: 14px; line-height: 22px; color: var(--fg)"></textarea>
+<div style="display: flex; align-items: center; gap: 2px; padding: 4px 8px 8px">
+<button type="button" aria-label="Attach files, folders, images, audio or video" style="width: 28px; height: 28px; display: grid; place-items: center; padding: 0; background: transparent; border: 0; border-radius: 6px; color: var(--fg2)"><svg class="i" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 7.5l-5.2 5.2a3 3 0 0 1-4.3-4.3l5.6-5.6a2 2 0 0 1 2.9 2.9l-5.5 5.5a1 1 0 0 1-1.4-1.4l5-5"></path></svg></button>
+<button type="button" aria-label="Mention a file" class="mono" style="width: 28px; height: 28px; padding: 0; background: transparent; border: 0; border-radius: 6px; font-size: 13px; color: var(--fg2)">@</button>
+<button type="button" aria-label="Commands" class="mono" style="width: 28px; height: 28px; padding: 0; background: transparent; border: 0; border-radius: 6px; font-size: 13px; color: var(--fg2)">/</button>
+<span style="flex: 1 1 auto"></span>
+<span class="mono" style="margin-right: 10px; font-size: 10.5px; color: var(--fg3)">⏎ send · ⇧⏎ newline</span>
+<button type="button" style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; background: var(--raise); border: 1px solid var(--line2); border-radius: 6px; font-size: 12.5px; font-weight: 500; color: var(--fg)"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 2px; background: var(--acc)"></span>Stop<span class="mono" style="font-size: 10.5px; color: var(--fg3)">⌘.</span></button>
+</div>
+</div>
+<div class="ap-cspace" aria-hidden="true"></div>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const mode = this.props.mode ?? 'dark';
+    return { themeClass: 'ap c-' + mode };
+  }
+}
+</script>
+</body>
+</html>

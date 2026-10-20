@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Apogee settings · Appearance</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:inherit}
+.t-dark{--surface-window:#131415;--surface-sidebar:#0E0F10;--surface-inspector:#161719;--surface-card:#18191B;--surface-control:#222326;--surface-selection:#25282B;--surface-code:#0F1011;--line-border:#2A2C2F;--line-strong:#3B3E42;--text-primary:#E7E5E0;--text-secondary:#ABA8A0;--text-tertiary:#938F86;--status-accent:#7FD4C1;--status-warning:#E9A23B;--status-error:#F2836F;color-scheme:dark}
+.t-light{--surface-window:#F7F7F5;--surface-sidebar:#EEEEEA;--surface-inspector:#F1F1EE;--surface-card:#FFFFFF;--surface-control:#ECECE8;--surface-selection:#E1E4E1;--surface-code:#F3F3F0;--line-border:#DDDDD7;--line-strong:#C6C6BF;--text-primary:#1B1C1D;--text-secondary:#4B4C4E;--text-tertiary:#5F6062;--status-accent:#0B7A68;--status-warning:#9F5600;--status-error:#B3261E;color-scheme:light}
+.ap .i{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
+.ap .mono{font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace}
+.ap input::placeholder{color:var(--text-tertiary)}
+.ap button,.ap select{font-family:inherit;cursor:pointer}
+.ap button:disabled{cursor:default;opacity:.45}
+.ap button:focus-visible,.ap a:focus-visible,.ap input:focus-visible,.ap select:focus-visible{outline:2px solid var(--status-accent);outline-offset:1px}
+.ap input[type=color]{-webkit-appearance:none;appearance:none}
+.ap input[type=color]::-webkit-color-swatch-wrapper{padding:2px}
+.ap input[type=color]::-webkit-color-swatch{border:0;border-radius:4px}
+.ap input[type=color]::-moz-color-swatch{border:0;border-radius:4px}
+.ap.f-plex{font-family:'IBM Plex Sans',system-ui,sans-serif!important}
+.ap.f-system{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI Variable Text',system-ui,sans-serif!important}
+.ap.f-atkinson{font-family:'Atkinson Hyperlegible',system-ui,sans-serif!important}
+.ap.m-plex .mono{font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace}
+.ap.m-system .mono{font-family:ui-monospace,'SF Mono','Cascadia Mono',Menlo,monospace}
+.ap.m-jetbrains .mono{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace}
+@media (max-width:760px){
+.ap{flex-direction:column!important;height:auto!important;overflow:visible!important}
+.ap .ap-side{flex:0 0 auto!important;border-right:0!important;border-bottom:1px solid var(--line-border)}
+.ap .ap-list{display:none!important}
+.ap .ap-body{flex-direction:column!important}
+.ap .ap-scroll{overflow:visible!important;padding:16px!important}
+.ap .ap-cards{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+.ap .ap-prev{flex:0 0 auto!important;border-left:0!important;border-top:1px solid var(--line-border)}
+}
+</style>
+</helmet>
+<div class="{{themeClass}}" style="height: 900px; display: flex; overflow: hidden; background: var(--surface-window); color: var(--text-primary); font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; line-height: 1.5; -webkit-font-smoothing: antialiased">
+
+<nav class="ap-side" aria-label="Settings" style="flex: 0 0 232px; min-height: 0; display: flex; flex-direction: column; background: var(--surface-sidebar); border-right: 1px solid var(--line-border)">
+<div style="flex: 0 0 52px; display: flex; align-items: center; gap: 8px; padding: 0 18px">
+<span style="width: 12px; height: 12px; border-radius: 50%; background: #FF5F57"></span>
+<span style="width: 12px; height: 12px; border-radius: 50%; background: #FEBC2E"></span>
+<span style="width: 12px; height: 12px; border-radius: 50%; background: #28C840"></span>
+</div>
+<label style="margin: 0 12px 14px; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border: 1px solid var(--line-border); border-radius: 6px; color: var(--text-tertiary)"><svg class="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"></circle><path d="M10.2 10.2L13.5 13.5"></path></svg><input type="search" placeholder="Search settings" aria-label="Search settings" style="flex: 1 1 auto; min-width: 0; height: 26px; padding: 0; border: 0; background: transparent; font: inherit; font-size: 12.5px; color: var(--text-primary)"></label>
+<div class="ap-list" style="display: flex; flex-direction: column; gap: 1px; padding: 0 8px">
+<a href="#" style="display: flex; align-items: center; height: 30px; padding: 0 10px; border-radius: 5px; color: var(--text-secondary); text-decoration: none; font-size: 13px">General</a>
+<a href="#" aria-current="page" style="display: flex; align-items: center; height: 30px; padding: 0 10px; border-radius: 5px; background: var(--surface-selection); color: var(--text-primary); text-decoration: none; font-size: 13px; font-weight: 500">Appearance</a>
+<a href="#" style="display: flex; align-items: center; height: 30px; padding: 0 10px; border-radius: 5px; color: var(--text-secondary); text-decoration: none; font-size: 13px">Models &amp; roles</a>
+<a href="#" style="display: flex; align-items: center; height: 30px; padding: 0 10px; border-radius: 5px; color: var(--text-secondary); text-decoration: none; font-size: 13px">Backends &amp; keys</a>
+<a href="#" style="display: flex; align-items: center; height: 30px; padding: 0 10px; border-radius: 5px; color: var(--text-secondary); text-decoration: none; font-size: 13px">Permissions</a>
+<a href="#" style="display: flex; align-items: center; height: 30px; padding: 0 10px; border-radius: 5px; color: var(--text-secondary); text-decoration: none; font-size: 13px">Web access</a>
+<a href="#" style="display: flex; align-items: center; height: 30px; padding: 0 10px; border-radius: 5px; color: var(--text-secondary); text-decoration: none; font-size: 13px">Memory</a>
+<a href="#" style="display: flex; align-items: center; height: 30px; padding: 0 10px; border-radius: 5px; color: var(--text-secondary); text-decoration: none; font-size: 13px">Keyboard</a>
+</div>
+</nav>
+
+<div style="flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column">
+<header style="flex: 0 0 52px; display: flex; align-items: center; gap: 8px; padding: 0 18px 0 28px; border-bottom: 1px solid var(--line-border)">
+<h1 style="flex: 1 1 auto; margin: 0; font-size: 13.5px; font-weight: 600">Appearance</h1>
+<button type="button" style="height: 28px; padding: 0 12px; background: transparent; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12.5px; color: var(--text-primary)">Import theme…</button>
+<button type="button" style="height: 28px; padding: 0 12px; background: transparent; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12.5px; color: var(--text-primary)">Export theme…</button>
+</header>
+
+<div class="ap-body" style="flex: 1 1 0; min-height: 0; display: flex">
+<div class="ap-scroll" style="flex: 1 1 0; min-width: 0; min-height: 0; overflow: auto; padding: 22px 28px 32px">
+
+<section aria-labelledby="ap-mode" style="padding-bottom: 20px; border-bottom: 1px solid var(--line-border)">
+<h2 id="ap-mode" style="margin: 0 0 12px; font-size: 13px; font-weight: 600">Mode</h2>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 22px">
+<div role="group" aria-label="Appearance mode" style="display: flex; height: 30px; padding: 2px; box-sizing: border-box; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface-card)">
+<button type="button" aria-pressed="{{modeSystem.pressed}}" onClick="{{modeSystem.pick}}" style="padding: 0 14px; border: 0; border-radius: 5px; background: {{modeSystem.bg}}; color: {{modeSystem.color}}; font-size: 12.5px; font-weight: {{modeSystem.weight}}">System</button>
+<button type="button" aria-pressed="{{modeLight.pressed}}" onClick="{{modeLight.pick}}" style="padding: 0 14px; border: 0; border-radius: 5px; background: {{modeLight.bg}}; color: {{modeLight.color}}; font-size: 12.5px; font-weight: {{modeLight.weight}}">Light</button>
+<button type="button" aria-pressed="{{modeDark.pressed}}" onClick="{{modeDark.pick}}" style="padding: 0 14px; border: 0; border-radius: 5px; background: {{modeDark.bg}}; color: {{modeDark.color}}; font-size: 12.5px; font-weight: {{modeDark.weight}}">Dark</button>
+</div>
+<label style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-secondary)">Dark uses<select value="{{darkTheme}}" onChange="{{onDarkTheme}}" style="height: 28px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-card); color: var(--text-primary); font-size: 12.5px"><option value="dark">Graphite Dark</option><option value="light">Graphite Light</option><option value="contrast">High Contrast</option></select></label>
+<label style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-secondary)">Light uses<select value="{{lightTheme}}" onChange="{{onLightTheme}}" style="height: 28px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-card); color: var(--text-primary); font-size: 12.5px"><option value="dark">Graphite Dark</option><option value="light">Graphite Light</option><option value="contrast">High Contrast</option></select></label>
+</div>
+<p style="margin: 10px 0 0; font-size: 12px; color: var(--text-tertiary)">System follows macOS and switches without a restart.</p>
+</section>
+
+<section aria-labelledby="ap-text" style="padding: 20px 0; border-bottom: 1px solid var(--line-border)">
+<h2 id="ap-text" style="margin: 0 0 12px; font-size: 13px; font-weight: 600">Text</h2>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 22px">
+<label style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-secondary)">Interface<select value="{{uiFont}}" onChange="{{onUiFont}}" style="height: 28px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-card); color: var(--text-primary); font-size: 12.5px"><option value="plex">IBM Plex Sans</option><option value="system">System font (SF Pro)</option><option value="atkinson">Atkinson Hyperlegible</option><option value="other">Other installed font…</option></select></label>
+<label style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-secondary)">Code<select value="{{codeFont}}" onChange="{{onCodeFont}}" style="height: 28px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-card); color: var(--text-primary); font-size: 12.5px"><option value="plex">IBM Plex Mono</option><option value="system">System mono (SF Mono)</option><option value="jetbrains">JetBrains Mono</option><option value="other">Other installed font…</option></select></label>
+<div role="group" aria-label="Text size" style="display: flex; height: 30px; padding: 2px; box-sizing: border-box; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface-card)">
+<button type="button" aria-pressed="{{sizeS.pressed}}" onClick="{{sizeS.pick}}" style="padding: 0 12px; border: 0; border-radius: 5px; background: {{sizeS.bg}}; color: {{sizeS.color}}; font-size: 12.5px; font-weight: {{sizeS.weight}}">Small</button>
+<button type="button" aria-pressed="{{sizeM.pressed}}" onClick="{{sizeM.pick}}" style="padding: 0 12px; border: 0; border-radius: 5px; background: {{sizeM.bg}}; color: {{sizeM.color}}; font-size: 12.5px; font-weight: {{sizeM.weight}}">Medium</button>
+<button type="button" aria-pressed="{{sizeL.pressed}}" onClick="{{sizeL.pick}}" style="padding: 0 12px; border: 0; border-radius: 5px; background: {{sizeL.bg}}; color: {{sizeL.color}}; font-size: 12.5px; font-weight: {{sizeL.weight}}">Large</button>
+<button type="button" aria-pressed="{{sizeXL.pressed}}" onClick="{{sizeXL.pick}}" style="padding: 0 12px; border: 0; border-radius: 5px; background: {{sizeXL.bg}}; color: {{sizeXL.color}}; font-size: 12.5px; font-weight: {{sizeXL.weight}}">Extra large</button>
+</div>
+</div>
+<div style="margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line-border); border-radius: 8px; background: var(--surface-card); display: flex; flex-direction: column; gap: 6px">
+<p style="margin: 0; font-size: {{ts.prose}}px; line-height: 1.6">Fetches start in Runner.run_batch(); every URL becomes its own task.</p>
+<div style="font-size: {{ts.body}}px; line-height: 1.5; color: var(--text-secondary)">TaskGroup timeouts in the ingest runner · 14:03</div>
+<div class="mono" style="font-size: {{ts.mono}}px; line-height: 1.5; color: var(--text-tertiary); overflow-wrap: anywhere">fetch_url  https://docs.python.org/3/library/asyncio-task.html  1.8 s</div>
+</div>
+<p style="margin: 10px 0 0; font-size: 12px; color: var(--text-tertiary)">Answers {{ts.prose}} px · interface {{ts.body}} px · code {{ts.code}} px. Fonts and size are saved in <span class="mono" style="font-size: 11.5px">config.json</span>, not in themes, so a shared theme never changes your text.</p>
+</section>
+
+<section aria-labelledby="ap-themes" style="padding: 20px 0; border-bottom: 1px solid var(--line-border)">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px"><h2 id="ap-themes" style="margin: 0; font-size: 13px; font-weight: 600">Themes</h2><span style="font-size: 12px; color: var(--text-tertiary)">Choose one to preview and edit it</span></div>
+<div class="ap-cards" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px">
+<button type="button" aria-pressed="{{cardDark.pressed}}" onClick="{{cardDark.pick}}" style="display: flex; flex-direction: column; gap: 8px; padding: 10px; text-align: left; background: var(--surface-card); border: 1px solid {{cardDark.border}}; box-shadow: 0 0 0 1px {{cardDark.ring}}; border-radius: 8px; color: var(--text-primary)">
+<span aria-hidden="true" style="display: flex; width: 100%; height: 28px; border-radius: 5px; overflow: hidden; border: 1px solid var(--line-border)"><span style="flex: 2 1 0; background: {{cardDark.s1}}"></span><span style="flex: 1 1 0; background: {{cardDark.s2}}"></span><span style="flex: 1 1 0; background: {{cardDark.s3}}"></span><span style="flex: 1 1 0; background: {{cardDark.s4}}"></span><span style="flex: 1 1 0; background: {{cardDark.s5}}"></span><span style="flex: 1 1 0; background: {{cardDark.s6}}"></span></span>
+<span style="font-size: 12.5px; font-weight: 500">Graphite Dark</span>
+<span style="font-size: 11px; color: {{cardDark.noteColor}}">{{cardDark.note}}</span>
+</button>
+<button type="button" aria-pressed="{{cardLight.pressed}}" onClick="{{cardLight.pick}}" style="display: flex; flex-direction: column; gap: 8px; padding: 10px; text-align: left; background: var(--surface-card); border: 1px solid {{cardLight.border}}; box-shadow: 0 0 0 1px {{cardLight.ring}}; border-radius: 8px; color: var(--text-primary)">
+<span aria-hidden="true" style="display: flex; width: 100%; height: 28px; border-radius: 5px; overflow: hidden; border: 1px solid var(--line-border)"><span style="flex: 2 1 0; background: {{cardLight.s1}}"></span><span style="flex: 1 1 0; background: {{cardLight.s2}}"></span><span style="flex: 1 1 0; background: {{cardLight.s3}}"></span><span style="flex: 1 1 0; background: {{cardLight.s4}}"></span><span style="flex: 1 1 0; background: {{cardLight.s5}}"></span><span style="flex: 1 1 0; background: {{cardLight.s6}}"></span></span>
+<span style="font-size: 12.5px; font-weight: 500">Graphite Light</span>
+<span style="font-size: 11px; color: {{cardLight.noteColor}}">{{cardLight.note}}</span>
+</button>
+<button type="button" aria-pressed="{{cardContrast.pressed}}" onClick="{{cardContrast.pick}}" style="display: flex; flex-direction: column; gap: 8px; padding: 10px; text-align: left; background: var(--surface-card); border: 1px solid {{cardContrast.border}}; box-shadow: 0 0 0 1px {{cardContrast.ring}}; border-radius: 8px; color: var(--text-primary)">
+<span aria-hidden="true" style="display: flex; width: 100%; height: 28px; border-radius: 5px; overflow: hidden; border: 1px solid var(--line-border)"><span style="flex: 2 1 0; background: {{cardContrast.s1}}"></span><span style="flex: 1 1 0; background: {{cardContrast.s2}}"></span><span style="flex: 1 1 0; background: {{cardContrast.s3}}"></span><span style="flex: 1 1 0; background: {{cardContrast.s4}}"></span><span style="flex: 1 1 0; background: {{cardContrast.s5}}"></span><span style="flex: 1 1 0; background: {{cardContrast.s6}}"></span></span>
+<span style="font-size: 12.5px; font-weight: 500">High Contrast</span>
+<span style="font-size: 11px; color: {{cardContrast.noteColor}}">{{cardContrast.note}}</span>
+</button>
+<button type="button" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; padding: 10px; text-align: left; background: transparent; border: 1px dashed var(--line-strong); border-radius: 8px; color: var(--text-secondary)">
+<span style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; color: var(--text-primary)"><svg class="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"></path></svg>New theme…</span>
+<span style="font-size: 11px; color: var(--text-tertiary)">Starts as a copy of {{themeName}}</span>
+</button>
+</div>
+</section>
+
+<section aria-labelledby="ap-colors" style="padding-top: 20px">
+<div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px">
+<h2 id="ap-colors" style="margin: 0; font-size: 13px; font-weight: 600">Element colors</h2>
+<span style="font-size: 12px; color: var(--text-tertiary)">{{themeName}} · {{changesText}}</span>
+<span style="font-size: 12px; color: {{lowColor}}">{{lowText}}</span>
+<span style="flex: 1 1 auto"></span>
+<button type="button" disabled="{{noChanges}}" onClick="{{resetAll}}" style="height: 26px; padding: 0 10px; background: transparent; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12px; color: var(--text-primary)">Reset all changes</button>
+</div>
+<p style="margin: 6px 0 0; font-size: 12px; color: var(--text-tertiary)">Contrast is measured against the background each element sits on. A low value is allowed, and flagged.</p>
+
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="5">
+<div style="margin-top: 18px">
+<h3 class="mono" style="margin: 0; padding: 0 0 6px; font-size: 10.5px; font-weight: 500; letter-spacing: .08em; color: var(--text-tertiary); border-bottom: 1px solid var(--line-border)">{{g.title}}</h3>
+<sc-for list="{{g.rows}}" as="row" hint-placeholder-count="3">
+<div style="display: grid; grid-template-columns: 32px minmax(0, 1fr) 88px 104px 28px; gap: 12px; align-items: center; min-height: 44px; padding: 4px 0; border-bottom: 1px solid var(--line-border)">
+<input type="color" value="{{row.value}}" onChange="{{row.onPick}}" aria-label="{{row.label}} color" style="width: 32px; height: 26px; padding: 0; border: 1px solid var(--line-strong); border-radius: 6px; background: transparent; cursor: pointer">
+<div style="min-width: 0; line-height: 1.35">
+<div style="display: flex; align-items: center; gap: 6px; font-size: 13px">{{row.label}}<sc-if value="{{row.edited}}" hint-placeholder-val="{{ false }}"><span title="Changed from the theme" style="width: 6px; height: 6px; border-radius: 50%; background: var(--status-accent)"></span></sc-if></div>
+<div style="font-size: 11.5px; color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis"><span class="mono" style="font-size: 10.5px">{{row.key}}</span> · {{row.where}}</div>
+</div>
+<input type="text" class="mono" value="{{row.hexShown}}" onChange="{{row.onHex}}" onBlur="{{row.onBlur}}" aria-label="{{row.label}} hex value" style="width: 100%; box-sizing: border-box; height: 26px; padding: 0 8px; border: 1px solid var(--line-border); border-radius: 5px; background: var(--surface-card); font-size: 11.5px; color: var(--text-primary)">
+<span class="mono" title="{{row.badgeTitle}}" style="display: inline-flex; gap: 6px; font-size: 11px; color: {{row.badgeColor}}">{{row.ratioText}}<span>{{row.badgeNote}}</span></span>
+<sc-if value="{{row.edited}}" hint-placeholder-val="{{ false }}"><button type="button" onClick="{{row.onReset}}" aria-label="Reset {{row.label}} to {{row.baseHex}}" title="Reset to {{row.baseHex}}" style="width: 28px; height: 26px; display: grid; place-items: center; padding: 0; background: transparent; border: 0; border-radius: 5px; color: var(--text-secondary)"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8a5 5 0 1 0 1.5-3.5"></path><path d="M3 2.5V5h2.5"></path></svg></button></sc-if>
+<sc-if value="{{row.notEdited}}" hint-placeholder-val="{{ true }}"><span></span></sc-if>
+</div>
+</sc-for>
+</div>
+</sc-for>
+
+<p style="margin: 18px 0 0; font-size: 12px; color: var(--text-tertiary)">Saved to <span class="mono" style="font-size: 11.5px; color: var(--text-secondary)">~/.apogee/themes/{{fileName}}</span>. Only your changes are written, so improvements to the built-in theme still reach you.</p>
+</section>
+</div>
+
+<aside class="ap-prev" aria-label="Preview" style="flex: 0 0 520px; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 14px; padding: 20px; box-sizing: border-box; background: var(--surface-inspector); border-left: 1px solid var(--line-border)">
+<div style="display: flex; align-items: baseline; justify-content: space-between"><span class="mono" style="font-size: 10.5px; letter-spacing: .08em; color: var(--text-tertiary)">PREVIEW</span><span style="font-size: 12px; color: var(--text-secondary)">{{themeName}}</span></div>
+
+<div style="border-radius: 10px; overflow: hidden; border: 1px solid {{p.strong}}; background: {{p.window}}; color: {{p.text}}; font-size: 11px; line-height: 1.45; box-shadow: 0 16px 40px rgba(0,0,0,.22)">
+<div style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border-bottom: 1px solid {{p.border}}">
+<span aria-hidden="true" style="display: flex; gap: 5px; margin-right: 6px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #FF5F57"></span><span style="width: 8px; height: 8px; border-radius: 50%; background: #FEBC2E"></span><span style="width: 8px; height: 8px; border-radius: 50%; background: #28C840"></span></span>
+<span style="flex: 1 1 auto; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">TaskGroup timeouts</span>
+<span style="display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 6px; border: 1px solid {{p.strong}}; border-radius: 5px; background: {{p.card}}"><svg class="i" width="10" height="10" viewBox="0 0 16 16" aria-hidden="true" style="color: {{p.local}}"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg>gpt-oss-20b<span class="mono" style="padding: 0 4px; border-radius: 3px; background: {{p.control}}; color: {{p.local}}; font-size: 9px">local</span></span>
+<span style="display: inline-flex; align-items: center; gap: 5px; color: {{p.text3}}">ctx<span style="width: 44px; height: 4px; border-radius: 2px; background: {{p.border}}; overflow: hidden"><span style="display: block; width: 84%; height: 100%; background: {{p.warning}}"></span></span><span class="mono" style="color: {{p.warning}}">84%</span></span>
+</div>
+<div style="display: flex; height: 430px">
+<div style="flex: 0 0 112px; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 8px 6px; background: {{p.sidebar}}; border-right: 1px solid {{p.border}}">
+<span class="mono" style="padding: 0 6px 4px; font-size: 8.5px; letter-spacing: .08em; color: {{p.text3}}">TODAY</span>
+<span style="display: flex; align-items: center; gap: 5px; height: 20px; padding: 0 6px; border-radius: 4px; background: {{p.selection}}; color: {{p.text}}; font-size: 10px; white-space: nowrap; overflow: hidden"><svg class="i" width="9" height="9" viewBox="0 0 16 16" aria-hidden="true" style="color: {{p.local}}"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg>TaskGroup timeouts</span>
+<span style="display: flex; align-items: center; gap: 5px; height: 20px; padding: 0 6px; color: {{p.text2}}; font-size: 10px; white-space: nowrap; overflow: hidden"><svg class="i" width="9" height="9" viewBox="0 0 16 16" aria-hidden="true" style="color: {{p.sub}}"><path d="M12.5 6A4.75 4.75 0 0 0 3.6 5.2"></path><path d="M3.5 10a4.75 4.75 0 0 0 8.9.8"></path><path d="M3.3 2.6v2.8h2.8"></path><path d="M12.7 13.4v-2.8H9.9"></path></svg>Review PR 482</span>
+<span style="display: flex; align-items: center; gap: 5px; height: 20px; padding: 0 6px; color: {{p.text2}}; font-size: 10px; white-space: nowrap; overflow: hidden"><svg class="i" width="9" height="9" viewBox="0 0 16 16" aria-hidden="true" style="color: {{p.api}}"><ellipse cx="8" cy="4.5" rx="5" ry="2"></ellipse><path d="M3 4.5V8c0 1.1 2.2 2 5 2s5-.9 5-2V4.5"></path><path d="M3 8v3.5c0 1.1 2.2 2 5 2s5-.9 5-2V8"></path></svg>RFC 9111 rules</span>
+<span style="display: flex; align-items: center; gap: 5px; height: 20px; padding: 0 6px; color: {{p.text2}}; font-size: 10px; white-space: nowrap; overflow: hidden"><svg class="i" width="9" height="9" viewBox="0 0 16 16" aria-hidden="true" style="color: {{p.text3}}"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg>KV cache sizing</span>
+<span style="flex: 1 1 auto"></span>
+<span class="mono" style="padding: 0 6px; font-size: 8.5px; color: {{p.text3}}">mem 22.4/36 GB</span>
+<span style="margin: 2px 6px 0; height: 3px; border-radius: 2px; background: {{p.border}}; overflow: hidden"><span style="display: block; width: 62%; height: 100%; background: {{p.text2}}"></span></span>
+</div>
+<div style="flex: 1 1 0; min-width: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; gap: 9px; padding: 10px 12px">
+<div style="display: flex; gap: 6px"><span class="mono" style="flex: 0 0 20px; font-size: 9px; line-height: 16px; color: {{p.text2}}">you</span><span>Keep the other fetches going when one times out?</span></div>
+<div class="mono" style="display: flex; align-items: center; gap: 6px; font-size: 8.5px; color: {{p.text3}}"><span style="flex: 1 1 0; height: 1px; background: {{p.border}}"></span>2 earlier exchanges not sent<span style="flex: 1 1 0; height: 1px; background: {{p.border}}"></span></div>
+<div style="border: 1px solid {{p.border}}; border-radius: 5px; background: {{p.card}}">
+<div class="mono" style="display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-bottom: 1px solid {{p.border}}; font-size: 9px; color: {{p.text2}}"><span style="color: {{p.text}}; font-weight: 500">thinking</span><span style="width: 5px; height: 5px; border-radius: 50%; background: {{p.accent}}"></span>6.2s<span style="width: 36px; height: 3px; border-radius: 2px; background: {{p.border}}; overflow: hidden"><span style="display: block; width: 21%; height: 100%; background: {{p.accent}}"></span></span></div>
+<div class="mono" style="display: grid; grid-template-columns: 50px minmax(0, 1fr); gap: 2px 8px; padding: 6px 8px 0; font-size: 8.5px; color: {{p.text3}}"><span>fetch_url</span><span style="color: {{p.text2}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">docs.python.org/3/library/asyncio-task.html</span><span>read_file</span><span style="color: {{p.text2}}">src/ingest/runner.py 40–80</span></div>
+<p style="margin: 0; padding: 5px 8px 7px; font-size: 10px; line-height: 1.5; color: {{p.text2}}">Catch the timeout inside the child so one slow host can’t cancel the batch<span style="display: inline-block; width: 5px; height: 10px; margin-left: 2px; vertical-align: -1px; background: {{p.accent}}"></span></p>
+</div>
+<p style="margin: 0; font-size: 10.5px; line-height: 1.5; color: {{p.text}}">Handle the timeout in the child, not the group, with <span class="mono" style="padding: 0 3px; border-radius: 3px; background: {{p.control}}; font-size: 9.5px">except TimeoutError</span>:</p>
+<div class="mono" style="padding: 6px 8px; border: 1px solid {{p.border}}; border-radius: 5px; background: {{p.code}}; font-size: 9px; line-height: 1.6; white-space: pre; overflow: hidden; color: {{p.text}}">
+<div><span style="color: {{p.kw}}">async def</span> <span style="color: {{p.fn}}">_fetch</span>(self, url):</div>
+<div style="padding-left: 2ch"><span style="color: {{p.kw}}">try</span>:</div>
+<div style="padding-left: 4ch"><span style="color: {{p.kw}}">async with</span> asyncio.<span style="color: {{p.fn}}">timeout</span>(<span style="color: {{p.num}}">10</span>):</div>
+<div style="padding-left: 6ch"><span style="color: {{p.kw}}">return await</span> self.client.<span style="color: {{p.fn}}">get</span>(url)</div>
+<div style="padding-left: 2ch"><span style="color: {{p.kw}}">except</span> TimeoutError:</div>
+<div style="padding-left: 4ch">log.<span style="color: {{p.fn}}">warning</span>(<span style="color: {{p.str}}">"timed out: %s"</span>, url)  <span style="color: {{p.cm}}"># keep going</span></div>
+</div>
+<div style="display: flex; align-items: center; gap: 5px; font-size: 9.5px; color: {{p.error}}"><svg class="i" width="10" height="10" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"></circle><path d="M6 6l4 4M10 6l-4 4"></path></svg>Qwen3-VL-8B didn’t load: needs 7.9 GB, 5.2 GB free</div>
+<div style="display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 4px 0 8px; border: 1px solid {{p.strong}}; border-radius: 5px; background: {{p.card}}"><span style="flex: 1 1 auto; font-size: 10px; color: {{p.text3}}">Message gpt-oss-20b</span><span class="mono" style="display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 6px; border-radius: 3px; background: {{p.text}}; color: {{p.window}}; font-size: 8.5px; font-weight: 600"><span style="width: 5px; height: 5px; background: {{p.window}}"></span>stop</span></div>
+</div>
+<div style="flex: 0 0 96px; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 8px; background: {{p.inspector}}; border-left: 1px solid {{p.border}}; font-size: 9.5px; line-height: 1.35">
+<span class="mono" style="font-size: 8px; letter-spacing: .08em; color: {{p.text3}}">THIS TURN</span>
+<span style="color: {{p.text3}}">thinking<br><span style="color: {{p.text}}">6.2 of 30 s</span></span>
+<span style="color: {{p.text3}}">context<br><span style="color: {{p.warning}}">84% full</span></span>
+<span style="color: {{p.text3}}">model<br><span style="color: {{p.local}}">local · this Mac</span></span>
+<span class="mono" style="margin-top: 4px; font-size: 8px; letter-spacing: .08em; color: {{p.text3}}">HELPERS</span>
+<span style="color: {{p.text2}}">Embedding-Gemma-300M</span>
+</div>
+</div>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px; border: 1px solid {{p.border}}; border-radius: 8px; background: {{p.window}}">
+<span class="mono" style="font-size: 9.5px; font-weight: 600; letter-spacing: .08em; line-height: 16px; padding: 0 5px; border-radius: 3px; border: 1px solid {{p.local}}; color: {{p.local}}">LOCAL</span>
+<span class="mono" style="font-size: 9.5px; font-weight: 600; letter-spacing: .08em; line-height: 16px; padding: 0 5px; border-radius: 3px; border: 1px solid {{p.api}}; color: {{p.api}}">API · BILLED</span>
+<span class="mono" style="font-size: 9.5px; font-weight: 600; letter-spacing: .08em; line-height: 16px; padding: 0 5px; border-radius: 3px; border: 1px solid {{p.sub}}; color: {{p.sub}}">SUBSCRIPTION</span>
+<span style="flex: 1 1 auto"></span>
+<span class="mono" style="display: inline-flex; align-items: center; gap: 6px; font-size: 10px; color: {{p.text3}}">ctx<span style="width: 64px; height: 5px; border-radius: 3px; background: {{p.border}}; overflow: hidden"><span style="display: block; width: 84%; height: 100%; background: {{p.warning}}"></span></span><span style="color: {{p.warning}}">84%</span></span>
+</div>
+</aside>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"chrome":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      theme: 'dark',
+      appearance: 'system',
+      darkTheme: 'dark',
+      lightTheme: 'light',
+      overrides: { dark: { 'model.subscription': '#d7a6f0', 'text.tertiary': '#6f6b64' }, light: {}, contrast: {} },
+      drafts: {},
+      uiFont: 'plex',
+      codeFont: 'plex',
+      size: 'm'
+    };
+  }
+
+  themes() {
+    const keys = ['surface.window', 'surface.sidebar', 'surface.inspector', 'surface.card', 'surface.control', 'surface.selection', 'surface.code', 'line.border', 'line.strong', 'text.primary', 'text.secondary', 'text.tertiary', 'status.accent', 'status.warning', 'status.error', 'model.local', 'model.api', 'model.subscription', 'code.keyword', 'code.string', 'code.comment', 'code.number', 'code.function'];
+    const build = (list) => {
+      const out = {};
+      keys.forEach((k, i) => { out[k] = list[i].toLowerCase(); });
+      return out;
+    };
+    return {
+      dark: { name: 'Graphite Dark', note: 'Built-in · default dark', file: 'graphite-dark.json', colors: build(['#131415', '#0E0F10', '#161719', '#18191B', '#222326', '#25282B', '#0F1011', '#2A2C2F', '#3B3E42', '#E7E5E0', '#ABA8A0', '#938F86', '#7FD4C1', '#E9A23B', '#F2836F', '#7FD4C1', '#E9A23B', '#A7B1F8', '#C3A6F0', '#A5D68E', '#8C887F', '#E5B567', '#8EC3F0']) },
+      light: { name: 'Graphite Light', note: 'Built-in · default light', file: 'graphite-light.json', colors: build(['#F7F7F5', '#EEEEEA', '#F1F1EE', '#FFFFFF', '#ECECE8', '#E1E4E1', '#F3F3F0', '#DDDDD7', '#C6C6BF', '#1B1C1D', '#4B4C4E', '#5F6062', '#0B7A68', '#9F5600', '#B3261E', '#0B7A68', '#9F5600', '#4450C4', '#7A3FC0', '#2F7A1F', '#67686A', '#8F5A00', '#1F5FA8']) },
+      contrast: { name: 'High Contrast', note: 'Built-in', file: 'high-contrast.json', colors: build(['#000000', '#0A0A0A', '#0A0A0A', '#111111', '#1E1E1E', '#2A2A2A', '#0A0A0A', '#5A5A5A', '#8A8A8A', '#FFFFFF', '#D6D6D6', '#B5B5B5', '#5EF0D2', '#FFC04D', '#FF8A7A', '#5EF0D2', '#FFC04D', '#B9C2FF', '#D8B9FF', '#B8F0A0', '#B5B5B5', '#FFC04D', '#9ED4FF']) }
+    };
+  }
+
+  groups() {
+    return [
+      { title: 'ACCENT & STATUS', rows: [
+        ['status.accent', 'Accent', 'Live activity, focus rings, the caret, links', 'surface.window'],
+        ['status.warning', 'Warning', 'Context at 80% and above', 'surface.window'],
+        ['status.error', 'Error', 'Failures that need a fix', 'surface.window']
+      ] },
+      { title: 'MODEL TYPES', rows: [
+        ['model.local', 'On this machine', 'Local model badges and icons', 'surface.window'],
+        ['model.api', 'Cloud API · billed', 'Pay-per-use models, wherever they appear', 'surface.window'],
+        ['model.subscription', 'Subscription', 'Models used through a vendor’s app', 'surface.window']
+      ] },
+      { title: 'TEXT', rows: [
+        ['text.primary', 'Primary text', 'Answers, messages, titles', 'surface.window'],
+        ['text.secondary', 'Secondary text', 'Thinking, values, session titles', 'surface.card'],
+        ['text.tertiary', 'Tertiary text', 'Labels, timestamps, tool names', 'surface.card']
+      ] },
+      { title: 'SURFACES', rows: [
+        ['surface.window', 'Window', 'Conversation background', 'text'],
+        ['surface.sidebar', 'Sidebar', 'Session list and the system strip', 'text'],
+        ['surface.inspector', 'Inspector', 'The right-hand pane', 'text'],
+        ['surface.card', 'Cards', 'Thinking, message box, attachments, prompts', 'text'],
+        ['surface.control', 'Controls', 'Buttons, inline code, chosen options', 'text'],
+        ['surface.selection', 'Selection', 'The open session, selected rows', 'text'],
+        ['surface.code', 'Code blocks', 'Background of code', 'text'],
+        ['line.border', 'Borders', 'Dividers and card outlines', null],
+        ['line.strong', 'Strong borders', 'Buttons and the message box', null]
+      ] },
+      { title: 'CODE', rows: [
+        ['code.keyword', 'Keywords', 'def, async, return', 'surface.code'],
+        ['code.string', 'Strings', 'Quoted text in code', 'surface.code'],
+        ['code.comment', 'Comments', 'Notes after #', 'surface.code'],
+        ['code.number', 'Numbers', '10, 0.5, 0x1F', 'surface.code'],
+        ['code.function', 'Functions', 'run_batch, create_task', 'surface.code']
+      ] }
+    ];
+  }
+
+  lum(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
+      const c = v / 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+  }
+
+  ratio(a, b) {
+    const x = this.lum(a);
+    const y = this.lum(b);
+    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+  }
+
+  withOverride(theme, key, value) {
+    const base = this.themes()[theme].colors[key];
+    const all = Object.assign({}, this.state.overrides);
+    const mine = Object.assign({}, all[theme] || {});
+    if (value === null || value.toLowerCase() === base) delete mine[key];
+    else mine[key] = value.toLowerCase();
+    all[theme] = mine;
+    return all;
+  }
+
+  colorsOf(id) {
+    const base = this.themes()[id].colors;
+    const ov = ((this.state && this.state.overrides) || {})[id] || {};
+    const cur = {};
+    Object.keys(base).forEach((k) => { cur[k] = ov[k] || base[k]; });
+    return cur;
+  }
+
+  renderVals() {
+    const s = this.state || {};
+    const T = this.themes();
+    const theme = s.theme || 'dark';
+    const ov = (s.overrides || {})[theme] || {};
+    const base = T[theme].colors;
+    const cur = this.colorsOf(theme);
+    const drafts = s.drafts || {};
+    const names = { 'surface.window': 'Window', 'surface.card': 'Cards', 'surface.code': 'Code blocks' };
+    let low = 0;
+
+    const groups = this.groups().map((g) => ({
+      title: g.title,
+      rows: g.rows.map((r) => {
+        const key = r[0];
+        const on = r[3];
+        const value = cur[key];
+        const edited = Boolean(ov[key]);
+        const dk = theme + ':' + key;
+        let ratio = null;
+        if (on === 'text') ratio = this.ratio(cur['text.primary'], value);
+        else if (on) ratio = this.ratio(value, cur[on]);
+        let badgeColor = 'var(--text-tertiary)';
+        let badgeNote = '';
+        let badgeTitle = 'Borders are decoration; no minimum applies';
+        if (ratio !== null) {
+          if (ratio < 3) { badgeColor = 'var(--status-error)'; badgeNote = 'too low'; low += 1; }
+          else if (ratio < 4.5) { badgeColor = 'var(--status-warning)'; badgeNote = 'low'; low += 1; }
+          badgeTitle = on === 'text'
+            ? 'Primary text on this surface: ' + ratio.toFixed(1) + ':1. Text needs 4.5:1.'
+            : 'Against ' + names[on] + ': ' + ratio.toFixed(1) + ':1. Text needs 4.5:1.';
+        }
+        return {
+          key: key,
+          label: r[1],
+          where: r[2],
+          value: value,
+          hexShown: drafts[dk] !== undefined ? drafts[dk] : value.toUpperCase(),
+          edited: edited,
+          notEdited: !edited,
+          baseHex: base[key].toUpperCase(),
+          ratioText: ratio === null ? '—' : ratio.toFixed(1) + ':1',
+          badgeColor: badgeColor,
+          badgeNote: badgeNote,
+          badgeTitle: badgeTitle,
+          onPick: (e) => this.setState({ overrides: this.withOverride(theme, key, e.target.value) }),
+          onHex: (e) => {
+            const v = e.target.value;
+            const d = Object.assign({}, this.state.drafts);
+            d[dk] = v;
+            const m = /^#?([0-9a-fA-F]{6})$/.exec(v.trim());
+            const next = { drafts: d };
+            if (m) next.overrides = this.withOverride(theme, key, '#' + m[1]);
+            this.setState(next);
+          },
+          onBlur: () => {
+            const d = Object.assign({}, this.state.drafts);
+            delete d[dk];
+            this.setState({ drafts: d });
+          },
+          onReset: () => this.setState({ overrides: this.withOverride(theme, key, null) })
+        };
+      })
+    }));
+
+    const card = (id) => {
+      const c = this.colorsOf(id);
+      const n = Object.keys((s.overrides || {})[id] || {}).length;
+      const sel = id === theme;
+      return {
+        pressed: sel,
+        pick: () => this.setState({ theme: id, drafts: {} }),
+        border: sel ? 'var(--status-accent)' : 'var(--line-border)',
+        ring: sel ? 'var(--status-accent)' : 'transparent',
+        note: n ? (n + (n === 1 ? ' change' : ' changes')) : T[id].note,
+        noteColor: n ? 'var(--status-accent)' : 'var(--text-tertiary)',
+        s1: c['surface.window'], s2: c['surface.card'], s3: c['text.primary'], s4: c['status.accent'], s5: c['model.api'], s6: c['model.subscription']
+      };
+    };
+
+    const mode = (id) => {
+      const sel = (s.appearance || 'system') === id;
+      return {
+        pressed: sel,
+        pick: () => this.setState({ appearance: id }),
+        bg: sel ? 'var(--surface-control)' : 'transparent',
+        color: sel ? 'var(--text-primary)' : 'var(--text-secondary)',
+        weight: sel ? 600 : 400
+      };
+    };
+
+    const seg = (field, id, fallback) => {
+      const sel = (s[field] || fallback) === id;
+      const next = {};
+      next[field] = id;
+      return {
+        pressed: sel,
+        pick: () => this.setState(next),
+        bg: sel ? 'var(--surface-control)' : 'transparent',
+        color: sel ? 'var(--text-primary)' : 'var(--text-secondary)',
+        weight: sel ? 600 : 400
+      };
+    };
+    const factor = { s: 12 / 13, m: 1, l: 14 / 13, xl: 15 / 13 }[s.size || 'm'];
+    const px = (v) => Math.round(v * factor * 2) / 2;
+    const uiFont = s.uiFont || 'plex';
+    const codeFont = s.codeFont || 'plex';
+
+    const n = Object.keys(ov).length;
+    return {
+      themeClass: 'ap t-' + (this.props.chrome ?? 'dark') + ' f-' + uiFont + ' m-' + codeFont,
+      uiFont: uiFont,
+      codeFont: codeFont,
+      onUiFont: (e) => { if (e.target.value !== 'other') this.setState({ uiFont: e.target.value }); },
+      onCodeFont: (e) => { if (e.target.value !== 'other') this.setState({ codeFont: e.target.value }); },
+      sizeS: seg('size', 's', 'm'),
+      sizeM: seg('size', 'm', 'm'),
+      sizeL: seg('size', 'l', 'm'),
+      sizeXL: seg('size', 'xl', 'm'),
+      ts: { prose: px(14), body: px(13), mono: px(11.5), code: px(12) },
+      groups: groups,
+      themeName: T[theme].name,
+      fileName: T[theme].file,
+      changesText: n ? (n + (n === 1 ? ' change' : ' changes')) : 'no changes',
+      noChanges: n === 0,
+      lowText: low ? (low + (low === 1 ? ' element below 4.5:1' : ' elements below 4.5:1')) : 'All text meets 4.5:1',
+      lowColor: low ? 'var(--status-warning)' : 'var(--text-tertiary)',
+      resetAll: () => {
+        const all = Object.assign({}, this.state.overrides);
+        all[theme] = {};
+        this.setState({ overrides: all, drafts: {} });
+      },
+      cardDark: card('dark'),
+      cardLight: card('light'),
+      cardContrast: card('contrast'),
+      modeSystem: mode('system'),
+      modeLight: mode('light'),
+      modeDark: mode('dark'),
+      darkTheme: s.darkTheme || 'dark',
+      lightTheme: s.lightTheme || 'light',
+      onDarkTheme: (e) => this.setState({ darkTheme: e.target.value }),
+      onLightTheme: (e) => this.setState({ lightTheme: e.target.value }),
+      p: {
+        window: cur['surface.window'], sidebar: cur['surface.sidebar'], inspector: cur['surface.inspector'], card: cur['surface.card'],
+        control: cur['surface.control'], selection: cur['surface.selection'], code: cur['surface.code'],
+        border: cur['line.border'], strong: cur['line.strong'],
+        text: cur['text.primary'], text2: cur['text.secondary'], text3: cur['text.tertiary'],
+        accent: cur['status.accent'], warning: cur['status.warning'], error: cur['status.error'],
+        local: cur['model.local'], api: cur['model.api'], sub: cur['model.subscription'],
+        kw: cur['code.keyword'], str: cur['code.string'], cm: cur['code.comment'], num: cur['code.number'], fn: cur['code.function']
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>
