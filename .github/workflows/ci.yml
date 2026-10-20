@@ -59,7 +59,10 @@
 # `version bump`; and, once a pull request into `stable` is MERGED, `tag and
 # release`, which publishes the release it makes. Nothing else.
 #
-# One pipeline (user decision, 2026-10-04, M8): this is the only workflow.
+# One pipeline (user decision, 2026-10-04, M8): this is the only workflow that
+# releases. (Since 2026-10-20 the macOS app's own pipeline, darwin.yml, runs
+# beside it on pull requests; it builds, tests and packages the app, and
+# publishes nothing.)
 # The separate manual release workflow, its `v*` tag trigger and its second
 # copy of the matrix are gone, so a release is published only by a merge --
 # or by the RE-CUT, this workflow dispatched on `stable` with `publish`

@@ -57,6 +57,8 @@ paths_of() {
             echo "lib/scripts/changed.sh"
             # The release name, which the bundle reports as its version.
             echo "lib/release/VERSION"
+            # Its pipeline's own definition.
+            echo ".github/workflows/darwin.yml"
             ;;
         *)
             printf 'changed.sh: no deliverable named %s (known: cli, gui-darwin)\n' "$1" >&2

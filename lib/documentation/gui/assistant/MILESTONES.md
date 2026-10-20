@@ -124,3 +124,28 @@ Decisions taken while building, for veto:
 **Verified.** Bare `lib/scripts/cicd.sh --test`: the CLI's 3550 tests and the app's 103 all pass; Release and Debug builds with no Swift warning; the layering check holds the new module, its view-models free of SwiftUI. **A live probe of the built app**: launched with `APOGEE_HOME` pointing at a scratch home on the CLI's mock backend (never `~/.apogee`), the app found the installed `~/.local/bin/apogee` itself and spawned `apogee chat --output-format stream-json --input-format stream-json --tools` in the home folder, with the sandbox inherited; quitting the app ended the child; nothing on stderr once the defaults fix was in.
 
 **Not run: driving the window by hand.** Typing a turn, answering the cards and pressing Stop in the real window against the installed binary is the user's run, recorded as such (`lib/src/darwin/scripts/build.sh open`, or Run in Xcode). The tests drive everything the window does through its view-model; what they cannot see is the drawing.
+
+### 2026-10-20 — `darwin-pipeline` (backlog item 1d): built, tested and packaged beside the CLI
+
+**Why.** The repo's law for a sibling application -- its own `changed.sh` entry, its own pipeline beside the CLI's -- was recorded but never exercised. 1a wired the local half; this is the CI half, so every pull request proves the app still builds, passes its suite and signs.
+
+- [x] **`.github/workflows/darwin.yml`**, the app's own pipeline, on pull requests into `stable` and on request (no `closed`: a merge releases nothing of the app):
+  - **`what changed (darwin)`** asks `changed.sh gui-darwin` against the latest release, on the pull request's whole test merge -- the CLI pipeline's question, for the app's inputs; on request everything runs.
+  - **`build darwin`**: when the app changed, on GitHub's `xcode-27` image, `lib/scripts/cicd.sh --app darwin --platform macos-arm64 --test --no-defer` -- the one build path a developer runs -- then `scripts/build.sh package`, and the zip kept as the artifact `apogee-gui-darwin`. When it did not, the job runs on a Linux runner with every step skipped and passes under its required name.
+- [x] **`scripts/build.sh package`**: the built app and a README zipped as `build/<target>/apogee-gui-darwin.zip` (`Apogee-<version>/`), the signature verified before, and again on the app unpacked from the zip. The README says what the app is, the CLI it needs with the installer's one-liner, and the ad-hoc signature's cost plainly: macOS will not open it with a double-click the first time -- right-click, Open.
+- [x] **`changed.sh gui-darwin`** gains the workflow file, so a change to how the app is built is exercised by building it.
+- [x] **The CLI's docs and `ci.yml`'s header** no longer call `ci.yml` the only workflow: it is the only one that releases (M8's decision, unchanged), with the app's beside it.
+
+Decisions taken while building, for veto:
+- **Job names `what changed (darwin)` and `build darwin`**: the CLI pipeline's style, never a CLI job's name -- a required check is named by its job alone, and two workflows' `what changed` would be one ambiguous check.
+- **One job builds, tests and packages**, rather than a build job and a package job handing the bundle between runners: one call into `cicd.sh`, the artifact made where the app was built.
+- **The build job's runner is the gate's answer** -- `xcode-27` when the app changed, `ubuntu-24.04` when it did not -- so an unchanged app costs no Mac runner. The CLI pipeline runs its no-op jobs on their own runners; this departs from that for cost, keeping the same required-name guarantee.
+- **The runner is `xcode-27`**, GitHub's macOS 27 image with Xcode 27 -- the only image with the macOS 27 SDK the app targets -- and it is a **preview** image (since 2026-07-16): queueing may be slower, and should it change or move to general availability under another label, this one line moves with it.
+- **The rehearsal is the same two commands on the dev host**, as the item specified; `make pr-ci` stays the CLI pipeline's.
+
+**Verified.** The job rehearsed on the dev host, command for command: the gate's question against the latest release (v0.1.9, `81b0da7`) answers `gui-darwin=true` for this branch, `true` with `cli=false` for a darwin-only commit (1b's), and `false` for a docs-only range; `cicd.sh --app darwin --platform macos-arm64 --test --no-defer` built the Release app and passed all 103 tests; `build.sh package` made a 428 KB zip holding `Apogee-0.1.9/Apogee.app`, its eight frameworks and the README, the signature verified once unpacked. The workflow parses as YAML. Bare `lib/scripts/cicd.sh --test`: the CLI's 3550 tests and the app's 103 all pass.
+
+**Not run, so the user's:**
+- **The first pull request's run.** The workflow has never run on GitHub: a pull request touching the app should start `build darwin` on `xcode-27` and leave `apogee-gui-darwin` on the run; one that does not should pass `build darwin` with its steps skipped. No push was made.
+- **The required checks.** Once that run passes, and before the merge: `lib/scripts/required-checks.py --pr <N>` shows `what changed (darwin)` and `build darwin` joining the "Stable: CI must pass" ruleset, and `--apply` sets them -- a repository setting, the user's to change.
+- **The artifact launched on a Mac** -- downloaded from the run and opened (right-click, Open) -- the item's manual check.

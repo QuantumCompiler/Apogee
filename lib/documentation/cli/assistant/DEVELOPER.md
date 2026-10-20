@@ -31,7 +31,9 @@ The build-related files outside an app directory are the one workflow and the on
 ```
 Apogee/
 ├── .github/
-│   ├── workflows/ci.yml     — The CLI pipeline, and the only workflow (M8): clone llama.cpp + unit tests per platform
+│   ├── workflows/darwin.yml — The macOS app's pipeline (2026-10-20): what changed (darwin), then build darwin on the
+│   │                          xcode-27 image through cicd.sh --app darwin, packaged as the artifact apogee-gui-darwin
+│   ├── workflows/ci.yml     — The CLI pipeline, and the only workflow that releases (M8): clone llama.cpp + unit tests per platform
 │   │                          (parallel), then build + package per platform; the PR-only `version bump` check; after a
 │   │                          merge, `tag and release`; dispatched with `publish`, the re-cut -- the same job, on this
 │   │                          run's own builds. All behind `what changed`: with the CLI unchanged since the latest
@@ -1202,7 +1204,7 @@ The steps, all in one change:
 
 ## Changing the pipeline
 
-The CLI pipeline is `ci.yml` — pull requests, the release after a merge, and the re-cut on request; since 2026-10-04 (M8) the only workflow — the package action, and the scripts they call. Several things are coupled to its jobs, and the costly ones fail only at merge time, so a change to it carries this list (user decision, 2026-10-03). `ci.yml`'s header repeats the short version, for whoever opens the file.
+The CLI pipeline is `ci.yml` — pull requests, the release after a merge, and the re-cut on request; since 2026-10-04 (M8) the only workflow that releases — the package action, and the scripts they call. Several things are coupled to its jobs, and the costly ones fail only at merge time, so a change to it carries this list (user decision, 2026-10-03). `ci.yml`'s header repeats the short version, for whoever opens the file.
 
 **A job added, removed or renamed, or a matrix row changed** (`ci.yml`):
 
@@ -1213,7 +1215,7 @@ The CLI pipeline is `ci.yml` — pull requests, the release after a merge, and t
 
 **What the CLI is built from changed** — a new directory or file its build reads, outside `lib/src/cli/` and `lib/scripts/`: add it to `cli` in `lib/scripts/changed.sh`. Otherwise a change to it alone is treated as "CLI unchanged", and the release copies the old CLI instead of building the new one.
 
-**A new deliverable** (a GUI application): its own entry in `changed.sh`, its place in `cicd.sh`'s `APPS` with its targets, and its own pipeline, as jobs or a workflow, running on pull requests into `stable` and calling `cicd.sh --app <it>` -- every pipeline names its deliverable, since `cicd.sh` builds them all by default. Once a pull request with it has passed, run `required-checks.py --apply`: it picks up a new workflow's jobs by itself. How its release joins the CLI's in `release-from-pr.sh` is part of designing that pipeline.
+**A new deliverable** (a GUI application): its own entry in `changed.sh`, its place in `cicd.sh`'s `APPS` with its targets, and its own pipeline, as jobs or a workflow, running on pull requests into `stable` and calling `cicd.sh --app <it>` -- every pipeline names its deliverable, since `cicd.sh` builds them all by default. The macOS app's `darwin.yml` (2026-10-20) is the worked example: its job names (`what changed (darwin)`, `build darwin`) are its own, never a CLI job's, since a required check is named by its job alone; its build job takes its runner from the gate's answer, so an unchanged app costs a Linux runner, not a Mac one; and its workflow file is in its own `changed.sh` entry. Once a pull request with it has passed, run `required-checks.py --apply`: it picks up a new workflow's jobs by itself. How its release joins the CLI's in `release-from-pr.sh` is part of designing that pipeline.
 
 **When `required-checks.py` itself must change.** Its assumptions are listed in its header:
 
@@ -1283,7 +1285,7 @@ It uses the newest open pull request into `stable`, else the last merged one; `-
 
 ### The re-cut
 
-**One pipeline** (user decision, 2026-10-04, M8): `ci.yml` is the only workflow. The separate manual release workflow is gone, and with it its `v*` tag trigger and its second copy of the matrix, so a release is published only by a merge — or by the re-cut, `ci.yml` itself dispatched on `stable` with `publish`. **A hand-pushed `v*` tag starts no workflow**: a tag is what a release makes, never how one is asked for. The escape hatch, for a merge whose own archives cannot be released (the tree check refused them, or the artifacts expired) or a deleted release cut again:
+**One pipeline** (user decision, 2026-10-04, M8): `ci.yml` is the only workflow that releases (the macOS app's `darwin.yml`, since 2026-10-20, builds, tests and packages it on pull requests and publishes nothing). The separate manual release workflow is gone, and with it its `v*` tag trigger and its second copy of the matrix, so a release is published only by a merge — or by the re-cut, `ci.yml` itself dispatched on `stable` with `publish`. **A hand-pushed `v*` tag starts no workflow**: a tag is what a release makes, never how one is asked for. The escape hatch, for a merge whose own archives cannot be released (the tree check refused them, or the artifacts expired) or a deleted release cut again:
 
 ```sh
 make -C lib/src/cli release VERSION=x.y.z

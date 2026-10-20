@@ -4,6 +4,7 @@
 #   build.sh build  [--target T] [--jobs N]   Apogee.app in Release, signed ad hoc
 #   build.sh test   [--target T] [--jobs N]   the whole suite (the scheme's tests), hermetic
 #   build.sh open   [--target T] [--jobs N]   build, then open the app
+#   build.sh package [--target T]             the built app zipped with its README
 #   build.sh clean  [--target T]              remove build/<T>/
 #
 # The application is an Xcode project, Apogee.xcodeproj beside this directory,
@@ -22,6 +23,9 @@
 #   build/<target>/xcode/       xcodebuild's derived data, both configurations
 #   build/<target>/Apogee.app   the release build's bundle, its signature
 #                               verified
+#   build/<target>/apogee-gui-darwin.zip
+#                               `package`'s: Apogee-<version>/ holding the app
+#                               and a README -- what CI keeps as its artifact
 #
 # Signing is ad hoc (CODE_SIGN_IDENTITY "-" in the project): the user's call,
 # 2026-10-20 -- no Developer ID and no notarization for now, so no signing
@@ -46,7 +50,7 @@ die() {
 }
 
 usage() {
-    sed -n '4,8p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '4,9p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
 }
 
@@ -54,9 +58,9 @@ usage() {
 command="$1"
 shift
 case "$command" in
-    build | test | open | clean) ;;
+    build | test | open | package | clean) ;;
     -h | --help) usage ;;
-    *) die "unknown command '${command}' (build, test, open, clean)" ;;
+    *) die "unknown command '${command}' (build, test, open, package, clean)" ;;
 esac
 
 target="macos-arm64"
@@ -135,6 +139,47 @@ build_app() {
     log "[${target}] ${bundle}: Apogee ${version}, signed ad hoc, signature verified"
 }
 
+# The built app, zipped with a README that says what it is and what its
+# ad-hoc signature costs, and the zip proven: unpacked again, the app's
+# signature must still verify.
+package_app() {
+    [[ -d "$bundle" ]] || die "no ${bundle} -- run '$0 build' first"
+    local said version stage zip check
+    said="$(codesign --verify --deep --strict "$bundle" 2>&1)" || die "the signature does not verify: ${said}"
+    version="$(plutil -extract CFBundleShortVersionString raw "${bundle}/Contents/Info.plist" 2>/dev/null)" ||
+        die "${bundle} carries no version: build it with '$0 build'"
+    stage="${build_dir}/package/Apogee-${version}"
+    zip="${build_dir}/apogee-gui-darwin.zip"
+    rm -rf "${build_dir}/package" "$zip"
+    mkdir -p "$stage"
+    ditto "$bundle" "${stage}/Apogee.app"
+    cat >"${stage}/README.txt" <<README
+Apogee ${version} for macOS -- the desktop app, in development
+
+Apogee.app drives the apogee command-line tool, which it looks for in
+~/.local/bin. Install that first:
+
+  curl -fsSL https://raw.githubusercontent.com/QuantumCompiler/Apogee/stable/lib/scripts/install.sh | bash
+
+This build is signed ad hoc -- not with an Apple Developer ID -- and is not
+notarized, so macOS will not open it with a double-click the first time:
+right-click Apogee.app, choose Open, then Open again (or System Settings ->
+Privacy & Security -> Open Anyway).
+
+Needs macOS 27 or later on Apple silicon.
+Built from $(git -C "$app_dir" rev-parse --short HEAD 2>/dev/null || echo "an unknown commit").
+README
+    ditto -c -k --keepParent "$stage" "$zip"
+    check="$(mktemp -d "${TMPDIR:-/tmp}/apogee-package.XXXXXX")"
+    ditto -x -k "$zip" "$check"
+    said="$(codesign --verify --deep --strict "${check}/Apogee-${version}/Apogee.app" 2>&1)" || {
+        rm -rf "$check"
+        die "the packaged app's signature does not verify: ${said}"
+    }
+    rm -rf "$check"
+    log "[${target}] ${zip}: Apogee ${version}, the app and its README, its signature verified once unpacked"
+}
+
 # Each failed test and its messages, from a result bundle.
 report_failures() {
     xcrun xcresulttool get test-results tests --path "$1" 2>/dev/null | python3 -I -c '
@@ -163,6 +208,9 @@ case "$command" in
         build_app
         log "opening ${bundle}"
         open "$bundle"
+        ;;
+    package)
+        package_app
         ;;
     test)
         log "[${target}] running the suite (Debug, ${jobs} jobs)"
