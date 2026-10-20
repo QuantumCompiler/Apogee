@@ -1,0 +1,82 @@
+import BusinessReads
+import DataProtocol
+import Foundation
+import InfrastructureProcess
+import Testing
+
+/// A fake `apogee` read: a shell script that prints what each case needs.
+final class FakeRead {
+    let directory: URL
+
+    init() throws {
+        directory = FileManager.default.temporaryDirectory.appendingPathComponent("apogee-read-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    deinit { try? FileManager.default.removeItem(at: directory) }
+
+    func binary(_ script: String) throws -> URL {
+        let file = directory.appendingPathComponent("apogee")
+        try ("#!/bin/sh\n" + script + "\n").write(to: file, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+        return file
+    }
+}
+
+@Suite("ReadRunner", .timeLimit(.minutes(1)))
+struct ReadRunnerTests {
+    @Test("a read's document comes back decoded, asked for with --output-format json")
+    func document() async throws {
+        let fake = try FakeRead()
+        let binary = try fake.binary(#"printf '{"object":"list","data":[{"id":"a"}],"total":1,"argv":"%s"}\n' "$*""#)
+        let outcome = await ReadRunner().run(binary: binary, ["chats", "list"])
+        guard case .document(let document) = outcome else {
+            Issue.record("no document: \(outcome)")
+            return
+        }
+        #expect(document.object == "list")
+        #expect(document.entries?.first?["id"]?.stringValue == "a")
+        #expect(document.total == 1)
+        #expect(document.value["argv"]?.stringValue == "chats list --output-format json")
+    }
+
+    @Test("a read that fails says why in the CLI's own words")
+    func failed() async throws {
+        let fake = try FakeRead()
+        let binary = try fake.binary("echo 'error: no chat named x' >&2; exit 3")
+        let outcome = await ReadRunner().run(binary: binary, ["chats", "show", "x"])
+        guard case .failed(let exit, let tail) = outcome else {
+            Issue.record("did not fail: \(outcome)")
+            return
+        }
+        #expect(exit == ChildExit(reason: .exited, status: 3))
+        #expect(tail.lastLine == "error: no chat named x")
+    }
+
+    @Test("stdout that is not one JSON document is said, not decoded")
+    func undecodable() async throws {
+        let fake = try FakeRead()
+        let outcome = await ReadRunner().run(binary: try fake.binary("echo 'Models:'; echo '  none'"), ["models"])
+        guard case .undecodable(let stdout, _) = outcome else {
+            Issue.record("decoded: \(outcome)")
+            return
+        }
+        #expect(stdout == "Models:\n  none")
+    }
+
+    @Test("a read past its time is stopped, and one that cannot start says so")
+    func timeoutAndCouldNotStart() async throws {
+        let fake = try FakeRead()
+        let slow = await ReadRunner(timeout: .milliseconds(300)).run(binary: try fake.binary("sleep 30"), ["check"])
+        guard case .timedOut = slow else {
+            Issue.record("not timed out: \(slow)")
+            return
+        }
+        let missing = await ReadRunner().run(binary: URL(fileURLWithPath: "/nonexistent/apogee"), ["check"])
+        guard case .couldNotStart(let reason) = missing else {
+            Issue.record("started: \(missing)")
+            return
+        }
+        #expect(reason.contains("/nonexistent/apogee"))
+    }
+}

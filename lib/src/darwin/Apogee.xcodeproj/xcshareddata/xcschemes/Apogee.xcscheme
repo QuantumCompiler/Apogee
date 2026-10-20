@@ -56,9 +56,42 @@
             parallelizable = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
+               BlueprintIdentifier = "1F24F78037EEEE5170A8CC81"
+               BuildableName = "DataPreferencesTests.xctest"
+               BlueprintName = "DataPreferencesTests"
+               ReferencedContainer = "container:Apogee.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "CD8E2F119F879D120DF0D397"
+               BuildableName = "DataDiscoveryTests.xctest"
+               BlueprintName = "DataDiscoveryTests"
+               ReferencedContainer = "container:Apogee.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
                BlueprintIdentifier = "488C3E5B64C0B0B3F2685C2E"
                BuildableName = "BusinessSessionTests.xctest"
                BlueprintName = "BusinessSessionTests"
+               ReferencedContainer = "container:Apogee.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "90098D83F96B69F19FDEFC89"
+               BuildableName = "BusinessReadsTests.xctest"
+               BlueprintName = "BusinessReadsTests"
                ReferencedContainer = "container:Apogee.xcodeproj">
             </BuildableReference>
          </TestableReference>

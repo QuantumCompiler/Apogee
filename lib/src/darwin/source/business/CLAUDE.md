@@ -2,7 +2,7 @@
 
 **Position.** Third of the four ([ADR 0001](../../../../documentation/gui/adrs/layer-enforcement.md)): the client core -- the machine-mode session (spawned through Infrastructure, spoken in Data's types), the reads, long-running jobs. What the GUI does; every capability itself is the CLI's.
 
-**Modules:** `session` -- a driven chat session: how its child is started, ChatLaunch.
+**Modules:** `session` -- a driven chat session: its child started (ChatLaunch), its events and lines (MachineSession), where it stands (TurnTracker), and the front door (ApogeeClient); `reads` -- one read run and its document decoded (ReadRunner).
 
 **May import:** this layer, Data, Infrastructure, and the system's non-UI frameworks. No UI framework, nothing of Presentation.
 

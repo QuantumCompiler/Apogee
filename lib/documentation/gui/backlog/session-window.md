@@ -9,7 +9,7 @@
 - `source/presentation/app/` — the window wired as the app's main scene (grown from 1a's shell).
 - `tests/presentation/session/` — the view-model over scripted sequences: the full mock-actor conversation, the question answered, cancel mid-stream, the error and spawn-failure renders, the unknown-event row.
 
-**Reference.** [`machine-mode-client-core.md`](machine-mode-client-core.md) — the stream and lines consumed whole, `(consumed decision)` for their shapes; [ADR 0002](../adrs/presentation-mvvm.md) — the module shape and the `styles` dependency; [`machine-mode.md`](../../cli/reference/machine-mode.md) — the event meanings rendered; the CLI's own front ends (the terminal views, the TUI session view) — the precedent for what a session surface shows: thinking, side activity, the answer, asks.
+**Reference.** The client core (1b, shipped 2026-10-20, [MILESTONES → Milestone A](../assistant/MILESTONES.md#milestone-a--the-macos-application)) — the stream and lines consumed whole, `(consumed decision)` for their shapes: `ApogeeClient.locateBinary()` and `startChat(binary:)`, `MachineSession`'s `events` (`SessionEvent`: each `ProtocolEvent`, then `.ended(SessionEnd)`) and its `send(user:)`, `answer(_:)`, `cancel()`, `close()` and `stop(grace:)`, `TurnTracker`'s phase, and `DiscoveryOutcome.installHint`; [ADR 0002](../adrs/presentation-mvvm.md) — the module shape and the `styles` dependency; [`machine-mode.md`](../../cli/reference/machine-mode.md) — the event meanings rendered; the CLI's own front ends (the terminal views, the TUI session view) — the precedent for what a session surface shows: thinking, side activity, the answer, asks.
 
 **Decisions made** (dated):
 - 2026-10-20 — The first window is one chat session; browsing saved chats, suites, models and the rest of the read surface are later items (the spike's MVP line, standing).
@@ -29,4 +29,4 @@
 - [ ] Transcript text equals the deltas' concatenation; unknown events appear as the quiet row; errors show the CLI's words.
 - [ ] The full suite is hermetic and green.
 
-**Scope note.** Earmarked for v0.2.0; gated on [`machine-mode-client-core.md`](machine-mode-client-core.md) (1b). Out of scope: multiple sessions/tabs, the read-surface windows (models, chats, suites — later items), attachments UI (`attach` stays in the core's vocabulary unrendered for now), tasks and plays as first-class UI, preferences beyond the binary override.
+**Scope note.** Earmarked for v0.2.0; gated on 1b, the client core (shipped 2026-10-20, [MILESTONES → Milestone A](../assistant/MILESTONES.md#milestone-a--the-macos-application)). Out of scope: multiple sessions/tabs, the read-surface windows (models, chats, suites — later items), attachments UI (`attach` stays in the core's vocabulary unrendered for now), tasks and plays as first-class UI, preferences beyond the binary override.
