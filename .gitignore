@@ -1,6 +1,10 @@
 # Build output. One directory per preset/target (build/macos-arm64, build/lint, …).
 build/
 
+# Xcode's per-user state inside a project (window layout, breakpoints, user
+# schemes). The shared scheme lives in xcshareddata/ and is committed.
+xcuserdata/
+
 # CMake / tooling byproducts
 compile_commands.json
 CMakeUserPresets.json

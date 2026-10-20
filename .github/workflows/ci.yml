@@ -27,7 +27,8 @@
 # Every build job shells out to lib/scripts/cicd.sh — the same script a
 # developer runs locally. That is deliberate: the moment CI grows its own build
 # steps, "works on my machine" becomes a real answer. If a step belongs in CI,
-# it belongs in that script.
+# it belongs in that script. Each call names `--app cli`: cicd.sh builds every
+# application by default, and this pipeline builds the CLI and nothing else.
 #
 # This workflow must live at .github/workflows/ (GitHub's requirement), which is
 # why it is the one build-related file not under lib/src/cli/. It stays a thin
@@ -443,7 +444,7 @@ jobs:
         shell: bash
         run: |
           set -eo pipefail
-          lib/scripts/cicd.sh --platform ${{ matrix.target }} --unit-tests --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+          lib/scripts/cicd.sh --app cli --platform ${{ matrix.target }} --unit-tests --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
             lib/scripts/ci-annotate.sh "unit tests ${{ matrix.name }}" "$RUNNER_TEMP/cicd.log"
             exit 1
           }
@@ -454,7 +455,7 @@ jobs:
         run: |
           git config --global --add safe.directory '*'
           set -eo pipefail
-          lib/scripts/cicd.sh --platform ${{ matrix.target }} --unit-tests --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+          lib/scripts/cicd.sh --app cli --platform ${{ matrix.target }} --unit-tests --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
             lib/scripts/ci-annotate.sh "unit tests ${{ matrix.name }}" "$RUNNER_TEMP/cicd.log"
             exit 1
           }
@@ -537,7 +538,7 @@ jobs:
         shell: bash
         run: |
           set -eo pipefail
-          lib/scripts/cicd.sh --platform ${{ matrix.target }} --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+          lib/scripts/cicd.sh --app cli --platform ${{ matrix.target }} --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
             lib/scripts/ci-annotate.sh "build ${{ matrix.name }}" "$RUNNER_TEMP/cicd.log"
             exit 1
           }
@@ -553,7 +554,7 @@ jobs:
         run: |
           git config --global --add safe.directory '*'
           set -eo pipefail
-          lib/scripts/cicd.sh --platform ${{ matrix.target }} --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+          lib/scripts/cicd.sh --app cli --platform ${{ matrix.target }} --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
             lib/scripts/ci-annotate.sh "build ${{ matrix.name }}" "$RUNNER_TEMP/cicd.log"
             exit 1
           }

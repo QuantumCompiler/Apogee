@@ -1,0 +1,17 @@
+# The Presentation layer
+
+**Position.** Fourth of the four ([ADR 0001](../../../../documentation/gui/adrs/layer-enforcement.md)): the windows, views and rendering, in SwiftUI -- whose types stay here and nowhere below.
+
+**Modules:** `styles` (the shared visual vocabulary), `app` (the application and its window).
+
+**Shape** ([ADR 0002](../../../../documentation/gui/adrs/presentation-mvvm.md)): every module but `styles` is `Views/` + `ViewModels/`, with any further directory it genuinely needs; a view binds to its view-model, the view-model consumes Business, and no file under `ViewModels/` imports a UI framework. `styles` -- colors, type, spacing and the common components -- leans on no sibling, and every other module may use it; a component a second module wants is promoted there, never copied.
+
+**The entry point** is not a module: the application target `Apogee` builds `source/main/`, one file that starts `PresentationApp`'s `ApogeeApp` -- the composition root, as the CLI's `source/main.cpp` is -- and embeds exactly the frameworks its links reach at run time, so a module a Presentation module starts linking is embedded the same day.
+
+**May import:** every layer below, the UI frameworks, and `styles` from any module.
+
+**Enforced by:** [`tests/architecture/layering`](../../tests/architecture/layering/LayeringCheck.swift): the edges, the MVVM shape, the view-models' imports and `styles`' independence.
+
+**Changing this layer:** a new module is a directory `source/presentation/<package>/` with `Views/` and `ViewModels/`, a framework target named `Presentation<Package>` in `Apogee.xcodeproj` building that folder, its test bundle at `tests/presentation/<package>/` in the shared scheme, and its name on this card's **Modules** line.
+
+**Depth:** [the GUI's ADRs](../../../../documentation/gui/adrs/README.md) · [the design](../../../../design/spec/README.md) · [DEVELOPER.md](../../../../documentation/gui/assistant/DEVELOPER.md).

@@ -28,3 +28,5 @@ Every GUI application is four layers, lowest to highest, with the same downward 
 ## Enforcement
 
 Lands with the first application's build: each app establishes its language's mechanical analog of the CLI's law — a module map as the one declaration and a layering check that fails on an undeclared or upward edge (the CLI's `harness.layering` and link policy are the reference implementation). Until that exists, this record and review hold the line, and the first application's backlog items must name their layer in **Seam + files** from day one.
+
+**Landed 2026-10-20** (1a, the macOS application): the module map is `lib/src/darwin/Apogee.xcodeproj` -- each module a framework target building its `source/<layer>/<package>/` folder, named `<Layer><Package>` -- and the check is `lib/src/darwin/tests/architecture/layering`, which reads `project.pbxproj` and fails an upward or undeclared edge, an import the target does not declare, a UI framework below Presentation, anything linked from outside the project, an empty map, and a layer card that disagrees with the map; every rule was verified against a planted violation.

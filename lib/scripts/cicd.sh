@@ -11,10 +11,16 @@
 # the GitHub Actions matrix runs one native runner per target, and each runner
 # invokes THIS script with its native --platform — one build path, everywhere.
 #
-# Each application under lib/src/<app>/ is a self-contained CMake project that
-# owns its presets, cmake helpers, pinned third-party code, and style config.
-# This script builds each one into lib/src/<app>/build/<target>/. Today that is
-# just the CLI; the GUI applications join the APPS list when they land.
+# Each application under lib/src/<app>/ owns its build and builds into
+# lib/src/<app>/build/<target>/. Two kinds of build entry are understood: a
+# self-contained CMake project (the CLI -- its presets, cmake helpers, pinned
+# third-party code and style config beside it), or an application's own
+# scripts/build.sh (the macOS app, an Xcode project). Each application builds
+# for its own targets: the CLI for all five, the macOS app for macos-arm64
+# alone. --app picks which applications run; without it, every one does --
+# which is what a developer's `cicd.sh --test` wants -- so each CI pipeline
+# names its own deliverable (`--app cli`, `--app darwin`) and never builds
+# another's.
 #
 # With --fresh it performs a CI-style clean-room build: clone the repo at the
 # current branch into a temp directory and build there.
@@ -34,10 +40,24 @@ set -euo pipefail
 REPO_URL="https://github.com/QuantumCompiler/Apogee"
 ALL_TARGETS=(linux-x64 linux-arm64 macos-arm64 windows-x64 windows-arm64)
 
-# Each application under lib/src/<app>/ owns its own self-contained CMake build
-# (presets, cmake helpers, third_party, style config). This script drives them;
-# the GUI applications join this list when they land.
-APPS=(cli)
+# Each application under lib/src/<app>/ owns its own build (see the header).
+# This script drives them; the linux and windows GUI applications join this
+# list when they land, with their targets in app_targets below.
+APPS=(cli darwin)
+
+# The targets an application builds for.
+app_targets() {
+    case "$1" in
+        cli)    printf '%s\n' "${ALL_TARGETS[@]}" ;;
+        darwin) printf '%s\n' macos-arm64 ;;
+    esac
+}
+
+app_builds_for() {
+    local app="$1" target="$2" t
+    while IFS= read -r t; do [[ "$t" == "$target" ]] && return 0; done < <(app_targets "$app")
+    return 1
+}
 
 CLEAN=0
 RUN_TESTS=0
@@ -48,6 +68,7 @@ FRESH=0
 NO_DEFER=0
 BRANCH=""
 PLATFORMS=()
+SELECTED_APPS=()
 JOBS="$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
 
 usage() {
@@ -61,12 +82,18 @@ Options:
                        Repeatable. Default: this machine's native target.
                        Targets this host cannot compile are listed and left
                        to the CI matrix (whose runners call this script).
+  -a, --app NAME       Application to build: ${APPS[*]}, or 'all'.
+                       Repeatable. Default: all of them. Each builds only for
+                       its own targets (darwin: macos-arm64); a CI pipeline
+                       names its own application.
   -c, --clean          Remove the target's build directory before building
-  -t, --test           Run the test suite (ctest) after a successful build
-                       (host-native target only — cross-built binaries can't run here)
-  -u, --unit-tests     Build ONLY the test binary and run it directly: the
+  -t, --test           Run the test suite after a successful build (ctest
+                       for the CLI, the Xcode scheme's tests for darwin) (host-native target
+                       only — cross-built binaries can't run here)
+  -u, --unit-tests     Build ONLY the tests and run them: for the CLI the
                        source-level suite, with no apogee executable built and
-                       no ctest. Implies the tests; --test is not needed.
+                       no ctest; for darwin its whole suite, with no app built.
+                       Implies the tests; --test is not needed.
                        Host-native target only, same reason.
       --clone-llama    Clone llama.cpp at the commit the CLI's third_party
                        build pins, prove it resolved, and stop: the first CI
@@ -151,6 +178,12 @@ valid_target() {
     return 1
 }
 
+valid_app() {
+    local a
+    for a in "${APPS[@]}"; do [[ "$1" == "$a" ]] && return 0; done
+    return 1
+}
+
 # Can this host natively compile the given target?
 buildable_here() {
     local host="$1" target="$2"
@@ -172,6 +205,15 @@ while [[ $# -gt 0 ]]; do
                 PLATFORMS+=("$2")
             fi
             shift ;;
+        -a|--app)
+            [[ $# -ge 2 ]] || die "--app needs an application"
+            if [[ "$2" == "all" ]]; then
+                SELECTED_APPS=("${APPS[@]}")
+            else
+                valid_app "$2" || die "unknown application '$2' (valid: ${APPS[*]}, all)"
+                SELECTED_APPS+=("$2")
+            fi
+            shift ;;
         -c|--clean)  CLEAN=1 ;;
         -t|--test)   RUN_TESTS=1 ;;
         -u|--unit-tests) UNIT_TESTS=1 ;;
@@ -189,6 +231,7 @@ done
 
 HOST="$(host_target)"
 [[ ${#PLATFORMS[@]} -gt 0 ]] || PLATFORMS=("$HOST")
+[[ ${#SELECTED_APPS[@]} -gt 0 ]] || SELECTED_APPS=("${APPS[@]}")
 if [[ $PRINT_HOST -eq 1 ]]; then
     printf '%s\n' "$HOST"
     exit 0
@@ -221,13 +264,41 @@ clone_llama() {
 build_target() {
     local root="$1" target="$2" app="$3"
     local app_dir="${root}/lib/src/${app}"
-    local build_dir="build/${target}"
-    cd "$app_dir"
+    if [[ -f "${app_dir}/CMakeLists.txt" ]]; then
+        build_cmake_app "$root" "$target" "$app"
+    elif [[ -x "${app_dir}/scripts/build.sh" ]]; then
+        build_script_app "$root" "$target" "$app"
+    else
+        log "NOTICE: no CMakeLists.txt or scripts/build.sh at ${app_dir} — skipping app '${app}'."
+    fi
+}
 
-    if [[ ! -f CMakeLists.txt ]]; then
-        log "NOTICE: no CMakeLists.txt at ${app_dir} — skipping app '${app}'."
+# An application that owns a scripts/build.sh (the macOS app): this script
+# asks it for each step and knows nothing of how it compiles.
+build_script_app() {
+    local root="$1" target="$2" app="$3"
+    local entry="${root}/lib/src/${app}/scripts/build.sh"
+    [[ $CLEAN -eq 1 ]] && "$entry" clean --target "$target"
+    if [[ $UNIT_TESTS -eq 1 ]]; then
+        log "[${app}/${target}] running the suite alone (no app built)"
+        "$entry" test --target "$target" --jobs "${JOBS}"
         return 0
     fi
+    log "[${app}/${target}] building"
+    "$entry" build --target "$target" --jobs "${JOBS}"
+    if [[ $RUN_TESTS -eq 1 ]]; then
+        log "[${app}/${target}] running tests"
+        "$entry" test --target "$target" --jobs "${JOBS}"
+    fi
+    log "[${app}/${target}] done (branch '$(git -C "$root" rev-parse --abbrev-ref HEAD)')"
+}
+
+# A self-contained CMake project (the CLI).
+build_cmake_app() {
+    local root="$1" target="$2" app="$3"
+    local app_dir="${root}/lib/src/${app}"
+    local build_dir="build/${target}"
+    cd "$app_dir"
 
     [[ $CLEAN -eq 1 ]] && { log "cleaning ${app_dir}/${build_dir}/"; rm -rf "${build_dir}"; }
 
@@ -304,8 +375,20 @@ build_target() {
 build_all_requested() {
     local root="$1" target app deferred=()
     for target in "${PLATFORMS[@]}"; do
+        # Only the selected applications that build for this target; the
+        # others are said, never an error -- the macOS app has no Linux build
+        # to defer.
+        local apps_here=()
+        for app in "${SELECTED_APPS[@]}"; do
+            if app_builds_for "$app" "$target"; then
+                apps_here+=("$app")
+            else
+                log "${app} builds only for $(app_targets "$app" | tr '\n' ' ')— nothing of it for ${target}"
+            fi
+        done
+        [[ ${#apps_here[@]} -gt 0 ]] || continue
         if buildable_here "$HOST" "$target"; then
-            for app in "${APPS[@]}"; do
+            for app in "${apps_here[@]}"; do
                 build_target "$root" "$target" "$app"
             done
         else

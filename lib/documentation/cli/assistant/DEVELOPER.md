@@ -12,15 +12,15 @@ lib/scripts/cicd.sh --test
 
 The repo-wide entry point, and the one every CI runner calls: it builds each application for the host's native target and runs its suite. For the CLI alone, `make -C lib/src/cli test` does the same thing; `make -C lib/src/cli help` lists every target.
 
-Requirements: CMake ≥ 3.25, a C++20 compiler, and git. `format` / `lint` additionally need `clang-format` / `clang-tidy` (Homebrew LLVM on macOS — Apple's toolchain ships no clang-tidy).
+Requirements: CMake ≥ 3.25, a C++20 compiler, and git. `format` / `lint` additionally need `clang-format` / `clang-tidy` (Homebrew LLVM on macOS — Apple's toolchain ships no clang-tidy). On a Mac the macOS application builds too, which needs Xcode 27 (`lib/scripts/cicd.sh --app cli --test` leaves it out).
 
 ---
 
 ## One application, one build
 
-**Each application under `lib/src/<app>/` is a self-contained CMake project.** Its presets, cmake helpers, pinned third-party code, style config, and build output all live beside its source. Nothing above `lib/src/<app>/` needs to know how that application compiles.
+**Each application under `lib/src/<app>/` is a self-contained project that owns its build.** Its build files, pinned third-party code, style config, and build output all live beside its source. Nothing above `lib/src/<app>/` needs to know how that application compiles.
 
-Today that is `lib/src/cli`. The GUI applications land later as siblings (`lib/src/darwin|linux|windows`), each owning its build the same way, and each joining the `APPS` list in `lib/scripts/cicd.sh`.
+Two exist: `lib/src/cli`, a CMake project, and since 2026-10-20 `lib/src/darwin`, the macOS application, an Xcode project whose one entry point from outside is its `scripts/build.sh` (the [GUI docs](../../gui/assistant/DEVELOPER.md) describe it). Both are in the `APPS` list in `lib/scripts/cicd.sh` (`cli darwin`), which knows each one's targets -- the CLI all five, darwin macos-arm64 alone -- and builds every application unless `--app` names some. **Each pipeline names its deliverable**: the CLI's calls `cicd.sh --app cli`, so its macOS jobs never build the app. The Linux and Windows GUI applications join the list the same way.
 
 The build-related files outside an app directory are the one workflow and the one packaging action under `.github/`, because GitHub requires them there. They are deliberately thin callers into `lib/scripts/` — `cicd.sh` to build, `release-from-pr.sh` to release — for exactly that reason.
 
@@ -72,7 +72,7 @@ Apogee/
     │   └── VERSION          — The release, x.y.z: what a merge publishes; the CLI's own version is in
     │                          lib/src/cli/CMakeLists.txt, and equals it whenever the CLI changes
     ├── scripts/             — Repo scripts
-    │   ├── cicd.sh          — CI/CD entry point: builds every app for any of the five release
+    │   ├── cicd.sh          — CI/CD entry point: builds every app (--app cli|darwin, default all) for any of the five release
     │   │                      targets (--platform linux|windows × x64|arm64, macos-arm64, or all;
     │   │                      non-native targets defer to the CI matrix, or fail with --no-defer), --fresh = clean-room
     │   │                      clone of github.com/QuantumCompiler/Apogee at that branch; --test, --clean;
@@ -94,7 +94,7 @@ Apogee/
     │   ├── cross-windows.sh — `make cross-windows`: CI's Windows x64 build, cross-compiled with MinGW-w64
     │   │                      GCC on a Mac or Linux machine -- compiled, linked, image size checked
     │   ├── changed.sh       — What each deliverable is built from, declared once, and whether that
-    │   │                      changed between two commits (`changed.sh cli <from> <to>`), for CI and pr-ci
+    │   │                      changed between two commits (`changed.sh cli|gui-darwin <from> <to>`), for CI and pr-ci
     │   ├── latest-release.sh — The newest published release: its tag, and its commit as origin has it
     │   ├── required-checks.py — The checks stable requires, read from a PR's passing run (every job that ran
     │   │                      and passed); shows the difference, and --apply sets the "Stable: CI must pass" ruleset
@@ -141,7 +141,9 @@ Apogee/
         │                          checks and drivers ctest runs, one directory per file type: cmake/
         │                          (`cmake -P` checks), sh/ (end-to-end runs), py/ (PTY and machine-mode drivers),
         │                          js/ (the HTML export's script driven under node, 27m)
-        └── <darwin|linux|windows>/ — GUI applications, one per platform (future — down the road)
+        ├── darwin/          — The macOS application (2026-10-20): Apogee.xcodeproj, scripts/build.sh, source/ and
+        │                      tests/ in the four layers -- see the GUI docs' DEVELOPER.md
+        └── <linux|windows>/ — The other GUI applications, one per platform (not yet started)
 ```
 
 ---
@@ -1035,8 +1037,8 @@ Run from `lib/src/cli`, or with `make -C lib/src/cli <target>` from anywhere.
 
 | Command | Does |
 |---|---|
-| `lib/scripts/cicd.sh --test` | **The repo-wide entry point.** Builds every app for the host target and runs its suite — the developer's gate before a push, and since 2026-09-22 CI's first stage too. `--platform`, `--fresh`, `--clean`, `--jobs` too; `--no-defer` turns a target this host cannot build from a deferral into a failure (every CI runner passes it); `--clone-llama` proves the llama.cpp pin resolves and stops (one of CI's two first-stage jobs); **`--unit-tests`** builds the `apogee_tests` target alone and runs that binary — the source-level suite, no `apogee` executable, no ctest — which is what both pipelines gate their builds on (2026-09-22); `APOGEE_CMAKE_ARGS` appends configure flags (a toolchain file, e.g. a MinGW cross-compile from macOS). |
-| `make test` | The same thing for the CLI alone (it calls `cicd.sh`). |
+| `lib/scripts/cicd.sh --test` | **The repo-wide entry point.** Builds every app for the host target and runs its suite — the developer's gate before a push, and since 2026-09-22 CI's first stage too. `--app cli|darwin|all` picks the applications (every one by default, and only those that build for the target; the CLI pipeline passes `--app cli`, 2026-10-20); `--platform`, `--fresh`, `--clean`, `--jobs` too; `--no-defer` turns a target this host cannot build from a deferral into a failure (every CI runner passes it); `--clone-llama` proves the llama.cpp pin resolves and stops (one of CI's two first-stage jobs); **`--unit-tests`** builds the `apogee_tests` target alone and runs that binary — the source-level suite, no `apogee` executable, no ctest — which is what both pipelines gate their builds on (2026-09-22); `APOGEE_CMAKE_ARGS` appends configure flags (a toolchain file, e.g. a MinGW cross-compile from macOS). |
+| `make test` | The same thing for the CLI alone (it calls `cicd.sh --app cli`). |
 | `make build [PRESET=…]` | Configure and build one preset. |
 | `make install [PREFIX=…] [MODE=…]` | Build, then install the binary to `$PREFIX/bin` (default `~/.local`, so no sudo). `MODE=dev` or `MODE=test` installs that channel's `apogee-dev`/`apogee-test` beside `apogee` -- see [Install channels](#install-channels). Since 51 it ends with `apogee bootstrap` after `check --fix`, as both installers do -- `APOGEE_MINIMAL_INSTALL=1 make install` skips it. |
 | `make reinstall [KEEP="<row> …"] [MODE=…]` | **Start over from source** (M9, 2026-10-04): a fresh build (`cmake --build --clean-first` -- every object recompiled, the fetched dependencies kept), `make install`, then `apogee reset` on the installed binary, run only as `$(APOGEE_BIN)` (`$(PREFIX)/bin/apogee` unless set). Each word of `KEEP` is forwarded as `--keep <word>` and only those rows are kept; bare, it keeps nothing. The Makefile knows no row -- the binary validates each word against the layout and refuses an unknown one before removing anything -- and never passes `--yes`: the plan is shown and the prompt waits for the person, so on a pipe the target stops at the refusal. It also stops where `make install` stops -- an install whose `check --fix` fails ends it before the reset, and `apogee reset`, which needs nothing from the config, is then run directly. With `MODE=` (M10) the whole chain is that channel's: built for it, installed as `apogee-dev`/`apogee-test`, and the reset run by that binary on its own root. |
@@ -1211,7 +1213,7 @@ The CLI pipeline is `ci.yml` — pull requests, the release after a merge, and t
 
 **What the CLI is built from changed** — a new directory or file its build reads, outside `lib/src/cli/` and `lib/scripts/`: add it to `cli` in `lib/scripts/changed.sh`. Otherwise a change to it alone is treated as "CLI unchanged", and the release copies the old CLI instead of building the new one.
 
-**A new deliverable** (a GUI application): its own entry in `changed.sh`, and its own pipeline, as jobs or a workflow, running on pull requests into `stable`. Once a pull request with it has passed, run `required-checks.py --apply`: it picks up a new workflow's jobs by itself. How its release joins the CLI's in `release-from-pr.sh` is part of designing that pipeline.
+**A new deliverable** (a GUI application): its own entry in `changed.sh`, its place in `cicd.sh`'s `APPS` with its targets, and its own pipeline, as jobs or a workflow, running on pull requests into `stable` and calling `cicd.sh --app <it>` -- every pipeline names its deliverable, since `cicd.sh` builds them all by default. Once a pull request with it has passed, run `required-checks.py --apply`: it picks up a new workflow's jobs by itself. How its release joins the CLI's in `release-from-pr.sh` is part of designing that pipeline.
 
 **When `required-checks.py` itself must change.** Its assumptions are listed in its header:
 

@@ -18,6 +18,7 @@
 
 - 2026-10-20 — **A CI artifact until 1c ships** (the user's call, at grooming): no release attachment in this item; the release scripts stay untouched, and the wiring lands with or after the session window.
 - 2026-10-20 — **Job and artifact names at build** in the CLI pipeline's naming style; the first green PR's `required-checks.py --apply` asked of the user per the standing rule (the default, confirmed at grooming).
+- 2026-10-20 — **What 1a left this item** (1a's build, recorded for veto): `cicd.sh` builds every application unless `--app` names some, so the darwin job calls `lib/scripts/cicd.sh --app darwin --platform macos-arm64 --no-defer` (with `--test`), and 1a pinned the CLI pipeline's own `cicd.sh` calls to `--app cli` -- `ci.yml`'s run lines only, no job, name, matrix or gate -- so the CLI's macOS jobs never build the app. "The CLI pipeline untouched" below therefore holds for its jobs, names and gates; its run lines gained `--app cli` with 1a. `changed.sh gui-darwin` (1a) lists `lib/src/darwin/`, `cicd.sh`, `changed.sh` and `lib/release/VERSION`; this item adds its workflow file to that entry. And 1a was built as an **Xcode project** (the user's call at its build), so "1a's bundling step" above is `xcodebuild` itself: `scripts/build.sh build` leaves the Release `Apogee.app` at `lib/src/darwin/build/macos-arm64/Apogee.app`, signed ad hoc and already `codesign --verify`'d -- the package job zips that. The runner needs Xcode 27 (macOS 27 SDK): GitHub's `xcode-27` image (macOS 27, public preview since 2026-07-16) is the one that has it; the CLI's `macos-14` does not.
 
 **Open calls:** none — groomed 2026-10-20.
 
@@ -28,4 +29,4 @@
 - [ ] A PR not touching the GUI's inputs skips the build under the required job name; the CLI pipeline is byte-for-byte untouched.
 - [ ] Required checks updated through `required-checks.py` with the user's approval; the release question above settled and wired accordingly.
 
-**Scope note.** Earmarked for v0.2.0; gated on [`darwin-scaffold.md`](darwin-scaffold.md) (1a). Out of scope: release attachment and any release-script change (the user's 2026-10-20 call — wiring lands with or after 1c), notarization and Developer ID (recorded later), linux/windows pipelines, auto-update machinery, any CLI pipeline change.
+**Scope note.** Earmarked for v0.2.0; gated on 1a, the darwin scaffold (shipped 2026-10-20, [MILESTONES → Milestone A](../assistant/MILESTONES.md#milestone-a--the-macos-application)). Out of scope: release attachment and any release-script change (the user's 2026-10-20 call — wiring lands with or after 1c), notarization and Developer ID (recorded later), linux/windows pipelines, auto-update machinery, any CLI pipeline change.

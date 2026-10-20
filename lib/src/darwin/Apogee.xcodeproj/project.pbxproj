@@ -1,0 +1,1595 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		073D159109F6C0D183CC8BDB /* InfrastructureProcess.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C52D031291F6BA58AC5185B /* InfrastructureProcess.framework */; };
+		0B3ABB929742B60E6A00A611 /* InfrastructureProcess.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C52D031291F6BA58AC5185B /* InfrastructureProcess.framework */; };
+		15BC46ED139E72C02F6DA1A1 /* DataProtocol.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFA5A0ABACC1F719CFE66357 /* DataProtocol.framework */; };
+		16441D78483521CACAF8B058 /* BusinessSession.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3017B9875E72A137B7BCFB35 /* BusinessSession.framework */; };
+		3E98A031445ED09F1EE7806B /* InfrastructureProcess.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C52D031291F6BA58AC5185B /* InfrastructureProcess.framework */; };
+		445FF840AF5AAD7E800C6B4A /* PresentationStyles.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EA30FC3989AAFE1BCBDEFDA7 /* PresentationStyles.framework */; };
+		51707DFCD37A57BB87EC7565 /* PresentationApp.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 412447F69437707A352F89C5 /* PresentationApp.framework */; };
+		5A3D6EC538A6714E567A378F /* DataProtocol.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFA5A0ABACC1F719CFE66357 /* DataProtocol.framework */; };
+		A59BD0B82128DFBE8D02E181 /* PresentationApp.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 412447F69437707A352F89C5 /* PresentationApp.framework */; };
+		C89A258067E1D9FBCEE1EFE5 /* PresentationStyles.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = EA30FC3989AAFE1BCBDEFDA7 /* PresentationStyles.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		ED06DF8AFAF7535C79B270DB /* PresentationStyles.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EA30FC3989AAFE1BCBDEFDA7 /* PresentationStyles.framework */; };
+		F5BB1F1932B942EFA1B48B2C /* PresentationApp.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 412447F69437707A352F89C5 /* PresentationApp.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		FBD256A14185E87B6758168D /* DataProtocol.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFA5A0ABACC1F719CFE66357 /* DataProtocol.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		23F635ABC306A14B93915438 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BE9A1754ED18FC0A62F8612C /* PresentationStyles */;
+			remoteInfo = PresentationStyles;
+		};
+		2ABDA790A0116D40531C3191 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 566EF84A99783309FC98BF91 /* DataProtocol */;
+			remoteInfo = DataProtocol;
+		};
+		2D0E6B412C17327BB8A3FE78 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8576464307C6A001BBE16D27 /* PresentationApp */;
+			remoteInfo = PresentationApp;
+		};
+		40B6DF6F346C1A70539DBDC3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 566EF84A99783309FC98BF91 /* DataProtocol */;
+			remoteInfo = DataProtocol;
+		};
+		541B781D732EA1700B467A37 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8576464307C6A001BBE16D27 /* PresentationApp */;
+			remoteInfo = PresentationApp;
+		};
+		701107300685762F173224B1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2CD582995C707EC244875EC7 /* BusinessSession */;
+			remoteInfo = BusinessSession;
+		};
+		89E427E1F8B24BC8CDB42F17 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DA4D843C049585B484E90C38 /* InfrastructureProcess */;
+			remoteInfo = InfrastructureProcess;
+		};
+		C055CA8B5A720BBAEA624236 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DA4D843C049585B484E90C38 /* InfrastructureProcess */;
+			remoteInfo = InfrastructureProcess;
+		};
+		D40ACB8227898C6C0A3C7181 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DA4D843C049585B484E90C38 /* InfrastructureProcess */;
+			remoteInfo = InfrastructureProcess;
+		};
+		D50F62DE3A996E5B479EA910 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BE9A1754ED18FC0A62F8612C /* PresentationStyles */;
+			remoteInfo = PresentationStyles;
+		};
+		DA2FDACB3414DDD378A09B5F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 566EF84A99783309FC98BF91 /* DataProtocol */;
+			remoteInfo = DataProtocol;
+		};
+		F763803008C4737CC8D15029 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BE9A1754ED18FC0A62F8612C /* PresentationStyles */;
+			remoteInfo = PresentationStyles;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		80C9CB95173423E6D6ECEC6E /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				C89A258067E1D9FBCEE1EFE5 /* PresentationStyles.framework in Embed Frameworks */,
+				F5BB1F1932B942EFA1B48B2C /* PresentationApp.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		15022295EF422E38E07E3E0C /* BusinessSessionTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BusinessSessionTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		2EE63A06077A8580A6A9743A /* InfrastructureProcessTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InfrastructureProcessTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		3017B9875E72A137B7BCFB35 /* BusinessSession.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = BusinessSession.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		412447F69437707A352F89C5 /* PresentationApp.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = PresentationApp.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		91C5958FCDFE8861BD0867EF /* PresentationAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PresentationAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		9485166B48082507206A6227 /* PresentationStylesTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PresentationStylesTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		962D523E1D8F916BDF29B640 /* ArchitectureLayeringTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ArchitectureLayeringTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		9C52D031291F6BA58AC5185B /* InfrastructureProcess.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = InfrastructureProcess.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		D547B0D659281C7149AFC653 /* DataProtocolTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DataProtocolTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		DFA5A0ABACC1F719CFE66357 /* DataProtocol.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = DataProtocol.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		EA30FC3989AAFE1BCBDEFDA7 /* PresentationStyles.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = PresentationStyles.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		FAC0E53A358EBFEF072530C0 /* Apogee.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Apogee.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		2A4DE84ED722CB72F0A874A1 /* process */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = process;
+			sourceTree = "<group>";
+		};
+		3EF98A9F3674E9068B657063 /* protocol */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = protocol;
+			sourceTree = "<group>";
+		};
+		561C3B293A30BBBCC61E1F7B /* session */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = session;
+			sourceTree = "<group>";
+		};
+		56B87ECCCEE7961E32EFDC4A /* session */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = session;
+			sourceTree = "<group>";
+		};
+		65D03DF33FA157023D5F9CBB /* app */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = app;
+			sourceTree = "<group>";
+		};
+		7031F77AE792040421445FA0 /* layering */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = layering;
+			sourceTree = "<group>";
+		};
+		8FD557AFF6326E310106083E /* styles */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = styles;
+			sourceTree = "<group>";
+		};
+		97EC21FBB858F4F0445A677C /* styles */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = styles;
+			sourceTree = "<group>";
+		};
+		A7C7F255717301504EDC9773 /* process */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = process;
+			sourceTree = "<group>";
+		};
+		BDEA87836A45381328177836 /* app */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = app;
+			sourceTree = "<group>";
+		};
+		C15EE0523E2D5CF1ED61B18A /* main */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = main;
+			sourceTree = "<group>";
+		};
+		E8F8E562D983CA1843C4FBA7 /* protocol */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = protocol;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		03C1EE9F5ED4490DFF8DDFDF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				16441D78483521CACAF8B058 /* BusinessSession.framework in Frameworks */,
+				0B3ABB929742B60E6A00A611 /* InfrastructureProcess.framework in Frameworks */,
+				15BC46ED139E72C02F6DA1A1 /* DataProtocol.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		13A82678E2EC664AF40BFFD2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				ED06DF8AFAF7535C79B270DB /* PresentationStyles.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		15DF0A1D49BB60A5D44CED49 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		3414F3E54C098836CA4B85BC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		3B509F627B646757AE56B159 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		53006F040598A9EE6784D936 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5A3D6EC538A6714E567A378F /* DataProtocol.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		543C21F532B4FD98BCD2B61C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		73603B1CAB5E31E5EB0E19BF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3E98A031445ED09F1EE7806B /* InfrastructureProcess.framework in Frameworks */,
+				FBD256A14185E87B6758168D /* DataProtocol.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D3EF5101FBDEDF940ED0D357 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A59BD0B82128DFBE8D02E181 /* PresentationApp.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DC28A6EF8209F15163171D81 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				51707DFCD37A57BB87EC7565 /* PresentationApp.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F04560B29EE46B834BB77E81 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				073D159109F6C0D183CC8BDB /* InfrastructureProcess.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FF79F98E82FA619B8C635C37 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				445FF840AF5AAD7E800C6B4A /* PresentationStyles.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		187D3808F3E8FA7A4F03C42E /* architecture */ = {
+			isa = PBXGroup;
+			children = (
+				7031F77AE792040421445FA0 /* layering */,
+			);
+			path = architecture;
+			sourceTree = "<group>";
+		};
+		44A9445334C1482E714D0632 /* business */ = {
+			isa = PBXGroup;
+			children = (
+				56B87ECCCEE7961E32EFDC4A /* session */,
+			);
+			path = business;
+			sourceTree = "<group>";
+		};
+		479711BCD58610E13EE15C6B /* business */ = {
+			isa = PBXGroup;
+			children = (
+				561C3B293A30BBBCC61E1F7B /* session */,
+			);
+			path = business;
+			sourceTree = "<group>";
+		};
+		518DA81DB9B99529C0C0AEBE = {
+			isa = PBXGroup;
+			children = (
+				CF3F3E8EE8BB771CB8A76EAD /* source */,
+				A0937472EE5878FA82CB0F7E /* tests */,
+				547D009064F7C3F13BEF3460 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		52D0BA4FD9B94BC50F1870BC /* presentation */ = {
+			isa = PBXGroup;
+			children = (
+				8FD557AFF6326E310106083E /* styles */,
+				65D03DF33FA157023D5F9CBB /* app */,
+			);
+			path = presentation;
+			sourceTree = "<group>";
+		};
+		547D009064F7C3F13BEF3460 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				9C52D031291F6BA58AC5185B /* InfrastructureProcess.framework */,
+				DFA5A0ABACC1F719CFE66357 /* DataProtocol.framework */,
+				3017B9875E72A137B7BCFB35 /* BusinessSession.framework */,
+				EA30FC3989AAFE1BCBDEFDA7 /* PresentationStyles.framework */,
+				412447F69437707A352F89C5 /* PresentationApp.framework */,
+				FAC0E53A358EBFEF072530C0 /* Apogee.app */,
+				2EE63A06077A8580A6A9743A /* InfrastructureProcessTests.xctest */,
+				D547B0D659281C7149AFC653 /* DataProtocolTests.xctest */,
+				15022295EF422E38E07E3E0C /* BusinessSessionTests.xctest */,
+				9485166B48082507206A6227 /* PresentationStylesTests.xctest */,
+				91C5958FCDFE8861BD0867EF /* PresentationAppTests.xctest */,
+				962D523E1D8F916BDF29B640 /* ArchitectureLayeringTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		58165780F81A8A82BC882A8B /* data */ = {
+			isa = PBXGroup;
+			children = (
+				E8F8E562D983CA1843C4FBA7 /* protocol */,
+			);
+			path = data;
+			sourceTree = "<group>";
+		};
+		809B4E29AB6E5ABC44C7CAB2 /* presentation */ = {
+			isa = PBXGroup;
+			children = (
+				97EC21FBB858F4F0445A677C /* styles */,
+				BDEA87836A45381328177836 /* app */,
+			);
+			path = presentation;
+			sourceTree = "<group>";
+		};
+		840BDCBEF010CB2B4966E7B7 /* data */ = {
+			isa = PBXGroup;
+			children = (
+				3EF98A9F3674E9068B657063 /* protocol */,
+			);
+			path = data;
+			sourceTree = "<group>";
+		};
+		A0937472EE5878FA82CB0F7E /* tests */ = {
+			isa = PBXGroup;
+			children = (
+				CAB3B64E1F2D1B5E0B9E085B /* infrastructure */,
+				58165780F81A8A82BC882A8B /* data */,
+				44A9445334C1482E714D0632 /* business */,
+				52D0BA4FD9B94BC50F1870BC /* presentation */,
+				187D3808F3E8FA7A4F03C42E /* architecture */,
+			);
+			path = tests;
+			sourceTree = "<group>";
+		};
+		CAB3B64E1F2D1B5E0B9E085B /* infrastructure */ = {
+			isa = PBXGroup;
+			children = (
+				2A4DE84ED722CB72F0A874A1 /* process */,
+			);
+			path = infrastructure;
+			sourceTree = "<group>";
+		};
+		CEAC0BD99DE3BC6A96F07C05 /* infrastructure */ = {
+			isa = PBXGroup;
+			children = (
+				A7C7F255717301504EDC9773 /* process */,
+			);
+			path = infrastructure;
+			sourceTree = "<group>";
+		};
+		CF3F3E8EE8BB771CB8A76EAD /* source */ = {
+			isa = PBXGroup;
+			children = (
+				CEAC0BD99DE3BC6A96F07C05 /* infrastructure */,
+				840BDCBEF010CB2B4966E7B7 /* data */,
+				479711BCD58610E13EE15C6B /* business */,
+				809B4E29AB6E5ABC44C7CAB2 /* presentation */,
+				C15EE0523E2D5CF1ED61B18A /* main */,
+			);
+			path = source;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		12E9326B2505CD16AF8A3447 /* InfrastructureProcessTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EAB928D74E671E9CA20A6256 /* Build configuration list for PBXNativeTarget "InfrastructureProcessTests" */;
+			buildPhases = (
+				D916050208A184E06571D9F6 /* Sources */,
+				F04560B29EE46B834BB77E81 /* Frameworks */,
+				0247C843DA71F75EE3CA6D65 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9EFA3466EC02751C3039FF03 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				2A4DE84ED722CB72F0A874A1 /* process */,
+			);
+			name = InfrastructureProcessTests;
+			packageProductDependencies = (
+			);
+			productName = InfrastructureProcessTests;
+			productReference = 2EE63A06077A8580A6A9743A /* InfrastructureProcessTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		2CD582995C707EC244875EC7 /* BusinessSession */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2F103FAD5C3F1B82A340D410 /* Build configuration list for PBXNativeTarget "BusinessSession" */;
+			buildPhases = (
+				E785F2B0FEBB0B1838711938 /* Sources */,
+				73603B1CAB5E31E5EB0E19BF /* Frameworks */,
+				4287C41FF956E0D011F226F9 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C2EE20DA9FEBCA18A5C17391 /* PBXTargetDependency */,
+				E7DCF4FF600299FDC7BDE477 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				561C3B293A30BBBCC61E1F7B /* session */,
+			);
+			name = BusinessSession;
+			packageProductDependencies = (
+			);
+			productName = BusinessSession;
+			productReference = 3017B9875E72A137B7BCFB35 /* BusinessSession.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+		3C0831B4A8098571876C0150 /* DataProtocolTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 22502A64D2CB830B0C2B04D4 /* Build configuration list for PBXNativeTarget "DataProtocolTests" */;
+			buildPhases = (
+				6D4E0537316B548EE9ABABE2 /* Sources */,
+				53006F040598A9EE6784D936 /* Frameworks */,
+				33AB543C9DE81F6FCA2550A0 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				3D6016DFF47F2C1A50AB353B /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				E8F8E562D983CA1843C4FBA7 /* protocol */,
+			);
+			name = DataProtocolTests;
+			packageProductDependencies = (
+			);
+			productName = DataProtocolTests;
+			productReference = D547B0D659281C7149AFC653 /* DataProtocolTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		488C3E5B64C0B0B3F2685C2E /* BusinessSessionTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 012A19458F298548C298D18D /* Build configuration list for PBXNativeTarget "BusinessSessionTests" */;
+			buildPhases = (
+				E7D4F2E768C265F639EC2AD0 /* Sources */,
+				03C1EE9F5ED4490DFF8DDFDF /* Frameworks */,
+				5040E34E27722D33E7908C0D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				2ADE5784B10C9E3CDB4FD4B0 /* PBXTargetDependency */,
+				B5F8C92EBEB9742F1710B0B8 /* PBXTargetDependency */,
+				9380204D6478B952D9C19BCD /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				56B87ECCCEE7961E32EFDC4A /* session */,
+			);
+			name = BusinessSessionTests;
+			packageProductDependencies = (
+			);
+			productName = BusinessSessionTests;
+			productReference = 15022295EF422E38E07E3E0C /* BusinessSessionTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		566EF84A99783309FC98BF91 /* DataProtocol */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4C5EEA7B686C8E337C7FDBD8 /* Build configuration list for PBXNativeTarget "DataProtocol" */;
+			buildPhases = (
+				4D7322FB0A506107288FA436 /* Sources */,
+				543C21F532B4FD98BCD2B61C /* Frameworks */,
+				26E7665524BFF3FC4973F6AF /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				3EF98A9F3674E9068B657063 /* protocol */,
+			);
+			name = DataProtocol;
+			packageProductDependencies = (
+			);
+			productName = DataProtocol;
+			productReference = DFA5A0ABACC1F719CFE66357 /* DataProtocol.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+		651D6129528DAF5EF8D36041 /* PresentationStylesTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8B9CA155E469A7D41CC1A5B7 /* Build configuration list for PBXNativeTarget "PresentationStylesTests" */;
+			buildPhases = (
+				3033F66BF5FB1B83156B802F /* Sources */,
+				FF79F98E82FA619B8C635C37 /* Frameworks */,
+				E7124C58950EC4138800D767 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				8B41A62C4A4AA73B58D4B393 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				8FD557AFF6326E310106083E /* styles */,
+			);
+			name = PresentationStylesTests;
+			packageProductDependencies = (
+			);
+			productName = PresentationStylesTests;
+			productReference = 9485166B48082507206A6227 /* PresentationStylesTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		728A4708350C9FAA6849ACE1 /* PresentationAppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3EC015270ADDB7524604304E /* Build configuration list for PBXNativeTarget "PresentationAppTests" */;
+			buildPhases = (
+				77D8D34BF08A86441051E5EB /* Sources */,
+				DC28A6EF8209F15163171D81 /* Frameworks */,
+				128A7968F64B1DC35FEFBB9E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				E3C850B2B4136F45378F571F /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				65D03DF33FA157023D5F9CBB /* app */,
+			);
+			name = PresentationAppTests;
+			packageProductDependencies = (
+			);
+			productName = PresentationAppTests;
+			productReference = 91C5958FCDFE8861BD0867EF /* PresentationAppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		8576464307C6A001BBE16D27 /* PresentationApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 112B9D84419EE52A22EF01EA /* Build configuration list for PBXNativeTarget "PresentationApp" */;
+			buildPhases = (
+				C74381CA8D00F238ACD4E9BE /* Sources */,
+				13A82678E2EC664AF40BFFD2 /* Frameworks */,
+				E74B6E03C93462E75B9212A3 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				8AE4941A96F88E8BB42A1BEE /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				BDEA87836A45381328177836 /* app */,
+			);
+			name = PresentationApp;
+			packageProductDependencies = (
+			);
+			productName = PresentationApp;
+			productReference = 412447F69437707A352F89C5 /* PresentationApp.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+		BE9A1754ED18FC0A62F8612C /* PresentationStyles */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9263A4543EF6C0132166E3DC /* Build configuration list for PBXNativeTarget "PresentationStyles" */;
+			buildPhases = (
+				FFE1D6A14F4B46DD1BF27CE6 /* Sources */,
+				3B509F627B646757AE56B159 /* Frameworks */,
+				E72A7FC62AB5F92BC00AA28D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				97EC21FBB858F4F0445A677C /* styles */,
+			);
+			name = PresentationStyles;
+			packageProductDependencies = (
+			);
+			productName = PresentationStyles;
+			productReference = EA30FC3989AAFE1BCBDEFDA7 /* PresentationStyles.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+		C87A8A6F8F3183F87AA2095C /* Apogee */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 79C16DC3E19D88984F1F8C63 /* Build configuration list for PBXNativeTarget "Apogee" */;
+			buildPhases = (
+				410D54C549C4B116F9044CAA /* Sources */,
+				D3EF5101FBDEDF940ED0D357 /* Frameworks */,
+				ECC92BFFED4F26063E55F1A5 /* Resources */,
+				80C9CB95173423E6D6ECEC6E /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				E503E4935DBA88CDEE56BF62 /* PBXTargetDependency */,
+				173D4F90E09E2DD5D662B472 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				C15EE0523E2D5CF1ED61B18A /* main */,
+			);
+			name = Apogee;
+			packageProductDependencies = (
+			);
+			productName = Apogee;
+			productReference = FAC0E53A358EBFEF072530C0 /* Apogee.app */;
+			productType = "com.apple.product-type.application";
+		};
+		DA4D843C049585B484E90C38 /* InfrastructureProcess */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3F4D651AA67A4E12FC8B454D /* Build configuration list for PBXNativeTarget "InfrastructureProcess" */;
+			buildPhases = (
+				D62E727EAC40F306C0D6A1BA /* Sources */,
+				3414F3E54C098836CA4B85BC /* Frameworks */,
+				F5503D8C9FEF956EDF14D175 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A7C7F255717301504EDC9773 /* process */,
+			);
+			name = InfrastructureProcess;
+			packageProductDependencies = (
+			);
+			productName = InfrastructureProcess;
+			productReference = 9C52D031291F6BA58AC5185B /* InfrastructureProcess.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+		ED4FDBD4BCBE232AC7703BD5 /* ArchitectureLayeringTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 644BD75C507697A10A6347EA /* Build configuration list for PBXNativeTarget "ArchitectureLayeringTests" */;
+			buildPhases = (
+				E558A0380F3D0E00B1FA3A5A /* Sources */,
+				15DF0A1D49BB60A5D44CED49 /* Frameworks */,
+				9D19DB709355658926F0C83D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				7031F77AE792040421445FA0 /* layering */,
+			);
+			name = ArchitectureLayeringTests;
+			packageProductDependencies = (
+			);
+			productName = ArchitectureLayeringTests;
+			productReference = 962D523E1D8F916BDF29B640 /* ArchitectureLayeringTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		46F86FAA6BBF9AC94A7E4595 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2700;
+				LastUpgradeCheck = 2700;
+			};
+			buildConfigurationList = 7EF2517A8FE63F4681EC5EEA /* Build configuration list for PBXProject "Apogee" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 518DA81DB9B99529C0C0AEBE;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 547D009064F7C3F13BEF3460 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				DA4D843C049585B484E90C38 /* InfrastructureProcess */,
+				566EF84A99783309FC98BF91 /* DataProtocol */,
+				2CD582995C707EC244875EC7 /* BusinessSession */,
+				BE9A1754ED18FC0A62F8612C /* PresentationStyles */,
+				8576464307C6A001BBE16D27 /* PresentationApp */,
+				C87A8A6F8F3183F87AA2095C /* Apogee */,
+				12E9326B2505CD16AF8A3447 /* InfrastructureProcessTests */,
+				3C0831B4A8098571876C0150 /* DataProtocolTests */,
+				488C3E5B64C0B0B3F2685C2E /* BusinessSessionTests */,
+				651D6129528DAF5EF8D36041 /* PresentationStylesTests */,
+				728A4708350C9FAA6849ACE1 /* PresentationAppTests */,
+				ED4FDBD4BCBE232AC7703BD5 /* ArchitectureLayeringTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		0247C843DA71F75EE3CA6D65 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		128A7968F64B1DC35FEFBB9E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		26E7665524BFF3FC4973F6AF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		33AB543C9DE81F6FCA2550A0 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4287C41FF956E0D011F226F9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5040E34E27722D33E7908C0D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9D19DB709355658926F0C83D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E7124C58950EC4138800D767 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E72A7FC62AB5F92BC00AA28D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E74B6E03C93462E75B9212A3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		ECC92BFFED4F26063E55F1A5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F5503D8C9FEF956EDF14D175 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		3033F66BF5FB1B83156B802F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		410D54C549C4B116F9044CAA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4D7322FB0A506107288FA436 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6D4E0537316B548EE9ABABE2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		77D8D34BF08A86441051E5EB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C74381CA8D00F238ACD4E9BE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D62E727EAC40F306C0D6A1BA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D916050208A184E06571D9F6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E558A0380F3D0E00B1FA3A5A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E785F2B0FEBB0B1838711938 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E7D4F2E768C265F639EC2AD0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FFE1D6A14F4B46DD1BF27CE6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		173D4F90E09E2DD5D662B472 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8576464307C6A001BBE16D27 /* PresentationApp */;
+			targetProxy = 541B781D732EA1700B467A37 /* PBXContainerItemProxy */;
+		};
+		2ADE5784B10C9E3CDB4FD4B0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2CD582995C707EC244875EC7 /* BusinessSession */;
+			targetProxy = 701107300685762F173224B1 /* PBXContainerItemProxy */;
+		};
+		3D6016DFF47F2C1A50AB353B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 566EF84A99783309FC98BF91 /* DataProtocol */;
+			targetProxy = 2ABDA790A0116D40531C3191 /* PBXContainerItemProxy */;
+		};
+		8AE4941A96F88E8BB42A1BEE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BE9A1754ED18FC0A62F8612C /* PresentationStyles */;
+			targetProxy = 23F635ABC306A14B93915438 /* PBXContainerItemProxy */;
+		};
+		8B41A62C4A4AA73B58D4B393 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BE9A1754ED18FC0A62F8612C /* PresentationStyles */;
+			targetProxy = D50F62DE3A996E5B479EA910 /* PBXContainerItemProxy */;
+		};
+		9380204D6478B952D9C19BCD /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 566EF84A99783309FC98BF91 /* DataProtocol */;
+			targetProxy = DA2FDACB3414DDD378A09B5F /* PBXContainerItemProxy */;
+		};
+		9EFA3466EC02751C3039FF03 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DA4D843C049585B484E90C38 /* InfrastructureProcess */;
+			targetProxy = C055CA8B5A720BBAEA624236 /* PBXContainerItemProxy */;
+		};
+		B5F8C92EBEB9742F1710B0B8 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DA4D843C049585B484E90C38 /* InfrastructureProcess */;
+			targetProxy = D40ACB8227898C6C0A3C7181 /* PBXContainerItemProxy */;
+		};
+		C2EE20DA9FEBCA18A5C17391 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DA4D843C049585B484E90C38 /* InfrastructureProcess */;
+			targetProxy = 89E427E1F8B24BC8CDB42F17 /* PBXContainerItemProxy */;
+		};
+		E3C850B2B4136F45378F571F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8576464307C6A001BBE16D27 /* PresentationApp */;
+			targetProxy = 2D0E6B412C17327BB8A3FE78 /* PBXContainerItemProxy */;
+		};
+		E503E4935DBA88CDEE56BF62 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BE9A1754ED18FC0A62F8612C /* PresentationStyles */;
+			targetProxy = F763803008C4737CC8D15029 /* PBXContainerItemProxy */;
+		};
+		E7DCF4FF600299FDC7BDE477 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 566EF84A99783309FC98BF91 /* DataProtocol */;
+			targetProxy = 40B6DF6F346C1A70539DBDC3 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		048F326E1C5336E267C9A618 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.PresentationStylesTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+		08D3EE7C907B577802FC72B0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.ArchitectureLayeringTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		26A60C7273DF0FF77F21BD5A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.InfrastructureProcessTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+		270E8293B33D9F176B572721 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.ArchitectureLayeringTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+		309515B939EB4289D518BD1B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Apogee;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+		4007539CA35CCA0947ED3F85 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.PresentationApp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+		47D09684D16424CCFB0685F4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.InfrastructureProcess;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		4C95F91A6D5CD87BB5DB8FDD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		53A577B2517B8B53B8203B15 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.InfrastructureProcessTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		6493020B17ECAE6D61D4C295 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.DataProtocolTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		707C412012A144334E815B98 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.BusinessSession;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+		81B5B82BFB5A88B46A222F3F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.PresentationAppTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		81B7399BD8119B1F34D84A5E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.PresentationApp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		82E53A7CE7AD5CFA14198DE2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.InfrastructureProcess;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+		88A283B98589C821B2620134 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.DataProtocol;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+		8CFFC90A04DBA4826C044F11 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.PresentationStylesTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		969595A508627F35A110362C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A54BBB22E4DB757D9FB9F113 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.PresentationStyles;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+		AA148A854E4533E60063A8B8 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.BusinessSessionTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+		C9BC334FAF2AB680696CA237 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.BusinessSession;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		D7E1F7706BFFB01384F8B4F5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Apogee;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		DCBE7F298FC08532BA63CCC9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.DataProtocolTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+		DFA9F9B68742C9BF0776C728 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.PresentationAppTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+		F5A3B9EB61DA1285DB0044D1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.PresentationStyles;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		F8587E59F04C11D91BCD516E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.BusinessSessionTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		FE5CFD9ED230F2792C70CCD9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.DataProtocol;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		012A19458F298548C298D18D /* Build configuration list for PBXNativeTarget "BusinessSessionTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F8587E59F04C11D91BCD516E /* Debug */,
+				AA148A854E4533E60063A8B8 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		112B9D84419EE52A22EF01EA /* Build configuration list for PBXNativeTarget "PresentationApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				81B7399BD8119B1F34D84A5E /* Debug */,
+				4007539CA35CCA0947ED3F85 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		22502A64D2CB830B0C2B04D4 /* Build configuration list for PBXNativeTarget "DataProtocolTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6493020B17ECAE6D61D4C295 /* Debug */,
+				DCBE7F298FC08532BA63CCC9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2F103FAD5C3F1B82A340D410 /* Build configuration list for PBXNativeTarget "BusinessSession" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C9BC334FAF2AB680696CA237 /* Debug */,
+				707C412012A144334E815B98 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		3EC015270ADDB7524604304E /* Build configuration list for PBXNativeTarget "PresentationAppTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				81B5B82BFB5A88B46A222F3F /* Debug */,
+				DFA9F9B68742C9BF0776C728 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		3F4D651AA67A4E12FC8B454D /* Build configuration list for PBXNativeTarget "InfrastructureProcess" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				47D09684D16424CCFB0685F4 /* Debug */,
+				82E53A7CE7AD5CFA14198DE2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		4C5EEA7B686C8E337C7FDBD8 /* Build configuration list for PBXNativeTarget "DataProtocol" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FE5CFD9ED230F2792C70CCD9 /* Debug */,
+				88A283B98589C821B2620134 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		644BD75C507697A10A6347EA /* Build configuration list for PBXNativeTarget "ArchitectureLayeringTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				08D3EE7C907B577802FC72B0 /* Debug */,
+				270E8293B33D9F176B572721 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		79C16DC3E19D88984F1F8C63 /* Build configuration list for PBXNativeTarget "Apogee" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D7E1F7706BFFB01384F8B4F5 /* Debug */,
+				309515B939EB4289D518BD1B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7EF2517A8FE63F4681EC5EEA /* Build configuration list for PBXProject "Apogee" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				969595A508627F35A110362C /* Debug */,
+				4C95F91A6D5CD87BB5DB8FDD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8B9CA155E469A7D41CC1A5B7 /* Build configuration list for PBXNativeTarget "PresentationStylesTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8CFFC90A04DBA4826C044F11 /* Debug */,
+				048F326E1C5336E267C9A618 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		9263A4543EF6C0132166E3DC /* Build configuration list for PBXNativeTarget "PresentationStyles" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F5A3B9EB61DA1285DB0044D1 /* Debug */,
+				A54BBB22E4DB757D9FB9F113 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		EAB928D74E671E9CA20A6256 /* Build configuration list for PBXNativeTarget "InfrastructureProcessTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				53A577B2517B8B53B8203B15 /* Debug */,
+				26A60C7273DF0FF77F21BD5A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+	};
+	rootObject = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+}

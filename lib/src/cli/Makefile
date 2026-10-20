@@ -239,7 +239,7 @@ install-zsh-completion:
 	fi
 
 test:
-	@$(CICD) --platform $$(uname -s | tr '[:upper:]' '[:lower:]' | sed 's/darwin/macos/')-$$(uname -m | sed 's/aarch64/arm64/;s/x86_64/x64/;s/amd64/x64/') --test --jobs $(JOBS)
+	@$(CICD) --app cli --platform $$(uname -s | tr '[:upper:]' '[:lower:]' | sed 's/darwin/macos/')-$$(uname -m | sed 's/aarch64/arm64/;s/x86_64/x64/;s/amd64/x64/') --test --jobs $(JOBS)
 
 # Rehearse the CI run a pull request into `stable` starts: GitHub's test merge
 # of this branch into stable, then ci.yml's pull-request jobs on it -- version
@@ -280,7 +280,7 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 fresh:
-	@$(CICD) --fresh --test
+	@$(CICD) --app cli --fresh --test
 
 format:
 	@$(CLANG_FORMAT) -i $(SOURCES)

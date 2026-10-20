@@ -9,9 +9,9 @@
 # is built from has changed (user decision, 2026-09-25). When it has not, the
 # deliverable is copied from the latest release instead of built again:
 # CI copies it into the run's artifacts, and a merge's release publishes the
-# copy. This file declares, once, what each deliverable is built from. Today
-# there is one, the CLI; a GUI application adds its own entry here, and its
-# own pipeline asks this script the same question.
+# copy. This file declares, once, what each deliverable is built from: the
+# CLI, and the macOS application (gui-darwin). A further GUI application adds
+# its own entry here, and its own pipeline asks this script the same question.
 #
 # CI asks it with <from> the latest release's commit and <to> the pull
 # request's test merge -- so the question is "does what would merge differ
@@ -47,8 +47,19 @@ paths_of() {
             # byte for byte to their files (it broke Windows once, 2026-09-20).
             echo ".gitattributes"
             ;;
+        gui-darwin)
+            # The macOS application's own tree: its package, sources, tests
+            # and build scripts.
+            echo "lib/src/darwin/"
+            # The entry point every build of it goes through, and this
+            # declaration.
+            echo "lib/scripts/cicd.sh"
+            echo "lib/scripts/changed.sh"
+            # The release name, which the bundle reports as its version.
+            echo "lib/release/VERSION"
+            ;;
         *)
-            printf 'changed.sh: no deliverable named %s (known: cli)\n' "$1" >&2
+            printf 'changed.sh: no deliverable named %s (known: cli, gui-darwin)\n' "$1" >&2
             exit 2
             ;;
     esac

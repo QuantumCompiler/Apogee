@@ -28,3 +28,5 @@
 ## Enforcement
 
 Joins the scaffold's layering check (track 1a ships it per ADR 0001's enforcement clause): the check holds every Presentation module to the `Views/`/`ViewModels/` shape, refuses a `ViewModels/` file that imports SwiftUI, and holds `styles` dependency-free of its siblings while every other Presentation module may link it. Until the first build, this record and review hold the line; track 1c's view-model tests are the pattern's standing proof.
+
+**Landed 2026-10-20** (1a): the darwin layering check holds every Presentation module but `styles` to `Views/` and `ViewModels/` with its files inside them, fails a UI-framework import in any `ViewModels/` file and a `styles` that depends on a sibling, each verified against a planted violation. The application's scene and views live in the `PresentationApp` framework, so its view-models test headlessly in an unhosted bundle; the application target itself is the entry point alone.

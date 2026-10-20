@@ -23,14 +23,14 @@ Project context for coding agents working on **the Apogee GUI** — the desktop 
 
 ## What this is
 
-The Apogee GUI: one native desktop application per platform (`lib/src/darwin/`, `lib/src/linux/`, `lib/src/windows/`), each a graphical front end that **drives the `apogee` CLI over its stdio machine mode** — the harness's capabilities rendered, never reimplemented. See [SPEC.md](SPEC.md) for scope and principles; nothing has shipped yet ([MILESTONES.md](MILESTONES.md) starts empty).
+The Apogee GUI: one native desktop application per platform (`lib/src/darwin/`, `lib/src/linux/`, `lib/src/windows/`), each a graphical front end that **drives the `apogee` CLI over its stdio machine mode** — the harness's capabilities rendered, never reimplemented. See [SPEC.md](SPEC.md) for scope and principles, and [MILESTONES.md](MILESTONES.md) for what has shipped -- since 2026-10-20 the macOS application's scaffold (Milestone A).
 
 ## Stack & environment
 
-- **Language / frameworks:** **Swift and SwiftUI** for the macOS application (the user's call, 2026-10-20, with the first spike); SwiftPM as its build system, the `.app` assembled by a bundling step with **ad-hoc signing** (same date). The linux/windows apps' stacks are still open — decided when their work opens.
+- **Language / frameworks:** **Swift and SwiftUI** for the macOS application (the user's call, 2026-10-20, with the first spike); an **Xcode project** as its build (the user's call, 2026-10-20, at 1a's build, over the SwiftPM default it was groomed with), Xcode building and **ad-hoc signing** the `.app` itself (same date). The linux/windows apps' stacks are still open — decided when their work opens.
 - **Key dependency:** the `apogee` binary and its machine-mode contract — [`machine-mode.md`](../../cli/reference/machine-mode.md) and `machine-schema.json` (shipped in every CLI archive, printed by the binary itself). A development GUI can take the CLI from a release install or from CI's `apogee-<target>` artifacts.
 - **Platforms:** macOS (Apple silicon), Linux (x64/arm64), Windows (x64/arm64) — the CLI's five targets. Primary dev host is macOS. **macOS is built first** (the user's call, 2026-10-20): macOS 27+, Apple silicon only, matching the CLI's `macos-arm64` target.
-- **Build:** each application under `lib/src/<app>/` is self-contained and owns its own build; when the first one lands it joins `cicd.sh`'s `APPS` list, gets its own entry in `lib/scripts/changed.sh`, and a pipeline of its own beside the CLI's (recorded in the CLI docs' map).
+- **Build:** each application under `lib/src/<app>/` is self-contained and owns its own build. The macOS app is an Xcode project (`lib/src/darwin/Apogee.xcodeproj`, Swift 6, macOS 27 and later, Apple silicon) driven by `xcodebuild` through its shared scheme `Apogee`, whose one entry point from outside is `lib/src/darwin/scripts/build.sh`; it is in `cicd.sh`'s `APPS` as `darwin` (built for macos-arm64 on an Apple-silicon Mac, deferred elsewhere), and `lib/scripts/changed.sh gui-darwin` declares what it is built from. Its pipeline of its own, beside the CLI's, is track 1's 1d.
 
 ---
 
@@ -45,22 +45,22 @@ Why this is non-negotiable: "parity is the product" is the repo's founding law �
 - The CLI child's stderr is captured, never surfaced raw; cancellation is the protocol's `cancel` line, never a kill as the first resort.
 - Secrets never pass through the GUI: keys are entered through the CLI's own flows, and the protocol carries no key fields by construction (the CLI's secrets invariant).
 
-Enforced by: the contract side is test-locked in the CLI (`cli.machine_schema_conformance` pins the doc, the schema and the binary to each other; `cli.machine_mode` drives the real binary). GUI-side enforcement — a conformance suite over a recorded session, a link-policy analog — accretes here with the first application; until then this section is held by review.
+Enforced by: the contract side is test-locked in the CLI (`cli.machine_schema_conformance` pins the doc, the schema and the binary to each other; `cli.machine_mode` drives the real binary). On the GUI side, the link-policy analog exists since 1a: the darwin layering check (`lib/src/darwin/tests/architecture/layering`) fails any package dependency, product, `unsafeFlags` or `linkedLibrary`, so nothing of the CLI's can be linked. A conformance suite over a recorded session accretes with the client core; until then the rest of this section is held by review.
 
 ---
 
 ## Codebase Map
 
-Nothing is built yet. The planned layout (the repo's recorded shape for sibling apps):
-
-| Path | Contents (planned) |
+| Path | Contents |
 |------|----------|
-| [`../adrs/`](../adrs/README.md) | The GUI's architecture decision records — [ADR 0001](../adrs/layer-enforcement.md): four layers, dependencies point down, regardless of language and framework. |
-| `lib/src/darwin/` | The macOS application — self-contained, own build, `source/<layer>/<package>/` and `tests/` mirroring it (ADR 0001's shape). |
-| `lib/src/linux/` | The Linux application — same shape. |
-| `lib/src/windows/` | The Windows application — same shape. |
+| [`../adrs/`](../adrs/README.md) | The GUI's architecture decision records — [ADR 0001](../adrs/layer-enforcement.md): four layers, dependencies point down, regardless of language and framework; [ADR 0002](../adrs/presentation-mvvm.md): Presentation modules are MVVM and share one `styles` module. |
+| `lib/src/darwin/` | **The macOS application — a self-contained Xcode project**, `Apogee.xcodeproj` (1a, 2026-10-20). **The project is the module map**: each module a framework target building one folder, `source/<layer>/<package>/`, named `<Layer><Package>` and depending only on its own layer or below; each mirrored by an unhosted unit-test bundle at `tests/<layer>/<package>/`, `<Target>Tests`, every one run by the shared scheme `Apogee`; the folders are file-system synchronized groups, so a file added to a folder is in its target with no project edit. The application target `Apogee` builds `source/main/` -- the entry point alone -- and embeds the frameworks it needs. `scripts/build.sh` is the one build entry from outside (`build`, `test`, `open`, `clean`; output under `build/<target>/`): Release built, signed ad hoc and verified, the version stamped from `lib/release/VERSION`. Each layer root carries a `CLAUDE.md` card (position, modules, import law), held to the map by the layering check. |
+| `lib/src/darwin/source/` | **Infrastructure**: `process` (`ChildCommand`: a child to spawn, its executable absolute, its environment laid over the parent's). **Data**: `protocol` (`MachineProtocol`: the protocol version read, the `stream-json` word). **Business**: `session` (`ChatLaunch`: the argv of a driven chat, `--tools` on). **Presentation**: `styles` (the shared vocabulary -- `Palette`'s design tokens following the system appearance, `TypeScale` and the `Font` steps, `Spacing`, `Radius`, `Layout`, and `Components/EmptyState`) and `app` (the application: `Views/ApogeeApp`, the scene, and `WelcomeView`, over `ViewModels/AppViewModel`). **`main/`**: `ApogeeMain`, the entry point that starts `ApogeeApp`. |
+| `lib/src/darwin/tests/` | Mirrors `source/`'s modules; and `architecture/layering`, **the layering check** -- `project.pbxproj` read as the property list it is (targets, folders, dependencies, links, embeds, build settings) with the shared scheme's testables, the sources and the layer cards, held to ADR 0001 and ADR 0002, every rule pinned on a planted miniature. |
+| `lib/src/linux/` | The Linux application — not yet started; same shape. |
+| `lib/src/windows/` | The Windows application — not yet started; same shape. |
 
-_TODO:_ fill with real packages as the first application lands; what is shared between the three apps (a machine-mode client core?) is a first-spike question, decided within ADR 0001's layers.
+What is shared between the three apps (one machine-mode client core, or three held to the same layer contract) stays open until a second app exists.
 
 ---
 
@@ -75,7 +75,7 @@ The GUI is built docs-first, the same lifecycle as the CLI's. Where new work is 
 
 Every change should satisfy this before merge:
 
-- [ ] Tests for the new behavior pass, and existing tests stay green. _TODO:_ the test command lands with the first application's build.
+- [ ] Tests for the new behavior pass, and existing tests stay green: `lib/scripts/cicd.sh --test` (every application), or `lib/scripts/cicd.sh --app darwin --test` for the macOS app alone. They are hermetic: scripted fakes, no network, no `apogee` binary, no window.
 - [ ] The machine-mode invariant holds: no linked CLI, no second capability, unknown protocol events tolerated.
 - [ ] **The four-layer law holds** ([ADR 0001](../adrs/layer-enforcement.md)): a new package declares its layer, dependencies point down, the UI framework's types stay in Presentation — whatever the language.
 - [ ] **Presentation keeps the MVVM shape** ([ADR 0002](../adrs/presentation-mvvm.md)): `Views/` and `ViewModels/` per module (view-models SwiftUI-free), shared visuals and common components in the one `styles` module, never duplicated.
@@ -83,7 +83,13 @@ Every change should satisfy this before merge:
 
 ## Code Style
 
-- _TODO:_ accretes with the first application (language undecided). Until then: match the surrounding code's conventions; when in doubt, find the closest existing analogue and follow it.
+- **Swift 6, strict concurrency, warning-free.** The project builds in the Swift 6 language mode; a warning is fixed where it is raised.
+- **The project file is edited in Xcode or by hand, and the layering check reads it.** A file added to a module's folder needs no project edit (synchronized groups); a new module is a framework target, its test bundle and its line in the shared scheme together, and the application target embeds what it newly reaches.
+- **One type per concern, named for what it is**, a doc comment on every public declaration saying what it is for -- and, where a rule of the protocol or an ADR is why it is shaped so, which rule.
+- **A target's name states its layer** (`DataProtocol`, `BusinessSession`), so every `import` says which layer it reaches; a new package is a directory, a target, a mirroring test bundle and a line on its layer card, together.
+- **View-models are `@MainActor @Observable` classes importing Foundation and Observation only**; the views bind to them and to `styles`, and nothing else.
+- **Tests use Swift Testing** (`@Suite`, `@Test`, `#expect`), each named for the behavior it pins.
+- Match the surrounding code's conventions; when in doubt, find the closest existing analogue and follow it.
 
 ## Documentation and Status
 
@@ -99,4 +105,4 @@ When a work item ships, in the same change:
 
 ## Release and Install Infrastructure
 
-Repo-wide and recorded in the CLI docs ([Release and Install Infrastructure](../../cli/assistant/CLAUDE.md#release-and-install-infrastructure)): a merge into `stable` publishes the release `lib/release/VERSION` names. The GUI's own packaging, install path and pipeline join that machinery when the first application lands — each app gets its own `changed.sh` entry and its own pipeline, and can take the CLI from the run's `apogee-<target>` artifacts. _TODO:_ the specifics are the first application's items.
+Repo-wide and recorded in the CLI docs ([Release and Install Infrastructure](../../cli/assistant/CLAUDE.md#release-and-install-infrastructure)): a merge into `stable` publishes the release `lib/release/VERSION` names. The GUI's own packaging, install path and pipeline join that machinery application by application — each app gets its own `changed.sh` entry and its own pipeline, and can take the CLI from the run's `apogee-<target>` artifacts. The macOS app has its entry (`gui-darwin`) and its ad-hoc-signed, verified `Apogee.app` (`scripts/build.sh build`) since 1a; its pipeline is 1d, and its place in a release is later work (the user's call, 2026-10-20: a CI artifact until the session window ships).

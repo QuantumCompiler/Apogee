@@ -4,7 +4,7 @@
 
 Apogee is an AI harness: it runs LLM workloads against Anthropic, OpenAI, Google and Ollama in the cloud — under either a subscription plan (their official CLIs) or an API billing plan (a direct key) — and against local models through llama.cpp linked in-process — or, opt-in on Apple silicon, through MLX. Which model runs is configuration, not architecture. It ships as a single, self-contained binary that bundles no models, requires no cloud account, and passes its own doctor on a fresh, keyless, modelless machine.
 
-This repository is home to the whole Apogee project. Today that is the **CLI application** ([`lib/src/cli`](lib/src/cli)), which carries the entire harness and is the current focus; **GUI applications** for each desktop platform are a committed direction and will live here as siblings (`lib/src/darwin`, `lib/src/linux`, `lib/src/windows`), powering the same binary directly over its structured stdio machine mode — never a localhost port.
+This repository is home to the whole Apogee project. Today that is the **CLI application** ([`lib/src/cli`](lib/src/cli)), which carries the entire harness and is the current focus; **GUI applications** for each desktop platform are a committed direction and live here as siblings (`lib/src/darwin`, `lib/src/linux`, `lib/src/windows`), powering the same binary directly over its structured stdio machine mode — never a localhost port. The macOS one has begun (`lib/src/darwin`, in development).
 
 ## Install
 
@@ -75,7 +75,8 @@ Run `apogee` with nothing after it at a terminal and it opens a full-screen shel
 | Path | What it is |
 |---|---|
 | [`lib/src/cli/`](lib/src/cli) | The CLI application — the whole harness, one self-contained CMake project. |
-| `lib/src/darwin` · `linux` · `windows` | The GUI applications, one per platform (planned; they drive the CLI over its [machine mode](lib/documentation/cli/reference/machine-mode.md)). |
+| [`lib/src/darwin/`](lib/src/darwin) | The macOS application — an Xcode project, in development; it drives the CLI over its [machine mode](lib/documentation/cli/reference/machine-mode.md). |
+| `lib/src/linux` · `windows` | The Linux and Windows applications (planned). |
 | [`lib/documentation/`](lib/documentation) | One docs directory per application — [CLAUDE.md](lib/documentation/CLAUDE.md) routes an agent to [`cli/`](lib/documentation/cli) or [`gui/`](lib/documentation/gui). |
 | [`lib/documentation/cli/reference/`](lib/documentation/cli/reference) | Integrator-facing reference: the [stdio machine mode](lib/documentation/cli/reference/machine-mode.md) for front-ends, the [HTTP API](lib/documentation/cli/reference/http-api.md) for `serve` clients, and [training](lib/documentation/cli/reference/training.md). |
 | [`lib/documentation/cli/assistant/`](lib/documentation/cli/assistant) | Contributor docs — [CLAUDE.md](lib/documentation/cli/assistant/CLAUDE.md) is the entry point; [ROADMAP.md](lib/documentation/cli/assistant/ROADMAP.md) is the release board. |
@@ -88,7 +89,7 @@ Run `apogee` with nothing after it at a terminal and it opens a full-screen shel
 lib/scripts/cicd.sh --test
 ```
 
-That builds every application for the host's native target and runs its suite — the same call CI makes. Requirements: CMake ≥ 3.25, a C++20 compiler, and git (libcurl development headers on Linux). llama.cpp is off by default in a source build — configure with `-DAPOGEE_ENABLE_LLAMA=ON` to link it; release binaries always ship with it. `make -C lib/src/cli help` lists the CLI project's own targets.
+That builds every application for the host's native target and runs its suite — the same call CI makes. Requirements: CMake ≥ 3.25, a C++20 compiler, and git (libcurl development headers on Linux); on a Mac the macOS application builds too, which needs Xcode 27 (`--app cli` leaves it out). llama.cpp is off by default in a source build — configure with `-DAPOGEE_ENABLE_LLAMA=ON` to link it; release binaries always ship with it. `make -C lib/src/cli help` lists the CLI project's own targets.
 
 `make -C lib/src/cli install` puts what you built in `~/.local/bin` with its shell completions, the same install the release scripts make. `MODE=dev` or `MODE=test` installs `apogee-dev` or `apogee-test` beside it instead, each keeping its models, chats and keys in a directory of its own (`~/.apogee-dev`, `~/.apogee-test`), so a development build never touches the install you rely on; `make -C lib/src/cli uninstall MODE=dev` removes it again. Any binary can be pointed at another one for a single run with `--dev`, `--test`, `--release` or `--custom <dir>/config/config.json`.
 

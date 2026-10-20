@@ -16,8 +16,8 @@
 #                       copies the release's instead, and so does this
 #   version bump        lib/scripts/version-check.sh
 #   clone llama.cpp     lib/scripts/cicd.sh --clone-llama
-#   unit tests <host>   lib/scripts/cicd.sh --unit-tests, llama.cpp off
-#   build <host>        lib/scripts/cicd.sh --platform <host> --no-defer,
+#   unit tests <host>   lib/scripts/cicd.sh --app cli --unit-tests, llama.cpp off
+#   build <host>        lib/scripts/cicd.sh --app cli --platform <host> --no-defer,
 #                       then lib/scripts/package.sh -- the archive a release
 #                       ships, and the proof that its binary runs
 #
@@ -290,7 +290,7 @@ if [ "$cli" = true ]; then
     unit_ok=0
     run_job "unit tests $host" "$unit_wt" \
         env APOGEE_CMAKE_ARGS=-DAPOGEE_ENABLE_LLAMA=OFF \
-        lib/scripts/cicd.sh --platform "$host" --unit-tests --no-defer ${jobs_args[@]+"${jobs_args[@]}"} &&
+        lib/scripts/cicd.sh --app cli --platform "$host" --unit-tests --no-defer ${jobs_args[@]+"${jobs_args[@]}"} &&
         unit_ok=1
 
     if [ $clone_ok -eq 1 ] && [ $unit_ok -eq 1 ]; then
@@ -299,7 +299,7 @@ if [ "$cli" = true ]; then
         run_job "build $host" "$build_wt" \
             env -u APOGEE_CMAKE_ARGS bash -c '
                 set -euo pipefail
-                lib/scripts/cicd.sh --platform "$1" --no-defer "${@:3}"
+                lib/scripts/cicd.sh --app cli --platform "$1" --no-defer "${@:3}"
                 lib/scripts/package.sh "$1" "$2"
             ' pr-ci "$host" "$artifacts" ${jobs_args[@]+"${jobs_args[@]}"} || true
     else
