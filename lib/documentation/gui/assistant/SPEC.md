@@ -33,7 +33,7 @@ _TODO:_ the first release's concrete feature cut is the first spike's to propose
 
 - **Thin client, honest renderer.** The GUI shows what the protocol says — states, errors and refusals in the CLI's own words — and invents nothing on top.
 - **Additive protocol, tolerant client.** Unknown events and fields are tolerated, never fatal; a GUI version never requires a breaking protocol change (the CLI's ADR 0006, consumed).
-- **Native per platform.** Each app feels at home on its OS. _TODO:_ whether that means three native shells or one shared one is the first spike's question.
+- **Native per platform.** Each app feels at home on its OS — the macOS app is Swift and SwiftUI (the user's call, 2026-10-20). Whether linux/windows share anything beyond ADR 0001's shape is decided when their work opens.
 
 ## Success criteria
 

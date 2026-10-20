@@ -27,9 +27,9 @@ The Apogee GUI: one native desktop application per platform (`lib/src/darwin/`, 
 
 ## Stack & environment
 
-- **Language / frameworks:** _TODO:_ undecided — the first spike settles each platform's shell (native per platform vs. one cross-platform shell) before any code exists.
+- **Language / frameworks:** **Swift and SwiftUI** for the macOS application (the user's call, 2026-10-20, with the first spike); SwiftPM as its build system, the `.app` assembled by a bundling step with **ad-hoc signing** (same date). The linux/windows apps' stacks are still open — decided when their work opens.
 - **Key dependency:** the `apogee` binary and its machine-mode contract — [`machine-mode.md`](../../cli/reference/machine-mode.md) and `machine-schema.json` (shipped in every CLI archive, printed by the binary itself). A development GUI can take the CLI from a release install or from CI's `apogee-<target>` artifacts.
-- **Platforms:** macOS (Apple silicon), Linux (x64/arm64), Windows (x64/arm64) — the CLI's five targets. Primary dev host is macOS. _TODO:_ which platform's app is built first is an open call for the first spike.
+- **Platforms:** macOS (Apple silicon), Linux (x64/arm64), Windows (x64/arm64) — the CLI's five targets. Primary dev host is macOS. **macOS is built first** (the user's call, 2026-10-20): macOS 27+, Apple silicon only, matching the CLI's `macos-arm64` target.
 - **Build:** each application under `lib/src/<app>/` is self-contained and owns its own build; when the first one lands it joins `cicd.sh`'s `APPS` list, gets its own entry in `lib/scripts/changed.sh`, and a pipeline of its own beside the CLI's (recorded in the CLI docs' map).
 
 ---
@@ -78,6 +78,7 @@ Every change should satisfy this before merge:
 - [ ] Tests for the new behavior pass, and existing tests stay green. _TODO:_ the test command lands with the first application's build.
 - [ ] The machine-mode invariant holds: no linked CLI, no second capability, unknown protocol events tolerated.
 - [ ] **The four-layer law holds** ([ADR 0001](../adrs/layer-enforcement.md)): a new package declares its layer, dependencies point down, the UI framework's types stay in Presentation — whatever the language.
+- [ ] **Presentation keeps the MVVM shape** ([ADR 0002](../adrs/presentation-mvvm.md)): `Views/` and `ViewModels/` per module (view-models SwiftUI-free), shared visuals and common components in the one `styles` module, never duplicated.
 - [ ] The affected docs are updated in the same change (see **Documentation and Status**).
 
 ## Code Style

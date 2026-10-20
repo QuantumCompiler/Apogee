@@ -20,8 +20,12 @@ The documentation tree was restructured per application (2026-10-20, the user's 
 
 - [x] The docs home — this system, scaffolded 2026-10-20; `adrs/` and `reference/` beside it the same day.
 - [x] **ADR 0001** — the four-layer law (Infrastructure / Data / Business / Presentation, dependencies down) holds for every GUI application regardless of language and framework (the user's call, 2026-10-20).
-- [ ] **The first spike** — the questions the first application hangs on: which platform first, three native shells vs. one shared shell, the machine-mode client core (spawning the binary, the JSONL session, tolerant event handling), and what of it is shared across the three apps.
-- See the [`backlog/`](../backlog/README.md) index for the work queue (empty until the spike's split lands).
+- [x] **The first spike** — ran 2026-10-20: the machine-mode integration proven cheap (the shipped binary driven end to end by a ~40-line Swift probe), the walls measured (no build wiring, no layering teeth, binary discovery from a `.app`), the split landed as track 1. The user's calls, same day: **macOS first, Swift and SwiftUI, unsigned ad-hoc**.
+- [ ] **The darwin scaffold** *([1a](../backlog/darwin-scaffold.md))* — SwiftPM, the four layers with the layering check at birth, the SwiftUI window, the ad-hoc `Apogee.app` bundle, the `APPS`/`changed.sh` wiring.
+- [ ] **The machine-mode client core** *([1b](../backlog/machine-mode-client-core.md))* — discovery across the install channels, the captured child, tolerant typed events over an async stream, answers and cancel down the pipe, the JSON reads.
+- [ ] **The session window** *([1c](../backlog/session-window.md))* — one chat session rendered and steered: streaming answers, thinking, tool lines, the protocol's questions as native UI, stop/Esc as `cancel`; the mock-actor conversation as the standing fixture.
+- [ ] **The darwin pipeline** *([1d](../backlog/darwin-pipeline.md))* — the GUI's own workflow beside the CLI's: the gated build on the macOS runner through `cicd.sh`, the ad-hoc-signed, verified `Apogee.app` artifact; one [user] call open (ship in releases from day one, or CI artifact until 1c).
+- See the [`backlog/`](../backlog/README.md) index for the work queue.
 
 ---
 

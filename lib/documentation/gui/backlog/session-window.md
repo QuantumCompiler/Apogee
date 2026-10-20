@@ -1,0 +1,31 @@
+# The session window: a conversation you can watch and steer
+
+**What / why.** The first real surface: one SwiftUI window holding one chat session over the client core — the reason the app exists. The protocol already carries everything the window needs (the GUI spike, 2026-10-20, drove it end to end against the shipped binary): streaming `answer_delta`s, the `thinking` phase, `tool_status` lines, `question` events (both `ask_user` and permission asks — the spike's mock conversation exercised both), `result` with its usage, honest `error` events, and `cancel` accepted mid-turn. This item renders that: the transcript (streamed answer text appearing as it arrives, a thinking indicator while the model reasons, tool lines as quiet status rows), **questions as native UI** (the `question` event's options rendered as buttons/forms, the chosen answer sent back as the protocol's `answer` line), **cancellation** (a stop control and Esc sending `cancel`, the turn ending the way the protocol says), and the session's start/end honestly shown (the `session` event's model and capabilities; a spawn failure or missing binary rendered with the install hint from the core's typed condition). The window is a thin Presentation layer over a view-model that is itself a pure function of the core's event stream — so the whole behavior tests headlessly against scripted events, and the **mock-actor conversation** (the spike's fixture: an ask, a gated tool call, a streamed answer) is the standing UI fixture.
+
+**Core constraint(s).** **Presentation only** (ADR 0001), **MVVM-shaped** ([ADR 0002](../adrs/presentation-mvvm.md)): the module is `Views/` + `ViewModels/`, the view-model SwiftUI-free so it tests headlessly, shared visuals taken from the `styles` module; the view-model consumes the Business session's stream and sends its lines — no `Process`, no JSON, no discovery up here, and no Business reach from a view. **The transcript is the protocol's truth**: text shown is exactly the deltas' concatenation; states (thinking, answering, waiting on a question, cancelled, failed) come from events, never inferred timers; an unknown event renders as an unobtrusive "unknown" row rather than vanishing (the tolerance law made visible). **Questions block honestly**: while a `question` stands, the input reflects it; answering sends the one `answer` line; dismissing is itself an answer only where the protocol says so. **Errors in the CLI's words** — the `error` event's message shown as sent, the stderr tail available on a spawn failure. Hermetic: every test drives the view-model with scripted event sequences; no real binary in the suite.
+
+**Seam + files.**
+- `source/presentation/session/` — the window, the transcript view (streamed text, thinking, tool rows, the unknown row), the question sheet, the input bar with the stop control; the view-model (the event-stream reducer, the outbound lines).
+- `source/presentation/app/` — the window wired as the app's main scene (grown from 1a's shell).
+- `tests/presentation/session/` — the view-model over scripted sequences: the full mock-actor conversation, the question answered, cancel mid-stream, the error and spawn-failure renders, the unknown-event row.
+
+**Reference.** [`machine-mode-client-core.md`](machine-mode-client-core.md) — the stream and lines consumed whole, `(consumed decision)` for their shapes; [ADR 0002](../adrs/presentation-mvvm.md) — the module shape and the `styles` dependency; [`machine-mode.md`](../../cli/reference/machine-mode.md) — the event meanings rendered; the CLI's own front ends (the terminal views, the TUI session view) — the precedent for what a session surface shows: thinking, side activity, the answer, asks.
+
+**Decisions made** (dated):
+- 2026-10-20 — The first window is one chat session; browsing saved chats, suites, models and the rest of the read surface are later items (the spike's MVP line, standing).
+- 2026-10-20 — The view-model is a pure reducer over the core's events, so the window's behavior is tested without UI automation or a binary.
+- 2026-10-20 — Unknown events render visibly-but-quietly; nothing the binary says is dropped on the floor.
+
+**Open calls:**
+- [default: visual design (layout, typography, the thinking indicator's form) at build — native macOS restraint, no theming system yet.]
+- [default: whether `--tools` is on for the first window's sessions (the protocol's asks then flow; the spike proved them) — default on, matching the CLI's interactive default.]
+
+**Guardrail(s).** The view-model matrix over scripted events (the mock-actor conversation end to end; state per event pinned; the question's answer line byte-exact; cancel's state path; the error and absence renders; the unknown row); no SwiftUI below Presentation (the layering check already fails it structurally); no binary, no network in tests — the one live pass (a real session against the installed binary on the dev host) is the user's run, recorded.
+
+**Acceptance criteria:**
+- [ ] The window drives a whole mock-actor conversation: streamed answer, thinking shown, the ask answered from native UI, the tool line visible, the result closing the turn.
+- [ ] Stop/Esc cancels a turn in flight through the protocol; a missing binary renders the typed condition with the install hint.
+- [ ] Transcript text equals the deltas' concatenation; unknown events appear as the quiet row; errors show the CLI's words.
+- [ ] The full suite is hermetic and green.
+
+**Scope note.** Earmarked for v0.2.0; gated on [`machine-mode-client-core.md`](machine-mode-client-core.md) (1b). Out of scope: multiple sessions/tabs, the read-surface windows (models, chats, suites — later items), attachments UI (`attach` stays in the core's vocabulary unrendered for now), tasks and plays as first-class UI, preferences beyond the binary override.

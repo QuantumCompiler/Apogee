@@ -11,3 +11,4 @@ The standing rules of the GUI's architecture, each written once, dated, and kept
 | ADR | Rule |
 |---|---|
 | [0001](layer-enforcement.md) | Four layers, dependencies point down — regardless of language and framework |
+| [0002](presentation-mvvm.md) | Presentation modules are MVVM (`Views/`, `ViewModels/`, module-specific extras), sharing one `styles` module |
