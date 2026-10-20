@@ -21,9 +21,12 @@ public final class Preferences: Sendable {
         self.store = store
     }
 
-    /// The app's own preferences, in its defaults domain.
+    /// The app's own preferences: its standard defaults, whose domain in the
+    /// app is its bundle identifier, `com.quantumcompiler.apogee`. (A suite
+    /// named for the app's own identifier is refused by `UserDefaults`, and
+    /// would keep nothing.)
     public static func standard() -> Preferences {
-        Preferences(store: DefaultsStore(UserDefaults(suiteName: "com.quantumcompiler.apogee") ?? .standard))
+        Preferences(store: DefaultsStore(.standard))
     }
 
     /// The `apogee` binary the user pointed the app at, ahead of every place

@@ -2,7 +2,7 @@
 
 **Position.** Fourth of the four ([ADR 0001](../../../../documentation/gui/adrs/layer-enforcement.md)): the windows, views and rendering, in SwiftUI -- whose types stay here and nowhere below.
 
-**Modules:** `styles` (the shared visual vocabulary), `app` (the application and its window).
+**Modules:** `styles` (the shared visual vocabulary), `session` (one chat session: the window, its transcript and cards, over a SwiftUI-free view-model folding the session's events), `app` (the application: its scene and the composition of its view-models).
 
 **Shape** ([ADR 0002](../../../../documentation/gui/adrs/presentation-mvvm.md)): every module but `styles` is `Views/` + `ViewModels/`, with any further directory it genuinely needs; a view binds to its view-model, the view-model consumes Business, and no file under `ViewModels/` imports a UI framework. `styles` -- colors, type, spacing and the common components -- leans on no sibling, and every other module may use it; a component a second module wants is promoted there, never copied.
 

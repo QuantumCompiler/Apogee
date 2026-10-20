@@ -27,6 +27,7 @@
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
+      codeCoverageEnabled = "NO"
       shouldAutocreateTestPlan = "YES">
       <Testables>
          <TestableReference
@@ -103,6 +104,17 @@
                BlueprintIdentifier = "651D6129528DAF5EF8D36041"
                BuildableName = "PresentationStylesTests.xctest"
                BlueprintName = "PresentationStylesTests"
+               ReferencedContainer = "container:Apogee.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "C405CB50A98702E2C1FAC690"
+               BuildableName = "PresentationSessionTests.xctest"
+               BlueprintName = "PresentationSessionTests"
                ReferencedContainer = "container:Apogee.xcodeproj">
             </BuildableReference>
          </TestableReference>
