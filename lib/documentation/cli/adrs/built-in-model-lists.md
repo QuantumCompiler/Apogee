@@ -46,10 +46,10 @@ The same day, the user set the rule this record holds: the lists are updated dur
 
 ## Enforcement
 
-- **Where work is judged.** The per-change checklist in [CLAUDE.md](../../assistant/CLAUDE.md) (Implementing a Feature) names the rule. Two skills check it:
+- **Where work is judged.** The per-change checklist in [CLAUDE.md](../assistant/CLAUDE.md) (Implementing a Feature) names the rule. Two skills check it:
   - the pre-MR docs pass (`apogee-cli-maintenance-update-documents`) audits the lists whenever a branch touches backends, rosters, completion or model selection;
   - the release roll (`apogee-cli-maintenance-update-release`) checks both lists against their sources at its gate.
 
-  [DEVELOPER.md](../../assistant/DEVELOPER.md) carries the recipe.
+  [DEVELOPER.md](../assistant/DEVELOPER.md) carries the recipe.
 - **Where users look.** The reviewed date is in `models list` and `models info`.
 - **In the suite.** `tests/data/backends/model_roster_test.cpp` holds the tables' shape: carried, never saved, a fetch winning, the reviewed date a real date. It also names Anthropic's current lineup, so dropping one of those ids is a deliberate test edit, never a slip.

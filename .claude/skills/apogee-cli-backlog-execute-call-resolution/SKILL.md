@@ -9,7 +9,7 @@ A backlog group (a table: `v0.1.4`, `maintenance`, `architecture`) builds fastes
 
 ## 1. Ground and inventory
 
-1. Re-read the live [backlog README](../../../lib/documentation/backlog/README.md) and `git status` — parallel sessions ship and take items; a 🚧 item's calls belong to its builder, so its document is **skipped and said**, and a placeholder with no document (a "still to be written" row) likewise.
+1. Re-read the live [backlog README](../../../lib/documentation/cli/backlog/README.md) and `git status` — parallel sessions ship and take items; a 🚧 item's calls belong to its builder, so its document is **skipped and said**, and a placeholder with no document (a "still to be written" row) likewise.
 2. Read **every document in the group's table**, in table order, and build the inventory: for each doc, its calls by tag — `[user]` (blocks the build), `[default: …]` (agent-decidable, veto-able), `(consumed decision)` (owned elsewhere — verify the owner still exists; if it shipped, repoint the note to the MILESTONES record, that's the whole resolution).
 3. Show the user the map before the first question: how many calls, which documents, which are user-owned — so they know the size of the sitting before it starts.
 

@@ -23,12 +23,12 @@ git diff --stat stable...HEAD
 
 Plus `git status` — warn if uncommitted work would be missing from the MR. Then read the branch's documentation deltas, which carry the narrative:
 
-- **Backlog documents deleted** on this branch + their new [`MILESTONES.md`](../../../lib/documentation/assistant/MILESTONES.md) entries → the items this MR **ships** (pull each item's goal and acceptance criteria from the milestone entry).
+- **Backlog documents deleted** on this branch + their new [`MILESTONES.md`](../../../lib/documentation/cli/assistant/MILESTONES.md) entries → the items this MR **ships** (pull each item's goal and acceptance criteria from the milestone entry).
 - **Index rows marked in progress** → items **advanced but not finished**; say what state they're left in.
 - **New dated entries** in item documents' Decisions made → the decisions this branch settled (including exercised `[default:]` calls).
-- [`ROADMAP.md`](../../../lib/documentation/assistant/ROADMAP.md) checkbox/section changes → release-level framing.
+- [`ROADMAP.md`](../../../lib/documentation/cli/assistant/ROADMAP.md) checkbox/section changes → release-level framing.
 - New/changed files under `lib/src/`, `lib/scripts/`, `.claude/skills/` → the implementation surface.
-- Changes under `.github/workflows/` that add, remove or rename a job or change a matrix → the merge needs the required checks re-applied first ([DEVELOPER.md → Changing the pipeline](../../../lib/documentation/assistant/DEVELOPER.md#changing-the-pipeline)); it goes under **Before merging**.
+- Changes under `.github/workflows/` that add, remove or rename a job or change a matrix → the merge needs the required checks re-applied first ([DEVELOPER.md → Changing the pipeline](../../../lib/documentation/cli/assistant/DEVELOPER.md#changing-the-pipeline)); it goes under **Before merging**.
 
 ## 2. Write the description
 

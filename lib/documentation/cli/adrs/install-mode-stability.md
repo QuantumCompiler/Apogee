@@ -12,7 +12,7 @@ Apogee reaches machines three ways, and all three are load-bearing: **from sourc
 
 - The installer entry points (script URLs, flags, behavior), the archive names and layout, and the `update` path are a public contract; code changes never move them as a side effect.
 - Restructures (renames, module splits, layer moves) are invisible at install time: same binary name, same archive per target, same `VERSION` discipline.
-- A change that genuinely must alter the pipeline or install surface is its own deliberate act, following [DEVELOPER.md → Changing the pipeline](../../assistant/DEVELOPER.md#changing-the-pipeline) — including the required-checks step and the user's say-so for repository settings — never a rider on a feature.
+- A change that genuinely must alter the pipeline or install surface is its own deliberate act, following [DEVELOPER.md → Changing the pipeline](../assistant/DEVELOPER.md#changing-the-pipeline) — including the required-checks step and the user's say-so for repository settings — never a rider on a feature.
 
 ## Consequences
 

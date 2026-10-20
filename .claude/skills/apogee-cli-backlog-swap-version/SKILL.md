@@ -11,7 +11,7 @@ The backlog index keeps one table per queued release, a directory per table, and
 
 Parallel sessions build and ship while you work. Before touching anything:
 
-1. Re-read [`lib/documentation/backlog/README.md`](../../../lib/documentation/backlog/README.md) and check `git status` — know which items are 🚧, whether recent ships landed, and that the tree is committed enough for `git mv` (fall back to plain `mv` for untracked files; both move, only tracked ones carry history).
+1. Re-read [`lib/documentation/cli/backlog/README.md`](../../../lib/documentation/cli/backlog/README.md) and check `git status` — know which items are 🚧, whether recent ships landed, and that the tree is committed enough for `git mv` (fall back to plain `mv` for untracked files; both move, only tracked ones carry history).
 2. **Survey every reference before replacing any.** `grep -rln "v0\.1\.[4-9]"` (the affected range) across `lib/documentation/` to list the files in scope; confirm **nothing has shipped** under any affected version — only forward-looking references may be blanket-bumped.
 3. **Find the bare track-number mentions by hand.** Lettered ids (`27a`) are regex-safe; bare ones (`**27, machine-mode integrations**`, "backlog item 27, for", "the number freed by …") are not — and **never blind-replace bare numbers**: `\b28\b` matches the 28 in `2026-09-28` (this has caused real damage). Grep for them, list them, and replace each as an exact longer string.
 4. **Removal direction only:** verify the numbers being slid *down onto* have nothing shipped under them — grep MILESTONES for the target prefixes. A number with shipped work recorded is never reused; if one is in the way, stop and tell the user.

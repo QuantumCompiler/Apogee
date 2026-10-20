@@ -34,8 +34,8 @@ Every document follows the backlog README's format and `/apogee-cli-backlog-crea
 
 ## 4. Place the set and update the docs
 
-1. **Index** ([backlog README](../../../lib/documentation/backlog/README.md)): one row per document in its table (creating a table and its directory for a first item), ids ascending, gates in the Status cells — and **the track preamble tells the spike's story**: when it ran, what it measured (the headline numbers), how it split, and which calls are recorded where. That paragraph is what lets a future agent trust the documents without the chat.
-2. **[ROADMAP.md](../../../lib/documentation/assistant/ROADMAP.md)**: the release's section (or Maintenance/Architecture) gains one line per item; a new release section is introduced with the spike summarized the way the existing sections do it.
+1. **Index** ([backlog README](../../../lib/documentation/cli/backlog/README.md)): one row per document in its table (creating a table and its directory for a first item), ids ascending, gates in the Status cells — and **the track preamble tells the spike's story**: when it ran, what it measured (the headline numbers), how it split, and which calls are recorded where. That paragraph is what lets a future agent trust the documents without the chat.
+2. **[ROADMAP.md](../../../lib/documentation/cli/assistant/ROADMAP.md)**: the release's section (or Maintenance/Architecture) gains one line per item; a new release section is introduced with the spike summarized the way the existing sections do it.
 3. **SPEC.md** only per step 2's rule — the dated revision agreed with the user, nothing else.
 4. **MILESTONES.md is never touched** — unless the spike itself shipped a kept probe or a milestone-recorded run, in which case that record already exists and is only cited, never written here.
 

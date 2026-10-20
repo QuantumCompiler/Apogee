@@ -5,20 +5,20 @@ description: Take the next recommended Apogee backlog item (or a named one) and 
 
 # Work an Apogee Backlog Item
 
-Apogee is built docs-first: every work item has its own document in `lib/documentation/backlog/`, and an agent builds **straight from that document**. This skill is the procedure for taking one.
+Apogee is built docs-first: every work item has its own document in `lib/documentation/cli/backlog/`, and an agent builds **straight from that document**. This skill is the procedure for taking one.
 
 ## 1. Load the working process first
 
-Before touching the queue, read the contributor docs in `lib/documentation/assistant/` — they are the source of truth and override anything remembered from prior sessions:
+Before touching the queue, read the contributor docs in `lib/documentation/cli/assistant/` — they are the source of truth and override anything remembered from prior sessions:
 
-1. [`CLAUDE.md`](../../../lib/documentation/assistant/CLAUDE.md) — **read fully**: the working process, adopted invariants, Code Style (hard rules: `.h`/`.cpp` pairs; smart pointers only, never owning raw pointers), and the Documentation and Status flow that defines "done".
-2. [`SPEC.md`](../../../lib/documentation/assistant/SPEC.md) — product shape, non-goals, principles.
-3. [`ROADMAP.md`](../../../lib/documentation/assistant/ROADMAP.md) — release context and the outstanding `[user]` decisions.
-4. [`DEVELOPER.md`](../../../lib/documentation/assistant/DEVELOPER.md) — architecture reference, as needed while building.
+1. [`CLAUDE.md`](../../../lib/documentation/cli/assistant/CLAUDE.md) — **read fully**: the working process, adopted invariants, Code Style (hard rules: `.h`/`.cpp` pairs; smart pointers only, never owning raw pointers), and the Documentation and Status flow that defines "done".
+2. [`SPEC.md`](../../../lib/documentation/cli/assistant/SPEC.md) — product shape, non-goals, principles.
+3. [`ROADMAP.md`](../../../lib/documentation/cli/assistant/ROADMAP.md) — release context and the outstanding `[user]` decisions.
+4. [`DEVELOPER.md`](../../../lib/documentation/cli/assistant/DEVELOPER.md) — architecture reference, as needed while building.
 
 ## 2. Pick the item
 
-Read [`lib/documentation/backlog/README.md`](../../../lib/documentation/backlog/README.md) — lifecycle, document format, the **gate convention**, and the priority-ordered index.
+Read [`lib/documentation/cli/backlog/README.md`](../../../lib/documentation/cli/backlog/README.md) — lifecycle, document format, the **gate convention**, and the priority-ordered index.
 
 - **The next item** is the topmost 🟢 row of the earliest version's table (🔒 rows wait on the items their Status cell names; every pending item assumes everything already shipped, and needs only its own gate chain).
 - If the user named a specific item, take that one instead — but verify its gate is satisfied and say so if it isn't.
@@ -43,14 +43,14 @@ Open calls are tagged:
 - Mark the item's index row **in progress** in the backlog README so parallel sessions see it's taken.
 - One item at a time. Honor the item's Core constraints and the repo-wide rules (CLAUDE.md → Invariants and Code Style).
 - Tests per the item's Guardrails; verify with `lib/scripts/cicd.sh --test` before calling anything done.
-- Anything checked on real weights runs on [the model families](../../../lib/documentation/assistant/DEVELOPER.md#on-real-weights-the-model-families): Meta, Qwen, Google and OpenAI, one installed model each — its Q4_K_M build when one is installed, full weights only when not — skipping the excluded models listed there, with each family's result recorded. Run one family at a time: every check for that family in one process with its model loaded once, then the next family. It replaces whatever models the item's document names. Optional: skip a family with no local model, or the whole part with none, and say so.
-- If the item changes the pipeline — a CI job added, removed or renamed, a matrix row, a new workflow, or what the CLI is built from — follow [DEVELOPER.md → Changing the pipeline](../../../lib/documentation/assistant/DEVELOPER.md#changing-the-pipeline). Its required-checks step comes after the pull request's run passes and before the merge, and `--apply` changes repository settings: tell the user it is needed, and run it only when they say so.
+- Anything checked on real weights runs on [the model families](../../../lib/documentation/cli/assistant/DEVELOPER.md#on-real-weights-the-model-families): Meta, Qwen, Google and OpenAI, one installed model each — its Q4_K_M build when one is installed, full weights only when not — skipping the excluded models listed there, with each family's result recorded. Run one family at a time: every check for that family in one process with its model loaded once, then the next family. It replaces whatever models the item's document names. Optional: skip a family with no local model, or the whole part with none, and say so.
+- If the item changes the pipeline — a CI job added, removed or renamed, a matrix row, a new workflow, or what the CLI is built from — follow [DEVELOPER.md → Changing the pipeline](../../../lib/documentation/cli/assistant/DEVELOPER.md#changing-the-pipeline). Its required-checks step comes after the pull request's run passes and before the merge, and `--apply` changes repository settings: tell the user it is needed, and run it only when they say so.
 
 ## 6. Ship — the Documentation and Status flow
 
 When the acceptance criteria pass, in the same change (per CLAUDE.md):
 
-1. Record the work in [`MILESTONES.md`](../../../lib/documentation/assistant/MILESTONES.md) (fold into the matching milestone, or start a new lettered one).
+1. Record the work in [`MILESTONES.md`](../../../lib/documentation/cli/assistant/MILESTONES.md) (fold into the matching milestone, or start a new lettered one).
 2. **Delete the item's backlog document and its index row** — the backlog holds pending work only. Update any other document whose gate this satisfied.
 3. Check the box / move the line in ROADMAP.md.
 4. Update the Codebase Map in CLAUDE.md and DEVELOPER.md for new/moved files.

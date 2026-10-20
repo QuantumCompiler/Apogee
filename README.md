@@ -75,10 +75,11 @@ Run `apogee` with nothing after it at a terminal and it opens a full-screen shel
 | Path | What it is |
 |---|---|
 | [`lib/src/cli/`](lib/src/cli) | The CLI application — the whole harness, one self-contained CMake project. |
-| `lib/src/darwin` · `linux` · `windows` | The GUI applications, one per platform (planned; they drive the CLI over its [machine mode](lib/documentation/reference/machine-mode.md)). |
-| [`lib/documentation/reference/`](lib/documentation/reference) | Integrator-facing reference: the [stdio machine mode](lib/documentation/reference/machine-mode.md) for front-ends, the [HTTP API](lib/documentation/reference/http-api.md) for `serve` clients, and [training](lib/documentation/reference/training.md). |
-| [`lib/documentation/assistant/`](lib/documentation/assistant) | Contributor docs — [CLAUDE.md](lib/documentation/assistant/CLAUDE.md) is the entry point; [ROADMAP.md](lib/documentation/assistant/ROADMAP.md) is the release board. |
-| [`lib/documentation/backlog/`](lib/documentation/backlog) | The work queue: one document per pending item, priority-ordered per release. |
+| `lib/src/darwin` · `linux` · `windows` | The GUI applications, one per platform (planned; they drive the CLI over its [machine mode](lib/documentation/cli/reference/machine-mode.md)). |
+| [`lib/documentation/`](lib/documentation) | One docs directory per application — [CLAUDE.md](lib/documentation/CLAUDE.md) routes an agent to [`cli/`](lib/documentation/cli) or [`gui/`](lib/documentation/gui). |
+| [`lib/documentation/cli/reference/`](lib/documentation/cli/reference) | Integrator-facing reference: the [stdio machine mode](lib/documentation/cli/reference/machine-mode.md) for front-ends, the [HTTP API](lib/documentation/cli/reference/http-api.md) for `serve` clients, and [training](lib/documentation/cli/reference/training.md). |
+| [`lib/documentation/cli/assistant/`](lib/documentation/cli/assistant) | Contributor docs — [CLAUDE.md](lib/documentation/cli/assistant/CLAUDE.md) is the entry point; [ROADMAP.md](lib/documentation/cli/assistant/ROADMAP.md) is the release board. |
+| [`lib/documentation/cli/backlog/`](lib/documentation/cli/backlog) | The work queue: one document per pending item, priority-ordered per release. |
 | [`lib/scripts/`](lib/scripts) | The installers and `cicd.sh`, the one build entry point local runs and CI share. |
 
 ## Building from source
@@ -93,7 +94,7 @@ That builds every application for the host's native target and runs its suite �
 
 ## Status
 
-Young and moving fast: [v0.1.0](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.0) (the harness), [v0.1.1](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.1) (the release pipeline), [v0.1.2](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.2) (the terminal and the model directory), [v0.1.3](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.3) (local agent tools and small-model depth), [v0.1.4](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.4) (MLX inference, model suites, autonomous tasks and code knowledge graphs), [v0.1.5](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.5) (provider detection and machine-mode integrations), [v0.1.6](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.6) (system insight and the full-screen TUI), [v0.1.7](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.7) (the pre-shipped library) and [v0.1.8](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.8) (the doors made law) are out, and `v0.1.9` is in development on its branch. The running board of what's shipped, in flight, and next is [ROADMAP.md](lib/documentation/assistant/ROADMAP.md).
+Young and moving fast: [v0.1.0](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.0) (the harness), [v0.1.1](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.1) (the release pipeline), [v0.1.2](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.2) (the terminal and the model directory), [v0.1.3](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.3) (local agent tools and small-model depth), [v0.1.4](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.4) (MLX inference, model suites, autonomous tasks and code knowledge graphs), [v0.1.5](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.5) (provider detection and machine-mode integrations), [v0.1.6](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.6) (system insight and the full-screen TUI), [v0.1.7](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.7) (the pre-shipped library) and [v0.1.8](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.8) (the doors made law) are out, and `v0.1.9` is in development on its branch. The running board of what's shipped, in flight, and next is [ROADMAP.md](lib/documentation/cli/assistant/ROADMAP.md).
 
 ## License
 

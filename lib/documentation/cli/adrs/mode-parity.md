@@ -27,4 +27,4 @@ The CLI is driven three ways: interactively at a terminal, over the HTTP admin p
 
 ## Enforcement
 
-`cli.machine_schema_conformance` pins machine mode to the code. The CLI↔HTTP parity conventions live in the working process ([CLAUDE.md](../../assistant/CLAUDE.md) → Documentation and Status, the parity audit rules); one-core assertions (identical payloads from CLI verb and served/tool twin, golden-compared) are the test pattern shipped items already use. The pre-MR docs pass audits parity by checklist.
+`cli.machine_schema_conformance` pins machine mode to the code. The CLI↔HTTP parity conventions live in the working process ([CLAUDE.md](../assistant/CLAUDE.md) → Documentation and Status, the parity audit rules); one-core assertions (identical payloads from CLI verb and served/tool twin, golden-compared) are the test pattern shipped items already use. The pre-MR docs pass audits parity by checklist.

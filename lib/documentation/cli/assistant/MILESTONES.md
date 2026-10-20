@@ -2217,7 +2217,7 @@ Asked for directly (Taylor), in three reports: "Not all subcommands have tab aut
   - **Partial failure, reported.** A path that cannot be removed is named with the reason; the removals after it still run, the check still runs -- its report is the directory as it now is -- and the exit code is non-zero.
   - **Nothing outside the data directory.** The binary, the completions and shell files stay uninstall's business.
 - [x] **Uninstall's plan machinery, generalized** (`cli/uninstall.h/.cpp`), so the two destructive verbs share one idea of what is the user's: `plan_rows` (the row walk and the user-data test), `describe_user_data` (the warning), `confirm_removal` (the discipline: `--yes` skips it, a terminal types `yes`, anything else is refused with the remediation) and `remove_planned` (the errors collection). Uninstall prints byte for byte what it did. Both now ask `stdin_is_piped` rather than the terminal alone -- the same answer in use, and a test that feeds `std::cin` is a pipe whatever terminal runs the suite.
-- [x] **Completion.** `apogee reset --keep <TAB>` offers exactly the layout's rows, in its order, read from the validator the command holds the word to: what TAB offers and what the verb accepts are one list, and it is the layout's ([ADR 0007](../adrs/cli/tab-completion.md)).
+- [x] **Completion.** `apogee reset --keep <TAB>` offers exactly the layout's rows, in its order, read from the validator the command holds the word to: what TAB offers and what the verb accepts are one list, and it is the layout's ([ADR 0007](../adrs/tab-completion.md)).
 - [x] **`make reinstall [KEEP="<row> …"]`** (`lib/src/cli/Makefile`): a fresh build (`cmake --build --clean-first`), `make install`, then `apogee reset` on the installed binary with each word of `KEEP` forwarded as `--keep <word>`. Only the named rows are kept; bare, nothing is, which the plan shows and the prompt confirms. The binary is run only as `$(APOGEE_BIN)`, defined beside `PREFIX` (`$(PREFIX)/bin/apogee`), so the install channels (M10) re-point the reset with the install. The Makefile knows no row and never passes `--yes`. `make help` names `KEEP`, its vocabulary and that bare keeps nothing.
 
 **Decisions**
@@ -2234,7 +2234,7 @@ Asked for directly (Taylor), in three reports: "Not all subcommands have tab aut
 | Entries outside the layout | Removed, named, and warned as the user's | "A bare reset leaves exactly the first-run skeleton" is false while `chat_history` survives it, and nothing says an unknown entry is Apogee's to dismiss. |
 | "A fresh build" | `cmake --build --clean-first`, not `make clean` | Every object recompiled; `make clean` deletes the fetched dependencies too (llama.cpp among them), so the target would need the network. |
 | The fix pass's output | The files it creates folded to one count; every other repair verbatim | A recreated layout is ~140 created files, and a line each scrolled the plan and the removals away. |
-| Modes reached | The command line only: no admin-plane route, no machine-mode verb -- skipped and said ([ADR 0002](../adrs/cli/mode-parity.md)), and classified a carve-out beside `uninstall` in `parity_test`'s table | As with `uninstall`, a served reset would delete the server's own state under it. |
+| Modes reached | The command line only: no admin-plane route, no machine-mode verb -- skipped and said ([ADR 0002](../adrs/mode-parity.md)), and classified a carve-out beside `uninstall` in `parity_test`'s table | As with `uninstall`, a served reset would delete the server's own state under it. |
 
 **Guardrails, each mutation-tested** (six mutants, all caught by `[reset]`): kept rows removed too; no `check --fix` after; a pipe proceeding; stopping at the first failure; entries outside the layout surviving; the secrets store unnamed.
 
@@ -2287,7 +2287,7 @@ Asked for directly (Taylor), in three reports: "Not all subcommands have tab aut
 - [x] **Uninstall per channel.**
   - `UninstallCommand` resolves its root through `install_home()`. That is `APOGEE_HOME` when set, so every sandboxed uninstall stays hermetic, and otherwise the baked channel's root. Never a flag's.
   - A dev or test build plans no completion stubs. The stubs call `apogee` by name and a dev install never writes any, so the release install's must survive a dev uninstall.
-- [x] **Completion follows the line's root.** `typed_root_flag` reads a root flag typed before the verb. So `apogee --dev complete -m <TAB>` offers the dev root's backends, which are what the command will accept ([ADR 0007](../adrs/cli/tab-completion.md)).
+- [x] **Completion follows the line's root.** `typed_root_flag` reads a root flag typed before the verb. So `apogee --dev complete -m <TAB>` offers the dev root's backends, which are what the command will accept ([ADR 0007](../adrs/tab-completion.md)).
 - [x] **The Makefile.** `MODE ?= release`, and any other value is an error naming the three channels.
   - `APOGEE_BIN` names the channel's installed binary: `$(PREFIX)/bin/apogee`, `apogee-dev` or `apogee-test`.
   - `build` and `no-llama` pass `-DAPOGEE_CHANNEL=$(MODE)` on every configure, release included, because CMake caches the value. `install` builds through `build`.
@@ -2513,7 +2513,7 @@ Two inference mechanisms, structurally different:
 
 One is a function pointer, the other a byte stream from another process, and **the single most important design decision is to not let that difference reach the rest of the harness.** Both adapters write into one sink (§6); everything above the adapter layer sees an ordered stream of `Event`.
 
-The two hard policy constraints — never read the CLI's credentials, never modify or bundle its binary — now live in [SPEC.md](../assistant/SPEC.md) → Principles, because they bind every vendor-CLI backend and not just this one. They are also restated as Core constraints above.
+The two hard policy constraints — never read the CLI's credentials, never modify or bundle its binary — now live in [SPEC.md](SPEC.md) → Principles, because they bind every vendor-CLI backend and not just this one. They are also restated as Core constraints above.
 
 Non-goal: reimplementing the agent loop. The Agent SDK is Python and TypeScript only; for other languages, invoking the CLI as a subprocess is the documented path. We are a caller, not a reimplementation.
 
@@ -2954,7 +2954,7 @@ The general lesson is the one this repo already applies elsewhere and had not ap
 - [x] **`--output-format` on `complete` and `chat`**, and **`--input-format` on `chat`** — the latter is what makes one child serve a whole conversation.
 - [x] **A shared `run_chat_turn()`** extracted from `chat.cpp` so the terminal REPL and the driven loop are literally the same turn, not two implementations that agree today.
 - [x] **`ask_user` over the protocol** — a `question` event answered by an `answer` line, so a driving GUI renders a native dialog instead of the tool being silently unavailable on the one surface built for a real UI.
-- [x] **[`documentation/reference/machine-mode.md`](../reference/machine-mode.md)** — the protocol reference, and the repo's first document written for *external consumers* rather than contributors.
+- [x] **[`documentation/cli/reference/machine-mode.md`](../reference/machine-mode.md)** — the protocol reference, and the repo's first document written for *external consumers* rather than contributors.
 - [x] **24 new tests** (572 total).
 
 **Three decisions worth recording.**
@@ -2975,7 +2975,7 @@ The general lesson is the one this repo already applies elsewhere and had not ap
 | `cli.reference_driver` — the deltas rebuild the result | `result.text` + `" [truncated]"` → caught on both turns |
 | `cli.machine_schema_conformance` | Removing an event from the doc, and adding one the code cannot emit → caught in both directions |
 
-**The reference driver is documentation and test at once.** [`tests/reference_driver.py`](../../src/cli/tests/scripts/py/reference_driver.py) is the worked example a GUI author reads, and it checks that three independent paths agree: the concatenated `answer_delta` chunks, the `result` event's text, and what `apogee complete` printed in text mode. If they ever disagree, one surface has grown a behaviour the other lacks — the failure the shared Reporter seam exists to prevent.
+**The reference driver is documentation and test at once.** [`tests/reference_driver.py`](../../../src/cli/tests/scripts/py/reference_driver.py) is the worked example a GUI author reads, and it checks that three independent paths agree: the concatenated `answer_delta` chunks, the `result` event's text, and what `apogee complete` printed in text mode. If they ever disagree, one surface has grown a behaviour the other lacks — the failure the shared Reporter seam exists to prevent.
 
 **The schema document is pinned to the code.** A protocol document that drifts is worse than none: a GUI author trusts it, builds against it, and debugs Apogee for a fault that is in the prose. `cli.machine_schema_conformance` checks the vocabulary in both directions, so an event added without documentation, or documented without an implementation, fails the build.
 
@@ -2983,7 +2983,7 @@ The general lesson is the one this repo already applies elsewhere and had not ap
 
 ### 2026-09-25 — The integration spike: a naive host embeds the binary (backlog item 28, for v0.1.5)
 
-Asked for by the user (2026-09-25): the CLI pluggable into **other people's** harnesses and applications, with the native machine mode as the floor and a common protocol integrators extend from. The spike's instrument is [`tests/naive_host_driver.py`](../../src/cli/tests/scripts/py/naive_host_driver.py) — a third-party-style host, kept as evidence and re-runnable (`naive_host_driver.py <binary> <work-dir>`), that knows **only what machine-mode.md says**: it may not learn from Apogee's source, and where the documented contract leaves it blind it records a wall instead of peeking. It ran against the installed `v0.1.2` binary (the shipped contract an integrator meets today) in a throwaway `APOGEE_HOME`, with a scripted `mock` backend as the model actor.
+Asked for by the user (2026-09-25): the CLI pluggable into **other people's** harnesses and applications, with the native machine mode as the floor and a common protocol integrators extend from. The spike's instrument is [`tests/naive_host_driver.py`](../../../src/cli/tests/scripts/py/naive_host_driver.py) — a third-party-style host, kept as evidence and re-runnable (`naive_host_driver.py <binary> <work-dir>`), that knows **only what machine-mode.md says**: it may not learn from Apogee's source, and where the documented contract leaves it blind it records a wall instead of peeking. It ran against the installed `v0.1.2` binary (the shipped contract an integrator meets today) in a throwaway `APOGEE_HOME`, with a scripted `mock` backend as the model actor.
 
 **What worked, exactly as documented.** The host completed a tool-using conversation end to end: `ask_user` flowed out as a `question` event and the answer back in; the permission gate's `question` (`kind:"permission"`, `tool`, `target`) arrived, was answered `yes`, and the tool ran; a failed tool came back **as a tool result the model read**, and the turn continued to a clean `result` — the denial-semantics contract holding under a real failure. One child served both turns; stdout carried nothing but JSONL; an unknown *inbound* line was ignored exactly as the doc promises. And the headline measurement: **host-supplied tools already work today** — the host ran a 40-line MCP stdio server, registered it with `apogee mcp create`, and its tool round-tripped through the loop (`mcp__host__host_lookup` → `host-answer:…` in the final text) with **zero prompts**, the `readOnlyHint` honoured.
 
@@ -4012,7 +4012,7 @@ The characterization also refuted the obvious design. Stripping headers alone wo
 **Verified live** against Apogee's own documentation, with zero backends configured:
 
 ```
-$ apogee embed ingest apogee-docs ./lib/documentation/assistant
+$ apogee embed ingest apogee-docs ./lib/documentation/cli/assistant
 2 file(s), 92 chunk(s)
 skipped 1:
   image.png: looks binary
@@ -4233,7 +4233,7 @@ Neither is reachable from the merge-blocking target, whose runtime is a fake wit
 
 **Verified on the real binary.**
 
-- **Lexical** (no embedding model, `lib/documentation/assistant` attached, Qwen3-VL-8B answering):
+- **Lexical** (no embedding model, `lib/documentation/cli/assistant` attached, Qwen3-VL-8B answering):
   - "What is photosynthesis?" went from `4 excerpts …, top 0.660 [lexical]` to `nothing relevant in the attachments -- the best match is under the floor (0.660 [lexical], none of the question's words)`. It matched only "what" and "is".
   - "How is a release cut and published?" reads `fair match (0.930 [lexical], 2 of 3 question words)`.
   - "Who painted the Mona Lisa?" and the sourdough question read `weak match (…, 1 of 3)` and `(…, 1 of 4)`. The docs do hold "painted" and "home", and the model answered from its own knowledge.
@@ -4275,7 +4275,7 @@ One more thing worth knowing: the probe's "unrelated" question, "What is the cap
 - [x] **`commands/serve_cmd.h/.cpp`** — `-m`/`--all-backends`, `--bind`/`--port`/`--allow-remote`, `--rag`/`--retriever`/`--rerank`, `--tools`/`--search`, `--preload`, `--ignore-timeout`, `--session-ttl`. `--preload` goes through a new `StatusReporting::preload` capability and `Harness::preload_model`, so only a backend that reports a load state is asked, and a paid provider is never sent a warm-up request in the name of preloading.
 - [x] **cpp-httplib `v0.56.0`**, the recorded default, fetched rather than found with every optional integration off — so `serve` adds a header and no TLS stack.
 - [x] **Two helpers the surfaces were already duplicating** — `names_a_configured_backend` (and `configured_backend_key`) and `make_built_in_tools` — moved to `commands/helpers` and used by `complete`, `chat`, and `serve`.
-- [x] **[`documentation/reference/http-api.md`](../reference/http-api.md)** — the contract for remote-client authors, pinned to the route table by `cli.http_api_conformance` in both directions.
+- [x] **[`documentation/cli/reference/http-api.md`](../reference/http-api.md)** — the contract for remote-client authors, pinned to the route table by `cli.http_api_conformance` in both directions.
 - [x] **49 new test cases** (951 in all), green in both builds.
 
 **The invariant's exception, made structural.** The symbol check used to scan `apogee_core` and the linked binary for `listen`/`accept` and fail on any reference. With a server in the binary that is no longer a statement anything can make — so the check now scans **every library the executable links that the build produces, static or shared**, collected by walking the link graph in CMake so a new in-process dependency is covered without anyone remembering, attributes each reference to the object file (or shared library) that made it (`nm -A -u`), and allow-lists exactly one object by name: `serve.cpp.o`. Every other file under `httpserver/` is as socket-free as the rest of the library, which is also what lets the handlers be tested with no port. Two vacuity guards: an empty archive list fails, and the allow-listed object **must be seen** referencing the symbols — a changed `nm` format or a moved listener fails loudly instead of passing quietly. Verified by planting a `listen()` in `http_types.cpp`: the check failed naming the file; and by handing it a throwaway shared library that calls `listen()`: it failed naming the library. **The walk found a gap the old check had been papering over.** In the llama preset it listed three archives where llama.cpp should have been — because llama.cpp builds as *shared* libraries there, and a shared library's own imports never appear in the executable's undefined-symbol table. The binary scan added in Milestone J to cover in-process llama.cpp therefore never saw inside it; the walk now scans every shared library the build produces, by file, and the llama preset reports ten. The runtime half gained its positive twin: `cli.serve_lifecycle` asserts with `lsof` that `serve` *does* hold a port while `cli.complete_opens_no_listening_socket` asserts `complete` does not.
@@ -5278,7 +5278,7 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,202
 - [x] **The dataset store** (`training/datasets`): `<name>.jsonl`, one writer through a temp file and a rename, an existing dataset refused without force, `role` before `content` on every line so the CLI, the admin twin and the Python script agree byte for byte; listing with shapes (`chat`, `flat`, `eval`, `mixed`, `empty`).
 - [x] **SafeTensors snapshots and dataset downloads** -- what the models item left unbuilt. `models pull <owner>/<repo> --safetensors` takes the whole full-weight repository (shards, configuration, tokenizer, custom code) into `paths.hf_dir` or `models/<owner>--<repo>/` through **`acquire_tree`**: every file into a `.staging` tree via `acquire_file` (the ladder with the GGUF rung skipped and the sidecar saying so), the directory renamed into place last, a failure anywhere removing the staging tree. The `/tree` endpoint lists files with the sha256 Hugging Face publishes for LFS files, so every shard is digest-checked -- the first source in Apogee where a digest is the rule rather than the exception. `models list` shows a snapshot as `safetensors` (trainable, not runnable) with its architecture from `config.json`; `models delete` removes one whole; the bare-`owner/repo` refusal now names `--safetensors` beside the converter.
 - [x] **The control plane** -- six routes: `GET/POST /v1/admin/datasets`, `GET/DELETE /v1/admin/datasets/{id}`, `GET /v1/admin/datasets/kits`, and `POST /v1/admin/datasets/synth` as the plane's third job kind (`datasets-synth`), the teacher served by the plane and never a vendor CLI. A dataset created over HTTP is byte-identical to the CLI's; the literal paths are matched before `{id}`. Fifty-four admin rows. The parity table: `datasets create|synth|delete` twins, `prepare|pull` backfills, `kits|list|info` read-only, `train setup` a carve-out.
-- [x] **`lib/documentation/reference/training.md`**, the user-facing reference for the track, and the `training/` layering rule: `harness/`, `platform/`, `agentloop/`, `agent/`, the framer and `models/sha256.h` by name, itself, never a surface.
+- [x] **`lib/documentation/cli/reference/training.md`**, the user-facing reference for the track, and the `training/` layering rule: `harness/`, `platform/`, `agentloop/`, `agent/`, the framer and `models/sha256.h` by name, itself, never a surface.
 - [x] **71 new test cases** (1366 in all); `cli.datasets_lifecycle` on the real binary.
 
 **Decisions**
@@ -5706,7 +5706,7 @@ What the numbers say, plainly:
 
 ### 2026-10-03 — `arch-adrs-layer-context` (architecture item A5): the law next to the code
 
-**Why.** The layers were built and enforced (A1–A4), and their reasons were written down as ADRs the same day (`lib/documentation/adrs/cli/`, at the user's direction). But a model or a person opening a file in `source/business/` still had nothing in reach saying what the layer may include, which rules bind a change there, or where the law is enforced. The user asked that "each file … must know the correct context for its layer". This item puts a card at every layer root and gives the ADRs teeth.
+**Why.** The layers were built and enforced (A1–A4), and their reasons were written down as ADRs the same day (`lib/documentation/cli/adrs/`, at the user's direction). But a model or a person opening a file in `source/business/` still had nothing in reach saying what the layer may include, which rules bind a change there, or where the law is enforced. The user asked that "each file … must know the correct context for its layer". This item puts a card at every layer root and gives the ADRs teeth.
 
 **What was built**
 
@@ -6630,7 +6630,7 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,218
 - [x] **The layering**: two new rules in `harness.layering` -- `graph/code_*` may include only one another, `embedstore/`, `contracts/sha256.h` and `contracts/cancellation.h`, so "zero model calls" is a property of the include graph; and only `graph/code_parser.cpp` may include `tree_sitter/`, a check that requires seeing it there. Each verified against a planted violation.
 - [x] **59 new Catch2 cases** (2,615 tests in `make test`, the e2e among them), and on the real binary **`cli.code_graph_lifecycle`** (`code_graph_e2e.sh`). **Every vendored grammar has a golden fixture**: a mini-repo per language under `tests/fixtures/code_graph/<lang>/` whose whole graph -- every node with its description, metadata and `file:line` mentions, every edge with its origin and sites -- must equal `<lang>.golden` byte for byte, each reviewed by hand when it was cut (`APOGEE_CODE_GRAPH_GOLDENS=<dir>` regenerates them outside the tree for review).
 
-**The pins** (each archive's exact commit, the tag it is; every one MIT -- the same table, with each grammar's size, in [`third_party/README.md`](../../src/cli/third_party/README.md)):
+**The pins** (each archive's exact commit, the tag it is; every one MIT -- the same table, with each grammar's size, in [`third_party/README.md`](../../../src/cli/third_party/README.md)):
 
 | Repository | Tag | Commit | Licence |
 |---|---|---|---|
@@ -7052,7 +7052,7 @@ Trade-off, recorded: the roster lives in cache, not the config -- one provider e
 - [x] **`/model` switches onto it, and back** (`chat_session`'s `move_pin`): one pin at a time, only on the conversation's backend. Leaving it, by `/model` anywhere else (the entry's bare key included) or by a `/suite` that moves the conversation, restores the entry and rebuilds it. A rebuild that fails puts every pin back and says why, and the conversation stays where it was. Attachments settle before a rebuild, as `/suite` settles them. The switch is said as the launch pin is (`switched to claude-sonnet-5-5 -- anthropic's roster, on backend 'claude'`), and `/model`, the banner and the TUI header read `claude (claude-sonnet-5-5)` while it holds. `/models` marks the pinned entry and folds each configured roster to one line. As a side effect, `/model Claude` now lands on the file's spelling, so `/models` stars it.
 - [x] **Saved with the chat** (`Session::model`, written only when set): launch `-m` and `/model` record the pin. A resume pins it again when the chat lands back on its backend, said on stderr as `-m` says it, so a chat reopened from the TUI's picker never quietly answers from a different model. `-m` on a resume replaces it, and an older binary ignores the field and resumes on the entry's own model.
 - [x] **Completed where it is typed** (`ArgumentValues::Models`): `/model ` offers the backends, then every configured type's cached roster ids, described `<type>'s roster`, read from the cache and never fetched. That covers the REPL and the TUI's input alike, one completer. `/rerank` keeps the backends alone.
-- [x] **Parity, named** ([ADR 0002](../adrs/cli/mode-parity.md)): the REPL and the shell share `run_session`, so they are one change. Machine mode has no `/model` (a `/`-line other than `/play` is a prompt there); its `-m` already resolved, and the resume re-pin reaches it through the same core. `serve`'s per-request roster override stays skipped, M13's consumed decision, and machine mode's `result.model` still names the backend key (a recorded default).
+- [x] **Parity, named** ([ADR 0002](../adrs/mode-parity.md)): the REPL and the shell share `run_session`, so they are one change. Machine mode has no `/model` (a `/`-line other than `/play` is a prompt there); its `-m` already resolved, and the resume re-pin reaches it through the same core. `serve`'s per-request roster override stays skipped, M13's consumed decision, and machine mode's `result.model` still names the backend key (a recorded default).
 - [x] **The mock says what it runs**: `{{model}}` expands to the model the provider was built to run, so a script proves which model a pin put it on.
 - [x] **Tests**:
   - the resolution table: a key in any case, an entry's own model, a key that is also a roster id, a sole owner, two owners, unknown and empty;
@@ -7156,7 +7156,7 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,100 
 
 Trade-off, recorded: Claude Code's list is Apogee's to keep current. A new Anthropic model is a row in `model_roster.cpp`, and a retired one a deletion, until Claude Code prints a list of its own. Then the fetched roster wins at once, with no change here.
 
-**Made a standing rule the same day (the user's word): [ADR 0009](../adrs/cli/built-in-model-lists.md), model lists Apogee carries are kept current with their vendors.** The lists are updated during development whenever relevant, by the change that finds them stale:
+**Made a standing rule the same day (the user's word): [ADR 0009](../adrs/built-in-model-lists.md), model lists Apogee carries are kept current with their vendors.** The lists are updated during development whenever relevant, by the change that finds them stale:
 - a vendor shipping, renaming or retiring a model;
 - a change touching a backend, the rosters, completion or model selection;
 - every release roll.
@@ -7326,13 +7326,13 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed 3,101 
 ### 2026-10-10 — `tui-parity-law` (backlog item 37a): the shell is a mode
 
 **Why.** The shell shipped with seven views. The same day's parity spike counted 25 root subcommands, 7 with a shell surface and 18 with none, and nothing held the gap honest:
-- [ADR 0002](../adrs/cli/mode-parity.md) named three doors, not four;
+- [ADR 0002](../adrs/mode-parity.md) named three doors, not four;
 - the per-change checklist had no line for the shell;
 - which commands deliberately get no view lived in chat history.
 
 Track 37 (37a–37h, the user's placement, from that spike and a second one) draws the rest. Its law ships first, so coverage drift is a failing test from the first day rather than after the views exist.
 
-- [x] **[ADR 0010](../adrs/cli/the-shell-is-a-mode.md), the shell is a mode.** Every root subcommand's place in the shell is one of four classes:
+- [x] **[ADR 0010](../adrs/the-shell-is-a-mode.md), the shell is a mode.** Every root subcommand's place in the shell is one of four classes:
   - drawn by a named view;
   - backfilled by a named pending item;
   - covered by the exec line (37h), with no curated view;
@@ -7716,8 +7716,8 @@ Decisions taken while building, for veto:
 
 Meanwhile the parity law classified `execute` as a view whose door was often absent, and stayed green. Track 44 (44a–44d, the user's placement) fixes the class, and **the records come first** (the user's call): the fixes build under them.
 
-- [x] **[ADR 0011](../adrs/cli/one-session-opening.md), a mode is opened by its command's own path.** One open function and one flag table per mode (`run_session` and `bind_session_flags` today), and every front end's door calls that function with that table. A front end owns presentation only. A door offered by a picker follows the command's own rules, worded in its vocabulary. A second composition of an opening is the defect.
-- [x] **[ADR 0012](../adrs/cli/doors-are-reachable.md), a classified door is reachable.** A `View` classification asserts a door reachable on a fresh install: a data directory as `check --fix` seeds it, with no suite and no saved chat. A genuinely conditional door either becomes unconditional or its row records the condition, which the shell says where the door is absent.
+- [x] **[ADR 0011](../adrs/one-session-opening.md), a mode is opened by its command's own path.** One open function and one flag table per mode (`run_session` and `bind_session_flags` today), and every front end's door calls that function with that table. A front end owns presentation only. A door offered by a picker follows the command's own rules, worded in its vocabulary. A second composition of an opening is the defect.
+- [x] **[ADR 0012](../adrs/doors-are-reachable.md), a classified door is reachable.** A `View` classification asserts a door reachable on a fresh install: a data directory as `check --fix` seeds it, with no suite and no saved chat. A genuinely conditional door either becomes unconditional or its row records the condition, which the shell says where the door is absent.
 - [x] **Each record's enforcement is pending, and says so**, dated. ADR 0011's door goldens land with 44b and 44c, ADR 0012's real-terminal walk with 44d. Neither record claims teeth it does not yet have.
 - [x] **The pointers**:
   - ADR 0002 and ADR 0010 each gained one dated line pointing forward (ADRs are append-only);
@@ -7732,7 +7732,7 @@ Decisions taken while building, for veto:
 
 ### 2026-10-14 — `tui-execute-door` (backlog item 44b): the execute door, always there, through the one opening
 
-**Why.** Execute was hard to reach from the shell. A fresh shell went straight into a chat, since the picker appeared only once a chat was saved, so a new install had no execute entry anywhere. The picker's execute rows were its own decision: a row per suite, and a bare row only when no suite was configured at all, where `apogee execute` opens bare whenever no suite is the default. And every shell session was opened from an argv the shell spelled itself. [ADR 0011](../adrs/cli/one-session-opening.md), written first (44a), names the class: a front end composing its own second opening of a mode.
+**Why.** Execute was hard to reach from the shell. A fresh shell went straight into a chat, since the picker appeared only once a chat was saved, so a new install had no execute entry anywhere. The picker's execute rows were its own decision: a row per suite, and a bare row only when no suite was configured at all, where `apogee execute` opens bare whenever no suite is the default. And every shell session was opened from an argv the shell spelled itself. [ADR 0011](../adrs/one-session-opening.md), written first (44a), names the class: a front end composing its own second opening of a mode.
 
 - [x] **One opening per mode** (`cli/execute`, `cli/chat`):
   - `open_execute_session` and `open_chat_session` are what the commands' callbacks run and what the shell's driver calls: the session core in its mode over flags parsed through the command's own table;
@@ -7756,7 +7756,7 @@ Decisions taken while building, for veto:
 
 ### 2026-10-14 — `tui-session-launch` (backlog item 44c): launching the shell into a session
 
-**Why.** The shell could not be opened *into* a session. `apogee tui --help` listed no option against `apogee execute`'s 40, so "the shell, in execute under suite X with this folder attached" had no spelling, though nearly every one of those knobs has a slash twin once a session exists. [ADR 0011](../adrs/cli/one-session-opening.md) asks for one flag table per mode that every door speaks.
+**Why.** The shell could not be opened *into* a session. `apogee tui --help` listed no option against `apogee execute`'s 40, so "the shell, in execute under suite X with this folder attached" had no spelling, though nearly every one of those knobs has a slash twin once a session exists. [ADR 0011](../adrs/one-session-opening.md) asks for one flag table per mode that every door speaks.
 
 - [x] **The session table on `apogee tui`** (`cli/tui_cmd`). It is bound by the very call `chat` and `execute` make, `bind_session_flags`, with execute's superset, never a copy. A flag the modes grow is `tui`'s with no change there, its completion included.
 - [x] **The launch** (`ShellLaunch`, `launch_mode`):
@@ -7782,7 +7782,7 @@ Decisions taken while building, for veto:
 
 ### 2026-10-14 — `tui-reachability-law` (backlog item 44d): every classified door, proven on a fresh install
 
-**Why.** The disparity audit's quietest finding was the one that let the others recur: **the parity law tested classification, not reachability.** `execute` was classified a view whose door a fresh install did not show, and the law stayed green. [ADR 0012](../adrs/cli/doors-are-reachable.md) (44a) states the rule. 44b made the door true and 44c the launch, and this item makes the rule's breach a failing check.
+**Why.** The disparity audit's quietest finding was the one that let the others recur: **the parity law tested classification, not reachability.** `execute` was classified a view whose door a fresh install did not show, and the law stayed green. [ADR 0012](../adrs/doors-are-reachable.md) (44a) states the rule. 44b made the door true and 44c the launch, and this item makes the rule's breach a failing check.
 
 - [x] **Every view names its door** (`cli/tui_parity`, `ShellDoor`): the view's title as the tab strip and the Go-to menu name it, and what that view shows for this door. The Session view's picker shows `New chat` for `chat` and `Execute` for `execute`; for the rest, the view is the door. A deliberately conditional door records its condition, and `seen` is then the words the shell says it in. No door is conditional today.
 - [x] **The law knows doors** (`shell_law_violations`), naming each of:

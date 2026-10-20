@@ -22,7 +22,7 @@ constexpr std::string_view kAdminPrefix = "/v1/admin";
 
 /// The table. `tests/scripts/cmake/http_api_conformance.cmake` reads the method/pattern
 /// pairs off these lines and requires each to be documented in
-/// `documentation/reference/http-api.md`, and each documented route to be
+/// `documentation/cli/reference/http-api.md`, and each documented route to be
 /// here -- so the reference a client author trusts cannot drift from the
 /// routes that exist. Admin rows are only reachable through the gate.
 constexpr std::array<Route, 96> kRoutes{{

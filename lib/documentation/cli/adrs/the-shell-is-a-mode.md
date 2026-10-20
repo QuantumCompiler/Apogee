@@ -6,13 +6,13 @@
 
 ## Context
 
-[ADR 0002](mode-parity.md) opens "The CLI is driven three ways": a terminal, the HTTP admin plane, machine mode. On 2026-10-10 a fourth door shipped: the full-screen shell (bare `apogee` at a terminal, `apogee tui`, [Milestone AH](../../assistant/MILESTONES.md#milestone-ah--the-full-screen-tui)), with seven views — Session, Models, Chats, Suites, Config, Home, Keys. The same day's parity spike counted, off the installed binary in a sandboxed home:
+[ADR 0002](mode-parity.md) opens "The CLI is driven three ways": a terminal, the HTTP admin plane, machine mode. On 2026-10-10 a fourth door shipped: the full-screen shell (bare `apogee` at a terminal, `apogee tui`, [Milestone AH](../assistant/MILESTONES.md#milestone-ah--the-full-screen-tui)), with seven views — Session, Models, Chats, Suites, Config, Home, Keys. The same day's parity spike counted, off the installed binary in a sandboxed home:
 - **25 root subcommands, 7 with a shell surface and 18 with none;**
 - **118 leaf verbs, 24 carrying a machine read.**
 
 Nothing held that gap honest. No record named the shell a mode, the per-change checklist had no line for it, and which commands deliberately get *no* view lived in chat history rather than in a test.
 
-A second spike the same day set the floor this record stands on. It counted **119 leaf surfaces carrying 434 flags**, which rules out a form per verb at that scale: the hand-built-views anti-pattern that took a sibling project's TUI down under its per-view parity burden. It also proved the structural answer live. One exec line, speaking the CLI's own grammar and running each typed command as a captured child of the shell's own binary, makes every verb and flag work in the shell by construction ([37h](../../backlog/README.md)).
+A second spike the same day set the floor this record stands on. It counted **119 leaf surfaces carrying 434 flags**, which rules out a form per verb at that scale: the hand-built-views anti-pattern that took a sibling project's TUI down under its per-view parity burden. It also proved the structural answer live. One exec line, speaking the CLI's own grammar and running each typed command as a captured child of the shell's own binary, makes every verb and flag work in the shell by construction ([37h](../backlog/README.md)).
 
 ## Decision
 
@@ -48,5 +48,5 @@ A second spike the same day set the floor this record stands on. It counted **11
 
   It fails on an empty registry too, never passing vacuously, and a planted fake subcommand proves it names what it finds.
 - The 32d byte-parity tests hold each view to its command, and the leak test searches each view's rows for a planted key.
-- The per-change checklist in [CLAUDE.md](../../assistant/CLAUDE.md) names the rule. [DEVELOPER.md](../../assistant/DEVELOPER.md#adding-a-tui-view) carries the recipe for adding a view.
-- Since 2026-10-10 (37h, [Milestone AH](../../assistant/MILESTONES.md#milestone-ah--the-full-screen-tui)) the exec line is live and reads its refusals from the table: `cli/tui_runner`'s `exec_refusal` matches a typed line against `shell_refusals()` after any root flag, and `tui_runner_test` holds each refused verb to its recorded reason, its neighbours running. With 37g every backfill was drawn, so the table holds views, runner-covered rows and carve-outs only, which `tui_parity_test` holds.
+- The per-change checklist in [CLAUDE.md](../assistant/CLAUDE.md) names the rule. [DEVELOPER.md](../assistant/DEVELOPER.md#adding-a-tui-view) carries the recipe for adding a view.
+- Since 2026-10-10 (37h, [Milestone AH](../assistant/MILESTONES.md#milestone-ah--the-full-screen-tui)) the exec line is live and reads its refusals from the table: `cli/tui_runner`'s `exec_refusal` matches a typed line against `shell_refusals()` after any root flag, and `tui_runner_test` holds each refused verb to its recorded reason, its neighbours running. With 37g every backfill was drawn, so the table holds views, runner-covered rows and carve-outs only, which `tui_parity_test` holds.

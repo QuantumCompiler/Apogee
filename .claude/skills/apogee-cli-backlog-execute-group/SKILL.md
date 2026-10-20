@@ -9,7 +9,7 @@ The group id is an index table: a version (`v0.1.3`), `maintenance`, or `archite
 
 ## 1. Read everything first, ask everything first
 
-1. Load the working process per `/apogee-cli-backlog-execute-item` step 1 (CLAUDE.md fully, SPEC, ROADMAP, DEVELOPER as needed) and the [backlog README](../../../lib/documentation/backlog/README.md).
+1. Load the working process per `/apogee-cli-backlog-execute-item` step 1 (CLAUDE.md fully, SPEC, ROADMAP, DEVELOPER as needed) and the [backlog README](../../../lib/documentation/cli/backlog/README.md).
 2. **Read every document in the group's table before building anything.** The run's order is the table's build order with gates honored; an item whose gate chain leaves the group and is not shipped is marked out of the run at the start, and said.
 3. **Resolve every blocking call now.** Collect the `[user]` open calls across *all* the group's documents and ask them together (AskUserQuestion), before the first line of code — mid-run there is no user. `[default: …]` calls are taken as stated and recorded as dated decisions in their documents. An unanswered `[user]` call drops only its own item (and its dependents) from the run, and the drop is announced in the plan, not discovered at item seven.
 4. Check `git status` and the index's 🚧 marks: this skill assumes it owns the checkout — commits punctuate the run — so another session mid-item on the same checkout means stop and tell the user before starting.

@@ -11,7 +11,7 @@ The backlog index gives every item an identity shaped by its table: release item
 
 Parallel sessions build and ship while you work:
 
-1. Re-read [`lib/documentation/backlog/README.md`](../../../lib/documentation/backlog/README.md) and check `git status` — know which items are 🚧 (an in-flight document gets id-reference edits only, nothing else; moving a 🚧 item itself is worth flagging to the user first), and whether recent ships changed the tables since you last looked.
+1. Re-read [`lib/documentation/cli/backlog/README.md`](../../../lib/documentation/cli/backlog/README.md) and check `git status` — know which items are 🚧 (an in-flight document gets id-reference edits only, nothing else; moving a 🚧 item itself is worth flagging to the user first), and whether recent ships changed the tables since you last looked.
 2. **Survey every reference before editing**: grep the moving item's id and its filename across `lib/documentation/`, and the ids of every trailing item in the source table (they will slide). List the hits; you will edit each as a targeted string.
 3. **Bare ids are landmines.** `M3`/`M4` match the **M3 Max chip** in MILESTONES' performance records; bare numbers match dates (`\b28\b` hits `2026-09-28`) and model names (`27B`). Never blind-replace an id — every occurrence is replaced as part of a longer exact string, or hand-verified first.
 

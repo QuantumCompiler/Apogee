@@ -4,7 +4,7 @@
 
 ## Context
 
-[ADR 0002](mode-parity.md) keeps behavior in one core that every mode renders, and [ADR 0010](the-shell-is-a-mode.md) made the full-screen shell a mode. Neither said where a *session's opening* lives. On 2026-10-13 the opening of `apogee execute` grew three behaviors ([Milestone AK](../../assistant/MILESTONES.md#milestone-ak--the-coding-mode)):
+[ADR 0002](mode-parity.md) keeps behavior in one core that every mode renders, and [ADR 0010](the-shell-is-a-mode.md) made the full-screen shell a mode. Neither said where a *session's opening* lives. On 2026-10-13 the opening of `apogee execute` grew three behaviors ([Milestone AK](../assistant/MILESTONES.md#milestone-ak--the-coding-mode)):
 - **41a** — the bare door: with no suite named or the default, it opens on `-m` or the default backend;
 - **41b** — the project opening: `AGENTS.md` (else `CLAUDE.md`) read into every request, the folder attached;
 - **41c** — the coder persona, carried in a project unless `-s` replaces it.
@@ -46,4 +46,4 @@ These are one drift class: **a front end composing its own second opening of a m
 - **The flag table, since 2026-10-14 (44c).** `apogee tui` binds the session table through the same `bind_session_flags` call the modes make. Two tests hold it:
   - `tui_cmd_test`'s "apogee tui takes the session table" requires `tui`'s option spellings to equal `execute`'s, so a flag the modes grow is `tui`'s or the test fails.
   - `tui_session_test`'s "apogee tui's flags open that session first" opens a session from flags parsed through `tui`'s table, and requires the same transcript, suite and backend as the same flags on `apogee execute --tools` and `apogee chat --tools`.
-- The per-change checklist in [CLAUDE.md](../../assistant/CLAUDE.md) names the rule.
+- The per-change checklist in [CLAUDE.md](../assistant/CLAUDE.md) names the rule.

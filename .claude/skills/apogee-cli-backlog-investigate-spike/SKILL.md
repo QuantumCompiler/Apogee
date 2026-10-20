@@ -16,9 +16,9 @@ A spike answers a design question with **evidence, not opinion**. Its deliverabl
 
 ## 2. Ground first
 
-1. [`lib/documentation/backlog/README.md`](../../../lib/documentation/backlog/README.md) — the index: what's already queued, the gate convention, where a resulting split would land (release table vs. the standing Architecture/Maintenance tables).
-2. [`lib/documentation/assistant/CLAUDE.md`](../../../lib/documentation/assistant/CLAUDE.md) and [`SPEC.md`](../../../lib/documentation/assistant/SPEC.md) — the invariants and non-goals the findings must respect. If the spike's premise collides with a SPEC non-goal, surface that **as a finding** — a SPEC revision is the user's call, made before any items exist.
-3. [`ROADMAP.md`](../../../lib/documentation/assistant/ROADMAP.md) — release context; which open `[user]` decisions might interact with this question.
+1. [`lib/documentation/cli/backlog/README.md`](../../../lib/documentation/cli/backlog/README.md) — the index: what's already queued, the gate convention, where a resulting split would land (release table vs. the standing Architecture/Maintenance tables).
+2. [`lib/documentation/cli/assistant/CLAUDE.md`](../../../lib/documentation/cli/assistant/CLAUDE.md) and [`SPEC.md`](../../../lib/documentation/cli/assistant/SPEC.md) — the invariants and non-goals the findings must respect. If the spike's premise collides with a SPEC non-goal, surface that **as a finding** — a SPEC revision is the user's call, made before any items exist.
+3. [`ROADMAP.md`](../../../lib/documentation/cli/assistant/ROADMAP.md) — release context; which open `[user]` decisions might interact with this question.
 4. **Precedents** — if a shipped Apogee item or an external project has already solved an analog, read it before probing; it tells you which walls are real and which are already-solved problems.
 
 ## 3. Probe the real thing
@@ -28,7 +28,7 @@ Prefer a probe over an argument: run the actual binary, drive it the way the que
 - **Sandbox everything.** A probe that touches state runs against a temp `APOGEE_HOME` under the scratchpad directory. Never touch the real `~/.apogee`.
 - **Probe scripts live in the scratchpad**, not the repo. Promote a probe into `lib/src/.../tests/` only when the user asks to keep it.
 - Shell facts for probing on this machine: Bash-tool stdin is a pipe, so smoke-test the binary with `</dev/null`; macOS has no `timeout` command (enforce deadlines inside the probe script); use absolute paths.
-- If the probe needs real weights, follow [the model families](../../../lib/documentation/assistant/DEVELOPER.md#on-real-weights-the-model-families) rules — one family at a time, model loaded once, honoring the exclusions listed there. Most spikes don't need weights; don't load a model to answer a plumbing question.
+- If the probe needs real weights, follow [the model families](../../../lib/documentation/cli/assistant/DEVELOPER.md#on-real-weights-the-model-families) rules — one family at a time, model loaded once, honoring the exclusions listed there. Most spikes don't need weights; don't load a model to answer a plumbing question.
 - **Play the naive outsider.** When the question is "can X be plugged into / driven by Y," write the probe the way a stranger would — no insider shortcuts, no reading our source to cheat — so every wall a real integrator would hit shows up as a measured failure instead of staying invisible.
 
 ## 4. Frame findings as walls

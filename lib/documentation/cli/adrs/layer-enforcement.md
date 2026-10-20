@@ -4,7 +4,7 @@
 
 ## Context
 
-The 2026-10-03 architecture spike measured the real include graph — 22 packages, 81 edges — and found it 93% conformant to a four-layer model, with exactly six violating edge-types, five sharing one root cause: the shared contracts living in a Business package. The carve (A1) moved them to a Data-floor `contracts/` module and the measured graph reached zero upward edges; the move (A2) made the layers literal directories — 433 source and 194 test files under `source/<layer>/<package>/`, include lines unchanged because the layer roots are the include roots (both shipped 2026-10-03, [Milestone AA](../../assistant/MILESTONES.md#milestone-aa--the-four-layers)).
+The 2026-10-03 architecture spike measured the real include graph — 22 packages, 81 edges — and found it 93% conformant to a four-layer model, with exactly six violating edge-types, five sharing one root cause: the shared contracts living in a Business package. The carve (A1) moved them to a Data-floor `contracts/` module and the measured graph reached zero upward edges; the move (A2) made the layers literal directories — 433 source and 194 test files under `source/<layer>/<package>/`, include lines unchanged because the layer roots are the include roots (both shipped 2026-10-03, [Milestone AA](../assistant/MILESTONES.md#milestone-aa--the-four-layers)).
 
 ## Decision
 
@@ -25,4 +25,4 @@ The CLI is four layers, lowest to highest:
 
 ## Enforcement
 
-The `harness.layering` test holds the four-layer map and fails on an undeclared or upward edge (shipped with A1). [A4](../../assistant/MILESTONES.md#milestone-aa--the-four-layers) makes the law compile-time: one static library per module, the link graph as the dependency declaration, the grep test rescoped to its named scalpel allowances. The summary card at each layer root restates this rule in brief and links here.
+The `harness.layering` test holds the four-layer map and fails on an undeclared or upward edge (shipped with A1). [A4](../assistant/MILESTONES.md#milestone-aa--the-four-layers) makes the law compile-time: one static library per module, the link graph as the dependency declaration, the grep test rescoped to its named scalpel allowances. The summary card at each layer root restates this rule in brief and links here.

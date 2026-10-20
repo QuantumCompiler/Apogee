@@ -3,7 +3,7 @@
 # Each layer root, in source/ and in tests/, carries a short CLAUDE.md -- a
 # card a model reads for free whenever it opens a file in that layer -- that
 # states the layer's law in brief and links the ADRs for depth
-# (lib/documentation/adrs/cli/). A card is only worth having while it is
+# (lib/documentation/cli/adrs/). A card is only worth having while it is
 # right, and an ADR's statement of the law only while it matches the law the
 # build enforces. So this check holds four things to the module map,
 # cmake/modules.cmake, which the build and harness.layering already read:
@@ -89,7 +89,7 @@ foreach(layer IN LISTS APOGEE_LAYERS)
                       "${CARD_MAX_LINES} lines and ${CARD_MAX_BYTES} bytes: it summarizes and "
                       "links, the ADRs and DEVELOPER.md hold the rest")
         endif()
-        if(NOT text MATCHES "adrs/cli/layer-enforcement\\.md")
+        if(NOT text MATCHES "cli/adrs/layer-enforcement\\.md")
             violation("${name} does not link ADR 0001 (layer-enforcement.md)")
         endif()
         # Each link target, `](` swapped for a marker first: a `]` in a list

@@ -9,15 +9,15 @@ A bug report arrives as a symptom — a transcript, a wrong number, a hang, "ver
 
 ## 1. Ground first
 
-1. [`lib/documentation/backlog/README.md`](../../../lib/documentation/backlog/README.md) — the Maintenance table (a permanent fixture: it exists even when empty), its `M<n>` numbering, the document format and tag semantics.
+1. [`lib/documentation/cli/backlog/README.md`](../../../lib/documentation/cli/backlog/README.md) — the Maintenance table (a permanent fixture: it exists even when empty), its `M<n>` numbering, the document format and tag semantics.
 2. **Scan the backlog for an existing home.** If a pending item already owns this seam, the evidence extends *that* document instead of spawning a near-duplicate — one concern, one home. Likewise check MILESTONES: a bug in something that just shipped may be a regression against a recorded guarantee, which is worth saying in the diagnosis.
-3. [`CLAUDE.md`](../../../lib/documentation/assistant/CLAUDE.md) / [`SPEC.md`](../../../lib/documentation/assistant/SPEC.md) — the invariants the fix must honor, and the principles that bound it (e.g. open models run; honesty lives in framing, not refusals).
+3. [`CLAUDE.md`](../../../lib/documentation/cli/assistant/CLAUDE.md) / [`SPEC.md`](../../../lib/documentation/cli/assistant/SPEC.md) — the invariants the fix must honor, and the principles that bound it (e.g. open models run; honesty lives in framing, not refusals).
 
 ## 2. Investigate — symptom, root cause, blast radius
 
 Evidence, not inference; the probing rules are the spike skill's:
 
-- **Reproduce it honestly.** A probe that touches state runs against a temp `APOGEE_HOME` under the scratchpad — never the real `~/.apogee`. The user's own transcript is already real-binary evidence; keep its exact bytes (markers, scores, timings) for the document. Shell facts: Bash stdin is a pipe (`</dev/null`), no macOS `timeout` (deadlines inside the script), absolute paths. Real weights only if the bug needs them, per [the model families](../../../lib/documentation/assistant/DEVELOPER.md#on-real-weights-the-model-families); display bugs reproduce better from recorded PTY bytes replayed through a terminal model than from live runs.
+- **Reproduce it honestly.** A probe that touches state runs against a temp `APOGEE_HOME` under the scratchpad — never the real `~/.apogee`. The user's own transcript is already real-binary evidence; keep its exact bytes (markers, scores, timings) for the document. Shell facts: Bash stdin is a pipe (`</dev/null`), no macOS `timeout` (deadlines inside the script), absolute paths. Real weights only if the bug needs them, per [the model families](../../../lib/documentation/cli/assistant/DEVELOPER.md#on-real-weights-the-model-families); display bugs reproduce better from recorded PTY bytes replayed through a terminal model than from live runs.
 - **Find the seam, not just the symptom:** the root cause as `file:line` in the source, and the one place the fix belongs. A signal that pattern-matches a known failure may have a different cause — verify in the code before naming it.
 - **Measure the blast radius** where numbers exist: how often, how slow, how wrong, which surfaces (the `models list` 14 s → "a seek per vocabulary string" precedent — the measurement decided the fix). Record what *already works* around the bug too; it bounds the item's scope.
 - Probe scripts live in the scratchpad; promote one into `tests/` only if the user asks.

@@ -4,7 +4,7 @@
 
 ## Context
 
-ADR [0001](layer-enforcement.md) fixed the four layers and the rule between them, and named their packages in prose, before the module set settled. Its list is short of what shipped: it places `transport` in Infrastructure, where A1 put it in Data (it speaks the contracts' cancellation token and errors); it names `commands`, which A3 split into `cli`, `views` and `machine`, beside which A4 carved `operations`; and it omits `agent`, `mcp` and `scaffold`. Since A4 (2026-10-03) one file declares every module's layer and links -- `lib/src/cli/cmake/modules.cmake` -- and both the build and the layering test read it ([Milestone AA](../../assistant/MILESTONES.md#milestone-aa--the-four-layers)).
+ADR [0001](layer-enforcement.md) fixed the four layers and the rule between them, and named their packages in prose, before the module set settled. Its list is short of what shipped: it places `transport` in Infrastructure, where A1 put it in Data (it speaks the contracts' cancellation token and errors); it names `commands`, which A3 split into `cli`, `views` and `machine`, beside which A4 carved `operations`; and it omits `agent`, `mcp` and `scaffold`. Since A4 (2026-10-03) one file declares every module's layer and links -- `lib/src/cli/cmake/modules.cmake` -- and both the build and the layering test read it ([Milestone AA](../assistant/MILESTONES.md#milestone-aa--the-four-layers)).
 
 ## Decision
 
