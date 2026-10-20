@@ -285,6 +285,110 @@ void JsonReporter::emit_error(std::string_view message) {
     write(object);
 }
 
+void JsonReporter::begin_job(std::string_view verb) {
+    nlohmann::json object = event("job");
+    object["verb"] = std::string{verb};
+    object["protocol_version"] = kMachineProtocolVersion;
+    object["schema"] = std::string{kMachineSchemaVersion};
+    write(object);
+}
+
+void JsonReporter::emit_stage(std::size_t index, std::size_t count, std::string_view label,
+                              std::string_view state) {
+    nlohmann::json object = event("stage");
+    object["index"] = index;
+    object["count"] = count;
+    object["label"] = std::string{label};
+    object["state"] = std::string{state};
+    write(object);
+}
+
+void JsonReporter::emit_bytes(std::int64_t done, std::int64_t total, std::string_view file,
+                              std::size_t index, std::size_t count) {
+    nlohmann::json object = event("bytes");
+    object["done"] = done;
+    if (total > 0) {
+        object["total"] = total;
+    }
+    if (!file.empty()) {
+        object["file"] = std::string{file};
+        object["index"] = index;
+        object["count"] = count;
+    }
+    write(object);
+}
+
+namespace {
+
+void with_scene(nlohmann::json& object, std::size_t scene) {
+    if (scene > 0) {
+        object["scene"] = scene;
+    }
+}
+
+}  // namespace
+
+void JsonReporter::emit_ready(std::string_view device, std::string_view dtype,
+                              std::string_view mode, std::size_t scene) {
+    nlohmann::json object = event("ready");
+    object["device"] = std::string{device};
+    if (!dtype.empty()) {
+        object["dtype"] = std::string{dtype};
+    }
+    if (!mode.empty()) {
+        object["mode"] = std::string{mode};
+    }
+    with_scene(object, scene);
+    write(object);
+}
+
+void JsonReporter::emit_step(int step, int steps, std::size_t scene) {
+    nlohmann::json object = event("step");
+    object["step"] = step;
+    object["steps"] = steps;
+    with_scene(object, scene);
+    write(object);
+}
+
+void JsonReporter::emit_frames(int frames, int width, int height, std::size_t scene) {
+    nlohmann::json object = event("frames");
+    object["frames"] = frames;
+    object["width"] = width;
+    object["height"] = height;
+    with_scene(object, scene);
+    write(object);
+}
+
+void JsonReporter::emit_assembling(int frames, std::size_t scene) {
+    nlohmann::json object = event("assembling");
+    object["frames"] = frames;
+    with_scene(object, scene);
+    write(object);
+}
+
+void JsonReporter::emit_segment(int index, int of, double seconds, std::size_t scene) {
+    nlohmann::json object = event("segment");
+    object["index"] = index;
+    object["of"] = of;
+    object["seconds"] = seconds;
+    with_scene(object, scene);
+    write(object);
+}
+
+void JsonReporter::emit_scene(std::size_t scene, std::size_t scenes, std::string_view state) {
+    nlohmann::json object = event("scene");
+    object["scene"] = scene;
+    object["scenes"] = scenes;
+    object["state"] = std::string{state};
+    write(object);
+}
+
+void JsonReporter::emit_document(const nlohmann::json& document) {
+    nlohmann::json object = event("document");
+    object["document"] = document;
+    write(object);
+}
+
 void JsonReporter::emit_task_transition(const tasks::Task& task, std::size_t index,
                                         const std::optional<tasks::LockHolder>& holder) {
     if (index >= task.transitions.size()) {
@@ -381,6 +485,39 @@ std::optional<InputFormat> input_format_from_string(std::string_view name) noexc
 
 std::vector<std::string_view> format_names() {
     return {to_string(OutputFormat::Text), to_string(OutputFormat::StreamJson)};
+}
+
+std::string_view to_string(JobFormat format) noexcept {
+    switch (format) {
+        case JobFormat::Json:
+            return "json";
+        case JobFormat::StreamJson:
+            return "stream-json";
+        case JobFormat::Text:
+            break;
+    }
+    return "text";
+}
+
+std::optional<JobFormat> job_format_from_string(std::string_view name) noexcept {
+    if (name == "text" || name.empty()) {
+        return JobFormat::Text;
+    }
+    if (name == "json") {
+        return JobFormat::Json;
+    }
+    if (name == "stream-json") {
+        return JobFormat::StreamJson;
+    }
+    return std::nullopt;
+}
+
+std::vector<std::string_view> job_format_names(bool document) {
+    if (!document) {
+        return {to_string(JobFormat::Text), to_string(JobFormat::StreamJson)};
+    }
+    return {to_string(JobFormat::Text), to_string(JobFormat::Json),
+            to_string(JobFormat::StreamJson)};
 }
 
 std::string_view to_string(ReadFormat format) noexcept {

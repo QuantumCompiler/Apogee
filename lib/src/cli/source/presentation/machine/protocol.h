@@ -82,7 +82,7 @@ private:
 /// One field of a line.
 struct FieldSpec {
     std::string_view name;
-    /// Its JSON type: `string`, `integer`, `boolean`, `object`, `array`, or
+    /// Its JSON type: `string`, `integer`, `number`, `boolean`, `object`, `array`, or
     /// two of them joined by `|` (`object|null`).
     std::string_view type;
     /// Always present. A field that may be absent is optional -- and absent

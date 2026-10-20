@@ -193,6 +193,52 @@ public:
     /// the tool, its target and `by: grant`.
     void emit_task_grant(const tasks::Task& task, int round, const tasks::Permit& permit);
 
+    // --- a long job's stream (52b) ------------------------------------------
+    //
+    // `models pull`, `video generate`, `video compose` and `voice say` under
+    // `--output-format stream-json`: the progress each already narrates,
+    // framed as events by its one producer. `scene` is 0 outside a composer's
+    // scene, and then omitted.
+
+    /// `job`, first: the verb, and the protocol's and the vocabulary's
+    /// versions.
+    void begin_job(std::string_view verb);
+
+    /// `stage`: a chain's step -- `index` of `count`, its label -- `started`,
+    /// `done` or `failed`.
+    void emit_stage(std::size_t index, std::size_t count, std::string_view label,
+                    std::string_view state);
+
+    /// `bytes`: `done` moved of `total` (left out when unknown -- never
+    /// guessed); in a tree of files, the file and its place.
+    void emit_bytes(std::int64_t done, std::int64_t total, std::string_view file, std::size_t index,
+                    std::size_t count);
+
+    /// `ready`: a runtime loaded -- its device, and its dtype and mode where
+    /// the driver says them.
+    void emit_ready(std::string_view device, std::string_view dtype, std::string_view mode,
+                    std::size_t scene);
+
+    /// `step`: a denoising step, `step` of `steps`.
+    void emit_step(int step, int steps, std::size_t scene);
+
+    /// `frames`: the driver wrote its frames, `width` x `height`.
+    void emit_frames(int frames, int width, int height, std::size_t scene);
+
+    /// `assembling`: the frames going into the clip.
+    void emit_assembling(int frames, std::size_t scene);
+
+    /// `segment`: speech, `index` of `of`, its seconds as the driver counted.
+    void emit_segment(int index, int of, double seconds, std::size_t scene);
+
+    /// `scene`: a composer's scene, `scene` of `scenes`, at `state` --
+    /// `speaking`, `rendering` or `asset` (its asset taken as it is).
+    void emit_scene(std::size_t scene, std::size_t scenes, std::string_view state);
+
+    /// `document`, last: the verb's own document -- what `--output-format
+    /// json` prints, whole.
+    void emit_document(const nlohmann::json& document);
+
     /// Whether any answer text was emitted this run.
     [[nodiscard]] bool wrote_answer() const noexcept;
 
@@ -252,6 +298,22 @@ enum class ReadFormat : std::uint8_t {
     /// nothing else there: diagnostics go to stderr, exit codes as ever.
     Json,
 };
+
+/// How a long job renders (52b): `--output-format` on `models pull` and the
+/// media runs. `text` is the people's view; `json` the verb's one document,
+/// where it has one; `stream-json` its progress as events on stdout, that
+/// document last.
+enum class JobFormat : std::uint8_t {
+    Text,
+    Json,
+    StreamJson,
+};
+
+[[nodiscard]] std::string_view to_string(JobFormat format) noexcept;
+[[nodiscard]] std::optional<JobFormat> job_format_from_string(std::string_view name) noexcept;
+/// The words a job's `--output-format` takes: `json` only for a verb with a
+/// document.
+[[nodiscard]] std::vector<std::string_view> job_format_names(bool document);
 
 [[nodiscard]] std::string_view to_string(ReadFormat format) noexcept;
 [[nodiscard]] std::optional<ReadFormat> read_format_from_string(std::string_view name) noexcept;

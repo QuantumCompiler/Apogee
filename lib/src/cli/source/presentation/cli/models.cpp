@@ -1690,6 +1690,18 @@ std::string read_model_info(const harness::Config& config, std::string_view name
                              ProviderLens{view.get(), &cache, &store});
 }
 
+nlohmann::json model_info_document(const harness::Config& config, std::string_view name,
+                                   const std::filesystem::path& config_path,
+                                   const BusyProgress& progress) {
+    const std::string body = read_model_info(config, name, config_path, progress);
+    if (body.empty()) {
+        return nullptr;
+    }
+    nlohmann::json document = render_record_document(body);
+    document["name"] = std::string{name};
+    return document;
+}
+
 std::string render_role_status(const harness::Config& config, const BusyProgress& progress,
                                const MachineBudgetSource& machine) {
     std::ostringstream out;
@@ -1889,13 +1901,19 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
     info->callback([load, info_name, info_quiet, info_format, &context]() {
         const harness::Config config = load();
         std::string body;
+        nlohmann::json document;
         {
             BusyLine busy{std::cerr, "reading the model",
                           busy_options(*info_quiet || *info_format == ReadFormat::Json)};
-            body = read_model_info(config, *info_name,
-                                   harness::resolve_config_path(context.config_path), busy.sink());
+            const std::filesystem::path config_path =
+                harness::resolve_config_path(context.config_path);
+            if (*info_format == ReadFormat::Json) {
+                document = model_info_document(config, *info_name, config_path, busy.sink());
+            } else {
+                body = read_model_info(config, *info_name, config_path, busy.sink());
+            }
         }
-        if (body.empty()) {
+        if (body.empty() && document.is_null()) {
             // A whole model is not one thing to show: name what it holds.
             const models::StoreRoots roots = store_roots_for(config, harness::models_dir());
             const models::StoreTarget target = models::resolve_store_target(roots, *info_name);
@@ -1941,8 +1959,6 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
             fail("no backend or stored weights named '" + *info_name + "'");
         }
         if (*info_format == ReadFormat::Json) {
-            nlohmann::json document = render_record_document(body);
-            document["name"] = *info_name;
             write_document(std::cout, document);
             return;
         }

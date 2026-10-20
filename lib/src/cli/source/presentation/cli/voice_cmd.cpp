@@ -4,10 +4,12 @@
 
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "cli/helpers.h"
 #include "cli/interrupt.h"
+#include "cli/job_stream.h"
 #include "cli/video_runtime.h"
 #include "cli/voice_say.h"
 #include "contracts/config.h"
@@ -29,7 +31,7 @@ namespace {
 struct SayFlags {
     VoiceSayOptions options;
     double speed = 1.0;
-    ReadFormat format = ReadFormat::Text;
+    JobFormat format = JobFormat::Text;
 };
 
 void voice_say(const RootContext& context, SayFlags flags, const CLI::App& verb) {
@@ -43,8 +45,17 @@ void voice_say(const RootContext& context, SayFlags flags, const CLI::App& verb)
     if (verb.count("--speed") > 0) {
         options.speed = flags.speed;
     }
-    BusyLine busy{std::cerr, "loading the voice model", busy_options(false)};
-    const auto say = [&busy](const std::string& line) {
+    // The run's progress as events instead (52b): the driver's own, relayed.
+    std::optional<JobStream> job;
+    if (flags.format == JobFormat::StreamJson) {
+        job.emplace("voice say");
+    }
+    BusyLine busy{std::cerr, "loading the voice model", busy_options(job.has_value())};
+    const auto say = [&busy, &job](const std::string& line) {
+        if (job.has_value()) {
+            job->events().on_notice(line);
+            return;
+        }
         busy.above([&line] { std::cerr << "[voice] " << line << "\n"; });
     };
     VoiceSaySeams seams;
@@ -57,6 +68,10 @@ void voice_say(const RootContext& context, SayFlags flags, const CLI::App& verb)
     };
     seams.say = say;
     seams.on_event = [&](const video::VoiceEvent& event) {
+        if (job.has_value()) {
+            relay_voice_event(job->events(), event, 0);
+            return;
+        }
         if (const std::optional<std::string> line = narrate_voice_event(event)) {
             say(*line);
             busy.set("speaking");
@@ -72,9 +87,14 @@ void voice_say(const RootContext& context, SayFlags flags, const CLI::App& verb)
     }
     busy.finish();
     if (result.document.is_null()) {
+        if (job.has_value()) {
+            job->failed(result.error);
+        }
         fail(result.error, result.exit_code);
     }
-    if (flags.format == ReadFormat::Json) {
+    if (job.has_value()) {
+        job->events().emit_document(result.document);
+    } else if (flags.format == JobFormat::Json) {
         write_document(std::cout, result.document);
     } else {
         for (const std::string& line : result.lines) {
@@ -82,6 +102,9 @@ void voice_say(const RootContext& context, SayFlags flags, const CLI::App& verb)
         }
     }
     if (result.exit_code != 0) {
+        if (job.has_value()) {
+            job->failed(result.error);
+        }
         fail(result.error, result.exit_code);
     }
 }
@@ -101,7 +124,7 @@ void VoiceCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->require_subcommand(1);
 
     auto flags = std::make_shared<SayFlags>();
-    auto format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    auto format = std::make_shared<JobFormat>(JobFormat::Text);
     CLI::App* say = cmd->add_subcommand(
         "say", "Speak text into one WAV -- each segment's length measured, its record beside it");
     say->add_option("text", flags->options.text, "What to say")->required();
@@ -118,7 +141,7 @@ void VoiceCommand::bind(CLI::App& root, const RootContext& context) {
                         " when it has it)")
         ->type_name(kVoiceValue);
     say->add_option("--speed", flags->speed, "How fast, 0.5-2.0 (default 1.0)");
-    add_read_format(say, format);
+    add_job_format(say, format, /*document=*/true);
     say->callback([&context, flags, format, say]() {
         flags->format = *format;
         voice_say(context, *flags, *say);

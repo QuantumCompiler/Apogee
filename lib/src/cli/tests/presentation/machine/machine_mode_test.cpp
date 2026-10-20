@@ -200,6 +200,57 @@ TEST_CASE("the excerpts a turn sent are a sources event, and nothing when none w
           "\n");
 }
 
+TEST_CASE("a job's events: its versions first, unknowns left out, scenes only in a composition",
+          "[commands][machine][job]") {
+    // 52b: one family across the four verbs, each shape pinned.
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.begin_job("video compose");
+    reporter.emit_stage(2, 3, "quantize to Q4_K_M", "failed");
+    reporter.emit_bytes(64, 0, {}, 0, 0);
+    reporter.emit_bytes(64, 128, "a.safetensors", 1, 4);
+    reporter.emit_ready("cuda", "bfloat16", "i2v", 0);
+    reporter.emit_step(3, 30, 0);
+    reporter.emit_frames(49, 832, 480, 2);
+    reporter.emit_assembling(49, 0);
+    reporter.emit_segment(2, 3, 1.25, 1);
+    reporter.emit_scene(2, 5, "rendering");
+    reporter.emit_document(nlohmann::json{{"object", "video.project"}, {"status", "done"}});
+    const std::vector<std::string> expected{
+        R"({"protocol_version":1,"schema":")" +
+            std::string{apogee::commands::kMachineSchemaVersion} +
+            R"(","type":"job","verb":"video compose"})",
+        R"({"count":3,"index":2,"label":"quantize to Q4_K_M","state":"failed","type":"stage"})",
+        R"({"done":64,"type":"bytes"})",
+        R"({"count":4,"done":64,"file":"a.safetensors","index":1,"total":128,"type":"bytes"})",
+        R"({"device":"cuda","dtype":"bfloat16","mode":"i2v","type":"ready"})",
+        R"({"step":3,"steps":30,"type":"step"})",
+        R"({"frames":49,"height":480,"scene":2,"type":"frames","width":832})",
+        R"({"frames":49,"type":"assembling"})",
+        R"({"index":2,"of":3,"scene":1,"seconds":1.25,"type":"segment"})",
+        R"({"scene":2,"scenes":5,"state":"rendering","type":"scene"})",
+        R"({"document":{"object":"video.project","status":"done"},"type":"document"})"};
+    std::vector<std::string> lines;
+    std::istringstream in{out.str()};
+    for (std::string line; std::getline(in, line);) {
+        lines.push_back(line);
+    }
+    CHECK(lines == expected);
+}
+
+TEST_CASE("a job's format words: json only for a verb with a document",
+          "[commands][machine][job]") {
+    using apogee::commands::JobFormat;
+    CHECK(apogee::commands::job_format_from_string("stream-json") == JobFormat::StreamJson);
+    CHECK(apogee::commands::job_format_from_string("json") == JobFormat::Json);
+    CHECK(apogee::commands::job_format_from_string("") == JobFormat::Text);
+    CHECK_FALSE(apogee::commands::job_format_from_string("jsonl").has_value());
+    CHECK(apogee::commands::job_format_names(true) ==
+          std::vector<std::string_view>{"text", "json", "stream-json"});
+    CHECK(apogee::commands::job_format_names(false) ==
+          std::vector<std::string_view>{"text", "stream-json"});
+}
+
 TEST_CASE("a file writer's permission question carries its diff as detail",
           "[commands][machine][permission][diff]") {
     std::ostringstream out;
@@ -1201,6 +1252,19 @@ TEST_CASE("every event every emitter writes is the declaration's, field for fiel
         reporter.emit_task_transition(task, index, std::nullopt);
     }
     reporter.emit_task_grant(task, 1, task.rounds.back().allowed.front());
+    // A long job's events (52b), as each verb's relay writes them.
+    reporter.begin_job("models pull");
+    reporter.emit_stage(1, 3, "convert to F16", "started");
+    reporter.emit_bytes(512, 1024, "model-00001.safetensors", 1, 2);
+    reporter.emit_bytes(512, 0, {}, 0, 0);
+    reporter.emit_ready("cpu", "float32", "t2v", 0);
+    reporter.emit_ready("mps", {}, {}, 2);
+    reporter.emit_step(1, 30, 2);
+    reporter.emit_frames(49, 832, 480, 0);
+    reporter.emit_assembling(49, 1);
+    reporter.emit_segment(1, 2, 1.5, 0);
+    reporter.emit_scene(1, 2, "speaking");
+    reporter.emit_document(nlohmann::json{{"object", "video.generation"}});
 
     std::set<std::string> seen_types;
     for (const nlohmann::json& event : events(out.str())) {

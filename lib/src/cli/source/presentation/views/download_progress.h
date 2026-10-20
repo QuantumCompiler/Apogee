@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <ostream>
 #include <string>
 #include <string_view>
@@ -36,6 +37,16 @@ namespace apogee::commands {
 /// Codepoint-safe; a width of zero yields an empty string.
 [[nodiscard]] std::string fit_tail(std::string_view text, std::size_t width);
 
+/// One count a download relays rather than paints (52b): `done` of `total`
+/// (zero or less when unknown); in a tree of files, the file and its place.
+struct ByteReport {
+    std::int64_t done = 0;
+    std::int64_t total = 0;
+    std::string_view file{};
+    std::size_t index = 0;
+    std::size_t count = 0;
+};
+
 class DownloadProgress {
 public:
     struct Options {
@@ -45,6 +56,11 @@ public:
         /// cannot be erased by the repaint, and would scroll exactly as the
         /// per-increment lines did.
         std::size_t width = 80;
+        /// Set: nothing is painted, and the counts go here instead (52b) -- a
+        /// job's machine stream relaying the same producer: each file's
+        /// start, every whole percent of a known total (every 16 MiB of an
+        /// unknown one), and where it ended.
+        std::function<void(const ByteReport&)> relay{};
     };
 
     DownloadProgress(std::ostream& out, Options options);
@@ -69,6 +85,7 @@ public:
 
 private:
     void report(std::int64_t written, std::int64_t total);
+    void relay(std::int64_t written, std::int64_t total, bool force);
     [[nodiscard]] std::string file_line() const;
     [[nodiscard]] std::string live_line(std::int64_t written, std::int64_t total) const;
 
@@ -83,6 +100,12 @@ private:
     /// is repainted only when its text would actually change.
     std::string painted_;
     std::int64_t last_report_ = 0;
+    /// Relaying: the tree's size, the last count seen and the last sent.
+    std::size_t count_ = 0;
+    std::int64_t seen_ = -1;
+    std::int64_t seen_total_ = 0;
+    std::int64_t relayed_ = -1;
+    std::int64_t relayed_percent_ = -1;
 };
 
 /// Options for a download reporting on stdout: live on a terminal, and sized

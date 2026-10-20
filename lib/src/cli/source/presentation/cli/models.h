@@ -160,6 +160,15 @@ struct ProviderLens {
                                           const std::filesystem::path& config_path,
                                           const BusyProgress& progress = {});
 
+/// `models info <name> --output-format json`'s document -- the body above
+/// as records, named -- or null when there is no one thing to show. What a
+/// pull's stream ends with for each set it stored (52b), so the two can
+/// never disagree.
+[[nodiscard]] nlohmann::json model_info_document(const harness::Config& config,
+                                                 std::string_view name,
+                                                 const std::filesystem::path& config_path,
+                                                 const BusyProgress& progress = {});
+
 /// Renders rows as an aligned table. Empty input yields a single explanatory
 /// line, never a bare header with nothing under it.
 ///

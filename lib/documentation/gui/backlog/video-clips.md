@@ -6,7 +6,7 @@
 
 **Seam + files.** `source/presentation/video/` (library, clip page, the sheets; view-models), `source/business/media/` (the records scan over the folders, the run assembly over the jobs core), `source/data/preferences/` (added folders). Tests: the records scan over fixture folders (sidecars parsed, chains linked); argv pins for every flag combination the sheet makes; the consent flow over a scripted refusal; run lifecycle over scripted children; hermetic.
 
-**Reference.** The `ScreenVideo*` boards and `ComponentsMedia.dc.html`; the contract board's VIDEO AND VOICE rows (G11's fallback); the CLI's 49c–49e records and flags `(consumed decision)`; [52b](../../cli/backlog/v0.2.0/jobs-stream-json.md) cross-referenced, not gated.
+**Reference.** The `ScreenVideo*` boards and `ComponentsMedia.dc.html`; the contract board's VIDEO AND VOICE rows (G11's fallback); the CLI's 49c–49e records and flags `(consumed decision)`; [52b](../../cli/assistant/MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths) (shipped 2026-10-20) cross-referenced, not gated.
 
 **Decisions made** (dated):
 - 2026-10-20 — From the design-completion spike (the user's call); the library is the folders' records (the design's decision 5, standing).

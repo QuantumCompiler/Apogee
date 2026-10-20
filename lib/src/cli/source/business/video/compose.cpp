@@ -288,6 +288,11 @@ ComposeOutcome render_project(harness::VideoProject& project, const ComposeSeams
     const auto label = [count](std::size_t index) {
         return "scene " + std::to_string(index + 1) + "/" + std::to_string(count);
     };
+    const auto begun = [&seams, count](std::size_t index, std::string_view state) {
+        if (seams.on_scene) {
+            seams.on_scene(index + 1, count, state);
+        }
+    };
 
     std::error_code code;
     std::filesystem::create_directories(project.scenes_dir, code);
@@ -309,6 +314,7 @@ ComposeOutcome render_project(harness::VideoProject& project, const ComposeSeams
             const std::filesystem::path wav = scene_file(project, index, "wav");
             clear(wav);
             say(label(index) + ": speaking its narration");
+            begun(index, "speaking");
             SpokenScene spoken = seams.speak(scene.narration, wav);
             if (!spoken.ok) {
                 return stop(spoken.cancelled, spoken.cancelled
@@ -364,6 +370,7 @@ ComposeOutcome render_project(harness::VideoProject& project, const ComposeSeams
             clip = scene_file(project, index, extension_of(scene.asset));
             clear(clip);
             say(label(index) + ": taking " + scene.asset + " as it is");
+            begun(index, "asset");
             std::filesystem::copy_file(project.assets / scene.asset, clip,
                                        std::filesystem::copy_options::overwrite_existing, code);
             if (code) {
@@ -384,6 +391,7 @@ ComposeOutcome render_project(harness::VideoProject& project, const ComposeSeams
             say(label(index) + ": rendering its clip -- " + seconds_words(ask.seconds) + ", seed " +
                 std::to_string(ask.seed) +
                 (ask.image.empty() ? std::string{} : ", from " + scene.asset));
+            begun(index, "rendering");
             const RenderedClip rendered = seams.render(ask, clip);
             if (!rendered.ok) {
                 return stop(rendered.cancelled, rendered.cancelled

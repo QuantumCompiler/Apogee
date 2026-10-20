@@ -14,7 +14,9 @@
 # listening socket anywhere in the tree while the driver runs; a library's
 # print on neither of apogee's streams; the loop (49d) -- a draft, the final
 # from it over the same seed and frame, a continuation from the final's last
-# frame, a clip with no record refused; `voice say` (50a) -- one WAV with its
+# frame, a clip with no record refused; since 52b each verb's progress as
+# `--output-format stream-json` events, the document last and a Ctrl-C'd
+# stream ending on an error; `voice say` (50a) -- one WAV with its
 # sentences timed and its record, an unknown voice refused, no listener while
 # the speech driver runs, Ctrl-C leaving nothing; and on a pipe, a missing
 # runtime refused naming the command that installs it.
@@ -135,6 +137,28 @@ for stream in out err; do
     fi
 done
 [ -z "$(ls -A "$APOGEE_HOME/cache/video")" ] || fail "a working directory was left"
+
+# --- the same run as events (52b): the driver's own, the document last ------
+generate streamed -o "$WORK_DIR/out/streamed.mp4" --output-format stream-json
+[ "$STATUS" -eq 0 ] || fail "the streamed generation failed ($STATUS): $(cat "$WORK_DIR/streamed.err")"
+python3 - "$WORK_DIR/streamed.out" "$WORK_DIR/out/streamed.mp4.json" <<'PY' \
+    || fail "the generation's stream: $(cat "$WORK_DIR/streamed.out")"
+import json, sys
+events = [json.loads(line) for line in open(sys.argv[1])]
+types = [e["type"] for e in events]
+assert types[0] == "job" and events[0]["verb"] == "video generate", types
+assert types[-1] == "document", types
+ready = [e for e in events if e["type"] == "ready"]
+assert ready and ready[0]["device"] == "cpu" and ready[0]["dtype"] == "float32", ready
+steps = [(e["step"], e["steps"]) for e in events if e["type"] == "step"]
+assert steps == [(1, 2), (2, 2)], steps
+assert types.index("ready") < types.index("step") < types.index("frames") < types.index("assembling"), types
+assert all("scene" not in e for e in events if e["type"] != "document"), "a scene outside a composition"
+assert events[-1]["document"] == json.load(open(sys.argv[2])), "the document is not the record"
+PY
+if grep -q "\[video\]" "$WORK_DIR/streamed.err"; then
+    fail "the stream's narration also reached stderr: $(cat "$WORK_DIR/streamed.err")"
+fi
 
 # --- a given seed is the record's; the text form names the clip -------------
 generate seeded -o "$WORK_DIR/out/seeded.mp4" --seed 7
@@ -330,6 +354,52 @@ set -e
 [ "$STATUS" -eq 130 ] || fail "Ctrl-C mid-speech exited $STATUS: $(cat "$WORK_DIR/voice-stopped.err")"
 [ ! -e "$WORK_DIR/out/stopped.wav" ] || fail "a cancelled speech left a file"
 
+# The same speech as events (52b): ready, each segment, the record last.
+set +e
+"$APOGEE_BIN" voice say "Hello there. How are you?" -o "$WORK_DIR/out/streamed.wav" \
+    --output-format stream-json </dev/null >"$WORK_DIR/voice-stream.out" 2>"$WORK_DIR/voice-stream.err"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 0 ] || fail "the streamed speech failed ($STATUS): $(cat "$WORK_DIR/voice-stream.err")"
+python3 - "$WORK_DIR/voice-stream.out" "$WORK_DIR/out/streamed.wav.json" <<'PY' \
+    || fail "the speech's stream: $(cat "$WORK_DIR/voice-stream.out")"
+import json, sys
+events = [json.loads(line) for line in open(sys.argv[1])]
+types = [e["type"] for e in events]
+assert types[0] == "job" and events[0]["verb"] == "voice say", types
+assert "ready" in types and "segment" in types and types[-1] == "document", types
+segment = next(e for e in events if e["type"] == "segment")
+assert segment["index"] == 1 and segment["of"] >= 1 and segment["seconds"] > 0, segment
+assert events[-1]["document"] == json.load(open(sys.argv[2])), "the document is not the record"
+PY
+# Ctrl-C mid-stream: 130, every line whole, the last an error.
+rm -f "$VOICE_RECORD"
+STUB_VOICE_HANG=1 STUB_VOICE_RECORD="$VOICE_RECORD" "$APOGEE_BIN" voice say "A long one." \
+    -o "$WORK_DIR/out/stopped2.wav" --output-format stream-json </dev/null \
+    >"$WORK_DIR/voice-cancel.out" 2>"$WORK_DIR/voice-cancel.err" &
+CHILD=$!
+tries=0
+until [ -s "$VOICE_RECORD" ] && grep -q '"say"' "$VOICE_RECORD"; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 300 ] || { kill -9 "$CHILD" 2>/dev/null || true; fail "the streamed speech never started"; }
+    sleep 0.1
+done
+kill -INT "$CHILD"
+set +e
+wait "$CHILD"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 130 ] || fail "Ctrl-C mid-stream exited $STATUS: $(cat "$WORK_DIR/voice-cancel.err")"
+python3 - "$WORK_DIR/voice-cancel.out" <<'PY' || fail "the cancelled stream: $(cat "$WORK_DIR/voice-cancel.out")"
+import json, sys
+events = [json.loads(line) for line in open(sys.argv[1])]
+assert events[0]["type"] == "job" and events[-1]["type"] == "error", [e["type"] for e in events]
+# The document --output-format json prints for a cancelled run, then the error.
+documents = [e["document"] for e in events if e["type"] == "document"]
+assert all(d["status"] == "cancelled" for d in documents), documents
+PY
+[ ! -e "$WORK_DIR/out/stopped2.wav" ] || fail "a cancelled streamed speech left a file"
+
 echo "voice say: one WAV, its sentences timed, its record; no listener; Ctrl-C - OK"
 
 # --- video generate --lora (49e): applied by the driver, hashed in the record ---
@@ -431,6 +501,31 @@ grep -q "scene 2/2: rendering its clip" "$WORK_DIR/resumed.err" || fail "the mis
 [ -f "$WORK_DIR/out/tides.mp4" ] || fail "the resumed video did not land"
 
 echo "video compose: planned with one correction, said first, spoken, rendered, kept, resumed - OK"
+
+# --- a composition as events (52b): each scene begun, its drivers' events --
+set +e
+"$APOGEE_BIN" video compose "the tides, twice a day" -o "$WORK_DIR/out/tides-stream.mp4" \
+    --planner planner --output-format stream-json </dev/null \
+    >"$WORK_DIR/compose-stream.out" 2>"$WORK_DIR/compose-stream.err"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 0 ] || fail "the streamed composition failed ($STATUS): $(cat "$WORK_DIR/compose-stream.err")"
+python3 - "$WORK_DIR/compose-stream.out" "$WORK_DIR/out/tides-stream.mp4.json" <<'PY' \
+    || fail "the composition's stream: $(cat "$WORK_DIR/compose-stream.out")"
+import json, sys
+events = [json.loads(line) for line in open(sys.argv[1])]
+types = [e["type"] for e in events]
+assert types[0] == "job" and events[0]["verb"] == "video compose", types
+assert types[-1] == "document", types
+scenes = [(e["scene"], e["scenes"], e["state"]) for e in events if e["type"] == "scene"]
+assert scenes == [(1, 2, "speaking"), (2, 2, "speaking"), (1, 2, "rendering"), (2, 2, "rendering")], scenes
+# Each driver event carries the scene it belongs to, in the order scenes ran.
+assert [e["scene"] for e in events if e["type"] == "segment"] == [1, 2], "segments"
+steps = [e["scene"] for e in events if e["type"] == "step"]
+assert steps and steps == sorted(steps) and set(steps) == {1, 2}, steps
+assert any(e["type"] == "notice" and "plan:" in e["text"] for e in events), "the plan was not said"
+assert events[-1]["document"] == json.load(open(sys.argv[2])), "the document is not the project"
+PY
 
 # --- video compose --edit (50d): the diff said, only the changed scene rendered ---
 cat >"$WORK_DIR/edit.json" <<'JSON'

@@ -545,6 +545,7 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
     };
     compose.can_burn = can_burn;
     compose.say = seams.say;
+    compose.on_scene = seams.on_scene;
     compose.save = save;
     const video::ComposeOutcome outcome = video::render_project(project, compose, cancellation);
     result.document = harness::video_project_document(project);

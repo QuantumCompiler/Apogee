@@ -8822,3 +8822,45 @@ Decisions taken while building, for veto:
 **Verified.** `lib/scripts/cicd.sh --test`: 3566 of 3566, two skipped and said (the real caption burn without libass, and the existing pdftotext case); the darwin suite's 102 cases passed. `cli.machine_schema_conformance` holds the new event and fields.
 
 **Not run on real weights**: nothing here touches a model; every test runs on the mock backend and fixtures.
+
+### 2026-10-20 — `jobs-stream-json` (backlog item 52b): long jobs as event streams
+
+**Why.** A GUI supervising a pull or a render could only parse prose written for people (G9, G11). The progress already existed: the pull chain's `[i/n]` stages, the download's byte counts, the video and voice drivers' JSONL events. It had no machine form.
+
+- [x] **`--output-format stream-json` on `models pull`, `video generate`, `video compose` and `voice say`.**
+  - One JSON object a line on stdout, opened by a `job` event (`verb`, `protocol_version`, `schema`) and closed by the verb's own document.
+  - Without the flag every verb prints exactly what it did before.
+  - The media verbs take `text`, `json` or `stream-json`; a pull, which has no document of its own, takes `text` or `stream-json`. `json` on a pull is refused by name.
+  - The flag's words complete from its `type_name`, as every value set does (ADR 0007).
+- [x] **A relay, never a second narrator.** `cli/job_stream`'s `JobStream` opens the stream, and each producer asks `JobStream::current()` whether to frame what it has instead of painting it:
+  - **The chain** (`run_chain`) says each stage as `stage` events, `started` then `done` or `failed`, in place of its `[i/n]` line.
+  - **The download**: `DownloadProgress` gained `Options::relay`, so every copy, download and hash of a pull is `bytes` events — through `job_download_options()`, which the pull's nine progress sites now use. The cadence is each file's start, each whole percent of a known total, each 16 MiB of an unknown one, and the end. `total` is left out when unknown, never guessed.
+  - **The drivers' events** are relayed as they arrive (`relay_video_event`, `relay_voice_event`): `ready` (device, and dtype and mode when said), `step` n of N, `frames`, `assembling`, `segment`.
+  - **A composition** gained `ComposeSeams::on_scene`, called beside the line `say` already gets: `scene` events (`speaking`, `rendering`, `asset`) with the scene count, and every driver event inside a scene carries its `scene`.
+  - **Everything else a verb prints on stdout for people** reaches the stream as a `notice`: while a stream is open, `std::cout` writes into a line relay (blank lines dropped). So the pull's hundred-odd narration writes needed no edits, and no stray prose can break the stream. A test holds a text pull's lines equal to the same pull's stream notices. The media verbs' `say` lines become notices in place of their stderr busy line.
+- [x] **The document last.**
+  - For the media verbs it is exactly what `--output-format json` prints — the record written beside the output. The e2e holds the stream's document equal to that file.
+  - For a pull it is one `document` per set of weights the run stored, in the order stored. Each is exactly `apogee models info <model>/<format>/<id> --output-format json`'s document: `model_info_document`, extracted from `models info` so the two cannot differ. The sets are: the GGUF or its already-stored twin, a snapshot, an MLX model, a pipeline, a voice model, and in a `--register` chain the snapshot, the F16 and each quantization.
+- [x] **Failure and Ctrl-C end the stream on an `error`**, its message the words stderr gets. `fail` and the pull's three cancel paths tell the stream, and the first failure said is the one sent. A media run that wrote its document anyway (`failed`, `cancelled`) sends it first, as `--output-format json` would print it. Ctrl-C exits 130 with every line whole.
+- [x] **The vocabulary**: ten new types declared in `protocol.cpp` (`job`, `stage`, `bytes`, `ready`, `step`, `frames`, `assembling`, `segment`, `scene`, `document`; `notice` and `error` reused), written by `JsonReporter`'s `begin_job` and `emit_*`. A session's `capabilities.events` lists them, as every type this build can write. `machine-mode.md` gained "A long job's run", held by `cli.machine_schema_conformance`.
+- [x] **The tests**:
+  - `cli/job_stream_test` (new): the line relay; one error; `models pull` streamed over a local Ollama store — bytes to their total, the stored set's document equal to `models info`'s, and the text run's lines equal to the stream's notices; json refused.
+  - `cli/model_chain_test`: stage events and notices, a failed stage.
+  - `views/download_progress_test`: the relay's cadence for a known total, an unknown one and a tree, nothing painted.
+  - `machine/machine_mode_test`: every job event's shape, and the declaration test emitting them all.
+  - `cli.video_lifecycle` grew stream phases on the real binary over the stub drivers: a generation, a speech, a Ctrl-C'd speech, and a composition's scenes.
+  - The chat and execute surface goldens were re-recorded: only their `session` lines changed, listing the new types.
+
+Decisions taken while building, for veto:
+- **The names**: `job`, `stage`, `bytes`, `ready`, `step`, `frames`, `assembling`, `segment`, `scene`, `document`; a chain's steps are `stage` so the denoiser keeps `step`. The doc's working `step` for both would have been ambiguous.
+- **The document rides in a `document` event** rather than as a bare last line, so every line of the stream keeps its `type`. The document inside is exactly the json twin's.
+- **A pull's "stored entry" is each set it stored**, read as `models info` reads it. A chain stores several, so there are several `document` events, the last the last stored.
+- **Stdout's prose is relayed as `notice`s** by redirecting `std::cout` while the stream is open, rather than threading a writer through the pull's code: one producer, no edits to its narration, and nothing unframed on stdout. stderr is left alone.
+- **A composition's voice-driver messages** ("loading torch and kokoro") are relayed as notices in the stream although the text run does not show them: they are the driver's own events, and the stream relays every event.
+- **The relay's cadence**: each whole percent, or each 16 MiB with no total — at most about a hundred `bytes` events a file.
+- **The schema's date stays `2026-10-20`**: 52a moved it today, and both growths ship in one release.
+- **`models convert --register` is not streamed** (out of scope). Its chain says `stage` events only when a stream is open, which only a pull opens.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3574 of 3574, two skipped and said (the real caption burn without libass, and the existing pdftotext case); the darwin suite's 102 cases passed; `cli.video_lifecycle`'s stream phases ran on the real binary over the stub drivers.
+
+**Not run on real weights**: the stream relays the drivers the stubs stand in for; a real pull's stream over the network is the user's run.

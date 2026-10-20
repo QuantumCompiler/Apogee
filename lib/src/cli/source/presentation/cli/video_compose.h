@@ -2,10 +2,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "cli/video_generate.h"
@@ -80,6 +82,8 @@ struct VideoComposeSeams {
     std::function<bool()> can_burn{};
     std::function<std::int64_t()> random_seed{};
     std::function<void(const std::string&)> say{};
+    /// Each scene begun, as the composer says it (52b).
+    std::function<void(std::size_t scene, std::size_t scenes, std::string_view state)> on_scene{};
     std::string platform{};
 };
 

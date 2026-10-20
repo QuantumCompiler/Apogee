@@ -190,6 +190,8 @@ apogee_add_module(cli
     cli/command.h
     cli/model_chain.h
     cli/model_chain.cpp
+    cli/job_stream.h
+    cli/job_stream.cpp
     cli/models_pull.h
     cli/models_pull.cpp
     cli/models_migrate.h

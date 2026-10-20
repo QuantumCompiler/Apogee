@@ -37,6 +37,9 @@ as chat does (see
 [Playing a symphony](#playing-a-symphony-execute)). `task run` and `task resume` take
 `--output-format` alone: a task reads nothing from its driver (see
 [A task's run](#a-tasks-run)).
+Since 52b `models pull`, `video generate`, `video compose` and `voice say`
+take `--output-format stream-json` too: their progress as events, their
+document last (see [A long job's run](#a-long-jobs-run)).
 
 ## Reading the stream
 
@@ -218,6 +221,67 @@ present to answer — and `task_finished` follows. Every `[task]` line a person
 would read goes to stderr, with the outcome; the exit code is the task's (`0`
 done, `130` cancelled, `2` a provider's failure, `1` anything else short of
 done).
+
+## A long job's run
+
+Since 52b the four verbs that run for minutes — `models pull`, `video
+generate`, `video compose` and `voice say` — take `--output-format
+stream-json`: the progress each already narrates for people, as one JSON
+object a line on stdout, and the verb's own document last. It is a relay,
+never a second narrator: the chain's steps, the download's counts and the
+drivers' events are the same producers the busy line and the `[i/n]` lines
+read, framed as events instead. Every line a verb prints for people on stdout
+reaches the stream as a `notice` (blank lines dropped); stderr keeps the
+diagnostics, as ever. Without the flag every verb prints exactly what it did
+before.
+
+```jsonl
+{"type":"job","verb":"models pull","protocol_version":1,"schema":"2026-10-20"}
+{"type":"notice","text":"pulling org/model, then converting it to F16 and registering it"}
+{"type":"stage","index":1,"count":3,"label":"pull org/model's full weights","state":"started"}
+{"type":"bytes","done":67108864,"total":4971201024,"file":"model-00001-of-00002.safetensors","index":1,"count":4}
+{"type":"stage","index":1,"count":3,"label":"pull org/model's full weights","state":"done"}
+…
+{"type":"document","document":{"name":"org--model/safetensors/1a2b3c4d5e6f","fields":[…]}}
+{"type":"document","document":{"name":"org--model/gguf/9f8e7d6c5b4a","fields":[…]}}
+```
+
+```jsonl
+{"type":"job","verb":"video compose","protocol_version":1,"schema":"2026-10-20"}
+{"type":"notice","text":"plan: \"Tides\" -- 2 scenes, about 5.5 s of video"}
+{"type":"scene","scene":1,"scenes":2,"state":"speaking"}
+{"type":"ready","device":"mps","scene":1}
+{"type":"segment","index":1,"of":1,"seconds":2.4,"scene":1}
+…
+{"type":"scene","scene":1,"scenes":2,"state":"rendering"}
+{"type":"ready","device":"mps","dtype":"bfloat16","mode":"t2v","scene":1}
+{"type":"step","step":1,"steps":50,"scene":1}
+…
+{"type":"frames","frames":73,"width":1280,"height":704,"scene":1}
+{"type":"assembling","frames":73,"scene":1}
+…
+{"type":"document","document":{"object":"video.project","status":"done",…}}
+```
+
+| Event | Meaning |
+|---|---|
+| `job` | First: the `verb`, `protocol_version` and `schema` — the same versions a session's announce. |
+| `stage` | A step of `models pull`'s chain (`--safetensors --register[-with]`): `index` of `count`, its `label` in the chain's words, `state` `started`, `done` or `failed`. A failed stage is followed by the chain's own `notice`s saying where it stopped and the one command that resumes it. |
+| `bytes` | Bytes a pull has moved — a download, a copy from the Ollama store, a hash: `done`, and `total` **only when known** (never guessed). In a tree of files (a snapshot, an MLX model, a pipeline, a voice model), the `file` moving and its `index` of `count`. Sent at each file's start, at each whole percent of a known total (each 16 MiB of an unknown one), and at its end. |
+| `ready` | A runtime loaded: `device`, and `dtype` and `mode` (`t2v`, `i2v`) when the driver says them. |
+| `step` | A denoising step done: `step` of `steps`. |
+| `frames` | A clip's frames written: `frames`, `width`, `height`. |
+| `assembling` | Those `frames` going into the clip. |
+| `segment` | Speech made: segment `index` of `of`, its `seconds` as the driver counted. |
+| `scene` | A composition's scene begun: `scene` of `scenes`, `state` `speaking` (its narration), `rendering` (its clip) or `asset` (its asset taken as it is). Every `ready`, `step`, `frames`, `assembling` and `segment` inside a composition carries the `scene` it belongs to; outside one they carry none. |
+| `document` | Last on success: the verb's own document, whole. For `video generate`, `video compose` and `voice say` it is exactly what `--output-format json` prints (the record beside the output). For `models pull`, which has no document of its own, one `document` per set of weights the run stored, in the order stored, each exactly what `apogee models info <model>/<format>/<id> --output-format json` prints for it. |
+
+A failure ends the stream with an `error` event, its `message` the words stderr
+gets; a media run that wrote its document anyway (`status` `failed` or
+`cancelled`, as `--output-format json` prints it) sends that `document` first.
+Ctrl-C exits `130` with the stream ending cleanly on its `error`, every line
+whole. `models pull` takes `text` or `stream-json` only; the three media verbs
+take `text`, `json` or `stream-json`.
 
 ## Validating and generating: the schema
 

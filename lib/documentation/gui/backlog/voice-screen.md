@@ -6,7 +6,7 @@
 
 **Seam + files.** `source/presentation/voice/` (library, say sheet, player; view-models), `source/business/media/` (the Music scan, say-run assembly). Tests: the scan over fixture speech records; argv pins; the player's timing cursor over a fixture document (scripted clock); consent; hermetic.
 
-**Reference.** `ScreenVoice.dc.html`, `ComponentsMedia.dc.html`; the contract board's rows; 50a `(consumed decision)` — the speech document and voices; [52b](../../cli/backlog/v0.2.0/jobs-stream-json.md) cross-referenced, not gated.
+**Reference.** `ScreenVoice.dc.html`, `ComponentsMedia.dc.html`; the contract board's rows; 50a `(consumed decision)` — the speech document and voices; [52b](../../cli/assistant/MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths) (shipped 2026-10-20) cross-referenced, not gated.
 
 **Decisions made** (dated):
 - 2026-10-20 — From the design-completion spike (the user's call).

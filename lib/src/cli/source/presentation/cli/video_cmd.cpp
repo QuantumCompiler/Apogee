@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 
@@ -12,6 +13,7 @@
 #include "backends/factory.h"
 #include "cli/helpers.h"
 #include "cli/interrupt.h"
+#include "cli/job_stream.h"
 #include "cli/video_compose.h"
 #include "cli/video_generate.h"
 #include "cli/video_runtime.h"
@@ -40,7 +42,7 @@ struct GenerateFlags {
     double duration = 0.0;
     int steps = 0;
     int fps = 0;
-    ReadFormat format = ReadFormat::Text;
+    JobFormat format = JobFormat::Text;
 };
 
 void video_generate(const RootContext& context, GenerateFlags flags, const CLI::App& verb) {
@@ -65,9 +67,18 @@ void video_generate(const RootContext& context, GenerateFlags flags, const CLI::
         options.fps = flags.fps;
     }
 
-    const bool json = flags.format == ReadFormat::Json;
-    BusyLine busy{std::cerr, "loading the pipeline", busy_options(false)};
-    const auto say = [&busy](const std::string& line) {
+    const bool json = flags.format == JobFormat::Json;
+    // The run's progress as events instead (52b): the driver's own, relayed.
+    std::optional<JobStream> job;
+    if (flags.format == JobFormat::StreamJson) {
+        job.emplace("video generate");
+    }
+    BusyLine busy{std::cerr, "loading the pipeline", busy_options(job.has_value())};
+    const auto say = [&busy, &job](const std::string& line) {
+        if (job.has_value()) {
+            job->events().on_notice(line);
+            return;
+        }
         busy.above([&line] { std::cerr << "[video] " << line << "\n"; });
     };
     int said_tenth = -1;
@@ -85,6 +96,10 @@ void video_generate(const RootContext& context, GenerateFlags flags, const CLI::
     };
     seams.say = say;
     seams.on_event = [&](const video::VideoEvent& event) {
+        if (job.has_value()) {
+            relay_video_event(job->events(), event, 0);
+            return;
+        }
         if (event.kind == video::VideoEvent::Kind::Step) {
             if (busy.active()) {
                 busy.report("denoising", static_cast<std::size_t>(event.step),
@@ -126,9 +141,14 @@ void video_generate(const RootContext& context, GenerateFlags flags, const CLI::
     }
     busy.finish();
     if (result.document.is_null()) {
+        if (job.has_value()) {
+            job->failed(result.error);
+        }
         fail(result.error, result.exit_code);
     }
-    if (json) {
+    if (job.has_value()) {
+        job->events().emit_document(result.document);
+    } else if (json) {
         write_document(std::cout, result.document);
     } else {
         for (const std::string& line : result.lines) {
@@ -136,13 +156,16 @@ void video_generate(const RootContext& context, GenerateFlags flags, const CLI::
         }
     }
     if (result.exit_code != 0) {
+        if (job.has_value()) {
+            job->failed(result.error);
+        }
         fail(result.error, result.exit_code);
     }
 }
 
 struct ComposeFlags {
     VideoComposeOptions options;
-    ReadFormat format = ReadFormat::Text;
+    JobFormat format = JobFormat::Text;
 };
 
 /// The plan on `backend`: the system prompt and the user message as a
@@ -198,12 +221,23 @@ void video_compose(const RootContext& context, const ComposeFlags& flags) {
         fail(e.what());
     }
     const models::StoreRoots roots = store_roots_of(config);
-    BusyLine busy{std::cerr, "planning", busy_options(false)};
-    const auto say = [&busy](const std::string& line) {
+    // The run's progress as events instead (52b): each scene begun, and its
+    // drivers' own events, relayed with the scene they belong to.
+    std::optional<JobStream> job;
+    if (flags.format == JobFormat::StreamJson) {
+        job.emplace("video compose");
+    }
+    BusyLine busy{std::cerr, "planning", busy_options(job.has_value())};
+    const auto say = [&busy, &job](const std::string& line) {
+        if (job.has_value()) {
+            job->events().on_notice(line);
+            return;
+        }
         busy.above([&line] { std::cerr << "[compose] " << line << "\n"; });
     };
     std::string scene_label;
     int said_tenth = -1;
+    std::size_t scene_now = 0;
 
     VideoComposeSeams seams;
     seams.ready_video = [&config](const ResolvedPipeline& pipeline) {
@@ -239,6 +273,11 @@ void video_compose(const RootContext& context, const ComposeFlags& flags) {
         run.ready = [](const ResolvedVoiceModel& resolved) {
             return video::probe_voice(video::VideoHost::current(), resolved.dir, resolved.handle);
         };
+        if (job.has_value()) {
+            run.on_event = [&](const video::VoiceEvent& event) {
+                relay_voice_event(job->events(), event, scene_now);
+            };
+        }
         run.work_root = harness::video_work_dir();
         run.platform = platform::host_target();
         return spoken_from(say_text(roots, options, run, InterruptScope::token()));
@@ -260,6 +299,10 @@ void video_compose(const RootContext& context, const ComposeFlags& flags) {
             return video::probe_video(video::VideoHost::current(), resolved.dir, resolved.handle);
         };
         run.on_event = [&](const video::VideoEvent& event) {
+            if (job.has_value()) {
+                relay_video_event(job->events(), event, ask.scene);
+                return;
+            }
             if (event.kind == video::VideoEvent::Kind::Step) {
                 if (busy.active()) {
                     busy.report(scene_label + ": denoising", static_cast<std::size_t>(event.step),
@@ -287,6 +330,12 @@ void video_compose(const RootContext& context, const ComposeFlags& flags) {
         say(line);
         busy.set("working");
     };
+    seams.on_scene = [&](std::size_t scene, std::size_t scenes, std::string_view state) {
+        scene_now = scene;
+        if (job.has_value()) {
+            job->events().emit_scene(scene, scenes, state);
+        }
+    };
     seams.platform = platform::host_target();
 
     VideoComposeResult result;
@@ -296,9 +345,14 @@ void video_compose(const RootContext& context, const ComposeFlags& flags) {
     }
     busy.finish();
     if (result.document.is_null()) {
+        if (job.has_value()) {
+            job->failed(result.error);
+        }
         fail(result.error, result.exit_code);
     }
-    if (flags.format == ReadFormat::Json) {
+    if (job.has_value()) {
+        job->events().emit_document(result.document);
+    } else if (flags.format == JobFormat::Json) {
         write_document(std::cout, result.document);
     } else {
         for (const std::string& line : result.lines) {
@@ -306,6 +360,9 @@ void video_compose(const RootContext& context, const ComposeFlags& flags) {
         }
     }
     if (result.exit_code != 0) {
+        if (job.has_value()) {
+            job->failed(result.error);
+        }
         fail(result.error, result.exit_code);
     }
 }
@@ -326,7 +383,7 @@ void VideoCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->require_subcommand(1);
 
     auto flags = std::make_shared<GenerateFlags>();
-    auto format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    auto format = std::make_shared<JobFormat>(JobFormat::Text);
     CLI::App* generate = cmd->add_subcommand(
         "generate",
         "Generate one clip -- narrated step by step, written only when whole, its record beside "
@@ -392,14 +449,14 @@ void VideoCommand::bind(CLI::App& root, const RootContext& context) {
         ->type_name(kPathValue);
     generate->add_flag("--no-lora", flags->options.no_lora,
                        "No LoRAs -- with --from, the record's cleared");
-    add_read_format(generate, format);
+    add_job_format(generate, format, /*document=*/true);
     generate->callback([&context, flags, format, generate]() {
         flags->format = *format;
         video_generate(context, *flags, *generate);
     });
 
     auto compose_flags = std::make_shared<ComposeFlags>();
-    auto compose_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    auto compose_format = std::make_shared<JobFormat>(JobFormat::Text);
     CLI::App* compose = cmd->add_subcommand(
         "compose",
         "Compose a narrated, captioned video from a brief -- the scenes planned and said first, "
@@ -457,7 +514,7 @@ void VideoCommand::bind(CLI::App& root, const RootContext& context) {
     compose->add_flag("--dry-run", compose_flags->options.dry_run,
                       "With --from: say the diff and print the edited project; render and write "
                       "nothing");
-    add_read_format(compose, compose_format);
+    add_job_format(compose, compose_format, /*document=*/true);
     compose->callback([&context, compose_flags, compose_format]() {
         compose_flags->format = *compose_format;
         video_compose(context, *compose_flags);

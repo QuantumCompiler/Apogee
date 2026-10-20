@@ -1,6 +1,7 @@
 #include "cli/models_pull.h"
 
 #include <CLI/CLI.hpp>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -22,7 +23,9 @@
 #include "cli/config_cmd.h"
 #include "cli/helpers.h"
 #include "cli/interrupt.h"
+#include "cli/job_stream.h"
 #include "cli/model_chain.h"
+#include "cli/models.h"
 #include "cli/models_migrate.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
@@ -51,9 +54,25 @@
 namespace apogee::commands {
 namespace {
 
+/// A failure said on the job's stream too, when one is open (52b): its
+/// `error` event carries the words stderr gets.
+void tell_job(const std::string& message) {
+    if (JobStream* job = JobStream::current(); job != nullptr) {
+        job->failed(message);
+    }
+}
+
 [[noreturn]] void fail(const std::string& message) {
     std::cerr << "apogee models: " << message << "\n";
+    tell_job(message);
     throw CLI::RuntimeError(1);
+}
+
+/// A set of weights the pull stored, for the stream's documents (52b).
+void note_stored(const std::string& model, std::string_view format, const std::string& id) {
+    if (JobStream* job = JobStream::current(); job != nullptr) {
+        job->stored(models::weights_handle(model, format, id));
+    }
 }
 
 /// A ref shaped "owner/repo…" is Hugging Face; anything else is an Ollama ref.
@@ -124,7 +143,7 @@ models::ConvertResult run_conversion(const std::filesystem::path& snapshot,
                                      const training::Converter& converter, std::int64_t estimate) {
     const std::filesystem::path partial = models::conversion_partial_path(output);
     models::ConvertResult result;
-    DownloadProgress progress{std::cout, stdout_download_options()};
+    DownloadProgress progress{std::cout, job_download_options()};
     {
         const Ticker ticker{[&progress, &partial, estimate]() {
             std::error_code code;
@@ -161,7 +180,7 @@ models::StoredFile commit_with_progress(const models::StoreRoots& roots, std::st
               << ") -- its SHA-256 names its folder in the store\n";
     models::StoredFile stored;
     {
-        DownloadProgress progress{std::cout, stdout_download_options()};
+        DownloadProgress progress{std::cout, job_download_options()};
         const InterruptScope interrupt;
         stored = models::commit_gguf(roots, model, staging, file, std::move(record),
                                      [&progress, total](std::int64_t hashed) {
@@ -173,6 +192,7 @@ models::StoredFile commit_with_progress(const models::StoreRoots& roots, std::st
     if (stored.error == models::kStopped) {
         (void)models::remove_weights(staging);
         std::cerr << "apogee models: cancelled -- nothing was written\n";
+        tell_job("cancelled -- nothing was written");
         throw CLI::RuntimeError(kCancelled);
     }
     if (!stored.error.empty()) {
@@ -430,7 +450,7 @@ PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& r
         items.push_back(std::move(item));
     }
 
-    DownloadProgress progress{std::cout, stdout_download_options()};
+    DownloadProgress progress{std::cout, job_download_options()};
     const models::AcquireTreeResult result = models::acquire_tree(
         destination, items,
         [&progress](std::size_t index, std::size_t count, std::string_view relative,
@@ -985,6 +1005,7 @@ void print_mlx_backend_hint(const models::StoredMlx& stored) {
 [[noreturn]] void cancelled_nothing_written(const std::filesystem::path& staging) {
     (void)models::remove_weights(staging);
     std::cerr << "apogee models: cancelled -- nothing was written\n";
+    tell_job("cancelled -- nothing was written");
     throw CLI::RuntimeError(kCancelled);
 }
 
@@ -1061,7 +1082,7 @@ PulledMlx pull_mlx(const std::string& ref, const models::StoreRoots& roots,
         item.promise = promises.back();
         items.push_back(std::move(item));
     }
-    DownloadProgress progress{std::cout, stdout_download_options()};
+    DownloadProgress progress{std::cout, job_download_options()};
     const models::AcquireTreeResult result = models::acquire_tree(
         staging, items,
         [&progress](std::size_t index, std::size_t count, std::string_view relative,
@@ -1202,7 +1223,7 @@ PulledPipeline pull_pipeline(const std::string& ref, const models::StoreRoots& r
         item.promise = promises.back();
         items.push_back(std::move(item));
     }
-    DownloadProgress progress{std::cout, stdout_download_options()};
+    DownloadProgress progress{std::cout, job_download_options()};
     const models::AcquireTreeResult result = models::acquire_tree(
         staging, items,
         [&progress](std::size_t index, std::size_t count, std::string_view relative,
@@ -1315,7 +1336,7 @@ PulledVoice pull_voice(const std::string& ref, const models::StoreRoots& roots,
         item.promise = promises.back();
         items.push_back(std::move(item));
     }
-    DownloadProgress progress{std::cout, stdout_download_options()};
+    DownloadProgress progress{std::cout, job_download_options()};
     const models::AcquireTreeResult result = models::acquire_tree(
         staging, items,
         [&progress](std::size_t index, std::size_t count, std::string_view relative,
@@ -1461,7 +1482,7 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
         models::incoming_path(roots, models::kMlxFormat, source.model);
     models::MlxConvertResult result;
     {
-        DownloadProgress progress{std::cout, stdout_download_options()};
+        DownloadProgress progress{std::cout, job_download_options()};
         {
             const Ticker ticker{[&progress, &staging, estimate]() {
                 progress.bytes(bytes_under(staging), estimate);
@@ -1494,7 +1515,7 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
               << ") -- its shards' SHA-256 names its folder in the store\n";
     models::StoredDirectory stored;
     {
-        DownloadProgress progress{std::cout, stdout_download_options()};
+        DownloadProgress progress{std::cout, job_download_options()};
         const InterruptScope interrupt;
         const auto bytes = static_cast<std::int64_t>(result.info.bytes);
         stored = models::commit_mlx(roots, source.model, staging, record,
@@ -1640,6 +1661,7 @@ ConvertedModel convert_model(const models::StoreRoots& roots, std::string_view g
     const auto cancelled = [&staging]() {
         (void)models::remove_weights(staging);
         std::cerr << "apogee models: cancelled -- nothing was written\n";
+        tell_job("cancelled -- nothing was written");
         throw CLI::RuntimeError(kCancelled);
     };
 
@@ -2144,6 +2166,7 @@ void run_register_chain(const RegisterChainRequest& request, const ChainTools& t
         stages.push_back({"pull " + request.pull_ref + "'s full weights", [&](ChainLog& chain) {
                               const PulledSnapshot pulled =
                                   pull_snapshot(request.pull_ref, roots, /*chained=*/true);
+                              note_stored(pulled.model, models::kSafetensorsFormat, pulled.id);
                               snapshot = pulled.model + "/safetensors/" + pulled.id;
                               // Everything after the pull runs offline: resuming
                               // need not reach Hugging Face again.
@@ -2153,6 +2176,7 @@ void run_register_chain(const RegisterChainRequest& request, const ChainTools& t
     stages.push_back({"convert to F16", [&](ChainLog& chain) {
                           f16 = convert_model(roots, snapshot, snapshot_from, "f16",
                                               /*chained=*/true);
+                          note_stored(f16.model, models::kGgufFormat, f16.id);
                           for (const std::string& warning : f16.warnings) {
                               chain.note(warning);
                           }
@@ -2162,6 +2186,7 @@ void run_register_chain(const RegisterChainRequest& request, const ChainTools& t
                               QuantizedModel made =
                                   quantize_model(roots, f16.model + "/gguf/" + f16.id, {}, level,
                                                  tools.quantize, /*chained=*/true);
+                              note_stored(made.model, models::kGgufFormat, made.id);
                               for (const std::string& warning : made.warnings) {
                                   chain.note(warning);
                               }
@@ -2411,9 +2436,12 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         "With --register: what each backend's name begins with, before -F16, -Q4KM ... "
         "(default: the model's name)");
 
-    pull->callback([pull_ref, pull_yes, pull_safetensors, pull_register, pull_register_with,
-                    pull_register_option, pull_base_name, pull_base_name_option, models_dir,
-                    &context]() {
+    auto pull_format = std::make_shared<JobFormat>(JobFormat::Text);
+    add_job_format(pull, pull_format, /*document=*/false);
+
+    const auto pull_one = [pull_ref, pull_yes, pull_safetensors, pull_register, pull_register_with,
+                           pull_register_option, pull_base_name, pull_base_name_option, models_dir,
+                           &context]() {
         const std::string& ref = *pull_ref;
         const models::StoreRoots roots = store_roots(models_dir, context.config_path);
         const bool registers = *pull_register || pull_register_option->count() > 0;
@@ -2436,7 +2464,8 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
             return;
         }
         if (*pull_safetensors) {
-            (void)pull_snapshot(ref, roots, /*chained=*/false);
+            const PulledSnapshot pulled = pull_snapshot(ref, roots, /*chained=*/false);
+            note_stored(pulled.model, models::kSafetensorsFormat, pulled.id);
             return;
         }
 
@@ -2475,19 +2504,23 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                     models::list_gguf_files(*client, hf, token, cancellation);
                 if (listing.ok && listing.pipeline()) {
                     const InterruptScope interrupt;
-                    (void)pull_pipeline(ref, roots, *client, InterruptScope::token());
+                    const auto pulled = pull_pipeline(ref, roots, *client, InterruptScope::token());
+                    note_stored(pulled.model, models::kPipelineFormat,
+                                pulled.dir.filename().string());
                     return;
                 }
                 // A voice model is a directory too, pulled whole when its
                 // files are laid out as one (50a).
                 if (listing.ok && listing.gguf_files.empty() && listing.voice()) {
                     const InterruptScope interrupt;
-                    (void)pull_voice(ref, roots, *client, InterruptScope::token());
+                    const auto pulled = pull_voice(ref, roots, *client, InterruptScope::token());
+                    note_stored(pulled.model, models::kVoiceFormat, pulled.dir.filename().string());
                     return;
                 }
                 if (listing.ok && listing.gguf_files.empty() && listing.mlx()) {
                     const InterruptScope interrupt;
-                    (void)pull_mlx(ref, roots, *client, InterruptScope::token());
+                    const auto pulled = pull_mlx(ref, roots, *client, InterruptScope::token());
+                    note_stored(pulled.model, models::kMlxFormat, pulled.dir.filename().string());
                     return;
                 }
                 std::string error;
@@ -2528,6 +2561,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                 if (stored.id == known) {
                     std::cout << "already here -- these exact weights are at\n  "
                               << stored.file.string() << "\n";
+                    note_stored(model, models::kGgufFormat, stored.id);
                     return;
                 }
             }
@@ -2552,7 +2586,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         // id once the bytes are verified and hashed.
         const std::filesystem::path staging =
             models::make_incoming_dir(roots, models::kGgufFormat, model);
-        DownloadProgress progress{std::cout, stdout_download_options()};
+        DownloadProgress progress{std::cout, job_download_options()};
         const models::AcquireResult result =
             models::acquire(staging / file_name, promise, source,
                             [&progress](std::int64_t written, std::int64_t total) {
@@ -2618,6 +2652,40 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         }
 
         print_backend_hint(model_file, projector);
+        note_stored(model, models::kGgufFormat, id);
+    };
+    pull->callback([pull_one, pull_format, &context]() {
+        if (*pull_format != JobFormat::StreamJson) {
+            pull_one();
+            return;
+        }
+        // The same pull, its progress as events (52b), and each set it stored
+        // said last as `models info` says it.
+        JobStream job{"models pull"};
+        try {
+            pull_one();
+        } catch (const CLI::RuntimeError&) {
+            job.failed("the pull failed; stderr says why");
+            throw;
+        } catch (const std::exception& e) {
+            job.failed(e.what());
+            throw;
+        }
+        const std::filesystem::path config_path = harness::resolve_config_path(context.config_path);
+        harness::Config config;
+        try {
+            config = harness::load_config(config_path);
+        } catch (const std::exception&) {
+            config = harness::Config{};
+        }
+        for (const std::string& handle : job.handles()) {
+            const nlohmann::json document = model_info_document(config, handle, config_path);
+            if (document.is_null()) {
+                job.events().on_notice("no document for " + handle);
+                continue;
+            }
+            job.events().emit_document(document);
+        }
     });
 
     // ---- delete -------------------------------------------------------------

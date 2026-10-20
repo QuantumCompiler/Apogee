@@ -205,6 +205,84 @@ constexpr std::array<FieldSpec, 5> kTaskFinished{{
     {"transition", "object", true, "The transition, as the ledger wrote it.", {}, {}},
 }};
 
+// A long job's events (52b).
+
+constexpr std::array<FieldSpec, 3> kJob{{
+    {"verb", "string", true, "The verb running: models pull, video generate, ...", {}, {}},
+    {"protocol_version", "integer", true, "As the session event's.", {}, {}},
+    {"schema", "string", true, "The vocabulary's version, a date.", {}, {}},
+}};
+
+constexpr std::array<FieldSpec, 4> kStage{{
+    {"index", "integer", true, "Which step of the chain, from 1.", {}, {}},
+    {"count", "integer", true, "How many steps the chain has.", {}, {}},
+    {"label", "string", true, "The step, in the chain's words.", {}, {}},
+    {"state", "string", true, "started, done or failed.", {}, {}},
+}};
+
+constexpr std::array<FieldSpec, 5> kBytes{{
+    {"done", "integer", true, "Bytes moved so far.", {}, {}},
+    {"total", "integer", false, "Bytes in all; absent when unknown, never guessed.", {}, {}},
+    {"file", "string", false, "In a tree of files: the one moving.", {}, {}},
+    {"index", "integer", false, "Its place in the tree, from 1.", {}, {}},
+    {"count", "integer", false, "Files in the tree.", {}, {}},
+}};
+
+constexpr FieldSpec kScene{
+    "scene", "integer", false, "In a composition: the scene this belongs to, from 1.", {}, {}};
+
+constexpr std::array<FieldSpec, 4> kReady{{
+    {"device", "string", true, "Where the runtime runs: cuda, mps, cpu.", {}, {}},
+    {"dtype", "string", false, "The precision it loaded in, when the driver says.", {}, {}},
+    {"mode", "string", false, "A clip's: t2v or i2v.", {}, {}},
+    kScene,
+}};
+
+constexpr std::array<FieldSpec, 3> kStep{{
+    {"step", "integer", true, "Denoising steps done.", {}, {}},
+    {"steps", "integer", true, "Steps in all.", {}, {}},
+    kScene,
+}};
+
+constexpr std::array<FieldSpec, 4> kFrames{{
+    {"frames", "integer", true, "Frames written.", {}, {}},
+    {"width", "integer", true, "Their width, in pixels.", {}, {}},
+    {"height", "integer", true, "Their height, in pixels.", {}, {}},
+    kScene,
+}};
+
+constexpr std::array<FieldSpec, 2> kAssembling{{
+    {"frames", "integer", true, "Frames going into the clip.", {}, {}},
+    kScene,
+}};
+
+constexpr std::array<FieldSpec, 4> kSegment{{
+    {"index", "integer", true, "Which segment of speech, from 1.", {}, {}},
+    {"of", "integer", true, "Segments in all.", {}, {}},
+    {"seconds", "number", true, "Its length, as the driver counted.", {}, {}},
+    kScene,
+}};
+
+constexpr std::array<FieldSpec, 3> kSceneEvent{{
+    {"scene", "integer", true, "The scene, from 1.", {}, {}},
+    {"scenes", "integer", true, "Scenes in the composition.", {}, {}},
+    {"state",
+     "string",
+     true,
+     "speaking (its narration), rendering (its clip) or asset (its asset taken as it is).",
+     {},
+     {}},
+}};
+
+constexpr std::array<FieldSpec, 1> kDocument{{
+    {"document",
+     "object",
+     true,
+     "The verb's own document, whole: what --output-format json prints.",
+     {},
+     {}},
+}};
+
 // Inbound lines.
 
 constexpr std::array<FieldSpec, 1> kUserLine{{
@@ -237,7 +315,7 @@ constexpr std::array<FieldSpec, 2> kHelloLine{{
 
 // --- the lines -----------------------------------------------------------------
 
-constexpr std::array<LineSpec, 19> kOutbound{{
+constexpr std::array<LineSpec, 29> kOutbound{{
     LineSpec{"session",
              "Once, first, unprompted: the protocol version, the model, the session's "
              "capabilities.",
@@ -261,6 +339,17 @@ constexpr std::array<LineSpec, 19> kOutbound{{
     LineSpec{"task_round", "A task's round started or ended.", kTaskRound},
     LineSpec{"task_grant", "A call a task's grant let through.", kTaskGrant},
     LineSpec{"task_finished", "A task ended.", kTaskFinished},
+    LineSpec{"job", "A long job's first event: the verb and the versions.", kJob},
+    LineSpec{"stage", "A step of a job's chain, started, done or failed.", kStage},
+    LineSpec{"bytes", "Bytes a job has moved, and of how many when known.", kBytes},
+    LineSpec{"ready", "A job's runtime loaded, and on what.", kReady},
+    LineSpec{"step", "A denoising step done.", kStep},
+    LineSpec{"frames", "A clip's frames written.", kFrames},
+    LineSpec{"assembling", "A clip's frames going into it.", kAssembling},
+    LineSpec{"segment", "A segment of speech made.", kSegment},
+    LineSpec{"scene", "A composition's scene begun: speaking, rendering or its asset.",
+             kSceneEvent},
+    LineSpec{"document", "A job's last event: the verb's own document.", kDocument},
 }};
 
 constexpr std::array<LineSpec, 5> kInbound{{

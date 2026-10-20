@@ -6,7 +6,7 @@
 
 **Seam + files.** `source/business/jobs/` (the supervised child over `infrastructure/process`: lifecycle, output tail, stop), `source/presentation/models/` grown (the downloads screens), later consumers noted (1m/1n/1o). Tests: the jobs core over scripted children (steps, stop, failure tails); the downloads view-model over scripted runs; the fallback parser's degrade path; hermetic.
 
-**Reference.** `ScreenDownload.dc.html`, `ScreenModelsDownloads.dc.html`; the contract board's MODELS rows (G9's fallback); [52b](../../cli/backlog/v0.2.0/jobs-stream-json.md) cross-referenced, not gated; M3's chain — the steps and resume commands the UI names.
+**Reference.** `ScreenDownload.dc.html`, `ScreenModelsDownloads.dc.html`; the contract board's MODELS rows (G9's fallback); [52b](../../cli/assistant/MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths) (shipped 2026-10-20) cross-referenced, not gated; M3's chain — the steps and resume commands the UI names.
 
 **Decisions made** (dated):
 - 2026-10-20 — From the design-completion spike (the user's call); one jobs core for every long run (downloads first, media next).

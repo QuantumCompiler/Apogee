@@ -176,6 +176,10 @@ struct ComposeSeams {
     bool can_burn = true;
     /// A line the run says as it goes.
     std::function<void(const std::string&)> say{};
+    /// A scene begun (52b), beside the line `say` gets for it: `scene` of
+    /// `scenes`, from 1, at `speaking` (its narration), `rendering` (its
+    /// clip) or `asset` (its asset taken as it is). Unset says nothing.
+    std::function<void(std::size_t scene, std::size_t scenes, std::string_view state)> on_scene{};
     /// The project as it stands, after every step: the caller writes it.
     std::function<void(const harness::VideoProject&)> save{};
 };
