@@ -24,7 +24,7 @@ The documentation tree was restructured per application (2026-10-20, the user's 
 - [ ] **The darwin scaffold** *([1a](../backlog/darwin-scaffold.md))* — SwiftPM, the four layers with the layering check at birth, the SwiftUI window, the ad-hoc `Apogee.app` bundle, the `APPS`/`changed.sh` wiring.
 - [ ] **The machine-mode client core** *([1b](../backlog/machine-mode-client-core.md))* — discovery across the install channels, the captured child, tolerant typed events over an async stream, answers and cancel down the pipe, the JSON reads.
 - [ ] **The session window** *([1c](../backlog/session-window.md))* — one chat session rendered and steered: streaming answers, thinking, tool lines, the protocol's questions as native UI, stop/Esc as `cancel`; the mock-actor conversation as the standing fixture.
-- [ ] **The darwin pipeline** *([1d](../backlog/darwin-pipeline.md))* — the GUI's own workflow beside the CLI's: the gated build on the macOS runner through `cicd.sh`, the ad-hoc-signed, verified `Apogee.app` artifact; one [user] call open (ship in releases from day one, or CI artifact until 1c).
+- [ ] **The darwin pipeline** *([1d](../backlog/darwin-pipeline.md))* — the GUI's own workflow beside the CLI's: the gated build on the macOS runner through `cicd.sh`, the ad-hoc-signed, verified `Apogee.app` artifact — a per-run CI artifact until 1c ships (the user's call, answered 2026-10-20).
 - See the [`backlog/`](../backlog/README.md) index for the work queue.
 
 ---

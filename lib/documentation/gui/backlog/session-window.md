@@ -16,9 +16,10 @@
 - 2026-10-20 — The view-model is a pure reducer over the core's events, so the window's behavior is tested without UI automation or a binary.
 - 2026-10-20 — Unknown events render visibly-but-quietly; nothing the binary says is dropped on the floor.
 
-**Open calls:**
-- [default: visual design (layout, typography, the thinking indicator's form) at build — native macOS restraint, no theming system yet.]
-- [default: whether `--tools` is on for the first window's sessions (the protocol's asks then flow; the spike proved them) — default on, matching the CLI's interactive default.]
+- 2026-10-20 — **Visual design at build**, in native macOS restraint with no theming system — shared vocabulary through ADR 0002's `styles` module, and the design pages under `lib/design/spec/` (the ColorTokens/Appearance/Chat contracts, landed 2026-10-20) consulted where they apply (the default, confirmed at grooming).
+- 2026-10-20 — **`--tools` is on** for the first window's sessions, matching the CLI's interactive default; the protocol's asks flow and the window renders them (the default, confirmed at grooming).
+
+**Open calls:** none — groomed 2026-10-20.
 
 **Guardrail(s).** The view-model matrix over scripted events (the mock-actor conversation end to end; state per event pinned; the question's answer line byte-exact; cancel's state path; the error and absence renders; the unknown row); no SwiftUI below Presentation (the layering check already fails it structurally); no binary, no network in tests — the one live pass (a real session against the installed binary on the dev host) is the user's run, recorded.
 

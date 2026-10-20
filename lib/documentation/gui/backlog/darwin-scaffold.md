@@ -21,9 +21,10 @@
 - 2026-10-20 — The layering check ships in this item, not later (ADR 0001's enforcement clause honored at birth).
 - 2026-10-20 — **[ADR 0002](../adrs/presentation-mvvm.md) lands with the scaffold** (the user's call, same day): Presentation modules are MVVM (`Views/`, `ViewModels/`, module-specific extras) sharing one `styles` module; the scaffold seeds the shape and the check holds it.
 
-**Open calls:**
-- [default: the first packages per layer named at build (small and honest — e.g. `infrastructure/process`, `data/protocol`, `business/session` as stubs 1b fills); the layer map's declaration format (a list in Package.swift or a sibling manifest) decided by what the check reads most robustly.]
-- [default: `Info.plist` minimums (bundle id `com.quantumcompiler.apogee`, the version mirroring the repo release) at build.]
+- 2026-10-20 — **First packages and the map's format**: the per-layer seed packages named at build (small and honest stubs 1b fills — `infrastructure/process`, `data/protocol`, `business/session` the expected shape); the layer map's declaration format decided by what the check reads most robustly (the default, confirmed at grooming).
+- 2026-10-20 — **`Info.plist` minimums at build**: bundle id `com.quantumcompiler.apogee`, the version mirroring the repo release (the default, confirmed at grooming).
+
+**Open calls:** none — groomed 2026-10-20.
 
 **Guardrail(s).** The layering check (an upward edge fails naming the targets; verified against a planted violation; refuses an empty graph); `swift test` green and hermetic; the bundle step produces an `Apogee.app` that `codesign --verify` accepts (ad-hoc) and that launches on the dev host (the user's one manual check, recorded); `cicd.sh` on a non-mac host defers darwin without failing; `changed.sh gui-darwin` answers correctly for a darwin-only and a docs-only diff.
 

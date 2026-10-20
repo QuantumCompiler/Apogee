@@ -17,9 +17,10 @@
 - 2026-10-20 — The schema's vocabulary is taken from the binary (`__machine-schema`) and from committed fixtures, never from an installed schema file (none exists — the spike's W3 measurement).
 - 2026-10-20 — Unknown events are kept and surfaced, never dropped silently and never fatal.
 
-**Open calls:**
-- [default: the discovery order — the override setting, then the release channel path, then dev/test channels — finalized at build; the override lives in the GUI's own persisted preferences (Data layer), never in the CLI's config.]
-- [default: the event-union's exact Swift shape (enum with associated values + an `unknown(type:raw:)` case) and the `AsyncStream` vs delegate choice at build, within the stated tolerance law.]
+- 2026-10-20 — **Discovery order**: the override setting, then the release channel path, then dev/test channels — finalized at build; the override lives in the GUI's own persisted preferences (Data layer), never in the CLI's config (the default, confirmed at grooming).
+- 2026-10-20 — **The event union's shape**: an enum with associated values plus `unknown(type:raw:)`, and the `AsyncStream`-vs-delegate choice, at build within the stated tolerance law (the default, confirmed at grooming).
+
+**Open calls:** none — groomed 2026-10-20.
 
 **Guardrail(s).** The fake-apogee matrix (handshake, a full turn's events in order, a question answered, cancel acknowledged, a dying child's tail folded into the failure); the tolerance tests (an unknown event type, an unknown field on a known event — both kept, nothing throws); the discovery table (override > channels, a missing binary the typed condition, a candidate that fails verification skipped and said); fixture lines committed from the real binary's stream, refreshed deliberately; the optional real-binary pass skipped-and-said without an install.
 
