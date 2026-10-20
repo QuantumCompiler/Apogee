@@ -55,11 +55,12 @@ Nothing is built yet. The planned layout (the repo's recorded shape for sibling 
 
 | Path | Contents (planned) |
 |------|----------|
-| `lib/src/darwin/` | The macOS application — self-contained, own build, `source/` and `tests/` at its first level. |
+| [`../adrs/`](../adrs/README.md) | The GUI's architecture decision records — [ADR 0001](../adrs/layer-enforcement.md): four layers, dependencies point down, regardless of language and framework. |
+| `lib/src/darwin/` | The macOS application — self-contained, own build, `source/<layer>/<package>/` and `tests/` mirroring it (ADR 0001's shape). |
 | `lib/src/linux/` | The Linux application — same shape. |
 | `lib/src/windows/` | The Windows application — same shape. |
 
-_TODO:_ fill with real packages as the first application lands; what is shared between the three apps (a machine-mode client core?) is a first-spike question.
+_TODO:_ fill with real packages as the first application lands; what is shared between the three apps (a machine-mode client core?) is a first-spike question, decided within ADR 0001's layers.
 
 ---
 
@@ -76,6 +77,7 @@ Every change should satisfy this before merge:
 
 - [ ] Tests for the new behavior pass, and existing tests stay green. _TODO:_ the test command lands with the first application's build.
 - [ ] The machine-mode invariant holds: no linked CLI, no second capability, unknown protocol events tolerated.
+- [ ] **The four-layer law holds** ([ADR 0001](../adrs/layer-enforcement.md)): a new package declares its layer, dependencies point down, the UI framework's types stay in Presentation — whatever the language.
 - [ ] The affected docs are updated in the same change (see **Documentation and Status**).
 
 ## Code Style

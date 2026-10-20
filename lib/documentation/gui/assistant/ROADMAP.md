@@ -18,7 +18,8 @@ How we work: features get discussed in chat, written up here (and in [SPEC.md](S
 
 The documentation tree was restructured per application (2026-10-20, the user's call): CLI docs under `documentation/cli/`, this system scaffolded under `documentation/gui/`, the [router](../../CLAUDE.md) between them.
 
-- [x] The docs home — this system, scaffolded 2026-10-20.
+- [x] The docs home — this system, scaffolded 2026-10-20; `adrs/` and `reference/` beside it the same day.
+- [x] **ADR 0001** — the four-layer law (Infrastructure / Data / Business / Presentation, dependencies down) holds for every GUI application regardless of language and framework (the user's call, 2026-10-20).
 - [ ] **The first spike** — the questions the first application hangs on: which platform first, three native shells vs. one shared shell, the machine-mode client core (spawning the binary, the JSONL session, tolerant event handling), and what of it is shared across the three apps.
 - See the [`backlog/`](../backlog/README.md) index for the work queue (empty until the spike's split lands).
 

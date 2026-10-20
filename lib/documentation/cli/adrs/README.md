@@ -6,7 +6,7 @@ The standing rules of the CLI's architecture, each written once, dated, and kept
 
 **Relation to the layer cards.** Each layer root in the source and test trees carries a short `CLAUDE.md` *summary card* ([A5](../assistant/MILESTONES.md#milestone-aa--the-four-layers)) that states its layer's law in a few lines and links here — the card is the context a model gets for free; this directory is the depth it reaches for. Cards summarize and point; only ADRs carry rationale.
 
-**Scope.** This directory is the CLI's (`lib/src/cli`). A sibling application (the planned GUIs) gets its own directory beside this one (`lib/documentation/adrs/<app>/`).
+**Scope.** This directory is the CLI's (`lib/src/cli`). A sibling application's records live in its own docs home — the GUI's are at [`gui/adrs/`](../../gui/adrs/README.md) (since the 2026-10-20 per-application docs restructure).
 
 ## Index
 

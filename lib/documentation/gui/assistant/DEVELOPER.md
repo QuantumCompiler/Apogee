@@ -14,6 +14,8 @@ lib/src/linux/      the Linux application
 lib/src/windows/    the Windows application
 ```
 
+Each application is four layers — Infrastructure, Data, Business, Presentation — with dependencies pointing down, regardless of its language and framework ([ADR 0001](../adrs/layer-enforcement.md)): `source/<layer>/<package>/`, tests mirroring.
+
 _TODO:_ the real package breakdown lands with the first application — including the first spike's answer on what is shared between the three apps (a machine-mode client core: spawning the `apogee` child, the JSONL session, tolerant event decoding, the cancel path).
 
 ## The contract the GUI builds against
