@@ -272,9 +272,19 @@ struct EditedScenes {
 /// such scene.
 [[nodiscard]] std::string redo_scene(EditedScenes& edited, std::size_t scene, std::int64_t seed);
 
+/// Which of a scene's records differ from the scene it came from, in the
+/// diff's order -- `narration`, `prompt`, `duration`, `asset`, `seed` (52c):
+/// the one reading both the said diff and the document's `changes` take.
+[[nodiscard]] std::vector<std::string> changed_records(const SceneChange& change);
+
 /// The diff, scene by scene, in words -- said before anything renders.
 [[nodiscard]] std::vector<std::string> diff_lines(const EditedScenes& edited,
                                                   std::size_t parent_scenes);
+
+/// The edit's comparison written onto `project`, whose scenes are
+/// `edited`'s (52c): each scene's `from`, `changes` and `moved`, and the
+/// parent's scenes `removed` -- the facts `diff_lines` says, as data.
+void record_provenance(harness::VideoProject& project, const EditedScenes& edited);
 
 /// Carries what each edited scene keeps from its parent into
 /// `scenes_dir`, copied byte for byte under its new number: its narration

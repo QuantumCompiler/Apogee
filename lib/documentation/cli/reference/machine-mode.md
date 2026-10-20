@@ -774,7 +774,7 @@ apogee video compose "<brief>" -o video.mp4 --output-format json   # {"object":"
 ```
 
 It is `version` (1), `status` (`rendering` while it runs, then `done`,
-`failed` or `cancelled`), `brief`, `title`, `output` and `scenes_dir`
+`failed` or `cancelled`; `planned` for a dry run's), `brief`, `title`, `output` and `scenes_dir`
 (`<stem>.scenes/` beside the video); `settings` (`model` and `voice_model`
 as store handles, `voice`, `crossfade`, `captions`, `music` and `assets`,
 null when not given); `plan` (`backend`, and the `attempts` it took: 1, or
@@ -789,15 +789,29 @@ false when this ffmpeg has no libass and the SRT is kept beside the video);
 and `platform`; and since 50d `parent` (the project it was edited from, null
 for an original) and `edits` -- every edit from the original brief to this
 one, each its `instruction` (null for none), the scenes it re-rolled
-(`redo`) and the project it was made `from`. An edit is the same verb:
+(`redo`) and the project it was made `from`; and since 52c, in an edited
+project only, each scene's `from` (the parent's scene it came from, or
+`"new"`), `changes` (which of its records differ from that scene's, in the
+diff's order: `narration`, `prompt`, `duration`, `asset`, `seed` -- empty
+when untouched) and `moved` (it left the parent's order), and the project's
+`removed` (the parent's scenes the edit left out). Read off the edit's own
+record comparison, they say exactly what the diff on stderr says, case for
+case. A project no edit made carries none of them, as before.
+
+`--dry-run` plans on paper (52c): on a brief, the one planning call alone --
+the plan and its spend said on stderr, the project written beside the video
+with `status` `planned` and printed, nothing spoken, rendered or kept under
+`scenes_dir`. The same command without `--dry-run` renders that plan as
+kept, never planning again (`rendering the plan a dry run kept at …`); a dry
+run over a plan already kept makes no call at all. An edit is the same verb:
 
 ```bash
 apogee video compose --from video.mp4 --edit "<instruction>" -o edited.mp4 --output-format json
 ```
 
 Its scene diff is said on stderr before anything renders; `--dry-run`
-prints the edited project with `status` `planned` and renders and writes
-nothing. Exit `1` on a failure and `130` on a cancel, every finished
+prints the edited project with `status` `planned`, its scenes' `from` and
+`changes` the diff as data, and renders and writes nothing. Exit `1` on a failure and `130` on a cancel, every finished
 scene kept either way: the same command again resumes it, rendering only
 what the document does not hold. A refusal before the plan prints no
 document, one line on stderr naming the fix.

@@ -640,7 +640,38 @@ std::string redo_scene(EditedScenes& edited, std::size_t scene, std::int64_t see
     return {};
 }
 
+std::vector<std::string> changed_records(const SceneChange& change) {
+    std::vector<std::string> out;
+    if (change.narration) {
+        out.emplace_back("narration");
+    }
+    if (change.visual) {
+        out.emplace_back("prompt");
+    }
+    if (change.seconds) {
+        out.emplace_back("duration");
+    }
+    if (change.asset) {
+        out.emplace_back("asset");
+    }
+    if (change.reseeded) {
+        out.emplace_back("seed");
+    }
+    return out;
+}
+
 std::vector<std::string> diff_lines(const EditedScenes& edited, std::size_t parent_scenes) {
+    // Each record's words, read off the same reading the document's
+    // `changes` are (52c).
+    const auto said = [](const std::string& record) -> std::string {
+        if (record == "duration") {
+            return "its length changed";
+        }
+        if (record == "seed") {
+            return "a new seed";
+        }
+        return "its " + record + " changed";
+    };
     std::vector<std::string> out;
     const std::size_t count = edited.scenes.size();
     out.push_back("the edit: " + std::to_string(count) + " scene" + (count == 1 ? "" : "s") +
@@ -653,20 +684,8 @@ std::vector<std::string> diff_lines(const EditedScenes& edited, std::size_t pare
             continue;
         }
         std::vector<std::string> what;
-        if (change.narration) {
-            what.emplace_back("its narration changed");
-        }
-        if (change.visual) {
-            what.emplace_back("its prompt changed");
-        }
-        if (change.seconds) {
-            what.emplace_back("its length changed");
-        }
-        if (change.asset) {
-            what.emplace_back("its asset changed");
-        }
-        if (change.reseeded) {
-            what.emplace_back("a new seed");
+        for (const std::string& record : changed_records(change)) {
+            what.push_back(said(record));
         }
         line += "scene " + std::to_string(change.from) + (change.moved ? ", moved" : "");
         if (what.empty()) {
@@ -683,6 +702,18 @@ std::vector<std::string> diff_lines(const EditedScenes& edited, std::size_t pare
         out.push_back("  scene " + std::to_string(removed) + " removed");
     }
     return out;
+}
+
+void record_provenance(harness::VideoProject& project, const EditedScenes& edited) {
+    for (std::size_t index = 0; index < project.scenes.size() && index < edited.changes.size();
+         ++index) {
+        const SceneChange& change = edited.changes[index];
+        harness::ProjectScene& scene = project.scenes[index];
+        scene.from = change.from;
+        scene.changes = change.from == 0 ? std::vector<std::string>{} : changed_records(change);
+        scene.moved = change.from != 0 && change.moved;
+    }
+    project.removed = edited.removed;
 }
 
 std::string carry_scenes(const harness::VideoProject& parent, EditedScenes& edited,

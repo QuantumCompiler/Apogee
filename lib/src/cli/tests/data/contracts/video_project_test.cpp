@@ -110,3 +110,37 @@ TEST_CASE("a project's scenes are kept beside its video", "[contracts][video][co
     CHECK(apogee::harness::video_project_scenes_dir(std::filesystem::path{"out"} / "tides.mp4") ==
           std::filesystem::path{"out"} / "tides.scenes");
 }
+
+TEST_CASE("an edited project's provenance is written and read back; an original's adds nothing",
+          "[contracts][video][compose][provenance]") {
+    // 52c: additive -- a project no edit made writes no new key, so every
+    // document written before reads and writes as it did.
+    const VideoProject original = sample();
+    const nlohmann::json plain = apogee::harness::video_project_document(original);
+    CHECK_FALSE(plain.contains("removed"));
+    CHECK_FALSE(plain["scenes"][0].contains("from"));
+    CHECK_FALSE(plain["scenes"][0].contains("changes"));
+    CHECK_FALSE(plain["scenes"][0].contains("moved"));
+
+    VideoProject edited = sample();
+    edited.parent = std::filesystem::path{"/videos"} / "tides-v1.mp4.json";
+    edited.scenes[0].from = 2;
+    edited.scenes[0].changes = {"narration", "seed"};
+    edited.scenes[0].moved = true;
+    edited.scenes[1].from = 0;
+    edited.removed = {1, 3};
+    const nlohmann::json document = apogee::harness::video_project_document(edited);
+    CHECK(document["scenes"][0]["from"] == 2);
+    CHECK(document["scenes"][0]["changes"] == nlohmann::json{"narration", "seed"});
+    CHECK(document["scenes"][0]["moved"] == true);
+    CHECK(document["scenes"][1]["from"] == "new");
+    CHECK(document["scenes"][1]["changes"].empty());
+    CHECK(document["removed"] == nlohmann::json{1, 3});
+
+    std::string error;
+    const std::optional<VideoProject> read =
+        apogee::harness::read_video_project(nlohmann::json::parse(document.dump()), error);
+    REQUIRE(read.has_value());
+    CHECK(apogee::harness::video_project_document(*read) == document);
+    CHECK(read->scenes[1].from == std::optional<std::size_t>{0});
+}

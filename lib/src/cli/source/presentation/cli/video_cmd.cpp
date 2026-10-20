@@ -512,8 +512,9 @@ void VideoCommand::bind(CLI::App& root, const RootContext& context) {
                         "With --from: render a scene (from 1) again on a fresh seed; give it "
                         "again for more");
     compose->add_flag("--dry-run", compose_flags->options.dry_run,
-                      "With --from: say the diff and print the edited project; render and write "
-                      "nothing");
+                      "Plan on paper: a brief's one planning call, its plan and spend said and "
+                      "kept beside the video, nothing rendered; with --from, the diff said and "
+                      "the edited project printed, nothing written");
     add_job_format(compose, compose_format, /*document=*/true);
     compose->callback([&context, compose_flags, compose_format]() {
         compose_flags->format = *compose_format;

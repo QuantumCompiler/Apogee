@@ -527,6 +527,33 @@ assert any(e["type"] == "notice" and "plan:" in e["text"] for e in events), "the
 assert events[-1]["document"] == json.load(open(sys.argv[2])), "the document is not the project"
 PY
 
+# --- a brief planned on paper (52c), then rendered as planned ---------------
+set +e
+"$APOGEE_BIN" video compose "the tides, twice a day" -o "$WORK_DIR/out/paper.mp4" \
+    --planner planner --dry-run --output-format json </dev/null \
+    >"$WORK_DIR/paper.out" 2>"$WORK_DIR/paper.err"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 0 ] || fail "the dry run failed ($STATUS): $(cat "$WORK_DIR/paper.err")"
+[ "$(field "$WORK_DIR/paper.out" '["status"]')" = "planned" ] || fail "the dry run's project is not planned"
+[ ! -e "$WORK_DIR/out/paper.mp4" ] && [ ! -e "$WORK_DIR/out/paper.scenes" ] || fail "a dry run rendered"
+grep -q "\[compose\] spend: 2 narration runs" "$WORK_DIR/paper.err" || fail "the dry run's spend was not said"
+python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); b=json.load(open(sys.argv[2])); sys.exit(a != b)' \
+    "$WORK_DIR/out/paper.mp4.json" "$WORK_DIR/paper.out" || fail "the plan kept is not the document printed"
+SEEDS="$(field "$WORK_DIR/paper.out" '["scenes"][0]["seed"]')"
+set +e
+"$APOGEE_BIN" video compose "the tides, twice a day" -o "$WORK_DIR/out/paper.mp4" \
+    --output-format json </dev/null >"$WORK_DIR/paper2.out" 2>"$WORK_DIR/paper2.err"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 0 ] || fail "rendering the kept plan failed ($STATUS): $(cat "$WORK_DIR/paper2.err")"
+grep -q "\[compose\] rendering the plan a dry run kept at" "$WORK_DIR/paper2.err" \
+    || fail "the kept plan was not said: $(cat "$WORK_DIR/paper2.err")"
+if grep -q "planning the scenes" "$WORK_DIR/paper2.err"; then fail "the kept plan was planned again"; fi
+[ "$(field "$WORK_DIR/paper2.out" '["status"]')" = "done" ] || fail "the kept plan was not rendered"
+[ "$(field "$WORK_DIR/paper2.out" '["scenes"][0]["seed"]')" = "$SEEDS" ] || fail "the plan's seed was not held"
+echo "video compose --dry-run: a brief planned on paper, kept, then rendered as planned - OK"
+
 # --- video compose --edit (50d): the diff said, only the changed scene rendered ---
 cat >"$WORK_DIR/edit.json" <<'JSON'
 {"turns": [{"text": "{\"title\": \"Tides\", \"scenes\": [{\"from\": 1, \"narration\": \"The sea breathes.\", \"visual\": \"a shore at dawn\", \"seconds\": 3}, {\"from\": 2, \"narration\": \"Twice a day.\", \"visual\": \"a full moon rising\", \"seconds\": 3}]}"}]}

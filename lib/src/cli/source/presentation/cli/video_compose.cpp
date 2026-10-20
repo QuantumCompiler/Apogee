@@ -243,9 +243,8 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
     std::error_code code;
 
     const bool editing = !options.from.empty();
-    if (!editing && (!options.edit.empty() || !options.redo.empty() || options.dry_run)) {
-        return refuse(
-            "--edit, --redo-scene and --dry-run work on a project -- name it with --from");
+    if (!editing && (!options.edit.empty() || !options.redo.empty())) {
+        return refuse("--edit and --redo-scene work on a project -- name it with --from");
     }
     std::string brief = trimmed(options.brief);
     if (editing && !brief.empty()) {
@@ -422,9 +421,14 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
             spoken += std::filesystem::is_regular_file(scene.voice, code) ? 1 : 0;
             rendered += std::filesystem::is_regular_file(scene.clip, code) ? 1 : 0;
         }
-        say("resuming " + sidecar.string() + ": " + std::to_string(spoken) + " of " +
-            std::to_string(project.scenes.size()) + " narrations and " + std::to_string(rendered) +
-            " clips already there");
+        if (project.status == "planned") {
+            // A dry run's plan (52c): rendered as planned, never planned again.
+            say("rendering the plan a dry run kept at " + sidecar.string());
+        } else {
+            say("resuming " + sidecar.string() + ": " + std::to_string(spoken) + " of " +
+                std::to_string(project.scenes.size()) + " narrations and " +
+                std::to_string(rendered) + " clips already there");
+        }
         if (const std::vector<std::string> ignored = ignored_flags(options); !ignored.empty()) {
             std::string named;
             for (const std::string& flag : ignored) {
@@ -488,6 +492,7 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
         project.platform = seams.platform;
         if (options.dry_run) {
             project.scenes = edited.scenes;
+            video::record_provenance(project, edited);
             project.status = "planned";
             result.document = harness::video_project_document(project);
             result.lines.emplace_back("a dry run: nothing was rendered or written");
@@ -499,6 +504,7 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
             return refuse(why);
         }
         project.scenes = edited.scenes;
+        video::record_provenance(project, edited);
         project.status = "rendering";
         save(project);
     } else {
@@ -527,13 +533,28 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
         project.voice = voice;
         project.planner = backend;
         project.plan_attempts = planned.attempts;
-        project.status = "rendering";
+        project.status = options.dry_run ? "planned" : "rendering";
         project.created = models::now_rfc3339();
         project.platform = seams.platform;
         save(project);
     }
     for (const std::string& line : plan_lines(project, can_burn)) {
         say(line);
+    }
+    if (options.dry_run) {
+        // On paper (52c): the plan call alone -- or none, for a plan already
+        // kept -- the project written beside the video as `planned`, and
+        // nothing spoken or rendered. The same command without --dry-run
+        // renders this plan.
+        result.document = harness::video_project_document(project);
+        result.lines = {resumed.has_value()
+                            ? "a dry run: the plan kept at " + sidecar.string() +
+                                  " -- nothing was planned again, spoken or rendered"
+                            : "a dry run: one planning call to " + project.planner +
+                                  ", nothing spoken or rendered",
+                        "the plan, beside it: " + sidecar.string() +
+                            " -- the same command without --dry-run renders it"};
+        return result;
     }
 
     video::ComposeSeams compose = seams.assembly;

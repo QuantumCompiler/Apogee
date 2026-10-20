@@ -593,9 +593,9 @@ TEST_CASE("an edit is refused before anything runs when it cannot be one",
         return result.error;
     };
     CHECK(refused([](VideoComposeOptions& o) { o.edit = "shorter"; }) ==
-          "--edit, --redo-scene and --dry-run work on a project -- name it with --from");
+          "--edit and --redo-scene work on a project -- name it with --from");
     CHECK(refused([](VideoComposeOptions& o) { o.redo = {1}; }) ==
-          "--edit, --redo-scene and --dry-run work on a project -- name it with --from");
+          "--edit and --redo-scene work on a project -- name it with --from");
     CHECK(refused([&run](VideoComposeOptions& o) { o.from = run.out_dir / "tides.mp4"; }) ==
           "--from takes its brief from the project -- give no brief");
     CHECK(refused([&run](VideoComposeOptions& o) {
@@ -627,4 +627,76 @@ TEST_CASE("a failed edit run is resumed by the same command, without editing aga
           std::vector<std::string>{"render s02.mp4 seed 8 on org--clip/pipeline/aaaaaaaaaaaa",
                                    "join", "mix", "burn"});
     CHECK(result.document["parent"] == run.sidecar().string());
+}
+
+TEST_CASE("a brief planned on paper: one planning call, the plan kept, nothing rendered",
+          "[cli][video][compose][dry-run]") {
+    // 52c: the plan call alone, the spend said, the project written beside
+    // the video as `planned` -- and the same command without --dry-run
+    // renders exactly that plan, never planning again.
+    Run run;
+    run.options.dry_run = true;
+    VideoComposeResult result = run.go();
+    INFO(result.error);
+    REQUIRE(result.exit_code == 0);
+    CHECK(run.calls == std::vector<std::string>{"plan on m"});
+    CHECK(result.document["status"] == "planned");
+    CHECK(result.document["scenes"].size() == 3);
+    CHECK(result.document["scenes"][0]["voice"].is_null());
+    CHECK(result.document["scenes"][0]["clip"].is_null());
+    CHECK_FALSE(result.document["scenes"][0].contains("from"));
+    CHECK(nlohmann::json::parse(slurp(run.sidecar())) == result.document);
+    CHECK(std::ranges::find(run.said, "plan: \"Tides\" -- 3 scenes, about 11.0 s of video") !=
+          run.said.end());
+    CHECK(std::ranges::any_of(run.said, [](const std::string& line) {
+        return line.starts_with("spend: 3 narration runs");
+    }));
+    CHECK(result.lines ==
+          std::vector<std::string>{"a dry run: one planning call to m, nothing spoken or rendered",
+                                   "the plan, beside it: " + run.sidecar().string() +
+                                       " -- the same command without --dry-run renders it"});
+    CHECK_FALSE(std::filesystem::exists(run.out_dir / "tides.mp4"));
+    CHECK_FALSE(std::filesystem::exists(run.out_dir / "tides.scenes"));
+
+    // On paper again: the kept plan, no second call.
+    run.calls.clear();
+    result = run.go();
+    REQUIRE(result.exit_code == 0);
+    CHECK(run.calls.empty());
+    CHECK(result.document["status"] == "planned");
+
+    // Without the flag: that plan, its seeds held, rendered whole.
+    run.options.dry_run = false;
+    run.said.clear();
+    run.answer.reset();  // a second plan call would be refused
+    result = run.go();
+    INFO(result.error);
+    REQUIRE(result.exit_code == 0);
+    const std::string clip = "org--clip/pipeline/aaaaaaaaaaaa";
+    CHECK(std::ranges::none_of(run.calls,
+                               [](const std::string& call) { return call.starts_with("plan"); }));
+    CHECK(std::ranges::find(run.calls, "render s01.mp4 seed 7 on " + clip) != run.calls.end());
+    CHECK(std::ranges::find(run.calls, "render s03.mp4 seed 9 on " + clip) != run.calls.end());
+    CHECK(std::ranges::find(run.said, "rendering the plan a dry run kept at " +
+                                          run.sidecar().string()) != run.said.end());
+    CHECK(result.document["status"] == "done");
+}
+
+TEST_CASE("an edit's dry run names each scene's source and what changed",
+          "[cli][video][compose][edit][dry-run]") {
+    Run run;
+    compose_parent(run);
+    run.options.edit = "make the second scene about the moon";
+    run.answer = edited_plan();
+    run.options.dry_run = true;
+    const VideoComposeResult result = run.go();
+    INFO(result.error);
+    REQUIRE(result.exit_code == 0);
+    const nlohmann::json& scenes = result.document["scenes"];
+    CHECK(std::ranges::find(run.said, "  2. scene 2; its prompt changed") != run.said.end());
+    CHECK(scenes[1]["from"] == 2);
+    CHECK(scenes[1]["changes"] == nlohmann::json{"prompt"});
+    CHECK(scenes[1]["moved"] == false);
+    CHECK(scenes[0]["changes"].empty());
+    CHECK(result.document["removed"].empty());
 }

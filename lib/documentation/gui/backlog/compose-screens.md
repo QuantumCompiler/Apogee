@@ -6,7 +6,7 @@
 
 **Seam + files.** `source/presentation/compose/` (the four screens; view-models), `source/business/media/` grown (project-document reads, compose run assembly). Tests: the running view over fixture project documents evolving per scene; argv pins (new, edit, redo-scene, resume); the stopped/resume states; the diff render over 52c-shaped fixtures and the compare-fallback; hermetic.
 
-**Reference.** The `ScreenCompose*` boards; the contract board's VIDEO AND VOICE rows (G12/G13 fallbacks); 50c/50d `(consumed decision)` — the documents and flags; [52c](../../cli/backlog/v0.2.0/compose-plan-documents.md) cross-referenced, not gated.
+**Reference.** The `ScreenCompose*` boards; the contract board's VIDEO AND VOICE rows (G12/G13 fallbacks); 50c/50d `(consumed decision)` — the documents and flags; [52c](../../cli/assistant/MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths) (shipped 2026-10-20) cross-referenced, not gated.
 
 **Decisions made** (dated):
 - 2026-10-20 — From the design-completion spike (the user's call); the project document is the one progress source (the design's app-side row, standing).

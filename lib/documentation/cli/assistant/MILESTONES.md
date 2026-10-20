@@ -8864,3 +8864,35 @@ Decisions taken while building, for veto:
 **Verified.** `lib/scripts/cicd.sh --test`: 3574 of 3574, two skipped and said (the real caption burn without libass, and the existing pdftotext case); the darwin suite's 102 cases passed; `cli.video_lifecycle`'s stream phases ran on the real binary over the stub drivers.
 
 **Not run on real weights**: the stream relays the drivers the stubs stand in for; a real pull's stream over the network is the user's run.
+
+### 2026-10-20 — `compose-plan-documents` (backlog item 52c): the composer plans on paper
+
+**Why.** The design's compose flow shows the plan before anything renders, and an edit's changes scene by scene. Both lacked a document. A new brief had no `--dry-run` (G12): the fallback was plan-and-render in one run, with Stop. An edit's dry run said its diff only as stderr prose (G13), and a scene did not name its source, so the app would have had to diff two documents by hand.
+
+- [x] **`video compose "<brief>" --dry-run` plans on paper.**
+  - It runs the one planning call (50c's member call, nothing else).
+  - It says the plan and its spend exactly as a real run's plan print does.
+  - It writes the project beside the video with `status` `planned`, and prints it. Nothing is spoken or rendered, and nothing is made under `scenes_dir`.
+  - **The same command without `--dry-run` renders that plan as kept**, on its seeds, never planning again; it says `rendering the plan a dry run kept at …`.
+  - A dry run over a plan already kept makes no call at all. This also closes a latent hole: an edit's dry run beside an existing project used to fall into the resume path and render.
+  - The refusal for `--dry-run` without `--from` is gone. `--edit` and `--redo-scene` still need a project.
+- [x] **An edited project names each scene's source and what changed.** `ProjectScene` gained `from` (the parent's scene, or 0 → `"new"`), `changes` and `moved`; `VideoProject` gained `removed`.
+  - They are read off 50d's own record comparison (`SceneChange`) by `record_provenance`.
+  - `changes` uses `changed_records`, the one reading `diff_lines` now words its prose from (`narration`, `prompt`, `duration`, `asset`, `seed`, in the diff's order). So the printed diff and the document cannot disagree. A test reads the document back in the diff's words and holds it equal to `diff_lines` for every case of 50d's matrix.
+  - The fields ride both the dry run's printed document and a real edit's saved project, and are read back so a resume keeps them.
+  - **Additive**: a project no edit made writes none of the new keys, so every document written before reads and writes exactly as it did (version 1, pinned by test).
+- [x] **The tests**:
+  - `contracts/video_project_test`: the round trip, and no new key on an original.
+  - `video/compose_test`: the matrix, case for case.
+  - `cli/video_compose_test`: one call and the kept plan, a second dry run calling nothing, the render of that plan on its seeds without planning again, and an edit's dry run naming `from` and `changes`.
+  - `cli.video_lifecycle` on the real binary: a brief's dry run, then the render of the kept plan.
+
+Decisions taken while building, for veto:
+- **A brief's dry run keeps its plan beside the video**, where an edit's dry run writes nothing. The acceptance asks that "the same brief without the flag renders that plan", and a plan made again is a different plan. The kept project is the one document the user asked for, and nothing else touches the disk. The edit's dry run keeps its shipped "writes nothing" contract.
+- **The spellings**: `from` is a number or `"new"`; `changes` uses the words `narration`, `prompt`, `duration`, `asset`, `seed`; `moved` is a boolean; `removed` is the parent's scene numbers. The project keeps version 1, since every addition is optional.
+- **`moved` and `removed` were added beside `from` and `changes`**, so the document matches the diff case for case: a reorder and a removal are cases the diff says.
+- **The provenance is kept in a real edit's project too**, not only the dry run's print: it is a fact of how this project came from its parent.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3578 of 3578, two skipped and said (the real caption burn without libass, and the existing pdftotext case); the darwin suite passed; `cli.video_lifecycle`'s dry-run phase ran on the real binary.
+
+**Not run on real weights**: a dry run makes one planning call; the user's real compose plans on their own planner.
