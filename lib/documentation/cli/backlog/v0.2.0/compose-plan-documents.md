@@ -12,8 +12,9 @@
 - 2026-10-20 — Specced from the GUI design spike, the user's call; G12 before-v1 per the design's recommendation.
 - 2026-10-20 — One computation per fact: the plan call and the record comparison are reused, never reimplemented for the document.
 
-**Open calls:**
-- [default: the `from`/`changes` field spellings at build, within the family schema's versioning.]
+- 2026-10-20 — **The `from`/`changes` spellings** at build, within the family schema's versioning (the default, confirmed at grooming).
+
+**Open calls:** none — groomed 2026-10-20.
 
 **Guardrail(s).** The plan-only pin (one model call, no render, no store writes); the diff-field equality with 50d's matrix; schema conformance and old-document parsing; no network, no weights.
 

@@ -12,9 +12,10 @@
 - 2026-10-20 — Specced from the GUI design spike, the user's call; ordered first per the design's before-v1 recommendation (G1, G8 in it).
 - 2026-10-20 — `sources` reports what was **sent**, never what was merely found; scores carry their retriever.
 
-**Open calls:**
-- [default: the diff's form in `detail` is a unified diff capped at a named size, the cap said in the field; exact caps at build.]
-- [default: the `sources` event's shape (list of `{file, page?, lines?, score, retriever}`) finalized at build within 28h's family style.]
+- 2026-10-20 — **The diff's form**: `detail` carries a unified diff capped at a named size, the cap said in the field; exact caps at build (the default, confirmed at grooming).
+- 2026-10-20 — **The `sources` shape**: a list of `{file, page?, lines?, score, retriever}` finalized at build within 28h's family style (the default, confirmed at grooming).
+
+**Open calls:** none — groomed 2026-10-20.
 
 **Guardrail(s).** Schema conformance grown; per-event fixture goldens; the old-stream additive pin; the gate-argument byte-equality; no network, no models.
 

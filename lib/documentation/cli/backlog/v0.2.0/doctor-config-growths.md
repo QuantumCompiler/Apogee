@@ -12,9 +12,10 @@
 - 2026-10-20 — Specced from the GUI design spike, the user's call; the two verify-rows resolved to gaps by probe are owned here (G16, G17).
 - 2026-10-20 — `config set` is allow-listed, never arbitrary: the config's typed units keep their typed verbs, secrets keep `auth add`.
 
-**Open calls:**
-- [default: the scalar allow-list's first entries (the web-search address, `memory.recall`, and peers found at build) declared as one table the refusal quotes.]
-- [default: the forget verb's name and placement (`chats recall --forget` the working shape) at build; it clears summaries only, never transcripts.]
+- 2026-10-20 — **The scalar allow-list's first entries** (the web-search address, `memory.recall`, and peers found at build) declared as one table the refusal quotes (the default, confirmed at grooming).
+- 2026-10-20 — **The forget verb's name and placement** (`chats recall --forget` the working shape) at build; it clears summaries only, never transcripts (the default, confirmed at grooming).
+
+**Open calls:** none — groomed 2026-10-20.
 
 **Guardrail(s).** Transform goldens and refusals; doctor-row matrix with skipped-never-pass; the forget absence pin; typed-document conformance with prose byte-identity; admin twin equality; no network, no models.
 

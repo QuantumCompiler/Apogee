@@ -12,9 +12,10 @@
 - 2026-10-20 — Specced from the GUI design spike, the user's call.
 - 2026-10-20 — Every inbound line is an existing core's door; `--private` means never-written, not written-then-deleted.
 
-**Open calls:**
-- [default: `set`'s accepted keys are exactly the session's own slash-settable run settings, refused by name otherwise; shapes at build.]
-- [default: `chats compact` asks before rewriting a saved session on a terminal, `--yes` for scripts (the house's destructive-verb manners).]
+- 2026-10-20 — **`set`'s keys** are exactly the session's own slash-settable run settings, refused by name otherwise; shapes at build (the default, confirmed at grooming).
+- 2026-10-20 — **`chats compact` asks** before rewriting a saved session on a terminal, `--yes` for scripts — the house's destructive-verb manners (the default, confirmed at grooming).
+
+**Open calls:** none — groomed 2026-10-20.
 
 **Guardrail(s).** Per-line effect tests over the mock backend; the private absence pin (filesystem and recall index swept); accepts/schema conformance; the one-core rule held by tests that drive both doors (slash and line) and assert one behavior; no network, no models.
 

@@ -12,8 +12,9 @@
 - 2026-10-20 — Specced from the GUI design spike, the user's call; before-v1 per the design's recommendation.
 - 2026-10-20 — A relay of existing progress, never a second accounting; the final line is the verb's own document.
 
-**Open calls:**
-- [default: event names and shapes (`step`, `bytes`, `scene`, …) finalized at build in the machine protocol's declared-as-data style, one family across the four verbs.]
+- 2026-10-20 — **Event names and shapes** (`step`, `bytes`, `scene`, …) finalized at build in the machine protocol's declared-as-data style, one family across the four verbs (the default, confirmed at grooming).
+
+**Open calls:** none — groomed 2026-10-20.
 
 **Guardrail(s).** Event goldens over scripted chains/fake drivers; default-output byte-identity; the document-equality pin; schema conformance; cancellation; no network, no weights.
 
