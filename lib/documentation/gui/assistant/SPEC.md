@@ -34,6 +34,7 @@ _TODO:_ the first release's concrete feature cut is the first spike's to propose
 - **Thin client, honest renderer.** The GUI shows what the protocol says — states, errors and refusals in the CLI's own words — and invents nothing on top.
 - **Additive protocol, tolerant client.** Unknown events and fields are tolerated, never fatal; a GUI version never requires a breaking protocol change (the CLI's ADR 0006, consumed).
 - **Native per platform.** Each app feels at home on its OS — the macOS app is Swift and SwiftUI (the user's call, 2026-10-20). Whether linux/windows share anything beyond ADR 0001's shape is decided when their work opens.
+- **Full parity** *(added 2026-10-20 — the user's call, from the first hands-on run of the built app)*: the GUI is meant to do **everything and anything the CLI and TUI do**. Every capability the CLI offers a person has a classified place in the GUI — a screen, the console, or a recorded carve-out with its reason — held mechanically (ADR 0003, once 2a lands). "The design doesn't show it" is a reason to grow the design per its own new-screen law, never to drop a capability.
 
 ## Success criteria
 

@@ -35,11 +35,24 @@ The documentation tree was restructured per application (2026-10-20, the user's 
 - [x] **Design board corrections** *(1q, shipped 2026-10-20 — [MILESTONES → Milestone B](MILESTONES.md#milestone-b--the-designs-screens))* — macOS 27+ stands; the probe-found gaps join the board's ledger; republished per its law.
 - See the [`backlog/`](../backlog/README.md) index for the work queue.
 
+### v0.2.0 — Track 2, CLI parity
+
+Opened 2026-10-20 (the user's call, from the first hands-on run: the GUI does everything the CLI and TUI do — the SPEC's Full-parity principle, same day). The audit against the TUI's classification found eight command families with no GUI place and no law holding coverage; the split closes the law first, then the families.
+
+- [ ] **The parity law** *([2a](../backlog/v0.2.0/parity-law-and-table.md))* — ADR 0003 and the classification table, held by test against the binary's own word list; the carve-outs recorded.
+- [ ] **The console** *([2b](../backlog/v0.2.0/gui-console.md))* — any verb run supervised, completion from the binary, carve-outs refused with their reasons; the catch-all while screens accrete.
+- [ ] **Knowledge & collections** *([2c](../backlog/v0.2.0/knowledge-collections.md))* — the record and store screens, supervised ingest and builds, the graph screen's prose half.
+- [ ] **The training studio** *([2d](../backlog/v0.2.0/training-studio.md))* — Train and Datasets over the documents, runs on the trainer's structured stream, promote/rollback confirmed.
+- [ ] **Agents, MCP & symphonies** *([2e](../backlog/v0.2.0/agents-mcp-symphonies.md))* — the resource screens, native in-app editing validated by the binary, plays into the session.
+- [ ] **Execute sessions, plays & recipes** *([2f](../backlog/v0.2.0/execute-sessions-plays.md))* — the picker's execute door, recipe expansion shown before launch, analyze console-covered.
+- [ ] **The review screen** *([2g](../backlog/v0.2.0/review-screen.md))* — dry-run-first, click-consented posting, targets, sweeps and skills; silence a first-class pass.
+
+
 ---
 
 ## Fast follow
 
-- [ ] **Stored weights by handle** — maintenance item M1 *([stored-weights-by-handle.md](../backlog/maintenance/stored-weights-by-handle.md))*: the user's run of the built app showed none of their SafeTensors sets. The CLI names every stored, unconfigured row `(not configured)`, and the GUI keyed rows by that name, so 18 stored rows drew as one, and info, delete and repair, Voice's voices and Settings' pipelines were all asked for `(not configured)`. The fix names a stored row by its handle and says the fold. Best built before `v0.2.0` merges.
+- [x] **Stored weights by handle** — maintenance item M1 *(shipped 2026-10-20 — [MILESTONES → Milestone B](MILESTONES.md#milestone-b--the-designs-screens))*: the user's run of the built app showed none of their SafeTensors sets. The CLI names every stored, unconfigured row `(not configured)`, and the GUI keyed rows by that name, so 18 stored rows drew as one, and info, delete and repair, Voice's voices and Settings' pipelines were all asked for `(not configured)`. Fixed by naming a stored row by its handle and showing the fold.
 
 ## Unspecced ideas
 
