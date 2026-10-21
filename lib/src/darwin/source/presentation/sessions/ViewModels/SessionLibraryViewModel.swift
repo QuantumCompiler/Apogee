@@ -82,6 +82,9 @@ public final class SessionLibraryViewModel {
     /// The line types the last session announced: whether this build has
     /// the CLI's 52d (`set`, `detach`, `compact` -- and `chat --private`).
     private var lastAccepts: [String]?
+    /// The event types the last session announced: whether this build streams
+    /// a long job's progress (the CLI's 52b announces `job`).
+    private var lastEvents: [String]?
     /// The model the next new session starts on, once.
     private var nextModel: String?
     private var inView = false
@@ -263,6 +266,10 @@ public final class SessionLibraryViewModel {
         await open(.new)
     }
 
+    /// Whether the build streams a long job's events (52b), as the last
+    /// session announced; `false` until one has -- the fallback.
+    public var streamsJobs: Bool { lastEvents?.contains("job") ?? false }
+
     /// The binary the library found, for the other places' reads.
     public var binaryURL: URL? { found?.url }
 
@@ -362,6 +369,7 @@ public final class SessionLibraryViewModel {
         switch event.kind {
         case .session(let info):
             lastAccepts = info.capabilities?.accepts ?? []
+            lastEvents = info.capabilities?.events ?? []
             let session = current
             Task { await readWindow(of: info.model, for: session) }
         case .result, .error:

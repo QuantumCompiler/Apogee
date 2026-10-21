@@ -64,6 +64,9 @@ public protocol RunningChild: AnyObject, Sendable {
     /// Closes its stdin: the child reads end of input.
     func closeInput()
 
+    /// Interrupts it, as Ctrl-C at a terminal does: SIGINT.
+    func interrupt()
+
     /// Asks it to stop: SIGTERM.
     func terminate()
 

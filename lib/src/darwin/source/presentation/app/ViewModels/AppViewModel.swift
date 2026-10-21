@@ -1,3 +1,4 @@
+import BusinessJobs
 import BusinessReads
 import BusinessSession
 import DataPreferences
@@ -21,10 +22,11 @@ final class AppViewModel {
     let shell: ShellViewModel
     let sessions: SessionLibraryViewModel
     let models: ModelsViewModel
+    let downloads: DownloadsViewModel
 
     init(
         info: [String: Any]?, preferences: Preferences, starter: (any ChatStarting)? = nil,
-        runner: (any CommandRunning)? = nil
+        runner: (any CommandRunning)? = nil, jobs: (any JobStarting)? = nil
     ) {
         let version = (info?["CFBundleShortVersionString"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         // Only the release build (scripts/build.sh) stamps the version; a
@@ -35,6 +37,9 @@ final class AppViewModel {
             starter: starter ?? ApogeeClient(identity: ClientIdentity(version: version ?? "development")),
             runner: runner ?? ReadRunner(), preferences: preferences)
         let models = ModelsViewModel(runner: runner ?? ReadRunner())
+        let downloads = DownloadsViewModel(starter: jobs ?? JobStarter())
+        downloads.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
+        downloads.finished = { [weak models] in Task { await models?.refresh() } }
         sessions.say = { [weak shell] text in shell?.say(text) }
         models.say = { [weak shell] text in shell?.say(text) }
         models.useInSession = { [weak shell, weak sessions] backend in
@@ -52,6 +57,7 @@ final class AppViewModel {
         self.shell = shell
         self.sessions = sessions
         self.models = models
+        self.downloads = downloads
     }
 
     convenience init(bundle: Bundle) {
@@ -62,5 +68,6 @@ final class AppViewModel {
     func start() async {
         await sessions.start(inView: shell.route == .sessions)
         await models.connect(binary: sessions.binaryURL)
+        downloads.connect(binary: sessions.binaryURL)
     }
 }

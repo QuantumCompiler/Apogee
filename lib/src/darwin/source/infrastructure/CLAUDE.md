@@ -2,7 +2,7 @@
 
 **Position.** First of the four ([ADR 0001](../../../../documentation/gui/adrs/layer-enforcement.md)): OS mechanisms behind one interface -- spawning and holding the `apogee` child, file-system paths, the platform's own services. What everything stands on.
 
-**Modules:** `process` -- the child process: what to spawn (ChildCommand), and a child held by its three pipes and nothing else (RunningChild, ProcessSpawner) -- stdout framed into lines, stderr kept as a bounded tail, a write to a child that stopped reading an error rather than a SIGPIPE -- and a one-shot run captured whole within a time limit (CapturedRun).
+**Modules:** `process` -- the child process: what to spawn (ChildCommand), and a child held by its three pipes and nothing else (RunningChild, ProcessSpawner) -- stdout framed into lines, stderr kept as a bounded tail, a write to a child that stopped reading an error rather than a SIGPIPE, an interrupt as Ctrl-C's -- and a one-shot run captured whole within a time limit (CapturedRun).
 
 **May import:** this layer and the system's non-UI frameworks (Foundation, Darwin, os). No UI framework, no module above.
 

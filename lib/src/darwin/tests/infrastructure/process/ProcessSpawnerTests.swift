@@ -50,6 +50,13 @@ struct ProcessSpawnerTests {
         }
     }
 
+    @Test("interrupt is Ctrl-C's signal: a child that does not catch it ends by it")
+    func interrupt() async throws {
+        let child = try spawner.spawn(ChildCommand(executable: URL(fileURLWithPath: "/bin/sleep"), arguments: ["30"]))
+        child.interrupt()
+        #expect(await child.waitForExit() == ChildExit(reason: .signalled, status: SIGINT))
+    }
+
     @Test("terminate ends a child that would run on, and says it was a signal")
     func terminate() async throws {
         let child = try spawner.spawn(ChildCommand(executable: URL(fileURLWithPath: "/bin/sleep"), arguments: ["30"]))

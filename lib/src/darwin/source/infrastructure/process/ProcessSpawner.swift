@@ -150,6 +150,12 @@ final class FoundationChild: RunningChild, @unchecked Sendable {
         }
     }
 
+    func interrupt() {
+        if process.isRunning {
+            process.interrupt()
+        }
+    }
+
     func terminate() {
         if process.isRunning {
             process.terminate()

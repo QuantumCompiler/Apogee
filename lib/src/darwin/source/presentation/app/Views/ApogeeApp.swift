@@ -23,11 +23,7 @@ public struct ApogeeApp: App {
                 case .sessions: SessionsScreen(library: model.sessions, shell: model.shell)
                 case .models:
                     ModelsScreen(model: model.models, shell: model.shell) {
-                        PlaceholderView(
-                            symbol: "arrow.down.circle",
-                            placeholder: Placeholder(
-                                about: "Downloads from Hugging Face and Ollama, step by step, will be here.",
-                                command: "apogee models pull"))
+                        DownloadsView(model: model.downloads)
                     }
                 default: PlaceholderScreen(destination)
                 }

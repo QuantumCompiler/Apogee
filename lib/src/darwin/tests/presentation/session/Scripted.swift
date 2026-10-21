@@ -171,6 +171,7 @@ final class ReplayChild: RunningChild, @unchecked Sendable {
         advance()
     }
 
+    func interrupt() { terminate() }
     func terminate() { closeInput() }
     func kill() { closeInput() }
     func waitForExit() async -> ChildExit { ChildExit(reason: .exited, status: 0) }

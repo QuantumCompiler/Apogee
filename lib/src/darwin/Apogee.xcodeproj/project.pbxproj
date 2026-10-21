@@ -93,6 +93,15 @@
 		7F794B2478DD44600ED1CA0F /* InfrastructureProcess.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C52D031291F6BA58AC5185B /* InfrastructureProcess.framework */; };
 		4B419E45221990AAB2F87C31 /* PresentationModels.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7A8D66B11E8035BA04B3ADB5 /* PresentationModels.framework */; };
 		9E7E59B7AAF93C1ED61B175D /* PresentationModels.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 7A8D66B11E8035BA04B3ADB5 /* PresentationModels.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		D58BEB698235FDB8CE3187D6 /* InfrastructureProcess.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C52D031291F6BA58AC5185B /* InfrastructureProcess.framework */; };
+		84D8CCC832842505664E8894 /* DataProtocol.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFA5A0ABACC1F719CFE66357 /* DataProtocol.framework */; };
+		157A89AAC2493019BC7E5980 /* BusinessJobs.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 334C1B40A0D65767F424F3F1 /* BusinessJobs.framework */; };
+		7C96A1DA97A961E6160DE7E7 /* InfrastructureProcess.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C52D031291F6BA58AC5185B /* InfrastructureProcess.framework */; };
+		AE852096F9682F3BA48467C0 /* DataProtocol.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFA5A0ABACC1F719CFE66357 /* DataProtocol.framework */; };
+		2B3D39E10B16157D0DAF6245 /* BusinessJobs.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 334C1B40A0D65767F424F3F1 /* BusinessJobs.framework */; };
+		AB8AC8F2850EF42B96E1C223 /* BusinessJobs.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 334C1B40A0D65767F424F3F1 /* BusinessJobs.framework */; };
+		6ACE1F504D2E8E94729AE779 /* BusinessJobs.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 334C1B40A0D65767F424F3F1 /* BusinessJobs.framework */; };
+		3298B05187E5006C67B9F49F /* BusinessJobs.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 334C1B40A0D65767F424F3F1 /* BusinessJobs.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -691,6 +700,69 @@
 			remoteGlobalIDString = 7FE06BD267EFA0B09070A570 /* PresentationModels */;
 			remoteInfo = PresentationModels;
 		};
+		BBBB0E24D2FEB2B955733E5B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DA4D843C049585B484E90C38 /* InfrastructureProcess */;
+			remoteInfo = InfrastructureProcess;
+		};
+		F5C087DF96B4D6634194E455 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 566EF84A99783309FC98BF91 /* DataProtocol */;
+			remoteInfo = DataProtocol;
+		};
+		610CE9CBCEAB96E5F3D851EA /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8A29CE34CFE185C18F1DEE9D /* BusinessJobs */;
+			remoteInfo = BusinessJobs;
+		};
+		09C504CE6D5456EBB9167C58 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DA4D843C049585B484E90C38 /* InfrastructureProcess */;
+			remoteInfo = InfrastructureProcess;
+		};
+		9CFBEF8D364643F2193ECF24 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 566EF84A99783309FC98BF91 /* DataProtocol */;
+			remoteInfo = DataProtocol;
+		};
+		36EC0302DA8C96CC346FCE10 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8A29CE34CFE185C18F1DEE9D /* BusinessJobs */;
+			remoteInfo = BusinessJobs;
+		};
+		30FA0D046890FB9BD837B1CF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8A29CE34CFE185C18F1DEE9D /* BusinessJobs */;
+			remoteInfo = BusinessJobs;
+		};
+		8FCD94BEF417DA7FFF0BECF8 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8A29CE34CFE185C18F1DEE9D /* BusinessJobs */;
+			remoteInfo = BusinessJobs;
+		};
+		94A518BA1E21BC23066791EC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8A29CE34CFE185C18F1DEE9D /* BusinessJobs */;
+			remoteInfo = BusinessJobs;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -712,6 +784,7 @@
 				D13ED8B4D6F4DF6FE8B32EEA /* PresentationSessions.framework in Embed Frameworks */,
 				3FD5D8280321EA29C0694126 /* BusinessReads.framework in Embed Frameworks */,
 				9E7E59B7AAF93C1ED61B175D /* PresentationModels.framework in Embed Frameworks */,
+				3298B05187E5006C67B9F49F /* BusinessJobs.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -745,6 +818,8 @@
 		EBC7D76D28CBD1776DA97A4E /* PresentationSessionsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PresentationSessionsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7A8D66B11E8035BA04B3ADB5 /* PresentationModels.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = PresentationModels.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		D83C1FAFF7092B10E85F1D39 /* PresentationModelsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PresentationModelsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		334C1B40A0D65767F424F3F1 /* BusinessJobs.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = BusinessJobs.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		7F2A0C05DC23E8903BAB7C4E /* BusinessJobsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BusinessJobsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -878,6 +953,16 @@
 			path = models;
 			sourceTree = "<group>";
 		};
+		C82C91FDCF61974FE05FBC0C /* jobs */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = jobs;
+			sourceTree = "<group>";
+		};
+		419549B0555AE642F24C29C8 /* jobs */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = jobs;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -905,6 +990,7 @@
 				DC0EA38EE3A5B37D742DDB35 /* PresentationSessions.framework in Frameworks */,
 				C9787B9F189511944E0A759D /* BusinessReads.framework in Frameworks */,
 				4B419E45221990AAB2F87C31 /* PresentationModels.framework in Frameworks */,
+				6ACE1F504D2E8E94729AE779 /* BusinessJobs.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1123,6 +1209,7 @@
 				26CE2E20E77568C1B32012F8 /* PresentationShell.framework in Frameworks */,
 				32CE76FA994D7AF3FA4DD641 /* BusinessReads.framework in Frameworks */,
 				6C8140EA4B7C1F1A8C60D094 /* DataProtocol.framework in Frameworks */,
+				2B3D39E10B16157D0DAF6245 /* BusinessJobs.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1134,6 +1221,26 @@
 				F7CD1F18C4E734C6D369A9BB /* BusinessReads.framework in Frameworks */,
 				5C453BA69780F17F28952FC4 /* DataProtocol.framework in Frameworks */,
 				7F794B2478DD44600ED1CA0F /* InfrastructureProcess.framework in Frameworks */,
+				AB8AC8F2850EF42B96E1C223 /* BusinessJobs.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		08A79A3FC9BC543623590D09 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D58BEB698235FDB8CE3187D6 /* InfrastructureProcess.framework in Frameworks */,
+				84D8CCC832842505664E8894 /* DataProtocol.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B6F0DE13189BD79462C72E5A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				157A89AAC2493019BC7E5980 /* BusinessJobs.framework in Frameworks */,
+				7C96A1DA97A961E6160DE7E7 /* InfrastructureProcess.framework in Frameworks */,
+				AE852096F9682F3BA48467C0 /* DataProtocol.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1153,6 +1260,7 @@
 			children = (
 				56B87ECCCEE7961E32EFDC4A /* session */,
 				E1AB9D914F6CD61F23B4E516 /* reads */,
+				419549B0555AE642F24C29C8 /* jobs */,
 			);
 			path = business;
 			sourceTree = "<group>";
@@ -1162,6 +1270,7 @@
 			children = (
 				561C3B293A30BBBCC61E1F7B /* session */,
 				6E54601246F44C3D2C2F92C7 /* reads */,
+				C82C91FDCF61974FE05FBC0C /* jobs */,
 			);
 			path = business;
 			sourceTree = "<group>";
@@ -1217,6 +1326,8 @@
 				EBC7D76D28CBD1776DA97A4E /* PresentationSessionsTests.xctest */,
 				7A8D66B11E8035BA04B3ADB5 /* PresentationModels.framework */,
 				D83C1FAFF7092B10E85F1D39 /* PresentationModelsTests.xctest */,
+				334C1B40A0D65767F424F3F1 /* BusinessJobs.framework */,
+				7F2A0C05DC23E8903BAB7C4E /* BusinessJobsTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -1607,6 +1718,7 @@
 				14E4CBA2A49DAF665B70510C /* PBXTargetDependency */,
 				2E778ABAB5F9A3E1244DA400 /* PBXTargetDependency */,
 				D10F05CAC9E67C132A8D4650 /* PBXTargetDependency */,
+				7DC1DA61C404226578F2EA7A /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				BDEA87836A45381328177836 /* app */,
@@ -1716,6 +1828,7 @@
 				4F8F6F290D67862C159649A1 /* PBXTargetDependency */,
 				D2E3448035436D866FD56BF9 /* PBXTargetDependency */,
 				2D23A1D79C8AF2BA22485818 /* PBXTargetDependency */,
+				E6BF4F252FE8F648AF5385E8 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C15EE0523E2D5CF1ED61B18A /* main */,
@@ -1918,6 +2031,7 @@
 				0C82ED43025B0FA3C9B20533 /* PBXTargetDependency */,
 				C69CA1F1F01D5209CA0450D7 /* PBXTargetDependency */,
 				5340E17681D2E6689F0D1B31 /* PBXTargetDependency */,
+				8246582CF348B7D622694830 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				8596C333A5DCE8576EBFAF64 /* models */,
@@ -1944,6 +2058,7 @@
 				5B9B8768B7B7FD61A7C4DF2A /* PBXTargetDependency */,
 				E9BCBC5FBF1BFB027C9F27A0 /* PBXTargetDependency */,
 				34A079B8A76531008F2B994A /* PBXTargetDependency */,
+				D47DA3442C78F0A3952E9CD8 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C366441A04B5FA76691C1667 /* models */,
@@ -1953,6 +2068,55 @@
 			);
 			productName = PresentationModelsTests;
 			productReference = D83C1FAFF7092B10E85F1D39 /* PresentationModelsTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		8A29CE34CFE185C18F1DEE9D /* BusinessJobs */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A9A68FEEB19459DBB9EAB5A0 /* Build configuration list for PBXNativeTarget "BusinessJobs" */;
+			buildPhases = (
+				4F2A4115B8215101C274CBD3 /* Sources */,
+				08A79A3FC9BC543623590D09 /* Frameworks */,
+				75480F836928110B3E50A123 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A027B7EA2C12F53090F818CE /* PBXTargetDependency */,
+				26FA39427688896C91767CBE /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				C82C91FDCF61974FE05FBC0C /* jobs */,
+			);
+			name = BusinessJobs;
+			packageProductDependencies = (
+			);
+			productName = BusinessJobs;
+			productReference = 334C1B40A0D65767F424F3F1 /* BusinessJobs.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+		75E70ACED0AADD66B9AFA581 /* BusinessJobsTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7DD3ABA52B50BB1B5CEF8C4F /* Build configuration list for PBXNativeTarget "BusinessJobsTests" */;
+			buildPhases = (
+				AF7529749AEC5CB6F7358201 /* Sources */,
+				B6F0DE13189BD79462C72E5A /* Frameworks */,
+				EA0882B252799B41C7471964 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D60844B1E6FC193A0FDC6DFF /* PBXTargetDependency */,
+				650F967D1E74E40DF83B07A4 /* PBXTargetDependency */,
+				43596328B509D9440B0367B5 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				419549B0555AE642F24C29C8 /* jobs */,
+			);
+			name = BusinessJobsTests;
+			packageProductDependencies = (
+			);
+			productName = BusinessJobsTests;
+			productReference = 7F2A0C05DC23E8903BAB7C4E /* BusinessJobsTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
@@ -2005,6 +2169,8 @@
 				40E06701DE5BCC134B0AE6E2 /* PresentationSessionsTests */,
 				7FE06BD267EFA0B09070A570 /* PresentationModels */,
 				BA46629F089F3C982496823F /* PresentationModelsTests */,
+				8A29CE34CFE185C18F1DEE9D /* BusinessJobs */,
+				75E70ACED0AADD66B9AFA581 /* BusinessJobsTests */,
 			);
 		};
 /* End PBXProject section */
@@ -2192,6 +2358,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		75480F836928110B3E50A123 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EA0882B252799B41C7471964 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -2371,6 +2551,20 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		F93C0A6E018FE4548F5CAA68 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4F2A4115B8215101C274CBD3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AF7529749AEC5CB6F7358201 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -2804,6 +2998,51 @@
 			isa = PBXTargetDependency;
 			target = 7FE06BD267EFA0B09070A570 /* PresentationModels */;
 			targetProxy = 8A3E3102B6EC65A0AF2E6CCC /* PBXContainerItemProxy */;
+		};
+		A027B7EA2C12F53090F818CE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DA4D843C049585B484E90C38 /* InfrastructureProcess */;
+			targetProxy = BBBB0E24D2FEB2B955733E5B /* PBXContainerItemProxy */;
+		};
+		26FA39427688896C91767CBE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 566EF84A99783309FC98BF91 /* DataProtocol */;
+			targetProxy = F5C087DF96B4D6634194E455 /* PBXContainerItemProxy */;
+		};
+		D60844B1E6FC193A0FDC6DFF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8A29CE34CFE185C18F1DEE9D /* BusinessJobs */;
+			targetProxy = 610CE9CBCEAB96E5F3D851EA /* PBXContainerItemProxy */;
+		};
+		650F967D1E74E40DF83B07A4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DA4D843C049585B484E90C38 /* InfrastructureProcess */;
+			targetProxy = 09C504CE6D5456EBB9167C58 /* PBXContainerItemProxy */;
+		};
+		43596328B509D9440B0367B5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 566EF84A99783309FC98BF91 /* DataProtocol */;
+			targetProxy = 9CFBEF8D364643F2193ECF24 /* PBXContainerItemProxy */;
+		};
+		8246582CF348B7D622694830 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8A29CE34CFE185C18F1DEE9D /* BusinessJobs */;
+			targetProxy = 36EC0302DA8C96CC346FCE10 /* PBXContainerItemProxy */;
+		};
+		D47DA3442C78F0A3952E9CD8 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8A29CE34CFE185C18F1DEE9D /* BusinessJobs */;
+			targetProxy = 30FA0D046890FB9BD837B1CF /* PBXContainerItemProxy */;
+		};
+		7DC1DA61C404226578F2EA7A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8A29CE34CFE185C18F1DEE9D /* BusinessJobs */;
+			targetProxy = 8FCD94BEF417DA7FFF0BECF8 /* PBXContainerItemProxy */;
+		};
+		E6BF4F252FE8F648AF5385E8 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8A29CE34CFE185C18F1DEE9D /* BusinessJobs */;
+			targetProxy = 94A518BA1E21BC23066791EC /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -3815,6 +4054,80 @@
 			};
 			name = Release;
 		};
+		D72D1C36D5CE221685A2F1AB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.BusinessJobs;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		7C84839F741810908D5E4368 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.BusinessJobs;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+		B30BC997553722EC8DB4368A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.BusinessJobsTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		30044BB0176F83020AA7865F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee.BusinessJobsTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -4057,6 +4370,24 @@
 			buildConfigurations = (
 				6B487977608A2805B59FF2AE /* Debug */,
 				2AF6E9D160A5AE5FF3E264DB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A9A68FEEB19459DBB9EAB5A0 /* Build configuration list for PBXNativeTarget "BusinessJobs" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D72D1C36D5CE221685A2F1AB /* Debug */,
+				7C84839F741810908D5E4368 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7DD3ABA52B50BB1B5CEF8C4F /* Build configuration list for PBXNativeTarget "BusinessJobsTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B30BC997553722EC8DB4368A /* Debug */,
+				30044BB0176F83020AA7865F /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

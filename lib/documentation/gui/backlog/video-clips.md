@@ -20,4 +20,4 @@
 - [ ] The library lists fixture clips with their records and chains; the sheet assembles every documented flag combination argv-exact; runs supervise with stop; consent asks before `train setup`.
 - [ ] Progress renders the stderr fallback today and 52b's events when present; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0; gated on [`downloads-jobs.md`](downloads-jobs.md) (1i — the jobs core it consumes). Out of scope: compose ([`compose-screens.md`](compose-screens.md)), voice (1o), any CLI change.
+**Scope note.** Earmarked for v0.2.0; gated on 1i, downloads and the jobs core ([shipped 2026-10-20](../assistant/MILESTONES.md#milestone-b--the-designs-screens)) (1i — the jobs core it consumes). Out of scope: compose ([`compose-screens.md`](compose-screens.md)), voice (1o), any CLI change.
