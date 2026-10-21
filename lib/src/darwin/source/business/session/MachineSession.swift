@@ -14,6 +14,9 @@ import InfrastructureProcess
 public actor MachineSession {
     /// Everything the session says, in order, `.ended` last.
     public nonisolated let events: AsyncStream<SessionEvent>
+    /// The child's process id, while there is a child: what the monitor reads
+    /// its memory by.
+    public nonisolated let processIdentifier: Int32?
     private let continuation: AsyncStream<SessionEvent>.Continuation
     private let child: (any RunningChild)?
 
@@ -51,6 +54,7 @@ public actor MachineSession {
     private init(child: (any RunningChild)?) {
         (events, continuation) = AsyncStream.makeStream(of: SessionEvent.self)
         self.child = child
+        processIdentifier = child?.processIdentifier
     }
 
     // MARK: - Reading

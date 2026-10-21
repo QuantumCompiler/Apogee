@@ -13,6 +13,8 @@ import InfrastructureProcess
 public actor SupervisedJob {
     /// What the job says, in order, `.ended` last.
     public nonisolated let updates: AsyncStream<JobUpdate>
+    /// The child's process id, when it started.
+    public nonisolated let processIdentifier: Int32?
     private let continuation: AsyncStream<JobUpdate>.Continuation
     private let child: (any RunningChild)?
     private let streaming: Bool
@@ -40,6 +42,7 @@ public actor SupervisedJob {
     private init(child: (any RunningChild)?, streaming: Bool) {
         (updates, continuation) = AsyncStream.makeStream(of: JobUpdate.self)
         self.child = child
+        processIdentifier = child?.processIdentifier
         self.streaming = streaming
     }
 
@@ -138,6 +141,12 @@ extension JobStarting {
 public protocol JobRunning: AnyObject, Sendable {
     var updates: AsyncStream<JobUpdate> { get }
     func stop(grace: Duration) async
+    /// Its child's process id, when it started.
+    var processIdentifier: Int32? { get }
+}
+
+extension JobRunning {
+    public var processIdentifier: Int32? { nil }
 }
 
 extension SupervisedJob: JobRunning {}

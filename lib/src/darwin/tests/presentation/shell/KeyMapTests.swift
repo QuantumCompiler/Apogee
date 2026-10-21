@@ -51,6 +51,5 @@ struct KeyMapTests {
             #expect(placeholder.about.hasSuffix("will be here."))
             #expect(placeholder.command.hasPrefix("apogee "))
         }
-        #expect(Overlay.monitor.placeholder.command == "apogee system")
     }
 }

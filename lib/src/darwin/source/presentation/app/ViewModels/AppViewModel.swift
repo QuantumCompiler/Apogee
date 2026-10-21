@@ -5,8 +5,10 @@ import DataPreferences
 import Foundation
 import Observation
 import PresentationModels
+import PresentationMonitor
 import PresentationSessions
 import PresentationShell
+import PresentationSuites
 import PresentationTasks
 
 /// The application's state: its name, the build it is, the window around its
@@ -25,6 +27,8 @@ final class AppViewModel {
     let models: ModelsViewModel
     let downloads: DownloadsViewModel
     let tasks: TasksViewModel
+    let monitor: MonitorViewModel
+    let suites: SuitesViewModel
 
     init(
         info: [String: Any]?, preferences: Preferences, starter: (any ChatStarting)? = nil,
@@ -44,6 +48,16 @@ final class AppViewModel {
         downloads.finished = { [weak models] in Task { await models?.refresh() } }
         let tasks = TasksViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
         tasks.say = { [weak shell] text in shell?.say(text) }
+        let monitor = MonitorViewModel(runner: runner ?? ReadRunner())
+        monitor.liveChildren = { [weak sessions, weak downloads, weak tasks] in
+            var children: [(label: String, pid: Int32)] = []
+            if let session = sessions?.current, let pid = session.processIdentifier {
+                children.append(("Session: \(session.transcript.model ?? "starting")", pid))
+            }
+            return children + (downloads?.children ?? []) + (tasks?.children ?? [])
+        }
+        let suites = SuitesViewModel(runner: runner ?? ReadRunner())
+        suites.say = { [weak shell] text in shell?.say(text) }
         sessions.say = { [weak shell] text in shell?.say(text) }
         models.say = { [weak shell] text in shell?.say(text) }
         models.useInSession = { [weak shell, weak sessions] backend in
@@ -52,11 +66,12 @@ final class AppViewModel {
         }
         // Sessions in view or not: the library keeps its one child to the
         // session on screen. A place coming into view reads again.
-        shell.routeChanged = { [weak sessions, weak models, weak tasks] destination in
+        shell.routeChanged = { [weak sessions, weak models, weak tasks, weak suites] destination in
             Task {
                 if destination == .sessions { await sessions?.cameIntoView() } else { await sessions?.leftView() }
                 if destination == .models { await models?.appeared() }
                 if destination == .tasks { await tasks?.appeared() }
+                if destination == .suites { await suites?.appeared() }
             }
         }
         self.shell = shell
@@ -64,6 +79,8 @@ final class AppViewModel {
         self.models = models
         self.downloads = downloads
         self.tasks = tasks
+        self.monitor = monitor
+        self.suites = suites
     }
 
     convenience init(bundle: Bundle) {
@@ -76,5 +93,7 @@ final class AppViewModel {
         await models.connect(binary: sessions.binaryURL)
         downloads.connect(binary: sessions.binaryURL)
         await tasks.connect(binary: sessions.binaryURL)
+        monitor.connect(binary: sessions.binaryURL)
+        await suites.connect(binary: sessions.binaryURL)
     }
 }

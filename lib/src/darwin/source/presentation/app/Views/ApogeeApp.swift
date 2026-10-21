@@ -1,7 +1,9 @@
 import PresentationModels
+import PresentationMonitor
 import PresentationSessions
 import PresentationShell
 import PresentationStyles
+import PresentationSuites
 import PresentationTasks
 import SwiftUI
 
@@ -27,7 +29,12 @@ public struct ApogeeApp: App {
                         DownloadsView(model: model.downloads)
                     }
                 case .tasks: TasksScreen(model: model.tasks)
+                case .suites: SuitesScreen(model: model.suites)
                 default: PlaceholderScreen(destination)
+                }
+            } overlay: { overlay in
+                switch overlay {
+                case .monitor: MonitorView(model: model.monitor, close: model.shell.closeOverlay)
                 }
             }
             .frame(minWidth: Layout.windowMinWidth, minHeight: Layout.windowMinHeight)

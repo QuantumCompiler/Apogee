@@ -7,18 +7,21 @@ import SwiftUI
 /// The shell knows places, not screens: the composition (`PresentationApp`)
 /// hands it each place's screen and the sidebar's session list, so a new
 /// screen is mounted there and the shell never links it.
-public struct ShellView<Screen: View, Sessions: View>: View {
+public struct ShellView<Screen: View, Sessions: View, OverlayContent: View>: View {
     @Bindable private var model: ShellViewModel
     private let sessions: () -> Sessions
     private let screen: (Destination) -> Screen
+    private let overlay: (Overlay) -> OverlayContent
 
     public init(
         model: ShellViewModel, @ViewBuilder sessions: @escaping () -> Sessions,
-        @ViewBuilder screen: @escaping (Destination) -> Screen
+        @ViewBuilder screen: @escaping (Destination) -> Screen,
+        @ViewBuilder overlay: @escaping (Overlay) -> OverlayContent
     ) {
         self.model = model
         self.sessions = sessions
         self.screen = screen
+        self.overlay = overlay
     }
 
     public var body: some View {
@@ -34,8 +37,8 @@ public struct ShellView<Screen: View, Sessions: View>: View {
         }
         .background(Palette.window)
         .onGeometryChange(for: Double.self) { Double($0.size.width) } action: { model.windowResized(width: $0) }
-        .sheet(item: Binding(get: { model.overlay }, set: { if $0 == nil { model.closeOverlay() } })) { overlay in
-            OverlaySheet(overlay: overlay, close: model.closeOverlay)
+        .sheet(item: Binding(get: { model.overlay }, set: { if $0 == nil { model.closeOverlay() } })) { which in
+            overlay(which)
         }
         .overlay(alignment: .bottom) {
             if let toast = model.toast {
@@ -124,25 +127,6 @@ public struct PlaceholderView: View {
                 .background(Palette.code, in: RoundedRectangle(cornerRadius: Radius.control))
         }
         .padding(Spacing.xxl)
-    }
-}
-
-/// An overlay over the window, closed by Esc or its button.
-struct OverlaySheet: View {
-    let overlay: Overlay
-    let close: () -> Void
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ScreenHeader(title: overlay.title) {
-                Button("Close", action: close)
-                    .keyboardShortcut(.cancelAction)
-            }
-            Divider()
-            PlaceholderView(symbol: "waveform.path.ecg", placeholder: overlay.placeholder)
-        }
-        .frame(minWidth: 460, minHeight: 300)
-        .background(Palette.window)
     }
 }
 

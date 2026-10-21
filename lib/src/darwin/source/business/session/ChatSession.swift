@@ -26,6 +26,12 @@ public protocol ChatSession: AnyObject, Sendable {
     func close() async
     /// Ends the session, escalating only as far as it must.
     func stop(grace: Duration) async
+    /// Its child's process id, when it has one.
+    var processIdentifier: Int32? { get }
+}
+
+extension ChatSession {
+    public var processIdentifier: Int32? { nil }
 }
 
 extension MachineSession: ChatSession {}

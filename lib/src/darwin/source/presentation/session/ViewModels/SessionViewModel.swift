@@ -173,6 +173,9 @@ public final class SessionViewModel {
         await session?.stop(grace: .seconds(5))
     }
 
+    /// Its child's process id, while it has one.
+    public var processIdentifier: Int32? { session?.processIdentifier }
+
     /// Whether its child was ended to free it, to be resumed when it is back
     /// in view.
     public var isPaused: Bool { transcript.status == .paused }

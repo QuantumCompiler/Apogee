@@ -53,9 +53,7 @@ public enum Destination: String, CaseIterable, Sendable, Identifiable {
         case .models:
             nil
         case .suites:
-            Placeholder(
-                about: "Your suites and their members, with whether they fit, will be here.",
-                command: "apogee models status")
+            nil
         case .tasks:
             nil
         case .graph:
@@ -100,15 +98,6 @@ public enum Overlay: String, Sendable, Identifiable {
     public var title: String {
         switch self {
         case .monitor: "System monitor"
-        }
-    }
-
-    public var placeholder: Placeholder {
-        switch self {
-        case .monitor:
-            Placeholder(
-                about: "CPU, memory, GPU and disk, read every two seconds while this is open, will be here.",
-                command: "apogee system")
         }
     }
 }
