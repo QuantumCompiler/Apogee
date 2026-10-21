@@ -986,9 +986,13 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   never guessed. Since M20, a SafeTensors set's `data` also carries
   `converts_to`, the formats `models convert` takes it to — `["gguf","mlx"]`
   for a language model's weights, `[]` for a draft head's or a diffusion
-  model's, which every conversion refuses. It is decided once, from the set's
-  own `config.json`, by the same function that makes those refusals, and it is
-  `null` on the other formats, which are what conversions make. A backend's
+  model's, which every conversion refuses. Since M21, an embedding model's
+  (sentence-transformers', by its `modules.json`) is `["gguf"]`. And `mlx` is
+  left out wherever the mlx-lm installed in Apogee's Python environment builds
+  no model of the set's `model_type`, by its own modules; with none installed
+  nothing is decided, and `mlx` stays. It is decided once, from the set's own
+  files, by the same functions that make those refusals, and it is `null` on
+  the other formats, which are what conversions make. A backend's
   document has no `data`.
 - **`chats list`**: newest first, each conversation's `id`, `updated`, `turns`
   and `name`, and since 52a the `backend` it runs on and the roster `model` it

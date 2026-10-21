@@ -726,6 +726,53 @@ TEST_CASE("models convert --mlx on the command line: the real driver, listed, ch
     CHECK_FALSE(std::filesystem::exists(stored.front().dir));
 }
 
+TEST_CASE("MLX is offered only for a type the installed mlx-lm builds, and refused before it runs",
+          "[commands][models][mlx][convert][driver][model_type]") {
+    // The user's call (M21, 2026-10-21): never show a conversion that cannot
+    // work. The mlx-lm installed says which types it builds, by its own
+    // modules (M15's reader); with none installed, nothing is decided.
+    if (apogee::platform::host_target() != "macos-arm64" ||
+        apogee::platform::find_on_path("python3").empty()) {
+        SKIP("the mlx runtime is Apple silicon's, and the driver needs a python3");
+    }
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    const std::string vl = "Qwen3-VL-8B-Instruct/safetensors/63f2634a2019";
+    write_mlx_model(home.models() / "Qwen3-VL-8B-Instruct" / "safetensors" / "63f2634a2019",
+                    {.bits = 0, .model_type = "qwen3_vl", .format = "pt"});
+    const std::string llama = "Llama3.2-1B-Instruct/safetensors/edaba290ce7f";
+    write_mlx_model(home.models() / "Llama3.2-1B-Instruct" / "safetensors" / "edaba290ce7f",
+                    {.bits = 0, .format = "pt"});
+    std::string out;
+    std::string err;
+    const auto conversions = [&](const std::string& handle) {
+        REQUIRE(home.run({"models", "info", handle, "--output-format", "json"}, &out, &err) == 0);
+        return nlohmann::json::parse(out)["data"]["converts_to"];
+    };
+    // No mlx-lm installed to ask: both offered, as before.
+    CHECK(conversions(vl) == nlohmann::json::array({"gguf", "mlx"}));
+
+    fake_mlx_runtime(home.home());  // builds gemma3, gemma4, gemma4_text, llama
+    CHECK(conversions(vl) == nlohmann::json::array({"gguf"}));
+    CHECK(conversions(llama) == nlohmann::json::array({"gguf", "mlx"}));
+    REQUIRE(home.run({"models", "info", vl}, &out) == 0);
+    CHECK(out.find("makes a GGUF of it\n") != std::string::npos);
+
+    const apogee::testing::EnvGuard record{"STUB_MLX_CONVERT_RECORD",
+                                           (home.home() / "calls.jsonl").string()};
+    CHECK(home.run({"models", "convert", vl, "--mlx"}, &out) != 0);
+    INFO(out);
+    CHECK(out.find("'" + vl +
+                   "' is a qwen3_vl model, which the mlx-lm in Apogee's Python environment builds "
+                   "no model for -- convert it without --mlx") != std::string::npos);
+    CHECK(out.find("--model-type <type>") != std::string::npos);
+    CHECK(home.run({"models", "convert", vl, "--mlx", "--model-type", "nosuch"}, &out) != 0);
+    CHECK(out.find("--model-type nosuch is no type the mlx-lm in Apogee's Python environment "
+                   "builds") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(home.home() / "calls.jsonl"));  // the driver never ran
+    CHECK(apogee::models::list_store_mlx(StoreRoots::at(home.models())).empty());
+}
+
 TEST_CASE("a vendor's model_type is refused with its door, then converted as the type named",
           "[commands][models][mlx][convert][driver][model_type]") {
     // M15: a vendor's spelling of a type mlx-lm has no class for, its door
@@ -754,7 +801,10 @@ TEST_CASE("a vendor's model_type is refused with its door, then converted as the
     CHECK(home.run(
               {"models", "convert", "--mlx", "google--gemma-4-12B-it-assistant", "--type", "4bit"},
               &out) != 0);
-    CHECK(out.find("ValueError: Model type gemma4_unified_assistant not supported.") !=
+    // Refused by the installed mlx-lm's own modules before the driver starts
+    // (M21, the user's call), M15's door kept.
+    CHECK(out.find("'google--gemma-4-12B-it-assistant' is a gemma4_unified_assistant model, "
+                   "which the mlx-lm in Apogee's Python environment builds no model for") !=
           std::string::npos);
     CHECK(out.find("convert them as it: --model-type <type> (nearest here: gemma4_unified, "
                    "gemma4_text, gemma4, gemma3)") != std::string::npos);
@@ -774,7 +824,7 @@ TEST_CASE("a vendor's model_type is refused with its door, then converted as the
     for (std::string line; std::getline(calls, line);) {
         seen.push_back(nlohmann::json::parse(line));
     }
-    REQUIRE(seen.size() == 2);
+    REQUIRE(seen.size() == 1);  // the refused run never started the driver
     CHECK(seen.back()["model_type"] == "gemma4_unified");
     CHECK(seen.back()["hf_path"].get<std::string>().find(".incoming-") != std::string::npos);
     // The snapshot untouched, and no view left behind.
@@ -1006,6 +1056,54 @@ TEST_CASE("a diffusion model is refused at every conversion door, and offered no
                      &out, &err) == 0);
     CHECK(nlohmann::json::parse(out)["data"]["converts_to"] ==
           nlohmann::json::array({"gguf", "mlx"}));
+}
+
+TEST_CASE("an embedding model is refused MLX before its chain starts, and offered its GGUF alone",
+          "[commands][models][mlx][convert][embedding]") {
+    // The user's run (M21, 2026-10-21): converting Gemma-Embedding-300M to
+    // MLX announced [1/2] and stopped in mlx-lm's strict load, hundreds of
+    // weight names long. It is a sentence-transformers embedding model.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    const std::string handle = "Gemma-Embedding-300M/safetensors/b6845e67fafb";
+    const std::filesystem::path embed =
+        home.models() / "Gemma-Embedding-300M" / "safetensors" / "b6845e67fafb";
+    write_mlx_model(embed, {.bits = 0, .format = "pt"});
+    apogee::testing::write_fixture_file(
+        embed / "config.json",
+        R"({"architectures": ["Gemma3TextModel"], "model_type": "gemma3_text"})");
+    apogee::testing::write_fixture_file(embed / "modules.json", R"([
+        {"idx": 0, "path": "", "type": "sentence_transformers.models.Transformer"},
+        {"idx": 1, "path": "1_Pooling", "type": "sentence_transformers.models.Pooling"},
+        {"idx": 2, "path": "2_Dense", "type": "sentence_transformers.models.Dense"},
+        {"idx": 3, "path": "3_Dense", "type": "sentence_transformers.models.Dense"},
+        {"idx": 4, "path": "4_Normalize", "type": "sentence_transformers.models.Normalize"}])");
+    apogee::testing::write_fixture_file(embed / "2_Dense" / "model.safetensors", "x");
+
+    std::string out;
+    // The user's exact command, refused before its chain announces a step.
+    CHECK(home.run({"models", "convert", handle, "--mlx", "--register", "--type", "8bit",
+                    "--base-name", "Gemma-Embed-300M"},
+                   &out) != 0);
+    INFO(out);
+    CHECK(out.find("'" + handle +
+                   "' is an embedding model (sentence-transformers: Transformer, Pooling, Dense, "
+                   "Dense, Normalize)") != std::string::npos);
+    CHECK(out.find("convert it without --mlx") != std::string::npos);
+    CHECK(out.find("[1/") == std::string::npos);
+    const StoreRoots roots = StoreRoots::at(home.models());
+    CHECK(apogee::models::list_store_mlx(roots).empty());
+    CHECK(apogee::models::find_abandoned_staging(roots).empty());
+
+    // `models info` offers the GGUF alone, and its data says so.
+    REQUIRE(home.run({"models", "info", handle}, &out) == 0);
+    CHECK(out.find("embedding:    an embedding model (sentence-transformers:") !=
+          std::string::npos);
+    CHECK(out.find("makes a GGUF of it\n") != std::string::npos);
+    CHECK(out.find("--mlx an MLX model") == std::string::npos);
+    std::string err;
+    REQUIRE(home.run({"models", "info", handle, "--output-format", "json"}, &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out)["data"]["converts_to"] == nlohmann::json::array({"gguf"}));
 }
 
 TEST_CASE("convert --mlx --register converts once and registers what the hint would",

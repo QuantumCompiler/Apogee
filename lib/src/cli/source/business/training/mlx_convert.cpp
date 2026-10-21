@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "contracts/layout.h"
+#include "training/convert.h"
 #include "training/script_runner.h"
 
 namespace apogee::training {
@@ -111,7 +112,7 @@ MlxConverter script_mlx_converter(std::filesystem::path interpreter, std::filesy
         }
         // A type mlx-lm knows no converter for: its own lists read now, at
         // failure time, to name the way out (M15).
-        const std::string error = outcome.describe();
+        const std::string error = fold_name_list(outcome.describe());
         return unsupported_model_type(error).empty()
                    ? error
                    : fold_model_type_failure(error, mlx_model_types(mlx_lm));

@@ -1265,6 +1265,18 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     return out.str();
 }
 
+/// The formats a SafeTensors set converts to: the one decision from its files
+/// (M20, M21), MLX left out where the mlx-lm installed builds no model of its
+/// type -- never offered where it cannot work (the user's call, 2026-10-21).
+[[nodiscard]] std::vector<std::string> set_conversions(const std::filesystem::path& dir) {
+    std::vector<std::string> conversions = models::snapshot_conversions(dir);
+    if (std::ranges::find(conversions, std::string{models::kMlxFormat}) != conversions.end() &&
+        installed_mlx_builds(dir) == false) {
+        std::erase(conversions, std::string{models::kMlxFormat});
+    }
+    return conversions;
+}
+
 /// `info` on one stored SafeTensors set: where it came from, what was made
 /// of it, and whether the listing folds it (M4).
 [[nodiscard]] std::string render_snapshot(const harness::Config& config,
@@ -1290,6 +1302,10 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
         out << "diffusion:    " << models::describe_diffusion_model(*diffusion) << "\n";
     } else {
         out << "format:       SafeTensors -- full weights, trainable, not runnable\n";
+        if (const std::optional<models::EmbeddingModel> embedding =
+                models::snapshot_embedding_model(stored.dir)) {
+            out << "embedding:    " << models::describe_embedding_model(*embedding) << "\n";
+        }
     }
     render_lineage(out, lineage, lineage.origin_of(handle));
     const std::string architecture = models::snapshot_architecture(stored.dir);
@@ -1308,13 +1324,16 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
             mlx_made.push_back(models::weights_handle(mlx.model, models::kMlxFormat, mlx.id));
         }
     }
-    if (!consumed.has_value() && mlx_made.empty() &&
-        models::snapshot_conversions(stored.dir).empty()) {
+    const std::vector<std::string> conversions = set_conversions(stored.dir);
+    if (!consumed.has_value() && mlx_made.empty() && conversions.empty()) {
         // What no conversion takes is offered none (M20).
         out << "made from it: nothing -- no conversion takes these weights\n";
     } else if (!consumed.has_value() && mlx_made.empty()) {
+        // Only what can work is offered (M21).
+        const bool mlx = std::ranges::find(conversions, std::string{models::kMlxFormat}) !=
+                         conversions.end();
         out << "made from it: nothing yet -- 'apogee models convert " << handle
-            << "' makes a GGUF of it (--mlx an MLX model)\n";
+            << "' makes a GGUF of it" << (mlx ? " (--mlx an MLX model)" : "") << "\n";
     } else {
         bool first = true;
         if (consumed.has_value()) {
@@ -1864,8 +1883,8 @@ namespace {
                 data["architecture"] = architecture;
             }
             data["lineage"] = lineage_entries(lineage, lineage.origin_of(handle));
-            // The formats it converts to, as the ladders decide (M20).
-            data["converts_to"] = models::snapshot_conversions(dir);
+            // The formats it converts to, as the ladders decide (M20, M21).
+            data["converts_to"] = set_conversions(dir);
         }
     }
     if (dir.empty()) {

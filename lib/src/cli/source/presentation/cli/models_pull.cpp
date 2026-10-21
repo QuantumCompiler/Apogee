@@ -711,6 +711,14 @@ models::StoreRoots store_roots(const std::filesystem::path& models_dir,
 
 namespace {
 
+/// An embedding model's dense layers are there: llama.cpp's converter takes
+/// them only when asked (M21).
+[[nodiscard]] bool dense_modules(const std::filesystem::path& snapshot) {
+    const std::optional<models::EmbeddingModel> embedding =
+        models::snapshot_embedding_model(snapshot);
+    return embedding.has_value() && embedding->dense;
+}
+
 /// Which set `given` names, before asking what kind of weights it holds.
 SnapshotChoice locate_snapshot(const models::StoreRoots& roots, std::string_view given,
                                std::string_view from_id) {
@@ -798,6 +806,22 @@ SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view
         choice.path.clear();
     }
     return choice;
+}
+
+std::vector<std::string> installed_mlx_model_types() {
+    const backends::MlxHost host = backends::MlxHost::current();
+    return training::mlx_model_types(training::find_site_package(host.venv, "mlx_lm"));
+}
+
+std::optional<bool> installed_mlx_builds(const std::filesystem::path& snapshot,
+                                         std::string_view as) {
+    const std::string type =
+        as.empty() ? models::read_mlx_config(snapshot).model_type : std::string{as};
+    const std::vector<std::string> types = installed_mlx_model_types();
+    if (type.empty() || types.empty()) {
+        return std::nullopt;
+    }
+    return std::ranges::find(types, type) != types.end();
 }
 
 GgufChoice choose_gguf(const models::StoreRoots& roots, std::string_view given,
@@ -1704,7 +1728,10 @@ ConvertedModel convert_model(const models::StoreRoots& roots, std::string_view g
                                          : std::string{})
                   << ")\n";
         const models::ConvertResult result = run_conversion(
-            source.path, model_output, training::script_converter(env.interpreter(), script, type),
+            source.path, model_output,
+            training::script_converter(env.interpreter(), script, type,
+                                       training::ConverterOutput::Model,
+                                       dense_modules(source.path)),
             model_estimate);
         if (result.cancelled) {
             cancelled();
@@ -2377,12 +2404,18 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
     }
     // What the weights are before what this machine has, as the GGUF path
     // orders it: a draft head is no conversion's input anywhere (2026-10-21).
-    if (const SnapshotChoice source =
-            registers != nullptr
-                ? choose_snapshot(roots, registers->snapshot, registers->snapshot_from)
-                : choose_snapshot(roots, given, from);
-        !source.error.empty()) {
+    const std::string& name = registers != nullptr ? registers->snapshot : given;
+    const SnapshotChoice source =
+        registers != nullptr ? choose_snapshot(roots, registers->snapshot, registers->snapshot_from)
+                             : choose_snapshot(roots, given, from);
+    if (!source.error.empty()) {
         fail(source.error);
+    }
+    // Nor is an embedding model an MLX conversion's: refused before the
+    // chain announces a step (M21).
+    if (const std::optional<models::EmbeddingModel> embedding =
+            models::snapshot_embedding_model(source.path)) {
+        fail(models::embedding_model_mlx_refusal("'" + name + "'", *embedding));
     }
     const backends::MlxHost host = backends::MlxHost::current();
     const backends::MlxReadiness runtime = backends::probe_mlx_runtime(host);
@@ -2396,6 +2429,29 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
              " -- run 'apogee check --fix' to seed it");
     }
     const std::filesystem::path mlx_lm = training::find_site_package(host.venv, "mlx_lm");
+    // A type this mlx-lm builds no model for is refused here, by its own
+    // modules, rather than in it once Python has started (M21, the user's
+    // call); M15's door -- naming the type it is -- stays open.
+    const std::string& as = registers != nullptr ? registers->model_type : model_type;
+    if (const std::vector<std::string> types = training::mlx_model_types(mlx_lm); !types.empty()) {
+        const std::string wanted =
+            as.empty() ? models::read_mlx_config(source.path).model_type : as;
+        if (!wanted.empty() && std::ranges::find(types, wanted) == types.end()) {
+            std::string near;
+            for (const std::string& candidate : training::nearest_model_types(wanted, types)) {
+                near += (near.empty() ? "" : ", ") + candidate;
+            }
+            fail((as.empty() ? "'" + name + "' is a " + wanted +
+                                   " model, which the mlx-lm in Apogee's Python environment "
+                                   "builds no model for -- convert it without --mlx, or, if "
+                                   "these weights are a type this mlx-lm knows, convert them "
+                                   "as it: --model-type <type>"
+                             : "--model-type " + wanted +
+                                   " is no type the mlx-lm in Apogee's Python environment "
+                                   "builds") +
+                 (near.empty() ? std::string{} : " (nearest here: " + near + ")"));
+        }
+    }
     if (registers != nullptr) {
         // M16: the hint executed -- each precision converted and registered.
         run_mlx_register_chain(

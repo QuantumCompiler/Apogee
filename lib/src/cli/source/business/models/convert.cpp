@@ -220,6 +220,11 @@ std::string mlx_conversion_refusal(const std::filesystem::path& snapshot,
     if (const std::optional<DiffusionModel> diffusion = snapshot_diffusion_model(snapshot)) {
         return diffusion_model_refusal(snapshot.string(), *diffusion);
     }
+    // Nor an embedding model, which the mlx backend could not embed with
+    // anyway: its GGUF is the conversion (M21).
+    if (const std::optional<EmbeddingModel> embedding = snapshot_embedding_model(snapshot)) {
+        return embedding_model_mlx_refusal(snapshot.string(), *embedding);
+    }
     // --- rung 2: never replace ---------------------------------------------------
     std::error_code code;
     if (std::filesystem::exists(out, code)) {

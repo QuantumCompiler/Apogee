@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <span>
@@ -45,10 +46,19 @@ namespace apogee::training {
 enum class ConverterOutput : std::uint8_t { Model, Projector };
 
 /// The script's arguments: `--outtype <type> --outfile <output> <input>`,
-/// then `--mmproj` for a projector.
+/// then `--mmproj` for a projector, and `--sentence-transformers-dense-modules`
+/// for an embedding model whose dense layers are there -- the converter leaves
+/// them out without it (M21); the caller, who reads the snapshot, says so.
 [[nodiscard]] std::vector<std::string> converter_arguments(
     std::string_view out_type, const std::filesystem::path& input,
-    const std::filesystem::path& output, ConverterOutput writes = ConverterOutput::Model);
+    const std::filesystem::path& output, ConverterOutput writes = ConverterOutput::Model,
+    bool dense_modules = false);
+
+/// A failure that lists names one a line -- mlx's strict weight load names
+/// every parameter it could not place, hundreds of them -- cut to its first
+/// `most` names and a count of the rest, everything else kept as written
+/// (M21). Any other error is returned unchanged.
+[[nodiscard]] std::string fold_name_list(const std::string& error, std::size_t most = 20);
 
 /// A failed run's error, with one plain line added when it names an
 /// architecture or a tensor the script does not know: the fix (a newer
@@ -60,6 +70,7 @@ enum class ConverterOutput : std::uint8_t { Model, Projector };
 /// inherited, and explained (`explain_converter_failure`).
 [[nodiscard]] Converter script_converter(std::filesystem::path interpreter,
                                          std::filesystem::path script, std::string out_type = "f16",
-                                         ConverterOutput writes = ConverterOutput::Model);
+                                         ConverterOutput writes = ConverterOutput::Model,
+                                         bool dense_modules = false);
 
 }  // namespace apogee::training

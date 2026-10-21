@@ -470,6 +470,25 @@ TEST_CASE("a diffusion model is refused by both ladders before any converter run
     CHECK(apogee::models::conversion_refusal(work.snapshot, work.root.path() / "out.gguf") == mlx);
 }
 
+TEST_CASE("an embedding model is refused by the MLX ladder alone; its GGUF is the conversion",
+          "[models][convert][mlx][embedding]") {
+    // The user's Gemma-Embedding-300M (M21, 2026-10-21): mlx-lm's strict
+    // load refused it after starting, and no MLX build of it could embed.
+    const MlxWork work;
+    write_file(work.snapshot / "config.json",
+               R"({"architectures": ["Gemma3TextModel"], "model_type": "gemma3_text"})");
+    write_file(work.snapshot / "modules.json",
+               R"([{"idx": 0, "path": "", "type": "sentence_transformers.models.Transformer"},
+                   {"idx": 1, "path": "1_Pooling",
+                    "type": "sentence_transformers.models.Pooling"}])");
+    CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out) ==
+          work.snapshot.string() +
+              " is an embedding model (sentence-transformers: Transformer, Pooling): it converts "
+              "to a GGUF a llamacpp backend embeds with -- mlx-lm's converter builds language "
+              "models, and the mlx backend does not embed -- convert it without --mlx");
+    CHECK(apogee::models::conversion_refusal(work.snapshot, work.root.path() / "out.gguf").empty());
+}
+
 TEST_CASE("the MLX size estimate follows the bits", "[models][convert][mlx]") {
     CHECK(apogee::models::estimated_mlx_bytes(1'000'000'000, 4) == 500'000'000 + 62'500'000);
     CHECK(apogee::models::estimated_mlx_bytes(1'000'000'000, 8) == 1'000'000'000 + 62'500'000);

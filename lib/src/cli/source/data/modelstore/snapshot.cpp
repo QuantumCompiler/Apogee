@@ -258,9 +258,61 @@ std::string diffusion_model_refusal(std::string_view subject, const DiffusionMod
     return std::string{subject} + " is " + describe_diffusion_model(model);
 }
 
+std::optional<EmbeddingModel> snapshot_embedding_model(const std::filesystem::path& dir) {
+    std::ifstream in{dir / "modules.json", std::ios::binary};
+    if (!in) {
+        return std::nullopt;
+    }
+    const nlohmann::json modules = nlohmann::json::parse(in, nullptr, false);
+    if (!modules.is_array()) {
+        return std::nullopt;
+    }
+    EmbeddingModel model;
+    bool pooled = false;
+    for (const nlohmann::json& module : modules) {
+        if (!module.is_object() || !module.contains("type") || !module["type"].is_string()) {
+            continue;
+        }
+        const std::string type = module["type"].get<std::string>();
+        const std::string word = type.substr(type.rfind('.') + 1);
+        model.modules.push_back(word);
+        pooled = pooled || word == "Pooling";
+        // The converter takes a Dense module only when its weights are there
+        // (conversion/gemma.py).
+        std::error_code code;
+        if (word == "Dense" && module.contains("path") && module["path"].is_string() &&
+            std::filesystem::is_regular_file(
+                dir / module["path"].get<std::string>() / "model.safetensors", code)) {
+            model.dense = true;
+        }
+    }
+    if (!pooled) {
+        return std::nullopt;
+    }
+    return model;
+}
+
+std::string describe_embedding_model(const EmbeddingModel& model) {
+    std::string modules;
+    for (const std::string& word : model.modules) {
+        modules += (modules.empty() ? "" : ", ") + word;
+    }
+    return "an embedding model (sentence-transformers: " + modules +
+           "): it converts to a GGUF a llamacpp backend embeds with -- mlx-lm's converter builds "
+           "language models, and the mlx backend does not embed";
+}
+
+std::string embedding_model_mlx_refusal(std::string_view subject, const EmbeddingModel& model) {
+    return std::string{subject} + " is " + describe_embedding_model(model) +
+           " -- convert it without --mlx";
+}
+
 std::vector<std::string> snapshot_conversions(const std::filesystem::path& dir) {
     if (snapshot_draft_head(dir).has_value() || snapshot_diffusion_model(dir).has_value()) {
         return {};
+    }
+    if (snapshot_embedding_model(dir).has_value()) {
+        return {std::string{kGgufFormat}};
     }
     return {std::string{kGgufFormat}, std::string{kMlxFormat}};
 }

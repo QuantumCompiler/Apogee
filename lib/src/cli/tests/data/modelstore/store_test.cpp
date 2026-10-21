@@ -1070,3 +1070,73 @@ TEST_CASE("which conversions a set takes is one decision: a language model both,
     CHECK(apogee::models::snapshot_conversions(head).empty());
     CHECK(apogee::models::snapshot_conversions(llama) == std::vector<std::string>{"gguf", "mlx"});
 }
+
+namespace {
+
+/// The user's Gemma-Embedding-300M (M21, 2026-10-21): its `modules.json`
+/// and its two dense layers' configs as stored, its `config.json` sliced to
+/// what says what it is.
+constexpr const char* kEmbeddingConfig =
+    R"({"architectures": ["Gemma3TextModel"], "model_type": "gemma3_text",
+        "hidden_size": 768, "use_bidirectional_attention": true})";
+constexpr const char* kEmbeddingModules = R"([
+  {"idx": 0, "name": "0", "path": "", "type": "sentence_transformers.models.Transformer"},
+  {"idx": 1, "name": "1", "path": "1_Pooling", "type": "sentence_transformers.models.Pooling"},
+  {"idx": 2, "name": "2", "path": "2_Dense", "type": "sentence_transformers.models.Dense"},
+  {"idx": 3, "name": "3", "path": "3_Dense", "type": "sentence_transformers.models.Dense"},
+  {"idx": 4, "name": "4", "path": "4_Normalize", "type": "sentence_transformers.models.Normalize"}
+])";
+
+/// The embedding model `dir` as the user's is stored, its dense layers'
+/// weights there when `dense`.
+void place_embedding_model(const std::filesystem::path& dir, bool dense) {
+    place_snapshot_with(dir, kEmbeddingConfig);
+    write_file(dir / "modules.json", kEmbeddingModules);
+    write_file(dir / "2_Dense" / "config.json",
+               R"({"in_features": 768, "out_features": 3072, "bias": false,
+                   "activation_function": "torch.nn.modules.linear.Identity"})");
+    write_file(dir / "3_Dense" / "config.json",
+               R"({"in_features": 3072, "out_features": 768, "bias": false,
+                   "activation_function": "torch.nn.modules.linear.Identity"})");
+    if (dense) {
+        write_file(dir / "2_Dense" / "model.safetensors");
+        write_file(dir / "3_Dense" / "model.safetensors");
+    }
+}
+
+}  // namespace
+
+TEST_CASE("an embedding model is read from its modules.json: its pipeline, and its dense layers",
+          "[models][store][embedding]") {
+    const Store store;
+    const std::filesystem::path embed = store.root.path() / "embed";
+    place_embedding_model(embed, true);
+    const std::optional<apogee::models::EmbeddingModel> read =
+        apogee::models::snapshot_embedding_model(embed);
+    REQUIRE(read.has_value());
+    CHECK(read->modules ==
+          std::vector<std::string>{"Transformer", "Pooling", "Dense", "Dense", "Normalize"});
+    CHECK(read->dense);
+    // Dense modules named but their weights absent: the converter takes none.
+    const std::filesystem::path bare = store.root.path() / "bare";
+    place_embedding_model(bare, false);
+    CHECK_FALSE(apogee::models::snapshot_embedding_model(bare)->dense);
+    // No Pooling module, no modules.json: none.
+    const std::filesystem::path unpooled = store.root.path() / "unpooled";
+    place_snapshot_with(unpooled, kEmbeddingConfig);
+    write_file(unpooled / "modules.json",
+               R"([{"idx": 0, "path": "", "type": "sentence_transformers.models.Transformer"}])");
+    CHECK_FALSE(apogee::models::snapshot_embedding_model(unpooled).has_value());
+    const std::filesystem::path llama = store.root.path() / "llama";
+    place_snapshot_with(llama, R"({"architectures": ["LlamaForCausalLM"], "model_type": "llama"})");
+    CHECK_FALSE(apogee::models::snapshot_embedding_model(llama).has_value());
+
+    // One wording, and the decision: a GGUF alone.
+    CHECK(apogee::models::describe_embedding_model(*read) ==
+          "an embedding model (sentence-transformers: Transformer, Pooling, Dense, Dense, "
+          "Normalize): it converts to a GGUF a llamacpp backend embeds with -- mlx-lm's converter "
+          "builds language models, and the mlx backend does not embed");
+    CHECK(apogee::models::embedding_model_mlx_refusal("'Gemma-Embedding-300M'", *read)
+              .ends_with("does not embed -- convert it without --mlx"));
+    CHECK(apogee::models::snapshot_conversions(embed) == std::vector<std::string>{"gguf"});
+}

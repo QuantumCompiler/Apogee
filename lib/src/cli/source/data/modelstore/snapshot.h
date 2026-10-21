@@ -132,10 +132,43 @@ struct DiffusionModel {
 [[nodiscard]] std::string diffusion_model_refusal(std::string_view subject,
                                                   const DiffusionModel& model);
 
+/// An **embedding model** (M21, 2026-10-21): a checkpoint sentence-transformers
+/// publishes as a pipeline -- the transformer, then pooling and, for some,
+/// dense layers and a normalize step -- which its `modules.json` declares by
+/// naming a `Pooling` module. llama.cpp's converter takes one as an embedding
+/// model a llamacpp backend embeds with; mlx-lm builds language models, and
+/// the mlx backend does not embed, so it converts to GGUF alone.
+struct EmbeddingModel {
+    /// Its modules in order, each type's last word: `Transformer`, `Pooling`,
+    /// `Dense`, `Normalize`.
+    std::vector<std::string> modules;
+    /// A `Dense` module's weights are there: what llama.cpp's converter
+    /// includes under `--sentence-transformers-dense-modules`, and leaves out
+    /// without it.
+    bool dense = false;
+};
+
+/// The embedding model `dir`'s `modules.json` describes: one naming a
+/// sentence-transformers `Pooling` module. nullopt for anything else, or for
+/// a directory with no readable `modules.json`.
+[[nodiscard]] std::optional<EmbeddingModel> snapshot_embedding_model(
+    const std::filesystem::path& dir);
+
+/// What an embedding model is, in the one wording every surface uses: "an
+/// embedding model (sentence-transformers: Transformer, Pooling, ...): it
+/// converts to a GGUF a llamacpp backend embeds with -- mlx-lm's converter
+/// builds language models, and the mlx backend does not embed".
+[[nodiscard]] std::string describe_embedding_model(const EmbeddingModel& model);
+
+/// The refusal an MLX conversion of one says, `subject` its name or path.
+[[nodiscard]] std::string embedding_model_mlx_refusal(std::string_view subject,
+                                                      const EmbeddingModel& model);
+
 /// The formats a SafeTensors set converts to, decided once from its own files
-/// (M20): `gguf` and `mlx` for a language model's weights, none for a draft
-/// head or a diffusion model's. What both conversion ladders refuse, what
-/// `models info` offers, and its `data.converts_to`, all read this.
+/// (M20): `gguf` and `mlx` for a language model's weights, `gguf` alone for an
+/// embedding model's (M21), none for a draft head or a diffusion model's.
+/// What both conversion ladders refuse, what `models info` offers, and its
+/// `data.converts_to`, all read this.
 [[nodiscard]] std::vector<std::string> snapshot_conversions(const std::filesystem::path& dir);
 
 /// Every snapshot directory directly under `root`, sorted by name.

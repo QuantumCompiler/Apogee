@@ -134,6 +134,18 @@ struct SnapshotChoice {
 [[nodiscard]] SnapshotChoice choose_snapshot(const models::StoreRoots& roots,
                                              std::string_view given, std::string_view from_id = {});
 
+/// The model types the mlx-lm in Apogee's Python environment builds, read
+/// from its own modules (M15's reader): empty when none is installed to ask.
+[[nodiscard]] std::vector<std::string> installed_mlx_model_types();
+
+/// Whether that mlx-lm builds `snapshot`'s model type -- its `config.json`'s,
+/// or `as` when named (`--model-type`): nullopt when no mlx-lm is installed
+/// to ask, or the type is unsaid, so nothing is decided without it. What MLX
+/// is offered and refused by, before anything runs (M21, the user's call:
+/// never offer a conversion that cannot work).
+[[nodiscard]] std::optional<bool> installed_mlx_builds(const std::filesystem::path& snapshot,
+                                                       std::string_view as = {});
+
 /// Which GGUF `models quantize` reads.
 struct GgufChoice {
     std::filesystem::path file;

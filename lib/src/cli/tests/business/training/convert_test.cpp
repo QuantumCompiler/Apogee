@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <fstream>
@@ -30,6 +31,44 @@ TEST_CASE("the converter is called with one argument shape", "[training][convert
                               apogee::training::ConverterOutput::Projector) ==
           std::vector<std::string>{"--outtype", "f16", "--outfile", "/out/m-mmproj.gguf", "/snap",
                                    "--mmproj"});
+}
+
+TEST_CASE("an embedding model's dense layers are asked for; nothing else changes",
+          "[training][convert][embedding]") {
+    // M21: the converter leaves a sentence-transformers model's dense
+    // modules out unless asked (its help names google/embeddinggemma-300m).
+    CHECK(converter_arguments("f16", "/snap", "/out/m.gguf",
+                              apogee::training::ConverterOutput::Model, true) ==
+          std::vector<std::string>{"--outtype", "f16", "--outfile", "/out/m.gguf", "/snap",
+                                   "--sentence-transformers-dense-modules"});
+    // A projector's run is no place for them.
+    CHECK(converter_arguments("f16", "/snap", "/out/m-mmproj.gguf",
+                              apogee::training::ConverterOutput::Projector, true) ==
+          std::vector<std::string>{"--outtype", "f16", "--outfile", "/out/m-mmproj.gguf", "/snap",
+                                   "--mmproj"});
+}
+
+TEST_CASE("a failure listing hundreds of names reads in a line or so, its count and tail kept",
+          "[training][convert][embedding]") {
+    // The user's run (M21): mlx's strict weight load named every parameter
+    // it could not place, one a line, the run's stderr tail on the last.
+    std::string error = "ValueError: Received 314 parameters not in model: \n";
+    for (int layer = 0; layer < 24; ++layer) {
+        for (const char* weight : {"input_layernorm", "mlp.down_proj", "self_attn.q_proj"}) {
+            error += "layers." + std::to_string(layer) + "." + weight + ".weight,\n";
+        }
+    }
+    error += "norm.weight. -- stderr: [INFO] Loading";
+    const std::string folded = apogee::training::fold_name_list(error);
+    CHECK(folded.starts_with("ValueError: Received 314 parameters not in model: \nlayers.0."));
+    CHECK(folded.find("... and 53 more") != std::string::npos);  // 73 names, 20 kept
+    CHECK(folded.ends_with(" -- stderr: [INFO] Loading"));
+    CHECK(std::ranges::count(folded, '\n') == 21);  // its line, 20 names, the count
+    // An error that lists nothing, or few, is left as written.
+    CHECK(apogee::training::fold_name_list("Traceback: it failed\nKeyError: 'x'") ==
+          "Traceback: it failed\nKeyError: 'x'");
+    const std::string few = "missing:\na.weight,\nb.weight.";
+    CHECK(apogee::training::fold_name_list(few) == few);
 }
 
 TEST_CASE("the offered precisions are the script's own, less the ternary ones",

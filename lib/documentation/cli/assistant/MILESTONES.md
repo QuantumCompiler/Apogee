@@ -4001,6 +4001,39 @@ The user's four Assistant snapshots (12B, 26B, E2B, E4B) are all draft heads, ea
 - **`config scan`'s count** still includes a diffusion model among the SafeTensors snapshots that "register when converted". Its text is what the GUI's register sheet reads, so a new line kind there waits on a change that updates both.
 - **Converting a diffusion model, or any type mlx-lm does not build, to MLX:** a capability, not upkeep. A spike, on the user's word.
 
+### 2026-10-21 — `embedding-models-convert-as-gguf` (maintenance item M21): MLX offered only where it can work
+
+**Why.** The user's next MLX conversion through the macOS app, after M20: `Gemma-Embedding-300M`, 8bit with registering, announced `[1/2]` and stopped in mlx-lm's strict weight load, its error the model's weight names one a line, some 300 of them. The set is EmbeddingGemma as sentence-transformers publishes it: a bare `Gemma3TextModel` encoder, then Pooling, two Dense layers and Normalize (`modules.json`). mlx-lm builds language models, so it cannot build one. The `mlx` backend does not embed, so no MLX build of it could serve. And the GGUF path, which llama.cpp's converter takes as `EmbeddingGemma`, dropped the two dense layers the converter includes only under `--sentence-transformers-dense-modules`. At the build the user widened it: "We shouldn't even show the ability to convert to MLX if it is not possible."
+
+- [x] **`modelstore/snapshot.h`**: `snapshot_embedding_model(dir)` reads `modules.json` (a Pooling module among its modules) and whether a Dense module's weights are there. `describe_embedding_model` and `embedding_model_mlx_refusal` are the one wording, and `snapshot_conversions` answers `["gguf"]` for one.
+- [x] **Refused before anything runs:** the MLX ladder (`mlx_conversion_refusal`) and the MLX door (`convert_to_mlx_command`), before the chain announces a step. The user's exact command now ends in 0.01 s: `… is an embedding model (sentence-transformers: Transformer, Pooling, Dense, Dense, Normalize): it converts to a GGUF a llamacpp backend embeds with -- … -- convert it without --mlx`. The GGUF ladder takes it.
+- [x] **The GGUF made whole:** `training::converter_arguments` passes `--sentence-transformers-dense-modules` when the caller, which reads the snapshot, says its dense layers are there. A language model's argv is unchanged.
+- [x] **MLX follows the installed mlx-lm**, the user's call. `models info`'s hint and `data.converts_to` leave `mlx` out wherever the mlx-lm in Apogee's Python environment builds no model of the set's `model_type`, read from its own modules (M15's `mlx_model_types`, through `cli/models_pull`'s `installed_mlx_builds`). The MLX door refuses such a set before the driver starts, naming the nearest types and keeping M15's `--model-type` door. An unknown `--model-type` is refused the same way. With no mlx-lm installed, nothing is decided.
+- [x] **A converter failure listing names** (`training::fold_name_list`) keeps its first line, its first 20 names, the count of the rest and the run's stderr tail, in both converters' failures.
+- [x] **The GUI needs nothing:** its M3 follows `converts_to`, so Stored weights shows Convert to GGUF alone for the embedding model, and no Convert to MLX for a type the installed mlx-lm does not build.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **An embedding model is known by its `modules.json` naming a Pooling module**, the item's default: the checkpoint's own declaration of its pipeline.
+- **The dense flag goes with a Dense module whose weights are present**, the item's default, as the converter itself requires.
+- **The name-list fold keeps 20 names**, the item's default, and applies to both converters' failures.
+- **M15's test changed with the rule.** A vendor's type the stub mlx-lm does not list is now refused by its modules before the driver starts, rather than in mlx-lm's own words after. Its door and its nearest types are said the same way, and the driver runs once, for the conversion as the named type.
+
+**Verified.**
+- `store_test`: the reader over the user's `modules.json` and dense configs (dense or not, unpooled, a language model), the wording, and `["gguf"]`.
+- `convert_test`, in `business/models`: the MLX ladder refuses and the GGUF ladder takes it.
+- `training/convert_test`: the dense flag on the model's run and never the projector's, and the fold over a failure in the user's shape, with few names left as written.
+- `models_mlx_test`:
+  - the user's exact command refused with no `[1/` and nothing staged;
+  - `models info`'s `embedding:` line, the hint GGUF-only and `["gguf"]`;
+  - over the stub mlx-lm, a `qwen3_vl` snapshot offered GGUF alone and refused before its driver, an unknown `--model-type` refused, and a Llama snapshot offered both;
+  - with no mlx-lm installed, both offered.
+- Probed with the build on a mirror of the user's store: refused in 0.01 s, `converts_to` `["gguf"]`.
+- Bare `lib/scripts/cicd.sh --test`: green. The CLI's 3,620 tests passed, the new cases among them, and the macOS app's 342 cases, with no warning.
+
+**Not done:**
+- **Embedding through MLX at all** (an `EmbeddingCapable` `mlx` backend over `mlx-embeddings`), and building vision, omni or video models through MLX: capabilities, not upkeep. A spike, on the user's word.
+- **Converting this set on real weights:** the user's run.
+
 ## Milestone O — Local multimodal
 
 **Goal.** Make `VisionCapable` tell the truth on the local backend: wire llama.cpp's `mtmd`, add `mmproj_path`, and close the cross-surface guard gap that let one surface accept a picture the other refused.
