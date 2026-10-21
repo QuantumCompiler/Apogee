@@ -1,0 +1,15 @@
+{
+ "chunks": 5,
+ "collection": "notes",
+ "index": "ok",
+ "path": "/Users/someone/.apogee/embeddings/notes.db",
+ "schema": 6,
+ "sources": [
+  "graph://community/1",
+  "heat-pumps.md",
+  "kr-20261021T050657Z-c74d1a",
+  "solar.md",
+  "windows.md"
+ ],
+ "vectors": null
+}

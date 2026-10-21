@@ -6,6 +6,7 @@ import Foundation
 import Observation
 import PresentationCompose
 import PresentationGraph
+import PresentationKnowledge
 import PresentationModels
 import PresentationConsole
 import PresentationMonitor
@@ -37,6 +38,8 @@ final class AppViewModel {
     let console: ConsoleViewModel
     let suites: SuitesViewModel
     let graph: GraphViewModel
+    let records: RecordsViewModel
+    let collections: CollectionsViewModel
     let video: VideoViewModel
     let compose: ComposeViewModel
     let voice: VoiceViewModel
@@ -73,6 +76,10 @@ final class AppViewModel {
         suites.say = { [weak shell] text in shell?.say(text) }
         let graph = GraphViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
         graph.say = { [weak shell] text in shell?.say(text) }
+        let records = RecordsViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
+        records.say = { [weak shell] text in shell?.say(text) }
+        let collections = CollectionsViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
+        collections.say = { [weak shell] text in shell?.say(text) }
         let video = VideoViewModel(
             starter: jobs ?? JobStarter(), preferences: preferences, home: FileManager.default.homeDirectoryForCurrentUser)
         video.say = { [weak shell] text in shell?.say(text) }
@@ -98,13 +105,17 @@ final class AppViewModel {
         }
         // Sessions in view or not: the library keeps its one child to the
         // session on screen. A place coming into view reads again.
-        shell.routeChanged = { [weak sessions, weak models, weak tasks, weak suites, weak graph, weak video, weak compose, weak voice] destination in
+        shell.routeChanged = { [weak sessions, weak models, weak tasks, weak suites, weak graph, weak video, weak compose, weak voice, weak records, weak collections] destination in
             Task {
                 if destination == .sessions { await sessions?.cameIntoView() } else { await sessions?.leftView() }
                 if destination == .models { await models?.appeared() }
                 if destination == .tasks { await tasks?.appeared() }
                 if destination == .suites { await suites?.appeared() }
                 if destination == .graph { await graph?.appeared() }
+                if destination == .knowledge {
+                    await records?.appeared()
+                    await collections?.appeared()
+                }
                 if destination == .voice { await voice?.appeared() }
                 if destination == .video {
                     video?.appeared()
@@ -121,6 +132,8 @@ final class AppViewModel {
         self.console = console
         self.suites = suites
         self.graph = graph
+        self.records = records
+        self.collections = collections
         self.video = video
         self.compose = compose
         self.voice = voice
@@ -141,6 +154,8 @@ final class AppViewModel {
         console.connect(binary: sessions.binaryURL)
         await suites.connect(binary: sessions.binaryURL)
         await graph.connect(binary: sessions.binaryURL)
+        await records.connect(binary: sessions.binaryURL)
+        await collections.connect(binary: sessions.binaryURL)
         video.connect(binary: sessions.binaryURL)
         compose.connect(binary: sessions.binaryURL)
         await voice.connect(binary: sessions.binaryURL)

@@ -1,0 +1,96 @@
+{
+ "communities": [
+  {
+   "id": 1,
+   "size": 3,
+   "summary": "The heat pump, its compressor and its outdoor unit: one machine moving heat indoors."
+  }
+ ],
+ "decisions": [
+  {
+   "decision": "Explain the outdoor unit in the heat pump guide. \u2014 Customers kept asking why the outdoor unit runs in winter.",
+   "discipline": "product",
+   "name": "kr-20261021T050657Z-c74d1a",
+   "status": "shipped",
+   "type": "decision"
+  }
+ ],
+ "degree": {
+  "in": 1,
+  "out": 2,
+  "total": 3
+ },
+ "description": "moves heat from a cold place to a warm one",
+ "graph": "notes",
+ "matched": "exact",
+ "max_per_relation": 12,
+ "mentions": 4,
+ "node": {
+  "name": "Heat pump",
+  "type": "system"
+ },
+ "object": "graph.node",
+ "provenance": {
+  "chunks": [
+   {
+    "chunk": 0,
+    "collection": "",
+    "source": "heat-pumps.md"
+   },
+   {
+    "chunk": 0,
+    "collection": "",
+    "source": "solar.md"
+   },
+   {
+    "chunk": 0,
+    "collection": "",
+    "source": "windows.md"
+   },
+   {
+    "chunk": 0,
+    "collection": "",
+    "source": "kr-20261021T050657Z-c74d1a"
+   }
+  ],
+  "code": []
+ },
+ "relations": [
+  {
+   "direction": "in",
+   "neighbors": [
+    {
+     "discipline": "product",
+     "name": "kr-20261021T050657Z-c74d1a",
+     "origin": "inferred",
+     "status": "shipped",
+     "type": "decision",
+     "weight": 1
+    }
+   ],
+   "relation": "concerns",
+   "total": 1
+  },
+  {
+   "direction": "out",
+   "neighbors": [
+    {
+     "description": "the compressor drives the cycle",
+     "name": "Compressor",
+     "origin": "inferred",
+     "type": "component",
+     "weight": 4
+    },
+    {
+     "description": "the outdoor unit gathers heat",
+     "name": "Outdoor unit",
+     "origin": "inferred",
+     "type": "component",
+     "weight": 4
+    }
+   ],
+   "relation": "contains",
+   "total": 2
+  }
+ ]
+}

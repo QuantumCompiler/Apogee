@@ -1,0 +1,15 @@
+{
+ "data": [
+  {
+   "chunks": 3,
+   "name": "knowledge",
+   "sources": 3
+  },
+  {
+   "chunks": 5,
+   "name": "notes",
+   "sources": 5
+  }
+ ],
+ "object": "list"
+}

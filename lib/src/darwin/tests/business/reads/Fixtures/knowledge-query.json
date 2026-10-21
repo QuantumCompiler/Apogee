@@ -1,0 +1,57 @@
+{
+ "records": [
+  {
+   "record": {
+    "decision": "Remove the cancel button from checkout.",
+    "discipline": "ux",
+    "downstream_link": "",
+    "id": "kr-20261021T045944Z-1e2354",
+    "intent": "We dropped the cancel button because testers kept mistaking it for back.",
+    "provenance": {
+     "attribution": "Ada Lovelace",
+     "source": "meeting"
+    },
+    "raw_ref": "/Users/someone/.apogee/knowledge/raw/kr-20261021T045944Z-1e2354.md",
+    "status": "rejected",
+    "timestamp": "2026-10-21T04:59:44.463192Z"
+   },
+   "score": 0.5962886409906911
+  },
+  {
+   "record": {
+    "decision": "Default the window to the model's trained length, capped by free memory.",
+    "discipline": "eng",
+    "downstream_link": "PROJ-42",
+    "id": "kr-20261021T045944Z-3346a9",
+    "intent": "Local models should load at a window the machine can hold.",
+    "provenance": {
+     "attribution": "Grace Hopper",
+     "source": "review"
+    },
+    "raw_ref": "/Users/someone/.apogee/knowledge/raw/kr-20261021T045944Z-3346a9.md",
+    "status": "shipped",
+    "timestamp": "2026-10-21T04:59:44.477387Z"
+   },
+   "score": 1.542680546962327e-06
+  },
+  {
+   "record": {
+    "decision": "Lead release notes with user-felt changes; process last.",
+    "discipline": "product",
+    "downstream_link": "",
+    "id": "kr-20261021T045954Z-0084c5",
+    "intent": "Release notes read better when they lead with what changed for the person running it.",
+    "provenance": {
+     "attribution": "Bob",
+     "source": "chat"
+    },
+    "raw_ref": "/Users/someone/.apogee/knowledge/raw/kr-20261021T045954Z-0084c5.md",
+    "status": "shipped",
+    "timestamp": "2026-10-21T04:59:54.408295Z"
+   },
+   "score": 9.656479224850218e-07
+  }
+ ],
+ "reranked": false,
+ "retriever": "lexical"
+}

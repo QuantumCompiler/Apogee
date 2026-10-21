@@ -97,6 +97,11 @@ public struct GraphExplain: Sendable, Equatable {
     public let relations: [Relation]
     /// Where it is stated in the code, `file:line`.
     public let statedAt: [String]
+    /// The communities it belongs to, with their summaries where stored.
+    public let communities: [GraphCommunity]
+    /// The decision records attached to it (a record about it captured into
+    /// the graph's collection).
+    public let decisions: [GraphDecision]
 
     public init?(document: ReadDocument) {
         let v = document.value
@@ -114,6 +119,8 @@ public struct GraphExplain: Sendable, Equatable {
         statedAt = (v["provenance"]?["code"]?.arrayValue ?? []).compactMap { c in
             c["file"]?.stringValue.map { $0 + (c["line"]?.intValue.map { ":\($0)" } ?? "") }
         }
+        communities = (v["communities"]?.arrayValue ?? []).compactMap(GraphCommunity.init)
+        decisions = (v["decisions"]?.arrayValue ?? []).compactMap { GraphDecision($0) }
     }
 }
 
@@ -127,6 +134,15 @@ public struct GraphStats: Sendable, Equatable {
     public let nodesByType: [String: Int]
     public let staleFiles: Int
     public let sources: [String]
+    /// `collection` for a collection's own (prose) graph, else the named
+    /// graph's kind.
+    public let kind: String
+    public let communities: Int
+    public let communitiesUnsummarised: Int
+    public let failedChunks: Int
+
+    /// A collection's own graph: prose, its entities drawn by a model.
+    public var isProse: Bool { kind == "collection" }
 
     public init(document: ReadDocument) {
         let v = document.value
@@ -138,5 +154,82 @@ public struct GraphStats: Sendable, Equatable {
         nodesByType = (v["nodes_by_type"]?.objectValue ?? [:]).compactMapValues(\.intValue)
         staleFiles = v["stale_files"]?.intValue ?? 0
         sources = (v["sources"]?.arrayValue ?? []).compactMap(\.stringValue)
+        kind = v["kind"]?.stringValue ?? ""
+        communities = v["communities"]?.intValue ?? 0
+        communitiesUnsummarised = v["communities_unsummarised"]?.intValue ?? 0
+        failedChunks = v["failed_chunks"]?.intValue ?? 0
+    }
+}
+
+/// A community of a graph: its members' count, and the summary a model wrote
+/// for it when one is stored.
+public struct GraphCommunity: Sendable, Equatable, Identifiable {
+    public let id: Int
+    public let size: Int
+    public let summary: String?
+    /// Its members, where the document names them (the report does).
+    public let members: [GraphNode]
+
+    public init?(_ value: JSONValue) {
+        guard let id = value["id"]?.intValue else { return nil }
+        self.id = id
+        size = value["size"]?.intValue ?? 0
+        summary = value["summary"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
+        members = (value["members"]?.arrayValue ?? []).map(GraphNode.init)
+    }
+}
+
+/// A decision record attached to a graph: its node's name (the record's id),
+/// its branch and discipline, and the decision in the CLI's words.
+public struct GraphDecision: Sendable, Equatable, Identifiable {
+    public let name: String
+    public let status: String
+    public let discipline: String
+    public let decision: String
+    public var id: String { name }
+
+    /// From an explain's decision (the node's own fields) or a report's (the
+    /// node under `node`).
+    public init?(_ value: JSONValue) {
+        let node = value["node"] ?? value
+        guard let name = node["name"]?.stringValue else { return nil }
+        self.name = name
+        status = node["status"]?.stringValue ?? ""
+        discipline = node["discipline"]?.stringValue ?? ""
+        decision = value["decision"]?.stringValue ?? ""
+    }
+}
+
+/// `graph report --output-format json`: the graph's own summary -- its
+/// communities, the decisions attached, its busiest entities -- from the
+/// store, with no model call.
+public struct GraphReport: Sendable, Equatable {
+    /// One of the busiest entities, with its relation count.
+    public struct Hub: Sendable, Equatable, Identifiable {
+        public let node: GraphNode
+        public let degree: Int
+        public var id: String { node.name }
+    }
+
+    public let summary: String
+    public let communities: [GraphCommunity]
+    public let communitiesTotal: Int
+    public let decisions: [GraphDecision]
+    public let decisionsTotal: Int
+    public let hubs: [Hub]
+    public let orphans: Int
+
+    public init?(document: ReadDocument) {
+        let v = document.value
+        guard v["object"]?.stringValue == "graph.report" else { return nil }
+        summary = v["human_summary"]?.stringValue ?? ""
+        communities = (v["communities"]?["shown"]?.arrayValue ?? []).compactMap(GraphCommunity.init)
+        communitiesTotal = v["communities"]?["total"]?.intValue ?? 0
+        decisions = (v["decisions"]?["shown"]?.arrayValue ?? []).compactMap { GraphDecision($0) }
+        decisionsTotal = v["decisions"]?["total"]?.intValue ?? 0
+        hubs = (v["hubs"]?["shown"]?.arrayValue ?? []).compactMap { hub in
+            hub["node"].map { Hub(node: GraphNode($0), degree: hub["degree"]?["total"]?.intValue ?? 0) }
+        }
+        orphans = v["orphans"]?["total"]?.intValue ?? 0
     }
 }

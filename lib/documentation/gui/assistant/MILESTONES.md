@@ -184,7 +184,7 @@ Decisions taken while building, for veto:
 - **The places row fits its seven** in the 256-point sidebar rather than scrolling sideways.
 - **Settings is a `Settings` scene**, the design's own native mapping (BuildLayout: "a Settings scene with its own sidebar").
 
-**Verified.** `scripts/build.sh test`: every test case passes (125 in the gate's run), the layering check holding the new module and its edges (`PresentationApp` → `PresentationShell` → `PresentationStyles`, `DataPreferences`; the app embedding `PresentationShell`); the Release app builds, signs and verifies with nine frameworks, with no Swift warning. The new tests: the route matrix over every place with restoration across a fresh view-model, an unknown remembered route, each command, overlays, the window law's threshold (899.5, 900, hidden at any width), the toast's lifetime and newest-wins dismissal, the key map against the design's list (seven places on ⌘1–⌘7 in order, no chord twice, every shell key listed by the design), the placeholders' honesty, and the app's composition. **Drawn offscreen**: the shell rendered through `ImageRenderer` against the Debug frameworks -- the full layout at 1100×700 (light, Models' placeholder, a toast) and the narrow one at 860×640 (dark, icons only, Code graph's placeholder) -- matched the design's frame. Bare `lib/scripts/cicd.sh --test`: the CLI's 3593 tests pass (two skipped, as always: the libass caption burn and pdftotext) and the app's suite passes.
+**Verified.** `scripts/build.sh test`: every test case passes (117 in the gate's run), the layering check holding the new module and its edges (`PresentationApp` → `PresentationShell` → `PresentationStyles`, `DataPreferences`; the app embedding `PresentationShell`); the Release app builds, signs and verifies with nine frameworks, with no Swift warning. The new tests: the route matrix over every place with restoration across a fresh view-model, an unknown remembered route, each command, overlays, the window law's threshold (899.5, 900, hidden at any width), the toast's lifetime and newest-wins dismissal, the key map against the design's list (seven places on ⌘1–⌘7 in order, no chord twice, every shell key listed by the design), the placeholders' honesty, and the app's composition. **Drawn offscreen**: the shell rendered through `ImageRenderer` against the Debug frameworks -- the full layout at 1100×700 (light, Models' placeholder, a toast) and the narrow one at 860×640 (dark, icons only, Code graph's placeholder) -- matched the design's frame. Bare `lib/scripts/cicd.sh --test`: the CLI's 3593 tests pass (two skipped, as always: the libass caption burn and pdftotext) and the app's suite passes.
 
 **Not run: looking at the live window.** The dev host's screen was locked through the run, so the built app could be launched but not seen; the window by hand -- the places, the keys, the narrow collapse by resizing -- is the user's check (`lib/src/darwin/scripts/build.sh open`).
 
@@ -540,3 +540,53 @@ Every screen stays a machine-mode client of the binary, tested hermetically.
   - the keyboard list at 21.
 - **Drawn offscreen over the real binary in a scratch home:** a real `models list` run through the jobs core (every table's columns intact), `reset` refused in the table's words, and the ten candidates `__complete models ""` returns.
 - Bare `lib/scripts/cicd.sh --test`: green -- the CLI's 3593 tests (the two usual skips) and the app's 252 cases.
+
+### 2026-10-20 — `knowledge-collections` (backlog item 2c): the record layer's screens
+
+**Why.** Two whole families had no GUI place, the organizational records (`knowledge`) and the embed store (`embed`). The graph screen also lacked its prose half: 1l shipped code graphs only. The TUI has had all three since 37c.
+
+- [x] **The Knowledge place** (⌘8, the eighth place; `PresentationKnowledge`, `source/presentation/knowledge/`, a new module), with tabs **Records** and **Collections**.
+  - **`RecordsViewModel`:**
+    - the records `knowledge list` reads, newest first, narrowed by branch;
+    - a question answered by `knowledge query <q> --status <branch|""> --json`, each score on the retriever's own scale and the retriever named;
+    - Link (`knowledge link`), Move to (`knowledge status`) and Delete (`knowledge delete`, confirmed here, since the CLI asks nothing on a pipe), each read back;
+    - Export (`knowledge export --format markdown|json [--anonymize] -o <file>`, the file chosen in a save panel);
+    - **Capture** (the clerk's one model call: `knowledge capture <text> [--status] [--discipline] [--link]`) and **Reindex**, both supervised.
+  - **`CollectionsViewModel`:**
+    - the collections `embed list` reads, and a collection's `embed info` (chunks, the text index's health, its vectors or "a text index only", its sources);
+    - a search, `embed query`, shown as the CLI prints it (it has no document form);
+    - **Ingest** (`embed ingest <collection> <path> [--retriever] [--graph]`), supervised;
+    - deletes confirmed: a whole collection with `--yes` only after the person's word, since the CLI only describes the delete without it; one source as the CLI takes it.
+  - **`KnowledgeScreen`:** the two tabs with their sheets, the capture and the ingest each showing its command as typed.
+- [x] **The Graph place's prose half.**
+  - A collection's graph (completion already listed them) says "Build its graph" until built, then shows its **report**: `graph report --output-format json`, read as `GraphReport` (the summary, communities with their members, decisions, the busiest entities).
+  - **Find communities** runs `graph communities` supervised.
+  - A node's explanation shows its **communities** and attached **decisions**.
+- [x] **The reads:**
+  - `Knowledge.swift`: `KnowledgeRecord`, `KnowledgeQuery`, `CollectionRow`, `CollectionInfo`;
+  - `Graph.swift` grew `GraphCommunity`, `GraphDecision` and `GraphReport`, `GraphExplain`'s `communities` and `decisions`, and `GraphStats`' `kind`, `communities` and `isProse`.
+- [x] **The parity table:** `knowledge` and `embed` are screens of `PresentationKnowledge`, and `graph`'s note names the prose half (17 screens, 7 gaps).
+- [x] **The design (canvas version 37):**
+  - the prototype's Knowledge place (⌘8, its records with a question answered, its collections with a search) and the graph's "Collection · notes" view;
+  - the boards `ScreenGraphProse`, `ScreenKnowledge` and `ScreenCollections`;
+  - the contract board's KNOWLEDGE rows and the prose-graph row (43 ready);
+  - the Layout board's ⌘1 – ⌘8.
+
+  Every string on the boards is the binary's own, from the recorded documents. The health check passes all 36 start screens.
+
+**Decisions made while building** (2026-10-20, each recorded for veto):
+- **One place, two tabs:** Knowledge holds Records and Collections, on ⌘8. A single place keeps the eight-key sidebar, where two would have needed ⌘9.
+- **A records question runs as a command, its stdout the document.** `knowledge query` takes `--json` and refuses `--output-format`, which the read helper always appends. The live drawing found this: the scripted test had passed it.
+- **A collection's search is the CLI's text** (no `--json` exists), shown in a code block, never re-scored.
+- **The prose half lives in the Graph place**, which already lists collection graphs, rather than in Knowledge. Building a collection's graph is the same `graph build` its Rebuild runs.
+- **Capture and reindex are supervised jobs.** Capture is one model call and can take a while.
+
+**Verified.**
+- `scripts/build.sh test`: 266 cases, no Swift warning. They read documents recorded from the installed binary over a scratch home (`tests/business/reads/Fixtures/knowledge-*`, `collection*`, `graph-prose-*`, paths made neutral). That home held records captured by a scripted mock clerk, a lexical collection of three notes, and its prose graph built by a scripted extractor, its community summarised and a decision record captured into it. New tests cover:
+  - the records, the query's scores and retriever, the collections, the prose graph's stats, report and explain;
+  - every verb argv-exact: query, link, move (and nothing for the same branch), delete, export, capture with overrides, ingest with its options, `--yes` only on a whole collection;
+  - capture and ingest supervised, read back at their end;
+  - the report read for a built collection graph, Find communities, and an unbuilt graph's honest line;
+  - the keys and places at eight.
+- **Drawn offscreen over the real binary in the scratch home:** a question answered with its scores and a record open; a collection's health, sources and a search as printed; the notes graph's report, then Heat pump's communities, decision and relations.
+- Bare `lib/scripts/cicd.sh --test`: green -- the CLI's 3593 tests (the two usual skips) and the app's 266 cases.

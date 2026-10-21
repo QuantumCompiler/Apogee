@@ -133,4 +133,50 @@ struct GraphViewModelTests {
         #expect(model.graph == nil)
         #expect(model.emptyText?.hasPrefix("No code graph yet.") == true)
     }
+
+    /// A collection's prose graph, recorded (tests/business/reads/Fixtures).
+    static func prose(_ name: String) -> String {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../business/reads/Fixtures/graph-prose-\(name).json")
+        return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+    }
+
+    @Test("a built collection graph reads its report; Find communities runs graph communities; explain carries both")
+    func proseGraph() async {
+        let runner = ScriptedRunner()
+        runner.saying(["__complete", "graph", "stats"], "notes\n")
+        runner.reading(["graph", "stats"], Self.prose("stats"))
+        runner.reading(["graph", "report"], Self.prose("report"))
+        runner.reading(["graph", "explain"], Self.prose("explain"))
+        let job = ScriptedJob()
+        let jobs = ScriptedJobs([job])
+        let model = GraphViewModel(runner: runner, starter: jobs)
+        await model.connect(binary: Self.binary)
+        #expect(model.stats?.isProse == true)
+        #expect(model.report?.communities.count == 1 && model.report?.decisions.count == 1)
+        #expect(model.emptyText == nil, "the report stands in for the empty search")
+        await model.select("Heat pump")
+        #expect(model.explain?.communities.first?.summary?.hasPrefix("The heat pump") == true)
+        #expect(model.explain?.decisions.first?.status == "shipped")
+        model.findCommunities()
+        #expect(jobs.starts.first?.arguments == ["graph", "communities", "notes"])
+        job.end()
+        #expect(await eventually { !model.isBuilding })
+    }
+
+    @Test("an unbuilt collection graph says what building it costs, and has no report")
+    func proseUnbuilt() async {
+        let runner = ScriptedRunner()
+        runner.saying(["__complete", "graph", "stats"], "notes\n")
+        runner.reading(["graph", "stats"], #"{"built":false,"graph":"notes","kind":"collection","object":"graph.stats"}"#)
+        let job = ScriptedJob()
+        let jobs = ScriptedJobs([job])
+        let model = GraphViewModel(runner: runner, starter: jobs)
+        await model.connect(binary: Self.binary)
+        #expect(model.report == nil)
+        #expect(model.emptyText?.hasPrefix("notes's graph isn't built yet") == true)
+        model.rebuild()
+        #expect(jobs.starts.first?.arguments == ["graph", "build", "notes"])
+        job.end()
+    }
 }

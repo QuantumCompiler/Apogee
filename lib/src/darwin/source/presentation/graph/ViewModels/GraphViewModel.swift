@@ -17,6 +17,9 @@ public final class GraphViewModel {
     public private(set) var graphs: [String] = []
     public private(set) var graph: String?
     public private(set) var stats: GraphStats?
+    /// A built collection graph's report (`graph report --output-format json`):
+    /// its summary, communities, decisions and busiest entities -- no model.
+    public private(set) var report: GraphReport?
     public var question = ""
     public private(set) var result: GraphQuery?
     public private(set) var layout = GraphLayout(nodes: [], edges: [])
@@ -71,6 +74,11 @@ public final class GraphViewModel {
             failure = nil
         } else {
             failure = outcome.failure
+        }
+        if let stats, stats.isProse, stats.built {
+            report = await runner.read(binary: binary, ["graph", "report", "--graph", graph]).document.flatMap(GraphReport.init)
+        } else {
+            report = nil
         }
         if result != nil { await search() }
         if let selected { await explain(selected) }
@@ -148,6 +156,13 @@ public final class GraphViewModel {
         run(sourced ? ["graph", "update", graph] : ["graph", "build", graph])
     }
 
+    /// A collection graph's communities, detected and summarised by the
+    /// utility model (`graph communities <graph>`), supervised.
+    public func findCommunities() {
+        guard let graph, stats?.isProse == true else { return }
+        run(["graph", "communities", graph])
+    }
+
     /// A new graph of a folder's code: `graph build <name> --source <folder>`.
     public func build(name: String, folder: URL) {
         let name = name.trimmingCharacters(in: .whitespaces)
@@ -183,6 +198,10 @@ public final class GraphViewModel {
     public var emptyText: String? {
         if let failure { return failure }
         if graph == nil { return "No code graph yet. Build one from a folder of code: no model, no key, no network." }
+        if let stats, stats.isProse, !stats.built {
+            return "\(stats.graph)'s graph isn't built yet. Building it has a model read every chunk for the things it names and how they relate."
+        }
+        if result == nil && report != nil { return nil }
         if result == nil { return "Search the graph: a function, a class, a file, or words naming some." }
         if result?.nodes.isEmpty == true { return "Nothing in \(graph ?? "the graph") matches “\(question)”." }
         return nil

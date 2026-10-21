@@ -1,0 +1,28 @@
+{
+ "built": true,
+ "chunks_with_mentions": 4,
+ "code_files": 0,
+ "code_files_by_language": {},
+ "code_mentions": 0,
+ "communities": 1,
+ "communities_unsummarised": 0,
+ "edges": 5,
+ "edges_extracted": 0,
+ "edges_inferred": 5,
+ "extract_model": "extractor",
+ "failed_chunks": 0,
+ "graph": "notes",
+ "kind": "collection",
+ "mentions": 13,
+ "nodes": 4,
+ "nodes_by_type": {
+  "component": 2,
+  "decision": 1,
+  "system": 1
+ },
+ "nodes_with_vectors": 0,
+ "object": "graph.stats",
+ "stale_files": 0,
+ "total_chunks": 4,
+ "unresolved_names": 0
+}

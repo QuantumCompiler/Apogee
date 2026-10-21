@@ -41,7 +41,7 @@ Opened 2026-10-20 (the user's call, from the first hands-on run: the GUI does ev
 
 - [x] **The parity law** *(2a, shipped 2026-10-20 — [MILESTONES → Milestone C](MILESTONES.md#milestone-c--cli-parity))* — ADR 0003 and the classification table, held by test against the binary's own word list; the carve-outs recorded.
 - [x] **The console** *(2b, shipped 2026-10-20 — [MILESTONES → Milestone C](MILESTONES.md#milestone-c--cli-parity))* — any verb run supervised, completion from the binary, carve-outs refused with their reasons; the catch-all while screens accrete.
-- [ ] **Knowledge & collections** *([2c](../backlog/v0.2.0/knowledge-collections.md))* — the record and store screens, supervised ingest and builds, the graph screen's prose half.
+- [x] **Knowledge & collections** *(2c, shipped 2026-10-20 — [MILESTONES → Milestone C](MILESTONES.md#milestone-c--cli-parity))* — the record and store screens, supervised ingest and builds, the graph screen's prose half.
 - [ ] **The training studio** *([2d](../backlog/v0.2.0/training-studio.md))* — Train and Datasets over the documents, runs on the trainer's structured stream, promote/rollback confirmed.
 - [ ] **Agents, MCP & symphonies** *([2e](../backlog/v0.2.0/agents-mcp-symphonies.md))* — the resource screens, native in-app editing validated by the binary, plays into the session.
 - [ ] **Execute sessions, plays & recipes** *([2f](../backlog/v0.2.0/execute-sessions-plays.md))* — the picker's execute door, recipe expansion shown before launch, analyze console-covered.

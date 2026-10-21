@@ -130,6 +130,7 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{p.isGraph}}"><svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="4" cy="4" r="1.5"></circle><circle cx="12" cy="6" r="1.5"></circle><circle cx="6" cy="12" r="1.5"></circle><path d="M5.4 4.4l5.2 1.2M4.4 5.4l1.2 5.1M10.9 7.1L7.1 11"></path></svg></sc-if>
 <sc-if value="{{p.isVideo}}"><svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="4" width="9" height="8" rx="1.5"></rect><path d="M10.75 7.2L14.25 5v6l-3.5-2.2"></path></svg></sc-if>
 <sc-if value="{{p.isVoice}}"><svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 7v2M4.75 5v6M7.5 2.5v11M10.25 5v6M13 6.5v3"></path></svg></sc-if>
+<sc-if value="{{p.isKnowledge}}"><svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h3v11H3zM7 2.5h3v11H7z"></path><path d="M10.6 3.2l2.5.7-2.5 9.4-2.5-.7z"></path></svg></sc-if>
 <sc-if value="{{p.hasBadge}}"><span aria-hidden="true" style="position: absolute; top: 6px; right: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--status-accent); box-shadow: 0 0 0 2px var(--surface-sidebar)"></span></sc-if>
 </button>
 </sc-for>
@@ -963,6 +964,65 @@ a{color:inherit}a:hover{color:inherit}
 </div>
 </sc-if>
 </sc-if>
+<sc-if value="{{ui.isKnowledge}}">
+<header class="ap-tools" style="flex: 0 0 52px; display: flex; align-items: center; gap: 14px; padding: 0 16px 0 24px; border-bottom: 1px solid var(--line-border)">
+<h1 style="margin: 0; font-size: var(--t-title); font-weight: 600">Knowledge</h1>
+<span style="font-size: var(--t-small); color: var(--text-tertiary)">Decision records and the collections they live in</span>
+<span style="flex: 1 1 auto"></span>
+<div role="group" aria-label="Show" class="seg">
+<button type="button" aria-pressed="{{kno.recOn}}" onClick="{{kno.showRecords}}" style="background: {{kno.recBg}}; color: var(--text-primary)">Records</button>
+<button type="button" aria-pressed="{{kno.colOn}}" onClick="{{kno.showCollections}}" style="background: {{kno.colBg}}; color: var(--text-primary)">Collections</button>
+</div>
+<sc-if value="{{kno.recOn}}"><button type="button" class="btn-g" onClick="{{kno.capture}}">Capture…</button><button type="button" class="btn-g" onClick="{{kno.export}}">Export…</button></sc-if>
+<sc-if value="{{kno.colOn}}"><button type="button" class="btn-g" onClick="{{kno.ingest}}">Ingest…</button></sc-if>
+</header>
+<sc-if value="{{kno.recOn}}">
+<div style="flex: 1 1 0; min-height: 0; display: flex">
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column">
+<div style="display: flex; gap: 8px; padding: 12px 16px"><input type="text" class="inp" value="{{kno.question}}" onChange="{{kno.onQuestion}}" aria-label="Ask the records" placeholder="Ask the records" style="flex: 1 1 auto; min-width: 0"><button type="button" class="btn-g" onClick="{{kno.ask}}">Ask</button><select class="inp" aria-label="Branch" onChange="{{kno.onBranch}}" style="flex: 0 0 auto"><option value="">Every branch</option><option value="shipped">Shipped</option><option value="rejected">Rejected</option><option value="superseded">Superseded</option></select></div>
+<sc-if value="{{kno.asked}}"><div style="padding: 0 18px 6px; font-size: var(--t-meta); color: var(--text-tertiary)">3 found · lexical</div></sc-if>
+<div style="flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 0 10px 12px">
+<sc-for list="{{kno.rows}}" as="r" hint-placeholder-count="3">
+<button type="button" class="hv" onClick="{{r.pick}}" aria-current="{{r.current}}" style="width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 12px; padding: 10px 12px; margin-bottom: 2px; border: 0; border-radius: 7px; background: {{r.bg}}; text-align: left; color: var(--text-primary)">
+<span style="font-size: var(--t-body)">{{r.decision}}</span><span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">{{r.score}}</span>
+<span style="font-size: var(--t-meta); color: var(--text-tertiary)">{{r.meta}}</span>
+</button>
+</sc-for>
+</div>
+</div>
+<aside class="ap-detail" aria-label="Record" style="flex: 0 0 380px; min-height: 0; overflow-y: auto; padding: 18px 20px; background: var(--surface-inspector); border-left: 1px solid var(--line-border)">
+<sc-if value="{{kno.hasSel}}">
+<h2 style="margin: 0; font-size: var(--t-title); font-weight: 600">{{kno.cur.decision}}</h2>
+<div class="mono" style="margin-top: 2px; font-size: var(--t-meta); color: var(--text-tertiary)">{{kno.cur.id}}</div>
+<sc-for list="{{kno.cur.facts}}" as="f"><h3 class="lbl" style="margin: 16px 0 4px">{{f.label}}</h3><div style="color: var(--text-primary)">{{f.value}}</div></sc-for>
+<div style="display: flex; gap: 8px; margin-top: 18px"><input type="text" class="inp" aria-label="Link it to a ticket, a commit, a file" placeholder="Link it to a ticket, a commit, a file" style="flex: 1 1 auto; min-width: 0"><button type="button" class="btn-g" onClick="{{kno.link}}">Link</button></div>
+<div style="display: flex; gap: 8px; margin-top: 10px"><button type="button" class="btn-g" onClick="{{kno.move}}">Move to…</button><span style="flex: 1 1 auto"></span><button type="button" class="btn-g" onClick="{{kno.del}}" style="color: var(--status-error)">Delete…</button></div>
+</sc-if>
+<sc-if value="{{kno.noSel}}"><p style="margin: 0; color: var(--text-tertiary)">Choose a record to read its reasoning and its decision.</p></sc-if>
+</aside>
+</div>
+</sc-if>
+<sc-if value="{{kno.colOn}}">
+<div style="flex: 1 1 0; min-height: 0; display: flex">
+<nav aria-label="Collections" style="flex: 0 0 280px; min-height: 0; overflow-y: auto; padding: 12px 10px; background: var(--surface-sidebar); border-right: 1px solid var(--line-border)">
+<sc-for list="{{kno.colls}}" as="c" hint-placeholder-count="2">
+<button type="button" class="hv" onClick="{{c.pick}}" aria-current="{{c.current}}" style="width: 100%; display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; margin-bottom: 4px; border: 0; border-radius: 7px; background: {{c.bg}}; text-align: left; color: var(--text-primary)"><span style="font-size: var(--t-body)">{{c.name}}</span><span style="font-size: var(--t-meta); color: var(--text-tertiary)">{{c.meta}}</span></button>
+</sc-for>
+</nav>
+<div style="flex: 1 1 0; min-width: 0; overflow-y: auto; padding: 22px 28px 32px">
+<div style="max-width: 880px">
+<div style="display: flex; align-items: center; gap: 10px"><h2 style="flex: 1 1 auto; margin: 0; font-size: var(--t-h2); font-weight: 600">notes</h2><button type="button" class="btn-g" onClick="{{kno.ingest}}">Ingest more…</button><button type="button" class="btn-g" onClick="{{kno.delColl}}" style="color: var(--status-error)">Delete…</button></div>
+<div style="display: flex; gap: 32px; margin-top: 14px"><div><div class="lbl">CHUNKS</div><div>5</div></div><div><div class="lbl">TEXT INDEX</div><div>ok</div></div><div><div class="lbl">VECTORS</div><div>none -- a text index only</div></div></div>
+<div style="display: flex; gap: 8px; margin-top: 18px"><input type="text" class="inp" value="{{kno.cq}}" aria-label="Search notes" placeholder="Search notes" style="flex: 1 1 auto; min-width: 0"><button type="button" class="btn-g" onClick="{{kno.search}}">Search</button></div>
+<sc-if value="{{kno.searched}}"><div class="mono" style="margin-top: 10px; padding: 10px 12px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); line-height: 1.6; white-space: pre; overflow-x: auto"><sc-for list="{{kno.results}}" as="l"><div>{{l.text}}</div></sc-for></div></sc-if>
+<h3 class="lbl" style="margin: 22px 0 6px">SOURCES · 5</h3>
+<sc-for list="{{kno.sources}}" as="src"><div style="display: flex; align-items: center; min-height: 28px; border-bottom: 1px solid var(--line-border)"><span style="flex: 1 1 auto">{{src.name}}</span><button type="button" class="btn-g" onClick="{{src.remove}}" style="height: 24px; font-size: var(--t-small)">Remove…</button></div></sc-for>
+</div>
+</div>
+</div>
+</sc-if>
+</sc-if>
+
 <sc-if value="{{ui.isSuites}}">
 <header class="ap-tools" style="flex: 0 0 52px; display: flex; align-items: center; gap: 14px; padding: 0 16px 0 24px; border-bottom: 1px solid var(--line-border)">
 <h1 style="margin: 0; font-size: var(--t-title); font-weight: 600">Suites</h1>
@@ -1093,14 +1153,18 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{ui.isGraph}}">
 <header class="ap-tools" style="flex: 0 0 52px; display: flex; align-items: center; gap: 14px; padding: 0 16px 0 24px; border-bottom: 1px solid var(--line-border)">
 <h1 style="margin: 0; font-size: var(--t-title); font-weight: 600">Code graph</h1>
-<span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary); white-space: nowrap">~/code/ingest · 214 files · 1,284 symbols · built {{gr.built}}</span>
+<sc-if value="{{gr.codeOn}}"><span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary); white-space: nowrap">~/code/ingest · 214 files · 1,284 symbols · built {{gr.built}}</span></sc-if>
+<sc-if value="{{gr.proseOn}}"><span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary); white-space: nowrap">notes · 4 entities · 5 relations · 1 community</span></sc-if>
 <span style="flex: 1 1 auto"></span>
 <div role="group" aria-label="Show" class="seg">
 <button type="button" aria-pressed="{{gr.fnOn}}" onClick="{{gr.showFns}}" style="background: {{gr.fnBg}}; color: var(--text-primary)">Functions</button>
 <button type="button" aria-pressed="{{gr.fileOn}}" onClick="{{gr.showFiles}}" style="background: {{gr.fileBg}}; color: var(--text-primary)">Files</button>
+<button type="button" aria-pressed="{{gr.proseOn}}" onClick="{{gr.showProse}}" style="background: {{gr.proseBg}}; color: var(--text-primary)">Collection · notes</button>
 </div>
 <button type="button" class="btn-g" onClick="{{gr.rebuild}}">Rebuild</button>
+<sc-if value="{{gr.proseOn}}"><button type="button" class="btn-g" onClick="{{gr.findCommunities}}">Find communities</button></sc-if>
 </header>
+<sc-if value="{{gr.codeOn}}">
 <div style="flex: 1 1 0; min-height: 0; display: flex">
 <nav aria-label="Files" style="flex: 0 0 230px; min-height: 0; overflow-y: auto; padding: 12px 8px; border-right: 1px solid var(--line-border)">
 <div class="lbl" style="padding: 0 8px 8px">FILES</div>
@@ -1136,6 +1200,36 @@ a{color:inherit}a:hover{color:inherit}
 </div>
 </aside>
 </div>
+</sc-if>
+<sc-if value="{{gr.proseOn}}">
+<div style="flex: 1 1 0; min-height: 0; display: flex">
+<div style="flex: 1 1 0; min-width: 0; overflow-y: auto; padding: 22px 28px 32px">
+<div style="max-width: 720px">
+<p style="margin: 0; color: var(--text-primary)">{{gr.prose.summary}}</p>
+<h3 class="lbl" style="margin: 22px 0 8px">COMMUNITIES · 1</h3>
+<div style="padding: 12px 14px; border-radius: 8px; background: var(--surface-inspector)"><div>{{gr.prose.community}}</div><div style="display: flex; gap: 10px; margin-top: 6px"><sc-for list="{{gr.prose.members}}" as="m"><span style="color: var(--status-accent); font-size: var(--t-small)">{{m.name}}</span></sc-for></div></div>
+<h3 class="lbl" style="margin: 22px 0 8px">DECISIONS · 1</h3>
+<div>{{gr.prose.decision}}</div><div class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">{{gr.prose.decisionMeta}}</div>
+<h3 class="lbl" style="margin: 22px 0 8px">BUSIEST</h3>
+<sc-for list="{{gr.prose.hubs}}" as="h"><div style="display: flex; gap: 10px; align-items: baseline; min-height: 26px"><span style="color: var(--status-accent)">{{h.name}}</span><span style="font-size: var(--t-meta); color: var(--text-tertiary)">{{h.meta}}</span></div></sc-for>
+</div>
+</div>
+<aside class="ap-detail" aria-label="Entity" style="flex: 0 0 300px; min-height: 0; overflow-y: auto; padding: 18px 20px; background: var(--surface-inspector); border-left: 1px solid var(--line-border)">
+<div class="lbl">SYSTEM</div>
+<h2 style="margin: 4px 0 2px; font-size: var(--t-title); font-weight: 600">Heat pump</h2>
+<div class="mono" style="margin-top: 6px; font-size: var(--t-meta)">moves heat from a cold place to a warm one</div>
+<div style="margin-top: 6px; font-size: var(--t-meta); color: var(--text-secondary)">1 in · 2 out</div>
+<h3 class="lbl" style="margin: 16px 0 6px">COMMUNITIES</h3>
+<div style="font-size: var(--t-small)">#1 · 3 entities: {{gr.prose.community}}</div>
+<h3 class="lbl" style="margin: 16px 0 6px">DECISIONS</h3>
+<div style="font-size: var(--t-small)">{{gr.prose.decision}}</div><div class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">{{gr.prose.decisionMeta}}</div>
+<h3 class="lbl" style="margin: 16px 0 6px">CONCERNS (IN)</h3>
+<div style="color: var(--status-accent); font-size: var(--t-small)">kr-20261021T050657Z-c74d1a</div>
+<h3 class="lbl" style="margin: 16px 0 6px">CONTAINS</h3>
+<sc-for list="{{gr.prose.contains}}" as="c"><div style="color: var(--status-accent); font-size: var(--t-small)">{{c.name}}</div></sc-for>
+</aside>
+</div>
+</sc-if>
 </sc-if>
 
 <sc-if value="{{ui.isVideo}}">
@@ -1926,7 +2020,7 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{ui.toastOn}}"><div role="status" style="position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 80; max-width: calc(100% - 48px); padding: 9px 16px; border-radius: 8px; background: var(--text-primary); color: var(--surface-window); font-size: var(--t-small); box-shadow: 0 8px 24px rgba(0,0,0,.3)">{{ui.toastText}}</div></sc-if>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","monitor","console","models","models:downloads","models:store","models:convert","models:register","models:roles","download","suites","tasks","newtask","graph","video","video:run","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions"],"default":"chat"},"still":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
+<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","monitor","console","knowledge","knowledge:collections","graph:prose","models","models:downloads","models:store","models:convert","models:register","models:roles","download","suites","tasks","newtask","graph","video","video:run","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions"],"default":"chat"},"still":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
 class Component extends DCLogic {
   constructor(props) {
     super(props);
@@ -1937,6 +2031,7 @@ class Component extends DCLogic {
       monitor: false,
       console: false,
       con: null,
+      kn: { tab: 'records', asked: false, branch: '', sel: '', coll: 'notes', searched: false },
       confirm: null,
       settingsPane: 'general',
       menu: null,
@@ -2119,6 +2214,8 @@ class Component extends DCLogic {
         set({ jobs: [job].concat(s.jobs) });
       }
     } else if (where === 'download') set({ screen: 'models', overlay: 'download', dl: { repo: 'Wan-AI/Wan2.1-T2V-1.3B-Diffusers', format: 'gguf', quant: 'Q4_K_M' } });
+    else if (where === 'graph' && sub === 'prose') set({ screen: 'graph', gView: 'prose' });
+    else if (where === 'knowledge') set({ screen: 'knowledge', kn: sub === 'collections' ? { tab: 'collections', coll: 'notes', searched: true } : { tab: 'records', asked: true, branch: '', sel: 'kr-20261021T045944Z-1e2354', coll: 'notes', searched: false } });
     else if (where === 'suites' || where === 'tasks' || where === 'graph' || where === 'voice') set({ screen: where });
     else if (where === 'newtask') set({ screen: 'tasks', overlay: 'newtask', newTask: { goal: 'Make tests/test_parsers.py pass on Python 3.12', suite: 'coding', rounds: '8', writes: 'allow', cmds: 'allow', require: '', requireFile: '' } });
     else if (where === 'video') {
@@ -3683,9 +3780,9 @@ class Component extends DCLogic {
     const runningJobs = s.jobs.filter((j) => j.state === 'running' && !j.finished).length;
     const runningTasks = s.tasks.filter((t) => t.status === 'running' && this.taskView(t).isRunning).length;
     const videoBusy = (s.vrun && !s.vrun.stopped ? 1 : 0) + (s.crender ? 1 : 0);
-    const places = [['chat', 'Sessions', '⌘1', 0], ['models', 'Models', '⌘2', runningJobs], ['suites', 'Suites', '⌘3', 0], ['tasks', 'Tasks', '⌘4', runningTasks], ['graph', 'Code graph', '⌘5', 0], ['video', 'Video', '⌘6', videoBusy], ['voice', 'Voice', '⌘7', s.vsay ? 1 : 0]].map((p) => ({
+    const places = [['chat', 'Sessions', '⌘1', 0], ['models', 'Models', '⌘2', runningJobs], ['suites', 'Suites', '⌘3', 0], ['tasks', 'Tasks', '⌘4', runningTasks], ['graph', 'Code graph', '⌘5', 0], ['video', 'Video', '⌘6', videoBusy], ['voice', 'Voice', '⌘7', s.vsay ? 1 : 0], ['knowledge', 'Knowledge', '⌘8', 0]].map((p) => ({
       label: p[1], key: p[2], current: s.screen === p[0], bg: s.screen === p[0] ? 'var(--surface-selection)' : '', color: s.screen === p[0] ? 'var(--text-primary)' : 'var(--text-secondary)', weight: s.screen === p[0] ? 500 : 400,
-      isChat: p[0] === 'chat', isModels: p[0] === 'models', isSuites: p[0] === 'suites', isTasks: p[0] === 'tasks', isGraph: p[0] === 'graph', isVideo: p[0] === 'video', isVoice: p[0] === 'voice',
+      isChat: p[0] === 'chat', isModels: p[0] === 'models', isSuites: p[0] === 'suites', isTasks: p[0] === 'tasks', isGraph: p[0] === 'graph', isVideo: p[0] === 'video', isVoice: p[0] === 'voice', isKnowledge: p[0] === 'knowledge',
       hasBadge: p[3] > 0, badge: p[3] + ' running', badgeColor: 'var(--status-accent)',
       aria: p[1] + ' ' + p[2] + (p[3] > 0 ? ' · ' + p[3] + ' running' : ''),
       go: () => this.setState({ screen: p[0], menu: null })
@@ -4423,7 +4520,7 @@ class Component extends DCLogic {
       recallSize: s.recallCount ? '41 MB index on this Mac' : 'nothing stored',
       nothingToForget: s.recallCount === 0,
       forget: () => this.setState({ confirm: { kind: 'forget' } }),
-      keys: [['New session', '⌘N'], ['New private session', '⇧⌘N'], ['Switch model', '⇧⌘M'], ['Show or hide the inspector', '⌥⌘I'], ['System monitor', '⌥⌘M'], ['Console', '⇧⌘K'], ['Settings', '⌘,'], ['Stop the answer', '⌘.'], ['Search sessions', '⇧⌘F'], ['Sessions, Models, Suites, Tasks, Code graph, Video, Voice', '⌘1 – ⌘7'], ['Models library', '⇧⌘L'], ['Send', '⏎'], ['New line', '⇧⏎'], ['Commands', '/'], ['Mention a file', '@'], ['Allow once on a permission card', '⏎'], ['Deny on a permission card', 'esc'], ['Pick an answer on a card', '1 – 4'], ['Play or pause the focused player', 'space'], ['Generate, Speak, Plan or Render, from its form', '⌘⏎'], ['Hide the sidebar', '⌃⌘S']].map((x) => ({ label: x[0], keys: x[1] }))
+      keys: [['New session', '⌘N'], ['New private session', '⇧⌘N'], ['Switch model', '⇧⌘M'], ['Show or hide the inspector', '⌥⌘I'], ['System monitor', '⌥⌘M'], ['Console', '⇧⌘K'], ['Settings', '⌘,'], ['Stop the answer', '⌘.'], ['Search sessions', '⇧⌘F'], ['Sessions, Models, Suites, Tasks, Code graph, Video, Voice, Knowledge', '⌘1 – ⌘8'], ['Models library', '⇧⌘L'], ['Send', '⏎'], ['New line', '⇧⏎'], ['Commands', '/'], ['Mention a file', '@'], ['Allow once on a permission card', '⏎'], ['Deny on a permission card', 'esc'], ['Pick an answer on a card', '1 – 4'], ['Play or pause the focused player', 'space'], ['Generate, Speak, Plan or Render, from its form', '⌘⏎'], ['Hide the sidebar', '⌃⌘S']].map((x) => ({ label: x[0], keys: x[1] }))
     };
 
     /* ---------- suites ---------- */
@@ -4506,8 +4603,49 @@ class Component extends DCLogic {
       }
     };
 
+    /* ---------- knowledge ---------- */
+    const kns = s.kn || { tab: 'records' };
+    const knPatch = (p) => this.setState({ kn: Object.assign({}, kns, p) });
+    const knRecs = [
+      { id: 'kr-20261021T045954Z-0084c5', decision: 'Lead release notes with user-felt changes; process last.', intent: 'Release notes read better when they lead with what changed for the person running it.', status: 'shipped', discipline: 'product', from: 'chat · Bob', link: '', at: '2026-10-21T04:59:54Z', score: '0.000' },
+      { id: 'kr-20261021T045944Z-3346a9', decision: "Default the window to the model's trained length, capped by free memory.", intent: 'Local models should load at a window the machine can hold.', status: 'shipped', discipline: 'eng', from: 'review · Grace Hopper', link: 'PROJ-42', at: '2026-10-21T04:59:44Z', score: '0.000' },
+      { id: 'kr-20261021T045944Z-1e2354', decision: 'Remove the cancel button from checkout.', intent: 'We dropped the cancel button because testers kept mistaking it for back.', status: 'rejected', discipline: 'ux', from: 'meeting · Ada Lovelace', link: '', at: '2026-10-21T04:59:44Z', score: '0.596' }
+    ];
+    const knShown = kns.asked ? [knRecs[2], knRecs[1], knRecs[0]] : knRecs.filter((r) => !kns.branch || r.status === kns.branch);
+    const knCur = knRecs.find((r) => r.id === kns.sel);
+    const kno = {
+      recOn: kns.tab !== 'collections',
+      colOn: kns.tab === 'collections',
+      recBg: kns.tab !== 'collections' ? 'var(--surface-control)' : 'transparent',
+      colBg: kns.tab === 'collections' ? 'var(--surface-control)' : 'transparent',
+      showRecords: () => knPatch({ tab: 'records' }),
+      showCollections: () => knPatch({ tab: 'collections' }),
+      question: kns.asked ? 'why was the cancel button removed' : '',
+      onQuestion: () => {},
+      onBranch: (e) => knPatch({ branch: e.target.value, asked: false }),
+      ask: () => knPatch({ asked: true }),
+      asked: !!kns.asked,
+      rows: knShown.map((r) => ({ decision: r.decision, score: kns.asked ? r.score : '', meta: r.status + ' · ' + r.discipline + ' · ' + r.at.slice(0, 10), current: r.id === kns.sel, bg: r.id === kns.sel ? 'var(--surface-selection)' : '', pick: () => knPatch({ sel: r.id }) })),
+      hasSel: !!knCur,
+      noSel: !knCur,
+      cur: knCur ? { id: knCur.id, decision: knCur.decision, facts: [{ label: 'WHY', value: knCur.intent }, { label: 'BRANCH', value: knCur.status }, { label: 'DISCIPLINE', value: knCur.discipline }, { label: 'FROM', value: knCur.from }, { label: 'LINKED TO', value: knCur.link || 'nothing yet' }, { label: 'CAPTURED', value: knCur.at }] } : { id: '', decision: '', facts: [] },
+      capture: () => this.say('apogee knowledge capture: the clerk distils the conversation (prototype)'),
+      export: () => this.say('apogee knowledge export --format markdown -o knowledge.md (prototype)'),
+      link: () => this.say('apogee knowledge link (prototype)'),
+      move: () => this.say('apogee knowledge status (prototype)'),
+      del: () => this.say('apogee knowledge delete: confirmed first (prototype)'),
+      colls: [['knowledge', '3 sources · 3 chunks'], ['notes', '5 sources · 5 chunks']].map((c) => ({ name: c[0], meta: c[1], current: c[0] === kns.coll, bg: c[0] === kns.coll ? 'var(--surface-selection)' : '', pick: () => knPatch({ coll: c[0] }) })),
+      cq: kns.searched ? 'how does a heat pump work' : '',
+      search: () => knPatch({ searched: true }),
+      searched: !!kns.searched,
+      results: ['0.000  [lexical]  heat-pumps.md#0', '    # Heat pumps  A heat pump moves heat from a cold place to a warm one. In winter the outdoor unit pul…', '0.000  [lexical]  graph://community/1#0', '    The heat pump, its compressor and its outdoor unit: one machine moving heat indoors.', '0.000  [lexical]  windows.md#0', '    # Windows  Triple glazing halves the heat lost through a window. Frames matter as much as glass.', '0.000  [lexical]  kr-20261021T050657Z-c74d1a#0', '    Customers kept asking why the outdoor unit runs in winter.  Decision: Explain the outdoor unit in th…', '0.000  [lexical]  solar.md#0', '    # Solar roofs  Panels make the most power at noon. A battery carries the surplus into the evening.  …'].map((t) => ({ text: t })),
+      sources: ['graph://community/1', 'heat-pumps.md', 'kr-20261021T050657Z-c74d1a', 'solar.md', 'windows.md'].map((n) => ({ name: n, remove: () => this.say('apogee embed delete notes --source ' + n + ': confirmed first (prototype)') })),
+      ingest: () => this.say('apogee embed ingest: chosen in a sheet, run supervised (prototype)'),
+      delColl: () => this.say('apogee embed delete notes --yes: confirmed first (prototype)')
+    };
+
     /* ---------- graph ---------- */
-    const gd = this.graphData(s.gView);
+    const gd = this.graphData(s.gView === 'prose' ? 'fns' : s.gView);
     const nodeById = {};
     gd.nodes.forEach((n) => { nodeById[n[0]] = n; });
     const gSel = nodeById[s.gNode] ? s.gNode : gd.nodes[0][0];
@@ -4518,6 +4656,20 @@ class Component extends DCLogic {
     const treeFiles = [['src/ingest/', 8, null], ['cli.py', 22, 'cli.py'], ['config.py', 22, 'config.py'], ['fetch.py', 22, 'fetch.py'], ['retry.py', 22, 'retry.py'], ['runner.py', 22, 'runner.py'], ['parsers/', 22, null], ['feed.py', 36, 'parsers/feed.py'], ['tests/', 8, null], ['test_runner.py', 22, null]];
     const gr = {
       built: s.gBuilt,
+      codeOn: s.gView !== 'prose',
+      proseOn: s.gView === 'prose',
+      proseBg: s.gView === 'prose' ? 'var(--surface-control)' : 'transparent',
+      showProse: () => this.setState({ gView: 'prose' }),
+      findCommunities: () => this.say('apogee graph communities notes: the utility model summarises each group (prototype)'),
+      prose: {
+        summary: 'Graph "notes" holds 4 entities and 5 relations. Every relation was asserted by a model. Its busiest entity is Heat pump (system), with 3 relations. 1 community is stored; 1 has a summary. 1 decision record is attached.',
+        community: 'The heat pump, its compressor and its outdoor unit: one machine moving heat indoors.',
+        members: ['Compressor', 'Heat pump', 'Outdoor unit'].map((m) => ({ name: m })),
+        decision: 'Explain the outdoor unit in the heat pump guide. — Customers kept asking why the outdoor unit runs in winter.',
+        decisionMeta: 'kr-20261021T050657Z-c74d1a · shipped · product',
+        hubs: [['Heat pump', 'system · 3 relations'], ['kr-20261021T050657Z-c74d1a', 'decision · 3 relations'], ['Compressor', 'component · 2 relations'], ['Outdoor unit', 'component · 2 relations']].map((h) => ({ name: h[0], meta: h[1] })),
+        contains: ['Compressor', 'Outdoor unit'].map((m) => ({ name: m }))
+      },
       fnOn: s.gView === 'fns',
       fileOn: s.gView === 'files',
       fnBg: s.gView === 'fns' ? 'var(--surface-control)' : 'transparent',
@@ -5305,6 +5457,7 @@ class Component extends DCLogic {
       isGraph: s.screen === 'graph',
       isVideo: s.screen === 'video',
       isVoice: s.screen === 'voice',
+      isKnowledge: s.screen === 'knowledge',
       runtimeOpen: !!s.rtAsk && !s.rtAsk.hidden,
       monitorOpen: s.monitor,
       consoleOpen: s.console,
@@ -5321,7 +5474,7 @@ class Component extends DCLogic {
       openPdf: () => this.say('Opens the source in Preview at that page (prototype)')
     };
 
-    return { ui: ui, nav: nav, mon: mon, con: con, chat: chat, tg: tg, rt: rt, wal: wal, cr: cr, pr: pr, cmp: cmp, ins: ins, mdl: mdl, st: st, sh: sh, dlg: dlg, cf: cf, set: setv, sui: sui, tsk: tsk, nt: ntv, gr: gr, vid: vid, comp: comp, vox: vox, rtc: rtc };
+    return { ui: ui, nav: nav, mon: mon, con: con, kno: kno, chat: chat, tg: tg, rt: rt, wal: wal, cr: cr, pr: pr, cmp: cmp, ins: ins, mdl: mdl, st: st, sh: sh, dlg: dlg, cf: cf, set: setv, sui: sui, tsk: tsk, nt: ntv, gr: gr, vid: vid, comp: comp, vox: vox, rtc: rtc };
   }
 }
 </script>

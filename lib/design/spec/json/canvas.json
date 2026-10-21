@@ -434,6 +434,33 @@
       "y": 1400,
       "title": "Console · any command, as typed",
       "page": "build"
+    },
+    "ScreenGraphProse.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 16720,
+      "y": 2720,
+      "title": "Code graph · a collection’s prose graph",
+      "page": "build"
+    },
+    "ScreenKnowledge.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 18240,
+      "y": 2720,
+      "title": "Knowledge · records, a question answered",
+      "page": "build"
+    },
+    "ScreenCollections.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 19760,
+      "y": 2720,
+      "title": "Knowledge · collections, a search",
+      "page": "build"
     }
   },
   "createdOnFiles": {
@@ -464,8 +491,8 @@
     },
     "library": {
       "kind": "title1",
-      "maxW": 16640,
-      "text": "Screens — models, suites, tasks and the code graph",
+      "maxW": 21200,
+      "text": "Screens — models, suites, tasks, the code graph and knowledge",
       "x": 0,
       "y": 2420,
       "page": "build"
@@ -539,6 +566,9 @@
     "ScreenTasks.dc.html",
     "ScreenNewTask.dc.html",
     "ScreenGraph.dc.html",
+    "ScreenGraphProse.dc.html",
+    "ScreenKnowledge.dc.html",
+    "ScreenCollections.dc.html",
     "ScreenVideoClip.dc.html",
     "ScreenVideoRun.dc.html",
     "ScreenVideoConsent.dc.html",

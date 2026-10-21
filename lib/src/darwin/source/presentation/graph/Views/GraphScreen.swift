@@ -25,7 +25,9 @@ public struct GraphScreen: View {
                     .fixedSize()
                 }
                 if let stats = model.stats {
-                    Text("\(stats.nodes) nodes · \(stats.edges) edges · \(stats.codeFiles) files" + (stats.staleFiles > 0 ? " · \(stats.staleFiles) changed" : ""))
+                    Text(stats.isProse
+                        ? "\(stats.nodes) entities · \(stats.edges) relations · \(stats.communities) communities"
+                        : "\(stats.nodes) nodes · \(stats.edges) edges · \(stats.codeFiles) files" + (stats.staleFiles > 0 ? " · \(stats.staleFiles) changed" : ""))
                         .font(.apogeeMeta.monospacedDigit())
                         .foregroundStyle(Palette.textTertiary)
                 }
@@ -33,7 +35,14 @@ public struct GraphScreen: View {
                     ProgressView().controlSize(.small)
                     Text(model.building?.busy ?? "building").font(.apogeeMeta).foregroundStyle(Palette.textSecondary).lineLimit(1)
                 } else {
-                    if model.graph != nil {
+                    if let stats = model.stats, stats.isProse {
+                        Button(stats.built ? "Rebuild" : "Build its graph") { model.rebuild() }
+                            .help("A model reads the collection's chunks for the things they name and how they relate")
+                        if stats.built {
+                            Button("Find communities") { model.findCommunities() }
+                                .help("Group related entities and have the utility model summarise each group")
+                        }
+                    } else if model.graph != nil {
                         Button("Rebuild") { model.rebuild() }.help("Parse the sources again where files changed -- no model")
                     }
                     Button("New graph…") { building = true }
@@ -55,6 +64,8 @@ public struct GraphScreen: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if let result = model.result {
                         GraphCanvas(model: model, result: result)
+                    } else if let report = model.report {
+                        ReportView(model: model, report: report)
                     }
                 }
                 if model.explain != nil && shell.layout.sidePanes {
@@ -148,6 +159,20 @@ struct ExplainCard: View {
                     ForEach(explain.statedAt, id: \.self) { place in
                         Text(place).font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
                     }
+                    if !explain.communities.isEmpty {
+                        section("COMMUNITIES")
+                        ForEach(explain.communities) { community in
+                            Text("#\(community.id) · \(community.size) entities" + (community.summary.map { ": " + $0 } ?? " -- not summarised yet"))
+                                .font(.apogeeSmall)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    if !explain.decisions.isEmpty {
+                        section("DECISIONS")
+                        ForEach(explain.decisions) { decision in
+                            DecisionLine(decision: decision)
+                        }
+                    }
                     ForEach(explain.relations) { relation in
                         VStack(alignment: .leading, spacing: Spacing.xs) {
                             Text(relation.heading.uppercased() + (relation.total > relation.neighbors.count ? " · \(relation.neighbors.count) of \(relation.total)" : ""))
@@ -166,6 +191,80 @@ struct ExplainCard: View {
             }
         }
         .background(Palette.inspector)
+    }
+
+    private func section(_ title: String) -> some View {
+        Text(title).font(.system(size: TypeScale.label, weight: .medium, design: .monospaced)).foregroundStyle(Palette.textTertiary)
+    }
+}
+
+/// A decision record attached to the graph: its decision, its branch.
+struct DecisionLine: View {
+    let decision: GraphDecision
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(decision.decision.isEmpty ? decision.name : decision.decision).font(.apogeeSmall).textSelection(.enabled)
+            Text([decision.name, decision.status, decision.discipline].filter { !$0.isEmpty }.joined(separator: " · "))
+                .font(.apogeeMeta.monospaced())
+                .foregroundStyle(Palette.textTertiary)
+        }
+    }
+}
+
+/// A collection graph's report, before any search: its summary, its
+/// communities, the decisions attached, its busiest entities -- each entity a
+/// way in.
+struct ReportView: View {
+    let model: GraphViewModel
+    let report: GraphReport
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Spacing.l) {
+                Text(report.summary).font(.apogeeBody).textSelection(.enabled)
+                if !report.communities.isEmpty {
+                    heading("COMMUNITIES · \(report.communitiesTotal)")
+                    ForEach(report.communities) { community in
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
+                            Text(community.summary ?? "Not summarised yet -- Find communities has the utility model write one.")
+                                .font(.apogeeBody)
+                                .foregroundStyle(community.summary == nil ? Palette.textTertiary : Palette.textPrimary)
+                            HStack(spacing: Spacing.s) {
+                                ForEach(community.members) { member in
+                                    Button(member.name) { Task { await model.select(member.name) } }.buttonStyle(.link).font(.apogeeSmall)
+                                }
+                            }
+                        }
+                        .padding(Spacing.m)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Palette.inspector, in: RoundedRectangle(cornerRadius: Radius.card))
+                    }
+                }
+                if !report.decisions.isEmpty {
+                    heading("DECISIONS · \(report.decisionsTotal)")
+                    ForEach(report.decisions) { DecisionLine(decision: $0) }
+                }
+                if !report.hubs.isEmpty {
+                    heading("BUSIEST")
+                    ForEach(report.hubs) { hub in
+                        HStack {
+                            Button(hub.node.name) { Task { await model.select(hub.node.name) } }.buttonStyle(.link)
+                            Text("\(hub.node.type) · \(hub.degree) relation\(hub.degree == 1 ? "" : "s")")
+                                .font(.apogeeMeta)
+                                .foregroundStyle(Palette.textTertiary)
+                        }
+                    }
+                }
+            }
+            .padding(Spacing.xl)
+            .frame(maxWidth: 720, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func heading(_ title: String) -> some View {
+        Text(title).font(.system(size: TypeScale.label, weight: .medium, design: .monospaced)).foregroundStyle(Palette.textTertiary)
     }
 }
 

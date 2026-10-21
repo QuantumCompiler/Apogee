@@ -1,7 +1,8 @@
 /// A place in the sidebar: one screen of the app, reached by its key.
 ///
-/// The design's seven places, in its order (`main.html`'s places bar,
-/// `BuildLayout.dc.html`'s keys): ⌘1 to ⌘7. Compositions live under Video,
+/// The design's eight places, in its order (`main.html`'s places bar,
+/// `BuildLayout.dc.html`'s keys): ⌘1 to ⌘8 -- Knowledge, the eighth, since
+/// 2c. Compositions live under Video,
 /// as the design draws them -- its second tab -- not as a place of their own.
 public enum Destination: String, CaseIterable, Sendable, Identifiable {
     case sessions
@@ -11,6 +12,7 @@ public enum Destination: String, CaseIterable, Sendable, Identifiable {
     case graph
     case video
     case voice
+    case knowledge
 
     public var id: String { rawValue }
 
@@ -23,6 +25,7 @@ public enum Destination: String, CaseIterable, Sendable, Identifiable {
         case .graph: "Code graph"
         case .video: "Video"
         case .voice: "Voice"
+        case .knowledge: "Knowledge"
         }
     }
 
@@ -36,10 +39,11 @@ public enum Destination: String, CaseIterable, Sendable, Identifiable {
         case .graph: "point.3.connected.trianglepath.dotted"
         case .video: "video"
         case .voice: "waveform"
+        case .knowledge: "books.vertical"
         }
     }
 
-    /// ⌘1 for the first place, ⌘7 for the last.
+    /// ⌘1 for the first place, ⌘8 for the last.
     public var key: KeyChord {
         KeyChord(String(Destination.allCases.firstIndex(of: self)! + 1), .command)
     }
@@ -61,6 +65,8 @@ public enum Destination: String, CaseIterable, Sendable, Identifiable {
         case .video:
             nil
         case .voice:
+            nil
+        case .knowledge:
             nil
         }
     }
