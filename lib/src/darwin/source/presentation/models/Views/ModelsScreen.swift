@@ -50,7 +50,7 @@ public struct ModelsScreen<Downloads: View>: View {
             }
         }
         .confirmationDialog(
-            model.pendingDelete.map { "Delete \($0.row.backend)?" } ?? "",
+            model.pendingDelete.map { "Delete \($0.row.name)?" } ?? "",
             isPresented: Binding(get: { model.pendingDelete != nil }, set: { if !$0 { model.pendingDelete = nil } }),
             titleVisibility: .visible
         ) {
@@ -60,7 +60,7 @@ public struct ModelsScreen<Downloads: View>: View {
             }
             Button("Cancel", role: .cancel) { model.pendingDelete = nil }
         } message: {
-            Text("apogee models delete \(model.pendingDelete?.row.backend ?? "") -- its files are removed from the store, and this can't be undone.")
+            Text("apogee models delete \(model.pendingDelete?.row.name ?? "") -- its files are removed from the store, and this can't be undone.")
         }
         .sheet(item: $model.renaming) { row in
             RenameModelSheet(row: row) { name in Task { await model.rename(row, to: name) } }
@@ -99,6 +99,22 @@ struct ModelTable: View {
                         .padding(.bottom, Spacing.xs)
                     ForEach(group.rows) { row in rowView(row) }
                 }
+                if let folded = model.foldedText {
+                    HStack(spacing: Spacing.s) {
+                        Text(folded).font(.apogeeSmall).foregroundStyle(Palette.textTertiary)
+                        Button("Show them") { Task { await model.showAll(true) } }
+                            .buttonStyle(.link)
+                            .font(.apogeeSmall)
+                    }
+                    .padding(.horizontal, Spacing.l)
+                    .padding(.top, Spacing.s)
+                } else if model.showingAll {
+                    Button("Fold the snapshots conversions consumed") { Task { await model.showAll(false) } }
+                        .buttonStyle(.link)
+                        .font(.apogeeSmall)
+                        .padding(.horizontal, Spacing.l)
+                        .padding(.top, Spacing.s)
+                }
                 if let empty = model.emptyText {
                     Text(empty)
                         .font(.apogeeBody)
@@ -115,14 +131,14 @@ struct ModelTable: View {
     }
 
     private func rowView(_ row: ModelRow) -> some View {
-        let current = model.selected == row.backend
+        let current = model.selected == row.name
         return Button {
             Task { await model.select(row) }
         } label: {
             HStack(spacing: Spacing.m) {
                 HStack(spacing: Spacing.s) {
                     KindMark(kind: row.kind)
-                    Text(row.backend).foregroundStyle(Palette.textPrimary).lineLimit(1)
+                    Text(row.name).foregroundStyle(Palette.textPrimary).lineLimit(1).truncationMode(.middle)
                     if !row.roles.isEmpty {
                         Text(row.roles).font(.apogeeMeta.monospaced()).foregroundStyle(Palette.accent).lineLimit(1)
                     }
@@ -136,7 +152,7 @@ struct ModelTable: View {
                     .font(.apogeeMeta.monospacedDigit())
                     .foregroundStyle(Palette.textSecondary)
                     .frame(width: 80, alignment: .trailing)
-                Text(row.state)
+                Text(ModelsViewModel.status(row))
                     .font(.apogeeSmall)
                     .foregroundStyle(row.state == "cannot load" ? Palette.error : Palette.textSecondary)
                     .lineLimit(1)
@@ -164,8 +180,8 @@ struct ModelDetails: View {
                 VStack(alignment: .leading, spacing: Spacing.l) {
                     HStack(alignment: .firstTextBaseline) {
                         VStack(alignment: .leading, spacing: Spacing.xs) {
-                            Text(row.backend).font(.apogeeHeading).foregroundStyle(Palette.textPrimary)
-                            Text([row.backendType, row.state].filter { !$0.isEmpty }.joined(separator: " · "))
+                            Text(row.name).font(.apogeeHeading).foregroundStyle(Palette.textPrimary).textSelection(.enabled)
+                            Text((row.isStored ? [ModelsViewModel.status(row), row.format ?? ""] : [row.backendType, row.state]).filter { !$0.isEmpty }.joined(separator: " · "))
                                 .font(.apogeeMeta.monospaced())
                                 .foregroundStyle(Palette.textTertiary)
                         }
@@ -220,7 +236,7 @@ struct ModelDetails: View {
 
     private func actions(_ row: ModelRow) -> some View {
         HStack(spacing: Spacing.s) {
-            if row.roles.contains("chat") || row.section == "cloud" || row.group == "gguf" || row.group == "mlx" {
+            if !row.isStored && (row.roles.contains("chat") || row.section == "cloud" || row.group == "gguf" || row.group == "mlx") {
                 Button("Use in a new session") { model.useInSession?(row.backend) }
             }
             Menu("More") {

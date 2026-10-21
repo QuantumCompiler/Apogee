@@ -48,6 +48,10 @@ public final class ModelsViewModel {
 
     public var tab: Tab = .all
     public private(set) var rows: [ModelRow] = []
+    /// The stored sets the list folded (a conversion consumed them), and
+    /// whether the person asked to see them: `models list --all`.
+    public private(set) var folded = 0
+    public private(set) var showingAll = false
     public private(set) var listing: Listing = .notRead
     public private(set) var selected: String?
     /// The selected model's `models info`, when read.
@@ -88,6 +92,7 @@ public final class ModelsViewModel {
     /// Models came into view: read again.
     public func appeared() async {
         guard binary != nil else { return }
+        showingAll = false
         await refresh()
     }
 
@@ -95,16 +100,17 @@ public final class ModelsViewModel {
     public func refresh() async {
         guard let binary else { return }
         if listing != .read { listing = .reading }
-        let outcome = await runner.read(binary: binary, ["models", "list"])
+        let outcome = await runner.read(binary: binary, ["models", "list"] + (showingAll ? ["--all"] : []))
         if let document = outcome.document {
             rows = ModelRow.list(from: document)
+            folded = ModelRow.folded(in: document)
             listing = .read
         } else {
             listing = .failed(outcome.failure ?? "the list could not be read")
         }
         await readRoles()
         if let selected {
-            if rows.contains(where: { $0.backend == selected }) {
+            if rows.contains(where: { $0.name == selected }) {
                 await readInfo(selected)
             } else {
                 close()
@@ -171,15 +177,32 @@ public final class ModelsViewModel {
     }
 
     public var selectedRow: ModelRow? {
-        selected.flatMap { name in rows.first { $0.backend == name } }
+        selected.flatMap { name in rows.first { $0.name == name } }
     }
 
-    /// Opens a model's details: `models info <backend>`.
+    /// Opens a model's details: `models info <name>` -- a backend, or stored
+    /// weights' handle.
     public func select(_ row: ModelRow) async {
-        selected = row.backend
+        selected = row.name
         info = nil
         infoFailure = nil
-        await readInfo(row.backend)
+        await readInfo(row.name)
+    }
+
+    /// The folded sets listed too, or folded again: `models list --all`,
+    /// held while the place is open.
+    public func showAll(_ all: Bool) async {
+        guard showingAll != all else { return }
+        showingAll = all
+        await refresh()
+    }
+
+    /// The CLI's own line for the fold, its count from the list.
+    public var foldedText: String? {
+        guard folded > 0, !showingAll else { return nil }
+        return folded == 1
+            ? "1 snapshot consumed by a conversion is folded"
+            : "\(folded) snapshots consumed by conversions are folded"
     }
 
     public func close() {
@@ -233,6 +256,15 @@ public final class ModelsViewModel {
     }
 
     /// Bytes as the design writes them.
+    /// A row's status: the CLI's state; for stored weights whose state only
+    /// repeats their format, what they are -- a GGUF or MLX model a backend
+    /// could point at is not configured, while SafeTensors sets, pipelines and
+    /// voice models, which no backend ever runs, are stored.
+    public static func status(_ row: ModelRow) -> String {
+        guard row.isStored, row.state == row.format else { return row.state }
+        return ["gguf", "mlx"].contains(row.state) ? "not configured" : "stored"
+    }
+
     public static func size(_ bytes: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
@@ -249,10 +281,10 @@ public final class ModelsViewModel {
     public func confirmDelete(andBackends: Bool) async {
         guard let pending = pendingDelete else { return }
         pendingDelete = nil
-        var arguments = ["models", "delete", pending.row.backend, "--yes"]
+        var arguments = ["models", "delete", pending.row.name, "--yes"]
         if andBackends { arguments.append("--and-backends") }
-        await run(arguments, doing: "Deleting \(pending.row.backend)", done: "Deleted \(pending.row.backend)")
-        if selected == pending.row.backend { close() }
+        await run(arguments, doing: "Deleting \(pending.row.name)", done: "Deleted \(pending.row.name)")
+        if selected == pending.row.name { close() }
     }
 
     /// `models rename <model> <new name>`, read back.
@@ -265,7 +297,7 @@ public final class ModelsViewModel {
     /// `models repair <name>`: verifies against the record, fixes a damaged
     /// SafeTensors set in place; what it found is its own words.
     public func repair(_ row: ModelRow) async {
-        await run(["models", "repair", row.backend], doing: "Checking \(row.backend)", done: nil)
+        await run(["models", "repair", row.name], doing: "Checking \(row.name)", done: nil)
     }
 
     /// Points a role at a backend: its `config set-default…` verb, read back
@@ -313,8 +345,8 @@ public final class ModelsViewModel {
         }
     }
 
-    /// The backends a role can point at.
-    public var backends: [String] { rows.map(\.backend) }
+    /// The backends a role can point at: configured ones, never stored weights.
+    public var backends: [String] { rows.filter { !$0.isStored }.map(\.backend) }
 }
 
 /// A group of the library, as the CLI groups `models list`: by what a local

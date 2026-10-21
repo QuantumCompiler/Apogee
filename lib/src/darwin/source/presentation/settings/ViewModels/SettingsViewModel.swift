@@ -136,8 +136,8 @@ public final class SettingsViewModel {
         failure = nil
         if let list = await runner.read(binary: binary, ["models", "list"]).document {
             let rows = ModelRow.list(from: list)
-            backends = rows.filter { $0.format != "pipeline" && $0.format != "voice" }
-            pipelines = rows.filter { $0.format == "pipeline" }.map(\.backend)
+            backends = rows.filter { !$0.isStored && $0.format != "pipeline" && $0.format != "voice" }
+            pipelines = rows.filter { $0.format == "pipeline" }.map(\.name)
         }
         if let auth = await runner.read(binary: binary, ["auth", "list"]).document {
             keyed = Set((auth.entries ?? []).compactMap { $0["provider"]?.stringValue })

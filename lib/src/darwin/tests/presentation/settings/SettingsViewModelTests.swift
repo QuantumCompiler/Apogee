@@ -68,7 +68,7 @@ struct SettingsViewModelTests {
 
     func runner() -> RecordingRunner {
         let runner = RecordingRunner()
-        runner.reading(["models", "list"], #"{"object":"list","data":[{"backend":"local","backend_type":"llamacpp","state":"ready"},{"backend":"wan","backend_type":"","format":"pipeline"}]}"#)
+        runner.reading(["models", "list"], #"{"object":"list","data":[{"backend":"local","backend_type":"llamacpp","state":"ready"},{"backend":"(not configured)","backend_type":"-","model":"Wan2.2-TI2V-5B/pipeline/9b1e47c0a2f6","format":"pipeline","group":"pipeline"},{"backend":"(not configured)","backend_type":"-","model":"Llama3.2-1B-Instruct/safetensors/edaba290ce7f","format":"safetensors","group":"safetensors"}]}"#)
         runner.reading(["auth", "list"], #"{"object":"list","data":[{"provider":"anthropic","source":"keychain"}],"backends":[]}"#)
         runner.reading(["providers", "scan"], #"{"object":"list","data":[{"provider":"claude","label":"Claude CLI","tier":"credentials found","backend":"not registered","type":"claude-cli"}]}"#)
         runner.reading(["check"], #"{"rows":[{"section":"Config","name":"config.json","status":"ok","detail":"parses cleanly"},{"section":"Runtimes","name":"llama-server","status":"fail","detail":"not installed","remedy":"apogee check --fix"}],"ok":false,"failures":1,"warnings":0}"#)
@@ -81,7 +81,7 @@ struct SettingsViewModelTests {
         let model = SettingsViewModel(runner: runner, starter: NoJobs(), preferences: Preferences(store: MemoryStore()))
         await model.connect(binary: Self.binary, version: "0.1.9")
         #expect(model.backends.map(\.backend) == ["local"])
-        #expect(model.pipelines == ["wan"])
+        #expect(model.pipelines == ["Wan2.2-TI2V-5B/pipeline/9b1e47c0a2f6"], "a pipeline by its handle, as set-default-video takes it")
         #expect(model.keyed == ["anthropic"])
         #expect(model.providers.map(\.label) == ["Claude CLI"])
         #expect(model.checks.count == 2 && model.checks[1].remedy == "apogee check --fix")

@@ -26,33 +26,56 @@ public struct ModelRow: Sendable, Equatable, Identifiable {
     public let components: Int?
     public let bytes: Int?
 
-    public var id: String { backend }
+    /// The backend `models list` writes for stored weights no backend points
+    /// at -- its table's placeholder, with `-` as their type.
+    public static let unconfigured = "(not configured)"
+
+    /// Stored weights no backend points at -- a SafeTensors set, an MLX
+    /// model, a stored GGUF, a pipeline, a voice model -- named by their store
+    /// handle (`<model>/<format>/<id>`), which `models list` gives as `model`.
+    public var isStored: Bool { backend == Self.unconfigured && backendType == "-" }
+
+    /// The name the CLI's verbs take: a configured row's backend, stored
+    /// weights' handle. Unique in a list, as a backend is in the config and a
+    /// handle in the store.
+    public var name: String { isStored ? model : backend }
+
+    public var id: String { name }
 
     /// Where it runs, from its backend's type; `nil` when that type is none
     /// of the three (the mock backend) or unknown.
     public var kind: ModelKind? { ModelKind(backendType: backendType) }
 
-    /// Every row of a `models list` document, in its order; one with no
-    /// backend is skipped.
+    /// How many stored sets `models list` folded away -- those a conversion
+    /// consumed -- which `models list --all` lists.
+    public static func folded(in document: ReadDocument) -> Int {
+        document.value["folded"]?.intValue ?? 0
+    }
+
+    /// Every row of a `models list` document, in its order; one with no name
+    /// -- no backend, or stored weights with no handle -- is skipped.
     public static func list(from document: ReadDocument) -> [ModelRow] {
         (document.entries ?? []).compactMap { entry in
             func text(_ key: String) -> String { entry[key]?.stringValue ?? "" }
             func optional(_ key: String) -> String? { entry[key]?.stringValue.flatMap { $0.isEmpty ? nil : $0 } }
             let backend = text("backend")
             guard !backend.isEmpty else { return nil }
-            return ModelRow(
+            let row = ModelRow(
                 backend: backend, backendType: text("backend_type"), model: text("model"), roles: text("roles"),
                 source: text("source"), architecture: text("architecture"), state: text("state"),
                 verified: text("verified"), section: optional("section") ?? "local", group: optional("group") ?? "other",
                 note: optional("note"), format: optional("format"), quant: optional("quant"), window: optional("window"),
                 components: entry["components"]?.intValue, bytes: entry["bytes"]?.intValue)
+            return row.name.isEmpty ? nil : row
         }
     }
 
-    /// The name `models rename` takes: its backends' name without the
-    /// level -- `qwen3-8b-Q4KM` is `qwen3-8b` -- when the backend ends in its
-    /// own quantization; else the backend's name as it is.
+    /// The name `models rename` takes: stored weights' directory -- the
+    /// handle's first part; else its backends' name without the level --
+    /// `qwen3-8b-Q4KM` is `qwen3-8b` -- when the backend ends in its own
+    /// quantization; else the backend's name as it is.
     public var renameName: String {
+        if isStored { return model.split(separator: "/").first.map(String.init) ?? model }
         guard let quant, !quant.isEmpty else { return backend }
         let level = "-" + quant.replacingOccurrences(of: "_", with: "")
         if backend.lowercased().hasSuffix(level.lowercased()) {

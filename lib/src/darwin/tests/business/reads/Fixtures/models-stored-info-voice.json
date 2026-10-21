@@ -1,0 +1,42 @@
+{
+ "data": {
+  "architecture": null,
+  "bytes": 1028,
+  "cache": null,
+  "format": "voice",
+  "handle": "Kokoro-82M/voice/5f3a2c91d0e4",
+  "lineage": [],
+  "window": null
+ },
+ "fields": [
+  {
+   "field": "weights",
+   "value": "Kokoro-82M/voice/5f3a2c91d0e4"
+  },
+  {
+   "field": "path",
+   "value": "/Users/someone/.apogee/models/Kokoro-82M/voice/5f3a2c91d0e4"
+  },
+  {
+   "field": "format",
+   "value": "voice -- a text-to-speech model, taken whole"
+  },
+  {
+   "field": "lineage",
+   "value": "unknown -- no record says where it came from"
+  },
+  {
+   "field": "files",
+   "value": "whole -- config.json, kokoro-v1_0.pth and 3 voice(s), each a whole archive"
+  },
+  {
+   "field": "voices",
+   "value": "American English: af_heart, am_adam\nBritish English: bf_emma"
+  },
+  {
+   "field": "size",
+   "value": "1 KiB on disk"
+  }
+ ],
+ "name": "Kokoro-82M/voice/5f3a2c91d0e4"
+}

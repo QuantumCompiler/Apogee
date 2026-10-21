@@ -20,10 +20,19 @@ struct VoiceViewModelTests {
         return home
     }
 
+    /// Recorded from the installed binary over a scratch store
+    /// (tests/business/reads/Fixtures): a voice model is stored weights, named
+    /// by its handle.
+    static func recorded(_ name: String) -> String {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../business/reads/Fixtures/models-stored-\(name).json")
+        return try! String(contentsOf: url, encoding: .utf8)
+    }
+
     func runner() -> ScriptedRunner {
         let runner = ScriptedRunner()
-        runner.reading(["models", "list"], #"{"object":"list","data":[{"backend":"local","backend_type":"llamacpp"},{"backend":"kokoro-82m","backend_type":"","format":"voice","group":"voice"}]}"#)
-        runner.reading(["models", "info", "kokoro-82m"], #"{"name":"kokoro-82m","fields":[{"field":"format","value":"voice -- a text-to-speech model, taken whole"},{"field":"voices","value":"en-us: af_heart, af_bella, am_adam\nen-gb: bf_emma"}]}"#)
+        runner.reading(["models", "list"], Self.recorded("list"))
+        runner.reading(["models", "info", "Kokoro-82M/voice/5f3a2c91d0e4"], Self.recorded("info-voice"))
         return runner
     }
 
@@ -33,10 +42,10 @@ struct VoiceViewModelTests {
         defer { try? FileManager.default.removeItem(at: home) }
         let model = VoiceViewModel(runner: runner(), starter: ScriptedJobs([]), preferences: Preferences(store: MemoryStore()), home: home)
         await model.connect(binary: Self.binary)
-        #expect(model.voiceModel == "kokoro-82m")
+        #expect(model.voiceModel == "Kokoro-82M/voice/5f3a2c91d0e4", "the store's voice model, by its handle")
         #expect(model.voices == [
-            VoiceViewModel.VoiceGroup(language: "en-us", voices: ["af_heart", "af_bella", "am_adam"]),
-            VoiceViewModel.VoiceGroup(language: "en-gb", voices: ["bf_emma"]),
+            VoiceViewModel.VoiceGroup(language: "American English", voices: ["af_heart", "am_adam"]),
+            VoiceViewModel.VoiceGroup(language: "British English", voices: ["bf_emma"]),
         ])
     }
 

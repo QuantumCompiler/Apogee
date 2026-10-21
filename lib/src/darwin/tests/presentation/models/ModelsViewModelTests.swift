@@ -13,7 +13,7 @@ struct ModelsViewModelTests {
     {"object":"list","data":[
      {"type":"model","backend":"claude","backend_type":"anthropic","model":"claude-sonnet-5","roles":"","source":"remote","architecture":"","profile":"","state":"ready","verified":"","section":"cloud","group":"anthropic"},
      {"type":"model","backend":"qwen3-8b-Q4KM","backend_type":"llamacpp","model":"/store/gguf/qwen3-8b-Q4_K_M.gguf","roles":"chat, embedding","source":"store","architecture":"qwen3","profile":"","state":"ready","verified":"sha256 ok","section":"local","group":"gguf","format":"gguf","quant":"Q4_K_M"},
-     {"type":"model","backend":"wan-1.3b","backend_type":"","model":"Wan-AI/Wan2.1-T2V-1.3B-Diffusers","roles":"","source":"store","architecture":"WanPipeline","profile":"","state":"pipeline","verified":"","section":"local","group":"pipeline","format":"pipeline","components":5,"bytes":28000000000},
+     {"type":"model","backend":"(not configured)","backend_type":"-","model":"Wan2.1-T2V-1.3B/pipeline/7c21e0d4b9a3","roles":"","source":"huggingface","architecture":"WanPipeline","profile":"-","state":"pipeline","verified":"","section":"local","group":"pipeline","format":"pipeline","components":5,"bytes":28000000000},
      {"type":"model","backend":"qwen-mlx","backend_type":"mlx","model":"Qwen/Qwen3-8B","roles":"","source":"store","architecture":"qwen3","profile":"","state":"ready","verified":"","section":"local","group":"mlx","format":"mlx","window":"32768-token window (the default; trained for 131072)"},
      {"type":"model","backend":"claude-code","backend_type":"claude-cli","model":"","roles":"","source":"","architecture":"","profile":"","state":"ready","verified":"","section":"cloud","group":"claude-cli"}
     ]}
@@ -35,10 +35,10 @@ struct ModelsViewModelTests {
         #expect(model.groups.map(\.title) == ["GGUF", "MLX", "Pipelines", "Anthropic", "Claude Code"])
         #expect(model.count(.all) == 5 && model.count(.local) == 3 && model.count(.cloud) == 2)
         model.tab = .local
-        #expect(model.groups.flatMap(\.rows).map(\.backend) == ["qwen3-8b-Q4KM", "qwen-mlx", "wan-1.3b"])
+        #expect(model.groups.flatMap(\.rows).map(\.name) == ["qwen3-8b-Q4KM", "qwen-mlx", "Wan2.1-T2V-1.3B/pipeline/7c21e0d4b9a3"])
         model.tab = .cloud
         #expect(model.groups.flatMap(\.rows).map(\.kind) == [.api, .subscription])
-        let pipeline = model.rows.first { $0.backend == "wan-1.3b" }!
+        let pipeline = model.rows.first { $0.format == "pipeline" }!
         #expect(pipeline.components == 5 && pipeline.bytes == 28_000_000_000)
         #expect(pipeline.kind == nil, "a stored pipeline has no backend type: no kind guessed")
     }
@@ -72,8 +72,8 @@ struct ModelsViewModelTests {
     func memoryUnknown() async {
         let runner = ScriptedRunner()
         let model = await connected(runner)
-        runner.reading(["models", "info", "wan-1.3b"], #"{"name":"wan-1.3b","fields":[],"data":{"format":"pipeline","handle":"wan/pipeline/1","bytes":28000000000,"architecture":"WanPipeline","window":null,"cache":null,"lineage":[]}}"#)
-        await model.select(model.rows.first { $0.backend == "wan-1.3b" }!)
+        runner.reading(["models", "info", "Wan2.1-T2V-1.3B/pipeline/7c21e0d4b9a3"], #"{"name":"Wan2.1-T2V-1.3B/pipeline/7c21e0d4b9a3","fields":[],"data":{"format":"pipeline","handle":"Wan2.1-T2V-1.3B/pipeline/7c21e0d4b9a3","bytes":28000000000,"architecture":"WanPipeline","window":null,"cache":null,"lineage":[]}}"#)
+        await model.select(model.rows.first { $0.format == "pipeline" }!)
         #expect(model.info?.memory == nil)
         #expect(model.typed.contains(Field("Memory", "not known: the files state no cache")))
     }
@@ -150,5 +150,63 @@ struct ModelsViewModelTests {
         let failed = ModelsViewModel(runner: failing)
         await failed.connect(binary: Self.binary)
         #expect(failed.emptyText == "The models could not be read: no scripted read for [\"models\", \"list\"]")
+    }
+
+    /// The recorded store (tests/business/reads/Fixtures): stored weights of
+    /// every kind, one set folded, a configured mock backend.
+    static func recorded(_ name: String) -> String {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../business/reads/Fixtures/models-stored-\(name).json")
+        return try! String(contentsOf: url, encoding: .utf8)
+    }
+
+    func recordedLibrary(_ runner: ScriptedRunner) async -> ModelsViewModel {
+        runner.reading(["models", "list"], Self.recorded("list"))
+        runner.reading(["models", "list", "--all"], Self.recorded("list-all"))
+        runner.reading(["models", "status"], Self.status)
+        let model = ModelsViewModel(runner: runner)
+        await model.connect(binary: Self.binary)
+        return model
+    }
+
+    @Test("stored weights are each their own row, named by their handle; the fold is said, and --all lists it while the place is open")
+    func storedWeights() async {
+        let runner = ScriptedRunner()
+        let model = await recordedLibrary(runner)
+        #expect(model.groups.map(\.title) == ["SafeTensors", "MLX", "Pipelines", "Voices", "Other"])
+        #expect(model.groups.flatMap(\.rows).count == 6, "every row drawn: none shares an identity")
+        #expect(model.groups[0].rows.map(\.name) == [
+            "Llama3.2-1B-Instruct/safetensors/edaba290ce7f", "Qwen3-VL-8B-Instruct/safetensors/63f2634a2019",
+        ])
+        #expect(model.groups.flatMap(\.rows).map(ModelsViewModel.status) == ["stored", "stored", "not configured", "stored", "stored", "-"],
+                "an MLX model a backend could run is not configured; what no backend runs is stored; a configured row's state is the CLI's")
+        #expect(model.backends == ["mock-chat"], "a role points at a backend, never at stored weights")
+        #expect(model.foldedText == "1 snapshot consumed by a conversion is folded")
+        await model.showAll(true)
+        #expect(runner.calls.contains("read models list --all"))
+        #expect(model.groups[0].rows.first?.name == "Gemma4-26B-Instruct/safetensors/13de95725073")
+        #expect(model.foldedText == nil && model.showingAll)
+        await model.appeared()
+        #expect(!model.showingAll && model.folded == 1)
+    }
+
+    @Test("stored weights' details, delete and repair go by their handle, rename by their directory; the placeholder is never a name")
+    func storedVerbs() async {
+        let runner = ScriptedRunner()
+        let model = await recordedLibrary(runner)
+        runner.reading(["models", "info"], Self.recorded("info-set"))
+        let set = model.rows[0]
+        await model.select(set)
+        #expect(runner.calls.contains("read models info Llama3.2-1B-Instruct/safetensors/edaba290ce7f"))
+        #expect(model.selectedRow == set && model.info != nil)
+        #expect(model.lineage.map(\.kind) == ["pulled"], "52e's typed data, read by the handle")
+        model.askToDelete(set)
+        await model.confirmDelete(andBackends: false)
+        #expect(runner.calls.contains("run models delete Llama3.2-1B-Instruct/safetensors/edaba290ce7f --yes"))
+        await model.repair(model.rows[1])
+        #expect(runner.calls.contains("run models repair Qwen3-VL-8B-Instruct/safetensors/63f2634a2019"))
+        await model.rename(model.rows[1], to: "qwen-vl")
+        #expect(runner.calls.contains("run models rename Qwen3-VL-8B-Instruct qwen-vl"))
+        #expect(!runner.calls.contains { $0.contains(ModelRow.unconfigured) })
     }
 }

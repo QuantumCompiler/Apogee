@@ -420,3 +420,45 @@ Decisions taken while building, for veto:
 - **The Layout board's "SwiftUI · macOS 14" column heading** (`BuildLayout.dc.html`) is left as it is: outside this item's three corrections ("nothing else on the board moves"); recorded for the user.
 
 **Verified.** The design's own health check (`lib/design/spec/CLAUDE.md`, the node run of every start screen for 30 ticks): 29 start screens, no problems. The board's counts checked against its chips: one of each kind in its legend, then 31 ready, 13 the app's own, 17 gaps and none assumed; the ledger G1 to G17 matches the gaps the map names; its markup balanced (334 `div`s open and closed). The board's text after the edit, read back: the decision line, the call, the four rows' statuses, G16 and G17 with their fallbacks. Bare `lib/scripts/cicd.sh --test`: green -- the CLI's 3593 tests (the two usual skips) and the app's 236 cases.
+
+### 2026-10-20 — `stored-weights-by-handle` (maintenance item M1): every stored set its own row
+
+**Why.** The user ran the built app, and the Models library showed none of the 16 SafeTensors sets and 2 MLX models in their store. The root cause was measured, not guessed: the store's metadata was mirrored into a scratch `APOGEE_HOME`, the installed 0.1.9 listed it with `models list --output-format json`, and the screen was drawn over that document.
+- **The CLI's side.** It writes its table's placeholder, `(not configured)`, as the backend of every stored row no backend points at. The handle is in `model`.
+- **The GUI's side.** It keyed and named rows by `backend`, so all 18 rows shared one identity. One row drew, then blank space, and the MLX group drew empty.
+- **The same name reached every verb.** Info, delete and repair asked the CLI for `(not configured)`, which it refuses. Voice asked `models info "(not configured)"` for its voices, and Settings offered the placeholder as a pipeline.
+- **Why tests missed it.** The fixtures behind 1h, 1o and 1p held stored rows hand-written with made-up backend names.
+
+- [x] **`ModelRow` names stored weights by their handle.**
+  - `isStored`: the CLI's two markers together, the backend `(not configured)` and the type `-`.
+  - `name`: a configured row's backend, or stored weights' handle. `id` is `name`.
+  - `renameName`: for stored weights, the handle's directory.
+  - `ModelRow.folded(in:)`: the list's own count.
+- [x] **The library.**
+  - Rows are drawn by name, and details and every verb go by `name`: `models info`, `delete` and `repair <handle>`, `models rename <directory>`.
+  - A stored row's status: "not configured" for a GGUF or MLX model a backend could point at; "stored" for a SafeTensors set, pipeline or voice model, which no backend runs; the CLI's own state where it has one ("cannot load").
+  - Stored weights get no "Use in a new session" and are no role target.
+  - The fold appears in the CLI's sentence, with **Show them** (`models list --all`, held while the place is open) and a way to fold them again.
+- [x] **Voice** finds the store's voice model by its handle. **Settings** offers the pipelines' handles and lists configured backends only.
+- [x] **The recorded fixtures**: `tests/business/reads/Fixtures/models-stored-{list,list-all,info-set,info-voice}.json`, with paths made neutral.
+  - Recorded from the installed binary over a scratch store built to the CLI's own completeness rules, with sparse weights.
+  - The store holds two SafeTensors sets, an MLX model converted from a third (which folds), a pipeline, a voice model and a configured mock backend.
+  - The Models, Voice and Settings tests read these, and their hand-written stored rows take the CLI's real shape.
+
+**Decisions made while building** (2026-10-20, each recorded for veto):
+- **A stored row is recognized by the CLI's two markers together** (the open call's default), pinned by the recorded fixture, so a CLI rewording fails a test rather than the screen. An explicit field (`"configured": false`) would be a CLI item, if wanted.
+- **Show them holds while the place is open** (the open call's default): coming back into view folds them again.
+- **The status says what stored weights are.** This refines the item's "not configured": no backend ever runs a SafeTensors set, a pipeline or a voice model, so "not configured" would invite a step that does not exist. They read "stored", and a GGUF or MLX model reads "not configured".
+- **The fixture's configured row is the mock backend:** no weights and no network. A stored GGUF would need a parsable header, and every stored kind takes the same placeholder (`models.cpp`), so the SafeTensors, MLX, pipeline and voice rows cover the rule.
+
+**Verified.**
+- `scripts/build.sh test`: 240 cases (the result bundle's count), no Swift warning. New tests cover:
+  - the recorded list: six rows with six names, the five stored ones by handle, a fold of 1, and `--all` listing the consumed set;
+  - the library's groups and statuses over it and the roles' targets; the fold said, `--all` read on asking and dropped on coming back;
+  - info, delete, repair and rename argv-exact for stored weights, with the placeholder never used as a name;
+  - Voice's voice model and voices from the recorded `models info`;
+  - Settings' pipelines by handle, with stored weights listed as no backend.
+- **Drawn offscreen** over the user's store as mirrored (18 stored rows): all 18 drawn under SafeTensors and MLX, each named by its handle, with "2 snapshots consumed by conversions are folded · Show them" beneath and a set's details read by its handle.
+- Bare `lib/scripts/cicd.sh --test`: green -- the CLI's 3593 tests (the two usual skips) and the app's 240 cases.
+
+**Not run:** the app on the user's real store. The screen was drawn offscreen over its mirrored metadata; running it for real is the user's step.

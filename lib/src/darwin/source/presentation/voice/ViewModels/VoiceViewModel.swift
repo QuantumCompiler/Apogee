@@ -85,7 +85,7 @@ public final class VoiceViewModel {
     /// (`models info <it>`'s `voices` field, one language a line).
     private func readVoices() async {
         guard let binary, let list = await runner.read(binary: binary, ["models", "list"]).document else { return }
-        voiceModel = ModelRow.list(from: list).first { $0.format == "voice" }?.backend
+        voiceModel = ModelRow.list(from: list).first { $0.format == "voice" }?.name
         guard let voiceModel, let info = await runner.read(binary: binary, ["models", "info", voiceModel]).document else {
             voices = []
             return
@@ -93,7 +93,7 @@ public final class VoiceViewModel {
         voices = Self.voices(in: ModelInfo(document: info).field("voices") ?? "")
     }
 
-    /// `en-us: af_heart, af_bella` lines, as the model lists them.
+    /// `American English: af_heart, af_bella` lines, as the model lists them.
     static func voices(in text: String) -> [VoiceGroup] {
         text.split(whereSeparator: \.isNewline).compactMap { line in
             guard let colon = line.firstIndex(of: ":") else { return nil }
