@@ -1,3 +1,4 @@
+import PresentationModels
 import PresentationSessions
 import PresentationShell
 import PresentationStyles
@@ -20,6 +21,14 @@ public struct ApogeeApp: App {
             } screen: { destination in
                 switch destination {
                 case .sessions: SessionsScreen(library: model.sessions, shell: model.shell)
+                case .models:
+                    ModelsScreen(model: model.models, shell: model.shell) {
+                        PlaceholderView(
+                            symbol: "arrow.down.circle",
+                            placeholder: Placeholder(
+                                about: "Downloads from Hugging Face and Ollama, step by step, will be here.",
+                                command: "apogee models pull"))
+                    }
                 default: PlaceholderScreen(destination)
                 }
             }

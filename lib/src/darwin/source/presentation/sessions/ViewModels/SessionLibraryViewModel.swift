@@ -82,6 +82,8 @@ public final class SessionLibraryViewModel {
     /// The line types the last session announced: whether this build has
     /// the CLI's 52d (`set`, `detach`, `compact` -- and `chat --private`).
     private var lastAccepts: [String]?
+    /// The model the next new session starts on, once.
+    private var nextModel: String?
     private var inView = false
     /// The open session leaves view mid-turn: pause it when the turn ends.
     private var pauseWhenIdle = false
@@ -254,6 +256,16 @@ public final class SessionLibraryViewModel {
         await open(.new)
     }
 
+    /// A new session on `model` -- `-m` -- from the models library's "Use in
+    /// a new session".
+    public func newSession(on model: String) async {
+        nextModel = model
+        await open(.new)
+    }
+
+    /// The binary the library found, for the other places' reads.
+    public var binaryURL: URL? { found?.url }
+
     /// ⇧⌘N.
     public func newPrivateSession() async {
         await open(.privately)
@@ -293,7 +305,10 @@ public final class SessionLibraryViewModel {
     private func make(_ target: Target, starter: any ChatStarting) {
         switch target {
         case .new:
-            current = SessionViewModel(starter: starter)
+            let model = nextModel
+            nextModel = nil
+            current = SessionViewModel(
+                starter: starter, launch: ChatLaunch(settings: model.map { RunSettings(model: $0) }))
             listedBeforeNew = Set(chats.map(\.id))
             preferences.openChat = nil
         case .privately:

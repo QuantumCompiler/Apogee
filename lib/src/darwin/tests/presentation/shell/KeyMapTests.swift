@@ -41,10 +41,11 @@ struct KeyMapTests {
         #expect(KeyChord("x", [.control, .option, .shift, .command]).symbols == "⌃⌥⇧⌘X")
     }
 
-    @Test("every place but Sessions is an honest placeholder: what will be there, and today's command")
+    @Test("every unbuilt place is an honest placeholder: what will be there, and today's command")
     func placeholders() {
         #expect(Destination.sessions.placeholder == nil)
-        for destination in Destination.allCases where destination != .sessions {
+        #expect(Destination.models.placeholder == nil)
+        for destination in Destination.allCases where destination.placeholder != nil {
             let placeholder = try! #require(destination.placeholder)
             #expect(placeholder.title == "Not built yet")
             #expect(placeholder.about.hasSuffix("will be here."))

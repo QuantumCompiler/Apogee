@@ -51,9 +51,7 @@ public enum Destination: String, CaseIterable, Sendable, Identifiable {
         case .sessions:
             nil
         case .models:
-            Placeholder(
-                about: "Your stored models, their details and roles, and downloads will be here.",
-                command: "apogee models list")
+            nil
         case .suites:
             Placeholder(
                 about: "Your suites and their members, with whether they fit, will be here.",

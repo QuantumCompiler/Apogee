@@ -3,6 +3,7 @@ import BusinessSession
 import DataPreferences
 import Foundation
 import Observation
+import PresentationModels
 import PresentationSessions
 import PresentationShell
 
@@ -19,6 +20,7 @@ final class AppViewModel {
     let versionLine: String
     let shell: ShellViewModel
     let sessions: SessionLibraryViewModel
+    let models: ModelsViewModel
 
     init(
         info: [String: Any]?, preferences: Preferences, starter: (any ChatStarting)? = nil,
@@ -32,16 +34,24 @@ final class AppViewModel {
         let sessions = SessionLibraryViewModel(
             starter: starter ?? ApogeeClient(identity: ClientIdentity(version: version ?? "development")),
             runner: runner ?? ReadRunner(), preferences: preferences)
+        let models = ModelsViewModel(runner: runner ?? ReadRunner())
         sessions.say = { [weak shell] text in shell?.say(text) }
+        models.say = { [weak shell] text in shell?.say(text) }
+        models.useInSession = { [weak shell, weak sessions] backend in
+            shell?.go(.sessions)
+            Task { await sessions?.newSession(on: backend) }
+        }
         // Sessions in view or not: the library keeps its one child to the
-        // session on screen.
-        shell.routeChanged = { [weak sessions] destination in
+        // session on screen. A place coming into view reads again.
+        shell.routeChanged = { [weak sessions, weak models] destination in
             Task {
                 if destination == .sessions { await sessions?.cameIntoView() } else { await sessions?.leftView() }
+                if destination == .models { await models?.appeared() }
             }
         }
         self.shell = shell
         self.sessions = sessions
+        self.models = models
     }
 
     convenience init(bundle: Bundle) {
@@ -51,5 +61,6 @@ final class AppViewModel {
     /// The app started: the library reads and opens what is in view.
     func start() async {
         await sessions.start(inView: shell.route == .sessions)
+        await models.connect(binary: sessions.binaryURL)
     }
 }

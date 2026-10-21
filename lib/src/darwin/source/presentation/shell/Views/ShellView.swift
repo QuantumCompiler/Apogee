@@ -100,11 +100,16 @@ extension ScreenHeader where Controls == EmptyView {
 }
 
 /// What a placeholder says: not built, what will be here, and the command.
-struct PlaceholderView: View {
+public struct PlaceholderView: View {
     let symbol: String
     let placeholder: Placeholder
 
-    var body: some View {
+    public init(symbol: String, placeholder: Placeholder) {
+        self.symbol = symbol
+        self.placeholder = placeholder
+    }
+
+    public var body: some View {
         VStack(spacing: Spacing.m) {
             EmptyState(symbol: symbol, title: placeholder.title, message: placeholder.about)
             Text("Until then, the command line has it:")

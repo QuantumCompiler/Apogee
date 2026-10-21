@@ -20,4 +20,4 @@
 - [ ] A pull runs supervised with steps shown (fallback today, 52b events when present), stops cleanly, resumes its remaining step, and the library shows the result by read-back.
 - [ ] The jobs core is the one supervisor (the layering check sees no process code in Presentation); the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0; gated on [`models-library.md`](models-library.md) (1h). Out of scope: media runs' screens (they consume the jobs core), the CLI's stream-json itself.
+**Scope note.** Earmarked for v0.2.0; gated on 1h, the models library (shipped 2026-10-20: [MILESTONES → Milestone B](../assistant/MILESTONES.md#milestone-b--the-designs-screens)). Out of scope: media runs' screens (they consume the jobs core), the CLI's stream-json itself.
