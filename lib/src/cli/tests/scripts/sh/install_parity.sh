@@ -41,7 +41,9 @@ APOGEE_BIN="${1:?$usage}"
 WORK="${2:?$usage}"
 CHANNEL_BIN="${3:-}"
 
-rm -rf "$WORK"
+. "$(dirname "$0")/sandbox.sh"
+WORK="$(sandbox_dir "$WORK")"
+trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/a" "$WORK/b"
 
 listing() {

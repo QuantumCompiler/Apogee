@@ -34,7 +34,8 @@ if ! command -v lsof >/dev/null 2>&1; then
     exit 0
 fi
 
-rm -rf "$WORK_DIR"
+. "$(dirname "$0")/sandbox.sh"
+WORK_DIR="$(sandbox_dir "$WORK_DIR")"
 mkdir -p "$WORK_DIR"
 export APOGEE_HOME="$WORK_DIR"
 trap 'rm -rf "$WORK_DIR"' EXIT

@@ -16,7 +16,8 @@ set -uo pipefail
 APOGEE_BIN="${1:?usage: machine_mode_e2e.sh <apogee-binary> <work-dir>}"
 WORK_DIR="${2:?usage: machine_mode_e2e.sh <apogee-binary> <work-dir>}"
 
-rm -rf "$WORK_DIR"
+. "$(dirname "$0")/sandbox.sh"
+WORK_DIR="$(sandbox_dir "$WORK_DIR")"
 mkdir -p "$WORK_DIR"
 export APOGEE_HOME="$WORK_DIR"
 trap 'rm -rf "$WORK_DIR"' EXIT

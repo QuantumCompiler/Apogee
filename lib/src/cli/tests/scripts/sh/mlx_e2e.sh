@@ -33,7 +33,8 @@ if ! mlx_fake_runtime_supported; then
     exit 0
 fi
 
-rm -rf "$WORK_DIR"
+. "$(dirname "$0")/sandbox.sh"
+WORK_DIR="$(sandbox_dir "$WORK_DIR")"
 mkdir -p "$WORK_DIR/work"
 export APOGEE_HOME="$WORK_DIR"
 unset ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GOOGLE_API_KEY
