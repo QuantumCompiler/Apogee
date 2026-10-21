@@ -37,4 +37,16 @@ struct PreferencesTests {
         #expect(store.string(forKey: "sidebarHidden") == nil)
         #expect(Preferences(store: MemoryStore(["route": ""])).route == nil)
     }
+
+    @Test("the media folders the person added are kept, one a line, and none is absent")
+    func mediaFolders() {
+        let store = MemoryStore()
+        let preferences = Preferences(store: store)
+        #expect(preferences.videoFolders.isEmpty)
+        preferences.videoFolders = ["/Users/someone/Clips", "/Volumes/Big/Video"]
+        #expect(store.string(forKey: "videoFolders") == "/Users/someone/Clips\n/Volumes/Big/Video")
+        #expect(Preferences(store: store).videoFolders == ["/Users/someone/Clips", "/Volumes/Big/Video"])
+        preferences.voiceFolders = []
+        #expect(store.string(forKey: "voiceFolders") == nil)
+    }
 }

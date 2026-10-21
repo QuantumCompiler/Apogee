@@ -6,6 +6,7 @@ import PresentationShell
 import PresentationStyles
 import PresentationSuites
 import PresentationTasks
+import PresentationVideo
 import SwiftUI
 
 /// The application: one window -- the shell around every screen -- and the
@@ -32,6 +33,14 @@ public struct ApogeeApp: App {
                 case .tasks: TasksScreen(model: model.tasks)
                 case .suites: SuitesScreen(model: model.suites)
                 case .graph: GraphScreen(model: model.graph, shell: model.shell)
+                case .video:
+                    VideoScreen(model: model.video) {
+                        PlaceholderView(
+                            symbol: "film.stack",
+                            placeholder: Placeholder(
+                                about: "Compositions -- a brief made into a narrated video, scene by scene -- will be here.",
+                                command: "apogee video compose --help"))
+                    }
                 default: PlaceholderScreen(destination)
                 }
             } overlay: { overlay in

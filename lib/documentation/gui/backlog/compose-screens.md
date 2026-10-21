@@ -20,4 +20,4 @@
 - [ ] A brief composes with scene progress read from the project document; stop keeps finished scenes and resume fills gaps, both shown truthfully.
 - [ ] Edit renders its diff (52c fields or the compare-fallback) and re-renders selectively via the real flags; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0; gated on [`video-clips.md`](video-clips.md) (1m — the media business layer and jobs idioms it extends). Out of scope: the CLI's plan documents (52c), voice (1o), a timeline editor (the design has none).
+**Scope note.** Earmarked for v0.2.0; gated on 1m, video clips ([shipped 2026-10-20](../assistant/MILESTONES.md#milestone-b--the-designs-screens)) (1m — the media business layer and jobs idioms it extends). Out of scope: the CLI's plan documents (52c), voice (1o), a timeline editor (the design has none).

@@ -59,9 +59,7 @@ public enum Destination: String, CaseIterable, Sendable, Identifiable {
         case .graph:
             nil
         case .video:
-            Placeholder(
-                about: "Your clips and compositions, and making new ones, will be here.",
-                command: "apogee video --help")
+            nil
         case .voice:
             Placeholder(
                 about: "Your speeches, and saying something new, will be here.",

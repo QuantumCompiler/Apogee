@@ -19,6 +19,8 @@ public final class Preferences: Sendable {
         static let sidebarHidden = "sidebarHidden"
         static let inspectorOpen = "inspectorOpen"
         static let openChat = "openChat"
+        static let videoFolders = "videoFolders"
+        static let voiceFolders = "voiceFolders"
     }
 
     public init(store: any KeyValueStore) {
@@ -68,6 +70,27 @@ public final class Preferences: Sendable {
     public var openChat: String? {
         get { store.string(forKey: Key.openChat).flatMap { $0.isEmpty ? nil : $0 } }
         set { store.set(newValue, forKey: Key.openChat) }
+    }
+
+    /// The folders the person added to the video library, beyond ~/Movies/Apogee.
+    public var videoFolders: [String] {
+        get { list(Key.videoFolders) }
+        set { setList(newValue, Key.videoFolders) }
+    }
+
+    /// The folders the person added to the voice library, beyond ~/Music/Apogee.
+    public var voiceFolders: [String] {
+        get { list(Key.voiceFolders) }
+        set { setList(newValue, Key.voiceFolders) }
+    }
+
+    /// Paths, kept one a line.
+    func list(_ key: String) -> [String] {
+        (store.string(forKey: key) ?? "").split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+    }
+
+    func setList(_ value: [String], _ key: String) {
+        store.set(value.isEmpty ? nil : value.joined(separator: "\n"), forKey: key)
     }
 
     /// A flag, kept as `true` or absent.

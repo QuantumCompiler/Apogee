@@ -1,3 +1,4 @@
+import AppKit
 import PresentationStyles
 import Testing
 
@@ -31,5 +32,10 @@ struct StylesTests {
         #expect(spacing == spacing.sorted())
         #expect(Layout.windowMinWidth > Layout.conversationMax)
         #expect(Layout.sidebar > Layout.sidebarCollapsed)
+    }
+
+    @Test("the media player's framework is loaded wherever styles is: AVKit's view exists at run time")
+    func playerFrameworkLoaded() {
+        #expect(NSClassFromString("AVPlayerView") != nil)
     }
 }

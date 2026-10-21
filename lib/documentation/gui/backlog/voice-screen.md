@@ -20,4 +20,4 @@
 - [ ] The library lists fixture speeches; the sheet speaks through the real command with the model's own voices; playback highlights sentences by the document's timings.
 - [ ] Consent gates the voice set's install; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0; gated on [`video-clips.md`](video-clips.md) (1m — the shared media machinery). Out of scope: voice cloning (the design's recorded out), any CLI change.
+**Scope note.** Earmarked for v0.2.0; gated on 1m, video clips ([shipped 2026-10-20](../assistant/MILESTONES.md#milestone-b--the-designs-screens)) (1m — the shared media machinery). Out of scope: voice cloning (the design's recorded out), any CLI change.
