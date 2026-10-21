@@ -32,7 +32,7 @@ The documentation tree was restructured per application (2026-10-20, the user's 
 - [x] **Tasks, monitor & suites, graph** *(1j, 1k and 1l, shipped 2026-10-20 — [MILESTONES → Milestone B](MILESTONES.md#milestone-b--the-designs-screens))* — the task screens over the task events, grants up front; the 2 s monitor while open and the suites with an honest fit; the graph screen over its documents with a client-side deterministic layout.
 - [x] **The media studio** *(1m, 1n and 1o, shipped 2026-10-20 — [MILESTONES → Milestone B](MILESTONES.md#milestone-b--the-designs-screens))* — clips from the Movies records, compose with scene progress from the project document, voice with the document's timings.
 - [x] **Settings** *(1p, shipped 2026-10-20 — [MILESTONES → Milestone B](MILESTONES.md#milestone-b--the-designs-screens))* — five panes over the real verbs, keys via stdin retained nowhere, the three-theme switch in `styles`.
-- [ ] **Design board corrections** *([1q](../backlog/design-board-sync.md))* — macOS 27+ stands; the probe-found gaps join the board's ledger; republished per its law.
+- [x] **Design board corrections** *(1q, shipped 2026-10-20 — [MILESTONES → Milestone B](MILESTONES.md#milestone-b--the-designs-screens))* — macOS 27+ stands; the probe-found gaps join the board's ledger; republished per its law.
 - See the [`backlog/`](../backlog/README.md) index for the work queue.
 
 ---
