@@ -279,6 +279,23 @@ public final class StoreViewModel {
         infos[set.handle]?.data?.bytes
     }
 
+    /// Whether a SafeTensors set converts to GGUF, or with `mlx` to MLX, as
+    /// its `models info` states it (`data.converts_to`, the CLI's M20). Where
+    /// the document does not say -- a binary before M20 -- it is offered, and
+    /// the CLI's refusal is the answer (M3).
+    public func converts(_ set: StoredSet, mlx: Bool) -> Bool {
+        guard set.format == "safetensors" else { return false }
+        guard let formats = infos[set.handle]?.data?.convertsTo else { return true }
+        return formats.contains(mlx ? "mlx" : "gguf")
+    }
+
+    /// What the design says beside a set's facts -- none for SafeTensors that
+    /// take no conversion, whose facts say why in the CLI's own words.
+    public func advice(_ set: StoredSet) -> String? {
+        if set.format == "safetensors", infos[set.handle]?.data?.convertsTo?.isEmpty == true { return nil }
+        return set.advice
+    }
+
     public var current: StoredSet? { selected.flatMap { handle in sets.first { $0.handle == handle } } }
     public var currentInfo: ModelInfo? { selected.flatMap { infos[$0] } }
 
@@ -370,7 +387,7 @@ public final class StoreViewModel {
 
     /// Opens the convert sheet: a GGUF for llama.cpp, or an MLX model.
     public func askToConvert(_ set: StoredSet, mlx: Bool) {
-        guard set.format == "safetensors" else { return }
+        guard converts(set, mlx: mlx) else { return }
         convertForm = ConvertForm(handle: set.handle, mlx: mlx, bytes: bytes(set))
     }
 

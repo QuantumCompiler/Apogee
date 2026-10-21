@@ -160,4 +160,51 @@ struct StoreViewModelTests {
         #expect(StoreViewModel.size(14_232_576_040) == "13.2 GiB", "the MLX model's note says 13.2 GiB")
         #expect(StoreViewModel.size(512) == "512 B")
     }
+
+    @Test("Stored weights offers the conversions a set takes: none for a diffusion model or a draft head, both for a language model, both where the binary does not say (M3)")
+    func conversionsOffered() async throws {
+        // A store recorded from the binary that ships the CLI's M20: the
+        // user's Wan2.2 transformer, their Gemma4-12B-Assistant draft head,
+        // and a Llama snapshot, each with its own models info.
+        let wan = "Wan-AI--Wan2.2-TI2V-5B/safetensors/6ef9b00b8b83"
+        let head = "Gemma4-12B-Assistant/safetensors/43b42c6289a0"
+        let llama = "Llama3.2-1B-Instruct/safetensors/edaba290ce7f"
+        let runner = ScriptedRunner()
+        runner.reading(["models", "list"], recorded("store-list-conversions"))
+        runner.reading(["models", "list", "--all"], recorded("store-list-conversions-all"))
+        runner.reading(["models", "info", wan], recorded("store-info-diffusion"))
+        runner.reading(["models", "info", head], recorded("store-info-draft-head"))
+        runner.reading(["models", "info", llama], recorded("store-info-snapshot-converts"))
+        let store = StoreViewModel(runner: runner)
+        await store.connect(binary: Self.binary)
+        await store.refresh()
+        #expect(store.sets.map(\.handle).sorted() == [head, llama, wan])
+
+        for handle in [wan, head] {
+            let set = try #require(store.sets.first { $0.handle == handle })
+            #expect(!store.converts(set, mlx: false) && !store.converts(set, mlx: true), "\(handle) takes no conversion")
+            store.askToConvert(set, mlx: true)
+            store.askToConvert(set, mlx: false)
+            #expect(store.convertForm == nil, "no door opens around the view")
+            #expect(store.advice(set) == nil, "no advice to convert what takes no conversion")
+        }
+        await store.select(wan)
+        #expect(store.currentInfo?.field("format") == "SafeTensors -- a diffusion model's weights, not runnable and not convertible",
+                "the CLI's own words say why")
+
+        let snapshot = try #require(store.sets.first { $0.handle == llama })
+        #expect(store.converts(snapshot, mlx: false) && store.converts(snapshot, mlx: true))
+        #expect(store.advice(snapshot) != nil)
+        store.askToConvert(snapshot, mlx: true)
+        #expect(store.convertForm?.handle == llama)
+
+        // A binary before M20 states no conversions: both are offered, and
+        // its refusal stays the answer.
+        let (older, _) = await self.store()
+        older.showingAll = true  // a conversion consumed this snapshot there
+        await older.refresh()
+        let before = try #require(older.sets.first { $0.handle == llama })
+        #expect(older.infos[llama]?.data != nil && older.infos[llama]?.data?.convertsTo == nil)
+        #expect(older.converts(before, mlx: false) && older.converts(before, mlx: true))
+    }
 }

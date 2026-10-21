@@ -1018,3 +1018,24 @@ The convert sheet wrote `-t 8bit --register-with 4bit`, where since the CLI's M1
 - Bare `lib/scripts/cicd.sh --test`: the CLI's 3,610 tests passed. The app's first run failed the 2i race above, at 340 of 341. Once that test waited for its reads, `cicd.sh --app darwin --test` passed 341 of 341, with no Swift warning, the CLI's tree unchanged in between.
 
 **Not done:** a convert button on a set no converter takes, such as a diffusion model or a draft head. That is M3's, once the CLI's M20 states which conversions a set takes.
+
+### 2026-10-21 — `convert-offers-what-the-set-takes` (maintenance item M3): Convert follows what the CLI says a set takes
+
+**Why.** The same run as M2: Stored weights offered **Convert to GGUF…** and **Convert to MLX…** on every SafeTensors set. That included the user's `Wan-AI--Wan2.2-TI2V-5B`, a diffusion transformer no converter takes, whose MLX conversion ran three seconds and failed in mlx-lm's words, and their four Assistant draft heads. The app rightly decides nothing about weights. The CLI's M20 now states the fact as `models info`'s `data.converts_to`.
+
+- [x] **`ModelInfo`'s `Facts` reads `convertsTo`.** It is `nil` where the document does not say: another format, or a binary before M20.
+- [x] **Stored weights offers the conversions the set takes** (`StoreViewModel.converts(_:mlx:)`), and `askToConvert` opens no sheet around the view. A set that takes none shows no convert action and no advice to convert. Its facts carry the CLI's own `format:` line saying why. Against a binary before M20, both are offered, and the CLI's refusal stays the answer.
+- [x] **Recorded:** `models list` (plain and `--all`) and `models info` for each of the three, from the binary that ships M20, over a sandbox holding the user's three kinds of set: the Wan transformer, the 12B draft head and a Llama snapshot. The sandbox's home is written `/Users/someone/.apogee`, as 2h's store fixtures are.
+- [x] **Previews:** a diffusion model and a draft head, each with no convert action, over those documents (ADR 0004).
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **No convert buttons, rather than greyed-out ones,** for a set that takes no conversion, the item's default. The CLI's `format:` line in its facts says why.
+- **The SafeTensors advice ("convert them to GGUF … or to MLX") is withheld** for such a set too, since it would say the opposite of the facts beside it.
+- **The draft head's preview says its base by its width**, as the recording does: the sandbox held no base model, and the preview is named for what it shows.
+
+**Verified.**
+- The `PresentationModels` scheme's own tests: 37 of 37. The new case covers no conversion and no sheet for the Wan set and the draft head, the CLI's words in the facts, both for the Llama snapshot, and both again over 2h's older document.
+- `check-previews` finds nothing.
+- Bare `lib/scripts/cicd.sh --test`: green. The CLI's 3,614 tests passed, and the app's 342 cases, with no Swift warning.
+
+**For the user:** the installed `apogee` predates M20, so until it is reinstalled (`make install`) the app offers both conversions as before, and the CLI's own refusal answers.

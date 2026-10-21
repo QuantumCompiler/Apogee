@@ -101,6 +101,27 @@ enum ModelsPreview {
         return store
     }
 
+    // MARK: - What a set converts to (M3)
+
+    static let wan = "Wan-AI--Wan2.2-TI2V-5B/safetensors/6ef9b00b8b83"
+    static let draftHead = "Gemma4-12B-Assistant/safetensors/43b42c6289a0"
+
+    /// A store recorded from the binary that ships the CLI's M20: a diffusion
+    /// model's weights, a draft head and a Llama snapshot, each `models info`
+    /// stating what it converts to.
+    static let conversionsRunner = PreviewRunner(reads: [
+        (["models", "list", "--all"], ModelsDocuments.conversionsListAll),
+        (["models", "list"], ModelsDocuments.conversionsList),
+        (["models", "info", wan], ModelsDocuments.infoDiffusion),
+        (["models", "info", draftHead], ModelsDocuments.infoDraftHead),
+        (["models", "info", "Llama3.2-1B-Instruct/safetensors/edaba290ce7f"], ModelsDocuments.infoSnapshotConverts),
+    ])
+
+    /// Stored weights over that store; not connected.
+    static func conversionsStore() -> StoreViewModel {
+        StoreViewModel(runner: conversionsRunner)
+    }
+
     /// The Llama snapshot's bytes, as its `models info` states them.
     static var snapshotBytes: Int? {
         ModelInfo(document: ReadDocument(text: ModelsDocuments.storeInfoSnapshot)!).data?.bytes

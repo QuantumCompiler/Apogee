@@ -121,6 +121,11 @@ public struct ModelInfo: Sendable, Equatable {
         public let window: Window?
         public let cache: Cache?
         public let lineage: [Step]
+        /// A SafeTensors set's conversions, as the CLI decides them (its M20):
+        /// `gguf`, `mlx`, or none for a draft head or a diffusion model.
+        /// `nil` where the document does not say -- another format, or a
+        /// binary before M20.
+        public let convertsTo: [String]?
     }
 
     public let name: String
@@ -148,7 +153,8 @@ public struct ModelInfo: Sendable, Equatable {
             }
             return Facts(
                 format: value["format"]?.stringValue, handle: value["handle"]?.stringValue, bytes: value["bytes"]?.intValue,
-                architecture: value["architecture"]?.stringValue, window: window, cache: cache, lineage: lineage)
+                architecture: value["architecture"]?.stringValue, window: window, cache: cache, lineage: lineage,
+                convertsTo: value["converts_to"]?.arrayValue.map { $0.compactMap(\.stringValue) })
         }
     }
 

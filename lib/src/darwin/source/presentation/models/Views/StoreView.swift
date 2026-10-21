@@ -209,7 +209,7 @@ struct StoreDetails: View {
                         Button { store.close() } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
                     }
                     actions(set)
-                    if let advice = set.advice { Text(advice).font(.apogeeSmall).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true) }
+                    if let advice = store.advice(set) { Text(advice).font(.apogeeSmall).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true) }
                     if let note = set.note { Text(note).font(.apogeeSmall).foregroundStyle(Palette.textTertiary) }
                     section("FACTS") {
                         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Spacing.m, verticalSpacing: Spacing.xs) {
@@ -268,8 +268,10 @@ struct StoreDetails: View {
 
     @ViewBuilder private func actions(_ set: StoredSet) -> some View {
         HStack(spacing: Spacing.s) {
-            if set.format == "safetensors" {
+            if store.converts(set, mlx: false) {
                 Button("Convert to GGUF…") { store.askToConvert(set, mlx: false) }
+            }
+            if store.converts(set, mlx: true) {
                 Button("Convert to MLX…") { store.askToConvert(set, mlx: true) }
             }
             if store.isUnquantized(set) {
@@ -646,6 +648,28 @@ struct StepsList: View {
             await store.connect(binary: previewBinary)
             await store.refresh()
             await store.select(ModelsPreview.q4)
+        }
+}
+
+#Preview("A diffusion model: no conversion it takes, said in the CLI's words") {
+    let store = ModelsPreview.conversionsStore()
+    StoreDetails(store: store, shell: ModelsPreview.shell()) { _ in }
+        .frame(width: 380, height: 640)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            await store.select(ModelsPreview.wan)
+        }
+}
+
+#Preview("A draft head: no conversion, its base said by its width") {
+    let store = ModelsPreview.conversionsStore()
+    StoreDetails(store: store, shell: ModelsPreview.shell()) { _ in }
+        .frame(width: 380, height: 640)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            await store.select(ModelsPreview.draftHead)
         }
 }
 
