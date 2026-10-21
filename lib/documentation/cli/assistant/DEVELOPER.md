@@ -42,7 +42,7 @@ Apogee/
 │   └── actions/package/     — The one packaging step every build uses: package.sh (built) or cli-from-release.sh
 │                              (copied), then the artifact upload
 ├── .claude/
-│   └── skills/          — One agnostic set serving both applications: each skill resolves CLI vs GUI from the ask, asking when ambiguous (2026-10-20)
+│   └── skills/          — One agnostic set serving every application: each skill resolves CLI, GUI or mod from the ask, asking when ambiguous (2026-10-20; the mod joined 2026-10-21)
 │       ├── apogee-backlog-create-item/ — Repo-local skill: spec a new item into the backlog + index + roadmap
 │       ├── apogee-backlog-create-spike/ — Repo-local skill: turn a spike's findings (chat or attached write-up) into the whole split's documents
 │       ├── apogee-backlog-execute-call-resolution/ — Repo-local skill: resolve a group's open calls one by one; answers recorded as dated decisions, consequences propagated

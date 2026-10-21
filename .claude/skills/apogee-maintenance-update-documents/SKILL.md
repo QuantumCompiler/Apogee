@@ -9,7 +9,7 @@ Apogee's docs are the source of truth — a merge request whose docs lag its cod
 
 ## 0. Which applications?
 
-Apogee's documentation is per application ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/cli/` and `lib/documentation/gui/`, written `<home>` below. **The branch decides the scope**: this pass covers every application the diff touched — both homes when both moved, each walked against its own docs. Repo-wide machinery (the pipeline, the release law) is recorded in the CLI's docs and audited once. If the user names a scope the diff disagrees with, ask with AskUserQuestion rather than guessing.
+Apogee's documentation is per application ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/cli/`, `lib/documentation/gui/` and `lib/documentation/mod/`, written `<home>` below. **The branch decides the scope**: this pass covers every application the diff touched — both homes when both moved, each walked against its own docs. Repo-wide machinery (the pipeline, the release law) is recorded in the CLI's docs and audited once. If the user names a scope the diff disagrees with, ask with AskUserQuestion rather than guessing.
 
 ## 1. Establish what this branch changed
 

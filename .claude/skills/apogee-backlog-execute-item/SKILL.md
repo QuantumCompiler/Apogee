@@ -1,6 +1,6 @@
 ---
 name: apogee-backlog-execute-item
-description: Take the next recommended Apogee backlog item (or a named one) — CLI or GUI — and work it per that application's docs-first process; the skill resolves which queue is meant and asks when it cannot. Use when the user says "take the next backlog item", "continue", "work the queue", "next item", or names a specific backlog document to implement.
+description: Take the next recommended Apogee backlog item (or a named one) — CLI, GUI or mod — and work it per that application's docs-first process; the skill resolves which queue is meant and asks when it cannot. Use when the user says "take the next backlog item", "continue", "work the queue", "next item", or names a specific backlog document to implement.
 ---
 
 # Work an Apogee Backlog Item
@@ -9,11 +9,11 @@ Apogee is built docs-first: every work item has its own document in `<home>/back
 
 ## 0. Which application?
 
-Apogee's documentation is per application ([the router](../../../lib/documentation/CLAUDE.md)): the CLI's home is [`lib/documentation/cli/`](../../../lib/documentation/cli/README.md) and the GUI's is [`lib/documentation/gui/`](../../../lib/documentation/gui/README.md). Resolve which queue this invocation means before touching anything, in order:
+Apogee's documentation is per application ([the router](../../../lib/documentation/CLAUDE.md)): the CLI's home is [`lib/documentation/cli/`](../../../lib/documentation/cli/README.md), the GUI's [`lib/documentation/gui/`](../../../lib/documentation/gui/README.md), and the mod's (the Claude plugin) [`lib/documentation/mod/`](../../../lib/documentation/mod/README.md). Resolve which queue this invocation means before touching anything, in order:
 
-1. **The arguments.** An id or table names its queue — the CLI's version tables (`v0.1.<x>`, `v0.2.0`) with their numeric tracks (`52a`) and the standing `M<n>`/`A<n>` queues; the GUI's index with its lettered tracks (`1e`). A named document resolves by which backlog holds it. A bare version (`v0.2.0`) can mean either queue — both carry work per release.
-2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens, windows, the design and the machine-mode client are the GUI's. Work that needs both gets cross-queue siblings, gated both ways.
-3. **Still ambiguous? Ask.** One AskUserQuestion — the CLI's queue or the GUI's — before anything is treated as decided. Never guess between them.
+1. **The arguments.** An id or table names its queue — the CLI's version tables (`v0.1.<x>`, `v0.2.0`) with their numeric tracks (`52a`) and the standing `M<n>`/`A<n>` queues; the GUI's and the mod's indexes with their lettered tracks. A named document resolves by which backlog holds it. A bare version can mean any queue — they all carry work per release.
+2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens, windows and the design are the GUI's; the Claude plugin (panes, slash commands, `$`-API work, `lib/src/mod/`) is the mod's. Work that spans queues gets cross-queue siblings, gated both ways.
+3. **Still ambiguous? Ask.** One AskUserQuestion — which application's queue (the CLI, the GUI, or the mod) — before anything is treated as decided. Never guess between them.
 
 Everything below reads from the chosen home, written `<home>`: its backlog README is the authority on that queue's tables, numbering, document format and link depths, and its assistant docs (`<home>/assistant/CLAUDE.md` first) carry the invariants. Where this skill says `<home>`, substitute the chosen application's directory.
 

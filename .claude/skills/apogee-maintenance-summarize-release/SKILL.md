@@ -12,7 +12,7 @@ The optional argument is the version (`v0.1.2` or `0.1.2`). With none, it is the
 
 ## 0. Which applications?
 
-A release is repo-wide: the version pointer, the pipeline and the publishing law live in the CLI's docs (`lib/documentation/cli/`), and every application contributes its own story from its own home (`lib/documentation/gui/` for the GUI), written `<home>` where a step applies per application. Walk the repo-wide machinery once, then each application's boards that the release touched. If the user's asked-for scope is unclear, ask with AskUserQuestion rather than guessing.
+A release is repo-wide: the version pointer, the pipeline and the publishing law live in the CLI's docs (`lib/documentation/cli/`), and every application contributes its own story from its own home (`lib/documentation/gui/`, `lib/documentation/mod/`), written `<home>` where a step applies per application. Walk the repo-wide machinery once, then each application's boards that the release touched. If the user's asked-for scope is unclear, ask with AskUserQuestion rather than guessing.
 
 ## 1. Pin the release and its range
 
