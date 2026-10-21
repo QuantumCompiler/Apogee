@@ -54,6 +54,56 @@ struct Snapshot {
 /// `model_type`, else empty.
 [[nodiscard]] std::string snapshot_architecture(const std::filesystem::path& dir);
 
+/// A **draft head** (2026-10-21): weights speculative decoding runs beside a
+/// base model and never alone -- Gemma 4's assistants, a few layers reading
+/// the base's hidden states through a projection, which `config.json` says
+/// by declaring `backbone_hidden_size`, the base's width. Nothing Apogee runs
+/// can chat with one: mlx-lm has no network for it, and llama.cpp loads it
+/// only as a draft beside its base, which Apogee does not run (26k). So no
+/// surface offers one as a model to convert or register; each says what it is.
+struct DraftHead {
+    /// `architectures[0]` as `config.json` names it, else `model_type`.
+    std::string architecture;
+    /// The width of the base model it reads; 0 when not declared.
+    std::int64_t backbone_hidden_size = 0;
+    /// `model_type` up to its first `_` -- the family a base shares.
+    std::string family;
+};
+
+/// The draft head `dir`'s `config.json` describes: one declaring
+/// `backbone_hidden_size`, or naming an architecture llama.cpp's converter
+/// takes as a draft head at the pinned revision (`Gemma4AssistantForCausalLM`,
+/// `Gemma4UnifiedAssistantForCausalLM`). nullopt for anything else, or for a
+/// directory with no readable `config.json`.
+[[nodiscard]] std::optional<DraftHead> snapshot_draft_head(const std::filesystem::path& dir);
+
+/// A model's width and family as its `config.json` says them: `hidden_size`,
+/// or `text_config`'s for a multimodal release, and `model_type` up to its
+/// first `_`. 0 and empty where not said.
+struct ConfigWidth {
+    std::int64_t hidden_size = 0;
+    std::string family;
+};
+
+[[nodiscard]] ConfigWidth config_width(const std::filesystem::path& dir);
+
+/// What a draft head is, in the one wording every surface uses: "a draft head
+/// (<architecture>): speculative decoding runs it beside its base model
+/// (<base>), reading that model's hidden states, and never alone". The base
+/// is the stored models `bases` names, else the width it reads, else unsaid.
+[[nodiscard]] std::string describe_draft_head(const DraftHead& head,
+                                              const std::vector<std::string>& bases);
+
+/// The refusal a conversion of one says, `subject` its name or path: what it
+/// is, that nothing converted from it could answer a chat, and the way out.
+[[nodiscard]] std::string draft_head_refusal(std::string_view subject, const DraftHead& head,
+                                             const std::vector<std::string>& bases);
+
+/// The short form a listing's note says: "draft head -- runs beside <base>,
+/// never alone".
+[[nodiscard]] std::string draft_head_note(const DraftHead& head,
+                                          const std::vector<std::string>& bases);
+
 /// Every snapshot directory directly under `root`, sorted by name.
 [[nodiscard]] std::vector<std::filesystem::path> list_snapshots(const std::filesystem::path& root);
 

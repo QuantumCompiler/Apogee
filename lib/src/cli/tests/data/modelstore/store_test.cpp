@@ -14,6 +14,7 @@
 
 #include "contracts/sha256.h"
 #include "modelstore/sidecar.h"
+#include "modelstore/snapshot.h"
 #include "platform/platform.h"
 #include "support/env_guard.h"
 #include "support/file_time.h"
@@ -885,4 +886,118 @@ TEST_CASE("a voice model lands under its model's voice/ by the digest over its w
     CHECK(apogee::models::backend_type_for_format(apogee::models::kVoiceFormat).empty());
     REQUIRE(apogee::models::remove_weights(stored.dir).empty());
     CHECK(apogee::models::list_store_voices(store.roots).empty());
+}
+
+namespace {
+
+/// The user's Gemma4-12B-Assistant, as its own config.json says it (2026-10-21):
+/// four layers 1024 wide, reading a 3840-wide base through a projection.
+constexpr const char* kAssistantConfig =
+    R"({"architectures": ["Gemma4UnifiedAssistantForCausalLM"],
+        "model_type": "gemma4_unified_assistant", "backbone_hidden_size": 3840,
+        "text_config": {"model_type": "gemma4_unified_text", "hidden_size": 1024,
+                        "num_hidden_layers": 4}})";
+
+/// A SafeTensors set whose config.json is `config`.
+void place_snapshot_with(const std::filesystem::path& dir, const std::string& config) {
+    write_file(dir / "config.json", config);
+    write_file(dir / "model.safetensors");
+}
+
+}  // namespace
+
+TEST_CASE("a draft head is read from its config: the width it reads, or its architecture's name",
+          "[models][store][draft_head]") {
+    const Store store;
+    const std::filesystem::path head = store.root.path() / "head";
+    place_snapshot_with(head, kAssistantConfig);
+    const std::optional<apogee::models::DraftHead> read = apogee::models::snapshot_draft_head(head);
+    REQUIRE(read.has_value());
+    CHECK(read->architecture == "Gemma4UnifiedAssistantForCausalLM");
+    CHECK(read->backbone_hidden_size == 3840);
+    CHECK(read->family == "gemma4");
+
+    // Named by an architecture llama.cpp converts as one, its width unsaid.
+    const std::filesystem::path named = store.root.path() / "named";
+    place_snapshot_with(named, R"({"architectures": ["Gemma4AssistantForCausalLM"],
+                                   "model_type": "gemma4_assistant"})");
+    const std::optional<apogee::models::DraftHead> by_name =
+        apogee::models::snapshot_draft_head(named);
+    REQUIRE(by_name.has_value());
+    CHECK(by_name->backbone_hidden_size == 0);
+
+    // A model of its own is none -- nor is a vendor's type name alone, M15's case.
+    const std::filesystem::path base = store.root.path() / "base";
+    place_snapshot_with(base, R"({"architectures": ["Gemma4UnifiedForConditionalGeneration"],
+                                  "model_type": "gemma4_unified",
+                                  "text_config": {"hidden_size": 3840}})");
+    CHECK_FALSE(apogee::models::snapshot_draft_head(base).has_value());
+    const std::filesystem::path variant = store.root.path() / "variant";
+    place_snapshot_with(variant, R"({"architectures": ["LlamaForCausalLM"],
+                                     "model_type": "gemma4_unified_assistant"})");
+    CHECK_FALSE(apogee::models::snapshot_draft_head(variant).has_value());
+    CHECK_FALSE(apogee::models::snapshot_draft_head(store.root.path() / "absent").has_value());
+
+    // A width is the config's own, or its text model's.
+    CHECK(apogee::models::config_width(base).hidden_size == 3840);
+    CHECK(apogee::models::config_width(base).family == "gemma4");
+    const std::filesystem::path flat = store.root.path() / "flat";
+    place_snapshot_with(flat, R"({"model_type": "llama", "hidden_size": 4096})");
+    CHECK(apogee::models::config_width(flat).hidden_size == 4096);
+    CHECK(apogee::models::config_width(flat).family == "llama");
+
+    // One wording: the base named when stored, else its width, else unsaid.
+    CHECK(apogee::models::describe_draft_head(*read, {"Gemma4-12B-Instruct"}) ==
+          "a draft head (Gemma4UnifiedAssistantForCausalLM): speculative decoding runs it beside "
+          "its base model (Gemma4-12B-Instruct), reading that model's hidden states, and never "
+          "alone");
+    CHECK(apogee::models::describe_draft_head(*read, {}).find("(a 3840-wide gemma4 model)") !=
+          std::string::npos);
+    CHECK(apogee::models::describe_draft_head(*by_name, {}).find("its base model, reading") !=
+          std::string::npos);
+    CHECK(apogee::models::draft_head_note(*read, {"Gemma4-12B-Instruct"}) ==
+          "draft head -- runs beside Gemma4-12B-Instruct, never alone");
+    CHECK(apogee::models::draft_head_refusal("'Gemma4-12B-Assistant'", *read, {})
+              .ends_with("never alone -- nothing converted from it could answer a chat; convert "
+                         "its base model instead"));
+}
+
+TEST_CASE("a draft head's base is the stored model of its family as wide as the width it reads",
+          "[models][store][draft_head]") {
+    const Store store;
+    const std::filesystem::path models = store.roots.models;
+    place_snapshot_with(models / "Gemma4-12B-Assistant" / "safetensors" / "aaaaaaaaaaaa",
+                        kAssistantConfig);
+    place_snapshot_with(models / "Gemma4-12B-Instruct" / "safetensors" / "bbbbbbbbbbbb",
+                        R"({"architectures": ["Gemma4UnifiedForConditionalGeneration"],
+                            "model_type": "gemma4_unified", "text_config": {"hidden_size": 3840}})");
+    // As wide, but another family: never its base.
+    place_snapshot_with(models / "Wide-Llama" / "safetensors" / "cccccccccccc",
+                        R"({"model_type": "llama", "hidden_size": 3840})");
+    // Another draft head declaring the same width is no base either.
+    place_snapshot_with(models / "Other-Assistant" / "safetensors" / "dddddddddddd",
+                        R"({"model_type": "gemma4_assistant", "backbone_hidden_size": 3840,
+                            "hidden_size": 3840})");
+    // The 26B: its base stored twice, as a snapshot and as an MLX model.
+    place_snapshot_with(models / "Gemma4-26B-Instruct" / "safetensors" / "eeeeeeeeeeee",
+                        R"({"model_type": "gemma4", "text_config": {"hidden_size": 2816}})");
+    apogee::testing::write_mlx_model(models / "Gemma4-26B-Instruct" / "mlx" / "ffffffffffff");
+    write_file(models / "Gemma4-26B-Instruct" / "mlx" / "ffffffffffff" / "config.json",
+               R"({"model_type": "gemma4", "text_config": {"hidden_size": 2816},
+                   "quantization": {"group_size": 64, "bits": 4}})");
+
+    const std::optional<apogee::models::DraftHead> head = apogee::models::snapshot_draft_head(
+        models / "Gemma4-12B-Assistant" / "safetensors" / "aaaaaaaaaaaa");
+    REQUIRE(head.has_value());
+    CHECK(apogee::models::draft_head_bases(store.roots, *head) ==
+          std::vector<std::string>{"Gemma4-12B-Instruct"});
+
+    apogee::models::DraftHead wide = *head;
+    wide.backbone_hidden_size = 2816;
+    CHECK(apogee::models::draft_head_bases(store.roots, wide) ==
+          std::vector<std::string>{"Gemma4-26B-Instruct"});
+    wide.backbone_hidden_size = 5376;
+    CHECK(apogee::models::draft_head_bases(store.roots, wide).empty());
+    wide.backbone_hidden_size = 0;
+    CHECK(apogee::models::draft_head_bases(store.roots, wide).empty());
 }

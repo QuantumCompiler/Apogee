@@ -3884,6 +3884,38 @@ Decisions taken while building, for veto:
 
 **Not run on real weights**: a real multi-precision MLX run is the user's.
 
+### 2026-10-21 — Draft heads, said for what they are (M15's correction)
+
+**Why.** The user converted Gemma4-12B-Assistant to MLX and it ended deep in mlx-lm: `ValueError: Model type gemma4_unified_assistant not supported`. M15's door then offered `--model-type gemma4_unified`, which cannot work. The weights are no model of their own. Their `config.json` declares `Gemma4UnifiedAssistantForCausalLM`: four layers 1,024 wide, with `pre_projection` and `post_projection` reading a 3,840-wide base model's hidden states (`backbone_hidden_size`). It is a **draft head** for speculative decoding, run beside its base and never alone. The evidence:
+- **mlx-lm 0.32.2 has no network for one.** It maps `gemma4_unified` to its whole `gemma4`, and building that from this config stops at `KeyError: 'sliding_attention'` before a weight is read.
+- **Its `--draft-model` takes a standalone model,** not a head that reads another model's state.
+- **llama.cpp converts one** (`GEMMA4_ASSISTANT`, `nextn_predict_layers`), but only as a draft beside its base, which Apogee does not run: 26k measured speculative decoding and built nothing.
+
+The user's four Assistant snapshots (12B, 26B, E2B, E4B) are all draft heads, each as wide as exactly one stored Instruct model.
+
+- [x] **`modelstore/snapshot.h`**: `snapshot_draft_head(dir)` reads the fact from `config.json` alone. A config declaring `backbone_hidden_size` is one, and so is one naming an architecture llama.cpp's converter takes as a draft head at the pin (`Gemma4AssistantForCausalLM`, `Gemma4UnifiedAssistantForCausalLM`). A vendor's type name alone, M15's case, is not.
+  - `config_width` gives a model's width and family.
+  - One wording: `describe_draft_head`, `draft_head_refusal` and `draft_head_note`.
+- [x] **`store.h`'s `draft_head_bases`**: the stored SafeTensors sets and MLX models of the head's family, as wide as the width it reads. The base is a fact from the files, never a guess from a name: on the user's store, 12B-Assistant gives Gemma4-12B-Instruct.
+- [x] **Refused before anything runs.**
+  - Both conversion ladders (`conversion_refusal`, `mlx_conversion_refusal`) refuse a draft head.
+  - The command's `choose_snapshot`, which every conversion door takes (GGUF, MLX and both `--register` chains), refuses it first with its stored base named: `'Gemma4-12B-Assistant/safetensors/43b42c6289a0' is a draft head (Gemma4UnifiedAssistantForCausalLM): speculative decoding runs it beside its base model (Gemma4-12B-Instruct), reading that model's hidden states, and never alone -- nothing converted from it could answer a chat; convert its base model instead`.
+  - `--model-type` changes nothing, since the overlay renames a type and not what the weights are. M15's door stays for a vendor's spelling of a type mlx-lm knows.
+- [x] **Framed where listed:**
+  - `models list` notes `draft head -- runs beside Gemma4-12B-Instruct, never alone`, a note its JSON rows carry too;
+  - `models info` says `a draft head's weights, not runnable and not convertible` and describes it;
+  - `config scan` counts draft heads apart from the snapshots a conversion makes runnable, and names them;
+  - `check`'s Models row says what it is.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The GGUF conversion is refused too.** llama.cpp can convert one, but Apogee converts to make backends, and a GGUF of a draft head would be an unrunnable backend that `config scan --register` then offers. llama.cpp's own converter remains for anyone who wants the file outside Apogee.
+- **`models info`'s JSON gains no field.** Its document has no runnable or trainable field to correct, and the `models list` note reaches the JSON rows. A typed `draft_head` field is left for a client that needs one (ADR 0002's skipped mode, named).
+- **The base is named only by measurement:** family and width from both configs. Where nothing matches, the width is said instead.
+
+**Verified.** `store_test` (the reader, the width, the wording, the base among a same-width model of another family and another head), `convert_test` (both ladders, and the M15 overlay still refused), and `models_mlx_test` on the command line (the user's exact command refused before its chain announces a step, `--model-type` and GGUF refused alike, nothing made or staged, then `models list`, `models info`, `config scan` and `check` saying it). `lib/scripts/cicd.sh --test`: green -- the CLI's 3,597 (the two standing skips) and the macOS app's 339 cases, no warning.
+
+**Not done:** using the draft heads. Speculative decoding with Gemma 4's assistants through llama.cpp's MTP support was never measured (26k measured Qwen's MTP head, 1.14×). That would be a spike, on the user's word.
+
 ## Milestone O — Local multimodal
 
 **Goal.** Make `VisionCapable` tell the truth on the local backend: wire llama.cpp's `mtmd`, add `mmproj_path`, and close the cross-surface guard gap that let one surface accept a picture the other refused.

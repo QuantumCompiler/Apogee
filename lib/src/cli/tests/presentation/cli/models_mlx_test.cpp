@@ -728,9 +728,12 @@ TEST_CASE("models convert --mlx on the command line: the real driver, listed, ch
 
 TEST_CASE("a vendor's model_type is refused with its door, then converted as the type named",
           "[commands][models][mlx][convert][driver][model_type]") {
-    // M15, the user's transcript: an Assistant variant mlx-lm has no class
-    // for, its door and the nearest types now said; then converted as the
-    // base type through a view, the snapshot untouched, the record telling.
+    // M15: a vendor's spelling of a type mlx-lm has no class for, its door
+    // and the nearest types now said; then converted as the base type through
+    // a view, the snapshot untouched, the record telling. (The user's own
+    // Assistant models turned out to be draft heads, refused before this
+    // door: the next case. This fixture is a plain model under a vendor's
+    // type name.)
     if (apogee::platform::host_target() != "macos-arm64" ||
         apogee::platform::find_on_path("python3").empty()) {
         SKIP("the mlx runtime is Apple silicon's, and the driver needs a python3");
@@ -853,6 +856,77 @@ int chain(Convert& convert, const std::vector<std::string>& precisions, bool lis
 }
 
 }  // namespace
+
+TEST_CASE("a draft head is refused at every conversion door, its base named, nothing run",
+          "[commands][models][mlx][convert][draft_head]") {
+    // The user's run (2026-10-21): converting Gemma4-12B-Assistant to MLX ended
+    // deep in mlx-lm, and M15's door offered an override that cannot work --
+    // the weights are a draft head, which runs beside its base and never alone.
+    // Now refused before anything runs, and framed wherever it is listed.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    const std::filesystem::path head =
+        home.models() / "Gemma4-12B-Assistant" / "safetensors" / "43b42c6289a0";
+    write_mlx_model(head, {.bits = 0, .format = "pt"});
+    apogee::testing::write_fixture_file(head / "config.json",
+                                        R"({"architectures": ["Gemma4UnifiedAssistantForCausalLM"],
+            "model_type": "gemma4_unified_assistant", "backbone_hidden_size": 3840,
+            "text_config": {"model_type": "gemma4_unified_text", "hidden_size": 1024}})");
+    const std::filesystem::path base =
+        home.models() / "Gemma4-12B-Instruct" / "safetensors" / "920344fd2dac";
+    write_mlx_model(base, {.bits = 0, .format = "pt"});
+    apogee::testing::write_fixture_file(
+        base / "config.json",
+        R"({"architectures": ["Gemma4UnifiedForConditionalGeneration"],
+            "model_type": "gemma4_unified", "text_config": {"hidden_size": 3840}})");
+    const std::string refused =
+        "'Gemma4-12B-Assistant/safetensors/43b42c6289a0' is a draft head "
+        "(Gemma4UnifiedAssistantForCausalLM): speculative decoding runs it beside its base model "
+        "(Gemma4-12B-Instruct), reading that model's hidden states, and never alone -- nothing "
+        "converted from it could answer a chat; convert its base model instead";
+
+    std::string out;
+    // The user's exact command, refused before its chain announces a step.
+    CHECK(home.run({"models", "convert", "Gemma4-12B-Assistant/safetensors/43b42c6289a0", "--mlx",
+                    "--register", "--type", "4bit", "--base-name", "Gemma4-12B-Assistant"},
+                   &out) != 0);
+    INFO(out);
+    CHECK(out.find(refused) != std::string::npos);
+    CHECK(out.find("[1/2]") == std::string::npos);
+    CHECK(out.find("--model-type") == std::string::npos);
+    // M15's override renames the type, never what the weights are; nor is a
+    // GGUF of one a backend.
+    CHECK(home.run({"models", "convert", "Gemma4-12B-Assistant", "--mlx", "--model-type",
+                    "gemma4_unified"},
+                   &out) != 0);
+    CHECK(out.find("is a draft head (Gemma4UnifiedAssistantForCausalLM)") != std::string::npos);
+    CHECK(home.run({"models", "convert", "Gemma4-12B-Assistant"}, &out) != 0);
+    CHECK(out.find("is a draft head (Gemma4UnifiedAssistantForCausalLM)") != std::string::npos);
+    const StoreRoots roots = StoreRoots::at(home.models());
+    CHECK(apogee::models::list_store_mlx(roots).empty());
+    CHECK(apogee::models::list_store_ggufs(roots).empty());
+    CHECK(apogee::models::find_abandoned_staging(roots).empty());
+
+    // Framed for what it is wherever it is listed.
+    REQUIRE(home.run({"models", "list", "--no-color"}, &out) == 0);
+    CHECK(out.find("draft head -- runs beside Gemma4-12B-Instruct, never alone") !=
+          std::string::npos);
+    REQUIRE(home.run({"models", "info", "Gemma4-12B-Assistant/safetensors/43b42c6289a0"}, &out) ==
+            0);
+    CHECK(out.find("format:       SafeTensors -- a draft head's weights, not runnable and not "
+                   "convertible") != std::string::npos);
+    CHECK(out.find("draft head:   a draft head (Gemma4UnifiedAssistantForCausalLM): speculative "
+                   "decoding runs it beside its base model (Gemma4-12B-Instruct)") !=
+          std::string::npos);
+    REQUIRE(home.run({"config", "scan"}, &out) == 0);
+    CHECK(out.find("1 SafeTensors snapshot(s) not listed -- weights, not runnable; each registers "
+                   "when converted") != std::string::npos);
+    CHECK(out.find("1 draft head(s) not listed -- each runs beside its base model, never alone: "
+                   "Gemma4-12B-Assistant") != std::string::npos);
+    (void)home.run({"check", "--no-color"}, &out);
+    CHECK(out.find("SafeTensors weights, draft head -- runs beside Gemma4-12B-Instruct, never "
+                   "alone") != std::string::npos);
+}
 
 TEST_CASE("convert --mlx --register converts once and registers what the hint would",
           "[commands][models][mlx][convert][chain]") {

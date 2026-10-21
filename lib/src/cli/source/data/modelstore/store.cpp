@@ -1081,4 +1081,27 @@ std::string legacy_refusal(const StoreRoots& roots, std::string_view given) {
     return {};
 }
 
+std::vector<std::string> draft_head_bases(const StoreRoots& roots, const DraftHead& head) {
+    std::set<std::string> found;
+    if (head.backbone_hidden_size <= 0) {
+        return {};
+    }
+    const auto consider = [&](const std::string& model, const std::filesystem::path& dir) {
+        if (snapshot_draft_head(dir).has_value()) {
+            return;
+        }
+        const ConfigWidth width = config_width(dir);
+        if (width.hidden_size == head.backbone_hidden_size && width.family == head.family) {
+            found.insert(model);
+        }
+    };
+    for (const StoredSnapshot& stored : list_store_snapshots(roots)) {
+        consider(stored.model, stored.dir);
+    }
+    for (const StoredMlx& stored : list_store_mlx(roots)) {
+        consider(stored.model, stored.dir);
+    }
+    return {found.begin(), found.end()};
+}
+
 }  // namespace apogee::models

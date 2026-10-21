@@ -660,7 +660,10 @@ struct StoreScanRow {
     return rows;
 }
 
-void render_store_scan(const std::vector<StoreScanRow>& rows, std::size_t snapshots) {
+/// `snapshots` counts the SafeTensors sets a conversion makes runnable;
+/// `draft_heads` names the ones none does (2026-10-21).
+void render_store_scan(const std::vector<StoreScanRow>& rows, std::size_t snapshots,
+                       const std::vector<std::string>& draft_heads) {
     std::size_t width = 0;
     for (const StoreScanRow& row : rows) {
         width = std::max(width, row.name.size());
@@ -685,7 +688,17 @@ void render_store_scan(const std::vector<StoreScanRow>& rows, std::size_t snapsh
                   << " SafeTensors snapshot(s) not listed -- weights, not runnable; each "
                      "registers when converted\n";
     }
-    if (rows.empty() && snapshots == 0) {
+    if (!draft_heads.empty()) {
+        std::string names;
+        for (const std::string& name : draft_heads) {
+            names += (names.empty() ? "" : ", ") + name;
+        }
+        std::cout << draft_heads.size()
+                  << " draft head(s) not listed -- each runs beside its base model, never "
+                     "alone: "
+                  << names << "\n";
+    }
+    if (rows.empty() && snapshots == 0 && draft_heads.empty()) {
         std::cout << "the model store is empty -- 'apogee models pull' fills it\n";
     }
 }
@@ -723,8 +736,16 @@ void bind_scan(CLI::App& parent, const RootContext& context) {
         const models::StoreRoots roots = models::StoreRoots::at(harness::models_dir());
         const std::vector<StoreScanRow> rows =
             scan_store_rows(roots, config.has_value() ? &*config : nullptr);
-        const std::size_t snapshots = models::list_store_snapshots(roots).size();
-        render_store_scan(rows, snapshots);
+        std::size_t snapshots = 0;
+        std::vector<std::string> draft_heads;
+        for (const models::StoredSnapshot& stored : models::list_store_snapshots(roots)) {
+            if (models::snapshot_draft_head(stored.dir).has_value()) {
+                draft_heads.push_back(stored.model);
+            } else {
+                ++snapshots;
+            }
+        }
+        render_store_scan(rows, snapshots, draft_heads);
 
         if (!config.has_value()) {
             if (*register_flag) {

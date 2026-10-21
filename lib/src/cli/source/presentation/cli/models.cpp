@@ -605,7 +605,12 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
                                ? std::to_string(record->files.size()) + " file(s) on record"
                                : "no record";
             // No note for a healthy one: its state column already says what
-            // it is, and a line under every snapshot was noise.
+            // it is, and a line under every snapshot was noise -- unless it is
+            // a draft head, which no conversion makes runnable (2026-10-21).
+            if (const std::optional<models::DraftHead> head =
+                    models::snapshot_draft_head(stored.dir)) {
+                row.note = models::draft_head_note(*head, models::draft_head_bases(roots, *head));
+            }
             if (models::config_is_download_record(stored.dir)) {
                 row.attention = true;
                 row.note = "damaged by an older pull -- 'apogee models repair " + stored.model +
@@ -1271,7 +1276,15 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     std::ostringstream out;
     out << "weights:      " << handle << "\n";
     out << "path:         " << stored.dir.string() << "\n";
-    out << "format:       SafeTensors -- full weights, trainable, not runnable\n";
+    const std::optional<models::DraftHead> head = models::snapshot_draft_head(stored.dir);
+    if (head.has_value()) {
+        out << "format:       SafeTensors -- a draft head's weights, not runnable and not "
+               "convertible\n";
+        out << "draft head:   "
+            << models::describe_draft_head(*head, models::draft_head_bases(roots, *head)) << "\n";
+    } else {
+        out << "format:       SafeTensors -- full weights, trainable, not runnable\n";
+    }
     render_lineage(out, lineage, lineage.origin_of(handle));
     const std::string architecture = models::snapshot_architecture(stored.dir);
     out << "architecture: " << (architecture.empty() ? "-" : architecture) << "\n";

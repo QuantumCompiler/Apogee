@@ -820,6 +820,11 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
             add(report, Status::Warn, "Models", name,
                 "damaged by an older pull: its config.json is a download record",
                 "apogee models repair " + name);
+        } else if (const std::optional<models::DraftHead> head =
+                       models::snapshot_draft_head(stored.dir)) {
+            add(report, Status::Ok, "Models", name,
+                "SafeTensors weights, " +
+                    models::draft_head_note(*head, models::draft_head_bases(roots, *head)));
         } else {
             add(report, Status::Ok, "Models", name, "SafeTensors weights");
         }

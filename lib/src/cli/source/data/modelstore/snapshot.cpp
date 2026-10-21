@@ -120,6 +120,120 @@ std::string snapshot_architecture(const std::filesystem::path& dir) {
     return config.value("model_type", std::string{});
 }
 
+namespace {
+
+/// `config.json` parsed, or a non-object when absent or not JSON.
+[[nodiscard]] nlohmann::json read_model_config(const std::filesystem::path& dir) {
+    std::ifstream in{dir / "config.json", std::ios::binary};
+    if (!in) {
+        return {};
+    }
+    nlohmann::json config = nlohmann::json::parse(in, nullptr, false);
+    return config.is_object() ? config : nlohmann::json{};
+}
+
+[[nodiscard]] std::string family_of(const nlohmann::json& config) {
+    const auto type = config.find("model_type");
+    if (type == config.end() || !type->is_string()) {
+        return {};
+    }
+    const std::string name = type->get<std::string>();
+    return name.substr(0, name.find('_'));
+}
+
+[[nodiscard]] std::int64_t positive_integer(const nlohmann::json& object, const char* key) {
+    const auto found = object.find(key);
+    return found != object.end() && found->is_number_integer() && found->get<std::int64_t>() > 0
+               ? found->get<std::int64_t>()
+               : 0;
+}
+
+/// The architectures llama.cpp's converter registers as a draft head at the
+/// pinned revision (`third_party/llama.cpp-convert/conversion/gemma.py`'s
+/// `Gemma4AssistantModel`) -- named, for a config that does not say its
+/// base's width.
+constexpr std::array<std::string_view, 2> kDraftHeadArchitectures{
+    "Gemma4AssistantForCausalLM", "Gemma4UnifiedAssistantForCausalLM"};
+
+[[nodiscard]] std::string joined(const std::vector<std::string>& names) {
+    std::string out;
+    for (const std::string& name : names) {
+        out += (out.empty() ? "" : ", ") + name;
+    }
+    return out;
+}
+
+/// The base, as said after a draft head: the stored models, else its width.
+[[nodiscard]] std::string base_of(const DraftHead& head, const std::vector<std::string>& bases) {
+    if (!bases.empty()) {
+        return joined(bases);
+    }
+    if (head.backbone_hidden_size > 0) {
+        return "a " + std::to_string(head.backbone_hidden_size) + "-wide " +
+               (head.family.empty() ? std::string{"model"} : head.family + " model");
+    }
+    return {};
+}
+
+}  // namespace
+
+std::optional<DraftHead> snapshot_draft_head(const std::filesystem::path& dir) {
+    const nlohmann::json config = read_model_config(dir);
+    if (!config.is_object()) {
+        return std::nullopt;
+    }
+    DraftHead head;
+    head.backbone_hidden_size = positive_integer(config, "backbone_hidden_size");
+    head.family = family_of(config);
+    if (const auto architectures = config.find("architectures");
+        architectures != config.end() && architectures->is_array() && !architectures->empty() &&
+        architectures->front().is_string()) {
+        head.architecture = architectures->front().get<std::string>();
+    } else {
+        head.architecture = config.value("model_type", std::string{});
+    }
+    const bool named = std::ranges::find(kDraftHeadArchitectures, head.architecture) !=
+                       kDraftHeadArchitectures.end();
+    if (head.backbone_hidden_size == 0 && !named) {
+        return std::nullopt;
+    }
+    return head;
+}
+
+ConfigWidth config_width(const std::filesystem::path& dir) {
+    const nlohmann::json config = read_model_config(dir);
+    if (!config.is_object()) {
+        return {};
+    }
+    ConfigWidth width{.hidden_size = positive_integer(config, "hidden_size"),
+                      .family = family_of(config)};
+    if (const auto text = config.find("text_config");
+        width.hidden_size == 0 && text != config.end() && text->is_object()) {
+        width.hidden_size = positive_integer(*text, "hidden_size");
+    }
+    return width;
+}
+
+std::string describe_draft_head(const DraftHead& head, const std::vector<std::string>& bases) {
+    const std::string base = base_of(head, bases);
+    return "a draft head (" + head.architecture +
+           "): speculative decoding runs it beside its base model" +
+           (base.empty() ? std::string{} : " (" + base + ")") +
+           ", reading that model's hidden states, and never alone";
+}
+
+std::string draft_head_refusal(std::string_view subject, const DraftHead& head,
+                               const std::vector<std::string>& bases) {
+    return std::string{subject} + " is " + describe_draft_head(head, bases) +
+           " -- nothing converted from it could answer a chat; convert its base model instead";
+}
+
+std::string draft_head_note(const DraftHead& head, const std::vector<std::string>& bases) {
+    const std::string base = base_of(head, bases);
+    return "draft head -- runs beside " + (base.empty() ? std::string{"its base model"} : base) +
+           ", never alone";
+}
+
 bool is_download_record(const std::filesystem::path& file) {
     std::ifstream in{file, std::ios::binary};
     if (!in) {

@@ -709,7 +709,10 @@ models::StoreRoots store_roots(const std::filesystem::path& models_dir,
     return models::StoreRoots{models_dir, snapshot_root(models_dir, config_flag)};
 }
 
-SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view given,
+namespace {
+
+/// Which set `given` names, before asking what kind of weights it holds.
+SnapshotChoice locate_snapshot(const models::StoreRoots& roots, std::string_view given,
                                std::string_view from_id) {
     SnapshotChoice choice;
     const models::StoreTarget target = models::resolve_store_target(roots, given);
@@ -772,6 +775,22 @@ SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view
     }
     choice.path = newest->dir;
     choice.id = newest->id;
+    return choice;
+}
+
+}  // namespace
+
+SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view given,
+                               std::string_view from_id) {
+    SnapshotChoice choice = locate_snapshot(roots, given, from_id);
+    if (choice.path.empty()) {
+        return choice;
+    }
+    if (const std::optional<models::DraftHead> head = models::snapshot_draft_head(choice.path)) {
+        choice.error = models::draft_head_refusal("'" + std::string{given} + "'", *head,
+                                                  models::draft_head_bases(roots, *head));
+        choice.path.clear();
+    }
     return choice;
 }
 
@@ -2349,6 +2368,15 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
             names += (names.empty() ? "" : ", ") + name;
         }
         fail("--mlx writes " + names + "; '" + type + "' is a GGUF precision");
+    }
+    // What the weights are before what this machine has, as the GGUF path
+    // orders it: a draft head is no conversion's input anywhere (2026-10-21).
+    if (const SnapshotChoice source =
+            registers != nullptr
+                ? choose_snapshot(roots, registers->snapshot, registers->snapshot_from)
+                : choose_snapshot(roots, given, from);
+        !source.error.empty()) {
+        fail(source.error);
     }
     const backends::MlxHost host = backends::MlxHost::current();
     const backends::MlxReadiness runtime = backends::probe_mlx_runtime(host);

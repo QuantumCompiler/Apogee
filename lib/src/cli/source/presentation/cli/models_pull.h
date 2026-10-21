@@ -128,7 +128,9 @@ struct SnapshotChoice {
 /// `given` as a model (its newest set, or `from_id`), as one set, or as a
 /// snapshot directory outside the store (its model named after the
 /// directory). Something only the old layout has is refused with the
-/// migration named.
+/// migration named, and so is a draft head -- weights that run beside their
+/// base model and never alone, the stored base named (2026-10-21): every verb
+/// that chooses here converts, and nothing converted from one is a backend.
 [[nodiscard]] SnapshotChoice choose_snapshot(const models::StoreRoots& roots,
                                              std::string_view given, std::string_view from_id = {});
 

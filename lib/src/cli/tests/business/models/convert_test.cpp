@@ -429,6 +429,30 @@ TEST_CASE("every MLX refusal comes before the converter runs", "[models][convert
     CHECK_FALSE(ran);
 }
 
+TEST_CASE("a draft head is refused by both ladders, whatever type it is converted as",
+          "[models][convert][mlx][draft_head]") {
+    // The user's Gemma4-12B-Assistant (2026-10-21): mlx-lm has no network for
+    // it -- even as `gemma4_unified`, building one stops at 'sliding_attention'
+    // -- and a GGUF of it is no backend, so neither ladder converts one.
+    const MlxWork work;
+    write_file(work.snapshot / "config.json",
+               R"({"architectures": ["Gemma4UnifiedAssistantForCausalLM"],
+                   "model_type": "gemma4_unified_assistant", "backbone_hidden_size": 3840})");
+    const std::string mlx = apogee::models::mlx_conversion_refusal(work.snapshot, work.out);
+    CHECK(mlx == work.snapshot.string() +
+                     " is a draft head (Gemma4UnifiedAssistantForCausalLM): speculative decoding "
+                     "runs it beside its base model (a 3840-wide gemma4 model), reading that "
+                     "model's hidden states, and never alone -- nothing converted from it could "
+                     "answer a chat; convert its base model instead");
+    CHECK(apogee::models::conversion_refusal(work.snapshot, work.root.path() / "out.gguf") == mlx);
+    // M15's override renames the type in a view; the weights stay a draft head.
+    const std::filesystem::path overlay = work.root.path() / "overlay";
+    REQUIRE(
+        apogee::models::stage_model_type_overlay(work.snapshot, overlay, "gemma4_unified").empty());
+    CHECK(apogee::models::mlx_conversion_refusal(overlay, work.out).find("is a draft head") !=
+          std::string::npos);
+}
+
 TEST_CASE("the MLX size estimate follows the bits", "[models][convert][mlx]") {
     CHECK(apogee::models::estimated_mlx_bytes(1'000'000'000, 4) == 500'000'000 + 62'500'000);
     CHECK(apogee::models::estimated_mlx_bytes(1'000'000'000, 8) == 1'000'000'000 + 62'500'000);

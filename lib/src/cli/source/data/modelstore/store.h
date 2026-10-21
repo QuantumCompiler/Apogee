@@ -400,6 +400,14 @@ struct StoredVoice {
 [[nodiscard]] std::vector<StoredSnapshot> list_store_snapshots(const StoreRoots& roots,
                                                                std::string_view model = {});
 
+/// The stored models a draft head belongs beside (2026-10-21): each stored
+/// SafeTensors set or MLX model, itself no draft head, of the head's family
+/// and as wide as the head's `backbone_hidden_size` -- read from their
+/// `config.json`, never guessed from a name. By model name, sorted, each
+/// once; empty when the head does not say its base's width or none is stored.
+[[nodiscard]] std::vector<std::string> draft_head_bases(const StoreRoots& roots,
+                                                        const DraftHead& head);
+
 /// The model's most recent SafeTensors set -- what `convert` and `train`
 /// read when no id is named.
 [[nodiscard]] std::optional<StoredSnapshot> newest_snapshot(const StoreRoots& roots,

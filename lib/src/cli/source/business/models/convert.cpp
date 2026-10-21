@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <fstream>
+#include <optional>
 #include <system_error>
 
 #include "modelstore/mlx_info.h"
@@ -118,6 +119,11 @@ std::string conversion_refusal(const std::filesystem::path& snapshot,
     if (std::string damaged = damaged_snapshot_error(snapshot); !damaged.empty()) {
         return damaged;
     }
+    // A draft head runs beside its base and never alone (2026-10-21): a GGUF
+    // of one is no backend.
+    if (const std::optional<DraftHead> head = snapshot_draft_head(snapshot)) {
+        return draft_head_refusal(snapshot.string(), *head, {});
+    }
     // --- rung 2: never replace ----------------------------------------------
     std::error_code code;
     if (std::filesystem::exists(output, code)) {
@@ -200,6 +206,11 @@ std::string mlx_conversion_refusal(const std::filesystem::path& snapshot,
         facts.mlx_format && facts.quantization.quantized()) {
         return snapshot.string() + " is already an MLX model (" + facts.quantization.describe() +
                ") -- an mlx backend runs it as it is; convert the full-weight release instead";
+    }
+    // mlx-lm has no network for a draft head, whatever `--model-type` says
+    // (2026-10-21).
+    if (const std::optional<DraftHead> head = snapshot_draft_head(snapshot)) {
+        return draft_head_refusal(snapshot.string(), *head, {});
     }
     // --- rung 2: never replace ---------------------------------------------------
     std::error_code code;
