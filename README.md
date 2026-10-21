@@ -77,7 +77,7 @@ Run `apogee` with nothing after it at a terminal and it opens a full-screen shel
 | [`lib/src/cli/`](lib/src/cli) | The CLI application — the whole harness, one self-contained CMake project. |
 | [`lib/src/darwin/`](lib/src/darwin) | The macOS application — an Xcode project, in development; it drives the CLI over its [machine mode](lib/documentation/cli/reference/machine-mode.md). |
 | `lib/src/linux` · `windows` | The Linux and Windows applications (planned). |
-| [`lib/documentation/`](lib/documentation) | One docs directory per application — [CLAUDE.md](lib/documentation/CLAUDE.md) routes an agent to [`cli/`](lib/documentation/cli) or [`gui/`](lib/documentation/gui). |
+| [`lib/documentation/`](lib/documentation) | One docs directory per application — [CLAUDE.md](lib/documentation/CLAUDE.md) routes an agent to [`cli/`](lib/documentation/cli), [`gui/`](lib/documentation/gui) or [`mod/`](lib/documentation/mod). |
 | [`lib/documentation/cli/reference/`](lib/documentation/cli/reference) | Integrator-facing reference: the [stdio machine mode](lib/documentation/cli/reference/machine-mode.md) for front-ends, the [HTTP API](lib/documentation/cli/reference/http-api.md) for `serve` clients, and [training](lib/documentation/cli/reference/training.md). |
 | [`lib/documentation/cli/assistant/`](lib/documentation/cli/assistant) | Contributor docs — [CLAUDE.md](lib/documentation/cli/assistant/CLAUDE.md) is the entry point; [ROADMAP.md](lib/documentation/cli/assistant/ROADMAP.md) is the release board. |
 | [`lib/documentation/cli/backlog/`](lib/documentation/cli/backlog) | The work queue: one document per pending item, priority-ordered per release. |
