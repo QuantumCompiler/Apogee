@@ -12,8 +12,8 @@ if(NOT DEFINED APOGEE_BIN OR NOT DEFINED APOGEE_WORK_DIR)
     message(FATAL_ERROR "APOGEE_BIN and APOGEE_WORK_DIR must be set")
 endif()
 
-file(REMOVE_RECURSE "${APOGEE_WORK_DIR}")
-file(MAKE_DIRECTORY "${APOGEE_WORK_DIR}")
+include("${CMAKE_CURRENT_LIST_DIR}/sandbox.cmake")
+apogee_sandbox_dir(APOGEE_WORK_DIR "${APOGEE_WORK_DIR}")
 
 set(CONFIG_FILE "${APOGEE_WORK_DIR}/config/config.json")
 

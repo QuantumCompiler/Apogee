@@ -33,6 +33,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import sys
 
 
@@ -104,8 +105,17 @@ def main():
         return 2
     apogee, work = sys.argv[1], sys.argv[2]
 
-    shutil.rmtree(work, ignore_errors=True)
-    os.makedirs(work, exist_ok=True)
+    # A home of this run's own beside the path ctest gives, removed when the
+    # run ends: two runs of the suite in one build tree once shared it (M17).
+    os.makedirs(os.path.dirname(work), exist_ok=True)
+    work = tempfile.mkdtemp(prefix=os.path.basename(work) + ".", dir=os.path.dirname(work))
+    try:
+        return run(apogee, work)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def run(apogee, work):
     env = dict(os.environ, APOGEE_HOME=work)
 
     for args in (["config", "init"],

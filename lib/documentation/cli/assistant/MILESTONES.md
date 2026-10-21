@@ -2458,6 +2458,56 @@ Decisions taken while building, for veto:
 
 **Not run here**: a real bootstrap. It installs gigabytes into the real environment and registers into the real config, so no test or check in this run ran one; the minimal switch was on every time. The user's next install is its first real run.
 
+### 2026-10-20 — `executable-suite-red` (maintenance item M17): two runs, one build tree
+
+**Goal.** `make test` on the dev host failed 13 of 3,593 (the user's run, 2026-10-20), all in the executable-spawning `cli.*` tier that does not gate CI. The item asked for each failure class's root cause before its fix, one fix per cause.
+
+**The diagnosis: one cause behind all six classes, script rot of one kind.** Not a product regression, and not a fixture predating a rule. Every executable-tier runner was handed a **fixed** scratch path in the build tree by `tests/CMakeLists.txt` (`${CMAKE_CURRENT_BINARY_DIR}/video-e2e` and its like, 31 of them) and wiped it on the way in. The user's `make test` ran while another session's gate (`lib/scripts/cicd.sh --test`) ran the same suite in the same tree (`lib/src/cli/build/macos-arm64`, 20:17–20:24), so each run's setup deleted the other's home mid-test. The evidence:
+
+- The gate that overlapped it failed 16 of the same family: homes vanished mid-test, `backend 'gpt' already exists`. The next run of that gate, alone, passed 3,593 of 3,593 on the same tree (20:25–20:32).
+- The unchanged code built in a separate tree passed 3,593 of 3,593.
+- Six lifecycle tests, each run as two ctest processes at once on one tree, reproduced M17's own messages: `cannot open config file (run 'apogee config init' …)`, `rm: …/analyze-e2e: Directory not empty`, `serve did not announce that it stopped`, `backend 'gpt' already exists`. Five of the six pairs failed; every one passes alone.
+
+Each class maps to the shared path:
+- **Class 1** (`config already exists`, `Directory not empty`): the other run's setup and writes racing the wipe.
+- **Classes 2 and 3** (`check --fix`, `cannot open config file`): the home deleted under a step.
+- **Class 4** (`two source trees are both named 'src'`): both runs adding their `src` to one graph's config.
+- **Class 5** (`a driver outlived its apogee`): the scan by `$WORK_DIR`'s path seeing the other run's driver.
+- **Class 6** (no answer, missing output): output files deleted before they were read.
+
+The specced premise of class 1, that the scripts enumerate what they remove, was wrong. Every script already removed its directory whole (`rm -rf "$WORK_DIR"` and an EXIT trap). The shared path was the drift.
+
+- [x] **`tests/scripts/sh/sandbox.sh`**: `sandbox_dir <path>` returns a fresh directory beside the path ctest gives (`mktemp -d "<path>.XXXXXX"`). On the way in it sweeps any sibling older than an hour: a killed run's, since the longest ctest timeout is 15 minutes. Every shell script that takes a work directory (26) sources it in place of its wipe, and its EXIT trap removes the run's own directory whole. `install_parity.sh` and `shell_completion_check.sh`, which had kept theirs, gained the trap.
+- [x] **`tests/scripts/cmake/sandbox.cmake`**: `apogee_sandbox_dir(<var> <path>)` applies the same rule to the CMake scripts that take one (`complete_e2e`, `config_e2e`, `install_is_ours_only`). The name is drawn at random, seeded by the microsecond. `install_is_ours_only` now removes its directory when it passes, as the other two already did.
+- [x] **`tests/scripts/py/reference_driver.py`**: its home is a `tempfile.mkdtemp` beside the path, removed in a `finally`. `main` hands the drive to `run`, so the worked example still reads top to bottom.
+- [x] **`tests/CMakeLists.txt` untouched**: the path each case is handed stays the base its sandbox is named from.
+
+**Decisions made while building** (2026-10-20, each recorded for veto):
+- **The [default] call: the shared helper is taken.** All 26 shell scripts shared the pattern, so there is one helper per runner language: shell, and CMake. The Python driver does it inline, being one file that is read as a worked example.
+- **No regression pin.** No product regression was found, and the pin bar is for product regressions. The concurrent-pairs run below is the recorded proof, not a new ctest case: new coverage is out of scope.
+- **`bare_help.cmake` is left as it is.** Its one write is an empty stdin file, which two runs write identically.
+- **Not fixed, and named: two runs still share the build itself.** One tree's `cmake --build`, including `cli.channel_probe_build`, which builds a target inside the tree, can race another run's. No failure came from it, since both are no-ops on an unchanged tree. A lock on the build tree in `lib/scripts/cicd.sh` would close it, and that is the user's call.
+
+**Verified.** Twelve tests run as concurrent pairs on one tree after the change, every pair passing: the six that failed in the reproduction, `cli.config_lifecycle`, `cli.reference_driver`, `cli.install_parity` (with its channel-probe fixture), `cli.shell_completion`, `cli.complete_lifecycle`, `cli.install_is_ours_only`. No run left a directory behind. `make -C lib/src/cli test` twice back to back: 3,593 of 3,593 both times (7 and 9 minutes), the two standing skips the only cases not run, and no directory left in the build tree; the first run that preceded the change, the same code in this tree, was 3,593 of 3,593 too, alone in its tree while another session's gate ran in the main checkout's. CI's tier gating is unchanged: `ci.yml` and `cicd.sh --unit-tests` are untouched, the executable tier stays `make test`'s, and the two standing skips (the libass caption burn, pdftotext) stay skips.
+
+### 2026-10-20 — `ci-test-log-granularity` (maintenance item M18): a line per test, with its time
+
+**Goal.** Running `make test` locally prints a line per case (`Test #3586: cli.tui_shell … Passed 11.57 sec`), and the user wanted CI's logs to read the same way (their ask, 2026-10-20). By construction CI's unit-test jobs run `cicd.sh --unit-tests`, which runs the Catch2 binary directly (the 2026-09-22 decision: no executable, no ctest), and Catch2's default report says nothing about a passing case. A green job's log showed the totals and nothing else.
+
+- [x] **`lib/scripts/cicd.sh`**: the one `apogee_tests` invocation runs `--reporter console --reporter automake::out=- --durations yes`, with the comment saying why. The console reporter prints `<seconds> s: <name>` as each case completes, and a case with sections gets one such line per section pass. The Automake reporter then prints `:test-result: PASS|FAIL|SKIP <name>`. The console's own report is unchanged: each failure's block, and the totals. Declared once, so a local `--unit-tests` run and every CI runner print the same lines.
+- [x] **`lib/scripts/ci-annotate.sh` taught the new shape.** A failed case's Catch2 block ends at the first per-case line as well as at the next header or the closing rule. Without that, a failure's block ran on through every passing case after it, up to the annotation's byte cap.
+
+**Decisions made while building** (2026-10-20, each recorded for veto):
+- **The [default] call: the reporter and flags.** Catch2 v3.7.1 has no stock reporter that prints a case's name, result and time on one line. The console reporter has the time and not the result; Automake has the result and not the time. So two reporters share stdout, each case's time line or lines followed by its result line. That is roughly 7,900 lines on a green run, against the ~3,550 the item estimated: 4,334 time lines and 3,533 result lines. A one-line shape would need a reporter of our own compiled into the test binary, which is outside "Catch2's own reporting".
+- **The other platforms, not run here.** `out=-` is Catch2's portable spelling of stdout, and nothing in the change is platform-specific. The Linux container (`make linux-tests`) was not running, and starting a VM was not this run's call. The first CI run on the branch shows the five runners, MSYS2's shells among them.
+
+**Verified.**
+- CI's own invocation run locally (`cicd.sh --app cli --platform macos-arm64 --unit-tests --no-defer`) printed 3,533 result lines (3,531 PASS, and SKIP for the two standing skips), each after its time line or lines. The totals are unchanged in shape: `test cases: 3533 | 3531 passed | 2 skipped`.
+- A planted failing case, then a planted case with two failing sections around a passing one, gave `:test-result: FAIL` and exit 42, Catch2's own code. `ci-annotate.sh` produced the summary naming them and one annotation per failure, each ending at its expansion: 746, 734, 718 and 719 bytes. The plants were removed after.
+- A console-only log, the old shape, is annotated byte for byte the same by the parser before and after.
+- `ci.yml` is byte-identical.
+- `lib/scripts/cicd.sh --test` on the branch: green -- the CLI's 3,593 (the two standing skips) and the macOS app's 219 cases, M17's sandboxes included, so its suite ran green a third time in a row.
+
 ## Milestone L — The vendor-CLI family
 
 **Goal.** A fifth backend and, more importantly, the machinery the rest of the vendor-CLI family will be built on: Claude driven through the official `claude` CLI as a **long-lived child process** — the subscription-auth path beside the API-key path from Milestone D. It reuses that backend's IR mapping and typed sinks and none of its HTTP: this one speaks JSONL over pipes.

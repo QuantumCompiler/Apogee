@@ -21,7 +21,8 @@ APOGEE_BIN="${1:?usage: code_graph_e2e.sh <apogee-binary> <work-dir> <fixtures-d
 WORK_DIR="${2:?usage: code_graph_e2e.sh <apogee-binary> <work-dir> <fixtures-dir>}"
 FIXTURES="${3:?usage: code_graph_e2e.sh <apogee-binary> <work-dir> <fixtures-dir>}"
 
-rm -rf "$WORK_DIR"
+. "$(dirname "$0")/sandbox.sh"
+WORK_DIR="$(sandbox_dir "$WORK_DIR")"
 mkdir -p "$WORK_DIR/home" "$WORK_DIR/docs"
 export APOGEE_HOME="$WORK_DIR/home"
 unset ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GOOGLE_API_KEY

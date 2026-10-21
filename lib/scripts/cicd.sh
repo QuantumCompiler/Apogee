@@ -352,7 +352,15 @@ build_cmake_app() {
         [[ -x "$unit_bin" ]] || die "no test binary at ${build_dir}/tests/apogee_tests"
 
         log "[${app}/${target}] running the source-level suite"
-        "$unit_bin"
+        # One line per test case as it completes, with its time and its result
+        # (M18, 2026-10-20): the console reporter's `--durations yes` prints
+        # `<seconds> s: <name>`, and the Automake reporter's `:test-result:
+        # PASS|FAIL|SKIP <name>` follows it. No stock reporter prints both, so
+        # both write to stdout, in that order. The console's own report -- each
+        # failure's block and the totals -- is unchanged, and it is what
+        # ci-annotate.sh reads. Declared here, once, so a local --unit-tests run
+        # and every CI runner print the same lines.
+        "$unit_bin" --reporter console --reporter automake::out=- --durations yes
         log "[${app}/${target}] unit tests done"
         return 0
     fi

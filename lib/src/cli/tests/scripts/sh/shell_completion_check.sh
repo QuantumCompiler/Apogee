@@ -22,7 +22,9 @@ binary="$1"
 work="$2"
 stubs="$(cd "$(dirname "$0")/../../../completions" && pwd)"
 
-rm -rf "$work"
+. "$(dirname "$0")/sandbox.sh"
+work="$(sandbox_dir "$work")"
+trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin" "$work/home"
 ln -s "$binary" "$work/bin/apogee"
 export PATH="$work/bin:$PATH"

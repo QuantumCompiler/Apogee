@@ -23,7 +23,8 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 77
 fi
 
-rm -rf "$WORK_DIR"
+. "$(dirname "$0")/sandbox.sh"
+WORK_DIR="$(sandbox_dir "$WORK_DIR")"
 mkdir -p "$WORK_DIR/bin"
 export APOGEE_HOME="$WORK_DIR/home"
 unset ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GH_TOKEN GITHUB_TOKEN
