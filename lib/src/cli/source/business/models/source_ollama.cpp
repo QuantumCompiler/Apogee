@@ -173,13 +173,13 @@ std::optional<OllamaEntry> find_in_store(const std::filesystem::path& root, std:
     return entry;
 }
 
-std::vector<OllamaEntry> list_store(const std::filesystem::path& root) {
-    std::vector<OllamaEntry> entries;
+std::vector<OllamaManifest> list_manifests(const std::filesystem::path& root) {
+    std::vector<OllamaManifest> found;
     std::error_code code;
 
     const std::filesystem::path manifests = root / "manifests";
     if (!std::filesystem::exists(manifests, code)) {
-        return entries;
+        return found;
     }
 
     for (const auto& file : std::filesystem::recursive_directory_iterator(
@@ -216,8 +216,17 @@ std::vector<OllamaEntry> list_store(const std::filesystem::path& root) {
             ref = ref.substr(std::string{kLibraryNamespace}.size() + 1);
         }
         ref += ":" + parts.back();
+        found.push_back({.ref = std::move(ref), .file = file.path()});
+    }
+    return found;
+}
 
-        if (std::optional<OllamaEntry> entry = parse_manifest(root, ref, read_file(file.path()))) {
+std::vector<OllamaEntry> list_store(const std::filesystem::path& root) {
+    std::vector<OllamaEntry> entries;
+    std::error_code code;
+    for (const OllamaManifest& manifest : list_manifests(root)) {
+        if (std::optional<OllamaEntry> entry =
+                parse_manifest(root, manifest.ref, read_file(manifest.file))) {
             if (std::filesystem::exists(entry->blob, code)) {
                 entries.push_back(std::move(*entry));
             }

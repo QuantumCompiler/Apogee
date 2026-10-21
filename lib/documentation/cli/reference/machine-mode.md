@@ -809,9 +809,14 @@ apogee bootstrap --output-format json   # {"object":"apogee.bootstrap",…}
 
 It is `minimal` (and `minimal_by`: `--minimal` or `APOGEE_MINIMAL_INSTALL`,
 null when it ran) and `steps` -- each `name`, `command` (the `apogee …` line
-it ran, null for a set this host is not for), `status` (`done` or
+it ran, null for a step this host is not for), `status` (`done` or
 `skipped`) and `reason` (null when done). The narration goes to stderr;
-the exit is `0` whatever was skipped.
+the exit is `0` whatever was skipped. Since 2026-10-21 the steps include
+`the code-execution server` (`apogee mcp create code --from code-exec`) and,
+last, `ffmpeg with captions`, whose `command` is another program's line as
+typed -- `brew install ffmpeg-full && brew unlink ffmpeg; brew link --force
+ffmpeg-full` on a Mac with Homebrew whose ffmpeg cannot burn captions, null
+where it is skipped.
 
 Since 50c a composed video is a document too -- its project, kept beside the
 video as `<video>.json` from the first step and printed when the run ends:

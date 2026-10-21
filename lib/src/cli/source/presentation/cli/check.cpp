@@ -1820,9 +1820,7 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
     if (host.starts_with("macos")) {
         // Homebrew's ffmpeg carries x264 and no libass; its keg-only
         // ffmpeg-full carries both (2026-10-20).
-        return ability == "x264" ? "brew install ffmpeg"
-                                 : "brew install ffmpeg-full && brew unlink ffmpeg; brew link "
-                                   "--force ffmpeg-full";
+        return ability == "x264" ? "brew install ffmpeg" : remedy_line(macos_captions_remedy());
     }
     if (host.starts_with("windows")) {
         return "winget install Gyan.FFmpeg";
@@ -2713,6 +2711,27 @@ bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options) {
         ansi::Style::detect(options.no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto);
     std::cout << render_report(report, style.color_enabled());
     return report.passed();
+}
+
+std::vector<RemedyCommand> macos_captions_remedy() {
+    return {{.argv = {"brew", "install", "ffmpeg-full"}},
+            {.argv = {"brew", "unlink", "ffmpeg"}, .may_fail = true},
+            {.argv = {"brew", "link", "--force", "ffmpeg-full"}}};
+}
+
+std::string remedy_line(const std::vector<RemedyCommand>& commands) {
+    std::string out;
+    for (std::size_t index = 0; index < commands.size(); ++index) {
+        if (index > 0) {
+            out += commands[index - 1].may_fail ? "; " : " && ";
+        }
+        std::string words;
+        for (const std::string& word : commands[index].argv) {
+            words += (words.empty() ? "" : " ") + word;
+        }
+        out += words;
+    }
+    return out;
 }
 
 }  // namespace apogee::commands

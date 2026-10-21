@@ -8,6 +8,7 @@
 
 #include "backends/provider_table.h"
 #include "contracts/config_edit.h"
+#include "models/source_ollama.h"
 
 namespace apogee::commands {
 
@@ -87,8 +88,19 @@ std::vector<backends::ProviderStatus> cached_statuses(const backends::ProviderCa
     return out;
 }
 
+std::vector<std::string> ollama_models_here() {
+    std::vector<std::string> refs;
+    for (models::OllamaManifest& manifest : models::list_manifests(models::ollama_store_root())) {
+        refs.push_back(std::move(manifest.ref));
+    }
+    std::ranges::sort(refs);
+    refs.erase(std::unique(refs.begin(), refs.end()), refs.end());
+    return refs;
+}
+
 RegistrationPlan plan_registration(const std::vector<backends::ProviderStatus>& statuses,
-                                   const harness::Config& config) {
+                                   const harness::Config& config,
+                                   const std::vector<std::string>& ollama_models) {
     RegistrationPlan plan;
     for (const backends::ProviderStatus& status : statuses) {
         const backends::ProviderFacts* facts = backends::provider_for_type(status.type);
@@ -101,11 +113,19 @@ RegistrationPlan plan_registration(const std::vector<backends::ProviderStatus>& 
         step.type = facts->type;
         const auto existing = std::ranges::find_if(
             config.backends, [&](const auto& entry) { return entry.second.type == facts->type; });
+        // Ollama's one model is the model (2026-10-21); with several, which
+        // one is the person's to say, so the step names them.
+        if (facts->type == harness::BackendType::OllamaCli && ollama_models.size() == 1) {
+            step.model = ollama_models.front();
+        }
         if (existing != config.backends.end()) {
             step.outcome = RegistrationStep::Outcome::AlreadyRegistered;
             step.detail = existing->first;
-        } else if (facts->needs_model) {
+        } else if (facts->needs_model && step.model.empty()) {
             step.outcome = RegistrationStep::Outcome::NeedsModel;
+            if (facts->type == harness::BackendType::OllamaCli) {
+                step.detail = joined(ollama_models);
+            }
         } else if (const auto* taken = named(config, step.name); taken != nullptr) {
             step.outcome = RegistrationStep::Outcome::NameTaken;
             step.name = taken->first;
@@ -135,6 +155,7 @@ void apply_registration(const std::filesystem::path& path, const RegistrationPla
             }
             harness::BackendConfig entry;
             entry.type = step.type;
+            entry.model = step.model;
             edited = harness::append_backend(edited, step.name, entry, /*force=*/false);
         }
         if (!plan.default_backend.empty()) {
@@ -150,8 +171,10 @@ std::string render_registration(const RegistrationPlan& plan, bool applied) {
         const std::string type{harness::to_string(step.type)};
         switch (step.outcome) {
             case RegistrationStep::Outcome::Register:
-                out +=
-                    (applied ? "registered " : "would register ") + step.name + " (" + type + ")\n";
+                out += (applied ? "registered " : "would register ") + step.name + " (" + type +
+                       (step.model.empty() ? std::string{}
+                                           : ", with Ollama's one model, " + step.model) +
+                       ")\n";
                 break;
             case RegistrationStep::Outcome::AlreadyRegistered:
                 out += step.provider + ": already registered as '" + step.detail +
@@ -163,9 +186,11 @@ std::string render_registration(const RegistrationPlan& plan, bool applied) {
                        "apogee config add-backend <name> --type " + type + "\n";
                 break;
             case RegistrationStep::Outcome::NeedsModel:
-                out += step.provider + ": not registered -- an " + type +
-                       " backend needs a model; add one with: apogee config add-backend " +
-                       step.name + " --type " + type + " --model <model>\n";
+                out += step.provider + ": not registered -- an " + type + " backend needs a model" +
+                       (step.detail.empty() ? std::string{}
+                                            : ", and Ollama has several: " + step.detail) +
+                       "; add one with: apogee config add-backend " + step.name + " --type " +
+                       type + " --model <model>\n";
                 break;
         }
     }
@@ -190,7 +215,8 @@ OfferOutcome offer_registration(const OfferContext& context, const harness::Conf
     if (!cache.scanned() || !cache.offer_answer.empty()) {
         return OfferOutcome::NotAsked;
     }
-    const RegistrationPlan plan = plan_registration(cached_statuses(cache), config);
+    const RegistrationPlan plan =
+        plan_registration(cached_statuses(cache), config, ollama_models_here());
     std::vector<std::string> names;
     for (const RegistrationStep& step : plan.steps) {
         if (step.outcome == RegistrationStep::Outcome::Register) {

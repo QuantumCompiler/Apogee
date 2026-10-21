@@ -2543,6 +2543,43 @@ The specced premise of class 1, that the scripts enumerate what they remove, was
 
 **Verified.** In a sandbox (`APOGEE_HOME`, `PREFIX` and the test channel, so no completion was written, and `APOGEE_MINIMAL_INSTALL=1` so no runtime was downloaded), `make update` was driven through a pseudo-terminal answering the reset's prompt. The planted home held a stored model, a chat, an environment marker and a configured backend. With `KEEP=sessions` it exited 0: nothing to migrate, the plan keeping `models/` and `sessions/`, the reset's check passing, then the bootstrap. The model and the chat were kept, and the environment and the backend reset. Without `KEEP` the model was kept and the chat removed. `install_parity`'s Makefile order rule (the first `check --fix` before the first `bootstrap`) holds, lines 138 and 140.
 
+### 2026-10-21 — Bootstrap growths: the code-execution server, Ollama's one model, ffmpeg-full
+
+**Why.** After `make update`, `apogee check` still showed three things left undone that the user wanted an update to do (their call, 2026-10-21): the code-execution server not registered (a skip naming `mcp create`), Ollama installed but not registered (it needs a model, and its store holds exactly one), and no burned-in captions (Homebrew's ffmpeg has no libass). The bootstrap every install path runs now does all three, each step said and never fatal. The voice runtime, the fourth thing left, is M19's.
+
+- [x] **The code-execution server** (`cli/bootstrap_cmd`): a step after the runtime sets and before the providers, `apogee mcp create code --from code-exec`, 47c's preset run as the binary's child like every step. It comes after the runtimes so it runs under the environment they made.
+  - Skipped, said, when it is registered already under any name (`operations::registered_code_exec_server`, the doctor's own read).
+  - Skipped, naming the way, when another server holds the name `code`. A second bootstrap is quiet about it.
+- [x] **Ollama's one model** (`cli/provider_offer`): `plan_registration` takes Ollama's models, read by `ollama_models_here` over `models::list_manifests`. That is the store's one walk, factored out of `list_store` and now counting a cloud model's manifest too: its weights live on Ollama's servers, so `list_store` (local weights) still passes over it, while `ollama list` and a registration count it.
+  - With exactly one, the Ollama CLI is registered with it, the entry `config add-backend ollama --type ollama-cli --model <it>` writes, through the one editor: `registered ollama (ollama-cli, with Ollama's one model, gpt-oss:20b-cloud)`.
+  - With several, none is chosen and the line names them.
+  - With none, nothing changes.
+  - `providers scan --register`, the shell's register key and the first-launch offer all pass the listing, so every door registers alike.
+- [x] **ffmpeg with captions**, the bootstrap's last step, on macOS with `brew` on PATH and an ffmpeg without the `subtitles` filter. The filter is found by `check`'s own probe (`platform::ffmpeg_listing` and `filter_listed`).
+  - It runs `check`'s remedy in order: `brew install ffmpeg-full`, `brew unlink ffmpeg` (which may fail where Homebrew's ffmpeg is not installed), then `brew link --force ffmpeg-full`. These go through `BootstrapSeams::run_program`, a seam of its own, since every other step runs the binary.
+  - The remedy is declared once, `macos_captions_remedy()` in `check.h`. `check` types it as its line with `remedy_line`, byte for byte the text it printed before; the bootstrap runs the same commands.
+  - Otherwise the step is skipped with its reason: not macOS, no Homebrew, no ffmpeg answering, or captions already burnable.
+  - A failing install or link ends the step there, naming the command.
+- [x] **The plan's facts**: `BootstrapHost` holds what `bootstrap_plan` is decided by, read before the first step and only when the bootstrap is not minimal, so `--minimal` and `APOGEE_MINIMAL_INSTALL` still skip it whole and run nothing: the host shape, macOS, Homebrew, the ffmpeg probe, and the code-execution registration. The JSON summary grows additively: an external step's `command` is its line as typed (`brew …`).
+- [x] **The suite stays hermetic about Ollama**: `support/hermetic_home.cpp` points `OLLAMA_MODELS` at an empty directory of the run's own, as it does `APOGEE_HOME`, so a developer's pulled models never decide what a test registers.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The ffmpeg swap changes a system package for every macOS install that has Homebrew**, not only the user's. Homebrew's `ffmpeg` is unlinked and `ffmpeg-full` linked in its place, which every other program on the machine then runs. It is the one bootstrap step outside Apogee's own environment, and SPEC's install non-goal was amended for it the same day. `--minimal` skips it with the rest.
+- **Ollama's one model is registered even when it is a cloud model.** The user's is `gpt-oss:20b-cloud`, which runs on Ollama's servers, so prompts sent to that backend leave the machine. The count is `ollama list`'s, and a cloud manifest is a model there.
+- **No ffmpeg at all is skipped, not installed.** The step replaces an ffmpeg that cannot burn captions; a machine with none is `check`'s to name.
+- **Several Ollama models choose none**, naming them. Which one is the person's to say.
+- **The refs keep `list_store`'s spelling**, the registry dropped. A model from another registry (`hf.co/…`) is named as the walk names it.
+
+**Verified.** `bootstrap_cmd_test`:
+- the plan with its two new steps;
+- every step in order, renumbered;
+- the code-execution step's three outcomes;
+- the captions step: every skip reason, the user's Mac running Homebrew's three commands in order through the seam with a failed unlink tolerated, and a failed install ending the step there with `check`'s line equal to the declaration's.
+
+`provider_offer_test`: one Ollama model registered byte for byte as `config add-backend` writes, a second pass finding it registered, several named and none chosen, and the store's models read with a cloud manifest among them. `source_ollama_test`: `list_manifests` and `list_store` over one local and one cloud manifest. `lib/scripts/cicd.sh --test`: the CLI's 3,602 green (the two standing skips) with no warning. The macOS app's suite passed 345 and failed one GUI case this change does not touch, `StoreJobsTests/storeOpensTheSheets()`, on a sheet's values under load. Rerun alone (`cicd.sh --app darwin --test`), the suite passed all 346. Formatting was then applied to three of this change's files, whitespace only, and the bootstrap, registration, Ollama and provider cases ran green again.
+
+**Not run here:** a real bootstrap. It installs into the real environment, links Homebrew packages, and registers into the real config, so no test ran one.
+
 ## Milestone L — The vendor-CLI family
 
 **Goal.** A fifth backend and, more importantly, the machinery the rest of the vendor-CLI family will be built on: Claude driven through the official `claude` CLI as a **long-lived child process** — the subscription-auth path beside the API-key path from Milestone D. It reuses that backend's IR mapping and typed sinks and none of its HTTP: this one speaks JSONL over pipes.

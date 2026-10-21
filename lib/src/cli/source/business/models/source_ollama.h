@@ -114,6 +114,19 @@ struct OllamaEntry {
 [[nodiscard]] std::optional<OllamaEntry> find_in_store(const std::filesystem::path& root,
                                                        std::string_view ref);
 
+/// One manifest in the store: the ref as the user names it, and its file. A
+/// cloud model's is one too -- its weights live on Ollama's servers, so
+/// `list_store` passes over it, while `ollama list` and a provider's
+/// registration count it (2026-10-21).
+struct OllamaManifest {
+    std::string ref;
+    std::filesystem::path file;
+};
+
+/// Every manifest under `root` -- the store's one walk, which `list_store`
+/// reads -- in the walk's order.
+[[nodiscard]] std::vector<OllamaManifest> list_manifests(const std::filesystem::path& root);
+
 /// Every model with local weights in the store, for a listing.
 [[nodiscard]] std::vector<OllamaEntry> list_store(const std::filesystem::path& root);
 

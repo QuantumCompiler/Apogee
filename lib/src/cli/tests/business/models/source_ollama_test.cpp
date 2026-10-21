@@ -2,11 +2,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <random>
 #include <string>
 #include <system_error>
+#include <vector>
 
 #include "support/gguf_builder.h"
 
@@ -284,6 +286,28 @@ TEST_CASE("listing a store finds models with local weights", "[models][ollama]")
 
 TEST_CASE("listing an absent store is empty rather than an error", "[models][ollama]") {
     CHECK(list_store("/no/such/store").empty());
+}
+
+TEST_CASE("every manifest is listed, a cloud model's too, and list_store keeps the local ones",
+          "[models][ollama]") {
+    // 2026-10-21: registration counts what `ollama list` shows -- the user's
+    // one model is a cloud model -- by the store's one walk.
+    const Store store;
+    (void)store.add_model("llama3.2", "3b", "llama");
+    store.write(std::filesystem::path{"manifests"} / "registry.ollama.ai" / "library" / "gpt-oss" /
+                    "20b-cloud",
+                R"({"schemaVersion":2,"layers":[]})");
+    std::vector<std::string> refs;
+    for (const apogee::models::OllamaManifest& manifest :
+         apogee::models::list_manifests(store.root)) {
+        refs.push_back(manifest.ref);
+    }
+    std::ranges::sort(refs);
+    CHECK(refs == std::vector<std::string>{"gpt-oss:20b-cloud", "llama3.2:3b"});
+    const auto local = list_store(store.root);
+    REQUIRE(local.size() == 1);
+    CHECK(local.front().ref == "llama3.2:3b");
+    CHECK(apogee::models::list_manifests("/no/such/store").empty());
 }
 
 TEST_CASE("the store reader has no way to delete anything", "[models][ollama][safety]") {
