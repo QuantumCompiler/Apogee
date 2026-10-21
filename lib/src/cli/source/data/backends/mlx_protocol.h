@@ -104,6 +104,10 @@ struct Event {
     /// and that package's version.
     bool vision = false;
     std::string mlx_vlm_version;
+    /// Ready: the adapter applied over the model (53a), empty for none. A
+    /// driver from before 53a never names one, so a start that asked for one
+    /// and hears none is refused rather than answered from the bare base.
+    std::string adapter{};
 };
 
 /// Parses one line, or nullopt for one that is not a protocol object -- a

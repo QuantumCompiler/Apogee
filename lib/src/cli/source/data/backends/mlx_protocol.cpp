@@ -168,6 +168,7 @@ std::optional<Event> parse_event(std::string_view line) {
         event.tool_parser = string_field(object, "tool_parser");
         event.mlx_lm_version = string_field(object, "mlx_lm");
         event.mlx_vlm_version = string_field(object, "mlx_vlm");
+        event.adapter = string_field(object, "adapter");
         const auto boolean = [&object](const char* key) {
             const auto it = object.find(key);
             return it != object.end() && it->is_boolean() && it->get<bool>();

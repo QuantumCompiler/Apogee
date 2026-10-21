@@ -8,6 +8,7 @@
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <random>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -852,5 +853,81 @@ TEST_CASE(
         CHECK(ready["vision"] == false);
         CHECK(ready["mlx_vlm"].is_null());
         CHECK(driver.close() == 0);
+    }
+}
+
+TEST_CASE("the driver hands its --adapter directory to the loader, and ready names it",
+          "[backends][mlx][driver][adapters]") {
+    // 53a: mlx-lm's own adapter_path, applied over the weights at load and
+    // never fused; and a ready line naming it, so the backend can tell this
+    // driver from one older than adapters.
+    REQUIRE_PYTHON();
+    const apogee::testing::TempDir dir{"mlx-driver-adapter-" +
+                                       std::to_string(std::random_device{}())};
+    const std::filesystem::path adapter = dir.path() / "style-adapter";
+    std::filesystem::create_directories(adapter);
+    std::ofstream{adapter / "adapter_config.json"} << "{}";
+    {
+        Driver driver{dir, {}, {"Styled."}, kModel, "stub_mlx", {"--adapter", adapter.string()}};
+        const json ready = driver.next();
+        CHECK(ready["type"] == "ready");
+        CHECK(ready["adapter"] == adapter.string());
+        driver.send(generate(1, json::array({user("Hello?")})));
+        CHECK(joined(driver.until_done(1), "text") == "Styled.");
+        CHECK(driver.close() == 0);
+        const std::vector<std::string> record = driver.record();
+        CHECK(count(record, "load model") == 1);
+        CHECK(count(record, "adapter style-adapter") == 1);
+    }
+    {
+        // Through mlx-vlm the same way, when a turn needs pictures.
+        Driver driver{dir,
+                      {},
+                      {"Seen."},
+                      kModel,
+                      std::string{kWithVlm},
+                      {"--vision", "--adapter", adapter.string()}};
+        const json ready = driver.next();
+        CHECK(ready["vision"] == true);
+        CHECK(ready["adapter"] == adapter.string());
+        CHECK(driver.close() == 0);
+        CHECK(count(driver.record(), "vlm adapter style-adapter") == 1);
+    }
+    {
+        // Without one, the ready line names none and the loader is asked
+        // exactly what it was before adapters.
+        const apogee::testing::TempDir plain{"mlx-driver-plain-" +
+                                             std::to_string(std::random_device{}())};
+        Driver driver{plain, {}, {"Plain."}};
+        const json ready = driver.next();
+        CHECK_FALSE(ready.contains("adapter"));
+        CHECK(driver.close() == 0);
+        CHECK(count(driver.record(), "adapter ") == 0);
+    }
+}
+
+TEST_CASE("an --adapter that is not an adapter directory fails the load, naming it",
+          "[backends][mlx][driver][adapters][errors]") {
+    REQUIRE_PYTHON();
+    const apogee::testing::TempDir dir{"mlx-driver-adapter-" +
+                                       std::to_string(std::random_device{}())};
+    const std::filesystem::path empty = dir.path() / "not-an-adapter";
+    std::filesystem::create_directories(empty);
+    {
+        Driver driver{dir, {}, {"x"}, kModel, "stub_mlx", {"--adapter", empty.string()}};
+        const json error = driver.next();
+        CHECK(error["kind"] == "load");
+        CHECK(error["message"].get<std::string>().find(
+                  empty.string() + " is not an mlx-lm adapter directory") != std::string::npos);
+        CHECK(driver.close() == 4);
+    }
+    {
+        // An --adapter naming nothing is a usage error.
+        Driver driver{dir, {}, {"x"}, kModel, "stub_mlx", {"--adapter"}};
+        const json error = driver.next();
+        CHECK(error["kind"] == "protocol");
+        CHECK(error["message"].get<std::string>().find("[--adapter <directory>]") !=
+              std::string::npos);
+        CHECK(driver.close() == 2);
     }
 }

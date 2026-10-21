@@ -9276,3 +9276,50 @@ Decisions taken while building, for veto:
 **Verified.** `lib/scripts/cicd.sh --test`: 3593 of 3593, two skipped and said (the real caption burn without libass, and the existing pdftotext case); the darwin suite passed; the doctor's rows read this machine's real ffmpeg (no libass: skipped with its command; x264: ok).
 
 **Not run on real weights**: `models info`'s typed data reads files only; the fixtures stand in for real sets.
+
+---
+
+## Milestone AP — Runtime adapters
+
+**Goal.** A fine-tune kept as a small delta applied to the unchanged base at load time, never merged (track 53, opened 2026-10-21 from that day's LoRA spike, the user's call). The spike's proof: the pinned `convert_lora_to_gguf.py` turned a real-format PEFT adapter against the store's Llama-3.2-1B snapshot into a **1.7 MB** GGUF LoRA, against the ~2.5 GB full F16 a 1B promote writes, **~1,500× smaller**. The runtimes' APIs sat ready and unused.
+
+### 2026-10-21 — `adapters-at-the-runtimes` (backlog item 53a): a fine-tune applied, never merged
+
+**Why.** A promote writes a full multi-GB model per version when only the delta changed. The pin's `llama_adapter_lora_init` and its per-context `llama_set_adapters_lora` (`llama.h:683/721`, 8 symbols in the built library) and mlx-lm's `adapter_path` were never called.
+
+- [x] **`adapters: [{path, scale, base_sha256}]` on llamacpp and mlx entries,** parsed in `contracts/config` and written only through the one editor:
+  - documented in the starter template (`assets/config.json`, `config_template.cpp`);
+  - one flow list, the editor replacing a block-style list whole with its comments kept around it;
+  - scale in (0, 2], 1.0 by default;
+  - refused at parse: on any other type, listed twice, an unknown key, a malformed pin, and on mlx more than one adapter or a scale other than 1, since mlx-lm loads one directory at its trained scale.
+- [x] **`config set-backend <name> --adapters <path>[:<scale>],...`** (46b's family; `""` clears; a path completes). The edit is tried unpinned through the loader first, so its rules refuse before any weights are read. Then each adapter is pinned against the entry's `model_path`. The admin plane's PATCH runs the same core, byte-identical.
+- [x] **Each adapter pinned to its exact base** (`backends/adapters`, 49e's `--lora` pattern):
+  - a GGUF base by its file's sha256, an MLX directory by the store's id rule over its shards;
+  - verified before any load, a missing file or a changed base refused by name with the `set-backend` line that re-pins the whole set;
+  - a base's hash memoized in `cache/weight-hashes.json` (keyed by path, size and modification time), so no load re-reads gigabytes.
+- [x] **llama.cpp's side:** each adapter is loaded once after the model and set on every context, chat and embedding alike, at its scale. Adapters are freed after the contexts and before the model.
+- [x] **The mlx side:** the driver takes `adapter_path` (and passes it to `mlx_vlm.load` on the vision path), and names it in its `ready` line. A driver handed an adapter that names none is refused, as 27c refuses a driver that cannot see: an older seeded copy would answer from the bare base. The driver's earlier digest joins `retired-scripts.txt`.
+- [x] **The prompt cache's identity holds the adapter set** (each adapter's path, size, modification time, pin and scale). Every set has its own prefix directory, a cache from another set is a miss and never restores under it, and with no adapters the record and its directory are byte-identical to before.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The field is `adapters: [{path, scale, base_sha256}]` and the flag `--adapters <path>[:<scale>],...`**, the item's default within 46b's family. As in 49e's `--lora`, only a number after the last colon is a scale.
+- **The pin is a full sha256, memoized by the prompt cache's identity rule**, so the hash is paid once per base file. The memo file is created on first use, never seeded, and safe to delete.
+- **A hand-written adapter with no pin still loads as config,** and its model load refuses with the command that pins the set.
+- **The embedding context takes the adapters too**, the document's third anchor.
+- **The adapter scale's bound shares 49e's value (2.0)** under its own constant, left apart to stay out of 49e's code.
+
+**Verified.**
+- 36 new cases (`[adapters]`, 403 assertions):
+  - the config unit and its refusals;
+  - the editor's round trips, comment-preserving;
+  - the runtime-seam matrix: loaded once, set per context at scale, in order, the embedding context included;
+  - the refusal table: a missing file, a hash mismatch by name;
+  - the fingerprint: another set misses, a byte-equal set hits;
+  - the mlx driver's argv and its `ready` guard;
+  - `set-backend` and the admin PATCH, byte-identical.
+- The neighbouring suites (config, editor, backends, prompt cache, set-backend, admin, assets with the driver's byte-identity) pass.
+- `harness.layering`, `harness.layer_context`, `cli.config_lifecycle`, `cli.install_parity`, `cli.mlx_lifecycle` and the listening-socket checks pass.
+- Bare `lib/scripts/cicd.sh --test`: green. The CLI's 3,656 tests and the macOS app's 342 cases passed, with no warning. Four files from M20 and M21 were then put through clang-format (whitespace only), rebuilt and their cases rerun.
+
+**Not done:** the real pass (one adapter on F16 and Q4_K_M bases against the merged twin, tok/s and RAM) is the user's run, recorded. `set-backend --adapters` hashes an unseen base once with no progress line.
+

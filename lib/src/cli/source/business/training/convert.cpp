@@ -84,8 +84,8 @@ std::string fold_name_list(const std::string& error, std::size_t most) {
     std::size_t start = 0;
     while (start <= error.size()) {
         const std::size_t end = error.find('\n', start);
-        lines.push_back(error.substr(start, end == std::string::npos ? std::string::npos
-                                                                     : end - start));
+        lines.push_back(
+            error.substr(start, end == std::string::npos ? std::string::npos : end - start));
         if (end == std::string::npos) {
             break;
         }
@@ -136,10 +136,9 @@ std::string explain_converter_failure(std::string error) {
 Converter script_converter(std::filesystem::path interpreter, std::filesystem::path script,
                            std::string out_type, ConverterOutput writes, bool dense_modules) {
     return [interpreter = std::move(interpreter), script = std::move(script),
-            out_type = std::move(out_type), writes,
-            dense_modules](const std::filesystem::path& input, const std::filesystem::path& gguf,
-                           const MessageSink& on_message,
-                           const harness::CancellationToken& cancellation) {
+            out_type = std::move(out_type), writes, dense_modules](
+               const std::filesystem::path& input, const std::filesystem::path& gguf,
+               const MessageSink& on_message, const harness::CancellationToken& cancellation) {
         ScriptRequest request;
         request.interpreter = interpreter;
         request.script = script;

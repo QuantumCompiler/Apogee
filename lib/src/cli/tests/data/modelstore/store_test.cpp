@@ -1056,9 +1056,10 @@ TEST_CASE("a diffusion model is read from its config: its diffusers class, and n
           "'Wan-AI--Wan2.2-TI2V-5B' is " + apogee::models::describe_diffusion_model(*read));
 }
 
-TEST_CASE("which conversions a set takes is one decision: a language model both, a draft head or "
-          "a diffusion model none",
-          "[models][store][diffusion][draft_head]") {
+TEST_CASE(
+    "which conversions a set takes is one decision: a language model both, a draft head or "
+    "a diffusion model none",
+    "[models][store][diffusion][draft_head]") {
     const Store store;
     const std::filesystem::path wan = store.root.path() / "wan";
     place_snapshot_with(wan, kWanConfig);

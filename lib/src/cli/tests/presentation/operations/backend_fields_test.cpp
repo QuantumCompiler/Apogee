@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <random>
 #include <set>
 #include <string>
 #include <vector>
@@ -15,7 +16,9 @@
 #include "cli/root.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
+#include "modelstore/sidecar.h"
 #include "support/cli_home.h"
+#include "support/env_guard.h"
 
 /// `config set-backend` (46b) through the real command: one flag per editable
 /// field, spelled as `add-backend` spells it; only the named fields touched,
@@ -172,4 +175,146 @@ TEST_CASE("set-backend lists a vendor's server tools, completed, refused where i
     CHECK(slurp(home.config_path()) == before);
     REQUIRE(home.run({"config", "set-backend", "claude", "--server-tools", ""}, &out, &err) == 0);
     CHECK(slurp(home.config_path()) == kConfig);
+}
+
+namespace {
+
+/// A base and two adapters outside any install, and a config naming them.
+struct AdapterFiles {
+    apogee::testing::TempDir dir{"set-backend-adapters-" + std::to_string(std::random_device{}())};
+    std::filesystem::path base = dir.path() / "base.gguf";
+    std::filesystem::path style = dir.path() / "style.gguf";
+    std::filesystem::path tone = dir.path() / "tone.gguf";
+    std::filesystem::path mlx_model = dir.path() / "mlx-model";
+
+    AdapterFiles() {
+        std::ofstream{base, std::ios::binary} << "base weights";
+        std::ofstream{style, std::ios::binary} << "style delta";
+        std::ofstream{tone, std::ios::binary} << "tone delta";
+        std::filesystem::create_directories(mlx_model);
+        std::ofstream{mlx_model / "model.safetensors", std::ios::binary} << "weights";
+    }
+
+    [[nodiscard]] std::string config() const {
+        return "backends:\n  local:\n    type: llamacpp   # in process\n    model_path: " +
+               base.string() + "   # the base\n    context_size: 4096\n  mlx:\n    type: mlx\n" +
+               "    model_path: " + mlx_model.string() +
+               "\n  bare:\n    type: llamacpp\n  claude:\n    type: anthropic\n"
+               "models:\n  default: local\n";
+    }
+};
+
+}  // namespace
+
+TEST_CASE("set-backend pins adapters to the base as it is now, in place, and clears them",
+          "[set-backend][cli][adapters]") {
+    // 53a: the one editor writes the list; the base's sha256 is recorded
+    // beside each adapter where the base can be read.
+    const AdapterFiles files;
+    const apogee::testing::CliHome home{files.config()};
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"config", "set-backend", "local", "--adapters",
+                      files.style.string() + ":0.5," + files.tone.string()},
+                     &out, &err) == 0);
+    const std::string pin = apogee::models::file_sha256(files.base);
+    CHECK_THAT(out, ContainsSubstring("set adapters; adapters pinned to " + files.base.string() +
+                                      " (sha256 " + pin.substr(0, 12) + ")"));
+    std::string expected = files.config();
+    const std::string under = "    model_path: " + files.base.string() + "   # the base\n";
+    expected.insert(
+        expected.find(under) + under.size(),
+        "    adapters: [{path: " + files.style.string() + ", scale: 0.5, base_sha256: \"" + pin +
+            "\"}, {path: " + files.tone.string() + ", scale: 1, base_sha256: \"" + pin + "\"}]\n");
+    CHECK(slurp(home.config_path()) == expected);
+    // The base was read once, and is remembered by its identity.
+    CHECK(std::filesystem::exists(home.home() / "cache" / "weight-hashes.json"));
+
+    // Cleared: the file it was, byte for byte.
+    REQUIRE(home.run({"config", "set-backend", "local", "--adapters", ""}, &out, &err) == 0);
+    CHECK_THAT(out, ContainsSubstring("cleared adapters"));
+    CHECK(slurp(home.config_path()) == files.config());
+
+    // An mlx entry takes one adapter directory, pinned to its model
+    // directory's shards.
+    const std::filesystem::path adapter = files.dir.path() / "mlx-adapter";
+    std::filesystem::create_directories(adapter);
+    std::ofstream{adapter / "adapter_config.json"} << "{}";
+    REQUIRE(home.run({"config", "set-backend", "mlx", "--adapters", adapter.string()}, &out,
+                     &err) == 0);
+    const apogee::harness::Config read = apogee::harness::load_config(home.config_path());
+    const auto& adapters = read.find_backend("mlx")->adapters;
+    REQUIRE(adapters.size() == 1);
+    CHECK(adapters[0].path == adapter.string());
+    CHECK(adapters[0].base_sha256.size() == 64);
+    CHECK(adapters[0].base_sha256 != pin);
+}
+
+TEST_CASE("set-backend refuses adapters it cannot pin, the file untouched",
+          "[set-backend][cli][adapters]") {
+    const AdapterFiles files;
+    const apogee::testing::CliHome home{files.config()};
+    std::string out;
+    std::string err;
+    const auto refused = [&](const std::vector<std::string>& args, const std::string& reason) {
+        INFO(reason);
+        CHECK(home.run(args, &out, &err) == 1);
+        CHECK_THAT(err, ContainsSubstring(reason));
+        CHECK(slurp(home.config_path()) == files.config());
+    };
+    refused({"config", "set-backend", "local", "--adapters", files.dir.path().string() + "/gone"},
+            "the adapter " + files.dir.path().string() + "/gone is not there");
+    refused({"config", "set-backend", "local", "--adapters", files.style.string() + ":3"},
+            "its scale 3 is outside (0, 2]");
+    refused({"config", "set-backend", "claude", "--adapters", files.style.string()},
+            "a backend of type anthropic applies no adapters");
+    refused({"config", "set-backend", "bare", "--adapters", files.style.string()},
+            "adapters apply over the entry's model_path, and it names none");
+    refused({"config", "set-backend", "mlx", "--adapters",
+             files.style.string() + "," + files.tone.string()},
+            "an mlx entry applies one adapter");
+    refused({"config", "set-backend", "mlx", "--adapters", files.style.string()},
+            "is not an mlx-lm adapter directory");
+    refused({"config", "set-backend", "local", "--adapters", files.dir.path().string()},
+            "is not a file -- a llamacpp entry applies a GGUF LoRA file");
+}
+
+TEST_CASE("set-backend completes --adapters with files",
+          "[set-backend][cli][adapters][completion]") {
+    const AdapterFiles files;
+    const apogee::testing::CliHome home{files.config()};
+    const apogee::testing::EnvGuard protocol{"APOGEE_COMPLETION_PROTOCOL", "2"};
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"__complete", "config", "set-backend", "local", "--adapters", ""}, &out,
+                     &err) == 0);
+    CHECK(out == ":files\n");
+}
+
+TEST_CASE("set-backend pins adapters in a JSONC config in place, its comments kept",
+          "[set-backend][cli][adapters][jsonc]") {
+    const AdapterFiles files;
+    const std::string config =
+        "{\n  // The backends.\n  \"backends\": {\n    \"local\": {\n"
+        "      \"type\": \"llamacpp\", // in process\n"
+        "      \"model_path\": \"" +
+        files.base.string() + "\" // the base\n    }\n  }\n}\n";
+    const apogee::testing::CliHome home{config, "config.json"};
+    std::string out;
+    std::string err;
+    REQUIRE(
+        home.run({"config", "set-backend", "local", "--adapters", files.style.string() + ":0.5"},
+                 &out, &err) == 0);
+    const std::string edited = slurp(home.config_path());
+    CHECK_THAT(edited, ContainsSubstring("// The backends."));
+    CHECK_THAT(edited, ContainsSubstring("// in process"));
+    CHECK_THAT(edited, ContainsSubstring("// the base"));
+    const auto adapters =
+        apogee::harness::load_config(home.config_path()).find_backend("local")->adapters;
+    CHECK(adapters == std::vector<apogee::harness::AdapterConfig>{
+                          {.path = files.style.string(),
+                           .scale = 0.5,
+                           .base_sha256 = apogee::models::file_sha256(files.base)}});
+    REQUIRE(home.run({"config", "set-backend", "local", "--adapters", ""}, &out, &err) == 0);
+    CHECK(slurp(home.config_path()) == config);
 }

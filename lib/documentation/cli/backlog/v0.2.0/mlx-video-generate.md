@@ -43,4 +43,4 @@
 - [ ] A pipeline generates as before. A `--from` rerun replays the engine its record names.
 - [ ] `lib/scripts/cicd.sh --test` is green, `cli.video_lifecycle` included.
 
-**Scope note.** v0.2.0, gated on [53k](mlx-video-convert.md), and through it on its `[user]` call. The GUI's [3b](../../../gui/backlog/v0.2.0/mlx-engines-and-drafters.md) shows the engine.
+**Scope note.** v0.2.0, gated on [53k](mlx-video-convert.md). The GUI's [3b](../../../gui/backlog/v0.2.0/mlx-engines-and-drafters.md) shows the engine.

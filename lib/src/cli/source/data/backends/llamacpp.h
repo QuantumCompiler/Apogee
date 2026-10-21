@@ -12,6 +12,7 @@
 #include <string_view>
 #include <vector>
 
+#include "backends/adapters.h"
 #include "backends/llama_runtime.h"
 #include "backends/model_profile.h"
 #include "backends/prompt_cache.h"
@@ -115,6 +116,14 @@ public:
         std::filesystem::path prompt_cache_dir;
         /// The most the prompt cache keeps on disk.
         std::uint64_t prompt_cache_cap = kPromptCacheCapBytes;
+
+        /// The LoRA adapters every context applies over the model, in order,
+        /// each with its scale and the pin to the base it was registered
+        /// against (53a). Empty, the default, runs the bare base as before.
+        std::vector<harness::AdapterConfig> adapters{};
+        /// Where the base's hash, which each load checks the pins against,
+        /// comes from: `cache/weight-hashes.json` as `options_from` maps it.
+        WeightHashing weight_hashing{};
 
         Clock clock;
     };

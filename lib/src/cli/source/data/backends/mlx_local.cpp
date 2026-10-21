@@ -16,6 +16,7 @@
 #include "backends/think_filter.h"
 #include "contracts/assets.h"
 #include "contracts/errors.h"
+#include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "logger/operational.h"
 #include "modelstore/mlx_info.h"
@@ -443,6 +444,10 @@ MlxLocalProvider::Options MlxLocalProvider::options_from(const std::string& back
     }
     options.sampling = config_rung(config);
     options.seed = config_seed(config);
+    // The adapter, as the loader read it (53a), and where the model's hash
+    // its pin is checked against is remembered.
+    options.adapters = config.adapters;
+    options.weight_hashing.memo = harness::weight_hash_cache_path();
     return options;
 }
 
@@ -676,6 +681,17 @@ void MlxLocalProvider::ensure_child(const harness::StreamOptions& options, bool 
     if (child_ != nullptr) {
         drop_child();  // it died between turns; a fresh one reloads the model
     }
+    // The adapter's file facts before a driver is started (53a): not there,
+    // not an adapter directory, pinned to no base, or pinned to weights the
+    // model directory no longer holds -- each refused by name.
+    if (const std::string refused =
+            adapter_refusal(options_.adapters, AdapterCheck{.backend = options_.backend_name,
+                                                            .base = options_.model_dir,
+                                                            .directories = true,
+                                                            .hashing = options_.weight_hashing});
+        !refused.empty()) {
+        throw harness::ProviderError(options_.backend_name, refused);
+    }
     stderr_tail_.clear();
     say(options, harness::StatusEvent::Type::ModelLoading, harness::StatusEvent::Phase::Start,
         vision ? "through mlx-vlm, to read images" : std::string{});
@@ -685,6 +701,11 @@ void MlxLocalProvider::ensure_child(const harness::StreamOptions& options, bool 
     command.arguments = {options_.driver.string(), "--model", options_.model_dir.string()};
     if (vision) {
         command.arguments.emplace_back("--vision");
+    }
+    // mlx-lm's own `adapter_path`, applied at load and never fused (53a).
+    for (const harness::AdapterConfig& adapter : options_.adapters) {
+        command.arguments.emplace_back("--adapter");
+        command.arguments.push_back(adapter.path);
     }
     ++spawns_;
     std::string error;
@@ -709,10 +730,24 @@ void MlxLocalProvider::ensure_child(const harness::StreamOptions& options, bool 
                 "earlier Apogee's up to this build's, and an edited one is kept, so delete it "
                 "first");
     }
+    if (!options_.adapters.empty() && ready.adapter.empty()) {
+        // A driver from before 53a: it ignores --adapter and loads the bare
+        // base, which would answer as if the adapter were applied.
+        drop_child();
+        throw harness::ProviderError(
+            options_.backend_name,
+            "the MLX driver at " + options_.driver.string() +
+                " does not apply adapters -- it is an older copy: 'apogee check --fix' brings "
+                "an earlier Apogee's up to this build's, and an edited one is kept, so delete "
+                "it first");
+    }
     say(options, harness::StatusEvent::Type::ModelReady, harness::StatusEvent::Phase::Done,
         "mlx-lm " + ready.mlx_lm_version + ", " +
             (ready.model_type.empty() ? std::string{"unknown"} : ready.model_type) +
-            (ready.vision ? ", mlx-vlm " + ready.mlx_vlm_version : std::string{}));
+            (ready.vision ? ", mlx-vlm " + ready.mlx_vlm_version : std::string{}) +
+            (ready.adapter.empty()
+                 ? std::string{}
+                 : ", adapter " + std::filesystem::path{ready.adapter}.filename().string()));
 }
 
 void MlxLocalProvider::await_ready(const harness::CancellationToken& cancellation) {

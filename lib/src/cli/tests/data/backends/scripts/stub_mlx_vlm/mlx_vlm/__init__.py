@@ -22,8 +22,10 @@ class Processor:
     """What load() hands back beside the model: the image processor."""
 
 
-def load(path, **_):
+def load(path, adapter_path=None, **_):
     record(f"vlm load {os.path.basename(os.path.normpath(path))}")
+    if adapter_path is not None:
+        record(f"vlm adapter {os.path.basename(os.path.normpath(adapter_path))}")
     error = os.environ.get("STUB_MLX_VLM_LOAD_ERROR")
     if error:
         raise ValueError(error)

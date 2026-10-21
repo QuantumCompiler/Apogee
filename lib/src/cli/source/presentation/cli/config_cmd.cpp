@@ -1097,7 +1097,12 @@ void bind_set_backend(CLI::App& parent, const RootContext& context) {
         {"server_tools", kServerToolsType,
          "The vendor's own server-side tools this entry may run, comma-separated: "
          "web_search, code_execution -- consent for that vendor to search or run code "
-         "under your key, where the host gate cannot see"}};
+         "under your key, where the host gate cannot see"},
+        // 53a: each adapter pinned to the base's weights as they are now.
+        {"adapters", kPathValue,
+         "LoRA adapters applied over model_path, never merged into it: <path>[:<scale>], "
+         "comma-separated, scale 1 unless given -- GGUF LoRA files on llamacpp, one adapter "
+         "directory on mlx -- each pinned to the base's weights as they are now"}};
     for (const FieldFlag& flag : flags) {
         std::string spelling = "--" + std::string{flag.field};
         std::ranges::replace(spelling, '_', '-');

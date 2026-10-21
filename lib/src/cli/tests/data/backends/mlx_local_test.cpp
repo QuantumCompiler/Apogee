@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -9,14 +10,17 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <random>
 #include <set>
 #include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include "backends/adapters.h"
 #include "backends/factory.h"
 #include "contracts/errors.h"
+#include "contracts/layout.h"
 #include "support/env_guard.h"
 #include "support/fake_mlx_driver.h"
 
@@ -1116,4 +1120,116 @@ TEST_CASE("an entry's fields map onto the provider's options", "[backends][mlx][
     CHECK(options.sampling.top_k == 40);
     CHECK(options.seed == 7U);
     CHECK(options.info.model_type == "llama");
+}
+
+// ---------------------------------------------------------------------------
+// Adapters (53a)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A model directory with a shard, an adapter directory beside it, and the
+/// options that run the one over the other, the adapter pinned as it is now.
+struct AdapterBench {
+    apogee::testing::TempDir dir{"mlx-adapters-" + std::to_string(std::random_device{}())};
+    std::filesystem::path model = dir.path() / "model";
+    std::filesystem::path adapter = dir.path() / "style-adapter";
+    std::filesystem::path memo = dir.path() / "cache" / "weight-hashes.json";
+
+    AdapterBench() {
+        std::filesystem::create_directories(model);
+        std::ofstream{model / "config.json"} << R"({"model_type":"llama"})";
+        std::ofstream{model / "model.safetensors"} << "weights";
+        std::filesystem::create_directories(adapter);
+        std::ofstream{adapter / "adapter_config.json"} << "{}";
+        std::ofstream{adapter / "adapters.safetensors"} << "delta";
+    }
+
+    [[nodiscard]] MlxLocalProvider::Options options() const {
+        MlxLocalProvider::Options options = Fixture::defaults();
+        options.model_dir = model;
+        options.weight_hashing.memo = memo;
+        options.adapters = {
+            {.path = adapter.string(), .base_sha256 = apogee::backends::weights_sha256(model)}};
+        return options;
+    }
+
+    /// The ready line of a driver that applied the adapter.
+    [[nodiscard]] std::string ready() const {
+        return json{{"type", "ready"},        {"protocol", 1},
+                    {"model_type", "llama"},  {"chat_template", true},
+                    {"tool_parser", nullptr}, {"thinking", false},
+                    {"mlx_lm", "0.32.0"},     {"adapter", adapter.string()}}
+                   .dump() +
+               "\n";
+    }
+};
+
+}  // namespace
+
+TEST_CASE("an adapter reaches the driver as mlx-lm's adapter_path, the argv pinned",
+          "[backends][mlx][adapters]") {
+    const AdapterBench bench;
+    DriverState state;
+    state.startup = bench.ready();
+    state.replies = {numbered(text("Styled.")) + done()};
+    Fixture fixture{state, bench.options()};
+    Streamed streamed;
+    CHECK(fixture.provider->stream_chat(ask("hi"), streamed.options).message.content.plain_text() ==
+          "Styled.");
+    REQUIRE(fixture.commands.size() == 1);
+    CHECK(fixture.commands[0].arguments ==
+          std::vector<std::string>{"/home/training/scripts/mlx_generate.py", "--model",
+                                   bench.model.string(), "--adapter", bench.adapter.string()});
+    REQUIRE(streamed.status(apogee::harness::StatusEvent::Type::ModelReady) != nullptr);
+    CHECK(streamed.status(apogee::harness::StatusEvent::Type::ModelReady)->detail ==
+          "mlx-lm 0.32.0, llama, adapter style-adapter");
+    // One driver, the adapter applied once as it loaded.
+    CHECK(fixture.provider->spawn_count() == 1);
+}
+
+TEST_CASE("a driver that never names the adapter it was handed is refused, the fix named",
+          "[backends][mlx][adapters]") {
+    // One older than 53a ignores --adapter and loads the bare base: answering
+    // from it would read as the adapter's answer.
+    const AdapterBench bench;
+    DriverState state;
+    state.replies = {numbered(text("Bare.")) + done()};
+    Fixture fixture{state, bench.options()};
+    Streamed streamed;
+    CHECK_THROWS_WITH(fixture.provider->stream_chat(ask("hi"), streamed.options),
+                      Catch::Matchers::ContainsSubstring("does not apply adapters") &&
+                          Catch::Matchers::ContainsSubstring("apogee check --fix"));
+    CHECK_FALSE(fixture.provider->has_live_child());
+}
+
+TEST_CASE("an adapter pinned to other weights is refused before a driver starts",
+          "[backends][mlx][adapters][refusal]") {
+    const AdapterBench bench;
+    MlxLocalProvider::Options options = bench.options();
+    std::ofstream{bench.model / "model.safetensors"} << "retrained weights";
+    DriverState state;
+    state.startup = bench.ready();
+    Fixture fixture{state, std::move(options)};
+    Streamed streamed;
+    CHECK_THROWS_WITH(fixture.provider->stream_chat(ask("hi"), streamed.options),
+                      Catch::Matchers::ContainsSubstring("the adapter " + bench.adapter.string() +
+                                                         " was pinned to other base weights"));
+    CHECK(fixture.provider->spawn_count() == 0);
+    // An adapter directory gone: refused by name, nothing started either.
+    std::filesystem::remove_all(bench.adapter);
+    Fixture gone{state, bench.options()};
+    CHECK_THROWS_WITH(gone.provider->stream_chat(ask("hi"), streamed.options),
+                      Catch::Matchers::ContainsSubstring("is not there"));
+    CHECK(gone.provider->spawn_count() == 0);
+}
+
+TEST_CASE("an mlx entry's adapter maps onto the provider's options",
+          "[backends][mlx][adapters][config]") {
+    Runtime runtime;
+    runtime.entry.adapters = {{.path = "/adapters/style", .base_sha256 = std::string(64, 'c')}};
+    const MlxLocalProvider::Options options =
+        MlxLocalProvider::options_from("local", runtime.entry, runtime.host);
+    CHECK(options.adapters == runtime.entry.adapters);
+    CHECK(options.weight_hashing.memo == apogee::harness::weight_hash_cache_path());
 }

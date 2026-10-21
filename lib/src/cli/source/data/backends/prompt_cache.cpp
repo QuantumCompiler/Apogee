@@ -22,7 +22,20 @@ constexpr std::string_view kStateExtension = ".state";
 constexpr std::string_view kModelRecord = "model.json";
 
 [[nodiscard]] nlohmann::json to_json(const ModelFingerprint& model) {
-    return {{"path", model.path}, {"size", model.size}, {"modified", model.modified}};
+    nlohmann::json json{{"path", model.path}, {"size", model.size}, {"modified", model.modified}};
+    // The bare base's record is written exactly as it was before adapters.
+    if (!model.adapters.empty()) {
+        nlohmann::json adapters = nlohmann::json::array();
+        for (const AdapterFingerprint& adapter : model.adapters) {
+            adapters.push_back({{"path", adapter.path},
+                                {"size", adapter.size},
+                                {"modified", adapter.modified},
+                                {"base_sha256", adapter.base_sha256},
+                                {"scale", adapter.scale}});
+        }
+        json["adapters"] = std::move(adapters);
+    }
+    return json;
 }
 
 [[nodiscard]] std::optional<ModelFingerprint> fingerprint_from(const nlohmann::json& json) {
@@ -31,12 +44,38 @@ constexpr std::string_view kModelRecord = "model.json";
         return std::nullopt;
     }
     try {
-        return ModelFingerprint{.path = json.at("path").get<std::string>(),
-                                .size = json.at("size").get<std::uintmax_t>(),
-                                .modified = json.at("modified").get<std::int64_t>()};
+        ModelFingerprint model{.path = json.at("path").get<std::string>(),
+                               .size = json.at("size").get<std::uintmax_t>(),
+                               .modified = json.at("modified").get<std::int64_t>()};
+        // A record from before adapters names none: the bare base's.
+        for (const nlohmann::json& adapter : json.value("adapters", nlohmann::json::array())) {
+            model.adapters.push_back(
+                AdapterFingerprint{.path = adapter.at("path").get<std::string>(),
+                                   .size = adapter.at("size").get<std::uintmax_t>(),
+                                   .modified = adapter.at("modified").get<std::int64_t>(),
+                                   .base_sha256 = adapter.at("base_sha256").get<std::string>(),
+                                   .scale = adapter.at("scale").get<double>()});
+        }
+        return model;
     } catch (const nlohmann::json::exception&) {
         return std::nullopt;
     }
+}
+
+/// A file's size and modification time, the identity a fingerprint keeps.
+[[nodiscard]] bool identity_of(const fs::path& path, std::uintmax_t& size, std::int64_t& modified) {
+    std::error_code code;
+    size = fs::file_size(path, code);
+    if (code) {
+        return false;
+    }
+    const fs::file_time_type written = fs::last_write_time(path, code);
+    if (code) {
+        return false;
+    }
+    modified = static_cast<std::int64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(written.time_since_epoch()).count());
+    return true;
 }
 
 [[nodiscard]] std::optional<nlohmann::json> read_json(const fs::path& path) {
@@ -75,33 +114,42 @@ void make_private_dir(const fs::path& path) {
 
 }  // namespace
 
-std::optional<ModelFingerprint> fingerprint_of(const fs::path& path) {
+std::optional<ModelFingerprint> fingerprint_of(
+    const fs::path& path, const std::vector<harness::AdapterConfig>& adapters) {
     std::error_code code;
     const fs::path absolute = fs::absolute(path, code);
     if (code) {
         return std::nullopt;
     }
-    const std::uintmax_t size = fs::file_size(absolute, code);
-    if (code) {
+    ModelFingerprint model{.path = absolute.lexically_normal().string()};
+    if (!identity_of(absolute, model.size, model.modified)) {
         return std::nullopt;
     }
-    const fs::file_time_type modified = fs::last_write_time(absolute, code);
-    if (code) {
-        return std::nullopt;
+    for (const harness::AdapterConfig& adapter : adapters) {
+        AdapterFingerprint applied{
+            .path = fs::absolute(adapter.path, code).lexically_normal().string(),
+            .base_sha256 = adapter.base_sha256,
+            .scale = adapter.scale};
+        if (code || !identity_of(applied.path, applied.size, applied.modified)) {
+            return std::nullopt;
+        }
+        model.adapters.push_back(std::move(applied));
     }
-    return ModelFingerprint{
-        .path = absolute.lexically_normal().string(),
-        .size = size,
-        .modified = static_cast<std::int64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(modified.time_since_epoch())
-                .count())};
+    return model;
 }
 
 PromptCache::PromptCache(fs::path root, std::uint64_t cap_bytes)
     : root_{std::move(root)}, cap_bytes_{cap_bytes} {}
 
 fs::path PromptCache::model_dir(const ModelFingerprint& fingerprint) const {
-    return root_ / "models" / hash_of(fingerprint.path);
+    // A set of adapters is a model of its own (53a): its directory is named
+    // by the set's files and scales too, so two sets over one base never
+    // clear each other's. The bare base's name is the one it always had.
+    std::string named = fingerprint.path;
+    for (const AdapterFingerprint& adapter : fingerprint.adapters) {
+        named += "\n" + adapter.path + "\t" + nlohmann::json(adapter.scale).dump();
+    }
+    return root_ / "models" / hash_of(named);
 }
 
 std::optional<std::string> PromptCache::claim_model(const ModelFingerprint& fingerprint,
@@ -115,8 +163,10 @@ std::optional<std::string> PromptCache::claim_model(const ModelFingerprint& fing
         }
         std::error_code code;
         fs::remove_all(dir, code);
-        said = "the prompt cache for " + std::string{name} +
-               " was made with a different model file; cleared";
+        const std::optional<ModelFingerprint> made = fingerprint_from(*json);
+        said = "the prompt cache for " + std::string{name} + " was made with a different " +
+               (made.has_value() && made->same_file(fingerprint) ? "adapter file" : "model file") +
+               "; cleared";
     }
     make_private_dir(root_);
     make_private_dir(root_ / "models");

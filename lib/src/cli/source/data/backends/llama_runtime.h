@@ -542,6 +542,15 @@ public:
         const std::vector<std::string>& texts, std::string& error) = 0;
 };
 
+/// One LoRA adapter a model's contexts apply (53a): the GGUF adapter file,
+/// and the strength every context applies it at.
+struct AdapterLoad {
+    std::string path{};
+    double scale = 1.0;
+
+    bool operator==(const AdapterLoad&) const = default;
+};
+
 /// What a model is loaded from and with.
 struct ModelLoad {
     /// The GGUF.
@@ -560,6 +569,14 @@ struct ModelLoad {
     /// Whether to find what free memory holds, for a backend whose window is
     /// the default: `LlamaModel::fitted_window` reports it.
     bool fit_window = false;
+    /// The entry's adapters, in order (53a): each loaded ONCE, right after
+    /// the model, and set on every context made from it -- the conversation's,
+    /// a side request's, the embedding context -- at its scale, never merged
+    /// into the weights. Per context is llama.cpp's own design
+    /// (`llama_set_adapters_lora`), and what one model serving several sets
+    /// will stand on. An adapter that will not load fails the load, naming
+    /// it. Empty, the default, loads the bare base exactly as before.
+    std::vector<AdapterLoad> adapters{};
 };
 
 /// Loads models. One per process in practice.

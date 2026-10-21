@@ -58,6 +58,7 @@ add_library(apogee_tests_data OBJECT
     data/contracts/symphony_walk_test.cpp
     data/contracts/host_test.cpp
     data/contracts/server_tools_test.cpp
+    data/contracts/config_adapters_test.cpp
     data/contracts/review_skill_test.cpp
     data/contracts/review_targets_test.cpp
     data/contracts/utf8_test.cpp
@@ -83,6 +84,8 @@ add_library(apogee_tests_data OBJECT
     data/backends/llamacpp_embed_test.cpp
     data/backends/llamacpp_test.cpp
     data/backends/llamacpp_prompt_cache_test.cpp
+    data/backends/llamacpp_adapters_test.cpp
+    data/backends/adapters_test.cpp
     data/backends/prompt_cache_test.cpp
     data/backends/sampling_test.cpp
     data/backends/claude_cli_events_test.cpp

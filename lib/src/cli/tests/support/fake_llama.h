@@ -158,6 +158,10 @@ public:
                samplings.back().reasoning_budget.has_value() && sampled >= *budget_spent_after;
     }
 
+    /// The adapters set on this context at its creation, in order with their
+    /// scales (53a) -- what the real one sets through `llama_set_adapters_lora`.
+    std::vector<backends::AdapterLoad> adapters;
+
     /// Every state saved and every load asked for, by path (26j); a load
     /// refused while `refuse_load` is set, as llama.cpp refuses a file of
     /// another version.
@@ -556,6 +560,12 @@ public:
     /// The window each context was asked for, in creation order.
     std::vector<std::int64_t> context_sizes;
 
+    /// The adapters loaded over this model, once each, in order (53a): every
+    /// context made from it -- and the embedding context -- applies them.
+    std::vector<backends::AdapterLoad> adapters;
+    /// The set the embedding context applied, at the last `embed_batch`.
+    std::vector<backends::AdapterLoad> embedding_adapters;
+
     [[nodiscard]] std::vector<std::int32_t> tokenize(std::string_view text,
                                                      bool add_special) const override {
         (void)add_special;
@@ -758,6 +768,7 @@ public:
     [[nodiscard]] std::vector<std::vector<float>> embed_batch(const std::vector<std::string>& texts,
                                                               std::string& error) override {
         embed_batches.push_back(texts.size());
+        embedding_adapters = adapters;
         if (!embed_error.empty()) {
             error = embed_error;
             return {};
@@ -796,6 +807,7 @@ public:
         state->refuse_load = refuse_load;
         state->refuse_save = refuse_save;
         state->multimodal = decodes_media;
+        state->adapters = adapters;
         contexts.push_back(state);
         // The provider owns its contexts and destroys a side request's the
         // moment the call returns -- so the model keeps them ALIVE and hands
@@ -829,6 +841,13 @@ public:
 
     /// How many times a model was loaded — the idle-unload assertion.
     int loads = 0;
+
+    /// Every adapter loaded, by path, across every model load, in order
+    /// (53a): "loaded once" is a count of these.
+    std::vector<std::string> adapter_loads;
+    /// When set, the adapter at this path will not load -- llama.cpp's word
+    /// on a LoRA made for another architecture -- and fails the load.
+    std::string adapter_error_path;
 
     /// How long a load takes: a load slow enough for a busy line to paint
     /// (27e's warmup narration).
@@ -887,8 +906,18 @@ public:
             error = load_error;
             return nullptr;
         }
+        // Each adapter once, over the model, as the real runtime loads them.
+        for (const backends::AdapterLoad& adapter : request.adapters) {
+            if (adapter.path == adapter_error_path) {
+                error = "could not load the adapter at '" + adapter.path +
+                        "' -- check that it is a GGUF LoRA made for this model's architecture";
+                return nullptr;
+            }
+            adapter_loads.push_back(adapter.path);
+        }
         ++loads;
         auto loaded = std::make_unique<FakeLlamaModel>();
+        loaded->adapters = request.adapters;
         loaded->batch_limit = batch_limit;
         loaded->rewindable = rewindable;
         loaded->sliding_window = sliding_window;

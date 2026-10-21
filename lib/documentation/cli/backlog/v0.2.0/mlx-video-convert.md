@@ -18,7 +18,7 @@ One exists. Blaizzy's mlx-video ports Wan to MLX: Wan2.1 1.3B and 14B text-to-vi
 - **Recorded as `video`** (53e). Never registered as a chat backend.
 
 **Seam + files.**
-- **`source/business/training/python_env.cpp`:** an `mlx-video` set (with `torch` for its converter), its Python range (≥3.11, per its README), and the pinned source per the `[user]` call.
+- **`source/business/training/python_env.cpp`:** an `mlx-video` set (with `torch` for its converter), its Python range (≥3.11, per its README), and the pinned source: a GitHub commit, read and dated (the user's call).
 - **`assets/mlx/mlx_convert.py`:** the `mlx_video.wan2.convert` route.
 - **`source/data/modelstore/snapshot.cpp`:** the M20 decision answers `["mlx"]` for a whole Wan original layout with mlx-video installed. **`source/business/models/convert.cpp`:** M20's refusal routed instead.
 - **`source/presentation/cli/models_pull.cpp`:** the MLX door's route and its estimate, by the README's figures where it states one and none otherwise.
@@ -27,10 +27,10 @@ One exists. Blaizzy's mlx-video ports Wan to MLX: Wan2.1 1.3B and 14B text-to-vi
 **Reference.** M20 and M21 (the decision and its refusals). [mlx-video](https://github.com/Blaizzy/mlx-video), its [Wan README](https://github.com/Blaizzy/mlx-video/blob/main/mlx_video/models/wan_2/README.md). A community 8-bit conversion of the same model exists: [Anes1032/Wan2.2-TI2V-5B-mlx-q8](https://huggingface.co/Anes1032/Wan2.2-TI2V-5B-mlx-q8). Its author says it runs comfortably at 720p, 24 fps on a 64 GB Mac, which is the author's claim.
 
 **Decisions made** (dated):
+- 2026-10-21 — **mlx-video installed from GitHub, pinned to a reviewed commit** (the user's call, at the v0.2.0 run's start: "Pinned GitHub install"). Apogee's environment trusts that one commit, read and recorded with its date, as the Python ranges are. A later commit is a deliberate bump.
 - 2026-10-21 — **Split from running it** ([53l](mlx-video-generate.md)): a converted directory is useful to inspect and register before an engine runs it, and the install question lives here.
 
 **Open calls:**
-- [user] **mlx-video is not on PyPI.** Install it from its GitHub repository, pinned to a commit Apogee has read (a reviewed date, as the Python ranges have)? Or wait for a published release, MLX video waiting with it? A pinned GitHub install is a new kind of dependency: Apogee would trust that commit's code in its environment.
 - [default: the conversion quantizes to 4-bit by default (the README's default), `--type` offering the precisions the converter takes, as `--mlx` does today.]
 
 **Guardrail(s).**
@@ -43,4 +43,4 @@ One exists. Blaizzy's mlx-video ports Wan to MLX: Wan2.1 1.3B and 14B text-to-vi
 - [ ] Otherwise the refusal says exactly what is missing, and `converts_to` has no `mlx`.
 - [ ] `lib/scripts/cicd.sh --test` is green.
 
-**Scope note.** v0.2.0, gated on [53e](mlx-records-say-their-kind.md) (the `video` kind) and [53j](wan-pulled-whole.md) (the set whole), and blocked by its `[user]` call. Other video models (LTX-2, which mlx-video also ports) are out of scope until the user holds one.
+**Scope note.** v0.2.0, gated on [53e](mlx-records-say-their-kind.md) (the `video` kind) and [53j](wan-pulled-whole.md) (the set whole). Other video models (LTX-2, which mlx-video also ports) are out of scope until the user holds one.

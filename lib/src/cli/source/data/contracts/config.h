@@ -106,6 +106,32 @@ inline constexpr std::int64_t kMaxSeed = 4'294'967'294;
 /// The largest `thinking_budget` a backend may name (26i).
 inline constexpr std::int64_t kMaxThinkingBudget = 1'000'000;
 
+/// The strongest an adapter may be applied (53a): 49e's LoRA bound, so a
+/// scale is a strength in (0, 2] wherever Apogee applies a LoRA.
+inline constexpr double kMaxAdapterScale = 2.0;
+
+/// One LoRA adapter a local entry applies over its base, never merged into it
+/// (53a): a llamacpp entry's GGUF LoRA file, an mlx entry's adapter directory
+/// (`adapter_config.json` beside its weights, as mlx-lm's training writes it).
+struct AdapterConfig {
+    /// `~` and `${VAR}` expanded on read.
+    std::string path{};
+    /// The strength it is applied at; 1.0 unless the entry says.
+    double scale = 1.0;
+    /// The sha256 of the base weights it was registered against -- the pin
+    /// `config set-backend --adapters` records, checked before every load,
+    /// so an adapter never runs over weights it was not made for. Empty for
+    /// an adapter written by hand, which is refused at load with the
+    /// command that records it.
+    std::string base_sha256{};
+
+    bool operator==(const AdapterConfig&) const = default;
+};
+
+/// Whether an entry of `type` applies adapters (53a): the two local runtimes,
+/// llamacpp and mlx. Any other refuses an `adapters:` list at load.
+[[nodiscard]] bool takes_adapters(BackendType type) noexcept;
+
 /// One entry under `backends:`.
 ///
 /// Which fields matter depends on the type -- api_key for the cloud types,
@@ -216,6 +242,14 @@ struct BackendConfig {
     /// Principles, 2026-10-16). The loader refuses a name the vendor does not
     /// offer, and any list on a backend whose API runs none.
     std::vector<std::string> server_tools{};
+
+    /// The LoRA adapters a local entry applies over `model_path`, in order
+    /// (53a): llama.cpp sets every one on each context at its scale; mlx-lm
+    /// loads one adapter directory, at the scale its training wrote. Empty,
+    /// the default, runs the bare base as before. The loader refuses a list
+    /// on any other type, a path named twice, and a scale outside (0, 2] --
+    /// on an mlx entry, more than one adapter or a scale other than 1.
+    std::vector<AdapterConfig> adapters{};
 };
 
 /// The `models:` role pointers.

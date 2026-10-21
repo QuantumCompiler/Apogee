@@ -801,8 +801,7 @@ SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view
     } else if (const std::optional<models::DiffusionModel> diffusion =
                    models::snapshot_diffusion_model(choice.path)) {
         // Neither converter takes one (M20): refused before any Python starts.
-        choice.error =
-            models::diffusion_model_refusal("'" + std::string{given} + "'", *diffusion);
+        choice.error = models::diffusion_model_refusal("'" + std::string{given} + "'", *diffusion);
         choice.path.clear();
     }
     return choice;
@@ -1727,12 +1726,12 @@ ConvertedModel convert_model(const models::StoreRoots& roots, std::string_view g
                   << (model_estimate > 0 ? ", about " + format_progress_size(model_estimate)
                                          : std::string{})
                   << ")\n";
-        const models::ConvertResult result = run_conversion(
-            source.path, model_output,
-            training::script_converter(env.interpreter(), script, type,
-                                       training::ConverterOutput::Model,
-                                       dense_modules(source.path)),
-            model_estimate);
+        const models::ConvertResult result =
+            run_conversion(source.path, model_output,
+                           training::script_converter(env.interpreter(), script, type,
+                                                      training::ConverterOutput::Model,
+                                                      dense_modules(source.path)),
+                           model_estimate);
         if (result.cancelled) {
             cancelled();
         }

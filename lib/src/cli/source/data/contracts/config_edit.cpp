@@ -6,6 +6,8 @@
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <functional>
 #include <initializer_list>
@@ -1672,7 +1674,152 @@ std::string remove_backend_field(std::string_view content, std::string_view name
     return std::string{content};
 }
 
+/// `adapters` as the flow list an `adapters:` line holds (53a), each
+/// `{path: ..., scale: ..., base_sha256: "..."}` -- the pin quoted, so a
+/// digest of digits alone stays text in either format, and left out when an
+/// adapter has none.
+std::string adapters_flow_list(const std::vector<AdapterConfig>& adapters) {
+    std::string list;
+    for (const AdapterConfig& adapter : adapters) {
+        list += list.empty() ? "" : ", ";
+        list += "{path: " + yaml_scalar(adapter.path) + ", scale: " + number_scalar(adapter.scale);
+        if (!adapter.base_sha256.empty()) {
+            list += ", base_sha256: \"" + adapter.base_sha256 + "\"";
+        }
+        list += "}";
+    }
+    return "[" + list + "]";
+}
+
+/// One past the last line of the field whose key is at `key`: its value's
+/// lines -- a block list's items, a flow list continued -- are every line
+/// below it indented past a field, up to the entry's `end`. A blank or a
+/// comment line is its own only between two of them: one trailing it is
+/// the next field's.
+std::size_t field_value_end(const Lines& lines, std::size_t key, std::size_t end) {
+    std::size_t last = key;
+    for (std::size_t i = key + 1; i < end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line)) {
+            continue;
+        }
+        if (indent_of(line) <= kFieldIndent) {
+            break;
+        }
+        last = i;
+    }
+    return last + 1;
+}
+
+/// Where the comment after a value on `line` starts -- the first `#` after
+/// a space outside a quoted scalar, from `from` on -- or npos when there is
+/// none. A path quoted for its `#` is not a comment; a quote mark inside a
+/// plain scalar (`it's`) opens nothing.
+std::size_t comment_start(std::string_view line, std::size_t from) {
+    char quote = 0;
+    for (std::size_t i = from; i < line.size(); ++i) {
+        const char c = line[i];
+        const char before = i > 0 ? line[i - 1] : ' ';
+        if (quote == '"' && c == '\\') {
+            ++i;  // an escaped character, a quote among them
+        } else if (quote != 0) {
+            quote = c == quote ? 0 : quote;
+        } else if ((c == '"' || c == '\'') &&
+                   std::string_view{" \t[{,:"}.find(before) != std::string_view::npos) {
+            quote = c;
+        } else if (c == '#' && (before == ' ' || before == '\t')) {
+            return i;
+        }
+    }
+    return std::string_view::npos;
+}
+
+/// The terminator `line` ends with, or none on a file's unterminated last.
+std::string terminator_of(std::string_view line) {
+    if (line.ends_with("\r\n")) {
+        return "\r\n";
+    }
+    return line.ends_with('\n') ? "\n" : "";
+}
+
 }  // namespace
+
+std::string set_backend_adapters(std::string_view content, std::string_view name,
+                                 const std::vector<AdapterConfig>& adapters) {
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+    const SectionRange range = find_section(lines, "backends");
+    if (!range.found) {
+        throw ConfigEditError("no 'backends:' section in this config");
+    }
+    const std::optional<std::size_t> key_line = find_entry_line(lines, range, name);
+    if (!key_line.has_value()) {
+        throw ConfigEditError("backend '" + std::string{name} + "' not found in config");
+    }
+    const auto [begin, end] = entry_extent(lines, *key_line, range.end);
+    std::optional<std::size_t> field_line;
+    std::optional<std::size_t> path_line;
+    std::optional<std::size_t> type_line;
+    for (std::size_t i = begin + 1; i < end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line) || indent_of(line) != kFieldIndent) {
+            continue;
+        }
+        const std::string_view field = line.substr(kFieldIndent);
+        if (field.starts_with("adapters:")) {
+            field_line = i;
+        } else if (field.starts_with("model_path:")) {
+            path_line = i;
+        } else if (field.starts_with("type:")) {
+            type_line = i;
+        }
+    }
+    const std::string written =
+        std::string(kFieldIndent, ' ') + "adapters: " + adapters_flow_list(adapters);
+    if (field_line.has_value()) {
+        // The whole value goes, a block list's lines with it; a comment after
+        // the key stays, spacing and all, on the one line written instead.
+        const std::size_t stop = field_value_end(lines, *field_line, end);
+        const std::string& original = lines[*field_line];
+        const std::string_view original_body = body(original);
+        const std::size_t colon = original_body.find(':');
+        std::string tail;
+        if (const std::size_t hash = comment_start(original_body, colon + 1);
+            hash != std::string_view::npos) {
+            std::size_t keep = hash;
+            while (keep > colon + 1 &&
+                   (original_body[keep - 1] == ' ' || original_body[keep - 1] == '\t')) {
+                --keep;
+            }
+            tail = std::string{original_body.substr(keep)};
+        }
+        tail += terminator_of(lines[stop - 1]);
+        lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(*field_line) + 1,
+                    lines.begin() + static_cast<std::ptrdiff_t>(stop));
+        if (adapters.empty()) {
+            lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(*field_line));
+        } else {
+            lines[*field_line] = written + tail;
+        }
+        return join_lines(lines);
+    }
+    if (adapters.empty()) {
+        return std::string{content};
+    }
+    // Where a reader looks for it: under the base it applies over.
+    const std::size_t at = path_line.has_value()   ? field_value_end(lines, *path_line, end)
+                           : type_line.has_value() ? field_value_end(lines, *type_line, end)
+                                                   : begin + 1;
+    // After a file's unterminated last line, the line before it gains the
+    // terminator and the new one ends the file as that one did.
+    std::string ending = terminator;
+    if (std::string& before = lines[at - 1]; terminator_of(before).empty()) {
+        before += terminator;
+        ending.clear();
+    }
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(at), written + ending);
+    return join_lines(lines);
+}
 
 std::vector<std::string_view> backend_editable_fields() {
     return {"type",
@@ -1697,7 +1844,8 @@ std::vector<std::string_view> backend_editable_fields() {
             "mode",
             "host",
             "idle_unload_seconds",
-            "server_tools"};
+            "server_tools",
+            "adapters"};
 }
 
 /// `value`, a comma-separated list of names (`web_search,code_execution`),
@@ -1748,11 +1896,19 @@ std::string set_backend_field(std::string_view content, std::string_view name,
         if (field == "type") {
             throw ConfigEditError("a backend's type cannot be cleared -- name the type it is");
         }
+        if (field == "adapters") {
+            return yaml_text::set_backend_adapters(content, name, {});  // its block lines too
+        }
         return remove_backend_field(content, name, field);
     }
     if (field == "server_tools") {
         return set_backend_path_field(content, name, field, "", flow_list_of_names(value),
                                       /*quote=*/false);
+    }
+    if (field == "adapters") {
+        // The list as given, pinned to nothing: `config set-backend` records
+        // each pin through `set_backend_adapters` itself (53a).
+        return yaml_text::set_backend_adapters(content, name, parse_adapter_list(value));
     }
     return set_backend_path_field(content, name, field, "", value);
 }
@@ -2917,6 +3073,58 @@ std::string set_backend_field(std::string_view content, std::string_view name,
     return in_format(content, [&](std::string_view text) {
         return yaml_text::set_backend_field(text, name, field, value);
     });
+}
+
+std::string set_backend_adapters(std::string_view content, std::string_view name,
+                                 const std::vector<AdapterConfig>& adapters) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::set_backend_adapters(text, name, adapters);
+    });
+}
+
+std::vector<AdapterConfig> parse_adapter_list(std::string_view text) {
+    std::vector<AdapterConfig> adapters;
+    std::size_t start = 0;
+    while (start <= text.size()) {
+        const std::size_t comma = text.find(',', start);
+        std::string_view item = text.substr(
+            start, comma == std::string_view::npos ? std::string_view::npos : comma - start);
+        while (!item.empty() && item.front() == ' ') {
+            item.remove_prefix(1);
+        }
+        while (!item.empty() && item.back() == ' ') {
+            item.remove_suffix(1);
+        }
+        AdapterConfig adapter;
+        std::string_view file = item;
+        // Only a number after the last colon is a scale -- 49e's rule, so
+        // `C:\lora.gguf` and a name holding a colon stay paths.
+        if (const std::size_t colon = item.rfind(':'); colon != std::string_view::npos) {
+            const std::string tail{item.substr(colon + 1)};
+            char* parsed = nullptr;
+            const double value = tail.empty() ? 0.0 : std::strtod(tail.c_str(), &parsed);
+            if (!tail.empty() && parsed == tail.c_str() + tail.size()) {
+                if (!std::isfinite(value) || value <= 0.0 || value > kMaxAdapterScale) {
+                    throw ConfigEditError("adapters: " + std::string{item} + ": its scale " + tail +
+                                          " is outside (0, 2]");
+                }
+                adapter.scale = value;
+                file = item.substr(0, colon);
+            }
+        }
+        if (file.empty()) {
+            throw ConfigEditError("adapters: '" + std::string{text} +
+                                  "' names an empty adapter -- each is <path>[:<scale>], "
+                                  "comma-separated");
+        }
+        adapter.path = std::string{file};
+        adapters.push_back(std::move(adapter));
+        if (comma == std::string_view::npos) {
+            break;
+        }
+        start = comma + 1;
+    }
+    return adapters;
 }
 
 std::string set_backend_mmproj_path(std::string_view content, std::string_view name,

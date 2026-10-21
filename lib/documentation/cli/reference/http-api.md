@@ -315,10 +315,16 @@ each set in place with every comment and every other field as it was, and
 `""` clearing an optional one. The fields are the entry's own (`type`,
 `model`, `model_path`, `mmproj_path`, the sampling and cache settings, and
 the rest `config set-backend --help` lists); never `api_key`, which is
-stored through the credential routes alone. The config it leaves is byte
+stored through the credential routes alone. `adapters` takes what
+`--adapters` takes -- `<path>[:<scale>]`, comma-separated, on a llamacpp or
+mlx entry -- and records beside each adapter the sha256 of the weights at
+the entry's `model_path` as they are now, the pin every load checks; the
+entry's view then lists them, each with its `path`, `scale` and
+`base_sha256`. The config it leaves is byte
 for byte the CLI's. `200 {edited, said, restart_required}`; `404` when
 unknown; `400` naming why for a field no backend has, a value its field
-cannot hold, or a key.
+cannot hold, an adapter that is not there or a base that cannot be read,
+or a key.
 
 ### `POST /v1/admin/backends/{id}/rename`
 

@@ -178,7 +178,7 @@ backend tells it everything it needs, one request at a time.
 Runs under the Python environment Apogee owns, never the system Python.
 Requires `mlx-lm` there:  apogee train setup --with mlx
 
-    mlx_generate.py --model <model directory> [--vision]
+    mlx_generate.py --model <model directory> [--vision] [--adapter <directory>]
 
 `--vision` loads the model through `mlx-vlm` instead, so a request may carry
 images (27c): a vision model's own processor reads them, and the reply is
@@ -186,6 +186,11 @@ read exactly as a text model's is -- the format's markers and call parser
 are `mlx_lm`'s, from the same model directory. A vision model answers every
 turn whole, with no cache kept between turns. Requires `mlx-vlm` too:
   apogee train setup --with mlx-vlm
+
+`--adapter` applies a LoRA adapter over the model at load, never fused into
+it (53a): the directory mlx-lm's training wrote (adapter_config.json beside
+its weights), handed to the loader as its own `adapter_path`. The backend has
+checked it is pinned to these weights before starting the driver.
 
 The protocol, one JSON object per line.
 
@@ -210,10 +215,11 @@ In, on stdin:
 Out, on stdout:
   {"type": "ready", "protocol": 1, "model_type": "...", "chat_template": B,
    "tool_parser": "..."|null, "thinking": B, "mlx_lm": "...",
-   "vision": B, "mlx_vlm": "..."|null}
+   "vision": B, "mlx_vlm": "..."|null, "adapter": "..."}
       Once, after the model loads. `tool_parser` names mlx_lm's parser for
       the model's call format, or null when it has none. `vision` says the
-      model was loaded through mlx-vlm and reads images.
+      model was loaded through mlx-vlm and reads images. `adapter` names the
+      adapter applied over it, and is there only when one was (53a).
   {"type": "text", "id": N, "text": "..."}        answer text, as generated
   {"type": "reasoning", "id": N, "text": "..."}   the model's reasoning
   {"type": "tool_call", "id": N, "name": "...", "arguments": {...}}
@@ -531,7 +537,8 @@ class Reader:
                     break
         if hold:
             self._route(self.pending[:-hold])
-            self.pending = self.pending[-hold:]
+)PY",
+    R"PY(            self.pending = self.pending[-hold:]
         else:
             self._route(self.pending)
             self.pending = ""
@@ -543,8 +550,7 @@ class Reader:
             text, self.lead_text = self.lead_text, ""
             self.holding_json = False
             self.lead = False
-)PY",
-    R"PY(            calls = json_calls(text, self.tool_names) if text.strip() else None
+            calls = json_calls(text, self.tool_names) if text.strip() else None
             if calls:
                 for call in calls:
                     self.calls.append(call)
@@ -584,14 +590,14 @@ class Driver:
         self.checkpoint = None
         self.input = Input()
 
-    def ready(self, version, vlm_version=None):
+    def ready(self, version, vlm_version=None, adapter=None):
         tokenizer = self.tokenizer
         tool_parser = None
         if getattr(tokenizer, "has_tool_calling", False):
             parser = getattr(tokenizer, "tool_parser", None)
             module = getattr(parser, "__module__", "") or ""
             tool_parser = module.rsplit(".", 1)[-1] or "unnamed"
-        emit({
+        line = {
             "type": "ready",
             "protocol": PROTOCOL,
             "model_type": self.model_type,
@@ -601,7 +607,12 @@ class Driver:
             "mlx_lm": version,
             "vision": self.vision,
             "mlx_vlm": vlm_version,
-        })
+        }
+        # Said only when applied: the backend refuses a driver that was asked
+        # for an adapter and never names one -- one older than adapters.
+        if adapter:
+            line["adapter"] = adapter
+        emit(line)
 
     def has_template(self):
         return bool(getattr(self.tokenizer, "has_chat_template", False))
@@ -862,7 +873,8 @@ def image_file(uri, directory, index):
         raise ValueError("an image's data: URI is empty")
     media = header[len("data:"):-len(";base64")].lower()
     path = os.path.join(directory, f"image-{index}{IMAGE_SUFFIXES.get(media, '.img')}")
-    with open(path, "wb") as out:
+)PY",
+    R"PY(    with open(path, "wb") as out:
         out.write(data)
     return path
 
@@ -882,8 +894,7 @@ def with_images(messages, directory):
         for part in content:
             kind = part.get("type") if isinstance(part, dict) else None
             if kind == "image":
-)PY",
-    R"PY(                path = image_file(part.get("image"), directory, len(images))
+                path = image_file(part.get("image"), directory, len(images))
                 images.append(path)
                 parts.append({"type": "image", "image": path})
             elif kind == "text":
@@ -1003,14 +1014,25 @@ def model_type_of(model_dir):
     return config.get("model_type") if isinstance(config, dict) else None
 
 
+USAGE = "usage: mlx_generate.py --model <model directory> [--vision] [--adapter <directory>]"
+
+
 def main(argv):
     model_dir = None
     if len(argv) >= 3 and argv[1] == "--model":
         model_dir = argv[2]
     if not model_dir:
-        error("protocol", "usage: mlx_generate.py --model <model directory> [--vision]")
+        error("protocol", USAGE)
         return 2
-    vision = "--vision" in argv[3:]
+    options = argv[3:]
+    vision = "--vision" in options
+    adapter = None
+    if "--adapter" in options:
+        at = options.index("--adapter")
+        if at + 1 >= len(options) or not options[at + 1]:
+            error("protocol", USAGE)
+            return 2
+        adapter = options[at + 1]
 
     try:
         import mlx.core as mx
@@ -1028,6 +1050,10 @@ def main(argv):
     if not os.path.isfile(os.path.join(model_dir, "config.json")):
         error("load", f"{model_dir} is not a model directory: it has no config.json")
         return 4
+    if adapter and not os.path.isfile(os.path.join(adapter, "adapter_config.json")):
+        error("load", f"{adapter} is not an mlx-lm adapter directory: it has no "
+              "adapter_config.json")
+        return 4
     model_type = model_type_of(model_dir)
     api = {
         "generate_step": generate_step,
@@ -1036,19 +1062,26 @@ def main(argv):
     }
     version = getattr(mlx_lm, "__version__", "unknown")
     if vision:
-        return serve_vision(mx, api, model_dir, model_type, version)
+        return serve_vision(mx, api, model_dir, model_type, version, adapter)
     try:
-        model, tokenizer = load(model_dir)
+        # The loader's own adapter_path: applied over the weights, never fused.
+        model, tokenizer = load(model_dir, adapter_path=adapter) if adapter else load(model_dir)
     except Exception as e:  # noqa: BLE001 -- the reason is the message
-        error("load", f"could not load {model_dir}: {type(e).__name__}: {e}")
+        error("load", f"could not load {model_dir}{with_adapter(adapter)}: "
+              f"{type(e).__name__}: {e}")
         return 4
 
     driver = Driver(mx, model, tokenizer, api, model_type)
-    driver.ready(version)
+    driver.ready(version, adapter=adapter)
     return driver.serve()
 
 
-def serve_vision(mx, api, model_dir, model_type, version):
+def with_adapter(adapter):
+    """How a load failure names the adapter it was asked to apply."""
+    return f" with the adapter {adapter}" if adapter else ""
+
+
+def serve_vision(mx, api, model_dir, model_type, version, adapter=None):
     """The model through mlx-vlm, so its turns may carry images (27c)."""
     try:
         import mlx_vlm
@@ -1061,16 +1094,20 @@ def serve_vision(mx, api, model_dir, model_type, version):
               "images cannot be read. Run: apogee train setup --with mlx-vlm")
         return 3
     try:
-        model, processor = load_vision(model_dir)
+        if adapter:
+            model, processor = load_vision(model_dir, adapter_path=adapter)
+        else:
+            model, processor = load_vision(model_dir)
         # The format -- template, reasoning markers, call parser -- as mlx_lm
         # reads it from the same directory, so a reply reads as a text one does.
         tokenizer = load_tokenizer(Path(model_dir))
     except Exception as e:  # noqa: BLE001 -- the reason is the message
-        error("load", f"could not load {model_dir} through mlx-vlm: {type(e).__name__}: {e}")
+        error("load", f"could not load {model_dir}{with_adapter(adapter)} through mlx-vlm: "
+              f"{type(e).__name__}: {e}")
         return 4
     api = dict(api, vision=stream_generate, vision_parameters=vision_parameters())
     driver = VisionDriver(mx, model, tokenizer, api, model_type, processor)
-    driver.ready(version, vlm_version_of(mlx_vlm))
+    driver.ready(version, vlm_version_of(mlx_vlm), adapter)
     return driver.serve()
 
 

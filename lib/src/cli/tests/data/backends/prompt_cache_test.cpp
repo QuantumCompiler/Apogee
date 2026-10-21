@@ -5,6 +5,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <random>
 #include <string>
 #include <system_error>
@@ -17,6 +18,7 @@
 namespace {
 
 namespace fs = std::filesystem;
+using apogee::backends::AdapterFingerprint;
 using apogee::backends::ChatCacheRecord;
 using apogee::backends::fingerprint_of;
 using apogee::backends::ModelFingerprint;
@@ -190,4 +192,92 @@ TEST_CASE("over its cap, the least recently used state goes first, never the one
     CHECK(usage.bytes == 6);
     // Within the cap, nothing goes.
     CHECK(cache.evict() == 0);
+}
+
+TEST_CASE("an adapter set joins a model's fingerprint, file by file and scale by scale",
+          "[prompt-cache][adapters]") {
+    // 53a: a context's state under one set is another model's.
+    const Scratch scratch;
+    const fs::path model = scratch.root / "m.gguf";
+    const fs::path lora = scratch.root / "style.gguf";
+    scratch.write(model, "weights");
+    scratch.write(lora, "delta");
+    const std::string pin(64, 'd');
+    const apogee::harness::AdapterConfig style{
+        .path = lora.string(), .scale = 0.5, .base_sha256 = pin};
+    const auto bare = fingerprint_of(model);
+    const auto with = fingerprint_of(model, {style});
+    REQUIRE(bare.has_value());
+    REQUIRE(with.has_value());
+    CHECK(bare->adapters.empty());
+    REQUIRE(with->adapters.size() == 1);
+    CHECK(with->adapters[0] ==
+          AdapterFingerprint{.path = fs::absolute(lora).lexically_normal().string(),
+                             .size = 5,
+                             .modified = with->adapters[0].modified,
+                             .base_sha256 = pin,
+                             .scale = 0.5});
+    // Another set over the same file: the same file, not the same model.
+    CHECK(with != bare);
+    CHECK(with->same_file(*bare));
+    CHECK(fingerprint_of(model, {style}) == with);
+    apogee::harness::AdapterConfig scaled = style;
+    scaled.scale = 1.0;
+    CHECK(fingerprint_of(model, {scaled}) != with);
+    // The adapter file replaced: another fingerprint; gone: none at all.
+    scratch.write(lora, "delta, retrained");
+    CHECK(fingerprint_of(model, {style}) != with);
+    fs::remove(lora);
+    CHECK_FALSE(fingerprint_of(model, {style}).has_value());
+}
+
+TEST_CASE("each adapter set keeps its own prefix directory, the bare base's as it was",
+          "[prompt-cache][adapters]") {
+    const Scratch scratch;
+    PromptCache cache{scratch.root / "prompt"};
+    const ModelFingerprint bare{.path = "/m/a.gguf", .size = 10, .modified = 1};
+    ModelFingerprint styled = bare;
+    styled.adapters = {{.path = "/l/style.gguf", .size = 3, .modified = 2, .scale = 1.0}};
+    ModelFingerprint toned = bare;
+    toned.adapters = {{.path = "/l/tone.gguf", .size = 3, .modified = 2, .scale = 1.0}};
+    const fs::path bare_dir = cache.prefix_path(bare, KvCacheType::Q8_0, 4096, {1}).parent_path();
+    const fs::path styled_dir =
+        cache.prefix_path(styled, KvCacheType::Q8_0, 4096, {1}).parent_path();
+    CHECK(bare_dir != styled_dir);
+    CHECK(styled_dir != cache.prefix_path(toned, KvCacheType::Q8_0, 4096, {1}).parent_path());
+    // Claimed in turn, none clears another's.
+    CHECK_FALSE(cache.claim_model(bare, "a").has_value());
+    CHECK_FALSE(cache.claim_model(styled, "a").has_value());
+    CHECK_FALSE(cache.claim_model(toned, "a").has_value());
+    CHECK_FALSE(cache.claim_model(bare, "a").has_value());
+    CHECK_FALSE(cache.claim_model(styled, "a").has_value());
+    // An adapter of the set changed in place: its directory is cleared, said
+    // as the adapter's change.
+    ModelFingerprint retrained = styled;
+    retrained.adapters[0].size = 4;
+    const auto said = cache.claim_model(retrained, "a");
+    REQUIRE(said.has_value());
+    CHECK(*said == "the prompt cache for a was made with a different adapter file; cleared");
+    // The bare base's record names no adapters: written as before 53a.
+    std::ifstream in{bare_dir / "model.json"};
+    const std::string record{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    CHECK(record == R"({"modified":1,"path":"/m/a.gguf","size":10})");
+}
+
+TEST_CASE("a chat's record keeps the adapter set it was saved under", "[prompt-cache][adapters]") {
+    const Scratch scratch;
+    const PromptCache cache{scratch.root};
+    ChatCacheRecord record{.model = {.path = "/m/a.gguf", .size = 10, .modified = 3},
+                           .cache_type = KvCacheType::Q8_0,
+                           .window = 4096,
+                           .tokens = 2400};
+    record.model.adapters = {{.path = "/l/style.gguf",
+                              .size = 5,
+                              .modified = 9,
+                              .base_sha256 = std::string(64, 'e'),
+                              .scale = 0.75}};
+    REQUIRE(cache.write_chat_record("chat", record));
+    const auto read = cache.read_chat_record("chat");
+    REQUIRE(read.has_value());
+    CHECK(read->model == record.model);
 }

@@ -476,6 +476,10 @@ LlamaCppProvider::Options LlamaCppProvider::options_from(const std::string& back
     // The prompt cache under `cache/prompt/` (26j).
     options.prompt_cache_dir = harness::prompt_cache_dir();
     options.mmproj_path = harness::expand_env(config.mmproj_path);
+    // The adapters, as the loader read them (53a), and where the base's hash
+    // their pins are checked against is remembered.
+    options.adapters = config.adapters;
+    options.weight_hashing.memo = harness::weight_hash_cache_path();
     if (config.context_size.has_value()) {
         options.context_size = *config.context_size;
     }
@@ -626,7 +630,9 @@ PromptCache* LlamaCppProvider::prompt_cache() {
     }
     if (!fingerprint_read_) {
         fingerprint_read_ = true;
-        fingerprint_ = fingerprint_of(std::filesystem::path{options_.model_path});
+        // The adapter set is part of what a cache was made with (53a).
+        fingerprint_ =
+            fingerprint_of(std::filesystem::path{options_.model_path}, options_.adapters);
     }
     if (!fingerprint_.has_value()) {
         return nullptr;
@@ -721,8 +727,10 @@ bool LlamaCppProvider::restore_chat(PromptCache& cache, LlamaContext& context,
     std::string why;
     if (!record.has_value()) {
         why = "its record is missing";
-    } else if (record->model != fingerprint_.value()) {
+    } else if (!record->model.same_file(fingerprint_.value())) {
         why = "it was made with a different model file";
+    } else if (record->model != fingerprint_.value()) {
+        why = "it was made under a different set of adapters";
     } else if (record->cache_type != context.cache_type() || record->window != context.capacity()) {
         why = "it was made with another cache type or window";
     } else {
@@ -931,17 +939,29 @@ void LlamaCppProvider::ensure_model(const harness::StatusSink& on_status) {
         say(event);
     }
 
-    ModelLoad load;
-    load.path = options_.model_path;
-    load.gpu_layers = options_.gpu_layers;
-    load.mmproj_path = options_.mmproj_path;
-    load.cache_type = options_.cache_type;
-    load.cache_type_named = options_.cache_type_named;
-    // Only the default window is fitted to memory: a context_size the user
-    // wrote is used as written.
-    load.fit_window = options_.context_size <= 0;
-    std::string error;
-    model_ = runtime_->load(load, error);
+    // The adapters' file facts before anything is read into memory (53a): an
+    // adapter not there, one pinned to no base, a base whose weights are not
+    // the ones it was pinned to -- each refused by name, as a failed load is,
+    // and the runtime's own word on an adapter relayed after.
+    std::string error =
+        adapter_refusal(options_.adapters, AdapterCheck{.backend = options_.backend_name,
+                                                        .base = options_.model_path,
+                                                        .hashing = options_.weight_hashing});
+    if (error.empty()) {
+        ModelLoad load;
+        load.path = options_.model_path;
+        load.gpu_layers = options_.gpu_layers;
+        load.mmproj_path = options_.mmproj_path;
+        load.cache_type = options_.cache_type;
+        load.cache_type_named = options_.cache_type_named;
+        // Only the default window is fitted to memory: a context_size the
+        // user wrote is used as written.
+        load.fit_window = options_.context_size <= 0;
+        for (const harness::AdapterConfig& adapter : options_.adapters) {
+            load.adapters.push_back(AdapterLoad{.path = adapter.path, .scale = adapter.scale});
+        }
+        model_ = runtime_->load(load, error);
+    }
     if (model_ == nullptr) {
         {
             harness::StatusEvent failed;

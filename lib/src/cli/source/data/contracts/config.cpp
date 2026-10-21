@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <limits>
@@ -154,6 +155,87 @@ std::optional<std::int64_t> integer_in(const YAML::Node& node, std::string_view 
 std::vector<std::string> string_list(const YAML::Node& node, std::string_view origin,
                                      std::string_view key, bool paths);
 
+/// Whether `text` is a sha256 in hex: 64 hex digits, either case.
+[[nodiscard]] bool sha256_digest(std::string_view text) noexcept {
+    return text.size() == 64 && std::ranges::all_of(text, [](char c) {
+               return std::isxdigit(static_cast<unsigned char>(c)) != 0;
+           });
+}
+
+/// An entry's `adapters:` (53a): a list of `{path, scale, base_sha256}`, a
+/// path named once, a scale in (0, kMaxAdapterScale] -- on an mlx entry one
+/// adapter at the scale its training wrote -- and only on a type that applies
+/// them. Empty when absent.
+std::vector<AdapterConfig> parse_adapters(const YAML::Node& node, std::string_view origin,
+                                          const std::string& where, BackendType type) {
+    std::vector<AdapterConfig> out;
+    if (!node.IsDefined() || node.IsNull()) {
+        return out;
+    }
+    if (!node.IsSequence()) {
+        fail(origin, where + ": expected a list of adapters, each {path, scale}");
+    }
+    std::size_t index = 0;
+    for (const YAML::Node& item : node) {
+        const std::string at = where + "[" + std::to_string(index++) + "]";
+        if (!item.IsMap()) {
+            fail(origin, at + ": expected {path, scale}");
+        }
+        for (const auto& field : item) {
+            const std::string key = field.first.Scalar();
+            if (key != "path" && key != "scale" && key != "base_sha256") {
+                fail(origin, at + ": unknown key '" + key +
+                                 "' (an adapter's are path, scale and base_sha256)");
+            }
+        }
+        AdapterConfig adapter;
+        adapter.path = expand_env_and_home(scalar(item["path"], origin, at + ".path"));
+        if (adapter.path.empty()) {
+            fail(origin, at + ": an adapter needs a path");
+        }
+        if (const std::optional<double> scale = number(item["scale"], origin, at + ".scale");
+            scale.has_value()) {
+            if (!std::isfinite(*scale) || *scale <= 0.0 || *scale > kMaxAdapterScale) {
+                fail(origin, at + ".scale: must be above 0 and at most 2");
+            }
+            adapter.scale = *scale;
+        }
+        adapter.base_sha256 = scalar(item["base_sha256"], origin, at + ".base_sha256");
+        if (!adapter.base_sha256.empty() && !sha256_digest(adapter.base_sha256)) {
+            fail(origin, at + ".base_sha256: '" + adapter.base_sha256 +
+                             "' is not a sha256 (64 hex digits)");
+        }
+        std::ranges::transform(adapter.base_sha256, adapter.base_sha256.begin(), fold);
+        if (std::ranges::any_of(out, [&adapter](const AdapterConfig& listed) {
+                return listed.path == adapter.path;
+            })) {
+            fail(origin, at + ".path: " + adapter.path +
+                             " is already in the list -- an adapter is applied once");
+        }
+        out.push_back(std::move(adapter));
+    }
+    if (out.empty()) {
+        return out;
+    }
+    if (!takes_adapters(type)) {
+        fail(origin, where + ": a backend of type " + std::string{to_string(type)} +
+                         " applies no adapters -- only llamacpp and mlx entries take them");
+    }
+    if (type == BackendType::Mlx) {
+        if (out.size() > 1) {
+            fail(origin, where +
+                             ": an mlx entry applies one adapter -- mlx-lm loads one adapter "
+                             "directory over its base");
+        }
+        if (out.front().scale != 1.0) {
+            fail(origin, where +
+                             "[0].scale: mlx-lm applies an adapter at the scale its training "
+                             "wrote (adapter_config.json) -- leave scale at 1");
+        }
+    }
+    return out;
+}
+
 BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
                             const std::string& name) {
     const std::string where = "backends." + name;
@@ -233,6 +315,7 @@ BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
         !refusal.empty()) {
         fail(origin, where + ".server_tools: " + refusal);
     }
+    backend.adapters = parse_adapters(node["adapters"], origin, where + ".adapters", backend.type);
 
     return backend;
 }
@@ -1151,6 +1234,10 @@ bool names_its_model(BackendType type) noexcept {
             return false;
     }
     return false;
+}
+
+bool takes_adapters(BackendType type) noexcept {
+    return type == BackendType::LlamaCpp || type == BackendType::Mlx;
 }
 
 std::string_view to_string(AgentToolPolicy policy) noexcept {

@@ -26,4 +26,4 @@
 - [ ] The mlx target registers the adapter directory with no conversion; a cross-format ask refuses naming the formats.
 - [ ] The vendored converter is seeded byte-identically with its digest recorded; the default promote is byte-identical to today; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0 (track 53); gated on [`adapters-at-the-runtimes.md`](adapters-at-the-runtimes.md) (53a — the unit it registers into). Out of scope: the doctor's rows and the gate's quantized-base eval (53c), default-flipping (a later decision), BitDelta-style compression (the track's research question).
+**Scope note.** Earmarked for v0.2.0 (track 53); its gate, 53a, shipped 2026-10-21 ([Milestone AP](../../assistant/MILESTONES.md#milestone-ap--runtime-adapters)) (53a — the unit it registers into). Out of scope: the doctor's rows and the gate's quantized-base eval (53c), default-flipping (a later decision), BitDelta-style compression (the track's research question).

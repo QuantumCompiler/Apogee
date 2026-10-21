@@ -165,6 +165,16 @@ struct SamplerDeleter {
     }
 };
 
+/// A LoRA adapter (53a). Owned by its model and freed before it: llama.cpp
+/// would free one left behind with the model, but an owner says when.
+struct AdapterDeleter {
+    void operator()(llama_adapter_lora* adapter) const noexcept {
+        llama_adapter_lora_free(adapter);
+    }
+};
+
+using AdapterPtr = std::unique_ptr<llama_adapter_lora, AdapterDeleter>;
+
 /// llama.cpp's multimodal projector. Owned by the model; contexts borrow it.
 struct MtmdDeleter {
     void operator()(mtmd_context* context) const noexcept {
@@ -741,15 +751,24 @@ struct ContextSettings {
     return GGML_TYPE_F16;
 }
 
+/// The adapters a model's contexts apply (53a), each loaded once over it,
+/// with the scale every context sets it at.
+struct LoadedAdapters {
+    std::vector<AdapterPtr> adapters{};
+    std::vector<float> scales{};
+};
+
 class RealModel final : public LlamaModel {
 public:
-    /// `vision` may be null: a text-only model.
+    /// `vision` may be null: a text-only model. `adapters` were loaded over
+    /// `model`, and every context made here applies them.
     RealModel(std::unique_ptr<llama_model, ModelDeleter> model, MtmdPtr vision,
-              ContextSettings settings)
+              ContextSettings settings, LoadedAdapters adapters)
         : model_{std::move(model)},
           vocab_{llama_model_get_vocab(model_.get())},
           vision_{std::move(vision)},
-          settings_{settings} {}
+          settings_{settings},
+          adapters_{std::move(adapters)} {}
 
     [[nodiscard]] std::vector<std::int32_t> tokenize(std::string_view text,
                                                      bool add_special) const override {
@@ -949,6 +968,10 @@ public:
                            " -- try cache_type: f16";
             }
             throw std::runtime_error(with_llama_reason(message));
+        }
+        if (!apply_adapters(context.get())) {
+            throw std::runtime_error(
+                with_llama_reason("llama.cpp: could not set the adapters on a context"));
         }
 
         std::string error;
@@ -1176,7 +1199,33 @@ private:
                 "llama.cpp: could not create an embedding context for this model");
             return false;
         }
+        // The entry's model embeds as it answers: through its adapters.
+        if (!apply_adapters(embedding_context_.get())) {
+            embedding_context_.reset();
+            error =
+                with_llama_reason("llama.cpp: could not set the adapters on the embedding context");
+            return false;
+        }
         return true;
+    }
+
+    /// Sets this model's adapters on `context` at their scales, in order
+    /// (53a) -- per context, llama.cpp's own design. A model with none sets
+    /// nothing, so the bare base's contexts are made exactly as before.
+    /// False when llama.cpp refuses.
+    [[nodiscard]] bool apply_adapters(llama_context* context) const {
+        if (adapters_.adapters.empty()) {
+            return true;
+        }
+        // The C API takes mutable arrays; these are this call's own copies.
+        std::vector<llama_adapter_lora*> handles;
+        handles.reserve(adapters_.adapters.size());
+        for (const AdapterPtr& adapter : adapters_.adapters) {
+            handles.push_back(adapter.get());
+        }
+        std::vector<float> scales = adapters_.scales;
+        llama_log().forget();
+        return llama_set_adapters_lora(context, handles.data(), handles.size(), scales.data()) == 0;
     }
 
     std::unique_ptr<llama_model, ModelDeleter> model_;
@@ -1185,6 +1234,9 @@ private:
     /// from this model, which is why contexts may borrow it raw.
     MtmdPtr vision_;
     ContextSettings settings_;
+    /// Declared after the model and before the embedding context, so they
+    /// are freed after every context here and before the model (53a).
+    LoadedAdapters adapters_;
     /// Lazily created; see ensure_embedding_context.
     std::unique_ptr<llama_context, ContextDeleter> embedding_context_;
     /// The model's chat templates, parsed on first render; see render_chat.
@@ -1303,8 +1355,25 @@ public:
                                       "' -- check that the file exists and is a valid GGUF");
             return nullptr;
         }
+        // Each adapter loaded once, over the model it was made for (53a):
+        // llama.cpp refuses another architecture's, and its reason rides on
+        // the error naming the file.
+        LoadedAdapters adapters;
+        for (const AdapterLoad& wanted : request.adapters) {
+            llama_log().forget();
+            AdapterPtr adapter{llama_adapter_lora_init(model.get(), wanted.path.c_str())};
+            if (adapter == nullptr) {
+                error = with_llama_reason("could not load the adapter at '" + wanted.path +
+                                          "' -- check that it is a GGUF LoRA made for this "
+                                          "model's architecture");
+                return nullptr;
+            }
+            adapters.adapters.push_back(std::move(adapter));
+            adapters.scales.push_back(static_cast<float>(wanted.scale));
+        }
         if (mmproj_path.empty()) {
-            return std::make_unique<RealModel>(std::move(model), nullptr, settings);
+            return std::make_unique<RealModel>(std::move(model), nullptr, settings,
+                                               std::move(adapters));
         }
 
         mtmd_context_params vision_params = mtmd_context_params_default();
@@ -1321,7 +1390,8 @@ public:
                                       "' -- check that it is the mmproj file matching this model");
             return nullptr;
         }
-        return std::make_unique<RealModel>(std::move(model), std::move(vision), settings);
+        return std::make_unique<RealModel>(std::move(model), std::move(vision), settings,
+                                           std::move(adapters));
     }
 };
 

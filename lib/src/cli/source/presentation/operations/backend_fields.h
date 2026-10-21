@@ -29,6 +29,13 @@ struct BackendFieldsOutcome {
 /// named, a backend not in the config, a type no backend has, a value its
 /// field cannot hold, and `api_key` -- a key is never taken on the command
 /// line, only by `auth add`.
+///
+/// `adapters` (53a) takes `<path>[:<scale>]`, comma-separated, and registers
+/// each adapter pinned to the entry's base as it is now: the loader's rules
+/// first, on the edit as it would land, then each path made absolute, its
+/// file facts asked, and the sha256 of the weights at `model_path` -- as this
+/// same edit leaves it -- recorded beside every one (`backends::pin_adapters`),
+/// written through `set_backend_adapters`.
 [[nodiscard]] BackendFieldsOutcome set_backend_fields(const std::filesystem::path& path,
                                                       std::string_view name,
                                                       const std::vector<BackendFieldEdit>& edits);

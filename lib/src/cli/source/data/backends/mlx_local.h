@@ -13,6 +13,7 @@
 #include <string_view>
 #include <vector>
 
+#include "backends/adapters.h"
 #include "backends/mlx_protocol.h"
 #include "backends/model_profile.h"
 #include "backends/sampling.h"
@@ -227,6 +228,14 @@ public:
         /// The config's rung of the sampling ladder, and its seed (26h).
         SamplingRung sampling;
         std::optional<std::uint32_t> seed;
+        /// The adapter the driver loads over the model (53a): at most one --
+        /// mlx-lm's `adapter_path`, a directory its training wrote -- with
+        /// the pin to the base it was registered against. Empty, the
+        /// default, starts the driver exactly as before.
+        std::vector<harness::AdapterConfig> adapters{};
+        /// Where the model directory's hash, which each start checks the pin
+        /// against, comes from: `cache/weight-hashes.json` from `options_from`.
+        WeightHashing weight_hashing{};
         /// Ends the child after this long with no request; zero never does.
         std::chrono::seconds idle_unload{0};
         /// How long a load may take before the driver is given up on: a

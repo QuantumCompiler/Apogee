@@ -23,6 +23,7 @@
 #include "httpserver/http_types.h"
 #include "httpserver/jobs.h"
 #include "httpserver/mux.h"
+#include "modelstore/sidecar.h"
 #include "support/env_guard.h"
 #include "training/python_env.h"
 
@@ -702,6 +703,32 @@ TEST_CASE("a backend edited over HTTP is byte-identical to the CLI's, and never 
     CHECK(Fixture::bytes(fixture.http_config) == before);
     CHECK(admin_set_backend_fields(fixture.context(), "nope", post(nlohmann::json{{"model", "x"}}))
               .status == 404);
+}
+
+TEST_CASE("adapters pinned over HTTP are byte-identical to the CLI's, and the view shows them",
+          "[httpserver][admin][parity][set-backend][adapters]") {
+    // 53a: the twin pins through the CLI's one core, the base read where it
+    // lies.
+    const Fixture fixture;
+    const std::filesystem::path base = fixture.home.path() / "base.gguf";
+    const std::filesystem::path lora = fixture.home.path() / "style.gguf";
+    std::ofstream{base, std::ios::binary} << "base weights";
+    std::ofstream{lora, std::ios::binary} << "style delta";
+    fixture.cli(
+        {"config", "add-backend", "tuned", "--type", "llamacpp", "--model-path", base.string()});
+    REQUIRE(admin_create_backend(
+                fixture.context(),
+                post(nlohmann::json{
+                    {"name", "tuned"}, {"type", "llamacpp"}, {"model_path", base.string()}}))
+                .status == 201);
+    fixture.cli({"config", "set-backend", "tuned", "--adapters", lora.string() + ":0.5"});
+    HttpRequest patch = post(nlohmann::json{{"adapters", lora.string() + ":0.5"}});
+    patch.method = "PATCH";
+    REQUIRE(admin_set_backend_fields(fixture.context(), "tuned", patch).status == 200);
+    CHECK(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
+    const nlohmann::json view = parsed(admin_get_backend(fixture.context(), "tuned"));
+    CHECK(view.dump().find(apogee::models::file_sha256(base)) != std::string::npos);
+    CHECK(view.dump().find(R"("scale":0.5)") != std::string::npos);
 }
 
 TEST_CASE("config set's twin moves the same scalars the CLI moves, byte for byte",

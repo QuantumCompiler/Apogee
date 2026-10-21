@@ -186,6 +186,25 @@ public:
 [[nodiscard]] std::string set_backend_field(std::string_view content, std::string_view name,
                                             std::string_view field, std::string_view value);
 
+/// Sets `backends.<name>.adapters` to `adapters` in place (53a): the whole
+/// value replaced where it stands -- a flow list on its line, or a block
+/// list's lines under it -- as one flow list, `{path, scale, base_sha256}`
+/// each (the pin left out where an adapter has none), a comment after the key
+/// kept; written after `model_path:` (else `type:`) when the entry has none.
+/// An empty list removes the field and every line of its value. What
+/// `set_backend_field`'s `adapters` and `config set-backend --adapters` both
+/// write through. Throws ConfigEditError for a backend not in the config.
+[[nodiscard]] std::string set_backend_adapters(std::string_view content, std::string_view name,
+                                               const std::vector<AdapterConfig>& adapters);
+
+/// `text` -- what `config set-backend --adapters` takes -- as the adapters it
+/// names (53a): comma-separated `<path>[:<scale>]`, a scale only the number
+/// after the last colon (so `C:\lora.gguf` stays a path) and 1 when none is
+/// given. Paths as written and no pins: the caller that can read the base
+/// resolves them and records each pin. Throws ConfigEditError naming an empty
+/// item or a scale outside (0, 2].
+[[nodiscard]] std::vector<AdapterConfig> parse_adapter_list(std::string_view text);
+
 /// Field names accepted by set_models_role.
 [[nodiscard]] std::vector<std::string_view> models_role_fields();
 

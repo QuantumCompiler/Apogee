@@ -192,6 +192,14 @@ struct LayoutEntry {
 /// refresh, never seeded, disposable, rebuilt on the next fetch.
 [[nodiscard]] std::filesystem::path roster_cache_path();
 
+/// `cache/weight-hashes.json` -- the sha256 of each set of base weights an
+/// adapter is pinned to (53a), remembered by the file's identity (its path,
+/// size and modification time, the prompt cache's own rule), so a base of
+/// gigabytes is read once per change rather than at every load. A file like
+/// the provider cache: written by the first check, never seeded, safe to
+/// delete -- the next load reads the weights again.
+[[nodiscard]] std::filesystem::path weight_hash_cache_path();
+
 /// What `seed_data_directory()` did.
 struct SeedResult {
     /// Directories -- and bundled asset files -- that did not exist and were

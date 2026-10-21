@@ -1330,8 +1330,8 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
         out << "made from it: nothing -- no conversion takes these weights\n";
     } else if (!consumed.has_value() && mlx_made.empty()) {
         // Only what can work is offered (M21).
-        const bool mlx = std::ranges::find(conversions, std::string{models::kMlxFormat}) !=
-                         conversions.end();
+        const bool mlx =
+            std::ranges::find(conversions, std::string{models::kMlxFormat}) != conversions.end();
         out << "made from it: nothing yet -- 'apogee models convert " << handle
             << "' makes a GGUF of it" << (mlx ? " (--mlx an MLX model)" : "") << "\n";
     } else {

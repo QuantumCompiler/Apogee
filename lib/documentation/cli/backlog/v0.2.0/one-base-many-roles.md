@@ -24,4 +24,4 @@
 - [ ] The footprint prices the shared base once and the admission report says so; the last sharer's release unloads it.
 - [ ] Entries on distinct bases behave byte-identically to today; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0 (track 53); gated on [`adapters-at-the-runtimes.md`](adapters-at-the-runtimes.md) (53a). Out of scope: mlx sharing (recorded later), scheduler or loop changes, any llama.cpp modification.
+**Scope note.** Earmarked for v0.2.0 (track 53); its gate, 53a, shipped 2026-10-21 ([Milestone AP](../../assistant/MILESTONES.md#milestone-ap--runtime-adapters)) (53a). Out of scope: mlx sharing (recorded later), scheduler or loop changes, any llama.cpp modification.

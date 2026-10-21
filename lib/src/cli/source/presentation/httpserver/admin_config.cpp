@@ -168,6 +168,16 @@ nlohmann::json backend_view(std::string_view name, const harness::BackendConfig&
     if (!backend.server_tools.empty()) {
         out["server_tools"] = backend.server_tools;
     }
+    // The adapters as the entry holds them, each with its pin (53a).
+    if (!backend.adapters.empty()) {
+        nlohmann::json adapters = nlohmann::json::array();
+        for (const harness::AdapterConfig& adapter : backend.adapters) {
+            adapters.push_back({{"path", adapter.path},
+                                {"scale", adapter.scale},
+                                {"base_sha256", adapter.base_sha256}});
+        }
+        out["adapters"] = std::move(adapters);
+    }
     return out;
 }
 

@@ -22,9 +22,9 @@
 
 **Decisions made** (dated):
 - 2026-10-21 — **Drafters ride the base's MLX backend**, never their own. Pairing is a field on the base's entry.
+- 2026-10-21 — **Built now, measured after** (the user's call, at the v0.2.0 run's start: "Build it now"). The speed-up on the user's Mac is their run, recorded once made.
 
 **Open calls:**
-- [user] **Build drafters now, or measure first?** Google's figure is "up to 3×", its own. Apogee's one comparable measurement found 1.14×. This item can either be built whole, or start by measuring the speed-up on the user's Mac with one base and its drafter through mlx-vlm, and be built only if the gain earns it. Building is several days of work. Measuring is one real-weights run the user makes.
 - [default: the 12B unified assistant pairs only if the installed mlx-vlm drafts `gemma4_unified`, and is refused saying so otherwise. Google's drafters name the 31B, 26B, E2B and E4B.]
 
 **Guardrail(s).**
@@ -38,4 +38,4 @@
 - [ ] Chat and GGUF conversions of a draft head are refused as before.
 - [ ] `lib/scripts/cicd.sh --test` is green.
 
-**Scope note.** v0.2.0, gated on [53f](mlx-vlm-conversions.md) (mlx-vlm's route and its text path), and blocked by its `[user]` call. Drafting on llama.cpp, where Gemma 4's heads load as `GEMMA4_ASSISTANT`, is out of scope. The GUI's [3b](../../../gui/backlog/v0.2.0/mlx-engines-and-drafters.md) pairs a drafter in the app.
+**Scope note.** v0.2.0, gated on [53f](mlx-vlm-conversions.md) (mlx-vlm's route and its text path), Drafting on llama.cpp, where Gemma 4's heads load as `GEMMA4_ASSISTANT`, is out of scope. The GUI's [3b](../../../gui/backlog/v0.2.0/mlx-engines-and-drafters.md) pairs a drafter in the app.

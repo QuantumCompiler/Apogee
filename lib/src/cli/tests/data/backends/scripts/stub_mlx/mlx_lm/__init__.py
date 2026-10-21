@@ -9,8 +9,12 @@ from mlx_lm._version import __version__  # noqa: F401 -- where mlx-lm keeps it
 from mlx_lm.tokenizer import Tokenizer
 
 
-def load(path):
+def load(path, adapter_path=None):
     record(f"load {os.path.basename(os.path.normpath(path))}")
+    if adapter_path is not None:
+        # The adapter mlx-lm would apply over the weights (53a), recorded as
+        # the loader was handed it.
+        record(f"adapter {os.path.basename(os.path.normpath(adapter_path))}")
     noise = os.environ.get("STUB_MLX_NOISE")
     if noise:
         print(noise)
