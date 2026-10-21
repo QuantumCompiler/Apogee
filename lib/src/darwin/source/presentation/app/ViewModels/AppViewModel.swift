@@ -8,6 +8,7 @@ import PresentationCompose
 import PresentationGraph
 import PresentationKnowledge
 import PresentationLibrary
+import PresentationReview
 import PresentationTraining
 import PresentationModels
 import PresentationConsole
@@ -46,6 +47,7 @@ final class AppViewModel {
     let agents: AgentsViewModel
     let symphonies: SymphoniesViewModel
     let mcp: MCPViewModel
+    let review: ReviewViewModel
     let video: VideoViewModel
     let compose: ComposeViewModel
     let voice: VoiceViewModel
@@ -94,6 +96,8 @@ final class AppViewModel {
         symphonies.say = { [weak shell] text in shell?.say(text) }
         let mcp = MCPViewModel(runner: runner ?? ReadRunner())
         mcp.say = { [weak shell] text in shell?.say(text) }
+        let review = ReviewViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
+        review.say = { [weak shell] text in shell?.say(text) }
         let video = VideoViewModel(
             starter: jobs ?? JobStarter(), preferences: preferences, home: FileManager.default.homeDirectoryForCurrentUser)
         video.say = { [weak shell] text in shell?.say(text) }
@@ -119,7 +123,7 @@ final class AppViewModel {
         }
         // Sessions in view or not: the library keeps its one child to the
         // session on screen. A place coming into view reads again.
-        shell.routeChanged = { [weak sessions, weak models, weak tasks, weak suites, weak graph, weak video, weak compose, weak voice, weak records, weak collections, weak training, weak agents, weak symphonies, weak mcp] destination in
+        shell.routeChanged = { [weak sessions, weak models, weak tasks, weak suites, weak graph, weak video, weak compose, weak voice, weak records, weak collections, weak training, weak agents, weak symphonies, weak mcp, weak review] destination in
             Task {
                 if destination == .sessions { await sessions?.cameIntoView() } else { await sessions?.leftView() }
                 if destination == .models { await models?.appeared() }
@@ -127,6 +131,7 @@ final class AppViewModel {
                 if destination == .suites { await suites?.appeared() }
                 if destination == .graph { await graph?.appeared() }
                 if destination == .training { await training?.appeared() }
+                if destination == .review { await review?.appeared() }
                 if destination == .library {
                     await agents?.refresh()
                     await symphonies?.refresh()
@@ -158,6 +163,7 @@ final class AppViewModel {
         self.agents = agents
         self.symphonies = symphonies
         self.mcp = mcp
+        self.review = review
         self.video = video
         self.compose = compose
         self.voice = voice
@@ -184,6 +190,7 @@ final class AppViewModel {
         await agents.connect(binary: sessions.binaryURL)
         await symphonies.connect(binary: sessions.binaryURL)
         mcp.use(binary: sessions.binaryURL)
+        await review.connect(binary: sessions.binaryURL)
         video.connect(binary: sessions.binaryURL)
         compose.connect(binary: sessions.binaryURL)
         await voice.connect(binary: sessions.binaryURL)

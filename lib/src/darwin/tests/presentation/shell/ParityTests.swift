@@ -32,11 +32,11 @@ struct ParityTests {
         #expect(ParityTable.violations(words: []) == ["no command words -- the law would pass vacuously"])
     }
 
-    @Test("today's truth: twenty-three screens, the gaps by their items, the console's two, three carve-outs, the plumbing")
+    @Test("today's truth: twenty-four screens, the gaps by their items, the console's two, three carve-outs, the plumbing")
     func census() {
         func count(_ match: (CommandPlace.Kind) -> Bool) -> Int { ParityTable.places.filter { match($0.kind) }.count }
-        #expect(count { if case .screen = $0 { true } else { false } } == 23)
-        #expect(count { if case .queued = $0 { true } else { false } } == 1)
+        #expect(count { if case .screen = $0 { true } else { false } } == 24)
+        #expect(count { if case .queued = $0 { true } else { false } } == 0)
         #expect(count { $0 == .console } == 2)
         #expect(count { if case .carvedOut = $0 { true } else { false } } == 3)
         #expect(count { $0 == .plumbing } == 3)

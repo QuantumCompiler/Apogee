@@ -60,8 +60,8 @@ public enum ParityTable {
         CommandPlace("agents", .screen(module: "PresentationLibrary"), "Library › Agents: list, create, delete, the person's own files edited in place"),
         CommandPlace("mcp", .screen(module: "PresentationLibrary"), "Library › MCP servers: connect state, presets registered, enable, disable, a tool tried"),
         CommandPlace("symphonies", .screen(module: "PresentationLibrary"), "Library › Symphonies: the catalog, a play supervised, own spec files edited and checked"),
-        // --- gaps: each named by its queued item --------------------------------
-        CommandPlace("review", .queued(item: "2g"), "reviews, targets and sweeps, the skills"),
+        CommandPlace("review", .screen(module: "PresentationReview"), "Review, ⇧⌘R: a merge request dry run first, posted on consent; targets and sweeps; the skills"),
+        // --- gaps: each named by its queued item (none since 2g) ------------------
         // --- the console's: run there as typed ----------------------------------
         CommandPlace("analyze", .console, "a one-shot agent workflow over an input"),
         CommandPlace("complete", .console, "a one-shot completion for scripts; a session is the conversation's place"),

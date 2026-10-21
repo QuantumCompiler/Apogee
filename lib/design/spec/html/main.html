@@ -134,6 +134,7 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{p.isKnowledge}}"><svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h3v11H3zM7 2.5h3v11H7z"></path><path d="M10.6 3.2l2.5.7-2.5 9.4-2.5-.7z"></path></svg></sc-if>
 <sc-if value="{{p.isTraining}}"><svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6L8 3l6.5 3L8 9z"></path><path d="M4 7.3v3.4C5.5 12 10.5 12 12 10.7V7.3M14.5 6v4"></path></svg></sc-if>
 <sc-if value="{{p.isLibrary}}"><svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h4v4h-4zM9.5 3.5h4v4h-4zM2.5 9.5h4v4h-4z"></path><path d="M11.5 9.5v4M9.5 11.5h4"></path></svg></sc-if>
+<sc-if value="{{p.isReview}}"><svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="4.5" cy="3.5" r="1.5"></circle><circle cx="4.5" cy="12.5" r="1.5"></circle><circle cx="11.5" cy="12.5" r="1.5"></circle><path d="M4.5 5v6M11.5 11V7a2 2 0 0 0-2-2H7"></path><path d="M8.5 3.5L7 5l1.5 1.5"></path></svg></sc-if>
 <sc-if value="{{p.hasBadge}}"><span aria-hidden="true" style="position: absolute; top: 6px; right: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--status-accent); box-shadow: 0 0 0 2px var(--surface-sidebar)"></span></sc-if>
 </button>
 </sc-for>
@@ -1101,6 +1102,66 @@ a{color:inherit}a:hover{color:inherit}
 </div>
 </sc-if>
 
+<sc-if value="{{ui.isReview}}">
+<header class="ap-tools" style="flex: 0 0 52px; display: flex; align-items: center; gap: 14px; padding: 0 16px 0 24px; border-bottom: 1px solid var(--line-border)">
+<h1 style="margin: 0; font-size: var(--t-title); font-weight: 600">Review</h1>
+<span style="font-size: var(--t-small); color: var(--text-tertiary)">Merge requests read by the review skills -- a dry run first</span>
+<span style="flex: 1 1 auto"></span>
+<div role="group" aria-label="Show" class="seg">
+<button type="button" aria-pressed="{{rv.runsOn}}" onClick="{{rv.showRuns}}" style="background: {{rv.runsBg}}; color: var(--text-primary)">Reviews</button>
+<button type="button" aria-pressed="{{rv.targetsOn}}" onClick="{{rv.showTargets}}" style="background: {{rv.targetsBg}}; color: var(--text-primary)">Targets and sweeps</button>
+<button type="button" aria-pressed="{{rv.skillsOn}}" onClick="{{rv.showSkills}}" style="background: {{rv.skillsBg}}; color: var(--text-primary)">Skills</button>
+</div>
+<sc-if value="{{rv.targetsOn}}"><button type="button" class="btn-g">Add target…</button><button type="button" class="btn-g">Sweep…</button></sc-if>
+</header>
+<sc-if value="{{rv.runsOn}}">
+<div style="flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 22px 28px 32px"><div style="max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; gap: 8px"><input type="text" class="inp" value="acme/widget#12" aria-label="A merge request" placeholder="A merge request: a URL, owner/repo#12 or group/project!4" style="flex: 1 1 auto; min-width: 0"><button type="button" class="btn-p">Review</button></div>
+<div style="display: flex; gap: 10px; align-items: center; font-size: var(--t-small); color: var(--text-secondary)"><span>Lenses: security</span><span>·</span><span>Model: the chat role</span></div>
+<div class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">apogee review mr acme/widget#12 --skills security --dry-run --output-format json</div>
+<div><h2 style="margin: 6px 0 0; font-size: var(--t-h2); font-weight: 600">Thumbnails</h2>
+<div class="mono" style="margin-top: 4px; font-size: var(--t-meta); color: var(--text-secondary)">github.com/acme/widget#12 · head cafe2222 · full</div>
+<div class="mono" style="margin-top: 2px; font-size: var(--t-meta); color: var(--text-tertiary)">lenses: security (named) · reviewer</div></div>
+<div style="display: flex; align-items: center; gap: 10px"><span style="flex: 1 1 auto; font-size: var(--t-small); color: var(--text-secondary)">dry run: nothing posted</span><button type="button" class="btn" onClick="{{rv.askPost}}">Post…</button></div>
+<div style="padding: 12px 14px; border: 1px solid var(--line-border); border-radius: 8px; background: var(--surface-card)">
+<div style="display: flex; align-items: baseline; gap: 10px"><span class="mono" style="font-size: var(--t-meta); font-weight: 600; color: var(--status-error)">high</span><span class="mono" style="font-size: var(--t-meta); color: var(--text-secondary)">correctness</span><span class="mono" style="font-size: var(--t-code)">app/thumbnails.py:8</span><span style="flex: 1 1 auto"></span><span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">high confidence · security</span></div>
+<p style="margin: 6px 0 0">The file name from the request reaches a shell command.</p>
+<p style="margin: 4px 0 0; font-size: var(--t-small); color: var(--text-secondary)">Pass a list, no shell.</p>
+</div>
+<div class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">candidates 1 · off change 0 · not new 0 · known 0 · duplicates 0 · dismissed 0 · tightened 0</div>
+</div></div>
+</sc-if>
+<sc-if value="{{rv.targetsOn}}">
+<div style="flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 22px 28px 32px"><div style="max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: baseline; gap: 12px; padding: 12px 14px; border-radius: 8px; background: var(--surface-card)"><div style="flex: 1 1 auto"><div style="font-weight: 500">acme-all</div><div class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">github · owner acme · lenses by the change</div></div><span style="font-size: var(--t-meta); color: var(--status-warning)">posts when swept</span><button type="button" class="btn-g">Remove…</button></div>
+<div style="display: flex; align-items: baseline; gap: 12px; padding: 12px 14px; border-radius: 8px; background: var(--surface-card)"><div style="flex: 1 1 auto"><div style="font-weight: 500">widget</div><div class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">github · repository acme/widget · lenses security</div></div><span style="font-size: var(--t-meta); color: var(--text-secondary)">documents only</span><button type="button" class="btn-g">Remove…</button></div>
+<h2 style="margin: 14px 0 0; font-size: var(--t-h2); font-weight: 600">The last sweep</h2>
+<div class="mono" style="font-size: var(--t-meta); color: var(--text-secondary)">dry run · 1 reviewed · 0 posted · 0 deferred · 0 errors · started 2026-10-21T06:09:25Z</div>
+<div style="padding: 12px 14px; border-radius: 8px; background: var(--surface-card)">
+<div style="font-size: var(--t-small); font-weight: 500">widget · repo · grant none</div>
+<div class="mono" style="margin-top: 6px; font-size: var(--t-code)">github.com/acme/widget</div>
+<div class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">watermark none → 2026-10-18T09:00:00Z</div>
+<div style="margin-top: 4px; font-size: var(--t-small); color: var(--text-secondary)">github.com/acme/widget#12 -- Thumbnails: 1 finding; dry run: nothing posted</div>
+</div>
+<div class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">kept at ~/.apogee/review/sweeps/20261021T060925Z.json</div>
+</div></div>
+</sc-if>
+<sc-if value="{{rv.skillsOn}}">
+<div style="flex: 1 1 0; min-height: 0; display: flex">
+<nav aria-label="Skills" style="flex: 0 0 300px; min-height: 0; overflow-y: auto; padding: 12px 10px; background: var(--surface-sidebar); border-right: 1px solid var(--line-border)">
+<sc-for list="{{rv.skills}}" as="k" hint-placeholder-count="7"><button type="button" class="hv" onClick="{{k.pick}}" aria-current="{{k.current}}" style="width: 100%; display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; margin-bottom: 4px; border: 0; border-radius: 7px; background: {{k.bg}}; text-align: left; color: var(--text-primary)"><span style="font-size: var(--t-body)">{{k.name}}</span><span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{k.applies}}</span></button></sc-for>
+</nav>
+<div style="flex: 1 1 0; min-width: 0; overflow-y: auto; padding: 22px 28px 32px"><div style="max-width: 820px">
+<h2 style="margin: 0; font-size: var(--t-h2); font-weight: 600">{{rv.skill.name}}</h2>
+<p style="margin: 8px 0 0">{{rv.skill.desc}}</p>
+<p style="margin: 6px 0 0; font-size: var(--t-small); color: var(--text-secondary)">{{rv.skill.applies}}</p>
+<div class="mono" style="margin-top: 14px; padding: 10px 12px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); line-height: 1.6; white-space: pre-wrap">{{rv.skill.prompt}}</div>
+<p class="mono" style="margin: 10px 0 0; font-size: var(--t-meta); color: var(--text-tertiary)">apogee review skills show {{rv.skill.name}}</p>
+</div></div>
+</div>
+</sc-if>
+</sc-if>
+
 <sc-if value="{{ui.isTraining}}">
 <header class="ap-tools" style="flex: 0 0 52px; display: flex; align-items: center; gap: 14px; padding: 0 16px 0 24px; border-bottom: 1px solid var(--line-border)">
 <h1 style="margin: 0; font-size: var(--t-title); font-weight: 600">Training</h1>
@@ -2046,6 +2107,17 @@ a{color:inherit}a:hover{color:inherit}
 </div>
 </sc-if>
 
+<sc-if value="{{ui.reviewPostOpen}}">
+<div style="position: absolute; inset: 0; z-index: 65; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.45)">
+<div role="alertdialog" aria-modal="true" aria-labelledby="rp-h" style="width: min(480px, 100%); border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-card); box-shadow: 0 24px 64px rgba(0,0,0,.45)">
+<div style="padding: 18px 20px 6px"><h2 id="rp-h" style="margin: 0; font-size: var(--t-h2); font-weight: 600">Post the review to github.com/acme/widget#12?</h2></div>
+<p style="margin: 0; padding: 6px 20px 0; font-size: var(--t-small); line-height: 1.6; color: var(--text-secondary)">The dry run found 1 finding to post inline. Posting runs the review again with --yes and posts what that run finds, as one batch on github.com/acme/widget#12: its inline comments and a summary.</p>
+<div class="mono" style="margin: 10px 20px 0; padding: 8px 10px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); color: var(--text-secondary); overflow-wrap: anywhere">apogee review mr acme/widget#12 --skills security --yes --output-format json</div>
+<div style="display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px 18px"><button type="button" class="btn-g" onClick="{{rv.cancelPost}}">Cancel</button><button type="button" class="btn-p" onClick="{{rv.cancelPost}}">Post</button></div>
+</div>
+</div>
+</sc-if>
+
 <sc-if value="{{ui.executeOpen}}">
 <div style="position: absolute; inset: 0; z-index: 65; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.45)">
 <div role="dialog" aria-modal="true" aria-labelledby="ex-h" style="width: min(560px, 100%); max-height: 100%; overflow-y: auto; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-card); box-shadow: 0 24px 64px rgba(0,0,0,.45)">
@@ -2182,7 +2254,7 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{ui.toastOn}}"><div role="status" style="position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 80; max-width: calc(100% - 48px); padding: 9px 16px; border-radius: 8px; background: var(--text-primary); color: var(--surface-window); font-size: var(--t-small); box-shadow: 0 8px 24px rgba(0,0,0,.3)">{{ui.toastText}}</div></sc-if>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","chat:play","monitor","console","knowledge","knowledge:collections","graph:prose","training","training:datasets","library","library:symphonies","library:mcp","models","models:downloads","models:store","models:convert","models:register","models:roles","download","suites","tasks","newtask","newtask:recipe","execute","graph","video","video:run","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions"],"default":"chat"},"still":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
+<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","chat:play","monitor","console","knowledge","knowledge:collections","graph:prose","training","training:datasets","library","library:symphonies","library:mcp","review","review:post","review:targets","review:skills","models","models:downloads","models:store","models:convert","models:register","models:roles","download","suites","tasks","newtask","newtask:recipe","execute","graph","video","video:run","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions"],"default":"chat"},"still":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
 class Component extends DCLogic {
   constructor(props) {
     super(props);
@@ -2379,6 +2451,7 @@ class Component extends DCLogic {
       }
     } else if (where === 'download') set({ screen: 'models', overlay: 'download', dl: { repo: 'Wan-AI/Wan2.1-T2V-1.3B-Diffusers', format: 'gguf', quant: 'Q4_K_M' } });
     else if (where === 'graph' && sub === 'prose') set({ screen: 'graph', gView: 'prose' });
+    else if (where === 'review') set({ screen: 'review', rv: { tab: sub === 'targets' ? 'targets' : sub === 'skills' ? 'skills' : 'runs', skill: 'security' }, overlay: sub === 'post' ? 'reviewpost' : null });
     else if (where === 'library') set({ screen: 'library', lib: { tab: sub || 'agents', played: sub === 'symphonies' } });
     else if (where === 'training') set({ screen: 'training', tr: sub === 'datasets' ? { tab: 'datasets', sel: '20261021-051826', regime: 'foundation', running: false } : { tab: 'runs', sel: '20261021-051826', regime: 'foundation', running: true } });
     else if (where === 'knowledge') set({ screen: 'knowledge', kn: sub === 'collections' ? { tab: 'collections', coll: 'notes', searched: true } : { tab: 'records', asked: true, branch: '', sel: 'kr-20261021T045944Z-1e2354', coll: 'notes', searched: false } });
@@ -2883,6 +2956,19 @@ class Component extends DCLogic {
       ['capture', '[status|link]', 'Save this conversation as a knowledge record'],
       ['help', '', 'List these commands']
     ]);
+  }
+
+  /** The shipped review skills, as `review skills list | show` gives them: name, description, what it applies to, its prompt's opening. */
+  reviewSkills() {
+    return [
+      ['ai-ml', 'Machine-learning code -- data leakage across splits, unseeded nondeterminism, tensor-shape mismatches, eval hygiene, prompt-injection surfaces', '.ipynb, **/train/**, **/training/**, **/ml/**, **/models/**, **/notebooks/**, **/eval/**, **/evals/**, **/inference/**, **/prompts/**', "You are reviewing one change through one lens: machine-learning and model-calling code -- training, evaluation, data pipelines, inference, prompts. You get the change as a unified diff, its new-side lines numbered. Lines starting with `+` are what the change adds, lines starting with `-` are what it removes, and the rest is unchanged context. Review only what the change adds or alters. If the change is not ML or model-calling code, the answer is empty."],
+      ['back-end', 'Server code -- missing auth checks, N+1 queries, unsafe migrations, contract drift, validation at the boundary', '.go, .py, .rb, .java, .kt, .cs, .php, .rs, .ex, .exs, .scala, .sql, **/api/**, **/server/**, **/backend/**, **/handlers/**, **/routes/**, **/controllers/**, **/services/**, **/migrations/**', "You are reviewing one change through one lens: back-end code that serves requests or owns data. You get the change as a unified diff, its new-side lines numbered. Lines starting with `+` are what the change adds, lines starting with `-` are what it removes, and the rest is unchanged context. Review only what the change adds or alters. If the change is not server code, the answer is empty."],
+      ['concurrency', 'Concurrent code -- data races, lock ordering, check-then-act (TOCTOU), async lifetimes', 'c, cpp, csharp, go, java, kotlin, rust, scala, swift', "You are reviewing one change through one lens: concurrency -- threads, tasks, coroutines, callbacks and shared state. You get the change as a unified diff, its new-side lines numbered. Lines starting with `+` are what the change adds, lines starting with `-` are what it removes, and the rest is unchanged context. Review only what the change adds or alters. If the change touches nothing concurrent, the answer is empty."],
+      ['embedded', 'Firmware and drivers -- interrupt safety, fixed-width types, volatile, stack and heap discipline, blocking in tight loops', '.ino, .ld, **/firmware/**, **/embedded/**, **/drivers/**, **/hal/**, **/bsp/**, **/isr/**, **/rtos/**', "You are reviewing one change through one lens: embedded code -- firmware, drivers, code that touches hardware or runs under an RTOS. You get the change as a unified diff, its new-side lines numbered. Lines starting with `+` are what the change adds, lines starting with `-` are what it removes, and the rest is unchanged context. Review only what the change adds or alters. If the change is not embedded code, the answer is empty."],
+      ['front-end', 'Browser code -- XSS sinks, state races, accessibility regressions, uncontrolled re-renders', '.js, .jsx, .ts, .tsx, .mjs, .vue, .svelte, .html, .htm, .css, .scss, **/components/**, **/frontend/**, **/web/**, **/ui/**, **/pages/**', "You are reviewing one change through one lens: front-end code that runs in a browser. You get the change as a unified diff, its new-side lines numbered. Lines starting with `+` are what the change adds, lines starting with `-` are what it removes, and the rest is unchanged context. Review only what the change adds or alters. If the change is not browser code, the answer is empty."],
+      ['general-correctness', 'The bugs any change can carry -- wrong operators, off-by-one, inverted or missing conditions, swallowed errors, null and lifetime slips', '', "You are reviewing one change through one lens: general correctness. You get the change as a unified diff, its new-side lines numbered. Lines starting with `+` are what the change adds, lines starting with `-` are what it removes, and the rest is unchanged context. Review only what the change adds or alters: a defect in an unchanged line is not this change's."],
+      ['security', 'Ways the change could be abused -- secrets in the diff, injection, path traversal, unsafe deserialization, broken access checks', '', "You are reviewing one change through one lens: security. You get the change as a unified diff, its new-side lines numbered. Lines starting with `+` are what the change adds, lines starting with `-` are what it removes, and the rest is unchanged context. Review only what the change adds or alters: ask how an attacker could turn it against the system."]
+    ];
   }
 
   /** The seeded task recipes, as `task recipes show` gives them. */
@@ -3983,9 +4069,9 @@ class Component extends DCLogic {
     const runningJobs = s.jobs.filter((j) => j.state === 'running' && !j.finished).length;
     const runningTasks = s.tasks.filter((t) => t.status === 'running' && this.taskView(t).isRunning).length;
     const videoBusy = (s.vrun && !s.vrun.stopped ? 1 : 0) + (s.crender ? 1 : 0);
-    const places = [['chat', 'Sessions', '⌘1', 0], ['models', 'Models', '⌘2', runningJobs], ['suites', 'Suites', '⌘3', 0], ['tasks', 'Tasks', '⌘4', runningTasks], ['graph', 'Code graph', '⌘5', 0], ['video', 'Video', '⌘6', videoBusy], ['voice', 'Voice', '⌘7', s.vsay ? 1 : 0], ['knowledge', 'Knowledge', '⌘8', 0], ['training', 'Training', '⌘9', s.tr && s.tr.running ? 1 : 0], ['library', 'Library', '⌘0', 0]].map((p) => ({
+    const places = [['chat', 'Sessions', '⌘1', 0], ['models', 'Models', '⌘2', runningJobs], ['suites', 'Suites', '⌘3', 0], ['tasks', 'Tasks', '⌘4', runningTasks], ['graph', 'Code graph', '⌘5', 0], ['video', 'Video', '⌘6', videoBusy], ['voice', 'Voice', '⌘7', s.vsay ? 1 : 0], ['knowledge', 'Knowledge', '⌘8', 0], ['training', 'Training', '⌘9', s.tr && s.tr.running ? 1 : 0], ['library', 'Library', '⌘0', 0], ['review', 'Review', '⇧⌘R', s.rv && s.rv.running ? 1 : 0]].map((p) => ({
       label: p[1], key: p[2], current: s.screen === p[0], bg: s.screen === p[0] ? 'var(--surface-selection)' : '', color: s.screen === p[0] ? 'var(--text-primary)' : 'var(--text-secondary)', weight: s.screen === p[0] ? 500 : 400,
-      isChat: p[0] === 'chat', isModels: p[0] === 'models', isSuites: p[0] === 'suites', isTasks: p[0] === 'tasks', isGraph: p[0] === 'graph', isVideo: p[0] === 'video', isVoice: p[0] === 'voice', isKnowledge: p[0] === 'knowledge', isTraining: p[0] === 'training', isLibrary: p[0] === 'library',
+      isChat: p[0] === 'chat', isModels: p[0] === 'models', isSuites: p[0] === 'suites', isTasks: p[0] === 'tasks', isGraph: p[0] === 'graph', isVideo: p[0] === 'video', isVoice: p[0] === 'voice', isKnowledge: p[0] === 'knowledge', isTraining: p[0] === 'training', isLibrary: p[0] === 'library', isReview: p[0] === 'review',
       hasBadge: p[3] > 0, badge: p[3] + ' running', badgeColor: 'var(--status-accent)',
       aria: p[1] + ' ' + p[2] + (p[3] > 0 ? ' · ' + p[3] + ' running' : ''),
       go: () => this.setState({ screen: p[0], menu: null })
@@ -4724,7 +4810,7 @@ class Component extends DCLogic {
       recallSize: s.recallCount ? '41 MB index on this Mac' : 'nothing stored',
       nothingToForget: s.recallCount === 0,
       forget: () => this.setState({ confirm: { kind: 'forget' } }),
-      keys: [['New session', '⌘N'], ['New private session', '⇧⌘N'], ['New execute session', '⌥⌘N'], ['Switch model', '⇧⌘M'], ['Show or hide the inspector', '⌥⌘I'], ['System monitor', '⌥⌘M'], ['Console', '⇧⌘K'], ['Settings', '⌘,'], ['Stop the answer', '⌘.'], ['Search sessions', '⇧⌘F'], ['Sessions, Models, Suites, Tasks, Code graph, Video, Voice, Knowledge, Training, Library', '⌘1 – ⌘9, ⌘0'], ['Models library', '⇧⌘L'], ['Send', '⏎'], ['New line', '⇧⏎'], ['Commands', '/'], ['Mention a file', '@'], ['Allow once on a permission card', '⏎'], ['Deny on a permission card', 'esc'], ['Pick an answer on a card', '1 – 4'], ['Play or pause the focused player', 'space'], ['Generate, Speak, Plan or Render, from its form', '⌘⏎'], ['Hide the sidebar', '⌃⌘S']].map((x) => ({ label: x[0], keys: x[1] }))
+      keys: [['New session', '⌘N'], ['New private session', '⇧⌘N'], ['New execute session', '⌥⌘N'], ['Switch model', '⇧⌘M'], ['Show or hide the inspector', '⌥⌘I'], ['System monitor', '⌥⌘M'], ['Console', '⇧⌘K'], ['Settings', '⌘,'], ['Stop the answer', '⌘.'], ['Search sessions', '⇧⌘F'], ['Sessions, Models, Suites, Tasks, Code graph, Video, Voice, Knowledge, Training, Library', '⌘1 – ⌘9, ⌘0'], ['Review', '⇧⌘R'], ['Models library', '⇧⌘L'], ['Send', '⏎'], ['New line', '⇧⏎'], ['Commands', '/'], ['Mention a file', '@'], ['Allow once on a permission card', '⏎'], ['Deny on a permission card', 'esc'], ['Pick an answer on a card', '1 – 4'], ['Play or pause the focused player', 'space'], ['Generate, Speak, Plan or Render, from its form', '⌘⏎'], ['Hide the sidebar', '⌃⌘S']].map((x) => ({ label: x[0], keys: x[1] }))
     };
 
     /* ---------- suites ---------- */
@@ -4836,6 +4922,25 @@ class Component extends DCLogic {
         const task = { id: id, goal: rc ? rc.goal.replace(/\{\{[^}]*\}\}/g, ntInput).trim() : n.goal.trim(), kind: 'generic', status: 'running', base: 0, since: st.clock, rounds: Number(n.rounds), suite: suitesDef[n.suite].name, started: 'today ' + this.nowTime(), writes: n.writes, cmds: n.cmds, haltAt: null };
         this.setState({ tasks: [task].concat(st.tasks), taskId: id, overlay: null, screen: 'tasks' });
       }
+    };
+
+    /* ---------- review ---------- */
+    const rvS = s.rv || { tab: 'runs', skill: 'security' };
+    const updRv = (patch) => this.setState({ rv: Object.assign({}, this.state.rv || rvS, patch) });
+    const skillDefs = this.reviewSkills();
+    const skillSel = skillDefs.find((k) => k[0] === rvS.skill) || skillDefs[skillDefs.length - 1];
+    const rv = {
+      runsOn: rvS.tab === 'runs', targetsOn: rvS.tab === 'targets', skillsOn: rvS.tab === 'skills',
+      runsBg: rvS.tab === 'runs' ? 'var(--surface-selection)' : 'transparent',
+      targetsBg: rvS.tab === 'targets' ? 'var(--surface-selection)' : 'transparent',
+      skillsBg: rvS.tab === 'skills' ? 'var(--surface-selection)' : 'transparent',
+      showRuns: () => updRv({ tab: 'runs' }),
+      showTargets: () => updRv({ tab: 'targets' }),
+      showSkills: () => updRv({ tab: 'skills' }),
+      askPost: () => this.setState({ overlay: 'reviewpost' }),
+      cancelPost: () => this.setState({ overlay: null }),
+      skills: skillDefs.map((k) => ({ name: k[0], applies: 'shipped · ' + (k[2] || 'every file'), current: k === skillSel, bg: k === skillSel ? 'var(--surface-selection)' : '', pick: () => updRv({ skill: k[0] }) })),
+      skill: { name: skillSel[0], desc: skillSel[1], applies: skillSel[2] ? 'Applies to: ' + skillSel[2] : 'Applies to every file.', prompt: skillSel[3] }
     };
 
     /* ---------- the execute door ---------- */
@@ -5777,6 +5882,8 @@ class Component extends DCLogic {
       isKnowledge: s.screen === 'knowledge',
       isTraining: s.screen === 'training',
       isLibrary: s.screen === 'library',
+      isReview: s.screen === 'review',
+      reviewPostOpen: s.overlay === 'reviewpost',
       runtimeOpen: !!s.rtAsk && !s.rtAsk.hidden,
       monitorOpen: s.monitor,
       consoleOpen: s.console,
@@ -5794,7 +5901,7 @@ class Component extends DCLogic {
       openPdf: () => this.say('Opens the source in Preview at that page (prototype)')
     };
 
-    return { ui: ui, nav: nav, mon: mon, con: con, kno: kno, trn: trn, lb: lb, chat: chat, tg: tg, rt: rt, wal: wal, cr: cr, pr: pr, cmp: cmp, ins: ins, mdl: mdl, st: st, sh: sh, dlg: dlg, cf: cf, set: setv, sui: sui, tsk: tsk, nt: ntv, ex: ex, gr: gr, vid: vid, comp: comp, vox: vox, rtc: rtc };
+    return { ui: ui, nav: nav, mon: mon, con: con, kno: kno, trn: trn, lb: lb, chat: chat, tg: tg, rt: rt, wal: wal, cr: cr, pr: pr, cmp: cmp, ins: ins, mdl: mdl, st: st, sh: sh, dlg: dlg, cf: cf, set: setv, sui: sui, tsk: tsk, nt: ntv, ex: ex, rv: rv, gr: gr, vid: vid, comp: comp, vox: vox, rtc: rtc };
   }
 }
 </script>

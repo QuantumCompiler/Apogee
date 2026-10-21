@@ -4,10 +4,10 @@ import Testing
 
 @Suite("KeyMap")
 struct KeyMapTests {
-    @Test("the places are the design's seven, in its order, on ⌘1 to ⌘7")
+    @Test("the places are the design's eleven, in its order, on ⌘1 to ⌘9, ⌘0 and ⇧⌘R")
     func places() {
-        #expect(Destination.allCases.map(\.title) == ["Sessions", "Models", "Suites", "Tasks", "Code graph", "Video", "Voice", "Knowledge", "Training", "Library"])
-        #expect(Destination.allCases.map(\.key.symbols) == ["⌘1", "⌘2", "⌘3", "⌘4", "⌘5", "⌘6", "⌘7", "⌘8", "⌘9", "⌘0"])
+        #expect(Destination.allCases.map(\.title) == ["Sessions", "Models", "Suites", "Tasks", "Code graph", "Video", "Voice", "Knowledge", "Training", "Library", "Review"])
+        #expect(Destination.allCases.map(\.key.symbols) == ["⌘1", "⌘2", "⌘3", "⌘4", "⌘5", "⌘6", "⌘7", "⌘8", "⌘9", "⌘0", "⇧⌘R"])
         for destination in Destination.allCases {
             #expect(KeyMap.chord(for: .go(destination)) == destination.key)
         }
@@ -31,7 +31,9 @@ struct KeyMapTests {
         }
         #expect(KeyMap.reference.contains(KeyReference("Sessions, Models, Suites, Tasks, Code graph, Video, Voice, Knowledge, Training, Library", "⌘1 – ⌘9, ⌘0")))
         #expect(KeyMap.reference.contains(KeyReference("New execute session", "⌥⌘N")))
-        #expect(KeyMap.reference.count == 22)
+        #expect(KeyMap.reference.contains(KeyReference("Review", "⇧⌘R")))
+        #expect(Destination.review.key.symbols == "⇧⌘R", "the eleventh place, the number keys spent")
+        #expect(KeyMap.reference.count == 23)
     }
 
     @Test("chords are written as the Mac's menus write them")

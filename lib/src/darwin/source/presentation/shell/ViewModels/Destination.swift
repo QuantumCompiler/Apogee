@@ -1,8 +1,9 @@
 /// A place in the sidebar: one screen of the app, reached by its key.
 ///
-/// The design's ten places, in its order (`main.html`'s places bar,
+/// The design's eleven places, in its order (`main.html`'s places bar,
 /// `BuildLayout.dc.html`'s keys): ⌘1 to ⌘9, then ⌘0 -- Knowledge the eighth
-/// since 2c, Training the ninth since 2d, Library the tenth since 2e. Compositions live under Video,
+/// since 2c, Training the ninth since 2d, Library the tenth since 2e -- and
+/// Review the eleventh since 2g, on ⇧⌘R, the number keys spent. Compositions live under Video,
 /// as the design draws them -- its second tab -- not as a place of their own.
 public enum Destination: String, CaseIterable, Sendable, Identifiable {
     case sessions
@@ -15,6 +16,7 @@ public enum Destination: String, CaseIterable, Sendable, Identifiable {
     case knowledge
     case training
     case library
+    case review
 
     public var id: String { rawValue }
 
@@ -30,6 +32,7 @@ public enum Destination: String, CaseIterable, Sendable, Identifiable {
         case .knowledge: "Knowledge"
         case .training: "Training"
         case .library: "Library"
+        case .review: "Review"
         }
     }
 
@@ -46,11 +49,14 @@ public enum Destination: String, CaseIterable, Sendable, Identifiable {
         case .knowledge: "books.vertical"
         case .training: "graduationcap"
         case .library: "puzzlepiece.extension"
+        case .review: "arrow.triangle.pull"
         }
     }
 
-    /// ⌘1 for the first place, ⌘9 for the ninth, ⌘0 for the tenth.
+    /// ⌘1 for the first place, ⌘9 for the ninth, ⌘0 for the tenth; the
+    /// eleventh, Review, ⇧⌘R.
     public var key: KeyChord {
+        if self == .review { return KeyChord("r", [.shift, .command]) }
         let number = Destination.allCases.firstIndex(of: self)! + 1
         return KeyChord(number == 10 ? "0" : String(number), .command)
     }
@@ -78,6 +84,8 @@ public enum Destination: String, CaseIterable, Sendable, Identifiable {
         case .training:
             nil
         case .library:
+            nil
+        case .review:
             nil
         }
     }

@@ -533,6 +533,42 @@
       "y": 2720,
       "title": "Tasks · new task from a recipe",
       "page": "build"
+    },
+    "ScreenReview.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 30400,
+      "y": 2720,
+      "title": "Review · a dry run, its findings",
+      "page": "build"
+    },
+    "ScreenReviewPost.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 31920,
+      "y": 2720,
+      "title": "Review · posting, asked first",
+      "page": "build"
+    },
+    "ScreenReviewTargets.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 33440,
+      "y": 2720,
+      "title": "Review · targets and the last sweep",
+      "page": "build"
+    },
+    "ScreenReviewSkills.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 34960,
+      "y": 2720,
+      "title": "Review · the skills",
+      "page": "build"
     }
   },
   "createdOnFiles": {
@@ -563,8 +599,8 @@
     },
     "library": {
       "kind": "title1",
-      "maxW": 30320,
-      "text": "Screens — models, suites, tasks, the code graph, knowledge, training and the library",
+      "maxW": 36400,
+      "text": "Screens — models, suites, tasks, the code graph, knowledge, training, the library and review",
       "x": 0,
       "y": 2420,
       "page": "build"
@@ -649,6 +685,10 @@
     "ScreenLibrary.dc.html",
     "ScreenLibrarySymphonies.dc.html",
     "ScreenLibraryMCP.dc.html",
+    "ScreenReview.dc.html",
+    "ScreenReviewPost.dc.html",
+    "ScreenReviewTargets.dc.html",
+    "ScreenReviewSkills.dc.html",
     "ScreenVideoClip.dc.html",
     "ScreenVideoRun.dc.html",
     "ScreenVideoConsent.dc.html",

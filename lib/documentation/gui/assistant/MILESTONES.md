@@ -748,3 +748,62 @@ Every screen stays a machine-mode client of the binary, tested hermetically.
   - the `/play ` catalog;
   - the new-task sheet with `digest-folder`, its input and grant, and the expansion.
 - Bare `lib/scripts/cicd.sh --test` passed in 7m19s: the CLI's 3,593 tests, none failing, and the app's 303 cases, none failing and none skipped, with no warning.
+
+### 2026-10-21 — `review-screen` (backlog item 2g): merge requests, targets and skills
+
+**Why.** The review agent (the CLI's track 48) had no GUI place. The TUI classified it as covered by the runner and left a Review view for later; the parity mandate (2026-10-20) makes the GUI's view now.
+
+- [x] **The Review place** (`PresentationReview`, `source/presentation/review/`, a new module): the eleventh place, on ⇧⌘R, with tabs Reviews · Targets and sweeps · Skills.
+  - **`ReviewViewModel`, a review:**
+    - `RunForm` gives the reference, the lenses (`--skills`) and the model (`-m`).
+    - **A review is a dry run first:** `review mr <ref> --dry-run --output-format json`, supervised on the jobs core with the CLI's narration (`[review] hunting with security`) as its busy line. Its `review.run` document is read from stdout and drawn: the merge request, head and mode, the lenses and plan, each finding (severity, kind, `file:line`, the claim, the suggested fix, confidence, the lenses that found it, inline or summary-only), the counts in the CLI's order, the batch's fate and the notes.
+    - **Posting only on the person's click on the shown batch:**
+      - **Post…** is offered only on a dry run with findings, and asks first, saying what goes (`postWords`).
+      - Only that yes passes `--yes`, on the same review's argv.
+      - The posted document is drawn after.
+    - **Silence is a complete review:** "nothing to say: silence is a complete review" is drawn as one, never as a failure, and no Post is offered.
+    - **A forge's refusal** (missing `gh`, logged out) is shown in the CLI's last words, its fix with it. No document is made up.
+  - **Targets and sweeps:**
+    - **Targets:** `review targets` is listed, with each target's grant ("posts when swept" or "documents only"). **Add target…** builds `review targets add <name> --repo|--owner … [--forge] [--host] [--skills] [--post] [--drafts] [-m]` as typed. **Remove…** asks first (`review targets delete`). Each change is read back.
+    - **A sweep** is a dry run (`review sweep --dry-run [--target …] [--since …] [-m]`) unless consented. **Sweep and post…** asks, naming the targets it would post on: those whose own `post: true` grants it, or every one it reaches with `--allow-post`, chosen in the sheet.
+    - **The `review.sweep` document is drawn:** the totals; per target its grant; per project its watermark before and after, or that a first sweep starts at now; each review; any error; and where the CLI kept the document.
+  - **Skills:** `review skills list` shows the seven lenses and the person's own, with their source and what each applies to (or every file). One is read whole with `review skills show`: its prompt, read only.
+  - `ReviewScreen`, `RunPage`, `FindingCard`, `TargetsView`, `SweepPage`, `SkillsView`, `TargetSheet`, `SweepSheet`, `RunningLine`.
+- [x] **The reads** (`Review.swift`): `ReviewFinding`, `ReviewRun` (with `Posted`, `isSilent`, `inlineFindings`, `overCap`), `ReviewTarget`, `ReviewSweep` (with `Target`, `Project`), `ReviewSkill`.
+- [x] **The shell:** `Destination.review`, the eleventh place on ⇧⌘R (`arrow.triangle.pull`), and the key on the keyboard list.
+- [x] **The parity table:** `review` is a screen of `PresentationReview`. That makes 24 screens and **no gap**: every CLI command now has its place.
+- [x] **The design (canvas version 41):**
+  - the prototype's Review place, with its place-bar icon and ⇧⌘R;
+  - the boards `ScreenReview`, `ScreenReviewPost`, `ScreenReviewTargets` and `ScreenReviewSkills` (48);
+  - the contract board's REVIEW rows: 58 ready and 22 gaps, with **gap G24**, "Post the batch a dry run found";
+  - the Layout board's ⇧⌘R row.
+
+  The health check passes all 48 start screens. Every skill's description and prompt opening on the boards is the binary's own.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **Review is the eleventh place, on ⇧⌘R.** The design gives every place a key, and ⌘1–⌘0 are spent. A review is no library resource, so it isn't a Library tab.
+- **The post runs the review again.** No verb posts a dry run's kept batch, so the consent says the post reviews again and posts what that run finds; the posted document is drawn after. Recorded as **G24**.
+- **The app never sends an unconsented, non-dry run.** A pipe's "nobody to ask -- run with --yes to post" refusal is read as the CLI says it, never provoked.
+- **A sweep that posts names where it posts** before it runs. `--allow-post` is a choice in the sheet, never a default.
+- **Skills are read only** (editing them is out of scope). This session's reviews are held in memory: the CLI keeps no review history but a sweep's documents, so the Reviews tab shows the last run.
+- **`gh` is found the way the CLI finds it, on the child's PATH.** An app opened from the Finder runs with launchd's PATH, so a `gh` installed by Homebrew can be "not on PATH" for it. The CLI's own refusal says so verbatim, and the app does not search for `gh` itself.
+
+**Verified.**
+- `scripts/build.sh test`: 314 cases, no Swift warning, including the layering check over the new module. They read documents recorded from the installed binary over a scratch home, with a fake `gh` first on PATH (the CLI's own review e2e's way) and a mock reviewer:
+  - `review-run-{dry,refused,posted,silent}`, `review-targets`, `review-sweep`, `review-skills`, `review-skill-show`;
+  - the forge's refusal with no `gh` (`review-no-gh.err`).
+
+  New tests cover:
+  - every read;
+  - a dry run argv-exact, supervised, its finding drawn;
+  - the consent pin: nothing posts without the yes, cancel runs nothing, `--yes` appears once, on the consented run, and the posted document is read;
+  - silence offering no Post;
+  - the forge's refusal verbatim;
+  - targets added (repository, and owner with forge, host, post and drafts), removal asked then run, read back;
+  - a dry sweep's argv and document, the posting targets named, the consented `--allow-post` sweep;
+  - the skills listed and one shown.
+- **Drawn offscreen over the real binary and the fake `gh`:**
+  - a dry review of `acme/widget#12`, its finding and Post…;
+  - the targets, and a sweep that reviewed nothing new past its kept watermark;
+  - the security lens whole.
+- Bare `lib/scripts/cicd.sh --test` passed in 7m25s: the CLI's 3,593 tests, none failing, and the app's 314 cases, none failing and none skipped, with no warning.
