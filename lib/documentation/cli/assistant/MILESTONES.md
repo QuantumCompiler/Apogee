@@ -8947,3 +8947,62 @@ Decisions taken while building, for veto:
 **Verified.** `lib/scripts/cicd.sh --test`: 3586 of 3586, two skipped and said (the real caption burn without libass, and the existing pdftotext case); the darwin suite's 102 cases passed; `cli.machine_mode`'s private phase ran on the real binary.
 
 **Not run on real weights**: every door runs on the mock backend; the compaction's summary is the utility model's own call.
+
+### 2026-10-20 — `doctor-config-growths` (backlog item 52e): ffmpeg's abilities, scalar keys, forgetting recall, typed model documents
+
+**Why.** Four smaller gaps the design's contract board and the GUI spike's probes found:
+- **(G14)** `check` said nothing about whether ffmpeg could burn captions (libass) or encode H.264 (x264). That was learned only when the first composition failed.
+- **(G15)** plain scalar keys had no setter: the web search's address and `memory.recall` were set only in an editor. `config get` could not even read `memory.recall`.
+- **(G16)** there was no way to forget the recall index.
+- **(G17)** `models info <set> --output-format json` carried only display strings, with no window, cache or byte facts.
+
+- [x] **The doctor reads ffmpeg's abilities.** The `Video` section gained `ffmpeg captions` (the `subtitles` filter, libass) and `ffmpeg h264` (the `libx264` encoder).
+  - They are read from ffmpeg's own `-filters` and `-encoders` listings through the seam's one child (`platform::ffmpeg_listing`, with `encoder_listed` beside `filter_listed`). A test scripts the probe through `CheckInputs::ffmpeg_listing`.
+  - A missing ability is `skipped`, saying what happens instead (captions kept beside the video as an SRT; clips encoded as MPEG-4 Part 2), and its remedy is the command that brings it on that platform. It is optional, as pdftotext is, so a fresh install still ends green (M11). `cli.install_parity` caught a first cut that warned:
+    - macOS: Homebrew's keg-only `ffmpeg-full` for libass, measured here (Homebrew's `ffmpeg` carries x264 but not libass), and `brew install ffmpeg` for x264;
+    - Linux: `sudo apt install ffmpeg`;
+    - Windows: `winget install Gyan.FFmpeg`.
+  - An ffmpeg missing or not answering skips both rows, never a pass. On this machine the rows read `skipped` for captions and `ok` for h264.
+- [x] **`config set <key> <value>`, allow-listed**, through `contracts/config_edit.h`'s new `set_scalar`.
+  - `settable_scalars()` is the declared table: `memory.recall`, `knowledge.auto_capture`, `ui.markdown`, `ui.thinking_display`, `attachments.graph`, `tools.search.provider`, `tools.search.url` and `tools.search.results`, each with its kind.
+  - Each value is written as its kind reads: a boolean or number bare, a word or text quoted when it must be. The line is replaced in place keeping its comment, or inserted into its section, or into the new `set_subsection_rendered` for the `tools.search` block (an inline block is refused, never misread). JSON and YAML configs alike go through the editor's one round trip.
+  - `scalar_refusal` refuses anything else by name:
+    - a secret-shaped key (`api_key`, `token`, `secret`, `password`, `credential`) toward `apogee auth add`;
+    - a key a typed verb owns toward that verb (`set-default`, `set-backend`, `set-permission`, `add-allowed-host`, …);
+    - else it quotes the table.
+  - `config get` now reads every key `config set` moves.
+  - The admin twin is `PUT /v1/admin/config/{id}`, through the same transform. A JSON boolean or number is the CLI's text, the result is byte-identical by test, and a refusal is a 400 with the file untouched.
+- [x] **`chats recall --forget`.** `chats recall` says what recall holds: the summaries, and the chats marked due one.
+  - `--forget` removes the index (with its write-ahead files) and every due mark, so nothing is summarised back into it at the next start. Every transcript stays.
+  - It shows the plan and asks at a terminal; `--yes` is for scripts; with no terminal it is refused naming the flag. `--yes` without `--forget` is refused.
+  - It says that finished chats are summarised again while `memory.recall` is on, naming `config set memory.recall false`.
+  - The verb is CLI-only, as recall is (26l): the parity table classes it a carve-out.
+- [x] **A typed `data` on `models info <set> --output-format json`** (`stored_set_data`), beside `fields[]`, which a test holds byte for byte to the record the text makes.
+  - `format`, `handle`, `bytes` (every file of the set);
+  - `architecture`;
+  - `window` (`tokens`, `source`, `trained`, from the GGUF header's `local_window` or the MLX reader's `mlx_window`);
+  - `cache` (a GGUF's `bytes`, `type`, `sliding_positions`);
+  - `lineage` as entries (`{kind, from, detail, inferred, missing}` from `Lineage::chain`, or an MLX set's record).
+  - Each is null where the format's reader says nothing: a pipeline's or a voice model's window and cache are never guessed.
+  - A pull's stream (52b) ends with this document, since it is the same `model_info_document`.
+- [x] **The tests**:
+  - `contracts/config_edit_test`: each key's round trip in place, the nested block made then moved, the refusal table.
+  - `httpserver/admin_config_test`: the twin byte-identical, and its refusals.
+  - `httpserver/serve_test`: the route.
+  - `httpserver/parity_test`: `config set`'s twin, and `chats recall` carved out.
+  - `cli/check_test`: the ffmpeg matrix over a scripted probe, and the encoder parser.
+  - `cli.install_parity`: a fresh install still ends with no warnings, on a machine whose ffmpeg has no libass.
+  - `cli/chat_test`: the forget verb's plan, refusal, consent and absence, with the transcript kept.
+  - `cli/read_documents_test`: the typed document for a GGUF, an MLX model, a pipeline and a voice model, with prose identity.
+  - `cli/lifecycle_test`: `config set value` marked free text on purpose, its key completing from the table.
+
+Decisions taken while building, for veto:
+- **The allow-list's first entries** are the eight keys above: the plain scalars the loader reads with no typed verb of their own. `auto_rag`, a top-level key, waits for a top-level writer. The `paths.*` keys are left to an editor: they move where the store lives.
+- **The secret shapes** are refused by substring of the key, so a new secret-bearing field is refused before anyone writes it, not after.
+- **`chats recall` with no flag reads** what recall holds; `--forget` is the destructive half. Forgetting also clears the due marks, or the next start would summarise chats straight back in.
+- **The remedies are package installs, named per platform**. On macOS, libass needs Homebrew's `ffmpeg-full`, linked in place of `ffmpeg`: the hint is `brew install ffmpeg-full && brew unlink ffmpeg; brew link --force ffmpeg-full`. The rows are `skipped`, not warnings or failures: a composition works without either, in a lesser form, and a fresh install must end green.
+- **`data` rides only a stored set's document**. A backend's typed facts are its config's, read by `config get`.
+
+**Verified.** `lib/scripts/cicd.sh --test`: 3593 of 3593, two skipped and said (the real caption burn without libass, and the existing pdftotext case); the darwin suite passed; the doctor's rows read this machine's real ffmpeg (no libass: skipped with its command; x264: ok).
+
+**Not run on real weights**: `models info`'s typed data reads files only; the fixtures stand in for real sets.

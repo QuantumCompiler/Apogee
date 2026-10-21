@@ -1299,6 +1299,21 @@ key.
 On a served request nobody can answer a prompt, so `ask` means deny there:
 `allow` in the config is the only way a destructive tool runs under `serve`.
 
+### `PUT /v1/admin/config/{id}`
+
+The twin of `apogee config set <key> <value>` (52e). `{id}` is one of the
+plain scalars the CLI moves — `memory.recall`, `knowledge.auto_capture`,
+`ui.markdown`, `ui.thinking_display`, `attachments.graph`,
+`tools.search.provider`, `tools.search.url`, `tools.search.results` — and the
+body `{"value": …}`: a string, or a boolean or a whole number, which is the
+CLI's text (`false`, `7`). The same transform writes both, so the bytes are
+identical: the line replaced in place keeping its comment, else inserted into
+its section (and block), else the section appended. `200 {key, value,
+restart_required}` — `restart_required` is `true` on a server, which read the
+config at startup. `400` naming why for a key outside the table — a
+secret-shaped key is pointed at `apogee auth add`, a key a typed route owns at
+that route's verb — or a value the key does not take; the file is untouched.
+
 ### `GET /v1/admin/allowed-hosts`
 
 The websites `fetch_url` reaches without asking — `tools.allowed_hosts`, as

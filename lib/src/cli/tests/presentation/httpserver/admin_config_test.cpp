@@ -703,3 +703,41 @@ TEST_CASE("a backend edited over HTTP is byte-identical to the CLI's, and never 
     CHECK(admin_set_backend_fields(fixture.context(), "nope", post(nlohmann::json{{"model", "x"}}))
               .status == 404);
 }
+
+TEST_CASE("config set's twin moves the same scalars the CLI moves, byte for byte",
+          "[httpserver][admin][config-set]") {
+    // 52e: the allow-listed scalars through the one `set_scalar`, from either
+    // door; a value as a JSON boolean or number is the CLI's text.
+    const Fixture fixture;
+    HttpRequest put;
+    put.method = "PUT";
+    put.body = R"({"value":false})";
+    const HttpResponse recall = admin_put_config_value(fixture.context(), "memory.recall", put);
+    REQUIRE(recall.status == 200);
+    CHECK(nlohmann::json::parse(recall.body) ==
+          nlohmann::json{{"key", "memory.recall"}, {"value", "false"}, {"restart_required", true}});
+    put.body = R"({"value":"http://127.0.0.1:8888"})";
+    REQUIRE(admin_put_config_value(fixture.context(), "tools.search.url", put).status == 200);
+    put.body = R"({"value":7})";
+    REQUIRE(admin_put_config_value(fixture.context(), "tools.search.results", put).status == 200);
+
+    fixture.cli({"config", "set", "memory.recall", "false"});
+    fixture.cli({"config", "set", "tools.search.url", "http://127.0.0.1:8888"});
+    fixture.cli({"config", "set", "tools.search.results", "7"});
+    CHECK(Fixture::bytes(fixture.http_config) == Fixture::bytes(fixture.cli_config));
+
+    // The refusals the CLI makes, in the envelope, the file untouched.
+    const std::string before = Fixture::bytes(fixture.http_config);
+    put.body = R"({"value":"sk-123"})";
+    const HttpResponse secret =
+        admin_put_config_value(fixture.context(), "backends.x.api_key", put);
+    CHECK(secret.status == 400);
+    CHECK(secret.body.find("apogee auth add") != std::string::npos);
+    put.body = R"({"value":"maybe"})";
+    CHECK(admin_put_config_value(fixture.context(), "memory.recall", put).status == 400);
+    put.body = R"({"value":[1]})";
+    CHECK(admin_put_config_value(fixture.context(), "memory.recall", put).status == 400);
+    put.body = R"({})";
+    CHECK(admin_put_config_value(fixture.context(), "memory.recall", put).status == 400);
+    CHECK(Fixture::bytes(fixture.http_config) == before);
+}

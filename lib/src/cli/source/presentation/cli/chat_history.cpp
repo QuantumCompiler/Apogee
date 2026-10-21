@@ -278,6 +278,63 @@ void ChatsCommand::bind(CLI::App& root, const RootContext& context) {
                   << "\n";
     });
 
+    // `chats recall` (52e): what recall holds, and with --forget every
+    // chat's summary gone -- never a transcript -- shown first, asked at a
+    // terminal, --yes for scripts. CLI-only, as recall is (26l).
+    auto recall_forget = std::make_shared<bool>(false);
+    auto recall_yes = std::make_shared<bool>(false);
+    CLI::App* recall = cmd->add_subcommand(
+        "recall", "Show what recall holds of earlier chats, or forget it all with --forget");
+    recall->add_flag("--forget", *recall_forget,
+                     "Forget every chat's summary -- the transcripts stay");
+    recall->add_flag("-y,--yes", *recall_yes, "With --forget: do not ask first (for scripts)");
+    recall->callback([recall_forget, recall_yes, &context]() {
+        const RecallHoldings held = recall_holdings();
+        const std::string holds =
+            std::to_string(held.summaries) + " chat summar" + (held.summaries == 1 ? "y" : "ies") +
+            " in " + held.index.string() +
+            (held.pending == 0 ? std::string{}
+                               : ", " + std::to_string(held.pending) + " more due one");
+        if (!*recall_forget) {
+            if (*recall_yes) {
+                fail("--yes answers --forget's question -- give --forget too");
+            }
+            std::cout << "recall holds " << holds << "\n";
+            return;
+        }
+        if (held.summaries == 0 && held.pending == 0) {
+            std::cout << "recall holds nothing -- nothing to forget\n";
+            return;
+        }
+        if (!*recall_yes) {
+            if (!platform::is_terminal(platform::StandardStream::In) || stdin_is_piped()) {
+                fail("forgetting recall removes " + holds +
+                     " -- add --yes to do it with no terminal to ask at");
+            }
+            std::cerr << "Forget " << holds << "? Every transcript stays. [y/N] " << std::flush;
+            std::string answer;
+            if (!std::getline(std::cin, answer) ||
+                (answer != "y" && answer != "Y" && answer != "yes")) {
+                std::cout << "left as it was\n";
+                return;
+            }
+        }
+        const RecallHoldings forgot = forget_all_recall();
+        bool recalls = true;
+        try {
+            recalls = harness::load_config(harness::resolve_config_path(context.config_path))
+                          .memory.recall;
+        } catch (const std::exception&) {
+            recalls = true;
+        }
+        std::cout << "forgot " << forgot.summaries << " chat summar"
+                  << (forgot.summaries == 1 ? "y" : "ies") << " -- every transcript stays"
+                  << (recalls ? "; chats finished from now on are summarised again (apogee config "
+                                "set memory.recall false stops it)"
+                              : "")
+                  << "\n";
+    });
+
     auto delete_name = std::make_shared<std::string>();
     CLI::App* remove = cmd->add_subcommand("delete", "Delete a conversation");
     remove->add_option("name", *delete_name, "Chat id or name")->type_name(kChatValue)->required();

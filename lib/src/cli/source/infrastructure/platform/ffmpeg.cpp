@@ -1105,4 +1105,40 @@ bool ffmpeg_has_filter(std::string_view name, const FfmpegLimits& limits) {
     return ran.error.empty() && filter_listed(ran.out, name);
 }
 
+bool encoder_listed(std::string_view listing, std::string_view name) {
+    while (!listing.empty()) {
+        const std::size_t end = listing.find('\n');
+        const std::string_view line = listing.substr(0, end);
+        listing = end == std::string_view::npos ? std::string_view{} : listing.substr(end + 1);
+        // ` V....D libx264  libx264 H.264 …`: six flag columns, then the name.
+        const std::size_t flags = line.find_first_not_of(" \t");
+        if (flags == std::string_view::npos) {
+            continue;
+        }
+        const std::size_t gap = line.find_first_of(" \t", flags);
+        if (gap == std::string_view::npos || gap - flags != 6) {
+            continue;
+        }
+        const std::size_t at = line.find_first_not_of(" \t", gap);
+        if (at == std::string_view::npos) {
+            continue;
+        }
+        const std::size_t stop = std::min(line.find_first_of(" \t\r", at), line.size());
+        if (line.substr(at, stop - at) == name) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::optional<std::string> ffmpeg_listing(std::string_view flag, const FfmpegLimits& limits,
+                                          std::string& error) {
+    const Run ran = run("ffmpeg", {"-hide_banner", std::string{flag}}, limits);
+    if (!ran.error.empty()) {
+        error = ran.error;
+        return std::nullopt;
+    }
+    return ran.out;
+}
+
 }  // namespace apogee::platform

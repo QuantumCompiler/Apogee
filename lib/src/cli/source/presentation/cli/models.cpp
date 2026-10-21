@@ -1690,6 +1690,166 @@ std::string read_model_info(const harness::Config& config, std::string_view name
                              ProviderLens{view.get(), &cache, &store});
 }
 
+namespace {
+
+/// The bytes of every regular file under `dir`.
+[[nodiscard]] std::uintmax_t bytes_under(const std::filesystem::path& dir) {
+    std::uintmax_t total = 0;
+    std::error_code code;
+    for (std::filesystem::recursive_directory_iterator it{dir, code}, end; !code && it != end;
+         it.increment(code)) {
+        if (it->is_regular_file(code)) {
+            total += it->file_size(code);
+        }
+    }
+    return total;
+}
+
+[[nodiscard]] std::string_view origin_word(models::OriginKind kind) {
+    switch (kind) {
+        case models::OriginKind::Pulled:
+            return "pulled";
+        case models::OriginKind::Converted:
+            return "converted";
+        case models::OriginKind::Quantized:
+            return "quantized";
+        case models::OriginKind::Trained:
+            return "trained";
+        case models::OriginKind::Unknown:
+            break;
+    }
+    return "unknown";
+}
+
+/// Each step of `origin`'s chain as an entry: how it came, from what, its
+/// detail, and whether the record said so or the store's shape did.
+[[nodiscard]] nlohmann::json lineage_entries(const models::Lineage& lineage,
+                                             const models::Origin& origin) {
+    nlohmann::json out = nlohmann::json::array();
+    for (const models::LineageLink& link : lineage.chain(origin)) {
+        out.push_back({{"kind", std::string{origin_word(link.origin.kind)}},
+                       {"from", link.origin.from},
+                       {"detail", link.origin.detail},
+                       {"inferred", link.origin.inferred},
+                       {"missing", link.missing}});
+    }
+    return out;
+}
+
+/// A window as data: its tokens, whether the config set it, the trained
+/// window when the files state one -- null when nothing says.
+[[nodiscard]] nlohmann::json window_of(std::int64_t window, bool configured, std::int64_t trained) {
+    if (window <= 0) {
+        return nullptr;
+    }
+    return {{"tokens", window},
+            {"source", configured ? "context_size" : "default"},
+            {"trained", trained > 0 ? nlohmann::json(trained) : nlohmann::json(nullptr)}};
+}
+
+/// `models info`'s typed `data` for one stored set (52e), beside its prose
+/// `fields[]`: the format, the bytes on disk, the window and the cache it
+/// costs where the format's own reader knows them (the GGUF header, the MLX
+/// files), and the lineage as entries -- read through the same readers the
+/// prose lines are, and null where they say nothing: an unknown is never
+/// guessed. Null for a name that is not one stored set.
+[[nodiscard]] nlohmann::json stored_set_data(const harness::Config& config, std::string_view name,
+                                             const std::filesystem::path& models_dir) {
+    const models::StoreRoots roots = store_roots_for(config, models_dir);
+    const models::StoreTarget target = models::resolve_store_target(roots, name);
+    if (!target.error.empty() || target.outside || target.id.empty()) {
+        return nullptr;
+    }
+    const std::string handle = models::weights_handle(target.model, target.format, target.id);
+    const models::Lineage lineage = models::read_lineage(roots);
+    nlohmann::json data{
+        {"format", target.format},           {"handle", handle},  {"bytes", nullptr},
+        {"architecture", nullptr},           {"window", nullptr}, {"cache", nullptr},
+        {"lineage", nlohmann::json::array()}};
+    if (target.format == models::kGgufFormat) {
+        for (const models::StoredGguf& stored : models::list_store_ggufs(roots, target.model)) {
+            if (stored.id != target.id) {
+                continue;
+            }
+            data["bytes"] = bytes_under(stored.dir);
+            data["lineage"] =
+                lineage_entries(lineage, lineage.origin_of(stored.file, std::nullopt));
+            const models::GgufInfo info = models::inspect_gguf(stored.file);
+            if (info.parsed && !info.is_projector()) {
+                if (!info.architecture.empty()) {
+                    data["architecture"] = info.architecture;
+                }
+                const models::LocalWindow window = models::local_window(info, {});
+                data["window"] = window_of(window.window, window.configured, window.trained);
+                if (window.cache_bytes.has_value()) {
+                    data["cache"] = {{"bytes", *window.cache_bytes},
+                                     {"type", std::string{harness::to_string(window.cache_type)}},
+                                     {"sliding_positions", window.sliding_positions}};
+                }
+            }
+            return data;
+        }
+        return nullptr;
+    }
+    if (target.format == models::kMlxFormat) {
+        for (const models::StoredMlx& stored : models::list_store_mlx(roots, target.model)) {
+            if (stored.id != target.id) {
+                continue;
+            }
+            const models::MlxInfo info = models::read_mlx_info(stored.dir);
+            data["bytes"] = info.bytes;
+            if (!info.architecture.empty()) {
+                data["architecture"] = info.architecture;
+            }
+            const models::MlxWindow window = models::mlx_window(info, {});
+            data["window"] = window_of(window.window, window.configured, window.trained);
+            // The record it was made by: a pull's ref, or the set a
+            // conversion read.
+            if (const std::optional<models::Snapshot> record = models::load_snapshot(stored.dir);
+                record.has_value()) {
+                data["lineage"].push_back(
+                    {{"kind", record->source == "convert" ? "converted" : "pulled"},
+                     {"from", record->ref},
+                     {"detail", record->source},
+                     {"inferred", false},
+                     {"missing", false}});
+            }
+            return data;
+        }
+        return nullptr;
+    }
+    std::filesystem::path dir;
+    if (target.format == models::kPipelineFormat) {
+        for (const models::StoredPipeline& stored :
+             models::list_store_pipelines(roots, target.model)) {
+            dir = stored.id == target.id ? stored.dir : dir;
+        }
+    } else if (target.format == models::kVoiceFormat) {
+        for (const models::StoredVoice& stored : models::list_store_voices(roots, target.model)) {
+            dir = stored.id == target.id ? stored.dir : dir;
+        }
+    } else {
+        for (const models::StoredSnapshot& stored :
+             models::list_store_snapshots(roots, target.model)) {
+            dir = stored.id == target.id ? stored.dir : dir;
+        }
+        if (!dir.empty()) {
+            if (const std::string architecture = models::snapshot_architecture(dir);
+                !architecture.empty()) {
+                data["architecture"] = architecture;
+            }
+            data["lineage"] = lineage_entries(lineage, lineage.origin_of(handle));
+        }
+    }
+    if (dir.empty()) {
+        return nullptr;
+    }
+    data["bytes"] = bytes_under(dir);
+    return data;
+}
+
+}  // namespace
+
 nlohmann::json model_info_document(const harness::Config& config, std::string_view name,
                                    const std::filesystem::path& config_path,
                                    const BusyProgress& progress) {
@@ -1699,6 +1859,13 @@ nlohmann::json model_info_document(const harness::Config& config, std::string_vi
     }
     nlohmann::json document = render_record_document(body);
     document["name"] = std::string{name};
+    // A stored set's facts as data (52e), beside the prose fields unchanged.
+    if (config.backends.find(std::string{name}) == config.backends.end()) {
+        if (nlohmann::json data = stored_set_data(config, name, harness::models_dir());
+            !data.is_null()) {
+            document["data"] = std::move(data);
+        }
+    }
     return document;
 }
 

@@ -6,7 +6,7 @@
 
 **Seam + files.** `source/presentation/settings/` (the window, five panes; view-models), `source/presentation/styles/` (the theme switch over the tokens' three sets), `source/business/reads/` (config/auth/check/providers commands), `source/data/preferences/` (theme, folders, startup). Tests: pane view-models over scripted documents; the auth flow's stdin write and zero-retention pinned; check rows with remedies and the fix/bootstrap buttons' commands; the G15 read-only fallback; theme switching over the tokens; hermetic.
 
-**Reference.** The five `ScreenSettings*` boards, `ColorTokens.dc.html`, `tokens.json`; the contract board's SETTINGS rows (G15/G16 fallbacks); [52e](../../cli/backlog/v0.2.0/doctor-config-growths.md) cross-referenced, not gated; the CLI's secrets invariant — the stdin discipline mirrored.
+**Reference.** The five `ScreenSettings*` boards, `ColorTokens.dc.html`, `tokens.json`; the contract board's SETTINGS rows (G15/G16 fallbacks); [52e](../../cli/assistant/MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths) (shipped 2026-10-20) cross-referenced, not gated; the CLI's secrets invariant — the stdin discipline mirrored.
 
 **Decisions made** (dated):
 - 2026-10-20 — From the design-completion spike (the user's call); the three-theme Appearance setting supersedes 1a's system-following default (the design's call, standing — `styles` owns the switch).

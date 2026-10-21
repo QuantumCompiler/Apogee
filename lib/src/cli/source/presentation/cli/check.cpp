@@ -1809,6 +1809,77 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
     }
 }
 
+/// The command that brings an ffmpeg with `ability` on `host` (52e): a
+/// package that carries it, runnable as written.
+[[nodiscard]] std::string ffmpeg_remedy(std::string_view host, std::string_view ability) {
+    if (host.starts_with("macos")) {
+        // Homebrew's ffmpeg carries x264 and no libass; its keg-only
+        // ffmpeg-full carries both (2026-10-20).
+        return ability == "x264" ? "brew install ffmpeg"
+                                 : "brew install ffmpeg-full && brew unlink ffmpeg; brew link "
+                                   "--force ffmpeg-full";
+    }
+    if (host.starts_with("windows")) {
+        return "winget install Gyan.FFmpeg";
+    }
+    return "sudo apt install ffmpeg";
+}
+
+/// What the ffmpeg on PATH can do for a video (52e): whether a
+/// composition's captions burn into its frames (the `subtitles` filter,
+/// libass) and whether its clips encode as H.264 (`libx264`), read from
+/// ffmpeg's own listings through the seam's one child. ffmpeg missing, or
+/// not answering, skips both -- never a pass. A missing ability is a skip
+/// too, with the command that brings it: an optional ability, as pdftotext
+/// is, so a fresh install still ends green (M11) -- a composition works
+/// without either, in a lesser form.
+void check_ffmpeg_abilities(CheckReport& report, const CheckInputs& inputs) {
+    const std::string host =
+        inputs.host_target.empty() ? std::string{platform::host_target()} : inputs.host_target;
+    constexpr std::string_view kCaptions = "ffmpeg captions";
+    constexpr std::string_view kH264 = "ffmpeg h264";
+    if (!inputs.ffmpeg_listing && platform::ffmpeg_path().empty()) {
+        for (const std::string_view name : {kCaptions, kH264}) {
+            add(report, Status::Skipped, "Video", std::string{name},
+                "ffmpeg is not installed -- video generate and compose need it to assemble",
+                ffmpeg_remedy(host, name == kH264 ? "x264" : "libass"));
+        }
+        return;
+    }
+    const auto ask = [&inputs](std::string_view flag, std::string& error) {
+        if (inputs.ffmpeg_listing) {
+            return inputs.ffmpeg_listing(flag, error);
+        }
+        return platform::ffmpeg_listing(flag, {}, error);
+    };
+    std::string error;
+    if (const std::optional<std::string> filters = ask("-filters", error); !filters.has_value()) {
+        add(report, Status::Skipped, "Video", std::string{kCaptions},
+            "could not ask ffmpeg for its filters -- " + error);
+    } else if (platform::filter_listed(*filters, "subtitles")) {
+        add(report, Status::Ok, "Video", std::string{kCaptions},
+            "libass -- a composition burns its captions into the frames");
+    } else {
+        add(report, Status::Skipped, "Video", std::string{kCaptions},
+            "no subtitles filter (this ffmpeg was built without libass) -- a composition keeps its "
+            "captions beside the video as an SRT",
+            ffmpeg_remedy(host, "libass"));
+    }
+    error.clear();
+    if (const std::optional<std::string> encoders = ask("-encoders", error);
+        !encoders.has_value()) {
+        add(report, Status::Skipped, "Video", std::string{kH264},
+            "could not ask ffmpeg for its encoders -- " + error);
+    } else if (platform::encoder_listed(*encoders, "libx264")) {
+        add(report, Status::Ok, "Video", std::string{kH264},
+            "libx264 -- clips and compositions encode as H.264");
+    } else {
+        add(report, Status::Skipped, "Video", std::string{kH264},
+            "no libx264 encoder -- clips encode as MPEG-4 Part 2, larger and less widely played",
+            ffmpeg_remedy(host, "x264"));
+    }
+}
+
 /// The video runtime (49b): torch and diffusers in the environment Apogee
 /// owns, read from their files (not set up is a skip naming the set, as the
 /// MLX rows are), and the seeded driver against its compiled-in copy.
@@ -2220,6 +2291,7 @@ CheckReport run_checks(const CheckInputs& inputs) {
     check_mlx(report, inputs);
     say(inputs, "checking video");
     check_video(report, inputs);
+    check_ffmpeg_abilities(report, inputs);
     say(inputs, "checking the data directory");
     check_filesystem(report, inputs);
     say(inputs, "checking secrets");

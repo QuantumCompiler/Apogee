@@ -8,6 +8,7 @@
 #include <sstream>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include "agentloop/embed_func.h"
 #include "agentloop/rag.h"
@@ -62,6 +63,39 @@ void forget_recall(std::string_view chat_id) {
     (void)index.remove(chat_id);
     std::error_code code;
     fs::remove(recall_marker(chat_id), code);
+}
+
+RecallHoldings recall_holdings() {
+    RecallHoldings out;
+    out.index = harness::recall_index_path();
+    out.summaries = agentloop::RecallIndex{out.index, std::nullopt}.chats();
+    std::error_code code;
+    for (fs::directory_iterator it{pending_dir(), code}, end; !code && it != end;
+         it.increment(code)) {
+        out.pending += it->is_regular_file(code) ? 1 : 0;
+    }
+    return out;
+}
+
+RecallHoldings forget_all_recall() {
+    const RecallHoldings held = recall_holdings();
+    std::error_code code;
+    // The index whole -- its write-ahead files with it -- and every due mark,
+    // so nothing is summarised back into it at the next start.
+    for (const std::string_view suffix : {"", "-wal", "-shm"}) {
+        fs::remove(held.index.string() + std::string{suffix}, code);
+    }
+    std::vector<fs::path> marks;
+    for (fs::directory_iterator it{pending_dir(), code}, end; !code && it != end;
+         it.increment(code)) {
+        if (it->is_regular_file(code)) {
+            marks.push_back(it->path());
+        }
+    }
+    for (const fs::path& mark : marks) {
+        fs::remove(mark, code);
+    }
+    return held;
 }
 
 std::string recall_summariser(const harness::Harness& harness, const harness::Config& config,

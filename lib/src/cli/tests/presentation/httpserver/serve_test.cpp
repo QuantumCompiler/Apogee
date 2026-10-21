@@ -96,7 +96,8 @@ TEST_CASE("the route table is the documented one", "[httpserver][mux]") {
         }
     }
     CHECK(public_rows == 8);
-    CHECK(admin_rows == 88);
+    CHECK(admin_rows == 89);
+    CHECK(has("PUT", "/v1/admin/config/{id}"));  // `config set`'s twin (52e)
     CHECK(has("POST", "/v1/admin/backends/default-vision"));
     // The rename twin (46a).
     CHECK(has("POST", "/v1/admin/backends/{id}/rename"));

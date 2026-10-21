@@ -159,6 +159,33 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
     if (key == "auto_rag") {
         return render(config.auto_rag);
     }
+    // What `config set` moves (52e), each read back as it is written.
+    if (key == "memory.recall") {
+        return config.memory.recall ? "true" : "false";
+    }
+    if (key == "knowledge.auto_capture") {
+        return config.knowledge.auto_capture ? "true" : "false";
+    }
+    if (key == "ui.markdown") {
+        return config.ui.markdown ? "true" : "false";
+    }
+    if (key == "ui.thinking_display") {
+        return std::string{harness::to_string(config.ui.thinking_display)};
+    }
+    if (key == "attachments.graph") {
+        return config.attachments.graph.has_value()
+                   ? std::string{harness::to_string(*config.attachments.graph)}
+                   : render(std::string{});
+    }
+    if (key == "tools.search.provider") {
+        return render(config.tools.search.provider);
+    }
+    if (key == "tools.search.url") {
+        return render(config.tools.search.url);
+    }
+    if (key == "tools.search.results") {
+        return std::to_string(config.tools.search.results);
+    }
     if (key == "permissions") {
         std::string out;
         for (const auto& [tool, level] : config.permissions.levels) {
@@ -1351,6 +1378,36 @@ void bind_get(CLI::App& parent, const RootContext& context) {
     });
 }
 
+/// `config set <key> <value>` (52e): a plain scalar with no verb of its own,
+/// from the declared table, through the one editor -- the line replaced in
+/// place, comments kept. Anything else is refused naming its door.
+void bind_set(CLI::App& parent, const RootContext& context) {
+    auto key = std::make_shared<std::string>();
+    auto value = std::make_shared<std::string>();
+    std::vector<std::string> keys;
+    for (const harness::SettableScalar& scalar : harness::settable_scalars()) {
+        keys.emplace_back(scalar.key);
+    }
+    CLI::App* cmd = parent.add_subcommand(
+        "set",
+        "Set a plain key with no verb of its own -- memory.recall, tools.search.url and "
+        "the rest 'config set --help' lists; secrets go through 'apogee auth add'");
+    std::string listed = "One of:";
+    for (const harness::SettableScalar& scalar : harness::settable_scalars()) {
+        listed += "\n  " + std::string{scalar.key} + " -- " + std::string{scalar.about};
+    }
+    cmd->footer(listed);
+    cmd->add_option("key", *key, "The dotted key")->type_name(words_value(keys))->required();
+    cmd->add_option("value", *value, "Its value (\"\" clears a text key)")->required();
+    cmd->callback([&context, key, value]() {
+        const std::filesystem::path path = config_path_for(context);
+        apply_edit(path, [&](std::string_view content) {
+            return harness::set_scalar(content, *key, *value);
+        });
+        std::cout << *key << " = " << *value << "\n";
+    });
+}
+
 void bind_format(CLI::App& parent, const RootContext& context) {
     CLI::App* cmd = parent.add_subcommand(
         "format", "Tidy whitespace in the config file, preserving all comments and key order");
@@ -1513,6 +1570,7 @@ void ConfigCommand::bind(CLI::App& root, const RootContext& context) {
     bind_add_graph(*cmd, context);
     bind_delete_graph(*cmd, context);
     bind_get(*cmd, context);
+    bind_set(*cmd, context);
     bind_format(*cmd, context);
 }
 

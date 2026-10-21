@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <charconv>
 #include <fstream>
 #include <functional>
 #include <initializer_list>
@@ -1854,16 +1855,17 @@ std::string set_embedding_graph_enabled(std::string_view content, std::string_vi
 
 namespace {
 
-/// Sets `<section>.<field>` to `value` -- the shared body of every "one
-/// scalar under a top-level section" edit: replace the line in place keeping
-/// its trailing comment, else insert it at the end of the section, else
-/// append the section.
-std::string set_section_scalar(std::string_view content, std::string_view section_name,
-                               std::string_view field, std::string_view value) {
+/// Sets `<section>.<field>` to `rendered` -- a value already written as
+/// YAML: a quoted string, or a bare `true` or `42` (52e) -- the shared body
+/// of every "one scalar under a top-level section" edit: replace the line in
+/// place keeping its trailing comment, else insert it at the end of the
+/// section, else append the section.
+std::string set_section_rendered(std::string_view content, std::string_view section_name,
+                                 std::string_view field, std::string_view rendered) {
     Lines lines = split_lines(content);
     const std::string terminator = dominant_terminator(lines);
     const std::string new_line =
-        std::string(kEntryIndent, ' ') + std::string{field} + ": " + yaml_scalar(value);
+        std::string(kEntryIndent, ' ') + std::string{field} + ": " + std::string{rendered};
 
     SectionRange section = find_section(lines, section_name);
 
@@ -1912,7 +1914,7 @@ std::string set_section_scalar(std::string_view content, std::string_view sectio
             if (value_start == key_colon + 1) {
                 replacement += ' ';  // `key:value` had no space; give it one
             }
-            replacement += yaml_scalar(value);
+            replacement += rendered;
             replacement += original.substr(value_end);
             if (replacement.empty() || replacement.back() != '\n') {
                 replacement += terminator;
@@ -1936,6 +1938,120 @@ std::string set_section_scalar(std::string_view content, std::string_view sectio
     }
     lines.push_back(std::string{section_name} + ":" + terminator);
     lines.push_back(new_line + terminator);
+    return join_lines(lines);
+}
+
+std::string set_section_scalar(std::string_view content, std::string_view section_name,
+                               std::string_view field, std::string_view value) {
+    return set_section_rendered(content, section_name, field, yaml_scalar(value));
+}
+
+/// `original` -- a `key: value` line at `indent` -- with its value token
+/// replaced by `rendered`, the trailing comment and the whitespace before it
+/// kept.
+std::string with_value(const std::string& original, std::size_t indent, std::string_view rendered,
+                       const std::string& terminator) {
+    const std::size_t key_colon = original.find(':', indent);
+    const std::size_t hash = original.find('#', key_colon);
+    const std::size_t limit = (hash == std::string::npos) ? original.size() : hash;
+    std::size_t value_start = key_colon + 1;
+    while (value_start < limit && (original[value_start] == ' ' || original[value_start] == '\t')) {
+        ++value_start;
+    }
+    std::size_t value_end = limit;
+    while (value_end > value_start &&
+           (original[value_end - 1] == ' ' || original[value_end - 1] == '\t' ||
+            original[value_end - 1] == '\r' || original[value_end - 1] == '\n')) {
+        --value_end;
+    }
+    std::string replacement = original.substr(0, value_start);
+    if (value_start == key_colon + 1) {
+        replacement += ' ';
+    }
+    replacement += rendered;
+    replacement += original.substr(value_end);
+    if (replacement.empty() || replacement.back() != '\n') {
+        replacement += terminator;
+    }
+    return replacement;
+}
+
+/// Sets `<section>.<sub>.<field>` to `rendered` (52e: `tools.search.url`):
+/// the line replaced in place keeping its comment, else inserted at the end
+/// of `<sub>:`'s block, else the block added at the end of the section, else
+/// the section appended. A `<sub>:` written inline (`search: {url: …}`) is
+/// refused, never misread.
+std::string set_subsection_rendered(std::string_view content, std::string_view section_name,
+                                    std::string_view sub, std::string_view field,
+                                    std::string_view rendered) {
+    constexpr std::size_t kSubIndent = kEntryIndent;
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+    const std::string field_line =
+        std::string(kFieldIndent, ' ') + std::string{field} + ": " + std::string{rendered};
+    const std::string sub_line = std::string(kSubIndent, ' ') + std::string{sub} + ":";
+
+    const SectionRange section = find_section(lines, section_name);
+    if (!section.found) {
+        if (!lines.empty()) {
+            std::string& last = lines.back();
+            if (!last.empty() && last.back() != '\n') {
+                last += terminator;
+            }
+            if (!is_blank(body(lines.back()))) {
+                lines.push_back(terminator);
+            }
+        }
+        lines.push_back(std::string{section_name} + ":" + terminator);
+        lines.push_back(sub_line + terminator);
+        lines.push_back(field_line + terminator);
+        return join_lines(lines);
+    }
+
+    std::optional<std::size_t> header;
+    std::size_t last_in_section = section.header;
+    for (std::size_t i = section.begin; i < section.end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line)) {
+            continue;
+        }
+        last_in_section = i;
+        if (key_at(line, kSubIndent) == sub) {
+            std::string_view rest = line.substr(kSubIndent + sub.size() + 1);
+            while (!rest.empty() && rest.front() == ' ') {
+                rest.remove_prefix(1);
+            }
+            if (!rest.empty() && rest.front() != '#') {
+                throw ConfigEditError("the " + std::string{section_name} + "." + std::string{sub} +
+                                      " line holds more than its key -- the editor sets the block "
+                                      "form, '" +
+                                      std::string{sub} + ":' alone with its fields under it");
+            }
+            header = i;
+        }
+    }
+    if (!header.has_value()) {
+        const auto at = static_cast<std::ptrdiff_t>(last_in_section + 1);
+        lines.insert(lines.begin() + at, field_line + terminator);
+        lines.insert(lines.begin() + at, sub_line + terminator);
+        return join_lines(lines);
+    }
+    std::size_t insert_at = *header + 1;
+    for (std::size_t i = *header + 1; i < section.end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line)) {
+            continue;
+        }
+        if (indent_of(line) <= kSubIndent) {
+            break;  // the block ended
+        }
+        if (key_at(line, kFieldIndent) == field) {
+            lines[i] = with_value(lines[i], kFieldIndent, rendered, terminator);
+            return join_lines(lines);
+        }
+        insert_at = i + 1;
+    }
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(insert_at), field_line + terminator);
     return join_lines(lines);
 }
 
@@ -1980,6 +2096,21 @@ std::string set_attachments_graph(std::string_view content, std::string_view met
         }
     }
     return set_section_scalar(content, "attachments", "graph", method);
+}
+
+std::string set_scalar(std::string_view content, std::string_view key, std::string_view rendered) {
+    // Each key's place: `section.field`, or `section.sub.field`.
+    const std::size_t first = key.find('.');
+    const std::size_t second = key.find('.', first + 1);
+    if (key == "attachments.graph") {
+        return set_attachments_graph(content, rendered);
+    }
+    if (second == std::string_view::npos) {
+        return set_section_rendered(content, key.substr(0, first), key.substr(first + 1), rendered);
+    }
+    return set_subsection_rendered(content, key.substr(0, first),
+                                   key.substr(first + 1, second - first - 1),
+                                   key.substr(second + 1), rendered);
 }
 
 std::string set_permission(std::string_view content, std::string_view tool,
@@ -2939,6 +3070,167 @@ std::string set_attachments_graph(std::string_view content, std::string_view met
     return in_format(content, [&](std::string_view text) {
         return yaml_text::set_attachments_graph(text, method);
     });
+}
+
+std::vector<SettableScalar> settable_scalars() {
+    return {
+        {.key = "memory.recall",
+         .kind = ScalarKind::Boolean,
+         .about = "summarise finished chats and recall them in new ones"},
+        {.key = "knowledge.auto_capture",
+         .kind = ScalarKind::Boolean,
+         .about = "capture a chat into the knowledge collection at a clean exit"},
+        {.key = "ui.markdown",
+         .kind = ScalarKind::Boolean,
+         .about = "render answers as markdown on a terminal"},
+        {.key = "ui.thinking_display",
+         .kind = ScalarKind::Word,
+         .words = "summary|raw",
+         .about = "how a model's reasoning is shown while it streams"},
+        {.key = "attachments.graph",
+         .kind = ScalarKind::Word,
+         .words = "code|off",
+         .about = "whether an attached folder of code builds its graph"},
+        {.key = "tools.search.provider",
+         .kind = ScalarKind::Word,
+         .words = "searxng",
+         .about = "the web search web_search answers from"},
+        {.key = "tools.search.url",
+         .kind = ScalarKind::Text,
+         .about = "the web search's address, such as http://127.0.0.1:8888"},
+        {.key = "tools.search.results",
+         .kind = ScalarKind::Integer,
+         .min = 1,
+         .max = 20,
+         .about = "how many results a search returns"},
+    };
+}
+
+namespace {
+
+[[nodiscard]] std::string scalar_keys_list() {
+    std::string out;
+    for (const SettableScalar& scalar : settable_scalars()) {
+        out += (out.empty() ? "" : ", ") + std::string{scalar.key};
+    }
+    return out;
+}
+
+[[nodiscard]] bool has_segment(std::string_view key, std::string_view part) {
+    std::string lowered{key};
+    std::ranges::transform(lowered, lowered.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return lowered.find(part) != std::string::npos;
+}
+
+}  // namespace
+
+std::string scalar_refusal(std::string_view key) {
+    for (const SettableScalar& scalar : settable_scalars()) {
+        if (scalar.key == key) {
+            return {};
+        }
+    }
+    const std::string named = "'" + std::string{key} + "'";
+    // A secret never goes in the file, whatever key it is under.
+    for (const std::string_view secret :
+         {"api_key", "apikey", "token", "secret", "password", "credential"}) {
+        if (has_segment(key, secret)) {
+            return named +
+                   " holds a secret, and a secret never goes in the config file -- store it with "
+                   "'apogee auth add'";
+        }
+    }
+
+    struct Door {
+        std::string_view prefix;
+        std::string_view door;
+    };
+
+    static constexpr std::array<Door, 9> kDoors{{
+        {"backends",
+         "a backend's fields have their verb: 'apogee config set-backend <name> "
+         "--<field> <value>'"},
+        {"models",
+         "the role pointers have their verbs: 'apogee config set-default <backend>' "
+         "and the set-default-* beside it"},
+        {"suites",
+         "a suite has its verbs: 'apogee config add-suite' and 'apogee config "
+         "set-suite'"},
+        {"permissions",
+         "a tool's level has its verb: 'apogee config set-permission <tool> "
+         "<ask|allow|deny>'"},
+        {"tools.allowed_hosts",
+         "the websites have their verbs: 'apogee config "
+         "add-allowed-host <host>' and delete-allowed-host"},
+        {"mcp_servers",
+         "an MCP server has its verbs: 'apogee mcp create', 'apogee mcp "
+         "enable'/'disable' and 'apogee config delete-mcp-server'"},
+        {"embeddings", "a collection is made by 'apogee embed ingest' and kept by its verbs"},
+        {"graphs", "a named graph has its verbs: 'apogee config add-graph' and delete-graph"},
+        {"agents", "an agent has its verbs: 'apogee agents create', edit and delete"},
+    }};
+    for (const Door& door : kDoors) {
+        if (key == door.prefix ||
+            (key.starts_with(door.prefix) && key.size() > door.prefix.size() &&
+             key[door.prefix.size()] == '.')) {
+            return named + " is not a key 'config set' moves -- " + std::string{door.door};
+        }
+    }
+    return named + " is not a key 'config set' moves -- it moves: " + scalar_keys_list();
+}
+
+std::string set_scalar(std::string_view content, std::string_view key, std::string_view value) {
+    if (const std::string refused = scalar_refusal(key); !refused.empty()) {
+        throw ConfigEditError(refused);
+    }
+    const std::vector<SettableScalar> table = settable_scalars();
+    const SettableScalar& scalar = *std::ranges::find(table, key, &SettableScalar::key);
+    std::string rendered;
+    switch (scalar.kind) {
+        case ScalarKind::Boolean:
+            if (value != "true" && value != "false") {
+                throw ConfigEditError(std::string{key} + " takes true or false, not '" +
+                                      std::string{value} + "'");
+            }
+            rendered = std::string{value};
+            break;
+        case ScalarKind::Word: {
+            bool known = false;
+            std::string_view rest = scalar.words;
+            while (!rest.empty()) {
+                const std::size_t bar = rest.find('|');
+                known = known || rest.substr(0, bar) == value;
+                rest = bar == std::string_view::npos ? std::string_view{} : rest.substr(bar + 1);
+            }
+            if (!known) {
+                std::string words{scalar.words};
+                std::ranges::replace(words, '|', ' ');
+                throw ConfigEditError(std::string{key} + " takes " + words + ", not '" +
+                                      std::string{value} + "'");
+            }
+            rendered = key == "attachments.graph" ? std::string{value} : yaml_scalar(value);
+            break;
+        }
+        case ScalarKind::Text:
+            rendered = yaml_scalar(value);
+            break;
+        case ScalarKind::Integer: {
+            std::int64_t number = 0;
+            const auto [end, error] =
+                std::from_chars(value.data(), value.data() + value.size(), number);
+            if (error != std::errc{} || end != value.data() + value.size() || number < scalar.min ||
+                number > scalar.max) {
+                throw ConfigEditError(
+                    std::string{key} + " takes a whole number from " + std::to_string(scalar.min) +
+                    " to " + std::to_string(scalar.max) + ", not '" + std::string{value} + "'");
+            }
+            rendered = std::to_string(number);
+            break;
+        }
+    }
+    return in_format(
+        content, [&](std::string_view text) { return yaml_text::set_scalar(text, key, rendered); });
 }
 
 std::string set_permission(std::string_view content, std::string_view tool,

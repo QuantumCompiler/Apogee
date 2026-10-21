@@ -6,7 +6,7 @@
 
 **Seam + files.** `source/presentation/models/` (library, details, roles; view-models), `source/business/reads/` (the models/config commands). Tests: view-models over scripted documents (rows, details with and without typed `data`, action→read-back, role moves), hermetic.
 
-**Reference.** `ScreenModels.dc.html`, `ScreenModelsRoles.dc.html`, `ComponentsModel.dc.html`; the contract board's MODELS rows; [52e](../../cli/backlog/v0.2.0/doctor-config-growths.md) (the typed document upgrade, cross-referenced, not gated); the spike's `models info` measurements.
+**Reference.** `ScreenModels.dc.html`, `ScreenModelsRoles.dc.html`, `ComponentsModel.dc.html`; the contract board's MODELS rows; [52e](../../cli/assistant/MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths) (shipped 2026-10-20) (the typed document upgrade, cross-referenced, not gated); the spike's `models info` measurements.
 
 **Decisions made** (dated):
 - 2026-10-20 — From the design-completion spike (the user's call); prose-fields fallback until 52e, upgrade noted.

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -33,6 +34,22 @@ namespace apogee::commands {
 /// Forgets a chat entirely: its summary and its marker. `chats delete`, and
 /// `/private`.
 void forget_recall(std::string_view chat_id);
+
+/// What recall holds (52e): the chats summarised in its index, and the
+/// chats marked as due a summary -- never a transcript, which recall does
+/// not hold.
+struct RecallHoldings {
+    std::filesystem::path index;
+    std::size_t summaries = 0;
+    std::size_t pending = 0;
+};
+
+[[nodiscard]] RecallHoldings recall_holdings();
+
+/// Forgets every chat's summary (52e: `chats recall --forget`): the index
+/// and the due marks removed, every transcript left as it is. Returns what
+/// was there.
+RecallHoldings forget_all_recall();
 
 /// Who summarises: the utility model when one is named, else the chat's own
 /// backend only when it costs nothing per call -- a summary is Apogee's idea,

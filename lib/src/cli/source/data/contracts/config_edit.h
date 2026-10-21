@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -342,6 +343,40 @@ public:
 /// writer: there is no `config set`, so no verb calls it yet, and a hand edit
 /// is the other way the block is set.
 [[nodiscard]] std::string set_attachments_graph(std::string_view content, std::string_view method);
+
+/// What a key `config set` moves takes (52e).
+enum class ScalarKind : std::uint8_t { Boolean, Word, Text, Integer };
+
+/// One key `config set` moves: its dotted name, what it takes -- a word
+/// key's words joined by `|`, an integer key's range -- and what it is.
+struct SettableScalar {
+    std::string_view key;
+    ScalarKind kind;
+    std::string_view words{};
+    std::int64_t min = 0;
+    std::int64_t max = 0;
+    std::string_view about{};
+};
+
+/// Every key `config set` moves, in the order it lists them (52e): the
+/// plain scalars with no typed verb of their own. The declared table every
+/// refusal quotes; a key not in it is never written by `set_scalar`.
+[[nodiscard]] std::vector<SettableScalar> settable_scalars();
+
+/// Why `config set` will not move `key`, naming the right door: `auth add`
+/// for anything secret-shaped, the typed verb where one owns the key, else
+/// the table's keys. Empty for a key the table holds.
+[[nodiscard]] std::string scalar_refusal(std::string_view key);
+
+/// Sets the allow-listed scalar `key` to `value` (52e): the line replaced in
+/// place keeping its comment, else inserted into its section (and block),
+/// else the section appended -- written as its kind reads it, a boolean or a
+/// number bare, a word or text quoted when it must be. The one path `config
+/// set` and its admin twin share. Throws ConfigEditError, the file untouched,
+/// for a key outside the table (`scalar_refusal`) or a value the key does
+/// not take, naming what it takes.
+[[nodiscard]] std::string set_scalar(std::string_view content, std::string_view key,
+                                     std::string_view value);
 
 /// Sets `permissions.<tool>` to `level` (`ask`, `allow`, or `deny`),
 /// replacing the existing line (keeping any trailing comment) or inserting

@@ -25,6 +25,7 @@
 #include "knowledge/store.h"
 #include "modelstore/store.h"
 #include "operations/code_exec_server.h"
+#include "platform/ffmpeg.h"
 #include "platform/platform.h"
 #include "secrets/store.h"
 #include "support/env_guard.h"
@@ -2896,4 +2897,78 @@ TEST_CASE("the code-execution server's registration line quotes a path only wher
     // No interpreter, no line: never a guessed command.
     registration.interpreter.clear();
     CHECK(registration.mcp_create_arguments("code").empty());
+}
+
+TEST_CASE(
+    "ffmpeg's captions and h264 are read from its own listings, skipped and never passed "
+    "when it cannot be asked",
+    "[check][video][ffmpeg]") {
+    // 52e: a scripted probe for each case -- both abilities, neither, and an
+    // ffmpeg that would not answer -- each warning with the command that
+    // brings what is missing on that platform.
+    const Install install;
+    const std::string with_libass =
+        " ... subtitles         V->V       Render text subtitles onto input video using the "
+        "libass library.\n";
+    const std::string with_x264 =
+        " V....D libx264              libx264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (codec "
+        "h264)\n V....D mpeg4                MPEG-4 part 2\n";
+    const auto report_for = [&install](std::string filters, std::string encoders,
+                                       std::string host) {
+        CheckInputs inputs = inputs_for(install);
+        inputs.host_target = std::move(host);
+        inputs.ffmpeg_listing = [filters, encoders](
+                                    std::string_view flag,
+                                    std::string& error) -> std::optional<std::string> {
+            if (filters == "silent") {
+                error = "ffmpeg did not answer";
+                return std::nullopt;
+            }
+            return flag == "-filters" ? filters : encoders;
+        };
+        return apogee::commands::run_checks(inputs);
+    };
+
+    const CheckReport both = report_for(with_libass, with_x264, "macos-arm64");
+    const apogee::commands::CheckRow* captions = row_in(both, "Video", "ffmpeg captions");
+    const apogee::commands::CheckRow* h264 = row_in(both, "Video", "ffmpeg h264");
+    REQUIRE(captions != nullptr);
+    REQUIRE(h264 != nullptr);
+    CHECK(captions->status == Status::Ok);
+    CHECK(h264->status == Status::Ok);
+    CHECK(captions->remedy.empty());
+
+    const CheckReport neither =
+        report_for(" ... scale  V->V  Scale.\n", " V....D mpeg4  MPEG-4 part 2\n", "macos-arm64");
+    captions = row_in(neither, "Video", "ffmpeg captions");
+    h264 = row_in(neither, "Video", "ffmpeg h264");
+    // Optional abilities: skipped with the command, never a warning on a
+    // fresh install (M11) and never a pass.
+    CHECK(captions->status == Status::Skipped);
+    CHECK(captions->detail.find("an SRT") != std::string::npos);
+    CHECK(captions->remedy ==
+          "brew install ffmpeg-full && brew unlink ffmpeg; brew link --force ffmpeg-full");
+    CHECK(h264->status == Status::Skipped);
+    CHECK(h264->remedy == "brew install ffmpeg");
+    const CheckReport linux_neither = report_for("", "", "linux-x64");
+    CHECK(row_in(linux_neither, "Video", "ffmpeg captions")->remedy == "sudo apt install ffmpeg");
+    const CheckReport windows_neither = report_for("", "", "windows-x64");
+    CHECK(row_in(windows_neither, "Video", "ffmpeg h264")->remedy == "winget install Gyan.FFmpeg");
+
+    // Not answering: skipped, with why -- never a pass.
+    const CheckReport silent = report_for("silent", "", "linux-x64");
+    for (const std::string_view name : {"ffmpeg captions", "ffmpeg h264"}) {
+        const apogee::commands::CheckRow* row = row_in(silent, "Video", name);
+        REQUIRE(row != nullptr);
+        CHECK(row->status == Status::Skipped);
+        CHECK(row->detail.find("ffmpeg did not answer") != std::string::npos);
+    }
+}
+
+TEST_CASE("an encoder listing is read by its name column alone", "[check][video][ffmpeg]") {
+    CHECK(apogee::platform::encoder_listed(" V....D libx264  libx264 H.264\n", "libx264"));
+    CHECK_FALSE(apogee::platform::encoder_listed(" V....D libx264rgb  RGB\n", "libx264"));
+    // The name in a description is not the encoder.
+    CHECK_FALSE(apogee::platform::encoder_listed(" V....D mpeg4  not libx264\n", "libx264"));
+    CHECK_FALSE(apogee::platform::encoder_listed("Encoders:\n V..... = Video\n", "libx264"));
 }

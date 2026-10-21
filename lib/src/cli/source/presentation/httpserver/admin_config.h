@@ -83,6 +83,14 @@ struct AdminConfigContext {
 /// level, plus any other key the config carries.
 [[nodiscard]] HttpResponse admin_list_permissions(const AdminConfigContext& context);
 
+/// `PUT /v1/admin/config/{id}` -- the `config set` twin (52e): `{id}` a key
+/// from `harness::settable_scalars()`, the body `{"value": …}` -- a string,
+/// or a boolean or a whole number written as one -- through the same
+/// `set_scalar` the CLI runs, so the two edits are byte-identical. A key
+/// outside the table, or a value it does not take, is a 400 naming why.
+[[nodiscard]] HttpResponse admin_put_config_value(const AdminConfigContext& context,
+                                                  std::string_view key, const HttpRequest& request);
+
 /// `PUT /v1/admin/permissions/{id}` -- the `config set-permission` twin.
 /// Body: `{"level": "ask" | "allow" | "deny"}`.
 [[nodiscard]] HttpResponse admin_put_permission(const AdminConfigContext& context,

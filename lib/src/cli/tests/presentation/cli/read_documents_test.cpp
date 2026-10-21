@@ -2,15 +2,21 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <map>
 #include <set>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include "cli/models.h"
 #include "httpserver/admin_agents.h"
 #include "httpserver/admin_config.h"
 #include "logger/session.h"
 #include "support/cli_home.h"
+#include "support/gguf_builder.h"
+#include "support/mlx_model.h"
+#include "support/pipeline_model.h"
+#include "support/voice_model.h"
 
 /// The reads' machine face (28h): `--output-format json` on `models
 /// list|info|status`, `chats list`, `agents list`, `mcp list` and `check`,
@@ -247,4 +253,58 @@ TEST_CASE("a JSON face asked of a command with none is refused, naming the reade
     const Read stream = read(home, {"chats", "list", "--output-format", "stream-json"});
     CHECK(stream.code != 0);
     CHECK(stream.err.find("expected 'text' or 'json'") != std::string::npos);
+}
+
+TEST_CASE("models info on a stored set carries a typed data beside its prose fields, unchanged",
+          "[reads][json][models][typed]") {
+    // 52e: the set's facts as data -- format, bytes, window, cache, lineage --
+    // where the format's reader knows them, null where it does not; the
+    // fields[] the text says stay label for label.
+    const CliHome home{kConfig};
+    const std::filesystem::path gguf =
+        home.models() / "org--m" / "gguf" / "aaaaaaaaaaaa" / "m-Q4_K_M.gguf";
+    std::filesystem::create_directories(gguf.parent_path());
+    std::ofstream{gguf, std::ios::binary} << apogee::testing::quantizable_gguf();
+    apogee::testing::write_mlx_model(home.models() / "org--x" / "mlx" / "bbbbbbbbbbbb");
+    apogee::testing::write_pipeline_model(home.models() / "org--clip" / "pipeline" /
+                                          "cccccccccccc");
+    apogee::testing::write_voice_model(home.models() / "hexgrad--K" / "voice" / "dddddddddddd");
+
+    std::map<std::string, nlohmann::json> data;
+    for (const std::string handle :
+         {"org--m/gguf/aaaaaaaaaaaa", "org--x/mlx/bbbbbbbbbbbb", "org--clip/pipeline/cccccccccccc",
+          "hexgrad--K/voice/dddddddddddd"}) {
+        INFO(handle);
+        const Read text = read(home, {"models", "info", handle});
+        REQUIRE(text.code == 0);
+        const nlohmann::json record =
+            document(read(home, {"models", "info", handle, "--output-format", "json"}));
+        // The prose, byte for byte the record the text makes, as before.
+        nlohmann::json prose = apogee::commands::render_record_document(text.out);
+        prose["name"] = handle;
+        nlohmann::json without = record;
+        without.erase("data");
+        CHECK(without == prose);
+        const nlohmann::json& typed = record.at("data");
+        CHECK(typed.at("handle") == handle);
+        CHECK(typed.at("bytes").get<std::uintmax_t>() > 0);
+        CHECK(typed.at("lineage").is_array());
+        data[typed.at("format").get<std::string>()] = typed;
+    }
+    // A GGUF's header states its window and what its cache costs.
+    CHECK(data.at("gguf").at("window").at("tokens").get<std::int64_t>() > 0);
+    CHECK(data.at("gguf").at("window").at("source") == "default");
+    CHECK(data.at("gguf").contains("cache"));
+    // An MLX model's config.json states its trained window.
+    CHECK(data.at("mlx").at("window").at("trained") == 131072);
+    CHECK(data.at("mlx").at("architecture").is_string());
+    // A pipeline and a voice model state neither: unknown stays unknown.
+    for (const std::string format : {"pipeline", "voice"}) {
+        INFO(format);
+        CHECK(data.at(format).at("window").is_null());
+        CHECK(data.at(format).at("cache").is_null());
+    }
+    // A backend's document carries no data: its typed facts are its config's.
+    CHECK_FALSE(document(read(home, {"models", "info", "local", "--output-format", "json"}))
+                    .contains("data"));
 }

@@ -92,6 +92,7 @@ const std::map<std::string, Classification>& table() {
         {"config set-default-utility", twin("POST", "/v1/admin/backends/default-utility")},
         {"config format", twin("POST", "/v1/admin/config/format")},
         {"config set-permission", twin("PUT", "/v1/admin/permissions/{id}")},
+        {"config set", twin("PUT", "/v1/admin/config/{id}")},
         {"config add-allowed-host", twin("PUT", "/v1/admin/allowed-hosts/{id}")},
         {"config delete-allowed-host", twin("DELETE", "/v1/admin/allowed-hosts/{id}")},
         {"config delete-mcp-server", twin("DELETE", "/v1/admin/mcp-servers/{id}")},
@@ -143,6 +144,9 @@ const std::map<std::string, Classification>& table() {
         // 52d: a served session's compaction is the recorded out the item
         // names -- the sessions plane, a model call.
         {"chats compact", backfill("sessions: transcripts on disk, a model call")},
+        {"chats recall",
+         carve_out("recall is CLI-only (26l): nothing of it is reachable from the server, "
+                   "forgetting it included (52e)")},
         // --- carve-outs: host-local by nature ---------------------------------
         {"config init", carve_out("the server cannot exist without a config to start from")},
         {"config migrate",

@@ -1038,6 +1038,9 @@ const std::vector<std::string> kFreeText{
     // A merge request on a remote forge (48c):
     // a URL or owner/repo#12, nothing local to offer.
     "review mr ref",
+    // A scalar's value (52e): a word, a number or an address by its key --
+    // the key completes from the declared table; its value is typed.
+    "config set value",
     // A sweep's start (a date) and a new target's name, host and remote
     // paths (48d).
     "review sweep --since", "review targets add name", "review targets add --host",

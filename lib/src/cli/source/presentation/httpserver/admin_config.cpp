@@ -690,6 +690,43 @@ HttpResponse admin_put_permission(const AdminConfigContext& context, std::string
                  {"restart_required", restart}});
 }
 
+HttpResponse admin_put_config_value(const AdminConfigContext& context, std::string_view key,
+                                    const HttpRequest& request) {
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, false);
+    if (body.is_discarded() || !body.is_object() || !body.contains("value")) {
+        return error_response(400, "the request body must be a JSON object with a value");
+    }
+    const nlohmann::json& given = body.at("value");
+    std::string value;
+    if (given.is_string()) {
+        value = given.get<std::string>();
+    } else if (given.is_boolean()) {
+        value = given.get<bool>() ? "true" : "false";
+    } else if (given.is_number_integer()) {
+        value = std::to_string(given.get<std::int64_t>());
+    } else {
+        return error_response(400, "value must be a string, a boolean or a whole number");
+    }
+    try {
+        harness::edit_config_file(context.config_path, [&](std::string_view content) {
+            return harness::set_scalar(content, key, value);
+        });
+    } catch (const harness::ConfigEditError& e) {
+        return error_response(400, e.what());
+    } catch (const harness::ConfigError& e) {
+        return error_response(400, e.what(), kConfigError);
+    }
+    const Loaded after = load_now(context);
+    if (!after.config.has_value()) {
+        return after.failure;
+    }
+    // A served run reads its config once at startup: a value set here is the
+    // CLI's now and this server's after a restart.
+    return json_response(200, nlohmann::json{{"key", std::string{key}},
+                                             {"value", value},
+                                             {"restart_required", context.startup != nullptr}});
+}
+
 HttpResponse admin_list_allowed_hosts(const AdminConfigContext& context) {
     const Loaded loaded = load_now(context);
     if (!loaded.config.has_value()) {

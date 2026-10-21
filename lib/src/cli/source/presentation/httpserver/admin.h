@@ -168,6 +168,7 @@ public:
 
     [[nodiscard]] HttpResponse list_permissions(const HttpRequest& request);
     [[nodiscard]] HttpResponse put_permission(const HttpRequest& request, std::string_view tool);
+    [[nodiscard]] HttpResponse put_config_value(const HttpRequest& request, std::string_view key);
     [[nodiscard]] HttpResponse list_allowed_hosts(const HttpRequest& request);
     [[nodiscard]] HttpResponse put_allowed_host(const HttpRequest& request, std::string_view host);
     [[nodiscard]] HttpResponse delete_allowed_host(const HttpRequest& request,

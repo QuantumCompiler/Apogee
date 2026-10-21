@@ -7,6 +7,7 @@
 #include <fstream>
 #include <map>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -33,6 +34,7 @@ using apogee::harness::set_mcp_server_enabled;
 using apogee::harness::set_models_role;
 using apogee::harness::set_permission;
 using apogee::testing::TempDir;
+using Catch::Matchers::ContainsSubstring;
 
 namespace {
 
@@ -1958,4 +1960,91 @@ TEST_CASE("the editable fields are the loader's, and every one add-backend write
     CHECK(entry.mode == "m");
     CHECK(entry.host == "h");
     CHECK(entry.idle_unload_seconds == 30);
+}
+
+TEST_CASE("config set moves each allow-listed scalar in place, comments kept, as its kind reads",
+          "[config_edit][config-set]") {
+    // 52e: the declared table's keys, each a golden round trip on a
+    // comment-dense config -- set, re-parsed to the value, set again in place.
+    using apogee::harness::set_scalar;
+    const std::string start =
+        std::string{kCommented} +
+        "\n# Recall across chats.\nmemory:\n  recall: true   # on by default\n";
+    const std::string off = set_scalar(start, "memory.recall", "false");
+    CHECK(off == std::string{kCommented} +
+                     "\n# Recall across chats.\nmemory:\n  recall: false   # on by default\n");
+    CHECK_FALSE(apogee::harness::parse_config(off, "<test>").memory.recall);
+
+    // A nested key: its block added at the end of its section, then moved in
+    // place; its peers written beside it.
+    std::string search = set_scalar(kCommented, "tools.search.url", "http://127.0.0.1:8888");
+    search = set_scalar(search, "tools.search.provider", "searxng");
+    search = set_scalar(search, "tools.search.results", "7");
+    const apogee::harness::Config read = apogee::harness::parse_config(search, "<test>");
+    CHECK(read.tools.search.url == "http://127.0.0.1:8888");
+    CHECK(read.tools.search.provider == "searxng");
+    CHECK(read.tools.search.results == 7);
+    const std::string moved = set_scalar(search, "tools.search.url", "http://10.0.0.2:8080");
+    CHECK(apogee::harness::parse_config(moved, "<test>").tools.search.url ==
+          "http://10.0.0.2:8080");
+    // One token, in place: the rest byte for byte.
+    std::string expected = search;
+    expected.replace(expected.find("http://127.0.0.1:8888"), 21, "http://10.0.0.2:8080");
+    CHECK(moved == expected);
+
+    // Each kind as its loader reads it: booleans and numbers bare, words and
+    // text quoted when they must be.
+    for (const auto& [key, value] :
+         std::vector<std::pair<std::string, std::string>>{{"knowledge.auto_capture", "true"},
+                                                          {"ui.markdown", "false"},
+                                                          {"ui.thinking_display", "raw"},
+                                                          {"attachments.graph", "off"}}) {
+        INFO(key);
+        require_parses(set_scalar(kCommented, key, value));
+    }
+    const apogee::harness::Config kinds = apogee::harness::parse_config(
+        set_scalar(set_scalar(kCommented, "knowledge.auto_capture", "true"), "ui.thinking_display",
+                   "raw"),
+        "<test>");
+    CHECK(kinds.knowledge.auto_capture);
+    CHECK(kinds.ui.thinking_display == apogee::harness::ThinkingDisplay::Raw);
+}
+
+TEST_CASE("config set refuses every key outside its table, naming the right door",
+          "[config_edit][config-set]") {
+    using apogee::harness::scalar_refusal;
+    using apogee::harness::set_scalar;
+    // Secret-shaped, wherever it sits: never into the file.
+    for (const std::string key : {"backends.claude.api_key", "tools.search.token", "x.password"}) {
+        INFO(key);
+        CHECK_THAT(scalar_refusal(key), ContainsSubstring("apogee auth add"));
+        CHECK_THROWS_AS(set_scalar(kCommented, key, "s"), ConfigEditError);
+    }
+    // A key a typed verb owns names that verb.
+    CHECK_THAT(scalar_refusal("models.default"), ContainsSubstring("config set-default"));
+    CHECK_THAT(scalar_refusal("backends.local.model"), ContainsSubstring("config set-backend"));
+    CHECK_THAT(scalar_refusal("permissions.write_file"),
+               ContainsSubstring("config set-permission"));
+    CHECK_THAT(scalar_refusal("tools.allowed_hosts"), ContainsSubstring("add-allowed-host"));
+    // Anything else quotes the table.
+    CHECK_THAT(scalar_refusal("color"),
+               ContainsSubstring("it moves: memory.recall, knowledge.auto_capture"));
+    CHECK(scalar_refusal("memory.recall").empty());
+    // A value the key does not take, named.
+    CHECK_THROWS_WITH(set_scalar(kCommented, "memory.recall", "yes"),
+                      "memory.recall takes true or false, not 'yes'");
+    CHECK_THROWS_WITH(set_scalar(kCommented, "ui.thinking_display", "loud"),
+                      "ui.thinking_display takes summary raw, not 'loud'");
+    CHECK_THROWS_WITH(set_scalar(kCommented, "tools.search.results", "21"),
+                      "tools.search.results takes a whole number from 1 to 20, not '21'");
+    CHECK_THROWS_AS(set_scalar(kCommented, "tools.search.results", "7x"), ConfigEditError);
+    // A block written inline is not misread.
+    CHECK_THROWS_AS(set_scalar("tools:\n  search: {url: x}\n", "tools.search.url", "y"),
+                    ConfigEditError);
+    // Every table key is settable; the table has no duplicates.
+    std::set<std::string_view> seen;
+    for (const apogee::harness::SettableScalar& scalar : apogee::harness::settable_scalars()) {
+        CHECK(seen.insert(scalar.key).second);
+        CHECK(scalar_refusal(scalar.key).empty());
+    }
 }

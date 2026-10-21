@@ -317,4 +317,15 @@ inline constexpr std::string_view kDuckFilter =
 /// before promising a burn (`subtitles` needs libass).
 [[nodiscard]] bool ffmpeg_has_filter(std::string_view name, const FfmpegLimits& limits);
 
+/// Whether `listing` -- `ffmpeg -encoders` -- names the encoder `name`
+/// (`libx264`).
+[[nodiscard]] bool encoder_listed(std::string_view listing, std::string_view name);
+
+/// `ffmpeg -hide_banner <flag>`'s listing -- `-filters`, `-encoders` --
+/// through the seam's one child (52e: what `check` reads), or nullopt with
+/// `error` saying why ffmpeg could not be asked.
+[[nodiscard]] std::optional<std::string> ffmpeg_listing(std::string_view flag,
+                                                        const FfmpegLimits& limits,
+                                                        std::string& error);
+
 }  // namespace apogee::platform

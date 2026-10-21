@@ -968,7 +968,17 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
 - **`models info`** and **`models status`**: their `label: value` record as
   `fields`, in order, each label as printed and a value's indented continuation
   joined to it with a newline. The values are the same words the human view
-  prints.
+  prints. Since 52e `models info` on one stored set (`<model>/<format>/<id>`,
+  or its id) adds a typed **`data`** beside the unchanged `fields`: `format`
+  (`gguf`, `mlx`, `safetensors`, `pipeline`, `voice`), `handle`, `bytes` (every
+  file of the set on disk), `architecture`, `window` (`tokens`, `source`
+  `default` or `context_size`, `trained` — the trained window the files state),
+  `cache` (a GGUF's: `bytes` at that window, `type`, `sliding_positions`) and
+  `lineage` (each step back, `{kind, from, detail, inferred, missing}` —
+  `pulled`, `converted`, `quantized`, `trained`). Each is what the format's own
+  reader states — the GGUF header, an MLX model's files — and `null` where it
+  states nothing (a pipeline's window, any cache but a GGUF's): an unknown is
+  never guessed. A backend's document has no `data`.
 - **`chats list`**: newest first, each conversation's `id`, `updated`, `turns`
   and `name`, and since 52a the `backend` it runs on and the roster `model` it
   pinned there with `-m` or `/model` — empty when it runs on the backend's own
@@ -991,7 +1001,14 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
 - **`check`**: every row the report shows, `status` one of `ok`, `warn`, `fail`
   and `skipped` — never folded into a pass — `ok` the verdict and the exit code
   the human run's (non-zero on a failure). With `--fix`, what it repaired is the
-  document's `fixed`, never a line beside it.
+  document's `fixed`, never a line beside it. Since 52e the `Video` section's
+  `ffmpeg captions` (the `subtitles` filter, libass: a composition's captions
+  burn in, else they are kept beside the video as an SRT) and `ffmpeg h264`
+  (`libx264`: else clips encode as MPEG-4 Part 2) rows read ffmpeg's own
+  listings; each missing ability is `skipped` — optional, as pdftotext is,
+  so a fresh install stays green — its `remedy` the command that brings it on
+  that platform, and an ffmpeg missing or not answering skips both too; neither
+  is ever a pass.
 - **`providers scan`** (since 37b): a row per provider in the knowledge table, as the human scan prints them -- `provider` (`claude`), `type` (`claude-cli`), `label` (`Claude CLI`), `tier` (`credentials found`, `verified 2026-10-06`, `not found`), `backend` (which configured backends reach it, `not registered` when it could be, else empty) and `evidence`, a line each. It is the explicit scan, so it may start a vendor's binary for its version as the human scan does. With `--register`, what registering did is the document's `registration` and the rosters it fetched its `rosters`, a line each; with `--refresh`, the rosters re-fetched are `rosters` too.
 - **`knowledge list`** and **`knowledge info`** (since 37c): the records the
   human list counts, newest first and kept to `--status`/`--discipline` as it

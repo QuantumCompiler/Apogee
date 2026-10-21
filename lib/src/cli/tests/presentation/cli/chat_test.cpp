@@ -2276,3 +2276,35 @@ TEST_CASE("chats compact folds a saved chat's history, asked first or --yes",
                                std::to_string(compacted.messages.size()) + ", by helper"));
     CHECK(chat.run({"chats", "compact", "no-such-chat", "--yes"}) != 0);
 }
+
+TEST_CASE("chats recall shows what recall holds, and forgets it with consent, transcripts kept",
+          "[chat][cli][recall][helpers][forget]") {
+    // 52e: the design's "Forget all session summaries" -- the index emptied,
+    // asked first or --yes, every transcript left as it was.
+    HelperChat chat{texts({"Noted.", "Fine."}), {"Title", "The project uses Postgres 16."}};
+    const std::string first = first_chat(chat);
+    REQUIRE(recalled_chats(chat) == 1);
+    INFO(chat.err);
+
+    REQUIRE(chat.run({"chats", "recall"}) == 0);
+    CHECK(chat.out.starts_with("recall holds 1 chat summary in "));
+
+    // No terminal to ask at: refused, nothing forgotten.
+    CHECK(chat.run({"chats", "recall", "--forget"}) != 0);
+    CHECK(chat.err.find("add --yes") != std::string::npos);
+    CHECK(recalled_chats(chat) == 1);
+    CHECK(chat.run({"chats", "recall", "--yes"}) != 0);  // --yes alone answers nothing
+
+    REQUIRE(chat.run({"chats", "recall", "--forget", "--yes"}) == 0);
+    CHECK(chat.out.starts_with("forgot 1 chat summary -- every transcript stays"));
+    CHECK(recalled_chats(chat) == 0);
+    CHECK_FALSE(std::filesystem::exists(apogee::harness::recall_index_path()));
+    // The transcript, untouched.
+    const auto sessions = apogee::logger::list_sessions();
+    REQUIRE(sessions.size() == 1);
+    CHECK(sessions.front().chat_id == first);
+    CHECK(replies(sessions.front()).size() == 2);
+
+    REQUIRE(chat.run({"chats", "recall", "--forget", "--yes"}) == 0);
+    CHECK(chat.out == "recall holds nothing -- nothing to forget\n");
+}

@@ -120,6 +120,13 @@ struct CheckInputs {
     /// asks a provider built from the config (`provider_metered_probe`).
     MeteredProbe metered;
 
+    /// What ffmpeg says of itself (52e): its `-filters` and `-encoders`
+    /// listings, as `platform::ffmpeg_listing` reads them -- nullopt with
+    /// the reason when it could not be asked. Null asks the ffmpeg on PATH,
+    /// and a missing one is said as such; a test scripts its own.
+    std::function<std::optional<std::string>(std::string_view flag, std::string& error)>
+        ffmpeg_listing;
+
     /// What the Providers section sees of the filesystem (28c): whether a
     /// vendor CLI is on PATH and its evidence files exist -- never a read,
     /// never a spawn. Null is this machine's; a test hands its own.
