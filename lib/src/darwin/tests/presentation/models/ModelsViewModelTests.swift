@@ -89,7 +89,7 @@ struct ModelsViewModelTests {
         await model.select(row)
         model.askToDelete(row)
         #expect(model.pendingDelete == .init(row: row))
-        #expect(!runner.calls.contains { $0.hasPrefix("run") })
+        #expect(!runner.calls.contains { $0.hasPrefix("run") && !$0.hasPrefix("run __complete") }, "asked first: nothing changed")
         await model.confirmDelete(andBackends: false)
         let ran = runner.calls.firstIndex(of: "run models delete qwen-mlx --yes")!
         #expect(runner.calls[ran + 1 ... ran + 2] == ["read models list", "read models status"], "read back")
@@ -114,17 +114,23 @@ struct ModelsViewModelTests {
         #expect(runner.calls.filter { $0 == "read models list" }.count == 2, "read back")
     }
 
-    @Test("rename takes the model's name without its level; repair says what the CLI said")
+    @Test("a model renames whole by the name the binary completes, any backend as a backend; repair says what the CLI said")
     func renameAndRepair() async {
         let runner = ScriptedRunner()
+        runner.commanding(["__complete", "models", "rename"], .done(stdout: "qwen3-8b\n"))
         var said: [String] = []
         let model = await connected(runner)
         model.say = { said.append($0) }
         let gguf = model.rows.first { $0.backend == "qwen3-8b-Q4KM" }!
-        #expect(gguf.renameName == "qwen3-8b")
-        await model.rename(gguf, to: "qwen3-8b-chat")
+        #expect(gguf.renameName == "qwen3-8b" && model.renamesAsModel(gguf))
+        model.askToRename(gguf, .model)
+        await model.rename(model.renaming!, to: "qwen3-8b-chat")
         #expect(runner.calls.contains("run models rename qwen3-8b qwen3-8b-chat"))
-        #expect(model.rows.first { $0.backend == "qwen-mlx" }!.renameName == "qwen-mlx")
+        let mlx = model.rows.first { $0.backend == "qwen-mlx" }!
+        #expect(!model.renamesAsModel(mlx), "no name of its the binary completes: renamed as a backend (M2)")
+        model.askToRename(mlx, .backend)
+        await model.rename(model.renaming!, to: "qwen-mlx-8b")
+        #expect(runner.calls.contains("run config rename-backend qwen-mlx qwen-mlx-8b"))
         var checked: [String] = []
         model.checkFiles = { checked.append($0) }
         model.repair(gguf)
@@ -132,7 +138,8 @@ struct ModelsViewModelTests {
         #expect(!runner.calls.contains { $0.hasPrefix("run models repair") })
         #expect(said.isEmpty || !said.contains { $0.contains("verified") })
         runner.commanding(["models", "rename"], .failed(exit: ChildExit(reason: .exited, status: 1), stderrTail: tail("apogee models: no model named 'x'")))
-        await model.rename(gguf, to: "other")
+        model.askToRename(gguf, .model)
+        await model.rename(model.renaming!, to: "other")
         #expect(model.failure == "apogee models: no model named 'x' (exited with status 1)")
     }
 
@@ -144,7 +151,8 @@ struct ModelsViewModelTests {
         #expect(model.roles.map(\.backend) == ["qwen3-8b-Q4KM", "qwen3-8b-Q4KM", nil])
         #expect(model.roles.map(\.isSet) == [true, false, false])
         await model.assign(model.roles[2], to: "claude")
-        #expect(runner.calls.suffix(3) == ["run config set-default-vision claude", "read models list", "read models status"])
+        #expect(runner.calls.suffix(4) == ["run config set-default-vision claude", "read models list", "read models status", "run __complete models rename "],
+                "read back, and the names models rename takes asked again (M2)")
         await model.assign(model.roles[0], to: "claude")
         #expect(runner.calls.contains("run config set-default claude"), "the chat role's verb is set-default")
         let before = runner.calls.count
@@ -218,7 +226,7 @@ struct ModelsViewModelTests {
         model.checkFiles = { checked.append($0) }
         model.repair(model.rows[1])
         #expect(checked == ["Qwen3-VL-8B-Instruct/safetensors/63f2634a2019"], "by its handle")
-        await model.rename(model.rows[1], to: "qwen-vl")
+        await model.rename(.init(row: model.rows[1], kind: .model), to: "qwen-vl")
         #expect(runner.calls.contains("run models rename Qwen3-VL-8B-Instruct qwen-vl"))
         #expect(!runner.calls.contains { $0.contains(ModelRow.unconfigured) })
     }

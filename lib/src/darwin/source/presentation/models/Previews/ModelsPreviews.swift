@@ -17,11 +17,15 @@ enum ModelsPreview {
     /// typed facts), as tests/presentation/models/ModelsViewModelTests.swift
     /// holds them (`list`, `status`, and its `details` test's document): two
     /// local backends, a stored pipeline, a cloud API and a subscription.
-    static let backendsRunner = PreviewRunner(reads: [
-        (["models", "list"], list),
-        (["models", "status"], status),
-        (["models", "info", "qwen3-8b-Q4KM"], ggufInfo),
-    ])
+    static let backendsRunner = PreviewRunner(
+        reads: [
+            (["models", "list"], list),
+            (["models", "status"], status),
+            (["models", "info", "qwen3-8b-Q4KM"], ggufInfo),
+        ],
+        // The names `models rename` takes, as the binary completed them over
+        // a GGUF family and an MLX model (M2's recording).
+        commands: [(["__complete", "models", "rename"], ModelsDocuments.renameNames)])
 
     static let list = #"""
     {"object":"list","data":[

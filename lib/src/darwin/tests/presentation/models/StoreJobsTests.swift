@@ -14,7 +14,8 @@ private func recorded(_ name: String, _ ext: String = "json") -> String {
 }
 
 /// The convert and quantize sheets' commands, pinned byte for byte and to the
-/// binary's own `--help` words (recorded); the store's long runs on the jobs
+/// binary's own `--help` words (recorded) -- and since M2 to its verdicts on
+/// every combination (`StoreCommandsTests`); the store's long runs on the jobs
 /// core, their steps ticking from scripted read-backs. Nothing converts.
 @Suite("StoreJobs", .timeLimit(.minutes(1)))
 @MainActor
@@ -36,16 +37,18 @@ struct StoreJobsTests {
         #expect(form.arguments == ["models", "convert", Self.snapshot, "--register"], "f16 the default, registering on")
         form.register = false
         #expect(form.arguments == ["models", "convert", Self.snapshot])
-        form.precision = "bf16"
         form.levels = ["Q8_0", "Q4_K_M"]
         form.baseName = "llama-1b"
-        #expect(form.arguments == ["models", "convert", Self.snapshot, "-t", "bf16", "--register-with", "Q4_K_M,Q8_0", "--base-name", "llama-1b"],
-                "levels in the CLI's order; choosing one turns registering on")
+        #expect(form.arguments == ["models", "convert", Self.snapshot, "--register-with", "Q4_K_M,Q8_0", "--base-name", "llama-1b"],
+                "levels in the CLI's order; choosing one registers")
         form.modelType = "llama"
         #expect(!form.arguments.contains("--model-type"), "a GGUF takes no MLX model type")
         pinned(form.arguments, to: help)
-        #expect(form.steps.map(\.label) == ["Convert to GGUF BF16", "Quantize to Q4_K_M", "Quantize to Q8_0", "Register llama-1b-BF16, llama-1b-Q4KM, llama-1b-Q80"])
+        #expect(form.steps.map(\.label) == ["Convert to GGUF F16", "Quantize to Q4_K_M", "Quantize to Q8_0", "Register llama-1b-F16, llama-1b-Q4KM, llama-1b-Q80"])
         #expect(form.steps.map(\.estimate) == ["about 2.3 GiB", "about 717 MiB", "about 1.2 GiB", nil], "estimates, said as such")
+        form.precision = "bf16"
+        #expect(form.arguments == ["models", "convert", Self.snapshot, "-t", "bf16"], "another precision is made on its own: the CLI registers and quantizes from the F16 (M2)")
+        #expect(form.steps.map(\.label) == ["Convert to GGUF BF16"])
     }
 
     @Test("convert to MLX: 4bit the default, further precisions one conversion each, the model type as typed")
@@ -57,7 +60,8 @@ struct StoreJobsTests {
         form.precision = "8bit"
         form.levels = ["4bit"]
         form.modelType = "gemma3"
-        #expect(form.arguments == ["models", "convert", Self.snapshot, "--mlx", "-t", "8bit", "--register-with", "4bit", "--model-type", "gemma3"])
+        #expect(form.arguments == ["models", "convert", Self.snapshot, "--mlx", "--register-with", "8bit,4bit", "--model-type", "gemma3"],
+                "every precision listed, the written one first, and no -t: the CLI's M16 (M2)")
         pinned(form.arguments, to: help)
         #expect(form.steps.map(\.label) == ["Convert to MLX 8bit", "Convert to MLX 4bit", "Register Llama3.2-1B-Instruct-8bit, Llama3.2-1B-Instruct-4bit"])
         #expect(form.steps.allSatisfy { $0.estimate == nil }, "no size stated, no estimate")
@@ -218,7 +222,9 @@ struct StoreJobsTests {
         let store = StoreViewModel(runner: runner)
         await store.connect(binary: URL(fileURLWithPath: "/Users/someone/.local/bin/apogee"))
         store.showingAll = true
-        #expect(await eventually { store.sets.count == 6 })
+        // Each set's `models info` is read after the sets: wait for the ones
+        // this test reads, or a busy run checks them before they land.
+        #expect(await eventually { store.sets.count == 6 && store.infos[Self.snapshot] != nil && store.infos[Self.f16] != nil })
         var converted: ConvertForm?
         var quantized: QuantizeForm?
         var checked: String?

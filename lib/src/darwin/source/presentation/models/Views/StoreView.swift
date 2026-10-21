@@ -423,18 +423,22 @@ struct ConvertSheet: View {
                         Text("\(form.mlx ? "4bit" : "f16"), the default").tag(String?.none)
                         ForEach(form.precisions.dropFirst(), id: \.self) { Text($0 == "auto" ? "auto, as the weights are" : $0).tag(String?.some($0)) }
                     }
-                    LabeledContent(form.mlx ? "Also make, one conversion each" : "Then quantize to") {
-                        HStack(spacing: Spacing.xs) {
-                            ForEach(form.levelChoices, id: \.self) { level in
-                                Toggle(level, isOn: Binding(
-                                    get: { store.convertForm?.levels.contains(level) ?? false },
-                                    set: { on in
-                                        if on { store.convertForm?.levels.insert(level) } else { store.convertForm?.levels.remove(level) }
-                                    }))
-                                    .toggleStyle(.button)
+                    if let note = form.aloneNote {
+                        Text(note).font(.apogeeSmall).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        LabeledContent(form.mlx ? "Also make, one conversion each" : "Then quantize to") {
+                            HStack(spacing: Spacing.xs) {
+                                ForEach(form.levelChoices, id: \.self) { level in
+                                    Toggle(level, isOn: Binding(
+                                        get: { store.convertForm?.levels.contains(level) ?? false },
+                                        set: { on in
+                                            if on { store.convertForm?.levels.insert(level) } else { store.convertForm?.levels.remove(level) }
+                                        }))
+                                        .toggleStyle(.button)
+                                }
                             }
+                            .font(.apogeeMeta.monospaced())
                         }
-                        .font(.apogeeMeta.monospaced())
                     }
                     Toggle("Register what's made", isOn: Binding(get: { store.convertForm?.register ?? false }, set: { store.convertForm?.register = $0 }))
                         .disabled(!form.levels.isEmpty)

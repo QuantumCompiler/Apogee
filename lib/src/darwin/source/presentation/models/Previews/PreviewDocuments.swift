@@ -88,5 +88,10 @@ Gemma4-26B-Instruct-mixed_4_8  not registered
 
 register the unregistered ones as backends: apogee config scan --register
 """#
+    /// tests/presentation/models/Fixtures/models-rename-complete.txt
+    static let renameNames = #"""
+GPT-OSS-20B
+qwen3-8b
+"""#
 }
 #endif

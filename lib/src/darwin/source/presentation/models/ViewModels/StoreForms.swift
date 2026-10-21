@@ -35,18 +35,31 @@ enum Estimate {
 }
 
 /// `models convert`, as the convert sheet builds it: one command, the CLI's
-/// own chain -- convert, each further level, the registrations.
+/// own chain -- convert, each further level, the registrations -- in the one
+/// shape the CLI takes it. With `--mlx`, `--register-with` names every
+/// precision to convert, `-t` refused beside it (the CLI's M16); a GGUF
+/// registers and quantizes from the F16 alone, so another precision is made
+/// on its own (M2: the shapes held to the binary's recorded verdicts).
 public struct ConvertForm: Equatable, Sendable {
     /// The SafeTensors set, by handle.
     public let handle: String
     /// `--mlx`: an MLX model for Apple silicon; else a GGUF for llama.cpp.
     public let mlx: Bool
     /// `-t`: the precision written; `nil` leaves the CLI's default (f16, or 4bit).
-    public var precision: String?
-    /// `--register-with`: further levels, each its own backend.
-    public var levels: Set<String> = []
-    /// `--register`: register what is made.
-    public var register = true
+    /// A GGUF at another precision is made on its own: no registering, no
+    /// levels.
+    public var precision: String? {
+        didSet { if alone { levels = []; register = false } }
+    }
+    /// `--register-with`: further levels, each its own backend. A GGUF's start
+    /// from the F16.
+    public var levels: Set<String> = [] {
+        didSet { if !mlx && !levels.isEmpty && alone { precision = nil } }
+    }
+    /// `--register`: register what is made -- a GGUF's being the F16.
+    public var register = true {
+        didSet { if !mlx && register && alone { precision = nil } }
+    }
     /// `--base-name`: what each backend's name begins with; empty is the model's name.
     public var baseName = ""
     /// `--model-type` (MLX): the type mlx-lm should take the weights as.
@@ -71,16 +84,32 @@ public struct ConvertForm: Equatable, Sendable {
     /// What `-t` writes, the CLI's default when none is chosen.
     public var written: String { precision ?? (mlx ? "4bit" : "f16") }
 
+    /// A GGUF at a precision other than f16: the CLI registers and quantizes
+    /// from the F16 alone ("--register makes the F16 -- the source every
+    /// quantization starts from"), so this one is made by itself.
+    public var alone: Bool { !mlx && written != "f16" }
+
+    /// Why a GGUF at another precision registers nothing and makes no levels.
+    public var aloneNote: String? {
+        alone ? "Registering and quantizing start from the F16, so a \(written) GGUF is made on its own. Choose f16 to register it or quantize from it." : nil
+    }
+
     /// The command, exactly as the sheet shows it.
     public var arguments: [String] {
         var arguments = ["models", "convert", handle]
         if mlx { arguments.append("--mlx") }
-        if let precision { arguments += ["-t", precision] }
         let chosen = levelChoices.filter(levels.contains)
-        if !chosen.isEmpty {
-            arguments += ["--register-with", chosen.joined(separator: ",")]
-        } else if register {
-            arguments.append("--register")
+        if mlx && !chosen.isEmpty {
+            // Every precision listed, the written one first: the CLI converts
+            // and names them in this order.
+            arguments += ["--register-with", ([written] + chosen).joined(separator: ",")]
+        } else {
+            if let precision { arguments += ["-t", precision] }
+            if !chosen.isEmpty {
+                arguments += ["--register-with", chosen.joined(separator: ",")]
+            } else if register {
+                arguments.append("--register")
+            }
         }
         let base = baseName.trimmingCharacters(in: .whitespaces)
         if !base.isEmpty && (register || !chosen.isEmpty) { arguments += ["--base-name", base] }

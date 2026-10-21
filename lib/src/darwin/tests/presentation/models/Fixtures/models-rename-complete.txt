@@ -1,0 +1,2 @@
+GPT-OSS-20B
+qwen3-8b

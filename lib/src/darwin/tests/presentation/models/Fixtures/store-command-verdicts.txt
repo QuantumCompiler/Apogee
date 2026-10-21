@@ -1,0 +1,92 @@
+taken	config rename-backend GPT-OSS-20B-mixed_4_8 gpt-oss-20b-mixed
+taken	models convert Nothing-Here/safetensors/000000000000
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register --base-name llama-1b
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register --base-name llama-1b --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 3bit,4bit
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 3bit,4bit --base-name llama-1b
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 3bit,4bit --base-name llama-1b --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 3bit,4bit --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 3bit,4bit,6bit
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 3bit,4bit,6bit --base-name llama-1b
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 3bit,4bit,6bit --base-name llama-1b --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 3bit,4bit,6bit --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 4bit,3bit
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 4bit,3bit --base-name llama-1b
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 4bit,3bit --base-name llama-1b --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 4bit,3bit --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 4bit,3bit,6bit
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 4bit,3bit,6bit --base-name llama-1b
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 4bit,3bit,6bit --base-name llama-1b --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 4bit,3bit,6bit --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 6bit,4bit
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 6bit,4bit --base-name llama-1b
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 6bit,4bit --base-name llama-1b --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 6bit,4bit --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 6bit,4bit,3bit
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 6bit,4bit,3bit --base-name llama-1b
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 6bit,4bit,3bit --base-name llama-1b --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 6bit,4bit,3bit --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 8bit,4bit
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 8bit,4bit --base-name llama-1b
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 8bit,4bit --base-name llama-1b --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 8bit,4bit --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 8bit,4bit,3bit
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 8bit,4bit,3bit --base-name llama-1b
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 8bit,4bit,3bit --base-name llama-1b --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with 8bit,4bit,3bit --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with mxfp4,4bit
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with mxfp4,4bit --base-name llama-1b
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with mxfp4,4bit --base-name llama-1b --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with mxfp4,4bit --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with mxfp4,4bit,3bit
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with mxfp4,4bit,3bit --base-name llama-1b
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with mxfp4,4bit,3bit --base-name llama-1b --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx --register-with mxfp4,4bit,3bit --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t 3bit
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t 3bit --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t 3bit --register
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t 3bit --register --base-name llama-1b
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t 3bit --register --base-name llama-1b --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t 3bit --register --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t 6bit
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t 6bit --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t 6bit --register
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t 6bit --register --base-name llama-1b
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t 6bit --register --base-name llama-1b --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t 6bit --register --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t 8bit
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t 8bit --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t 8bit --register
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t 8bit --register --base-name llama-1b
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t 8bit --register --base-name llama-1b --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t 8bit --register --model-type gemma3
+refused: apogee models: with --mlx, --register-with names every precision to convert -- drop --type, or name it in the list	models convert Nothing-Here/safetensors/000000000000 --mlx -t 8bit --register-with 4bit
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t mxfp4
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t mxfp4 --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t mxfp4 --register
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t mxfp4 --register --base-name llama-1b
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t mxfp4 --register --base-name llama-1b --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --mlx -t mxfp4 --register --model-type gemma3
+taken	models convert Nothing-Here/safetensors/000000000000 --register
+taken	models convert Nothing-Here/safetensors/000000000000 --register --base-name llama-1b
+taken	models convert Nothing-Here/safetensors/000000000000 --register-with Q2_K
+taken	models convert Nothing-Here/safetensors/000000000000 --register-with Q2_K --base-name llama-1b
+taken	models convert Nothing-Here/safetensors/000000000000 --register-with Q2_K,Q3_K_M
+taken	models convert Nothing-Here/safetensors/000000000000 --register-with Q2_K,Q3_K_M --base-name llama-1b
+taken	models convert Nothing-Here/safetensors/000000000000 -t auto
+taken	models convert Nothing-Here/safetensors/000000000000 -t bf16
+refused: apogee models: --register makes the F16 -- the source every quantization starts from; drop --type	models convert Nothing-Here/safetensors/000000000000 -t bf16 --register
+taken	models convert Nothing-Here/safetensors/000000000000 -t f32
+taken	models convert Nothing-Here/safetensors/000000000000 -t q8_0
+taken	models quantize Nothing-Here/gguf/000000000000
+taken	models quantize Nothing-Here/gguf/000000000000 -t Q2_K
+taken	models quantize Nothing-Here/gguf/000000000000 -t Q3_K_M
+taken	models quantize Nothing-Here/gguf/000000000000 -t Q5_K_M
+taken	models quantize Nothing-Here/gguf/000000000000 -t Q6_K
+taken	models quantize Nothing-Here/gguf/000000000000 -t Q8_0
+refused: apogee models: no model named 'GPT-OSS-20B-mixed_4_8' -- name it as its backends share it (the backend without its -F16 or -Q4KM), or by its stored directory	models rename GPT-OSS-20B-mixed_4_8 gpt-oss-20b-mixed
+taken	models rename qwen3-8b qwen3-8b-chat

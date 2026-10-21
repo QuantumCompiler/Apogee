@@ -81,8 +81,8 @@ public struct ModelsScreen<Downloads: View>: View {
         } message: {
             Text("apogee config delete-backend \(model.removing ?? "") -- its config entry goes; the weights stay under Stored weights, ready to register again.")
         }
-        .sheet(item: $model.renaming) { row in
-            RenameModelSheet(row: row) { name in Task { await model.rename(row, to: name) } }
+        .sheet(item: $model.renaming) { renaming in
+            RenameModelSheet(renaming: renaming) { name in Task { await model.rename(renaming, to: name) } }
         }
         .alert("That didn't work", isPresented: Binding(get: { model.failure != nil }, set: { if !$0 { model.dismissFailure() } })) {
             Button("OK") { model.dismissFailure() }
@@ -249,8 +249,11 @@ struct ModelDetails: View {
             }
             Menu("More") {
                 Button("Assign a role…") { model.tab = .roles }
+                Button("Rename the backend…") { model.askToRename(row, .backend) }
+                if model.renamesAsModel(row) {
+                    Button("Rename the model…") { model.askToRename(row, .model) }
+                }
                 if row.section == "local" {
-                    Button("Rename…") { model.renaming = row }
                     Button("Check its files") { model.repair(row) }
                 }
                 if let path = model.path {
@@ -364,25 +367,28 @@ struct KindMark: View {
 
 /// A new name for a stored model.
 struct RenameModelSheet: View {
-    let row: ModelRow
+    let renaming: ModelsViewModel.Renaming
     let rename: (String) -> Void
     @State private var name: String
     @Environment(\.dismiss) private var dismiss
 
-    init(row: ModelRow, rename: @escaping (String) -> Void) {
-        self.row = row
+    init(renaming: ModelsViewModel.Renaming, rename: @escaping (String) -> Void) {
+        self.renaming = renaming
         self.rename = rename
-        _name = State(initialValue: row.renameName)
+        _name = State(initialValue: renaming.name)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.m) {
-            Text("Rename model").font(.apogeeHeading)
-            Text("Every quantization's backend, and the stored directory they run from, take the new name.")
+            Text(renaming.kind == .backend ? "Rename backend" : "Rename model").font(.apogeeHeading)
+            Text(renaming.kind == .backend
+                ? "The backend takes the new name, and so does every reference to it: the roles, the suites, the saved chats. Its weights stay where they are."
+                : "Every quantization's backend, and the stored directory they run from, take the new name.")
                 .font(.apogeeSmall)
                 .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
             TextField("Name", text: $name).textFieldStyle(.roundedBorder)
-            Text("apogee models rename \(row.renameName) …").font(.apogeeCode).foregroundStyle(Palette.textTertiary)
+            Text((["apogee"] + renaming.command + ["…"]).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary)
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
@@ -456,9 +462,15 @@ struct RenameModelSheet: View {
     .padding(Spacing.xl)
 }
 
-#Preview("Rename a GGUF backend's model") {
+#Preview("Rename a GGUF backend's model: every quantization and its folder") {
     if let row = ModelsPreview.rows.first(where: { $0.backend == "qwen3-8b-Q4KM" }) {
-        RenameModelSheet(row: row) { _ in }
+        RenameModelSheet(renaming: .init(row: row, kind: .model)) { _ in }
+    }
+}
+
+#Preview("Rename an MLX backend: the backend and every reference") {
+    if let row = ModelsPreview.rows.first(where: { $0.backend == "qwen-mlx" }) {
+        RenameModelSheet(renaming: .init(row: row, kind: .backend)) { _ in }
     }
 }
 

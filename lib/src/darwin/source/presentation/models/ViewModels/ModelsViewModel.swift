@@ -44,6 +44,30 @@ public final class ModelsViewModel {
         public let row: ModelRow
     }
 
+    /// A rename asked for: the backend alone, or the model its backends share.
+    public struct Renaming: Equatable, Identifiable {
+        public enum Kind: Equatable, Sendable {
+            /// `config rename-backend`: the backend and every reference to it
+            /// -- the roles, the suites, the saved chats -- the store left alone.
+            case backend
+            /// `models rename`: every quantization's backend and the stored
+            /// folder they run from.
+            case model
+        }
+
+        public let row: ModelRow
+        public let kind: Kind
+        public var id: String { row.id + (kind == .backend ? "#backend" : "#model") }
+
+        /// The name being changed: the backend's, or the model's.
+        public var name: String { kind == .backend ? row.backend : row.renameName }
+
+        /// The command, as typed, before its new name.
+        public var command: [String] {
+            kind == .backend ? ["config", "rename-backend", row.backend] : ["models", "rename", row.renameName]
+        }
+    }
+
     public var tab: Tab = .backends
     public private(set) var rows: [ModelRow] = []
     public private(set) var listing: Listing = .notRead
@@ -57,7 +81,11 @@ public final class ModelsViewModel {
     /// A backend whose entry waits on the person's word to go: `config
     /// delete-backend`, its weights kept under Stored weights.
     public var removing: String?
-    public var renaming: ModelRow?
+    public var renaming: Renaming?
+    /// The names `models rename` takes, as the binary completes them: its
+    /// GGUF families and stored folders. The rule is the CLI's, asked, never
+    /// re-derived (M2).
+    public private(set) var modelNames: Set<String> = []
     /// A command running now, by what it is doing: its buttons wait.
     public private(set) var working: String?
     /// The last change that failed, in the CLI's words.
@@ -107,6 +135,7 @@ public final class ModelsViewModel {
             listing = .failed(outcome.failure ?? "the list could not be read")
         }
         await readRoles()
+        await readModelNames()
         if let selected {
             if rows.contains(where: { $0.name == selected }) {
                 await readInfo(selected)
@@ -125,6 +154,16 @@ public final class ModelsViewModel {
         } else {
             rolesFailure = outcome.failure
         }
+    }
+
+    /// `apogee __complete models rename ""`: the names the verb takes.
+    private func readModelNames() async {
+        guard let binary else { return }
+        guard case .done(let stdout) = await runner.command(binary: binary, ["__complete", "models", "rename", ""]) else {
+            modelNames = []
+            return
+        }
+        modelNames = Set(stdout.split(whereSeparator: \.isNewline).map(String.init).filter { !$0.isEmpty })
     }
 
     private func readInfo(_ name: String) async {
@@ -273,11 +312,24 @@ public final class ModelsViewModel {
         if selected == name { close() }
     }
 
-    /// `models rename <model> <new name>`, read back.
-    public func rename(_ row: ModelRow, to name: String) async {
+    /// Whether the model a backend belongs to can be renamed whole: the
+    /// binary completes its name for `models rename`.
+    public func renamesAsModel(_ row: ModelRow) -> Bool {
+        modelNames.contains(row.renameName)
+    }
+
+    public func askToRename(_ row: ModelRow, _ kind: Renaming.Kind) {
+        guard kind == .backend || renamesAsModel(row) else { return }
+        renaming = Renaming(row: row, kind: kind)
+    }
+
+    /// `config rename-backend <backend> <new name>`, or `models rename <model>
+    /// <new name>`, read back.
+    public func rename(_ renaming: Renaming, to name: String) async {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, name != row.renameName else { return }
-        await run(["models", "rename", row.renameName, name], doing: "Renaming", done: "Renamed to \(name)")
+        self.renaming = nil
+        guard !name.isEmpty, name != renaming.name else { return }
+        await run(renaming.command + [name], doing: "Renaming", done: "Renamed to \(name)")
     }
 
     /// `models repair <name>`: verifies against the record, fixes a damaged

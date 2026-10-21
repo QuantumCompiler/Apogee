@@ -987,3 +987,34 @@ Every screen stays a machine-mode client of the binary, tested hermetically.
   Nothing converts: the standing rule.
 - **Drawn offscreen over the real binary on 2h's scratch store:** the convert sheet for the Llama SafeTensors set, and the quantize sheet for its F16. No job was started on real weights; a real conversion through the app is the user's run.
 - Bare `lib/scripts/cicd.sh --test` passed in 7m28s: the CLI's 3,593 tests, none failing, and the app's 331 cases, none failing and none skipped, with no warning.
+
+### 2026-10-21 — `store-commands-the-cli-takes` (maintenance item M2): every store command one the binary takes
+
+**Why.** The user's run of the built app on 2026-10-21 met the binary's refusals from the Models place:
+- an MLX conversion of 8bit then 4bit: `with --mlx, --register-with names every precision to convert -- drop --type, or name it in the list`;
+- a rename of the MLX backend `GPT-OSS-20B-mixed_4_8`: `no model named 'GPT-OSS-20B-mixed_4_8' -- name it as its backends share it …, or by its stored directory`.
+
+The convert sheet wrote `-t 8bit --register-with 4bit`, where since the CLI's M16 `--register-with` names every MLX precision. The same form sent a GGUF precision other than f16 with Register, which the CLI refuses because registering and quantizing start from the F16. And the Backends tab's Rename… always ran `models rename`, which takes a GGUF family or a stored folder, never a backend's own name. 2i had checked each flag against `--help`, which names flags and not the rules between them, and its tests pinned the refused commands.
+
+- [x] **The convert sheet builds only what the CLI takes** (`ConvertForm`).
+  - With `--mlx` and further precisions, `--register-with <written>,<rest…>` and no `-t`, in the order the CLI converts and names them.
+  - A GGUF at another precision is made on its own. Choosing one clears Register and the levels, and the sheet says why where the levels were. Turning Register on, or choosing a level, puts f16 back.
+- [x] **Rename is two acts** (`ModelsViewModel.Renaming`). **Rename the backend…**, on every backend, runs `config rename-backend`: the backend and every reference to it, the store left alone. **Rename the model…** runs `models rename`, offered only where the binary completes the row's family name: `__complete models rename ""`, read with the list. The sheet says which act it is.
+- [x] **The bug is a fixture.** `scripts/refresh-store-commands-fixture.sh` records the binary's verdict on every command the convert and quantize sheets can build: 92, each run in a throwaway home of its own against a set that does not exist, so nothing converts. It also records the rename's listing and completion from a sandbox holding a GGUF family and an MLX model with a mixed recipe, as the user's is. `StoreCommandsTests` fails on a sheet command the binary refuses, and on one it was never asked, naming the line to add.
+- [x] **Previews:** both rename acts and the completion as recorded (ADR 0004).
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The GGUF sheet ties precision to Register and levels**, the item's default: the sheet never offers a command the CLI refuses.
+- **Rename the backend is offered on every backend, cloud ones included,** the item's default: `config rename-backend` takes any.
+- **The verdicts are recorded by a script** beside the parity fixture's, the item's default.
+- **A family is named from the level its listing states, and confirmed by the binary's list.** A GGUF whose listing states no level, because its header cannot be read, is renamed as a backend only. That is conservative, and Stored weights still renames its folder. The recorded sandbox's GGUF is such a placeholder, so the family case is pinned on the listing `ModelsViewModelTests` holds, with the binary's verdict on the command recorded.
+- **A 2i test raced its own reads.** `storeOpensTheSheets` waited for the sets and then checked what each set's `models info` says, which is read after them. The first full run failed it. It now waits for the reads it checks.
+- **The schemes' `codeCoverageEnabled = "NO"` was put back** in `Apogee.xcscheme` and `PresentationReview.xcscheme`, the user's call, after Xcode re-saved them without it.
+
+**Verified.**
+- The `PresentationModels` scheme's own tests: 36 of 36.
+- The recorded verdicts: the 89 commands the sheets build or the renames use are taken. The three refusals are the user's two and the latent GGUF one, kept as recorded evidence.
+- `check-previews` finds nothing.
+- Bare `lib/scripts/cicd.sh --test`: the CLI's 3,610 tests passed. The app's first run failed the 2i race above, at 340 of 341. Once that test waited for its reads, `cicd.sh --app darwin --test` passed 341 of 341, with no Swift warning, the CLI's tree unchanged in between.
+
+**Not done:** a convert button on a set no converter takes, such as a diffusion model or a draft head. That is M3's, once the CLI's M20 states which conversions a set takes.
