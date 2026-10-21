@@ -14,7 +14,10 @@
 # kits with the mock backend as the teacher, and the cycle from a queue
 # directory -- skipped, passing and promoting with the anchor set, failing
 # on a regression and tripping the breaker at k=1, refused while halted,
-# resumed.
+# resumed. Between them (53b), `promote --adapter`: the fuse skipped, a
+# small GGUF LoRA registered on an entry's adapters over its untouched base,
+# repointed in place, retained, and an mlx run's adapter refused on a
+# llamacpp entry naming both formats.
 #
 # POSIX only, like the other shell checks.
 set -eu
@@ -214,6 +217,69 @@ assert "pruned_at" in ledger["versions"][0], ledger' "$WORK_DIR/status.json" "$W
 "$APOGEE_BIN" check >"$WORK_DIR/check.out" 2>&1 || fail "check: $(cat "$WORK_DIR/check.out")"
 grep -q "ok   versions: tuned" "$WORK_DIR/check.out" || fail "check ledger row: $(grep 'versions' "$WORK_DIR/check.out")"
 grep -q "ok   converter" "$WORK_DIR/check.out" || fail "check converter row: $(grep converter "$WORK_DIR/check.out")"
+
+# --- adapter promote (53b): the fuse skipped, the adapter itself the version ------
+# An entry over a stand-in base -- v3's GGUF, which parses; a real run's own
+# base in use -- and the two runs promoted onto it as adapters: each a small
+# GGUF LoRA under training/versions/based/, registered on the entry's adapters
+# through the one editor and pinned to the base's sha256, the base untouched.
+BASE="$V3"
+BASE_SHA=$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$BASE")
+cp "$BASE" "$WORK_DIR/base.before"
+"$APOGEE_BIN" config add-backend based --type llamacpp --model-path "$BASE" >/dev/null || fail "add-backend based"
+cp "$CONFIG" "$WORK_DIR/before-adapter.json"
+"$APOGEE_BIN" train promote "$RUN" --as based --adapter </dev/null >"$WORK_DIR/adapter.out" 2>&1 || fail "adapter promote: $(cat "$WORK_DIR/adapter.out")"
+grep -q "updated backend based -> v1 (adapter)" "$WORK_DIR/adapter.out" || fail "adapter promote summary: $(cat "$WORK_DIR/adapter.out")"
+A1="$TRAINING/versions/based/v1.lora.gguf"
+[ -f "$A1" ] || fail "no adapter version at $A1"
+[ "$(wc -c < "$A1")" -lt 4096 ] || fail "the adapter version is not small: $(wc -c < "$A1") bytes"
+[ "$(served based)" = "$BASE" ] || fail "the adapter promote repointed model_path: $(served based)"
+cmp "$WORK_DIR/base.before" "$BASE" || fail "the adapter promote touched the base"
+[ ! -d "$TRAINING/runs/$RUN/fused" ] || fail "an adapter promote fused"
+inserted "$WORK_DIR/before-adapter.json" "$CONFIG" > "$WORK_DIR/adapter-added.txt" || fail "the adapter promote changed more than it added: $(diff "$WORK_DIR/before-adapter.json" "$CONFIG")"
+grep -q "\"adapters\"" "$WORK_DIR/adapter-added.txt" || fail "no adapters member: $(cat "$WORK_DIR/adapter-added.txt")"
+grep -q "$A1" "$WORK_DIR/adapter-added.txt" || fail "the adapter is not registered: $(cat "$WORK_DIR/adapter-added.txt")"
+grep -q "$BASE_SHA" "$WORK_DIR/adapter-added.txt" || fail "the adapter is not pinned to the base: $(cat "$WORK_DIR/adapter-added.txt")"
+python3 -c 'import json,sys
+ledger = json.load(open(sys.argv[1]))
+v = ledger["versions"][0]
+assert ledger["active_version"] == 1 and v["adapter_path"] == sys.argv[2], ledger
+assert v["base_sha256"] == sys.argv[3] and "gguf_path" not in v, ledger' \
+    "$TRAINING/versions/based.json" "$A1" "$BASE_SHA" || fail "the adapter ledger: $(cat "$TRAINING/versions/based.json")"
+# A second version takes the first's place; retain_versions 1 prunes the
+# first's kilobytes, and a rollback to it is refused by name.
+cp "$CONFIG" "$WORK_DIR/at-adapter-v1.json"
+"$APOGEE_BIN" train promote "$RUN2" --as based --adapter </dev/null >"$WORK_DIR/adapter2.out" 2>&1 || fail "second adapter promote: $(cat "$WORK_DIR/adapter2.out")"
+A2="$TRAINING/versions/based/v2.lora.gguf"
+grep -q "updated backend based -> v2 (adapter)" "$WORK_DIR/adapter2.out" || fail "second adapter summary: $(cat "$WORK_DIR/adapter2.out")"
+grep -q "pruned:" "$WORK_DIR/adapter2.out" || fail "retention skipped the adapters: $(cat "$WORK_DIR/adapter2.out")"
+[ ! -f "$A1" ] || fail "v1's adapter survived retain_versions 1"
+[ -f "$A2" ] || fail "no v2 adapter"
+sed "s|$A1|$A2|" "$WORK_DIR/at-adapter-v1.json" > "$WORK_DIR/expected-adapter2.json"
+cmp "$WORK_DIR/expected-adapter2.json" "$CONFIG" || fail "the second adapter changed more than the path: $(diff "$WORK_DIR/expected-adapter2.json" "$CONFIG")"
+cmp "$WORK_DIR/base.before" "$BASE" || fail "the second adapter promote touched the base"
+if "$APOGEE_BIN" train rollback based >/dev/null 2>"$WORK_DIR/adapter-rollback.err"; then
+    fail "rollback reached a pruned adapter"
+fi
+grep -q "its adapter is gone" "$WORK_DIR/adapter-rollback.err" || fail "adapter rollback wording: $(cat "$WORK_DIR/adapter-rollback.err")"
+"$APOGEE_BIN" train versions based | grep -q "v2.lora.gguf  <- active" || fail "train versions: $("$APOGEE_BIN" train versions based)"
+"$APOGEE_BIN" check >"$WORK_DIR/check-adapter.out" 2>&1 || fail "check with an adapter version: $(cat "$WORK_DIR/check-adapter.out")"
+grep -q "ok   versions: based" "$WORK_DIR/check-adapter.out" || fail "check adapter ledger row: $(grep 'versions' "$WORK_DIR/check-adapter.out")"
+# Formats never cross: an mlx run's adapter onto a llamacpp entry is refused
+# naming both, and nothing is written.
+python3 -c 'import json,sys
+path = sys.argv[1]
+manifest = json.load(open(path))
+manifest["trainer"] = "mlx"
+json.dump(manifest, open(path, "w"), indent=2)' "$TRAINING/runs/$RUN/manifest.json"
+cp "$CONFIG" "$WORK_DIR/before-cross.json"
+if "$APOGEE_BIN" train promote "$RUN" --as based --adapter </dev/null >/dev/null 2>"$WORK_DIR/cross.err"; then
+    fail "an mlx run's adapter was registered on a llamacpp entry"
+fi
+grep -q "mlx-lm adapter (trainer mlx)" "$WORK_DIR/cross.err" || fail "cross-format wording: $(cat "$WORK_DIR/cross.err")"
+grep -q "GGUF LoRA" "$WORK_DIR/cross.err" || fail "cross-format wording: $(cat "$WORK_DIR/cross.err")"
+cmp "$WORK_DIR/before-cross.json" "$CONFIG" || fail "a refused adapter promote edited the config"
+[ ! -e "$TRAINING/versions/based/v3.lora.gguf" ] || fail "a refused adapter promote wrote a version"
 
 # --- the pipelines item ---------------------------------------------------------
 # The training block is rewritten once for the rest: the mock trainer, a

@@ -11,6 +11,8 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "contracts/config.h"
 #include "contracts/layout.h"
@@ -486,6 +488,7 @@ TEST_CASE("the compiled-in converter byte-matches the vendored llama.cpp tree, f
     }
     CHECK(on_disk == files.size());
     bool entry_seen = false;
+    bool lora_seen = false;
     bool package_seen = false;
     bool gguf_seen = false;
     bool template_seen = false;
@@ -497,6 +500,8 @@ TEST_CASE("the compiled-in converter byte-matches the vendored llama.cpp tree, f
         CHECK(apogee::harness::bundled_script_relative_path(file.name) ==
               "training/scripts/" + std::string{file.name});
         entry_seen = entry_seen || file.name == "convert/convert_hf_to_gguf.py";
+        // Its sibling (53b): `train promote --adapter`'s PEFT -> GGUF LoRA.
+        lora_seen = lora_seen || file.name == "convert/convert_lora_to_gguf.py";
         package_seen = package_seen || file.name == "convert/conversion/__init__.py";
         // Where the script's own `sys.path` tweak looks, so the pinned copy
         // shadows the PyPI one (which lags the pin at the same version).
@@ -505,6 +510,7 @@ TEST_CASE("the compiled-in converter byte-matches the vendored llama.cpp tree, f
             template_seen || file.name == "convert/models/templates/llama-cpp-rwkv-world.jinja";
     }
     CHECK(entry_seen);
+    CHECK(lora_seen);
     CHECK(package_seen);
     CHECK(gguf_seen);
     CHECK(template_seen);
@@ -537,6 +543,42 @@ TEST_CASE(
     CHECK_FALSE(apogee::harness::is_unmodified_bundled_asset(root.path(), kits));
     CHECK_FALSE(apogee::harness::is_unmodified_bundled_asset(root.path(), kits / "reasoning.yaml"));
     CHECK(apogee::harness::is_unmodified_bundled_asset(root.path(), kits / "summarization.yaml"));
+}
+
+TEST_CASE(
+    "the LoRA converter is seeded beside its sibling byte for byte, counted in the tree, and "
+    "brought up to date as the tree is",
+    "[harness][assets][converter][adapter]") {
+    // 53b: the vendored `convert_lora_to_gguf.py` is not a second tree -- it
+    // seeds, inspects and refreshes as one more file of the converter's.
+    const apogee::testing::TempDir root{"assets-lora-" + std::to_string(std::random_device{}())};
+    REQUIRE(apogee::harness::seed_data_directory(root.path()).ok());
+    const std::filesystem::path tree =
+        root.path() / apogee::harness::bundled_converter_relative_dir();
+    const std::filesystem::path seeded = tree / "convert_lora_to_gguf.py";
+    const std::filesystem::path vendored = std::filesystem::path{APOGEE_THIRD_PARTY_DIR} /
+                                           "llama.cpp-convert" / "convert_lora_to_gguf.py";
+    REQUIRE(std::filesystem::is_regular_file(seeded));
+    CHECK(read(seeded) == read(vendored));
+    // It imports what its sibling does, from beside it.
+    CHECK(read(seeded).find("from conversion import") != std::string::npos);
+    CHECK(read(seeded).find("Path(__file__).parent / 'gguf-py'") != std::string::npos);
+    CHECK(apogee::harness::inspect_converter_tree(tree).current());
+
+    // An earlier copy, recorded as retired, is this build's again after the
+    // refresh; the same bytes unrecorded are the user's edit, and kept.
+    std::ofstream{seeded, std::ios::binary} << "# an older pin's lora converter\n";
+    const std::string entry = "convert/convert_lora_to_gguf.py " +
+                              apogee::models::sha256_hex("# an older pin's lora converter\n");
+    const std::vector<std::string_view> list{entry};
+    CHECK(apogee::harness::inspect_converter_tree(tree, list).stale == 1);
+    CHECK(apogee::harness::inspect_converter_tree(tree, {}).edited == 1);
+    apogee::harness::AssetSeedResult result;
+    apogee::harness::refresh_converter_tree(root.path(), tree, result, list);
+    REQUIRE(result.ok());
+    CHECK(result.updated ==
+          std::vector<std::string>{"training/scripts/convert/convert_lora_to_gguf.py"});
+    CHECK(read(seeded) == read(vendored));
 }
 
 TEST_CASE("an earlier Apogee's converter is brought up to this build's; an edit is kept",

@@ -23,7 +23,9 @@
 ///             selected driver, live progress, a manifest
 ///   eval      the gate: substring and pairwise-judge items at 100%
 ///   promote   fuse -> convert -> verify -> register through the one config
-///             editor -> the version ledger, with retention
+///             editor -> the version ledger, with retention; with --adapter
+///             (53b) no fuse: the adapter alone, a GGUF LoRA or an mlx-lm
+///             directory, registered on the entry's adapters over its base
 ///   rollback  repoint a backend at its previous version; delete nothing
 ///   versions  a backend's ledger
 ///   status    the cycle, the active pipeline, the runs, the active versions

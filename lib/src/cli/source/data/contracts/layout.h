@@ -121,8 +121,10 @@ struct LayoutEntry {
 /// `training/runs` -- one directory per fine-tuning run: the manifest, the
 /// adapter, the fused checkpoint while it exists. Created by the first run.
 [[nodiscard]] std::filesystem::path training_runs_dir();
-/// `training/versions` -- promoted GGUFs (`<backend>/v<N>.gguf`) and one
-/// ledger per backend (`<backend>.json`). Created by the first promote.
+/// `training/versions` -- one ledger per backend (`<backend>.json`) and its
+/// adapter versions (53b: `<backend>/v<N>.lora.gguf`, or the directory
+/// `<backend>/v<N>.lora`); a merged version lives in the model store.
+/// Created by the first promote.
 [[nodiscard]] std::filesystem::path training_versions_dir();
 /// `training/suites` -- hand-written eval suites; `train eval --suite <name>`
 /// looks here. Created by first use, never seeded.

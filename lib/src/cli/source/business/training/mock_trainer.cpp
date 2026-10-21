@@ -320,4 +320,48 @@ std::string write_mock_gguf(const std::filesystem::path& fused_dir,
     return out.good() ? std::string{} : "cannot write " + gguf.string();
 }
 
+std::string write_mock_lora_gguf(const std::filesystem::path& adapter_dir,
+                                 const std::filesystem::path& base_dir,
+                                 const std::filesystem::path& gguf) {
+    std::error_code code;
+    if (!std::filesystem::is_directory(adapter_dir, code)) {
+        return "no adapter at " + adapter_dir.string();
+    }
+    std::string bytes;
+    bytes.append("GGUF");
+    append_u32(bytes, 3);  // container version
+    append_u64(bytes, 1);  // tensors
+    append_u64(bytes, 4);  // metadata pairs
+    append_text(bytes, "general.architecture");
+    append_u32(bytes, 8);  // String
+    append_text(bytes, architecture_of(base_dir));
+    append_text(bytes, "general.type");
+    append_u32(bytes, 8);
+    append_text(bytes, "adapter");
+    append_text(bytes, "adapter.type");
+    append_u32(bytes, 8);
+    append_text(bytes, "lora");
+    append_text(bytes, "general.name");
+    append_u32(bytes, 8);
+    // The run in the name, so two runs' adapters differ as real ones do.
+    append_text(bytes, "apogee-mock-adapter " + adapter_dir.parent_path().filename().string());
+    append_text(bytes, "blk.0.attn_q.weight.lora_a");
+    append_u32(bytes, 2);  // dimensions
+    append_u64(bytes, 16);
+    append_u64(bytes, 2);  // rank
+    append_u32(bytes, 1);  // ggml type F16
+    append_u64(bytes, 0);  // data offset
+    while (bytes.size() % 32 != 0) {
+        bytes.push_back('\0');
+    }
+    bytes.append(static_cast<std::size_t>(16 * 2 * 2), '\0');  // the tensor's data
+    std::filesystem::create_directories(gguf.parent_path(), code);
+    std::ofstream out{gguf, std::ios::binary | std::ios::trunc};
+    if (!out) {
+        return "cannot write " + gguf.string();
+    }
+    out << bytes;
+    return out.good() ? std::string{} : "cannot write " + gguf.string();
+}
+
 }  // namespace apogee::training

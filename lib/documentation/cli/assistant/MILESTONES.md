@@ -9323,3 +9323,44 @@ Decisions taken while building, for veto:
 
 **Not done:** the real pass (one adapter on F16 and Q4_K_M bases against the merged twin, tok/s and RAM) is the user's run, recorded. `set-backend --adapters` hashes an unseen base once with no progress line.
 
+### 2026-10-21 — `adapter-promote` (backlog item 53b): a version is kilobytes, not gigabytes
+
+**Why.** Every promote wrote a full model: fuse, convert, register, and `retain_versions` kept several complete copies. The spike's live conversion made a 1B adapter a 1.7 MB GGUF LoRA against the ~2.5 GB F16.
+
+- [x] **`train promote --adapter`**, opt-in, its completion in the shell. The eval gate runs first, as for every promote. Then the fuse is skipped:
+  - **a llamacpp target:** the run's PEFT adapter goes through the vendored `convert_lora_to_gguf.py` (always `--base`, the hub offline) into `training/versions/<backend>/v<N>.lora.gguf`, written under a staging name, its header read and renamed into place;
+  - **an mlx target:** its adapter directory is copied as it is to `v<N>.lora/`, mlx-lm's numbered checkpoints left out;
+  - **either way,** the adapter is registered on the entry's `adapters:` through the one editor, pinned with 53a's `pin_adapters`, and the base is never touched.
+- [x] **The ledger** records `adapter_path` and `base_sha256`. Rollback restores the previous adapter on the entry with its recorded pin. Retention keeps its meaning, now over kilobytes. A merged ledger serializes byte for byte as before.
+- [x] **The converter, vendored:** `convert_lora_to_gguf.py` was copied byte for byte from the build's own llama.cpp at the pin (`bd4f514d`, b11151; sha256 `3c5f109f…`), compiled in by `generate_training_assets.py`, and seeded, checked and refreshed as one more file of the converter tree. `vendor_llama_convert.py` copies it on the next pin bump.
+- [x] **Refusals, each naming the formats or the way:**
+  - a cross-format ask (an mlx run onto a llamacpp entry, a peft run onto an mlx one);
+  - a new entry name (the `config add-backend` line given);
+  - mixing merged and adapter versions on one backend;
+  - `--quantize` or `--keep-fused` with `--adapter`;
+  - a pipeline stage after the first;
+  - a run whose trainer is not recorded.
+- [x] **The default promote is byte-identical to before.** The regime and the cycle still promote merged.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The flag is `--adapter`, and the files are `v<N>.lora.gguf` / `v<N>.lora/`** under the `<backend>/v<N>` shape `layout.h` already documented, the item's default.
+- **Only an existing entry takes an adapter version:** Apogee cannot know which GGUF of the base a new entry should run.
+- **A backend's versions are all merged or all adapters,** since mixing would put an adapter over a fine-tune or swap the base under its adapters.
+- **Adapters added by hand are kept:** a new version replaces only the previous version's adapter, in its position and at its scale. An mlx entry already holding another adapter is refused, since mlx-lm loads one.
+- **`check`'s versions row reads an adapter version** from the entry's adapters, so it does not warn falsely. The per-adapter rows remain 53c's.
+
+**Verified.**
+- 14 new cases (`[adapter]`, 277 assertions):
+  - the plan over closures (the fuse skipped, converted once, registered through the editor; the mlx target converting nothing);
+  - the refusals;
+  - the ledger round trip and rollback repoint;
+  - retention;
+  - the converter's argument shape and its run under a stand-in script;
+  - the seeded script's byte identity and refresh;
+  - the command flows and the flag's completion.
+- `train_e2e.sh` gained an adapter phase on the real binary: byte-exact registration, base untouched, retention, the cross-format refusal.
+- `harness.layering`, `harness.layer_context`, `cli.train_lifecycle`, `cli.install_parity`, `cli.shell_completion`, `cli.machine_schema_conformance` and `cli.http_api_conformance` pass.
+- Bare `lib/scripts/cicd.sh --test`: green. The CLI's 3,670 tests and the macOS app's 342 cases passed, with no warning.
+
+**Not done:** the real end-to-end run (train → adapter promote → chat on the entry) is the user's.
+

@@ -1057,7 +1057,11 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   five as `recent_runs`, each backend's `versions` headline, the pipelines,
   the `active_pipeline` and `latest_pipeline`, whether a cycle holds the lock
   (`cycle_active`) and the cycle's headline; a version ledger, or every one in
-  a list. A backend with no history is refused as the text refuses it.
+  a list -- each version its `gguf_path`, an MLX one's `mlx_path`, or since
+  53b an adapter version's `adapter_path` (a GGUF LoRA, or an mlx-lm adapter
+  directory, registered on the entry's `adapters:` over its untouched base)
+  and the `base_sha256` it was pinned to. A backend with no history is
+  refused as the text refuses it.
 - **`datasets list`**, **`datasets info`** and **`datasets kits`** (since
   37f): the control plane's bodies -- each dataset's `name`, `path`, `lines`,
   `bytes` and `shape`; each kit's `name`, `path`, `description`,

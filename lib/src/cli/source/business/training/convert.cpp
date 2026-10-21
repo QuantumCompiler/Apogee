@@ -19,6 +19,10 @@ std::filesystem::path converter_script() {
     return harness::training_scripts_dir() / "convert" / "convert_hf_to_gguf.py";
 }
 
+std::filesystem::path lora_converter_script() {
+    return harness::training_scripts_dir() / "convert" / "convert_lora_to_gguf.py";
+}
+
 std::string converter_unavailable(const PythonEnv& env, const std::filesystem::path& script,
                                   std::span<const std::string_view> retired) {
     if (!env.exists()) {
@@ -144,6 +148,46 @@ Converter script_converter(std::filesystem::path interpreter, std::filesystem::p
         request.script = script;
         request.arguments = converter_arguments(out_type, input, gguf, writes, dense_modules);
         request.environment.emplace_back("PYTHONDONTWRITEBYTECODE", "1");
+        const ScriptOutcome outcome = run_script(
+            request,
+            [&on_message](const ScriptEvent& event) {
+                if (on_message && event.kind != ScriptEvent::Kind::Error) {
+                    on_message(event.text);
+                }
+            },
+            cancellation);
+        if (outcome.ok) {
+            return std::string{};
+        }
+        if (outcome.cancelled) {
+            return std::string{"cancelled"};
+        }
+        return explain_converter_failure(fold_name_list(outcome.describe()));
+    };
+}
+
+std::vector<std::string> lora_converter_arguments(std::string_view out_type,
+                                                  const std::filesystem::path& adapter,
+                                                  const std::filesystem::path& base,
+                                                  const std::filesystem::path& output) {
+    return {"--outtype", std::string{out_type}, "--base",        base.string(),
+            "--outfile", output.string(),       adapter.string()};
+}
+
+AdapterConverter script_lora_converter(std::filesystem::path interpreter,
+                                       std::filesystem::path script, std::string out_type) {
+    return [interpreter = std::move(interpreter), script = std::move(script),
+            out_type = std::move(out_type)](
+               const std::filesystem::path& adapter, const std::filesystem::path& base,
+               const std::filesystem::path& gguf, const MessageSink& on_message,
+               const harness::CancellationToken& cancellation) {
+        ScriptRequest request;
+        request.interpreter = interpreter;
+        request.script = script;
+        request.arguments = lora_converter_arguments(out_type, adapter, base, gguf);
+        request.environment.emplace_back("PYTHONDONTWRITEBYTECODE", "1");
+        // `--base` names the configuration; nothing is fetched to find it.
+        request.environment.emplace_back("HF_HUB_OFFLINE", "1");
         const ScriptOutcome outcome = run_script(
             request,
             [&on_message](const ScriptEvent& event) {

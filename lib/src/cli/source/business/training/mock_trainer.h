@@ -75,4 +75,12 @@ private:
 [[nodiscard]] std::string write_mock_gguf(const std::filesystem::path& fused_dir,
                                           const std::filesystem::path& gguf);
 
+/// The mock's adapter converter (53b): a minimal, well-formed GGUF LoRA at
+/// `gguf` -- `general.type` `adapter`, `adapter.type` `lora`, the base's
+/// `general.architecture` from its `config.json`, one tensor -- that the
+/// header reader parses. The error text, or empty.
+[[nodiscard]] std::string write_mock_lora_gguf(const std::filesystem::path& adapter_dir,
+                                               const std::filesystem::path& base_dir,
+                                               const std::filesystem::path& gguf);
+
 }  // namespace apogee::training

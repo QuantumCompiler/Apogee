@@ -40,19 +40,42 @@ struct VersionEntry {
     /// model. Empty when they were dropped.
     std::string fused_path{};
     std::string pruned_at{};
+    /// An adapter version's adapter (53b), registered on its entry's
+    /// `adapters:` over the base the entry runs, which it never touches: a
+    /// GGUF LoRA file (`<backend>/v<N>.lora.gguf`) for a llamacpp entry, an
+    /// mlx-lm adapter directory (`<backend>/v<N>.lora`) for an mlx one, both
+    /// under `training/versions/`. Set for an adapter version, with
+    /// `gguf_path` and `mlx_path` empty; empty for a merged one.
+    std::string adapter_path{};
+    /// The sha256 of the base weights the adapter was pinned to when it was
+    /// registered (53b) -- the pin its `adapters:` item carries, so a rollback
+    /// restores it without reading the base again.
+    std::string base_sha256{};
 
     [[nodiscard]] bool pruned() const noexcept {
         return !pruned_at.empty();
     }
 
-    /// An MLX version (27c), its backend an `mlx` one.
-    [[nodiscard]] bool mlx() const noexcept {
-        return !mlx_path.empty();
+    /// An adapter version (53b): the delta alone, applied over the entry's
+    /// base at load, never merged into it.
+    [[nodiscard]] bool adapter() const noexcept {
+        return !adapter_path.empty();
     }
 
-    /// What the version's backend points at: its MLX directory, else its GGUF.
+    /// An MLX version (27c), its backend an `mlx` one: the fused weights, or
+    /// (53b) an mlx-lm adapter directory -- an adapter version's file is a
+    /// GGUF LoRA exactly when it is named `.gguf`.
+    [[nodiscard]] bool mlx() const noexcept {
+        return !mlx_path.empty() || (adapter() && !adapter_path.ends_with(".gguf"));
+    }
+
+    /// What the version is: its adapter, else its MLX directory, else its
+    /// GGUF -- the file or directory retention removes and a rollback names.
     [[nodiscard]] const std::string& weights() const noexcept {
-        return mlx() ? mlx_path : gguf_path;
+        if (adapter()) {
+            return adapter_path;
+        }
+        return mlx_path.empty() ? gguf_path : mlx_path;
     }
 };
 

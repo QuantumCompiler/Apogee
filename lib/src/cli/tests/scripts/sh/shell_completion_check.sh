@@ -86,6 +86,8 @@ cases=(
     "complete|--rag||notes"
     "config|get|backends.cl|backends.claude"
     "datasets|synth|x|--kit||reasoning"
+    # 53b: a flag is offered the day it exists.
+    "train|promote|r1|--ad|--adapter"
     "models|pull|ll|llama3.2:3b"
     # Words a command validates itself, offered from the same list.
     "knowledge|query|q|--status||rejected"

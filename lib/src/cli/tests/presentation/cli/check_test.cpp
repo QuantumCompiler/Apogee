@@ -17,6 +17,7 @@
 #include "backends/provider_table.h"
 #include "contracts/assets.h"
 #include "contracts/config.h"
+#include "contracts/config_edit.h"
 #include "contracts/layout.h"
 #include "contracts/sha256.h"
 #include "embedstore/store.h"
@@ -1468,6 +1469,46 @@ TEST_CASE(
     CHECK(row_with(report, "versions: tuned")->status == Status::Warn);
     CHECK(row_with(report, "versions: tuned")->detail.find("does not hold") != std::string::npos);
     CHECK(report.passed());  // warnings only: the install is not broken
+
+    // An adapter version (53b): its adapter there and on the entry's
+    // adapters -- the entry's model_path is its base, never the version.
+    std::filesystem::remove(install.root / "training" / "versions" / "tuned.json");
+    const std::filesystem::path lora =
+        install.root / "training" / "versions" / "based" / "v1.lora.gguf";
+    install.write("training/versions/based/v1.lora.gguf", "GGUF lora");
+    const nlohmann::json adapters = {
+        {"backend_name", "based"},
+        {"active_version", 1},
+        {"versions", nlohmann::json::array({{{"version", 1},
+                                             {"run_id", "r1"},
+                                             {"adapter_path", lora.string()},
+                                             {"base_sha256", std::string(64, 'a')},
+                                             {"promoted_at", "t"}}})}};
+    install.write("training/versions/based.json", adapters.dump() + "\n");
+    const std::string entry =
+        "backends:\n  based:\n    type: llamacpp\n    model_path: /base.gguf\n";
+    const auto based = [&](const std::string& config) {
+        install.write("config/config.yaml", config);
+        load_into(inputs);
+        return run_checks(inputs);
+    };
+    report = based(apogee::harness::set_backend_adapters(
+        entry, "based",
+        {apogee::harness::AdapterConfig{.path = lora.string(),
+                                        .base_sha256 = std::string(64, 'a')}}));
+    versions = row_with(report, "versions: based");
+    REQUIRE(versions != nullptr);
+    CHECK(versions->status == Status::Ok);
+    CHECK(versions->detail.find("active v1 of 1, and the backend applies it") != std::string::npos);
+    report = based(entry);
+    versions = row_with(report, "versions: based");
+    REQUIRE(versions != nullptr);
+    CHECK(versions->status == Status::Warn);
+    CHECK(versions->detail.find("the backend's adapters do not name it") != std::string::npos);
+    std::filesystem::remove(lora);
+    report = run_checks(inputs);
+    CHECK(row_with(report, "versions: based")->detail.find("names an adapter that is not there") !=
+          std::string::npos);
 }
 
 TEST_CASE(

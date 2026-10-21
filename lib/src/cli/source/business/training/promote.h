@@ -27,7 +27,14 @@
 /// verify → version, the conversion never run. Everything else -- the
 /// gate, `max + 1`, retention, the rollback target -- is the same code.
 ///
-/// Nothing here edits the config or knows a backend type: the conversion,
+/// **Two modes** (53b): merged, the default, as above; or, opt-in, the
+/// adapter itself as the version -- gate → convert to a GGUF LoRA (or, for
+/// MLX, copy the adapter directory as it is) → verify → version, the fuse
+/// never run -- registered on the entry's `adapters:` over the base it
+/// already runs. The gate is the same one, before either: the mode changes
+/// what is written, never what is judged.
+///
+/// Nothing here edits the config or knows a backend type: the conversions,
 /// the header check and the quantizer arrive as closures, and the config
 /// edit is the command's (`cli/train.cpp`, the composition root). What
 /// this package owns is the arithmetic that is easy to get wrong -- version
@@ -62,6 +69,13 @@ using Verifier = std::function<std::string(const std::filesystem::path& artifact
 using Quantizer =
     std::function<std::string(const std::filesystem::path& input,
                               const std::filesystem::path& output, std::string_view type)>;
+/// A PEFT adapter directory → a GGUF LoRA at the path given, read against the
+/// configuration of the base it was trained over (53b). The error text, or
+/// empty.
+using AdapterConverter = std::function<std::string(
+    const std::filesystem::path& adapter_dir, const std::filesystem::path& base_dir,
+    const std::filesystem::path& gguf, const MessageSink& on_message,
+    const harness::CancellationToken& cancellation)>;
 
 /// `max(version) + 1`, or 1 for an empty ledger. Pruned entries count:
 /// their numbers are taken and must never be reissued.
@@ -86,10 +100,45 @@ enum class PromoteTarget : std::uint8_t {
 /// What a recorded version is.
 [[nodiscard]] PromoteTarget target_of(const VersionEntry& entry) noexcept;
 
-/// Why `ledger` cannot take a `target` version, or empty when it can: a
-/// backend's versions are all of one kind, since a rollback repoints the
-/// entry's `model_path` and never its type. Asked before anything is built.
-[[nodiscard]] std::string target_conflict(const VersionLedger& ledger, PromoteTarget target);
+/// How a promotion makes its version (53b).
+enum class PromoteMode : std::uint8_t {
+    /// The adapter fused into the base and the fused model made the version:
+    /// a full model per version. The default.
+    Merge,
+    /// The fuse skipped: the adapter itself is the version -- converted to a
+    /// GGUF LoRA for a GGUF target, copied as it is for an MLX one -- and
+    /// registered on the entry's `adapters:` over the base it runs, which it
+    /// never touches. Opt-in (`train promote --adapter`).
+    Adapter,
+};
+
+/// What a recorded version is made by.
+[[nodiscard]] PromoteMode mode_of(const VersionEntry& entry) noexcept;
+
+/// Why `ledger` cannot take a `target` version made by `mode`, or empty when
+/// it can: a backend's versions are all of one kind, since a rollback
+/// repoints the entry's `model_path` -- or, for adapter versions, its
+/// `adapters:` -- and never its type or its base. Asked before anything is
+/// built.
+[[nodiscard]] std::string target_conflict(const VersionLedger& ledger, PromoteTarget target,
+                                          PromoteMode mode = PromoteMode::Merge);
+
+/// Why the run's adapter cannot be registered as it is on a `target` entry,
+/// or empty when it can (53b). Formats never cross, and are said, never
+/// guessed: a PEFT adapter (trainer `peft`) is converted to a GGUF LoRA for a
+/// llamacpp entry, an mlx-lm adapter directory (trainer `mlx`) is registered
+/// as it is on an mlx entry, and the mock's is either. And an adapter applies
+/// only over the weights it was trained on: a pipeline stage after the first
+/// trained over the stage before's fused checkpoint, which no entry runs.
+[[nodiscard]] std::string adapter_promotion_conflict(const RunManifest& manifest,
+                                                     PromoteTarget target);
+
+/// Where an adapter version lives (53b): `<versions_dir>/<backend>/v<N>.lora.gguf`
+/// for a GGUF target, the directory `<versions_dir>/<backend>/v<N>.lora` for
+/// an MLX one -- beside the backend's ledger, kilobytes rather than a model.
+[[nodiscard]] std::filesystem::path adapter_version_path(const std::filesystem::path& versions_dir,
+                                                         std::string_view backend, int version,
+                                                         PromoteTarget target);
 
 struct PromotePlan {
     int version = 0;
@@ -107,10 +156,18 @@ struct PromotePlan {
     /// Empty means F16 is the artifact.
     std::string quantize_type;
     bool keep_fused = false;
+    /// Merge, the default; or the adapter itself as the version (53b).
+    PromoteMode mode = PromoteMode::Merge;
+    /// An adapter version's file or directory (`adapter_version_path`); empty
+    /// for a merged one, which writes nothing here.
+    std::filesystem::path adapter_path{};
 
     /// What the version is: the GGUF, or for an MLX target the fused
-    /// directory.
+    /// directory -- or, for an adapter version, the adapter.
     [[nodiscard]] const std::filesystem::path& artifact() const noexcept {
+        if (mode == PromoteMode::Adapter) {
+            return adapter_path;
+        }
         return target == PromoteTarget::Mlx ? fused_dir : gguf_path;
     }
 };
@@ -147,6 +204,28 @@ struct ArtifactsResult {
     const Converter& convert, const Verifier& verify, const Quantizer& quantize,
     const MessageSink& on_message, const harness::CancellationToken& cancellation);
 
+/// The plan for the next version as an adapter (53b), beside the fused plan:
+/// the same `max + 1`, the version at `adapter_version_path` under
+/// `versions_dir`, and nothing fused, quantized or kept.
+[[nodiscard]] PromotePlan plan_adapter_promotion(const VersionLedger& ledger,
+                                                 const std::filesystem::path& versions_dir,
+                                                 std::string_view backend, PromoteTarget target);
+
+/// The adapter version's file (53b), the fuse skipped -- no trainer is asked
+/// for one. A GGUF target: `convert` the run's PEFT adapter against its base,
+/// once, then `verify` that it parses. An MLX target: the run's mlx-lm
+/// adapter directory copied as it is -- every file but the trainer's numbered
+/// checkpoints (`0000100_adapters.safetensors`), which mlx-lm never loads --
+/// then `verify`'d; `convert` is never called. Either is built under a
+/// staging name beside the plan's path (`.incoming-v<N>.lora[.gguf]`) and
+/// renamed into it once verified; a path already taken is never overwritten.
+/// A failure removes what it left; the run directory, the config and the
+/// ledger are untouched here.
+[[nodiscard]] ArtifactsResult build_adapter_artifacts(
+    const RunManifest& manifest, const PromotePlan& plan, const AdapterConverter& convert,
+    const Verifier& verify, const MessageSink& on_message,
+    const harness::CancellationToken& cancellation);
+
 /// The ledger entry a successful build records.
 [[nodiscard]] VersionEntry promotion_entry(const RunManifest& manifest, const PromotePlan& plan,
                                            std::string promoted_at);
@@ -167,8 +246,9 @@ struct PruneResult {
 using ArtifactRemover = std::function<std::string(const VersionEntry& entry)>;
 
 /// Appends `entry`, makes it active, and prunes per `retain`: each pruned
-/// entry's artifacts are removed (`remove`; by default its GGUF file, or its
-/// MLX directory) and the entry marked, never erased -- the ledger is
+/// entry's artifacts are removed (`remove`; by default its GGUF file, its
+/// MLX directory, or -- 53b -- its adapter's file or directory, kilobytes
+/// under the same count) and the entry marked, never erased -- the ledger is
 /// history, and a rollback can name what is gone. Weights another kept
 /// version still records -- identical weights promoted twice share one
 /// stored file -- are never removed.
@@ -184,8 +264,8 @@ struct RollbackTarget {
 
 /// The highest version below the active one -- not `active - 1`, since
 /// numbers have gaps after a prune -- refused by name when it was pruned,
-/// its file (or an MLX version's directory) is gone, or it is not the kind
-/// the active version is. Deletes nothing.
+/// its file (or an MLX version's directory, or an adapter version's adapter)
+/// is gone, or it is not the kind the active version is. Deletes nothing.
 [[nodiscard]] RollbackTarget rollback_target(const VersionLedger& ledger);
 
 }  // namespace apogee::training

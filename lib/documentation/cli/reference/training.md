@@ -28,7 +28,7 @@ environment under its data directory**:
 ~/.apogee/training/datasets/      trainer-ready datasets, one .jsonl per dataset
 ~/.apogee/training/datasets/raw/  downloaded dataset files, for `datasets prepare`
 ~/.apogee/training/runs/<id>/     one directory per run: manifest.json, adapters/
-~/.apogee/training/versions/      promoted GGUFs (<backend>/v<N>.gguf) and one ledger per backend
+~/.apogee/training/versions/      one ledger per backend (<backend>.json), and adapter versions (<backend>/v<N>.lora.gguf, or the directory <backend>/v<N>.lora)
 ~/.apogee/training/suites/        your hand-written eval suites
 ~/.apogee/training/pipelines/<id>/ one manifest per pipeline run (its stage runs live under runs/)
 ~/.apogee/training/regime/<id>/   a regime's synthesised dataset and materialised suite per kit
@@ -425,6 +425,7 @@ and re-runs only with `--force`.
 ```bash
 apogee train promote <run-id> --as <backend> [--force] [--quantize TYPE] [--keep-fused]
 apogee train promote <run-id> --as <backend> --target mlx [--force]
+apogee train promote <run-id> --as <backend> --adapter [--force]
 ```
 
 The only path from a run to inference, in order: the **eval gate** (hard by
@@ -469,18 +470,55 @@ GGUF), and a promote of one kind into a backend whose versions are the other
 machine that cannot run it (off Apple silicon, no `mlx-lm`), the entry is
 kept and the reason said. The regime and the cycle still promote GGUFs.
 
+**`--adapter`** (53b; opt-in -- the merge above stays the default): the
+fuse is skipped and the adapter itself is the version, applied over the
+base the entry already runs and never merged into it -- kilobytes or a few
+megabytes a version instead of a whole model. The same gate first: the mode
+changes what is written, never what is judged. `--as` names an **existing**
+`llamacpp` or `mlx` entry with a `model_path` -- its base, which is never
+touched. For a `llamacpp` entry the run's PEFT adapter is converted by
+llama.cpp's own `convert_lora_to_gguf.py`, vendored at the pinned revision
+beside `convert_hf_to_gguf.py` and seeded with it under
+`training/scripts/convert/`, run under the environment's interpreter with
+the `convert` set (`--base` the run's base snapshot, the Hub offline) into
+`training/versions/<backend>/v<N>.lora.gguf` (F16), whose header is read
+before anything else is touched. For an `mlx` entry the run's mlx-lm
+adapter directory is copied as it is -- no conversion, no `convert` set --
+into `training/versions/<backend>/v<N>.lora/`, the trainer's numbered
+checkpoints left in the run. Either way the adapter is then **pinned** to
+the base's weight hash (53a's rule, the hash remembered in
+`cache/weight-hashes.json`) and **registered** on the entry's `adapters:`
+through the one config editor, in the place of the active version's adapter
+and at its scale -- an adapter the ledger did not put there stays as it is
+-- and the ledger records the version's `adapter_path` and the
+`base_sha256` it was pinned to. Numbering, retention (a pruned version's
+adapter removed) and rollback (the entry's adapter repointed, with its pin)
+are the same. Refused before anything is written: a name no entry has,
+`--quantize` and `--keep-fused` (nothing is fused), a second adapter on an
+`mlx` entry (mlx-lm loads one), a pipeline stage after the first (it trained
+over the stage before's fused checkpoint, which no entry runs), and
+**formats that would cross** -- an mlx run's adapter onto a `llamacpp`
+entry, or a peft run's onto an `mlx` one, each refused naming both formats.
+A backend's versions are merged or adapters, never both: a merged promote
+into a backend holding adapter versions is refused (it would replace the
+base under them), and an adapter promote into one holding merged versions
+(its `model_path` is a fine-tune, not the base the adapter was trained
+over).
+
 ### `train rollback`, `versions`, `status`
 
 ```bash
-apogee train rollback <backend>      # repoint model_path at the previous version
-apogee train versions [<backend>]    # the ledger(s): version, time, run, eval, weights (a GGUF, or mlx/<id>), active
+apogee train rollback <backend>      # repoint model_path (or, for adapter versions, the entry's adapter) at the previous version
+apogee train versions [<backend>]    # the ledger(s): version, time, run, eval, weights (a GGUF, mlx/<id>, or v<N>.lora[.gguf]), active
 apogee train status                  # the runs (newest first, running ones counted) and the active versions
 ```
 
 `rollback` repoints the backend at the highest version below the active
 one (not "active minus one": numbers have gaps after a prune) and **deletes
-nothing**; a pruned target, one whose file (or MLX directory) is gone, or an
-entry whose type is no longer the version's, is refused by name.
+nothing**; a pruned target, one whose file (or MLX directory, or adapter) is
+gone, or an entry whose type is no longer the version's, is refused by name.
+An adapter version's rollback repoints the entry's adapter in the active
+version's place, with the pin the ledger recorded; the base is not touched.
 The filesystem is the source of truth for all three: nothing is cached.
 `status` also rolls up the cycle (idle, running now, or halted with the
 reason; the anchor) and the pipelines (the running one, else the latest).

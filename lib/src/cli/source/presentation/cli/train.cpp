@@ -20,6 +20,7 @@
 
 #include "agentloop/loop.h"
 #include "agentloop/reporter.h"
+#include "backends/adapters.h"
 #include "backends/factory.h"
 #include "backends/mlx_local.h"
 #include "cli/datasets.h"
@@ -216,6 +217,30 @@ struct Providers {
     return training::script_converter(env.interpreter(), script);
 }
 
+/// The converter an adapter promote runs for a GGUF target (53b): the mock's
+/// for a mock run, else the vendored `convert_lora_to_gguf.py` under the
+/// environment's interpreter with the `convert` set -- the full converter's
+/// questions, asked of its sibling in the same tree.
+[[nodiscard]] training::AdapterConverter make_adapter_converter(const harness::Config& config,
+                                                                std::string_view trainer_name) {
+    if (trainer_name == "mock") {
+        return [](const std::filesystem::path& adapter, const std::filesystem::path& base,
+                  const std::filesystem::path& gguf, const training::MessageSink& on_message,
+                  const harness::CancellationToken&) {
+            if (on_message) {
+                on_message("mock converter: writing a minimal GGUF LoRA");
+            }
+            return training::write_mock_lora_gguf(adapter, base, gguf);
+        };
+    }
+    const training::PythonEnv env = require_python_env(config, "train promote --adapter");
+    const std::filesystem::path script = training::lora_converter_script();
+    if (const std::string why = training::converter_unavailable(env, script); !why.empty()) {
+        fail_user(why);
+    }
+    return training::script_lora_converter(env.interpreter(), script);
+}
+
 [[nodiscard]] training::Verifier header_verifier() {
     return [](const std::filesystem::path& gguf) {
         const models::GgufInfo info = models::inspect_gguf(gguf);
@@ -230,6 +255,20 @@ struct Providers {
     return [](const std::filesystem::path& dir) {
         const models::MlxInfo info = models::read_mlx_info(dir);
         return info.complete ? std::string{} : info.problem;
+    };
+}
+
+/// An MLX adapter version's check (53b): the directory mlx-lm loads an
+/// adapter from -- its `adapter_config.json` and `adapters.safetensors`.
+[[nodiscard]] training::Verifier mlx_adapter_verifier() {
+    return [](const std::filesystem::path& dir) {
+        std::error_code code;
+        for (const std::string_view file : {"adapter_config.json", "adapters.safetensors"}) {
+            if (!std::filesystem::is_regular_file(dir / file, code)) {
+                return "it holds no " + std::string{file};
+            }
+        }
+        return std::string{};
     };
 }
 
@@ -298,6 +337,10 @@ struct PromoteRequest {
     /// What to make runnable (27c): asked for, else what an existing entry
     /// runs, else a GGUF.
     std::optional<training::PromoteTarget> target;
+    /// `--adapter` (53b): the adapter itself as the version, registered on
+    /// the entry's `adapters:` over the base it runs -- the fuse skipped.
+    /// Off, the default: the merged promote, byte for byte as before.
+    bool adapter = false;
 };
 
 struct PromoteChecks {
@@ -363,6 +406,35 @@ struct PromoteChecks {
         }
         checks.target = *runs;
     }
+    if (request.adapter) {
+        // 53b: the adapter goes on an entry that already runs its base.
+        if (existing == nullptr) {
+            checks.error =
+                "an adapter promote registers the adapter on an entry that runs the base it "
+                "was trained over, and '" +
+                request.backend +
+                "' is not configured -- add it first ('apogee config add-backend " +
+                request.backend +
+                " --type llamacpp --model-path <base.gguf>', or --type mlx with the base's MLX "
+                "directory), then promote --adapter into it";
+            return checks;
+        }
+        if (existing->model_path.empty()) {
+            checks.error = "adapters apply over the entry's model_path, and '" +
+                           checks.existing_key + "' names none -- set it with 'apogee config " +
+                           "set-backend " + checks.existing_key + " --model-path <base>'";
+            return checks;
+        }
+        if (!request.quantize.empty() || request.keep_fused) {
+            checks.error = std::string{request.quantize.empty() ? "--keep-fused" : "--quantize"} +
+                           " has nothing to act on: an adapter promote fuses and quantizes "
+                           "nothing, the version is the adapter alone over the entry's base -- "
+                           "drop it, or promote without --adapter";
+            return checks;
+        }
+        checks.error = training::adapter_promotion_conflict(manifest, checks.target);
+        return checks;
+    }
     if (!request.quantize.empty() && checks.target == training::PromoteTarget::Mlx) {
         checks.error =
             "--quantize makes a quantized GGUF, and an MLX promotion registers the "
@@ -407,6 +479,12 @@ struct PromoteOutcome {
     /// An existing entry repointed rather than a new one appended.
     bool updated = false;
     training::PruneResult pruned;
+    /// An adapter version (53b): the base it applies over, untouched, and
+    /// the sha256 it was pinned to.
+    std::string base_path{};
+    std::string base_sha256{};
+    /// The version's size on disk.
+    std::int64_t bytes = 0;
 };
 
 /// The model store's roots as a promotion sees them: `paths.hf_dir` for
@@ -459,6 +537,14 @@ struct PromoteOutcome {
 /// store -- a version promoted before the store existed -- goes alone. An
 /// MLX version is its stored directory, whole (27c).
 [[nodiscard]] std::string remove_promoted(const training::VersionEntry& entry) {
+    if (entry.adapter()) {
+        // An adapter version's file or directory under training/versions/
+        // (53b): the version alone -- its base is the entry's, never Apogee's
+        // to remove.
+        std::error_code code;
+        std::filesystem::remove_all(entry.adapter_path, code);
+        return code ? code.message() : std::string{};
+    }
     if (entry.mlx()) {
         return models::remove_weights(entry.mlx_path);
     }
@@ -642,6 +728,232 @@ struct PromoteOutcome {
     }
     outcome.ok = true;
     return outcome;
+}
+
+/// Two spellings of one path: an adapter's as the config holds it (`~` and
+/// `${VAR}` expanded on read) and a version's as the ledger records it.
+[[nodiscard]] bool same_path(const std::string& a, const std::string& b) {
+    return std::filesystem::path{a}.lexically_normal() ==
+           std::filesystem::path{b}.lexically_normal();
+}
+
+/// The entry's adapters with `adapter` in place of `replaced` (53b): the
+/// version a promote or a rollback moves from, at its scale and in its place
+/// -- or, when the entry lists no such adapter, `adapter` after the rest.
+/// Every adapter the ledger did not put there stays as it is.
+[[nodiscard]] std::vector<harness::AdapterConfig> with_version_adapter(
+    std::vector<harness::AdapterConfig> adapters, const std::string& replaced,
+    harness::AdapterConfig adapter) {
+    const auto held = std::ranges::find_if(adapters, [&](const harness::AdapterConfig& item) {
+        return !replaced.empty() && same_path(item.path, replaced);
+    });
+    if (held != adapters.end()) {
+        adapter.scale = held->scale;
+        *held = std::move(adapter);
+    } else {
+        adapters.push_back(std::move(adapter));
+    }
+    return adapters;
+}
+
+/// Why an mlx entry cannot take `adapters` (53b): mlx-lm loads one adapter
+/// directory, so another already there is said, with the way to take it off.
+[[nodiscard]] std::string one_mlx_adapter(const std::string& key,
+                                          const harness::BackendConfig& entry,
+                                          const std::vector<harness::AdapterConfig>& adapters,
+                                          const std::string& version_path) {
+    if (entry.type != harness::BackendType::Mlx || adapters.size() <= 1) {
+        return {};
+    }
+    for (const harness::AdapterConfig& adapter : adapters) {
+        if (!same_path(adapter.path, version_path)) {
+            return "'" + key + "' is an mlx entry, which applies one adapter, and it already " +
+                   "applies " + adapter.path + " -- take it off with 'apogee config set-backend " +
+                   key + " --adapters \"\"', then promote again";
+        }
+    }
+    return {};
+}
+
+/// The adapter promote (53b), beside `promote_run`: the same gate, refusals
+/// and ledger, the fuse skipped. The run's adapter becomes a small version
+/// under `training/versions/` -- a GGUF LoRA converted by the vendored
+/// script, or the mlx-lm directory copied as it is -- pinned to the base the
+/// entry runs, and registered on its `adapters:` through the one editor in
+/// place of the active version's. The entry's `model_path`, and the base it
+/// names, are never touched. A failure at any step leaves the config and the
+/// ledger as they were.
+[[nodiscard]] PromoteOutcome promote_adapter_run(
+    const harness::Config& config, const std::filesystem::path& config_path,
+    const training::TrainingStore& store, const training::RunManifest& manifest,
+    const training::AdapterConverter& convert, const PromoteRequest& request,
+    const training::MessageSink& on_message, const harness::CancellationToken& cancellation) {
+    PromoteOutcome outcome;
+    const auto refuse = [&outcome](std::string error) {
+        outcome.refused = true;
+        outcome.error = std::move(error);
+        return outcome;
+    };
+    const PromoteChecks checks = precheck_promotion(config, manifest, request);
+    if (!checks.error.empty()) {
+        return refuse(checks.error);
+    }
+    std::string ledger_error;
+    training::VersionLedger ledger =
+        training::load_ledger(store.versions_dir(), request.backend, ledger_error)
+            .value_or(training::VersionLedger{.backend = request.backend});
+    if (!ledger_error.empty()) {
+        return refuse("the version ledger is unreadable: " + ledger_error);
+    }
+    ledger.backend = checks.existing_key;
+    if (const std::string conflict =
+            training::target_conflict(ledger, checks.target, training::PromoteMode::Adapter);
+        !conflict.empty()) {
+        return refuse(conflict);
+    }
+    const harness::BackendConfig& entry = *config.find_backend(checks.existing_key);
+    const training::VersionEntry* active = ledger.active();
+    const std::string replaced = active != nullptr ? active->adapter_path : std::string{};
+    const training::PromotePlan plan = training::plan_adapter_promotion(
+        ledger, store.versions_dir(), ledger.backend, checks.target);
+    if (const std::string refusal = one_mlx_adapter(
+            ledger.backend, entry,
+            with_version_adapter(entry.adapters, replaced,
+                                 harness::AdapterConfig{.path = plan.adapter_path.string()}),
+            plan.adapter_path.string());
+        !refusal.empty()) {
+        return refuse(refusal);
+    }
+    const bool mlx = checks.target == training::PromoteTarget::Mlx;
+    outcome.target = checks.target;
+    outcome.backend_key = ledger.backend;
+    outcome.updated = true;
+    outcome.version = plan.version;
+    outcome.base_path = harness::expand_env_and_home(entry.model_path);
+    if (on_message) {
+        on_message("run " + manifest.run_id + " -> " + ledger.backend + " v" +
+                   std::to_string(plan.version) + " (adapter" + (mlx ? ", mlx)" : ")"));
+    }
+    const training::ArtifactsResult built = training::build_adapter_artifacts(
+        manifest, plan, convert, mlx ? mlx_adapter_verifier() : header_verifier(), on_message,
+        cancellation);
+    if (built.cancelled) {
+        outcome.cancelled = true;
+        outcome.error = "cancelled";
+        return outcome;
+    }
+    if (!built.ok) {
+        outcome.error = built.error + " -- the config and the version ledger are unchanged";
+        return outcome;
+    }
+    outcome.bytes = built.bytes;
+    outcome.weights_path = plan.adapter_path.string();
+    std::error_code code;
+    const auto unstore = [&plan, &code] { std::filesystem::remove_all(plan.adapter_path, code); };
+
+    // Pinned to the weights the entry runs now (53a's unit), the hash read
+    // once per change of them and remembered.
+    if (on_message) {
+        on_message("pinning the adapter to the base it applies over: " + outcome.base_path);
+    }
+    std::vector<harness::AdapterConfig> fresh{harness::AdapterConfig{.path = outcome.weights_path}};
+    if (const std::string refused =
+            backends::pin_adapters(fresh, {.backend = ledger.backend,
+                                           .base = std::filesystem::path{outcome.base_path},
+                                           .directories = mlx,
+                                           .hashing = {.memo = harness::weight_hash_cache_path()}});
+        !refused.empty()) {
+        unstore();
+        outcome.error = refused +
+                        " -- the adapter was removed, and the config and the version "
+                        "ledger are unchanged";
+        return outcome;
+    }
+    outcome.base_sha256 = fresh.front().base_sha256;
+
+    // The adapter exists, reads whole and is pinned: now, and only now, the
+    // config -- the entry's `adapters:` through the one editor.
+    const std::vector<harness::AdapterConfig> adapters =
+        with_version_adapter(entry.adapters, replaced, fresh.front());
+    try {
+        harness::edit_config_file(config_path, [&](std::string_view content) {
+            return harness::set_backend_adapters(content, ledger.backend, adapters);
+        });
+    } catch (const harness::ConfigEditError& e) {
+        unstore();
+        outcome.error = std::string{"registering the adapter: "} + e.what() +
+                        " -- the adapter was removed and the ledger is unchanged";
+        return outcome;
+    } catch (const harness::ConfigError& e) {
+        unstore();
+        outcome.error = std::string{"registering the adapter: "} + e.what() +
+                        " -- the adapter was removed and the ledger is unchanged";
+        return outcome;
+    }
+
+    training::VersionEntry version =
+        training::promotion_entry(manifest, plan, training::rfc3339_now());
+    version.base_sha256 = outcome.base_sha256;
+    outcome.pruned =
+        training::record_promotion(ledger, std::move(version), config.training.retain_versions,
+                                   training::rfc3339_now(), remove_promoted);
+    if (const std::string failure = training::save_ledger(store.versions_dir(), ledger);
+        !failure.empty()) {
+        outcome.error = "the adapter is registered, but the ledger could not be saved: " + failure;
+        return outcome;
+    }
+    outcome.ok = true;
+    return outcome;
+}
+
+/// `train promote --adapter` (53b), after the shared refusals: the converter
+/// composed here -- the GGUF target's alone; an MLX one converts nothing, so
+/// none need be installed -- the adapter promote run, and its report.
+void run_adapter_promote(const harness::Config& config, const std::filesystem::path& config_path,
+                         const training::TrainingStore& store,
+                         const training::RunManifest& manifest, const PromoteRequest& request,
+                         training::PromoteTarget target, std::string_view trainer_name) {
+    const bool mlx = target == training::PromoteTarget::Mlx;
+    const training::AdapterConverter convert =
+        mlx ? training::AdapterConverter{} : make_adapter_converter(config, trainer_name);
+    const InterruptScope interrupt;
+    const PromoteOutcome result = promote_adapter_run(
+        config, config_path, store, manifest, convert, request,
+        [](std::string_view text) { std::cerr << "[promote] " << text << "\n"; },
+        InterruptScope::token());
+    if (result.cancelled) {
+        throw CLI::RuntimeError(kCancelled);
+    }
+    if (result.refused) {
+        fail_user(result.error);
+    }
+    if (!result.ok) {
+        std::cerr << "apogee train: promote failed: " << result.error << "\n";
+        throw CLI::RuntimeError(kBackendError);
+    }
+    std::cout << "updated backend " << result.backend_key << " -> v" << result.version
+              << " (adapter)\n"
+              << "  adapter: " << result.weights_path << " (" << human_size(result.bytes)
+              << (mlx ? ", the mlx-lm directory as it is" : ", a GGUF LoRA") << ")\n"
+              << "  base:    " << result.base_path << " (untouched; pinned by sha256 "
+              << result.base_sha256.substr(0, 12) << ")\n"
+              << "  config:  " << config_path.string() << "\n";
+    if (manifest.eval.has_value()) {
+        std::cout << "  eval:    " << percent(manifest.eval->score) << " ("
+                  << manifest.eval->num_passed << "/" << manifest.eval->total << ")\n";
+    }
+    for (const std::string& removed : result.pruned.removed) {
+        std::cout << "  pruned:  " << removed << " (retain_versions "
+                  << config.training.retain_versions << ")\n";
+    }
+    for (const std::string& failed : result.pruned.failed) {
+        std::cerr << "apogee train: warning: could not prune " << failed << "\n";
+    }
+    std::cout << "\nChat with it:\n  apogee chat -m " << result.backend_key << "\n";
+    const std::optional<training::VersionLedger> ledger = store.list_versions(result.backend_key);
+    if (ledger.has_value() && ledger->kept() > 1) {
+        std::cout << "Roll back if needed:\n  apogee train rollback " << result.backend_key << "\n";
+    }
 }
 
 // --- the pipeline console ---------------------------------------------------------
@@ -1756,10 +2068,12 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     auto promote_keep = std::make_shared<bool>(false);
     auto promote_trainer = std::make_shared<std::string>();
     auto promote_target = std::make_shared<std::string>();
+    auto promote_adapter = std::make_shared<bool>(false);
     CLI::App* promote = cmd->add_subcommand(
         "promote",
         "Fuse, verify, and register the run: a GGUF on a llamacpp backend, or with --target mlx "
-        "the fused model itself on an mlx backend");
+        "the fused model itself on an mlx backend; with --adapter, the adapter alone on the "
+        "entry's adapters, over the base it runs");
     promote->add_option("run", *promote_id, "The run id")->type_name(kRunValue)->required();
     promote
         ->add_option("--as", *promote_as,
@@ -1781,8 +2095,13 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                       "Keep the fused SafeTensors checkpoint under the run directory");
     promote->add_option("--trainer", *promote_trainer, "Override the run's recorded trainer")
         ->type_name(words_value(training::trainer_names()));
+    promote->add_flag(
+        "--adapter", *promote_adapter,
+        "No fuse: register the adapter itself on an existing entry's adapters, over the base it "
+        "runs -- a GGUF LoRA converted from a peft run for a llamacpp entry, an mlx run's "
+        "adapter directory as it is for an mlx entry (default: merge)");
     promote->callback([&context, promote_id, promote_as, promote_force, promote_quantize,
-                       promote_keep, promote_trainer, promote_target]() {
+                       promote_keep, promote_trainer, promote_target, promote_adapter]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_strict(context, config_path);
         const training::TrainingStore store{harness::training_dir()};
@@ -1792,6 +2111,7 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         request.force = *promote_force;
         request.quantize = *promote_quantize;
         request.keep_fused = *promote_keep;
+        request.adapter = *promote_adapter;
         if (!promote_target->empty()) {
             request.target = training::promote_target_from_string(*promote_target);
             if (!request.target.has_value()) {
@@ -1808,6 +2128,12 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             std::cerr << "apogee train: warning: " << checks.warning << "\n";
         }
         const std::string trainer_name = choose_trainer(config, *promote_trainer, manifest.trainer);
+        if (request.adapter) {
+            // No fuse, so no trainer is built (53b).
+            run_adapter_promote(config, config_path, store, manifest, request, checks.target,
+                                trainer_name);
+            return;
+        }
         const std::unique_ptr<training::Trainer> trainer =
             make_trainer(config, trainer_name, "train promote");
         const bool mlx = checks.target == training::PromoteTarget::Mlx;
@@ -1916,9 +2242,26 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         const int from = ledger->active_version;
         const int to = target.entry->version;
         const std::string weights = target.entry->weights();
+        // An adapter version (53b) repoints the entry's adapters, in the
+        // active version's place, with the pin it was registered under; the
+        // base is not touched.
+        std::vector<harness::AdapterConfig> adapters;
+        if (target.entry->adapter()) {
+            const training::VersionEntry* active = ledger->active();
+            const harness::BackendConfig& entry = *config.find_backend(key);
+            adapters = with_version_adapter(
+                entry.adapters, active != nullptr ? active->adapter_path : std::string{},
+                harness::AdapterConfig{.path = weights, .base_sha256 = target.entry->base_sha256});
+            if (const std::string refusal = one_mlx_adapter(key, entry, adapters, weights);
+                !refusal.empty()) {
+                fail_user(refusal);
+            }
+        }
         try {
             harness::edit_config_file(config_path, [&](std::string_view content) {
-                return harness::set_backend_model_path(content, key, weights);
+                return target.entry->adapter()
+                           ? harness::set_backend_adapters(content, key, adapters)
+                           : harness::set_backend_model_path(content, key, weights);
             });
         } catch (const harness::ConfigEditError& e) {
             fail_user(e.what());
@@ -1931,8 +2274,10 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             fail_user("the config is repointed, but the ledger could not be saved: " + failure);
         }
         std::cout << "rolled back " << key << ": v" << from << " -> v" << to << "\n"
-                  << (target.entry->mlx() ? "  mlx:  " : "  gguf: ") << weights
-                  << "\n  nothing was deleted; v" << from << " stays on disk\n";
+                  << (target.entry->adapter() ? "  adapter: "
+                      : target.entry->mlx()   ? "  mlx:  "
+                                              : "  gguf: ")
+                  << weights << "\n  nothing was deleted; v" << from << " stays on disk\n";
     });
 
     // ---- versions ----------------------------------------------------------
@@ -1992,8 +2337,10 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                           << pad(promoted, 22) << pad(entry.run_id, 20)
                           << pad(eval_glyph(entry.eval_passed, entry.eval_score), 11)
                           // A GGUF by its file's name; an MLX version by its
-                          // stored directory, the id its weights hash to (27c).
-                          << (entry.mlx() ? "mlx/" : "")
+                          // stored directory, the id its weights hash to (27c);
+                          // an adapter version by its own, `v<N>.lora[.gguf]`
+                          // (53b).
+                          << (entry.mlx() && !entry.adapter() ? "mlx/" : "")
                           << std::filesystem::path{entry.weights()}.filename().string();
                 if (entry.pruned()) {
                     std::cout << "  (pruned)";

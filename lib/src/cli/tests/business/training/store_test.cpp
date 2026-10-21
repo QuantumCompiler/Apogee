@@ -193,6 +193,72 @@ TEST_CASE("a ledger round-trips, is saved atomically, and every ledger lists by 
 }
 
 TEST_CASE(
+    "an adapter version round-trips its adapter and the base hash it was pinned to; a merged "
+    "ledger is written byte for byte as before",
+    "[training][store][ledger][adapter]") {
+    // 53b: the ledger records `adapter_path` and the base's weight hash, and
+    // a rollback restores both without reading the base again.
+    const apogee::testing::TempDir root{"store-adapter-" + std::to_string(std::random_device{}())};
+    const TrainingStore store{root.path()};
+    const std::string pin(64, 'c');
+    VersionLedger ledger;
+    ledger.backend = "based";
+    ledger.active_version = 2;
+    VersionEntry a1;
+    a1.version = 1;
+    a1.run_id = "r1";
+    a1.adapter_path = (store.versions_dir() / "based" / "v1.lora.gguf").string();
+    a1.base_sha256 = pin;
+    a1.promoted_at = "2026-10-21T12:00:00Z";
+    a1.pruned_at = "2026-10-21T14:00:00Z";
+    VersionEntry a2;
+    a2.version = 2;
+    a2.run_id = "r2";
+    a2.adapter_path = (store.versions_dir() / "based" / "v2.lora").string();
+    a2.base_sha256 = pin;
+    a2.promoted_at = "2026-10-21T13:00:00Z";
+    a2.eval_score = 1.0;
+    a2.eval_passed = true;
+    ledger.versions = {a1, a2};
+    REQUIRE(apogee::training::save_ledger(store.versions_dir(), ledger).empty());
+    const std::optional<VersionLedger> back = store.list_versions("based");
+    REQUIRE(back.has_value());
+    REQUIRE(back->versions.size() == 2);
+    CHECK(back->versions[0].adapter());
+    CHECK(back->versions[0].adapter_path == a1.adapter_path);
+    CHECK(back->versions[0].base_sha256 == pin);
+    CHECK(back->versions[0].pruned());
+    CHECK_FALSE(back->versions[0].mlx());  // a GGUF LoRA
+    CHECK(back->versions[1].mlx());        // an mlx-lm directory
+    CHECK(back->versions[1].weights() == a2.adapter_path);
+    CHECK(back->versions[1].gguf_path.empty());
+    CHECK(back->versions[1].mlx_path.empty());
+    const nlohmann::json json = apogee::training::ledger_to_json(*back);
+    CHECK(json["versions"][1]["adapter_path"] == a2.adapter_path);
+    CHECK(json["versions"][1]["base_sha256"] == pin);
+    CHECK_FALSE(json["versions"][1].contains("gguf_path"));
+    CHECK_FALSE(json["versions"][1].contains("mlx_path"));
+
+    // A merged version is written exactly as it was before adapters: the
+    // same keys, in the same order -- nothing of 53b's added.
+    VersionLedger merged;
+    merged.backend = "tuned";
+    merged.active_version = 1;
+    VersionEntry m1;
+    m1.version = 1;
+    m1.run_id = "r1";
+    m1.gguf_path = "/models/m/gguf/abcdef012345/tuned-v1.gguf";
+    m1.promoted_at = "2026-10-21T12:00:00Z";
+    m1.eval_score = 1.0;
+    m1.eval_passed = true;
+    merged.versions = {m1};
+    CHECK(apogee::training::ledger_to_json(merged).dump() ==
+          R"({"active_version":1,"backend_name":"tuned","versions":[{"eval_passed":true,)"
+          R"("eval_score":1.0,"gguf_path":"/models/m/gguf/abcdef012345/tuned-v1.gguf",)"
+          R"("promoted_at":"2026-10-21T12:00:00Z","run_id":"r1","version":1}]})");
+}
+
+TEST_CASE(
     "pipelines list newest first with an unreadable manifest skipped, one by id or "
     "nothing, the running one active, and the summary JSON",
     "[training][store][pipeline]") {

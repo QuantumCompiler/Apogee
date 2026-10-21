@@ -111,8 +111,10 @@ TEST_CASE("the trainer detection names its reason when nothing fits", "[commands
 
 #include <nlohmann/json.hpp>
 
+#include "backends/adapters.h"
 #include "contracts/assets.h"
 #include "contracts/layout.h"
+#include "contracts/sha256.h"
 #include "models/quantize.h"
 #include "training/manifest.h"
 #include "training/store.h"
@@ -766,6 +768,259 @@ TEST_CASE(
     // The doctor reads the MLX ledger as it reads a GGUF one.
     (void)fixture.run({"check", "--no-color"}, &out, &err);
     CHECK(out.find("active v3 of 3, and the backend points at it") != std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// The adapter promote (53b): `train promote --adapter`, the fuse skipped
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// An entry that runs the run's base -- a stand-in GGUF in the store, read
+/// only for its hash -- appended under `backends:`.
+std::filesystem::path add_base_entry(const RunFixture& fixture, std::string_view name) {
+    const std::filesystem::path base =
+        fixture.home / "models" / "tiny" / "gguf" / "bbbbbbbbbbbb" / "tiny-F16.gguf";
+    write_file(base, "GGUF the base weights");
+    write_file(fixture.base.config_path, read_file(fixture.base.config_path) + "  " +
+                                             std::string{name} +
+                                             ":\n    type: llamacpp\n    model_path: " +
+                                             apogee::harness::yaml_scalar(base.string()) + "\n");
+    return base;
+}
+
+/// The ledger of `backend`, which must exist.
+apogee::training::VersionLedger ledger_of(const RunFixture& fixture, std::string_view backend) {
+    const std::optional<apogee::training::VersionLedger> found =
+        apogee::training::TrainingStore{fixture.training}.list_versions(backend);
+    REQUIRE(found.has_value());
+    return *found;
+}
+
+}  // namespace
+
+TEST_CASE(
+    "train promote --adapter writes a small GGUF LoRA, registers it on the entry's adapters "
+    "through the one editor with the base untouched and pinned, and repoints in place; "
+    "rollback restores the pin, retention prunes kilobytes",
+    "[commands][train][promote][adapter]") {
+    const RunFixture fixture;
+    const std::filesystem::path base = add_base_entry(fixture, "based");
+    const std::string base_bytes = read_file(base);
+    const std::string pin = apogee::models::sha256_hex(base_bytes);
+    const std::string id = fixture.trained();
+    std::string out;
+    std::string err;
+
+    // The gate runs first, whatever the mode: nothing is judged differently.
+    CHECK(fixture.run({"train", "promote", id, "--as", "based", "--adapter"}, &out, &err) == 1);
+    CHECK(err.find("no eval results") != std::string::npos);
+    (void)fixture.evaluated(id);
+
+    // Refused before anything is built: a name no entry has (an adapter goes
+    // on an entry that runs its base), and the flags that act on a fuse.
+    CHECK(fixture.run({"train", "promote", id, "--as", "nowhere", "--adapter"}, &out, &err) == 1);
+    CHECK(err.find("'nowhere' is not configured") != std::string::npos);
+    CHECK(err.find("apogee config add-backend nowhere --type llamacpp") != std::string::npos);
+    CHECK(
+        fixture.run({"train", "promote", id, "--as", "based", "--adapter", "--quantize", "Q4_K_M"},
+                    &out, &err) == 1);
+    CHECK(err.find("--quantize has nothing to act on") != std::string::npos);
+    CHECK(fixture.run({"train", "promote", id, "--as", "based", "--adapter", "--keep-fused"}, &out,
+                      &err) == 1);
+    CHECK(err.find("--keep-fused has nothing to act on") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "versions"));
+
+    const std::string before = read_file(fixture.base.config_path);
+    REQUIRE(fixture.run({"train", "promote", id, "--as", "based", "--adapter"}, &out, &err) == 0);
+    INFO(out << err);
+    const std::filesystem::path v1 = fixture.training / "versions" / "based" / "v1.lora.gguf";
+    CHECK(out.find("updated backend based -> v1 (adapter)") != std::string::npos);
+    CHECK(out.find("adapter: " + v1.string()) != std::string::npos);
+    CHECK(out.find("pinned by sha256 " + pin.substr(0, 12)) != std::string::npos);
+    CHECK(err.find("no fuse: the adapter is the version") != std::string::npos);
+    CHECK(err.find("converting the adapter to a GGUF LoRA") != std::string::npos);
+    // A small file, parsed as a GGUF adapter, and nothing fused anywhere.
+    REQUIRE(std::filesystem::is_regular_file(v1));
+    CHECK(std::filesystem::file_size(v1) < 1024);
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "runs" / id / "fused"));
+    // The base untouched: the same bytes, still what model_path names.
+    CHECK(read_file(base) == base_bytes);
+    // Registered through the one editor, and nothing else changed: the
+    // config is the editor's own output over the config before.
+    const apogee::harness::AdapterConfig a1{.path = v1.string(), .base_sha256 = pin};
+    CHECK(read_file(fixture.base.config_path) ==
+          apogee::harness::set_backend_adapters(before, "based", {a1}));
+    const apogee::harness::Config loaded = apogee::harness::load_config(fixture.base.config_path);
+    REQUIRE(loaded.find_backend("based") != nullptr);
+    CHECK(loaded.find_backend("based")->model_path == base.string());
+    CHECK(loaded.find_backend("based")->adapters == std::vector{a1});
+    // The ledger: the adapter and the base's hash, no GGUF of a model.
+    const apogee::training::VersionLedger first = ledger_of(fixture, "based");
+    CHECK(first.active_version == 1);
+    REQUIRE(first.find(1) != nullptr);
+    CHECK(first.find(1)->adapter_path == v1.string());
+    CHECK(first.find(1)->base_sha256 == pin);
+    CHECK(first.find(1)->gguf_path.empty());
+    CHECK(first.find(1)->run_id == id);
+    CHECK(first.find(1)->eval_passed == true);
+
+    // A second version takes the first's place in the list, at its scale;
+    // an adapter the ledger did not put there stays where it stands.
+    const apogee::harness::AdapterConfig style{
+        .path = (fixture.home / "style.gguf").string(), .scale = 0.5, .base_sha256 = pin};
+    write_file(fixture.base.config_path,
+               apogee::harness::set_backend_adapters(read_file(fixture.base.config_path), "based",
+                                                     {a1, style}));
+    const std::string id2 = fixture.trained(3);
+    (void)fixture.evaluated(id2);
+    const std::string at_v1 = read_file(fixture.base.config_path);
+    REQUIRE(fixture.run({"train", "promote", id2, "--as", "based", "--adapter"}, &out, &err) == 0);
+    const std::filesystem::path v2 = fixture.training / "versions" / "based" / "v2.lora.gguf";
+    CHECK(out.find("updated backend based -> v2 (adapter)") != std::string::npos);
+    CHECK(out.find("apogee train rollback based") != std::string::npos);
+    const apogee::harness::AdapterConfig a2{.path = v2.string(), .base_sha256 = pin};
+    CHECK(read_file(fixture.base.config_path) ==
+          apogee::harness::set_backend_adapters(at_v1, "based", {a2, style}));
+    CHECK(read_file(base) == base_bytes);
+
+    // Rollback repoints the adapter, its recorded pin with it; deletes nothing.
+    REQUIRE(fixture.run({"train", "rollback", "based"}, &out, &err) == 0);
+    CHECK(out.find("rolled back based: v2 -> v1") != std::string::npos);
+    CHECK(out.find("adapter: " + v1.string()) != std::string::npos);
+    CHECK(read_file(fixture.base.config_path) == at_v1);
+    CHECK(std::filesystem::exists(v2));
+    CHECK(ledger_of(fixture, "based").active_version == 1);
+    REQUIRE(fixture.run({"train", "versions", "based"}, &out, &err) == 0);
+    CHECK(out.find("v1.lora.gguf  <- active") != std::string::npos);
+    CHECK(out.find("v2.lora.gguf") != std::string::npos);
+
+    // The doctor's ledger row reads an adapter version on the entry's adapters.
+    (void)fixture.run({"check", "--no-color"}, &out, &err);
+    CHECK(out.find("active v1 of 2, and the backend applies it") != std::string::npos);
+
+    // A backend's versions never mix: a merged promote into it is refused.
+    CHECK(fixture.run({"train", "promote", id2, "--as", "based"}, &out, &err) == 1);
+    CHECK(err.find("'based' holds adapter versions (active v1)") != std::string::npos);
+    // Nor an adapter onto an entry whose versions are merged fine-tunes.
+    REQUIRE(fixture.run({"train", "promote", id, "--as", "tuned"}, &out, &err) == 0);
+    CHECK(fixture.run({"train", "promote", id2, "--as", "tuned", "--adapter"}, &out, &err) == 1);
+    CHECK(err.find("'tuned' holds merged versions (active v1)") != std::string::npos);
+
+    // Retention counts adapter versions as any: retain 1 keeps the active
+    // one alone, the others' files removed and their entries kept.
+    write_file(fixture.base.config_path,
+               read_file(fixture.base.config_path) + "training:\n  retain_versions: 1\n");
+    REQUIRE(fixture.run({"train", "promote", id2, "--as", "based", "--adapter"}, &out, &err) == 0);
+    CHECK(out.find("updated backend based -> v3 (adapter)") != std::string::npos);
+    CHECK(out.find("pruned:") != std::string::npos);
+    const apogee::training::VersionLedger retained = ledger_of(fixture, "based");
+    CHECK(retained.active_version == 3);
+    CHECK(retained.find(1)->pruned());
+    CHECK(retained.find(2)->pruned());
+    CHECK_FALSE(std::filesystem::exists(v1));
+    CHECK_FALSE(std::filesystem::exists(v2));
+    CHECK(std::filesystem::exists(fixture.training / "versions" / "based" / "v3.lora.gguf"));
+    CHECK(read_file(base) == base_bytes);
+    CHECK(fixture.run({"train", "rollback", "based"}, &out, &err) == 1);
+    CHECK(err.find("its adapter is gone") != std::string::npos);
+}
+
+TEST_CASE(
+    "train promote --adapter onto an mlx entry registers the run's adapter directory as it is, "
+    "converting nothing; formats never cross, said by name",
+    "[commands][train][promote][adapter][mlx]") {
+    const RunFixture fixture;
+    // An mlx entry over a stand-in MLX directory: a configuration and a shard.
+    const std::filesystem::path base = fixture.home / "models" / "tiny" / "mlx" / "cccccccccccc";
+    write_file(base / "config.json", R"({"model_type": "llama"})");
+    write_file(base / "model.safetensors", "the base shard");
+    write_file(fixture.base.config_path, read_file(fixture.base.config_path) +
+                                             "  fast:\n    type: mlx\n    model_path: " +
+                                             apogee::harness::yaml_scalar(base.string()) + "\n");
+    (void)add_base_entry(fixture, "based");
+    const std::string id = fixture.trained();
+    (void)fixture.evaluated(id);
+    std::string out;
+    std::string err;
+
+    const std::string before = read_file(fixture.base.config_path);
+    REQUIRE(fixture.run({"train", "promote", id, "--as", "fast", "--adapter"}, &out, &err) == 0);
+    INFO(out << err);
+    const std::filesystem::path v1 = fixture.training / "versions" / "fast" / "v1.lora";
+    CHECK(out.find("updated backend fast -> v1 (adapter)") != std::string::npos);
+    CHECK(out.find("the mlx-lm directory as it is") != std::string::npos);
+    CHECK(err.find("no conversion: the mlx-lm adapter directory is registered as it is") !=
+          std::string::npos);
+    CHECK(err.find("converting") == std::string::npos);
+    CHECK(err.find("mock converter") == std::string::npos);
+    // The run's directory, copied whole -- and the run's own copy kept.
+    const std::filesystem::path run_adapter{fixture.manifest(id).adapter_dir};
+    CHECK(read_file(v1 / "adapter_config.json") == read_file(run_adapter / "adapter_config.json"));
+    CHECK(read_file(v1 / "adapters.safetensors") ==
+          read_file(run_adapter / "adapters.safetensors"));
+    CHECK(std::filesystem::exists(run_adapter / "adapters.safetensors"));
+    // Pinned to the MLX base by the store's id rule, registered through the
+    // one editor, the base's files untouched.
+    const std::string pin = apogee::backends::weights_sha256(base);
+    REQUIRE_FALSE(pin.empty());
+    CHECK(read_file(fixture.base.config_path) ==
+          apogee::harness::set_backend_adapters(
+              before, "fast",
+              {apogee::harness::AdapterConfig{.path = v1.string(), .base_sha256 = pin}}));
+    CHECK(read_file(base / "model.safetensors") == "the base shard");
+    const apogee::training::VersionLedger ledger = ledger_of(fixture, "fast");
+    CHECK(ledger.find(1)->adapter_path == v1.string());
+    CHECK(ledger.find(1)->base_sha256 == pin);
+    CHECK(ledger.find(1)->mlx());
+
+    // mlx-lm loads one adapter: another already on the entry is said.
+    write_file(fixture.base.config_path,
+               apogee::harness::set_backend_adapters(
+                   read_file(fixture.base.config_path), "fast",
+                   {apogee::harness::AdapterConfig{.path = (fixture.home / "other").string(),
+                                                   .base_sha256 = pin}}));
+    const std::string id2 = fixture.trained(3);
+    (void)fixture.evaluated(id2);
+    CHECK(fixture.run({"train", "promote", id2, "--as", "fast", "--adapter"}, &out, &err) == 1);
+    CHECK(err.find("'fast' is an mlx entry, which applies one adapter") != std::string::npos);
+    CHECK(err.find("apogee config set-backend fast --adapters") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "versions" / "fast" / "v2.lora"));
+
+    // Formats never cross: an mlx run's adapter onto a llamacpp entry is
+    // refused naming both formats, and a peft run's onto an mlx entry.
+    apogee::training::RunManifest mlx_run = fixture.manifest(id2);
+    mlx_run.trainer = "mlx";
+    REQUIRE(apogee::training::write_manifest(fixture.training / "runs" / id2, mlx_run).empty());
+    const std::string unchanged = read_file(fixture.base.config_path);
+    CHECK(fixture.run({"train", "promote", id2, "--as", "based", "--adapter"}, &out, &err) == 1);
+    CHECK(err.find("an mlx-lm adapter (trainer mlx)") != std::string::npos);
+    CHECK(err.find("a llamacpp entry applies a GGUF LoRA") != std::string::npos);
+    CHECK(err.find("adapter formats never cross") != std::string::npos);
+    apogee::training::RunManifest peft_run = mlx_run;
+    peft_run.trainer = "peft";
+    REQUIRE(apogee::training::write_manifest(fixture.training / "runs" / id2, peft_run).empty());
+    CHECK(fixture.run({"train", "promote", id2, "--as", "fast", "--adapter"}, &out, &err) == 1);
+    CHECK(err.find("a PEFT adapter (trainer peft)") != std::string::npos);
+    CHECK(read_file(fixture.base.config_path) == unchanged);
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "versions" / "based"));
+}
+
+TEST_CASE("train promote completes its --adapter flag",
+          "[commands][train][promote][adapter][completion]") {
+    // ADR 0007: a new flag is offered the moment it exists.
+    const Fixture fixture;
+    const std::ostringstream captured;
+    std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
+    int code = -1;
+    {
+        apogee::commands::RootCommand root{apogee::commands::default_registry()};
+        std::vector<const char*> argv{"apogee", "__complete", "train", "promote", "r1", "--ad"};
+        code = root.run(static_cast<int>(argv.size()), argv.data());
+    }
+    std::cout.rdbuf(old_out);
+    CHECK(code == 0);
+    CHECK(captured.str().find("--adapter\n") != std::string::npos);
 }
 
 TEST_CASE(

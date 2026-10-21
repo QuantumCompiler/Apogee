@@ -24,4 +24,4 @@
 - [ ] A promote toward a quantized entry gates its candidate on the quantized base, the report saying so; a candidate under the floor never registers.
 - [ ] The full suite is green over fixtures and closures.
 
-**Scope note.** Earmarked for v0.2.0 (track 53); gated on [`adapter-promote.md`](adapter-promote.md) (53b — the ledger and target facts it reads). Out of scope: new eval kits, the runtimes (53a), sharing (53d).
+**Scope note.** Earmarked for v0.2.0 (track 53); gated on 53b, shipped 2026-10-21 ([Milestone AP](../../assistant/MILESTONES.md#milestone-ap--runtime-adapters)) (53b — the ledger and target facts it reads). Out of scope: new eval kits, the runtimes (53a), sharing (53d).

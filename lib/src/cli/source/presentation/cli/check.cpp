@@ -2123,9 +2123,10 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
     }
 
     // Every version ledger: the active version's GGUF -- or MLX directory
-    // (27c) -- exists and the backend's model_path names it -- else the two
-    // have drifted, and a chat runs something other than what `train
-    // versions` says is active.
+    // (27c) -- exists and the backend's model_path names it -- or, for an
+    // adapter version (53b), its adapter exists and the backend's adapters
+    // name it -- else the two have drifted, and a chat runs something other
+    // than what `train versions` says is active.
     for (const training::VersionLedger& ledger : training::TrainingStore{training}.all_versions()) {
         const std::string label = "versions: " + ledger.backend;
         const training::VersionEntry* active = ledger.active();
@@ -2137,12 +2138,14 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
             continue;
         }
         const bool there = active->mlx()
-                               ? std::filesystem::is_directory(active->mlx_path, code)
-                               : std::filesystem::is_regular_file(active->gguf_path, code);
+                               ? std::filesystem::is_directory(active->weights(), code)
+                               : std::filesystem::is_regular_file(active->weights(), code);
+        const std::string kind = active->adapter() ? "an adapter"
+                                 : active->mlx()   ? "an MLX model"
+                                                   : "a GGUF";
         if (!there) {
             add(report, Status::Warn, "Training", label,
-                "active v" + std::to_string(active->version) + " names " +
-                    (active->mlx() ? "an MLX model" : "a GGUF") +
+                "active v" + std::to_string(active->version) + " names " + kind +
                     " that is not there: " + active->weights(),
                 "apogee train rollback " + ledger.backend + ", or promote again");
             continue;
@@ -2153,7 +2156,30 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
                 "active v" + std::to_string(active->version) +
                     " exists, but no backend of that name is configured",
                 "apogee config add-backend " + ledger.backend + " --type " +
-                    (active->mlx() ? "mlx" : "llamacpp") + " --model-path " + active->weights());
+                    (active->mlx() ? "mlx" : "llamacpp") +
+                    (active->adapter() ? " --model-path <base> && apogee config set-backend " +
+                                             ledger.backend + " --adapters "
+                                       : std::string{" --model-path "}) +
+                    active->weights());
+            continue;
+        }
+        if (active->adapter()) {
+            // 53b: the base is the entry's own; the version is an adapter on it.
+            const bool applied =
+                std::ranges::any_of(backend->adapters, [&](const harness::AdapterConfig& adapter) {
+                    return std::filesystem::path{adapter.path}.lexically_normal() ==
+                           std::filesystem::path{active->adapter_path}.lexically_normal();
+                });
+            if (!applied) {
+                add(report, Status::Warn, "Training", label,
+                    "the ledger says v" + std::to_string(active->version) + " (" +
+                        active->weights() + ") but the backend's adapters do not name it",
+                    "apogee train rollback " + ledger.backend + ", or promote again");
+                continue;
+            }
+            add(report, Status::Ok, "Training", label,
+                "active v" + std::to_string(active->version) + " of " +
+                    std::to_string(ledger.versions.size()) + ", and the backend applies it");
             continue;
         }
         if (harness::expand_env_and_home(backend->model_path) != active->weights()) {

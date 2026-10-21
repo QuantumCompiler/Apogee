@@ -3,10 +3,13 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <random>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "support/env_guard.h"
@@ -678,4 +681,424 @@ TEST_CASE(
     const apogee::training::RollbackTarget across = apogee::training::rollback_target(mixed);
     CHECK(across.entry == nullptr);
     CHECK(across.error.find("never changes a backend's type") != std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// The adapter promote (53b): the fuse skipped, the adapter the version
+// ---------------------------------------------------------------------------
+
+namespace {
+
+using apogee::training::PromoteMode;
+using apogee::training::PromoteTarget;
+
+/// An adapter version (53b): its file -- or, for MLX, its directory -- under
+/// `dir`, pinned to a base.
+VersionEntry adapter_entry(int version, const std::filesystem::path& dir, bool mlx = false,
+                           bool pruned = false) {
+    VersionEntry e;
+    e.version = version;
+    e.run_id = "r" + std::to_string(version);
+    e.adapter_path = apogee::training::adapter_version_path(
+                         dir, "tuned", version, mlx ? PromoteTarget::Mlx : PromoteTarget::Gguf)
+                         .string();
+    e.base_sha256 = std::string(64, 'b');
+    e.promoted_at = "2026-10-21T12:00:0" + std::to_string(version) + "Z";
+    if (pruned) {
+        e.pruned_at = "2026-10-21T13:00:00Z";
+    } else if (mlx) {
+        write(std::filesystem::path{e.adapter_path} / "adapters.safetensors", "a");
+    } else {
+        write(e.adapter_path, "GGUF lora");
+    }
+    return e;
+}
+
+std::string read_back(const std::filesystem::path& path) {
+    std::ifstream in{path, std::ios::binary};
+    return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+}
+
+/// A converter that counts, records what it was handed, and writes the
+/// mock's GGUF LoRA.
+struct CountingAdapterConverter {
+    int calls = 0;
+    std::filesystem::path adapter;
+    std::filesystem::path base;
+    std::filesystem::path out;
+
+    apogee::training::AdapterConverter closure() {
+        return
+            [this](const std::filesystem::path& adapter_dir, const std::filesystem::path& base_dir,
+                   const std::filesystem::path& gguf, const apogee::training::MessageSink&,
+                   const apogee::harness::CancellationToken&) {
+                ++calls;
+                adapter = adapter_dir;
+                base = base_dir;
+                out = gguf;
+                return apogee::training::write_mock_lora_gguf(adapter_dir, base_dir, gguf);
+            };
+    }
+};
+
+}  // namespace
+
+TEST_CASE(
+    "the adapter plan sits beside the fused plan: max + 1, a small file or directory named for "
+    "the version under training/versions/<backend>/, nothing fused; the default plan is merge",
+    "[training][promote][adapter]") {
+    const apogee::testing::TempDir root{"adapter-plan-" + std::to_string(std::random_device{}())};
+    VersionLedger ledger;
+    ledger.backend = "tuned";
+    ledger.versions = {adapter_entry(1, root.path(), false, true), adapter_entry(2, root.path())};
+    ledger.active_version = 2;
+    const PromotePlan gguf = apogee::training::plan_adapter_promotion(
+        ledger, root.path() / "versions", "tuned", PromoteTarget::Gguf);
+    CHECK(gguf.version == 3);
+    CHECK(gguf.mode == PromoteMode::Adapter);
+    CHECK(gguf.target == PromoteTarget::Gguf);
+    CHECK(gguf.adapter_path == root.path() / "versions" / "tuned" / "v3.lora.gguf");
+    CHECK(gguf.artifact() == gguf.adapter_path);
+    CHECK(gguf.fused_dir.empty());
+    CHECK(gguf.gguf_path.empty());
+    CHECK(gguf.quantize_type.empty());
+    CHECK_FALSE(gguf.keep_fused);
+    const PromotePlan mlx = apogee::training::plan_adapter_promotion(
+        ledger, root.path() / "versions", "tuned", PromoteTarget::Mlx);
+    CHECK(mlx.adapter_path == root.path() / "versions" / "tuned" / "v3.lora");
+    CHECK(mlx.artifact() == mlx.adapter_path);
+
+    // The default is the merge, its plan exactly as it was: no adapter path.
+    const PromotePlan merged = apogee::training::plan_promotion(
+        ledger, root.path() / "runs" / "r9", root.path() / "stage", "tuned", "", false);
+    CHECK(merged.mode == PromoteMode::Merge);
+    CHECK(merged.adapter_path.empty());
+    CHECK(merged.artifact() == merged.gguf_path);
+
+    // What a version is made by, and its kind, read back from the ledger.
+    CHECK(apogee::training::mode_of(adapter_entry(4, root.path())) == PromoteMode::Adapter);
+    CHECK(apogee::training::mode_of(entry(5, root.path())) == PromoteMode::Merge);
+    CHECK(apogee::training::target_of(adapter_entry(6, root.path())) == PromoteTarget::Gguf);
+    CHECK(apogee::training::target_of(adapter_entry(7, root.path(), true)) == PromoteTarget::Mlx);
+    CHECK(adapter_entry(8, root.path()).weights() ==
+          (root.path() / "tuned" / "v8.lora.gguf").string());
+}
+
+TEST_CASE(
+    "a GGUF adapter version skips the fuse, converts once -- the run's adapter against its "
+    "base, into the plan's file -- verifies it, and leaves nothing on a failure",
+    "[training][promote][adapter]") {
+    const apogee::testing::TempDir root{"adapter-gguf-" + std::to_string(std::random_device{}())};
+    const RunManifest manifest = complete_run(root.path());
+    VersionLedger ledger;
+    ledger.backend = "tuned";
+    const PromotePlan plan = apogee::training::plan_adapter_promotion(
+        ledger, root.path() / "versions", "tuned", PromoteTarget::Gguf);
+    CountingAdapterConverter convert;
+    int verified = 0;
+    const apogee::training::Verifier verify = [&verified](const std::filesystem::path&) {
+        ++verified;
+        return std::string{};
+    };
+    std::vector<std::string> messages;
+    const apogee::training::ArtifactsResult built = apogee::training::build_adapter_artifacts(
+        manifest, plan, convert.closure(), verify,
+        [&messages](std::string_view text) { messages.emplace_back(text); }, {});
+    INFO(built.error);
+    REQUIRE(built.ok);
+    CHECK(convert.calls == 1);
+    CHECK(convert.adapter == std::filesystem::path{manifest.adapter_dir});
+    CHECK(convert.base == std::filesystem::path{manifest.base_model});
+    // Written under a staging name beside its place, renamed in once read.
+    CHECK(convert.out == plan.adapter_path.parent_path() / ".incoming-v1.lora.gguf");
+    CHECK_FALSE(std::filesystem::exists(convert.out));
+    CHECK(verified == 1);
+    CHECK(std::filesystem::is_regular_file(plan.adapter_path));
+    CHECK(built.bytes == static_cast<std::int64_t>(std::filesystem::file_size(plan.adapter_path)));
+    // Nothing fused: no checkpoint beside the run, and the fuse never said.
+    CHECK_FALSE(std::filesystem::exists(root.path() / "runs" / "r1" / "fused"));
+    bool fused_message = false;
+    bool no_fuse = false;
+    for (const std::string& message : messages) {
+        fused_message = fused_message || message.find("fusing") != std::string::npos;
+        no_fuse = no_fuse || message.find("no fuse") != std::string::npos;
+    }
+    CHECK_FALSE(fused_message);
+    CHECK(no_fuse);
+    // The run's adapter is as it was.
+    CHECK(
+        std::filesystem::exists(root.path() / "runs" / "r1" / "adapters" / "adapters.safetensors"));
+
+    // The version's path is taken: a second build refuses before converting.
+    const apogee::training::ArtifactsResult again = apogee::training::build_adapter_artifacts(
+        manifest, plan, convert.closure(), verify, {}, {});
+    CHECK_FALSE(again.ok);
+    CHECK(again.error.find("already exists, though the ledger records no v1") != std::string::npos);
+    CHECK(convert.calls == 1);
+    CHECK(std::filesystem::is_regular_file(plan.adapter_path));
+
+    // A conversion that fails, or one that writes something unreadable,
+    // leaves nothing at the version's path.
+    VersionLedger next = ledger;
+    next.versions = {adapter_entry(1, root.path() / "elsewhere")};
+    next.active_version = 1;
+    const PromotePlan second = apogee::training::plan_adapter_promotion(
+        next, root.path() / "versions", "tuned", PromoteTarget::Gguf);
+    const apogee::training::AdapterConverter failing =
+        [](const std::filesystem::path&, const std::filesystem::path&,
+           const std::filesystem::path& gguf, const apogee::training::MessageSink&,
+           const apogee::harness::CancellationToken&) {
+            write(gguf, "half");
+            return std::string{"Model FooForCausalLM is not supported"};
+        };
+    const apogee::training::ArtifactsResult convert_failed =
+        apogee::training::build_adapter_artifacts(manifest, second, failing, verify, {}, {});
+    CHECK_FALSE(convert_failed.ok);
+    CHECK(convert_failed.error.find("convert: Model FooForCausalLM") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(second.adapter_path));
+    CHECK_FALSE(
+        std::filesystem::exists(second.adapter_path.parent_path() / ".incoming-v2.lora.gguf"));
+    const apogee::training::Verifier unreadable = [](const std::filesystem::path&) {
+        return std::string{"bad magic"};
+    };
+    const apogee::training::ArtifactsResult unparsed = apogee::training::build_adapter_artifacts(
+        manifest, second, convert.closure(), unreadable, {}, {});
+    CHECK_FALSE(unparsed.ok);
+    CHECK(unparsed.error.find("the converted LoRA does not parse: bad magic") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(second.adapter_path));
+
+    // Cancelled before it starts: nothing converted, nothing written.
+    const apogee::harness::CancellationToken token = apogee::harness::CancellationToken::create();
+    token.cancel();
+    const int before = convert.calls;
+    const apogee::training::ArtifactsResult cancelled = apogee::training::build_adapter_artifacts(
+        manifest, second, convert.closure(), verify, {}, token);
+    CHECK(cancelled.cancelled);
+    CHECK(convert.calls == before);
+    CHECK_FALSE(std::filesystem::exists(second.adapter_path));
+
+    // What an interrupted attempt left under the staging name was never
+    // registered: the next build replaces it.
+    write(second.adapter_path.parent_path() / ".incoming-v2.lora.gguf", "half of a killed run");
+    const apogee::training::ArtifactsResult resumed = apogee::training::build_adapter_artifacts(
+        manifest, second, convert.closure(), verify, {}, {});
+    INFO(resumed.error);
+    CHECK(resumed.ok);
+    CHECK(std::filesystem::is_regular_file(second.adapter_path));
+    CHECK_FALSE(
+        std::filesystem::exists(second.adapter_path.parent_path() / ".incoming-v2.lora.gguf"));
+    std::filesystem::remove(second.adapter_path);
+
+    // An adapter that is not there is said.
+    RunManifest gone = manifest;
+    gone.adapter_dir = (root.path() / "runs" / "r1" / "nothing").string();
+    const apogee::training::ArtifactsResult missing =
+        apogee::training::build_adapter_artifacts(gone, second, convert.closure(), verify, {}, {});
+    CHECK_FALSE(missing.ok);
+    CHECK(missing.error.find("the run's adapter is not at") != std::string::npos);
+}
+
+TEST_CASE(
+    "an MLX adapter version copies the adapter directory as it is -- the trainer's numbered "
+    "checkpoints left behind -- and converts nothing",
+    "[training][promote][adapter][mlx]") {
+    const apogee::testing::TempDir root{"adapter-mlx-" + std::to_string(std::random_device{}())};
+    const RunManifest manifest = complete_run(root.path());
+    const std::filesystem::path run_adapter{manifest.adapter_dir};
+    write(run_adapter / "adapter_config.json", R"({"lora_parameters": {"rank": 8}})");
+    write(run_adapter / "0000100_adapters.safetensors", "checkpoint");
+    write(run_adapter / "0000200_adapters.safetensors", "checkpoint");
+    VersionLedger ledger;
+    ledger.backend = "tuned";
+    const PromotePlan plan = apogee::training::plan_adapter_promotion(
+        ledger, root.path() / "versions", "tuned", PromoteTarget::Mlx);
+    CountingAdapterConverter convert;
+    const apogee::training::ArtifactsResult built = apogee::training::build_adapter_artifacts(
+        manifest, plan, convert.closure(), accept(), {}, {});
+    INFO(built.error);
+    REQUIRE(built.ok);
+    CHECK(convert.calls == 0);
+    CHECK(std::filesystem::is_directory(plan.adapter_path));
+    CHECK(read_back(plan.adapter_path / "adapter_config.json") ==
+          R"({"lora_parameters": {"rank": 8}})");
+    CHECK(read_back(plan.adapter_path / "adapters.safetensors") == "a");
+    CHECK_FALSE(std::filesystem::exists(plan.adapter_path / "0000100_adapters.safetensors"));
+    CHECK_FALSE(std::filesystem::exists(plan.adapter_path / "0000200_adapters.safetensors"));
+    // What was copied, and nothing else: the configuration and the weights.
+    CHECK(built.bytes ==
+          static_cast<std::int64_t>(std::string_view{R"({"lora_parameters": {"rank": 8}})"}.size() +
+                                    std::string_view{"a"}.size()));
+    // The run keeps its own copy, checkpoints and all.
+    CHECK(std::filesystem::exists(run_adapter / "0000100_adapters.safetensors"));
+    CHECK_FALSE(std::filesystem::exists(root.path() / "runs" / "r1" / "fused"));
+
+    // A copy the check refuses is removed whole.
+    VersionLedger next;
+    next.backend = "tuned";
+    next.versions = {adapter_entry(1, root.path() / "elsewhere", true)};
+    next.active_version = 1;
+    const PromotePlan second = apogee::training::plan_adapter_promotion(
+        next, root.path() / "versions", "tuned", PromoteTarget::Mlx);
+    const apogee::training::Verifier refusing = [](const std::filesystem::path&) {
+        return std::string{"it holds no adapter_config.json"};
+    };
+    const apogee::training::ArtifactsResult refused = apogee::training::build_adapter_artifacts(
+        manifest, second, convert.closure(), refusing, {}, {});
+    CHECK_FALSE(refused.ok);
+    CHECK(refused.error.find("not an mlx-lm adapter directory") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(second.adapter_path));
+    CHECK_FALSE(std::filesystem::exists(second.adapter_path.parent_path() / ".incoming-v2.lora"));
+    CHECK(convert.calls == 0);
+}
+
+TEST_CASE(
+    "adapter formats never cross, said by name: an mlx run's adapter onto a llamacpp target, a "
+    "peft run's onto an mlx one; a later pipeline stage's adapter applies over no entry's base",
+    "[training][promote][adapter][refusal]") {
+    const apogee::testing::TempDir root{"adapter-cross-" + std::to_string(std::random_device{}())};
+    RunManifest run = complete_run(root.path());
+    using apogee::training::adapter_promotion_conflict;
+
+    run.trainer = "mlx";
+    const std::string mlx_to_gguf = adapter_promotion_conflict(run, PromoteTarget::Gguf);
+    CHECK(mlx_to_gguf.find("mlx-lm adapter (trainer mlx)") != std::string::npos);
+    CHECK(mlx_to_gguf.find("GGUF LoRA") != std::string::npos);
+    CHECK(mlx_to_gguf.find("PEFT adapter (trainer peft)") != std::string::npos);
+    CHECK(mlx_to_gguf.find("never cross") != std::string::npos);
+    CHECK(mlx_to_gguf.find("--target mlx") != std::string::npos);
+    CHECK(adapter_promotion_conflict(run, PromoteTarget::Mlx).empty());
+
+    run.trainer = "peft";
+    const std::string peft_to_mlx = adapter_promotion_conflict(run, PromoteTarget::Mlx);
+    CHECK(peft_to_mlx.find("PEFT adapter (trainer peft)") != std::string::npos);
+    CHECK(peft_to_mlx.find("mlx-lm adapter directory (trainer mlx)") != std::string::npos);
+    CHECK(peft_to_mlx.find("--target gguf") != std::string::npos);
+    CHECK(adapter_promotion_conflict(run, PromoteTarget::Gguf).empty());
+
+    run.trainer = "mock";
+    CHECK(adapter_promotion_conflict(run, PromoteTarget::Gguf).empty());
+    CHECK(adapter_promotion_conflict(run, PromoteTarget::Mlx).empty());
+
+    // A format nobody recorded is not guessed.
+    run.trainer.clear();
+    CHECK(adapter_promotion_conflict(run, PromoteTarget::Gguf).find("records no trainer") !=
+          std::string::npos);
+
+    // A stage after the first trained over the stage before's fused weights.
+    run.trainer = "peft";
+    run.parent_run = "pipe-1-s0";
+    const std::string staged = adapter_promotion_conflict(run, PromoteTarget::Gguf);
+    CHECK(staged.find("pipeline stage trained over stage pipe-1-s0") != std::string::npos);
+    CHECK(staged.find("without --adapter") != std::string::npos);
+}
+
+TEST_CASE(
+    "a backend's versions are merged or adapters, never both: each is refused into a ledger of "
+    "the other, before anything is built",
+    "[training][promote][adapter][refusal]") {
+    const apogee::testing::TempDir root{"adapter-kinds-" + std::to_string(std::random_device{}())};
+    VersionLedger empty;
+    empty.backend = "tuned";
+    CHECK(apogee::training::target_conflict(empty, PromoteTarget::Gguf, PromoteMode::Adapter)
+              .empty());
+
+    VersionLedger merged;
+    merged.backend = "tuned";
+    merged.versions = {entry(1, root.path())};
+    merged.active_version = 1;
+    CHECK(apogee::training::target_conflict(merged, PromoteTarget::Gguf).empty());
+    const std::string onto_merged =
+        apogee::training::target_conflict(merged, PromoteTarget::Gguf, PromoteMode::Adapter);
+    CHECK(onto_merged.find("'tuned' holds merged versions (active v1)") != std::string::npos);
+    CHECK(onto_merged.find("not the base an adapter was trained over") != std::string::npos);
+
+    VersionLedger adapters;
+    adapters.backend = "tuned";
+    adapters.versions = {adapter_entry(1, root.path() / "a"), adapter_entry(2, root.path() / "a")};
+    adapters.active_version = 2;
+    CHECK(apogee::training::target_conflict(adapters, PromoteTarget::Gguf, PromoteMode::Adapter)
+              .empty());
+    // The default -- a merge -- is refused into it: it would replace the
+    // base under the adapters.
+    const std::string onto_adapters =
+        apogee::training::target_conflict(adapters, PromoteTarget::Gguf);
+    CHECK(onto_adapters.find("'tuned' holds adapter versions (active v2)") != std::string::npos);
+    CHECK(onto_adapters.find("with --adapter") != std::string::npos);
+    // Within adapters, the target still never changes.
+    CHECK(apogee::training::target_conflict(adapters, PromoteTarget::Mlx, PromoteMode::Adapter)
+              .find("holds GGUF LoRA adapters (active v2)") != std::string::npos);
+
+    // A rollback never crosses from an adapter version to a merged one.
+    VersionLedger mixed;
+    mixed.backend = "tuned";
+    mixed.versions = {entry(1, root.path() / "m"), adapter_entry(2, root.path() / "m")};
+    mixed.active_version = 2;
+    const apogee::training::RollbackTarget across = apogee::training::rollback_target(mixed);
+    CHECK(across.entry == nullptr);
+    CHECK(across.error.find("v1 of 'tuned' is a GGUF") != std::string::npos);
+    CHECK(across.error.find("never changes a backend's type") != std::string::npos);
+}
+
+TEST_CASE(
+    "adapter versions are retained and rolled back as any version is: kilobyte files removed "
+    "beyond retain_versions, never the active one, a rollback to one gone refused",
+    "[training][promote][adapter][retain][rollback]") {
+    const apogee::testing::TempDir root{"adapter-retain-" + std::to_string(std::random_device{}())};
+    VersionLedger ledger;
+    ledger.backend = "tuned";
+    ledger.versions = {adapter_entry(1, root.path()), adapter_entry(2, root.path()),
+                       adapter_entry(3, root.path())};
+    ledger.active_version = 3;
+    const apogee::training::PruneResult pruned = apogee::training::record_promotion(
+        ledger, adapter_entry(4, root.path()), 2, "2026-10-21T15:00:00Z");
+    CHECK(ledger.active_version == 4);
+    CHECK(pruned.removed ==
+          std::vector<std::string>{(root.path() / "tuned" / "v1.lora.gguf").string(),
+                                   (root.path() / "tuned" / "v2.lora.gguf").string()});
+    CHECK_FALSE(std::filesystem::exists(root.path() / "tuned" / "v1.lora.gguf"));
+    CHECK_FALSE(std::filesystem::exists(root.path() / "tuned" / "v2.lora.gguf"));
+    CHECK(std::filesystem::exists(root.path() / "tuned" / "v3.lora.gguf"));
+    CHECK(std::filesystem::exists(root.path() / "tuned" / "v4.lora.gguf"));
+    CHECK(ledger.find(1)->pruned());
+    CHECK(ledger.kept() == 2);
+
+    // Rollback repoints at the adapter below, its pin with it; deletes nothing.
+    const apogee::training::RollbackTarget back = apogee::training::rollback_target(ledger);
+    REQUIRE(back.entry != nullptr);
+    CHECK(back.entry->version == 3);
+    CHECK(back.entry->adapter_path == (root.path() / "tuned" / "v3.lora.gguf").string());
+    CHECK(back.entry->base_sha256 == std::string(64, 'b'));
+    CHECK(std::filesystem::exists(root.path() / "tuned" / "v4.lora.gguf"));
+    ledger.active_version = 3;
+    const apogee::training::RollbackTarget gone = apogee::training::rollback_target(ledger);
+    CHECK(gone.entry == nullptr);
+    CHECK(gone.error.find("its adapter is gone") != std::string::npos);
+    ledger.active_version = 4;
+    std::filesystem::remove(root.path() / "tuned" / "v3.lora.gguf");
+    const apogee::training::RollbackTarget missing = apogee::training::rollback_target(ledger);
+    CHECK(missing.entry == nullptr);
+    CHECK(missing.error.find("the adapter for v3 of 'tuned' is not at") != std::string::npos);
+
+    // An MLX adapter version's directory goes whole.
+    VersionLedger mlx;
+    mlx.backend = "tuned";
+    mlx.versions = {adapter_entry(1, root.path() / "x", true),
+                    adapter_entry(2, root.path() / "x", true)};
+    mlx.active_version = 2;
+    (void)apogee::training::record_promotion(mlx, adapter_entry(3, root.path() / "x", true), 2,
+                                             "t");
+    CHECK_FALSE(std::filesystem::exists(root.path() / "x" / "tuned" / "v1.lora"));
+    CHECK(
+        std::filesystem::exists(root.path() / "x" / "tuned" / "v2.lora" / "adapters.safetensors"));
+
+    // The ledger entry a successful adapter build records.
+    const PromotePlan plan = apogee::training::plan_adapter_promotion(
+        ledger, root.path() / "versions", "tuned", PromoteTarget::Gguf);
+    const VersionEntry recorded =
+        apogee::training::promotion_entry(complete_run(root.path()), plan, "now");
+    CHECK(recorded.version == 5);
+    CHECK(recorded.adapter_path == plan.adapter_path.string());
+    CHECK(recorded.gguf_path.empty());
+    CHECK(recorded.mlx_path.empty());
+    CHECK(recorded.adapter());
 }
