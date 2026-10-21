@@ -37,7 +37,7 @@ The documentation tree was restructured per application (2026-10-20, the user's 
 
 ### v0.2.0 — Track 2, CLI parity
 
-Opened 2026-10-20 (the user's call, from the first hands-on run: the GUI does everything the CLI and TUI do — the SPEC's Full-parity principle, same day). The audit against the TUI's classification found eight command families with no GUI place and no law holding coverage; the split closes the law first, then the families.
+Opened 2026-10-20 (the user's call, from the first hands-on run: the GUI does everything the CLI and TUI do — the SPEC's Full-parity principle, same day). The audit against the TUI's classification found eight command families with no GUI place and no law holding coverage; the split closes the law first, then the families. The same evening the user's next run found the store's verbs unreached: Models listed backends, and nothing could convert, quantize or register stored weights. That became 2h–2i, after the design grew its Stored weights view.
 
 - [ ] **The parity law** *([2a](../backlog/v0.2.0/parity-law-and-table.md))* — ADR 0003 and the classification table, held by test against the binary's own word list; the carve-outs recorded.
 - [ ] **The console** *([2b](../backlog/v0.2.0/gui-console.md))* — any verb run supervised, completion from the binary, carve-outs refused with their reasons; the catch-all while screens accrete.
@@ -46,6 +46,8 @@ Opened 2026-10-20 (the user's call, from the first hands-on run: the GUI does ev
 - [ ] **Agents, MCP & symphonies** *([2e](../backlog/v0.2.0/agents-mcp-symphonies.md))* — the resource screens, native in-app editing validated by the binary, plays into the session.
 - [ ] **Execute sessions, plays & recipes** *([2f](../backlog/v0.2.0/execute-sessions-plays.md))* — the picker's execute door, recipe expansion shown before launch, analyze console-covered.
 - [ ] **The review screen** *([2g](../backlog/v0.2.0/review-screen.md))* — dry-run-first, click-consented posting, targets, sweeps and skills; silence a first-class pass.
+- [ ] **The model store** *([2h](../backlog/v0.2.0/model-store-screen.md))* — Backends and Stored weights apart, as the design draws them: every set by its handle, with made-from links; register one or all, remove a backend, delete with or without its backends, rename.
+- [ ] **Convert, quantize and check as jobs** *([2i](../backlog/v0.2.0/convert-quantize-jobs.md))* — the sheets build the CLI's own chain, with names as the CLI gives them; each run is supervised on the Jobs tab, using the G18 and G20 fallbacks.
 
 
 ---
