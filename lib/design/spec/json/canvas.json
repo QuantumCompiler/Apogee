@@ -425,6 +425,15 @@
       "y": 2720,
       "title": "Models · registering a stored set",
       "page": "build"
+    },
+    "ScreenConsole.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 12160,
+      "y": 1400,
+      "title": "Console · any command, as typed",
+      "page": "build"
     }
   },
   "createdOnFiles": {
@@ -447,8 +456,8 @@
     },
     "sessions": {
       "kind": "title1",
-      "maxW": 12080,
-      "text": "Screens — sessions and the system monitor",
+      "maxW": 13600,
+      "text": "Screens — sessions, the system monitor and the console",
       "x": 0,
       "y": 1100,
       "page": "build"
@@ -518,6 +527,7 @@
     "ScreenSessionNew.dc.html",
     "ScreenSessionPrivate.dc.html",
     "ScreenMonitor.dc.html",
+    "ScreenConsole.dc.html",
     "ScreenModels.dc.html",
     "ScreenModelsStore.dc.html",
     "ScreenModelsConvert.dc.html",

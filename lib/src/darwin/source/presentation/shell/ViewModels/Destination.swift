@@ -86,12 +86,15 @@ public struct Placeholder: Equatable, Sendable {
 public enum Overlay: String, Sendable, Identifiable {
     /// The system monitor, ⌥⌘M.
     case monitor
+    /// The console, ⇧⌘K: any command run as typed (ADR 0003's catch-all).
+    case console
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
         case .monitor: "System monitor"
+        case .console: "Console"
         }
     }
 }

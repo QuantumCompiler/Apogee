@@ -500,3 +500,43 @@ Every screen stays a machine-mode client of the binary, tested hermetically.
   - every screen's module has its folder, and every gap's item is an index row;
   - the console's refusals give the carve-outs' reasons and nothing else.
 - Bare `lib/scripts/cicd.sh --test`: green -- the CLI's 3593 tests (the two usual skips) and the app's 246 cases.
+
+### 2026-10-20 — `gui-console` (backlog item 2b): every verb reachable, today
+
+**Why.** The parity law (2a) names a place for every command, and the console is the place that makes reach true now. A family's screen improves the experience, while the console guarantees reach as screens accrete, as the CLI's exec line (37h) did for the TUI.
+
+- [x] **`PresentationConsole`** (`source/presentation/console/`, a new module), a shell overlay on **⇧⌘K**. It joins the View menu, gets a terminal button beside the monitor's in the sidebar, and a line in the keyboard list.
+  - **`ConsoleViewModel`:**
+    - **The line:** split as a shell splits it (quotes group, a backslash escapes; an open quote runs nothing), with a leading `apogee` dropped.
+    - **Completion:** the binary's own, `apogee __complete <words> <the word being typed>` in one bounded run. One candidate completes the word, and several are offered.
+    - **A run:** the jobs core's, with stdout streamed, the busy line live, the stderr tail kept, and the ending said ("Done.", "Exited with status 1.", "Stopped."). Stop is Ctrl-C's, and one run goes at a time.
+    - **Refusals:** a carved-out command is refused with `ParityTable`'s reason and never started.
+    - **History:** recalled with ↑ and ↓.
+  - **`ConsoleView`:** the transcript, whose lines keep their width so a table's columns hold, scrolling sideways; the busy line and Stop; the candidates as buttons; the input, where Tab completes and Return runs.
+- [x] **The shell:** `Overlay.console`, `ShellCommand.toggleConsole`, and ⇧⌘K among `KeyMap`'s bindings and the design's keyboard list.
+- [x] **The design (canvas versions 35 and 36):**
+  - the prototype's console overlay and its `console` start;
+  - the board `ScreenConsole`, slotted after the monitor's with the row's note grown;
+  - the contract board's row, "The console: any command, as typed", ready, which makes 40 ready parts;
+  - the Layout board's key row;
+  - the keyboard list's ⇧⌘K.
+
+  The design's health check passes all 33 start screens. Every changed file was read back from the canvas identical to the repo's.
+
+**Decisions made while building** (2026-10-20, each recorded for veto):
+- **The console is an overlay sheet on ⇧⌘K** (the open call's default: a global sheet on a key, keyboard-first). ⇧⌘K was free in the design's list.
+- **Completion runs through `CommandRunning`'s one-shot command**, a bounded run per Tab, rather than growing the jobs core. Completion is no long job and needs no supervision.
+- **Stderr is kept at the end and shown live as the busy line.** The jobs core reads stderr as a bounded tail, and the console prints it whole when the run ends, in the CLI's words.
+- **The board's transcript is the binary's own output**: `models list` over a scratch store, and the completion `apogee __complete models ""` answers. The design never invents a CLI word.
+
+**Verified.**
+- `scripts/build.sh test`: 252 cases, no Swift warning. New:
+  - the word-splitting matrix (quotes, escapes, the word being typed, an open quote);
+  - completion argv-exact (`__complete|models|li`, a leading `apogee` dropped, an empty word after a space), with one candidate completing;
+  - a run argv-exact on the jobs core, with stdout, the busy line, stderr and "Done.";
+  - a failure's status and stderr, one run at a time, and Stop;
+  - the three carve-outs refused by their reasons with nothing started;
+  - an empty line, an open quote, no binary, and the history;
+  - the keyboard list at 21.
+- **Drawn offscreen over the real binary in a scratch home:** a real `models list` run through the jobs core (every table's columns intact), `reset` refused in the table's words, and the ten candidates `__complete models ""` returns.
+- Bare `lib/scripts/cicd.sh --test`: green -- the CLI's 3593 tests (the two usual skips) and the app's 252 cases.

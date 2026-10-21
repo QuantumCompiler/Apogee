@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The shell's keys, as menu commands: a Go menu with every place, and the
-/// View menu's sidebar and monitor. Settings' ⌘, is the Settings scene's own.
+/// View menu's sidebar, monitor and console. Settings' ⌘, is the Settings scene's own.
 public struct ShellCommands: Commands {
     private let model: ShellViewModel
 
@@ -25,6 +25,9 @@ public struct ShellCommands: Commands {
                     .keyboardShortcut(binding.chord.equivalent, modifiers: binding.chord.eventModifiers)
             }
             if let binding = KeyMap.shell.first(where: { $0.command == .toggleMonitor }) {
+                item(binding)
+            }
+            if let binding = KeyMap.shell.first(where: { $0.command == .toggleConsole }) {
                 item(binding)
             }
         }

@@ -140,6 +140,7 @@ a{color:inherit}a:hover{color:inherit}
 <div style="display: flex; align-items: center; gap: 2px">
 <button type="button" class="hv" onClick="{{nav.toggleSystem}}" aria-expanded="{{nav.systemOpen}}" style="flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border: 0; border-radius: 5px; background: transparent; color: var(--text-tertiary); text-align: left"><svg class="i" width="10" height="10" viewBox="0 0 16 16" aria-hidden="true" style="transform: rotate({{nav.systemRot}}deg); transition: transform .15s ease"><path d="M4 6l4 4 4-4"></path></svg><span class="lbl">SYSTEM</span><sc-if value="{{nav.systemClosed}}"><span class="mono" style="flex: 1 1 auto; min-width: 0; margin-left: 4px; font-size: var(--t-meta); color: {{mon.memColor}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{nav.systemSummary}}</span></sc-if></button>
 <button type="button" class="ib" onClick="{{nav.toggleMonitor}}" aria-label="System monitor (Option Command M)" aria-expanded="{{ui.monitorOpen}}" title="System monitor ⌥⌘M" style="width: 26px; height: 26px; background: {{nav.stripBg}}; color: var(--text-tertiary)"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8.5h3l1.5-4 3 8 1.5-4h4"></path></svg></button>
+<button type="button" class="ib" onClick="{{nav.toggleConsole}}" aria-label="Console (Shift Command K)" aria-expanded="{{ui.consoleOpen}}" title="Console ⇧⌘K" style="width: 26px; height: 26px; background: {{nav.consoleBg}}; color: var(--text-tertiary)"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5l3.5 3.5L3 11.5M8 12h5"></path></svg></button>
 </div>
 <sc-if value="{{nav.systemOpen}}">
 <button type="button" class="hv" onClick="{{nav.toggleMonitor}}" aria-label="Open the system monitor" style="width: 100%; display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; padding: 6px 8px 6px; margin-top: 2px; border: 0; border-radius: 6px; background: transparent; color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--t-meta); line-height: 16px; text-align: left">
@@ -1627,6 +1628,19 @@ a{color:inherit}a:hover{color:inherit}
 </div>
 </sc-if>
 
+<sc-if value="{{ui.consoleOpen}}">
+<div role="dialog" aria-label="Console" class="menu" style="position: absolute; left: 268px; right: 16px; bottom: 16px; z-index: 50; max-height: calc(100% - 32px); display: flex; flex-direction: column; font-size: var(--t-small)">
+<div style="display: flex; align-items: center; gap: 10px; padding: 12px 12px 10px 18px; border-bottom: 1px solid var(--line-border)"><h2 style="margin: 0; font-size: var(--t-title); font-weight: 600">Console</h2><span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">apogee, as typed · ⇧⌘K</span><span style="flex: 1 1 auto"></span><button type="button" class="btn-g" onClick="{{con.clear}}" style="height: 26px; font-size: var(--t-small)">Clear</button><button type="button" class="ib" onClick="{{con.close}}" aria-label="Close the console"><svg class="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path></svg></button></div>
+<div class="mono" style="flex: 1 1 auto; min-height: 240px; overflow-y: auto; padding: 12px 18px; font-size: var(--t-meta); line-height: 1.6">
+<sc-if value="{{con.empty}}"><p style="margin: 0; font-family: var(--font-ui); color: var(--text-tertiary)">Any apogee command runs here, as you’d type it at a prompt. Tab asks apogee what can come next; serve, reset and uninstall stay at the prompt.</p></sc-if>
+<sc-for list="{{con.lines}}" as="l" hint-placeholder-count="8"><div style="white-space: pre; color: {{l.color}}; font-weight: {{l.weight}}; margin-top: {{l.gap}}">{{l.text}}</div></sc-for>
+</div>
+<sc-if value="{{con.running}}"><div style="display: flex; align-items: center; gap: 10px; padding: 8px 18px; border-top: 1px solid var(--line-border)"><span class="mono" style="flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: var(--t-meta)">{{con.busy}}</span><button type="button" class="btn-g" onClick="{{con.stop}}" style="height: 26px; font-size: var(--t-small)">Stop</button></div></sc-if>
+<sc-if value="{{con.hasSuggestions}}"><div style="display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 18px 0; border-top: 1px solid var(--line-border)"><sc-for list="{{con.suggestions}}" as="w"><button type="button" class="btn-g mono" onClick="{{w.pick}}" style="height: 24px; font-size: var(--t-meta)">{{w.word}}</button></sc-for></div></sc-if>
+<div style="display: flex; align-items: center; gap: 8px; padding: 10px 12px 12px 18px"><span class="mono" style="color: var(--text-tertiary); font-size: var(--t-meta)">apogee</span><input type="text" class="inp mono" value="{{con.input}}" onChange="{{con.onInput}}" aria-label="Command" placeholder="models list" style="flex: 1 1 auto; min-width: 0"><button type="button" class="btn-g" onClick="{{con.run}}" style="height: 28px">Run</button></div>
+</div>
+</sc-if>
+
 <sc-if value="{{ui.settingsOpen}}">
 <div style="position: absolute; inset: 0; z-index: 60; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.45)">
 <div role="dialog" aria-modal="true" aria-label="Settings" style="width: min(1080px, 100%); height: min(780px, 100%); display: flex; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-window); box-shadow: 0 24px 64px rgba(0,0,0,.45)">
@@ -1912,7 +1926,7 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{ui.toastOn}}"><div role="status" style="position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 80; max-width: calc(100% - 48px); padding: 9px 16px; border-radius: 8px; background: var(--text-primary); color: var(--surface-window); font-size: var(--t-small); box-shadow: 0 8px 24px rgba(0,0,0,.3)">{{ui.toastText}}</div></sc-if>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","monitor","models","models:downloads","models:store","models:convert","models:register","models:roles","download","suites","tasks","newtask","graph","video","video:run","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions"],"default":"chat"},"still":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
+<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","monitor","console","models","models:downloads","models:store","models:convert","models:register","models:roles","download","suites","tasks","newtask","graph","video","video:run","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions"],"default":"chat"},"still":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
 class Component extends DCLogic {
   constructor(props) {
     super(props);
@@ -1921,6 +1935,8 @@ class Component extends DCLogic {
       screen: 'chat',
       overlay: null,
       monitor: false,
+      console: false,
+      con: null,
       confirm: null,
       settingsPane: 'general',
       menu: null,
@@ -2084,6 +2100,14 @@ class Component extends DCLogic {
     } else if (where === 'monitor') {
       set({ screen: 'chat', monitor: true, navOpen: Object.assign({}, s.navOpen, { system: true }) });
       s.cs = Object.assign({}, s.cs, { taskgroup: Object.assign({}, s.cs.taskgroup, { progress: 30 }) });
+    } else if (where === 'console') {
+      set({ screen: 'chat', console: true, con: { input: 'models ', running: null, suggestions: ['list', 'info', 'status', 'rename', 'pull', 'delete', 'quantize', 'convert', 'repair', 'migrate'], lines: [
+        ['command', 'apogee models list'], ['out', 'Local backends'], ['out', ''], ['out', 'SafeTensors'], ['out', 'BACKEND           MODEL                                          SOURCE       ARCH     STATE        VERIFIED'],
+        ['out', '(not configured)  Llama3.2-1B-Instruct/safetensors/edaba290ce7f  huggingface  Llama    safetensors  9 file(s) on record'],
+        ['out', '(not configured)  Qwen3-VL-8B-Instruct/safetensors/63f2634a2019  huggingface  Qwen3VL  safetensors  14 file(s) on record'],
+        ['out', '1 snapshot consumed by a conversion is folded -- --all lists it'], ['note', 'Done.'],
+        ['command', 'apogee reset'], ['problem', 'Not run here: deletes the data directory the running app stands on -- run it at a prompt, with the app closed.']
+      ] } });
     } else if (where === 'models') {
       set({ screen: 'models', modelsTab: { downloads: 'jobs', jobs: 'jobs', store: 'store', convert: 'store', register: 'store', roles: 'roles' }[sub] || 'backends' });
       if (sub === 'store' || sub === 'convert') set({ storeSel: 'safetensors/a04f3e19b2c7' });
@@ -3242,6 +3266,32 @@ class Component extends DCLogic {
       openLibrary: () => this.setState({ monitor: false, screen: 'models', modelsTab: 'store' })
     };
 
+    /* ---------- console ---------- */
+    const conState = s.con || { lines: [], input: '', suggestions: [], running: null };
+    const conColor = { command: 'var(--text-primary)', out: 'var(--text-primary)', err: 'var(--text-secondary)', note: 'var(--text-tertiary)', problem: 'var(--status-error)' };
+    const conPatch = (p) => this.setState({ con: Object.assign({}, conState, p) });
+    const con = {
+      lines: conState.lines.map((l) => ({ text: l[1], color: conColor[l[0]], weight: l[0] === 'command' ? 600 : 400, gap: l[0] === 'command' ? '8px' : '0' })),
+      empty: conState.lines.length === 0,
+      running: !!conState.running,
+      busy: conState.running ? conState.running.busy : '',
+      input: conState.input || '',
+      onInput: (e) => conPatch({ input: e.target.value, suggestions: [] }),
+      suggestions: (conState.suggestions || []).map((w) => ({ word: w, pick: () => conPatch({ input: (conState.input || '').replace(/\S*$/, '') + w + ' ', suggestions: [] }) })),
+      hasSuggestions: !!(conState.suggestions && conState.suggestions.length),
+      run: () => {
+        const line = (conState.input || '').trim();
+        if (!line || conState.running) return;
+        const word = line.replace(/^apogee\s+/, '').split(/\s+/)[0];
+        const refused = { serve: 'a daemon the app would orphan when it quits -- run it at a prompt, or under a service manager', reset: 'deletes the data directory the running app stands on -- run it at a prompt, with the app closed', uninstall: 'removes Apogee and the data directory the app drives -- the app never uninstalls the binary it runs; run it at a prompt, with the app closed' }[word];
+        const lines = conState.lines.concat([['command', 'apogee ' + line.replace(/^apogee\s+/, '')]]).concat(refused ? [['problem', 'Not run here: ' + refused + '.']] : [['note', 'Done.']]);
+        conPatch({ input: '', suggestions: [], lines: lines });
+      },
+      clear: () => conPatch({ lines: [] }),
+      stop: () => conPatch({ running: null, lines: conState.lines.concat([['note', 'Stopped.']]) }),
+      close: () => this.setState({ console: false })
+    };
+
     /* ---------- chat ---------- */
     const defs = this.chatDefs();
     const cid = s.chatId;
@@ -3678,6 +3728,8 @@ class Component extends DCLogic {
       },
       newPrivate: () => { const st = this.state; this.setState({ screen: 'chat', chatId: 'private', privateOpen: true, extra: Object.assign({}, st.extra, { private: [] }), chipsBy: Object.assign({}, st.chipsBy, { private: [] }), menu: null }); },
       toggleMonitor: () => this.setState({ monitor: !this.state.monitor }),
+      toggleConsole: () => this.setState({ console: !this.state.console }),
+      consoleBg: s.console ? 'var(--surface-selection)' : '',
       stripBg: s.monitor ? 'var(--surface-selection)' : '',
       openSettings: () => this.setState({ overlay: 'settings', menu: null }),
       cycleTheme: () => {
@@ -4371,7 +4423,7 @@ class Component extends DCLogic {
       recallSize: s.recallCount ? '41 MB index on this Mac' : 'nothing stored',
       nothingToForget: s.recallCount === 0,
       forget: () => this.setState({ confirm: { kind: 'forget' } }),
-      keys: [['New session', '⌘N'], ['New private session', '⇧⌘N'], ['Switch model', '⇧⌘M'], ['Show or hide the inspector', '⌥⌘I'], ['System monitor', '⌥⌘M'], ['Settings', '⌘,'], ['Stop the answer', '⌘.'], ['Search sessions', '⇧⌘F'], ['Sessions, Models, Suites, Tasks, Code graph, Video, Voice', '⌘1 – ⌘7'], ['Models library', '⇧⌘L'], ['Send', '⏎'], ['New line', '⇧⏎'], ['Commands', '/'], ['Mention a file', '@'], ['Allow once on a permission card', '⏎'], ['Deny on a permission card', 'esc'], ['Pick an answer on a card', '1 – 4'], ['Play or pause the focused player', 'space'], ['Generate, Speak, Plan or Render, from its form', '⌘⏎'], ['Hide the sidebar', '⌃⌘S']].map((x) => ({ label: x[0], keys: x[1] }))
+      keys: [['New session', '⌘N'], ['New private session', '⇧⌘N'], ['Switch model', '⇧⌘M'], ['Show or hide the inspector', '⌥⌘I'], ['System monitor', '⌥⌘M'], ['Console', '⇧⌘K'], ['Settings', '⌘,'], ['Stop the answer', '⌘.'], ['Search sessions', '⇧⌘F'], ['Sessions, Models, Suites, Tasks, Code graph, Video, Voice', '⌘1 – ⌘7'], ['Models library', '⇧⌘L'], ['Send', '⏎'], ['New line', '⇧⏎'], ['Commands', '/'], ['Mention a file', '@'], ['Allow once on a permission card', '⏎'], ['Deny on a permission card', 'esc'], ['Pick an answer on a card', '1 – 4'], ['Play or pause the focused player', 'space'], ['Generate, Speak, Plan or Render, from its form', '⌘⏎'], ['Hide the sidebar', '⌃⌘S']].map((x) => ({ label: x[0], keys: x[1] }))
     };
 
     /* ---------- suites ---------- */
@@ -5255,6 +5307,7 @@ class Component extends DCLogic {
       isVoice: s.screen === 'voice',
       runtimeOpen: !!s.rtAsk && !s.rtAsk.hidden,
       monitorOpen: s.monitor,
+      consoleOpen: s.console,
       settingsOpen: s.overlay === 'settings',
       downloadOpen: s.overlay === 'download',
       newTaskOpen: s.overlay === 'newtask',
@@ -5268,7 +5321,7 @@ class Component extends DCLogic {
       openPdf: () => this.say('Opens the source in Preview at that page (prototype)')
     };
 
-    return { ui: ui, nav: nav, mon: mon, chat: chat, tg: tg, rt: rt, wal: wal, cr: cr, pr: pr, cmp: cmp, ins: ins, mdl: mdl, st: st, sh: sh, dlg: dlg, cf: cf, set: setv, sui: sui, tsk: tsk, nt: ntv, gr: gr, vid: vid, comp: comp, vox: vox, rtc: rtc };
+    return { ui: ui, nav: nav, mon: mon, con: con, chat: chat, tg: tg, rt: rt, wal: wal, cr: cr, pr: pr, cmp: cmp, ins: ins, mdl: mdl, st: st, sh: sh, dlg: dlg, cf: cf, set: setv, sui: sui, tsk: tsk, nt: ntv, gr: gr, vid: vid, comp: comp, vox: vox, rtc: rtc };
   }
 }
 </script>

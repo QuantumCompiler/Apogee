@@ -54,6 +54,13 @@ struct Sidebar<Sessions: View>: View {
                 .foregroundStyle(Palette.textTertiary)
                 .help("System monitor \(KeyMap.chord(for: .toggleMonitor)?.symbols ?? "")")
                 .accessibilityLabel("System monitor")
+                Button(action: { model.perform(.toggleConsole) }) {
+                    Image(systemName: "terminal")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.textTertiary)
+                .help("Console \(KeyMap.chord(for: .toggleConsole)?.symbols ?? "")")
+                .accessibilityLabel("Console")
             }
         }
         .font(.apogeeBody)

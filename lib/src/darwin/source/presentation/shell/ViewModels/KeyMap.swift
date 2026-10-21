@@ -42,6 +42,8 @@ public enum ShellCommand: Hashable, Sendable {
     case modelsLibrary
     /// Open or close the system monitor.
     case toggleMonitor
+    /// Open or close the console.
+    case toggleConsole
     /// Hide or show the sidebar.
     case toggleSidebar
     /// Open Settings -- the Settings scene's own command carries its key.
@@ -83,6 +85,7 @@ public enum KeyMap {
         Destination.allCases.map { KeyBinding(.go($0), $0.key, $0.title) } + [
             KeyBinding(.modelsLibrary, KeyChord("l", [.shift, .command]), "Models Library"),
             KeyBinding(.toggleMonitor, KeyChord("m", [.option, .command]), "System Monitor"),
+            KeyBinding(.toggleConsole, KeyChord("k", [.shift, .command]), "Console"),
             KeyBinding(.toggleSidebar, KeyChord("s", [.control, .command]), "Hide Sidebar"),
             KeyBinding(.openSettings, KeyChord(",", .command), "Settings"),
         ]
@@ -99,6 +102,7 @@ public enum KeyMap {
         KeyReference("Switch model", "⇧⌘M"),
         KeyReference("Show or hide the inspector", "⌥⌘I"),
         KeyReference("System monitor", "⌥⌘M"),
+        KeyReference("Console", "⇧⌘K"),
         KeyReference("Settings", "⌘,"),
         KeyReference("Stop the answer", "⌘."),
         KeyReference("Search sessions", "⇧⌘F"),

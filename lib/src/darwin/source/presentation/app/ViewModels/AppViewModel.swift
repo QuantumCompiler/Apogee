@@ -7,6 +7,7 @@ import Observation
 import PresentationCompose
 import PresentationGraph
 import PresentationModels
+import PresentationConsole
 import PresentationMonitor
 import PresentationSessions
 import PresentationSettings
@@ -33,6 +34,7 @@ final class AppViewModel {
     let downloads: DownloadsViewModel
     let tasks: TasksViewModel
     let monitor: MonitorViewModel
+    let console: ConsoleViewModel
     let suites: SuitesViewModel
     let graph: GraphViewModel
     let video: VideoViewModel
@@ -58,6 +60,7 @@ final class AppViewModel {
         downloads.finished = { [weak models] in Task { await models?.refresh() } }
         let tasks = TasksViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
         tasks.say = { [weak shell] text in shell?.say(text) }
+        let console = ConsoleViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
         let monitor = MonitorViewModel(runner: runner ?? ReadRunner())
         monitor.liveChildren = { [weak sessions, weak downloads, weak tasks] in
             var children: [(label: String, pid: Int32)] = []
@@ -115,6 +118,7 @@ final class AppViewModel {
         self.downloads = downloads
         self.tasks = tasks
         self.monitor = monitor
+        self.console = console
         self.suites = suites
         self.graph = graph
         self.video = video
@@ -134,6 +138,7 @@ final class AppViewModel {
         downloads.connect(binary: sessions.binaryURL)
         await tasks.connect(binary: sessions.binaryURL)
         monitor.connect(binary: sessions.binaryURL)
+        console.connect(binary: sessions.binaryURL)
         await suites.connect(binary: sessions.binaryURL)
         await graph.connect(binary: sessions.binaryURL)
         video.connect(binary: sessions.binaryURL)

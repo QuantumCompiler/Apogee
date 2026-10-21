@@ -42,6 +42,7 @@ public final class ShellViewModel {
         case .go(let destination): go(destination)
         case .modelsLibrary: go(.models)
         case .toggleMonitor: overlay = overlay == .monitor ? nil : .monitor
+        case .toggleConsole: overlay = overlay == .console ? nil : .console
         case .toggleSidebar: setSidebarHidden(!sidebarHidden)
         case .openSettings: break  // the Settings scene answers its own command
         }

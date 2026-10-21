@@ -1,6 +1,7 @@
 import PresentationCompose
 import PresentationGraph
 import PresentationModels
+import PresentationConsole
 import PresentationMonitor
 import PresentationSessions
 import PresentationSettings
@@ -64,6 +65,7 @@ public struct ApogeeApp: App {
             } overlay: { overlay in
                 switch overlay {
                 case .monitor: MonitorView(model: model.monitor, close: model.shell.closeOverlay)
+                case .console: ConsoleView(model: model.console, close: model.shell.closeOverlay)
                 }
             }
             .frame(minWidth: Layout.windowMinWidth, minHeight: Layout.windowMinHeight)
