@@ -39,6 +39,7 @@ public enum ParityTable {
         // --- screens: drawn in the app today ------------------------------------
         CommandPlace("chat", .screen(module: "PresentationSession"), "the session window: a conversation driven over machine mode"),
         CommandPlace("chats", .screen(module: "PresentationSessions"), "Sessions: the saved conversations, renamed, deleted, resumed"),
+        CommandPlace("execute", .screen(module: "PresentationSessions"), "Sessions' execute door: a suite or bare, a project folder, orchestrate; /play in the session"),
         CommandPlace("models", .screen(module: "PresentationModels"), "Models: the library, a model's details, the roles, downloads"),
         CommandPlace("config", .screen(module: "PresentationSettings"), "Settings' panes, and Suites (PresentationSuites)"),
         CommandPlace("version", .screen(module: "PresentationSettings"), "Settings › General, and the window's subtitle"),
@@ -47,7 +48,7 @@ public enum ParityTable {
         CommandPlace("check", .screen(module: "PresentationSettings"), "Settings › Backends & keys: health, with each failing row's remedy"),
         CommandPlace("providers", .screen(module: "PresentationSettings"), "Settings › Backends & keys: the providers on this machine"),
         CommandPlace("graph", .screen(module: "PresentationGraph"), "Code graph, and a collection's prose graph: its communities, report and decisions"),
-        CommandPlace("task", .screen(module: "PresentationTasks"), "Tasks; recipes are 2f's"),
+        CommandPlace("task", .screen(module: "PresentationTasks"), "Tasks, recipes in the new-task sheet"),
         CommandPlace("auth", .screen(module: "PresentationSettings"), "Settings › Backends & keys: keys added on stdin, kept nowhere"),
         CommandPlace("video", .screen(module: "PresentationVideo"), "Video: clips, and compositions (PresentationCompose)"),
         CommandPlace("voice", .screen(module: "PresentationVoice"), "Voice: speeches, say, playback by the timings"),
@@ -60,7 +61,6 @@ public enum ParityTable {
         CommandPlace("mcp", .screen(module: "PresentationLibrary"), "Library › MCP servers: connect state, presets registered, enable, disable, a tool tried"),
         CommandPlace("symphonies", .screen(module: "PresentationLibrary"), "Library › Symphonies: the catalog, a play supervised, own spec files edited and checked"),
         // --- gaps: each named by its queued item --------------------------------
-        CommandPlace("execute", .queued(item: "2f"), "execute sessions: suite, model, project folder, orchestrate"),
         CommandPlace("review", .queued(item: "2g"), "reviews, targets and sweeps, the skills"),
         // --- the console's: run there as typed ----------------------------------
         CommandPlace("analyze", .console, "a one-shot agent workflow over an input"),

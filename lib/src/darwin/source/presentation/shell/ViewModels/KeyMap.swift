@@ -99,6 +99,7 @@ public enum KeyMap {
     public static let reference: [KeyReference] = [
         KeyReference("New session", "⌘N"),
         KeyReference("New private session", "⇧⌘N"),
+        KeyReference("New execute session", "⌥⌘N"),
         KeyReference("Switch model", "⇧⌘M"),
         KeyReference("Show or hide the inspector", "⌥⌘I"),
         KeyReference("System monitor", "⌥⌘M"),

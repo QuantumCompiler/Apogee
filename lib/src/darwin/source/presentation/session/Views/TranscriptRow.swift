@@ -166,10 +166,18 @@ struct ActivityView: View {
                         .textSelection(.enabled)
                 }
                 ForEach(Array(activity.lines.enumerated()), id: \.offset) { _, line in
-                    Text(line)
-                        .font(.apogeeCode)
-                        .foregroundStyle(Palette.textSecondary)
-                        .textSelection(.enabled)
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
+                        // A play's stage, marked where it stands: the line is the CLI's.
+                        if let stage = PlayNarration.stage(line) {
+                            Text("\(stage.index)/\(stage.count)")
+                                .font(.apogeeMeta.monospacedDigit())
+                                .foregroundStyle(Palette.accent)
+                        }
+                        Text(line)
+                            .font(.apogeeCode)
+                            .foregroundStyle(Palette.textSecondary)
+                            .textSelection(.enabled)
+                    }
                 }
             }
             .padding(.top, Spacing.xs)
@@ -186,6 +194,9 @@ struct ActivityView: View {
     }
 
     static func summary(_ activity: Activity) -> String {
+        if let play = activity.play {
+            return play.summary(live: activity.live)
+        }
         var parts = [activity.live ? "thinking" : "thought"]
         if activity.budgetReached { parts.append("budget reached") }
         if !activity.lines.isEmpty {

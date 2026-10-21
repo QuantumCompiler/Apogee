@@ -1,0 +1,18 @@
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","document"],"schema":"2026-10-20","tools":true},"model":"root","next_turn":1,"protocol_version":1,"type":"session"}
+{"turn":1,"type":"thinking"}
+{"text":"[tool] play_echo2","turn":1,"type":"tool_status"}
+{"text":"play — the model chose echo2: 2 member calls, utility → chat","turn":1,"type":"tool_status"}
+{"text":"stage 1/2 first — asking utility (helper): One: hello","turn":1,"type":"tool_status"}
+{"text":"stage 2/2 second — asking chat (root): Two: HELPER<One: hello>","turn":1,"type":"tool_status"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"answer_start"}
+{"text":"ANSWER<e","turn":1,"type":"answer_delta"}
+{"text":"cho2 ans","turn":1,"type":"answer_delta"}
+{"text":"wered:\nR","turn":1,"type":"answer_delta"}
+{"text":"OOT<Two:","turn":1,"type":"answer_delta"}
+{"text":" HELPER<","turn":1,"type":"answer_delta"}
+{"text":"One: hel","turn":1,"type":"answer_delta"}
+{"text":"lo>>>","turn":1,"type":"answer_delta"}
+{"turn":1,"type":"answer_end"}
+{"finish_reason":"stop","model":"root","text":"ANSWER<echo2 answered:\nROOT<Two: HELPER<One: hello>>>","turn":1,"type":"result"}

@@ -41,6 +41,9 @@ public struct SlashCommand: Equatable, Identifiable, Sendable {
         case compact
         case detachAll
         case stop
+        /// `/play <symphony> <input>`: an `execute` session's turn, sent as
+        /// typed (machine-mode.md -> Playing a symphony).
+        case play
     }
 
     public let name: String
@@ -61,6 +64,10 @@ public struct SlashCommand: Equatable, Identifiable, Sendable {
         SlashCommand(name: "/delete", summary: "Delete this session", act: .library(.delete)),
         SlashCommand(name: "/inspector", summary: "Show or hide the inspector", act: .library(.toggleInspector)),
         SlashCommand(name: "/stop", summary: "Stop the turn", act: .stop),
+        SlashCommand(
+            name: "/play",
+            summary: "Play a symphony on the input: its stages on the suite's members, its output this session's answer",
+            act: .play),
     ]
 }
 

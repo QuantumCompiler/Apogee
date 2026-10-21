@@ -56,7 +56,7 @@ public struct ApogeeClient: Sendable {
         binary: URL, launch: ChatLaunch = ChatLaunch(), folder: URL? = nil, environment: [String: String] = [:]
     ) -> MachineSession {
         var command = launch.command(binary: binary)
-        command.workingDirectory = folder ?? home
+        command.workingDirectory = folder ?? launch.folder ?? home
         command.environment = environment
         return MachineSession.start(
             spawner: spawner, command: command,

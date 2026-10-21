@@ -25,6 +25,16 @@ public struct SessionList: View {
                 Spacer()
                 Button {
                     shell.go(.sessions)
+                    Task { await library.openExecuteDoor() }
+                } label: {
+                    Image(systemName: "hammer")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.textSecondary)
+                .help("New execute session ⌥⌘N")
+                .accessibilityLabel("New execute session")
+                Button {
+                    shell.go(.sessions)
                     Task { await library.newPrivateSession() }
                 } label: {
                     Image(systemName: "eye.slash")

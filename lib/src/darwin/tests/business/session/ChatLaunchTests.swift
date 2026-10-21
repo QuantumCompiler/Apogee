@@ -47,6 +47,27 @@ struct ChatLaunchTests {
         #expect(ChatLaunch(noRecall: true).arguments == base + ["--no-recall"])
     }
 
+    @Test("the execute door: execute's word, the same two directions, then --suite and --orchestrate as chosen")
+    func execute() {
+        let base = ["execute", "--output-format", "stream-json", "--input-format", "stream-json", "--tools"]
+        #expect(ChatLaunch(execute: ChatLaunch.Execute()).arguments == base, "left to the config: the default suite, else bare")
+        #expect(ChatLaunch(execute: ChatLaunch.Execute(suite: "duo")).arguments == base + ["--suite", "duo"])
+        #expect(ChatLaunch(execute: ChatLaunch.Execute(suite: "duo", orchestrate: true)).arguments
+            == base + ["--suite", "duo", "--orchestrate"])
+        #expect(ChatLaunch(settings: RunSettings(model: "helper"), execute: ChatLaunch.Execute()).arguments
+            == base + ["-m", "helper"], "bare on one model")
+        #expect(ChatLaunch(resume: "c1", execute: ChatLaunch.Execute(suite: "duo")).arguments
+            == base + ["--resume", "c1", "--suite", "duo"], "paused and resumed, it reopens as it opened")
+    }
+
+    @Test("a launch's folder is where its child works: a project for execute")
+    func folder() {
+        let project = URL(fileURLWithPath: "/Users/someone/code/ingest")
+        let launch = ChatLaunch(execute: ChatLaunch.Execute(), folder: project)
+        #expect(launch.command(binary: binary).workingDirectory == project)
+        #expect(ChatLaunch().command(binary: binary).workingDirectory == nil, "the client's own default, the home folder")
+    }
+
     @Test("a client starts a chat in the user's home unless given a folder, and says hello first")
     func clientStartsInHome() async throws {
         let fake = try FakeApogee()
@@ -66,6 +87,30 @@ struct ChatLaunchTests {
         #expect(fake.received.first == #"{"type":"hello","client":{"name":"Apogee","version":"0.2.0"},"wants":["tools"]}"#)
         // Both sides through realpath(3): Foundation's own resolving drops /private.
         let physical = try #require(realpath(home.path, nil))
+        defer { free(physical) }
+        #expect(try String(contentsOf: cwd, encoding: .utf8) == String(cString: physical))
+    }
+
+    @Test("a client opens a launch in the launch's folder: an execute door's project")
+    func clientStartsInTheLaunchFolder() async throws {
+        let fake = try FakeApogee()
+        let home = fake.directory.appendingPathComponent("home")
+        let project = fake.directory.appendingPathComponent("project")
+        for folder in [home, project] {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
+        let client = ApogeeClient(
+            identity: ClientIdentity(version: "0.2.0"), spawner: ProcessSpawner(),
+            preferences: Preferences(store: MemoryStore()), home: home)
+        let cwd = fake.directory.appendingPathComponent("cwd")
+        let session = client.startChat(
+            binary: fake.executable, launch: ChatLaunch(execute: ChatLaunch.Execute(), folder: project),
+            environment: ["FAKE_SCENARIO": "conversation", "FAKE_LOG": fake.log.path, "FAKE_CWD": cwd.path])
+        var reader = EventReader(session)
+        _ = await reader.untilKind { if case .session = $0 { true } else { false } }
+        await session.close()
+        _ = await reader.untilEnded()
+        let physical = try #require(realpath(project.path, nil))
         defer { free(physical) }
         #expect(try String(contentsOf: cwd, encoding: .utf8) == String(cString: physical))
     }

@@ -11,8 +11,8 @@ It is a reference for building the apps under `lib/src/darwin/`, `linux/` and `w
 | `CLAUDE.md` | How to work on the design: keeping it in step with the canvas, what each kind of change touches, the format's rules, and how to check a change. Repo-only. |
 | `html/main.html` | **The entry point**: the interactive prototype, with every screen, overlay and flow in one file. |
 | `html/support.js` | The standalone runtime that lets the design files open in a browser (below). Repo-only: the canvas serves its own. |
-| `html/Screen*.dc.html` | One board per screen and state (41), each mounting the prototype at a starting point, so they cannot drift from it. |
-| `html/BuildContract.dc.html` | How the app talks to Apogee: startup, each part of the design mapped to the event or command behind it, the CLI gaps (G1–G20, two of them closed) with their fallbacks, and the decisions the design makes. |
+| `html/Screen*.dc.html` | One board per screen and state (44), each mounting the prototype at a starting point, so they cannot drift from it. |
+| `html/BuildContract.dc.html` | How the app talks to Apogee: startup, each part of the design mapped to the event or command behind it, the CLI gaps (G1–G23, two of them closed) with their fallbacks, and the decisions the design makes. |
 | `html/BuildLayout.dc.html` | Regions and sizes, navigation and keys, the states every screen draws, and each piece as SwiftUI, Qt Quick and WinUI. |
 | `html/BuildProcesses.dc.html` | The process diagram: the app, its `apogee` children, and the files it reads and writes. |
 | `html/ColorTokens.dc.html`, `html/TypeSpace.dc.html` | Foundations: the color tokens and their contrast; type, space and shape. |

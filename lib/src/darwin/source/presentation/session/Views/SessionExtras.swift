@@ -112,14 +112,16 @@ struct AttachmentChips: View {
     }
 }
 
-/// The list the input offers: slash commands after `/`, paths after `@`.
+/// The list the input offers: slash commands after `/`, the symphonies after
+/// `/play `, paths after `@`.
 struct SuggestionList: View {
     @Bindable var model: SessionViewModel
 
     var body: some View {
         let commands = model.slashSuggestions
+        let plays = model.playSuggestions
         let mentions = model.mentionSuggestions
-        if !commands.isEmpty || !mentions.isEmpty {
+        if !commands.isEmpty || !plays.isEmpty || !mentions.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(commands) { command in
                     Button {
@@ -128,6 +130,22 @@ struct SuggestionList: View {
                         HStack(spacing: Spacing.m) {
                             Text(command.name).font(.apogeeCode).foregroundStyle(Palette.textPrimary)
                             Text(command.summary).font(.apogeeSmall).foregroundStyle(Palette.textTertiary)
+                            Spacer()
+                        }
+                        .padding(.horizontal, Spacing.m)
+                        .frame(height: 28)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                ForEach(plays) { play in
+                    Button {
+                        model.complete(play: play.name)
+                    } label: {
+                        HStack(spacing: Spacing.m) {
+                            Image(systemName: "music.note.list").foregroundStyle(Palette.textTertiary)
+                            Text(play.name).font(.apogeeCode).foregroundStyle(Palette.textPrimary)
+                            Text(play.description).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).lineLimit(1)
                             Spacer()
                         }
                         .padding(.horizontal, Spacing.m)

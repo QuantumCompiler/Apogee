@@ -49,6 +49,12 @@ public final class SessionViewModel {
     public var presenting: Presenting?
     /// The folder the session works in, which `@` completes paths from.
     public var folder: URL = FileManager.default.homeDirectoryForCurrentUser
+    /// The symphonies `/play` offers in an `execute` session, as `symphonies
+    /// list` read them.
+    public var plays: [PlayChoice] = []
+    /// The config's default suite, the one an `execute` opened without
+    /// `--suite` runs under; empty when none is set, `nil` unread.
+    public var defaultSuite: String?
     /// The last turn sent, for Try again.
     public private(set) var lastSent: String?
 
@@ -83,6 +89,29 @@ public final class SessionViewModel {
         self.launch = launch
         chatID = launch.resume
         settings = launch.settings
+        if let folder = launch.folder { self.folder = folder }
+    }
+
+    /// An `execute` session (its door's), rather than a chat.
+    public var isExecute: Bool { launch.execute != nil }
+
+    /// What an `execute` session was opened with, as its flags said it:
+    /// `execute · suite duo · orchestrating · in ingest`. The session's
+    /// events name its model, never its suite, so the suite is the launch's
+    /// -- or the config's default, read -- and no count is guessed.
+    public var executeBanner: String? {
+        guard let execute = launch.execute else { return nil }
+        var parts = ["execute"]
+        if let suite = execute.suite {
+            parts.append("suite \(suite)")
+        } else if let defaultSuite, !defaultSuite.isEmpty {
+            parts.append("suite \(defaultSuite), the default")
+        } else if defaultSuite != nil {
+            parts.append("no suite")
+        }
+        if execute.orchestrate { parts.append("orchestrating") }
+        if let folder = launch.folder { parts.append("in \(folder.lastPathComponent)") }
+        return parts.joined(separator: " · ")
     }
 
     /// How this session is kept private, when it is.
@@ -337,9 +366,10 @@ public final class SessionViewModel {
 
     /// Whether a command has what it needs now: `/compact` and `/detach` the
     /// 52d lines, `/stop` a turn in flight, `/rename` and `/delete` a saved
-    /// conversation.
+    /// conversation, `/play` an `execute` session.
     public func available(_ command: SlashCommand) -> Bool {
         switch command.act {
+        case .play: isExecute
         case .compact: canCompact && outbox != nil
         case .detachAll: canDetach && !attachments.isEmpty
         case .stop: canCancel
@@ -351,6 +381,11 @@ public final class SessionViewModel {
     /// Runs a slash command: the draft is cleared, the act done or handed on.
     public func run(_ command: SlashCommand) {
         guard available(command) else { return }
+        if command.act == .play {
+            // The line is the turn: `/play <symphony> <input>`, sent as typed.
+            draft = "/play "
+            return
+        }
         draft = ""
         switch command.act {
         case .library(let action): onAction?(action)
@@ -358,7 +393,22 @@ public final class SessionViewModel {
         case .compact: compact()
         case .detachAll: attachments.forEach(detach)
         case .stop: cancel()
+        case .play: break
         }
+    }
+
+    /// The symphonies `/play ` offers for the name being typed after it.
+    public var playSuggestions: [PlayChoice] {
+        guard isExecute, draft.hasPrefix("/play ") else { return [] }
+        let typed = draft.dropFirst("/play ".count)
+        guard !typed.contains(" ") else { return [] }
+        return plays.filter { $0.name.hasPrefix(typed) }
+    }
+
+    /// Completes the `/play` line with the symphony `name`; its input follows.
+    public func complete(play name: String) {
+        guard isExecute, draft.hasPrefix("/play ") else { return }
+        draft = "/play \(name) "
     }
 
     /// The paths `@` offers for what is typed after it.

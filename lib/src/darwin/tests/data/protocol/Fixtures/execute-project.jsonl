@@ -1,0 +1,11 @@
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","document"],"schema":"2026-10-20","tools":true},"model":"root","next_turn":1,"protocol_version":1,"type":"session"}
+{"text":"persona: coder, the shipped coding prompt, in every request -- -s replaces it","type":"notice"}
+{"text":"project context: AGENTS.md, 11 words, in every request","type":"notice"}
+{"text":"attaching . (2 files, 89 bytes)","type":"notice"}
+{"text":"attached .: 2 files, 2 chunks, no map: the model's window is unknown, searched by its words: no embedding model is set ('apogee config set-default-embedding') -- its excerpts are retrieved each turn","turn":1,"type":"notice"}
+{"text":"graph: 2 nodes, 1 edge (supported: c 1; skipped: .md 1)","turn":1,"type":"notice"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"answer_start"}
+{"text":"ROOT<hi>","turn":1,"type":"answer_delta"}
+{"turn":1,"type":"answer_end"}
+{"finish_reason":"stop","model":"root","text":"ROOT<hi>","turn":1,"type":"result"}

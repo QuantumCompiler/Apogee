@@ -54,6 +54,9 @@ public struct SessionsScreen: View {
         } message: {
             Text(pendingMessage)
         }
+        .sheet(isPresented: $library.executeDoorOpen) {
+            ExecuteDoorSheet(library: library)
+        }
         .sheet(item: $library.renaming) { chat in
             RenameSheet(chat: chat) { name in
                 Task { await library.rename(chat, to: name) }
@@ -163,6 +166,11 @@ public struct SessionCommands: Commands {
                 Task { await library.newPrivateSession() }
             }
             .keyboardShortcut("n", modifiers: [.shift, .command])
+            Button("New Execute Session…") {
+                shell.go(.sessions)
+                Task { await library.openExecuteDoor() }
+            }
+            .keyboardShortcut("n", modifiers: [.option, .command])
         }
         CommandGroup(after: .toolbar) {
             Button("Session Settings…") {

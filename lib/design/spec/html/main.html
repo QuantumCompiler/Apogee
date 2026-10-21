@@ -81,6 +81,7 @@ a{color:inherit}a:hover{color:inherit}
 <div style="flex: 0 0 52px; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 18px">
 <span class="ap-lights" aria-hidden="true" style="display: flex; gap: 8px"><span style="width: 12px; height: 12px; border-radius: 50%; background: #FF5F57"></span><span style="width: 12px; height: 12px; border-radius: 50%; background: #FEBC2E"></span><span style="width: 12px; height: 12px; border-radius: 50%; background: #28C840"></span></span>
 <span style="flex: 1 1 auto"></span>
+<button type="button" class="ib ap-lab" onClick="{{nav.newExecute}}" aria-label="New execute session (Option Command N)" title="New execute session ⌥⌘N"><svg class="i" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 13.5l6-6"></path><path d="M7.5 3.5l3-1.5 3.5 3.5-1.5 3-1.5-1.5-2 2-2.5-2.5 2-2z"></path></svg></button>
 <button type="button" class="ib ap-lab" onClick="{{nav.newPrivate}}" aria-label="New private session (Shift Command N)" title="New private session ⇧⌘N"><svg class="i" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8s2.2-4 6-4c1 0 1.9.3 2.7.7M14 8s-2.2 4-6 4c-1 0-1.9-.3-2.7-.7"></path><path d="M6.6 9.4a2 2 0 0 1 2.8-2.8"></path><path d="M3 13L13 3"></path></svg></button>
 <button type="button" class="ib" onClick="{{nav.newChat}}" aria-label="New session (Command N)" title="New session ⌘N"><svg class="i" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3H4.5A1.5 1.5 0 0 0 3 4.5v7A1.5 1.5 0 0 0 4.5 13h7a1.5 1.5 0 0 0 1.5-1.5V8"></path><path d="M11.5 2.5l2 2L8 10H6V8z"></path></svg></button>
 </div>
@@ -168,6 +169,7 @@ a{color:inherit}a:hover{color:inherit}
 <div style="flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px">
 <sc-if value="{{chat.isPrivate}}"><span class="mono" style="display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border: 1px solid var(--line-strong); border-radius: 4px; font-size: var(--t-tag); font-weight: 600; letter-spacing: .08em; color: var(--text-secondary)"><svg class="i" width="11" height="11" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8s2.2-4 6-4c1 0 1.9.3 2.7.7M14 8s-2.2 4-6 4c-1 0-1.9-.3-2.7-.7"></path><path d="M6.6 9.4a2 2 0 0 1 2.8-2.8"></path><path d="M3 13L13 3"></path></svg>PRIVATE</span></sc-if>
 <h1 style="margin: 0; min-width: 0; font-size: var(--t-title); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{chat.title}}</h1>
+<sc-if value="{{chat.execOn}}"><span class="mono" title="Opened as apogee execute: its suite’s symphonies play with /play" style="flex: 0 1 auto; min-width: 0; font-size: var(--t-meta); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{chat.execBanner}}</span></sc-if>
 </div>
 
 <div style="position: relative">
@@ -554,6 +556,29 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{pr.isOther}}"><div class="prose"><p style="margin: 0">Going with your answer: “{{pr.other}}”. In the real app Claude would continue from it here; this prototype stops at the question.</p></div></sc-if>
 <div class="mono" style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; font-size: var(--t-meta); color: var(--text-tertiary)"><span style="display: inline-flex; align-items: center; gap: 6px"><span style="width: 6px; height: 6px; border-radius: 50%; background: var(--model-subscription)"></span>Claude · 17:26</span><span>11.2 s</span><span>tokens not reported by the Claude app</span></div>
 </sc-if>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{chat.isPlay}}">
+<div role="note" class="note"><span class="rule"></span><span>persona: coder, the shipped coding prompt, in every request -- -s replaces it</span><span class="rule"></span></div>
+<div role="note" class="note"><span class="rule"></span><span>project context: AGENTS.md, 12 words, in every request</span><span class="rule"></span></div>
+<div class="row me" title="Sent 09:40">
+<p class="prose" style="margin: 0; min-width: 0">/play summarize-verify The board met on 14 October. It agreed to move the release to 3 November, and Ana Ruiz will own the checklist.</p>
+</div>
+<div role="note" class="note"><span class="rule"></span><span>attaching . (2 files, 95 bytes)</span><span class="rule"></span></div>
+<div role="note" class="note"><span class="rule"></span><span>graph: 2 nodes, 1 edge (supported: python 1; skipped: .md 1)</span><span class="rule"></span></div>
+<div class="row">
+<div style="min-width: 0; display: flex; flex-direction: column; gap: 10px">
+<div style="border: 1px solid var(--line-border); border-radius: 6px; background: var(--surface-card)">
+<div class="mono" style="display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-bottom: 1px solid var(--line-border); font-size: var(--t-ui); color: var(--text-secondary)"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" style="color: var(--text-tertiary)"><path d="M4.5 6.5L8 10l3.5-3.5"></path></svg><span style="color: var(--text-primary); font-weight: 500">played summarize-verify</span><span>· 2 stages</span></div>
+<div style="padding: 10px 12px 12px">
+<div class="tl"><span style="color: var(--status-accent)">1/2</span><span style="color: var(--text-secondary); overflow-wrap: anywhere">stage 1/2 summarize — asking utility (qwen3-0.6b): Summarize the passage below in at most three sentences. Keep…</span><span></span></div>
+<div class="tl"><span style="color: var(--status-accent)">2/2</span><span style="color: var(--text-secondary); overflow-wrap: anywhere">stage 2/2 verify — asking chat (gpt-oss-20b): Here is a passage and a summary of it. Passage: The board…</span><span></span></div>
+</div>
+</div>
+<div class="prose"><p style="margin: 0">The board met on 14 October and moved the release to 3 November; Ana Ruiz owns the checklist.</p></div>
+<div class="mono" style="display: flex; gap: 16px; font-size: var(--t-meta); color: var(--text-tertiary)"><span style="display: inline-flex; align-items: center; gap: 6px"><span style="width: 6px; height: 6px; border-radius: 50%; background: var(--model-local)"></span>gpt-oss-20b · 09:40</span></div>
 </div>
 </div>
 </sc-if>
@@ -2021,12 +2046,37 @@ a{color:inherit}a:hover{color:inherit}
 </div>
 </sc-if>
 
+<sc-if value="{{ui.executeOpen}}">
+<div style="position: absolute; inset: 0; z-index: 65; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.45)">
+<div role="dialog" aria-modal="true" aria-labelledby="ex-h" style="width: min(560px, 100%); max-height: 100%; overflow-y: auto; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-card); box-shadow: 0 24px 64px rgba(0,0,0,.45)">
+<div style="padding: 18px 20px 6px"><h2 id="ex-h" style="margin: 0; font-size: var(--t-h2); font-weight: 600">New execute session</h2><p style="margin: 4px 0 0; font-size: var(--t-small); color: var(--text-secondary)">A session under a suite, its symphonies playable with /play -- or bare on one model.</p></div>
+<div style="padding: 12px 20px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px">
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: var(--t-small); color: var(--text-secondary)">Suite<select class="inp" value="{{ex.suite}}" onChange="{{ex.onSuite}}"><sc-for list="{{ex.suites}}" as="o"><option value="{{o.value}}">{{o.label}}</option></sc-for></select></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: var(--t-small); color: var(--text-secondary)">Model<select class="inp" value="{{ex.model}}" onChange="{{ex.onModel}}"><sc-for list="{{ex.models}}" as="o"><option value="{{o.value}}">{{o.label}}</option></sc-for></select></label>
+</div>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: var(--t-small); color: var(--text-secondary)">Folder<span style="display: flex; gap: 8px; align-items: center"><input type="text" class="inp mono" value="{{ex.folder}}" readonly aria-label="Folder" style="flex: 1 1 auto"><button type="button" class="btn">Choose…</button></span></label>
+<label style="display: inline-flex; align-items: center; gap: 8px; font-size: var(--t-small); color: {{ex.orchColor}}"><input type="checkbox" checked="{{ex.orchestrate}}" disabled="{{ex.cantOrchestrate}}" onChange="{{ex.toggleOrchestrate}}">Orchestrate: offer the suite’s symphonies to its chat model, as tools</label>
+<p style="margin: 0; font-size: var(--t-small); color: var(--text-tertiary)">{{ex.note}}</p>
+<div class="mono" style="padding: 8px 10px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); line-height: 1.6; color: var(--text-secondary); overflow-wrap: anywhere">{{ex.command}}</div>
+</div>
+<div style="display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px 18px"><button type="button" class="btn-g" onClick="{{ex.cancel}}">Cancel</button><button type="button" class="btn-p" onClick="{{ex.open}}">Open</button></div>
+</div>
+</div>
+</sc-if>
+
 <sc-if value="{{ui.newTaskOpen}}">
 <div style="position: absolute; inset: 0; z-index: 65; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.45)">
 <div role="dialog" aria-modal="true" aria-labelledby="nt-h" style="width: min(600px, 100%); max-height: 100%; overflow-y: auto; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-card); box-shadow: 0 24px 64px rgba(0,0,0,.45)">
 <div style="padding: 18px 20px 6px"><h2 id="nt-h" style="margin: 0; font-size: var(--t-h2); font-weight: 600">New task</h2><p style="margin: 4px 0 0; font-size: var(--t-small); color: var(--text-secondary)">Say what done looks like. The task plans, then works in rounds, checking itself after each, until its checks pass or its rounds run out.</p></div>
 <div style="padding: 12px 20px; display: flex; flex-direction: column; gap: 14px">
-<label style="display: flex; flex-direction: column; gap: 6px; font-size: var(--t-small); color: var(--text-secondary)">Goal<textarea rows="3" value="{{nt.goal}}" onChange="{{nt.onGoal}}" placeholder="e.g. Make tests/test_parsers.py pass on Python 3.12" style="box-sizing: border-box; width: 100%; resize: vertical; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-window); font-size: var(--t-body); line-height: 1.5; color: var(--text-primary)"></textarea></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: var(--t-small); color: var(--text-secondary)">Recipe<select class="inp" value="{{nt.recipe}}" onChange="{{nt.onRecipe}}"><sc-for list="{{nt.recipeOptions}}" as="o"><option value="{{o.value}}">{{o.label}}</option></sc-for></select></label>
+<sc-if value="{{nt.noRecipe}}"><label style="display: flex; flex-direction: column; gap: 6px; font-size: var(--t-small); color: var(--text-secondary)">Goal<textarea rows="3" value="{{nt.goal}}" onChange="{{nt.onGoal}}" placeholder="e.g. Make tests/test_parsers.py pass on Python 3.12" style="box-sizing: border-box; width: 100%; resize: vertical; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-window); font-size: var(--t-body); line-height: 1.5; color: var(--text-primary)"></textarea></label></sc-if>
+<sc-if value="{{nt.hasRecipe}}">
+<p style="margin: 0; font-size: var(--t-small); color: var(--text-secondary)">{{nt.recipeDesc}}</p>
+<sc-if value="{{nt.recipeTakesInput}}"><label style="display: flex; flex-direction: column; gap: 6px; font-size: var(--t-small); color: var(--text-secondary)">Input<input type="text" class="inp" value="{{nt.input}}" onChange="{{nt.onInput}}" style="width: 100%"><span style="color: var(--text-tertiary)">{{nt.recipeInput}}</span></label></sc-if>
+<sc-if value="{{nt.hasGrants}}"><div><div style="margin-bottom: 6px; font-size: var(--t-small); color: var(--text-secondary)">Suggests</div><div style="display: flex; flex-wrap: wrap; gap: 6px 18px"><sc-for list="{{nt.grants}}" as="g"><label style="display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-small)"><input type="checkbox" checked="{{g.on}}" onChange="{{g.toggle}}"><span class="mono">Allow {{g.name}}</span></label></sc-for></div><p style="margin: 6px 0 0; font-size: var(--t-small); color: var(--text-tertiary)">Given only if ticked: a grant the recipe suggests is never assumed.</p></div></sc-if>
+</sc-if>
 <div><div style="margin-bottom: 6px; font-size: var(--t-small); color: var(--text-secondary)">Done when</div>
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px">
 <label style="display: flex; flex-direction: column; gap: 6px; font-size: var(--t-small); color: var(--text-tertiary)">the answer says<input type="text" class="inp" value="{{nt.require}}" onChange="{{nt.onRequire}}" placeholder="e.g. 0 failed" style="width: 100%"></label>
@@ -2037,12 +2087,13 @@ a{color:inherit}a:hover{color:inherit}
 <label style="display: flex; flex-direction: column; gap: 6px; font-size: var(--t-small); color: var(--text-secondary)">Suite<select class="inp" value="{{nt.suite}}" onChange="{{nt.onSuite}}"><option value="coding">Coding · local</option><option value="research">Research · hybrid</option><option value="big">Big local</option></select></label>
 <label style="display: flex; flex-direction: column; gap: 6px; font-size: var(--t-small); color: var(--text-secondary)">Rounds, at most<select class="inp mono" value="{{nt.rounds}}" onChange="{{nt.onRounds}}"><option value="4">4</option><option value="8">8</option><option value="16">16</option><option value="32">32</option></select></label>
 </div>
-<div style="display: flex; flex-wrap: wrap; gap: 14px 28px">
+<sc-if value="{{nt.noRecipe}}"><div style="display: flex; flex-wrap: wrap; gap: 14px 28px">
 <div><div style="margin-bottom: 6px; font-size: var(--t-small); color: var(--text-secondary)">Writing files</div><div role="group" aria-label="Writing files" class="seg" style="display: inline-flex"><sc-for list="{{nt.writes}}" as="w"><button type="button" aria-pressed="{{w.current}}" onClick="{{w.pick}}" style="background: {{w.bg}}; color: {{w.color}}; font-weight: {{w.weight}}">{{w.label}}</button></sc-for></div></div>
 <div><div style="margin-bottom: 6px; font-size: var(--t-small); color: var(--text-secondary)">Running commands</div><div role="group" aria-label="Running commands" class="seg" style="display: inline-flex"><sc-for list="{{nt.cmds}}" as="w"><button type="button" aria-pressed="{{w.current}}" onClick="{{w.pick}}" style="background: {{w.bg}}; color: {{w.color}}; font-weight: {{w.weight}}">{{w.label}}</button></sc-for></div></div>
-</div>
+</div></sc-if>
 <p style="margin: 0; font-size: var(--t-small); color: var(--text-tertiary)">A task never stops to ask. What isn’t granted here is refused, the task is told, and every use of what is granted is recorded.</p>
 <div class="mono" style="padding: 8px 10px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); line-height: 1.6; color: var(--text-secondary); overflow-wrap: anywhere">{{nt.command}}</div>
+<sc-if value="{{nt.hasRecipe}}"><div><div style="margin-bottom: 6px; font-size: var(--t-small); color: var(--text-secondary)">The same run as typing</div><div class="mono" style="padding: 8px 10px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); line-height: 1.6; color: var(--text-secondary); overflow-wrap: anywhere; white-space: pre-wrap">{{nt.expansion}}</div></div></sc-if>
 </div>
 <div style="display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px 18px"><button type="button" class="btn-g" onClick="{{nt.cancel}}">Cancel</button><button type="button" class="btn-p" onClick="{{nt.start}}" disabled="{{nt.cantStart}}">Start task</button></div>
 </div>
@@ -2131,7 +2182,7 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{ui.toastOn}}"><div role="status" style="position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 80; max-width: calc(100% - 48px); padding: 9px 16px; border-radius: 8px; background: var(--text-primary); color: var(--surface-window); font-size: var(--t-small); box-shadow: 0 8px 24px rgba(0,0,0,.3)">{{ui.toastText}}</div></sc-if>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","monitor","console","knowledge","knowledge:collections","graph:prose","training","training:datasets","library","library:symphonies","library:mcp","models","models:downloads","models:store","models:convert","models:register","models:roles","download","suites","tasks","newtask","graph","video","video:run","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions"],"default":"chat"},"still":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
+<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","chat:play","monitor","console","knowledge","knowledge:collections","graph:prose","training","training:datasets","library","library:symphonies","library:mcp","models","models:downloads","models:store","models:convert","models:register","models:roles","download","suites","tasks","newtask","newtask:recipe","execute","graph","video","video:run","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions"],"default":"chat"},"still":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
 class Component extends DCLogic {
   constructor(props) {
     super(props);
@@ -2332,7 +2383,10 @@ class Component extends DCLogic {
     else if (where === 'training') set({ screen: 'training', tr: sub === 'datasets' ? { tab: 'datasets', sel: '20261021-051826', regime: 'foundation', running: false } : { tab: 'runs', sel: '20261021-051826', regime: 'foundation', running: true } });
     else if (where === 'knowledge') set({ screen: 'knowledge', kn: sub === 'collections' ? { tab: 'collections', coll: 'notes', searched: true } : { tab: 'records', asked: true, branch: '', sel: 'kr-20261021T045944Z-1e2354', coll: 'notes', searched: false } });
     else if (where === 'suites' || where === 'tasks' || where === 'graph' || where === 'voice') set({ screen: where });
-    else if (where === 'newtask') set({ screen: 'tasks', overlay: 'newtask', newTask: { goal: 'Make tests/test_parsers.py pass on Python 3.12', suite: 'coding', rounds: '8', writes: 'allow', cmds: 'allow', require: '', requireFile: '' } });
+    else if (where === 'newtask') set({ screen: 'tasks', overlay: 'newtask', newTask: sub === 'recipe'
+      ? { goal: '', suite: 'coding', rounds: '8', writes: 'none', cmds: 'none', require: '', requireFile: '', recipe: 'digest-folder', input: 'docs', grants: ['write_file'] }
+      : { goal: 'Make tests/test_parsers.py pass on Python 3.12', suite: 'coding', rounds: '8', writes: 'allow', cmds: 'allow', require: '', requireFile: '', recipe: '', input: '', grants: [] } });
+    else if (where === 'execute') set({ screen: 'chat', chatId: 'play', overlay: 'execute', ex: { suite: 'coding', model: '', folder: '~/code/ingest', orchestrate: true } });
     else if (where === 'video') {
       set({ screen: 'video', mediaTab: 'clips', clipSel: 'lh-final', play: { key: 'clip:lh-final', on: false, base: 2.1, t0: 0 } });
       if (sub === 'run') {
@@ -2788,6 +2842,7 @@ class Component extends DCLogic {
       { id: 'retry', title: 'Make fetch retries configurable', group: 'TODAY', time: '13:40', model: 'gpt-oss', ctx: 13420 },
       { id: 'wal', title: 'Group commit, from the storage notes', group: 'TODAY', time: '11:52', model: 'sonnet', ctx: 18140 },
       { id: 'crash', title: 'What’s in this crash screenshot?', group: 'TODAY', time: '10:18', model: 'qwenvl', ctx: 1906 },
+      { id: 'play', title: 'The board’s minutes, summarized', group: 'TODAY', time: '09:40', model: 'gpt-oss', ctx: 2140, exec: 'execute · suite coding · orchestrating · in ingest' },
       { id: 'pr', title: 'Review PR 482: retry budget for uploads', group: 'YESTERDAY', time: '17:26', model: 'claude', ctx: 0 },
       { id: 'kv', title: 'Where llama.cpp sizes the KV cache', group: 'YESTERDAY', time: '16:47', model: 'gpt-oss', ctx: 7240 },
       { id: 'standup', title: 'Transcribe standup-2026-10-09.m4a', group: 'YESTERDAY', time: '10:15', model: 'gemma-mlx', stub: 6, ctx: 9100 },
@@ -2799,8 +2854,12 @@ class Component extends DCLogic {
     ];
   }
 
-  commands() {
-    return [
+  commands(execute) {
+    const exec = execute ? [
+      ['play', '<symphony> [input]', 'Play a symphony on the input: its stages on the suite’s members, its output this session’s answer'],
+      ['symphonies', '', 'List the symphonies /play can play']
+    ] : [];
+    return exec.concat([
       ['model', '[backend]', 'Show the backend answering, or switch to another'],
       ['models', '', 'List the configured backends'],
       ['suite', '[name|off]', 'Show the suite and what its members hold, or switch'],
@@ -2823,6 +2882,28 @@ class Component extends DCLogic {
       ['rerank', '[backend]', 'The model that reranks search results, or off, or auto'],
       ['capture', '[status|link]', 'Save this conversation as a knowledge record'],
       ['help', '', 'List these commands']
+    ]);
+  }
+
+  /** The seeded task recipes, as `task recipes show` gives them. */
+  recipes() {
+    return [
+      { name: 'capture-decisions', description: 'Sweep a transcript for its decisions and capture each as a knowledge record.', input: 'The transcript file, relative to where the task runs.', goal: 'Read the transcript {{input}} and find every decision it records -- what was agreed, and why. For each one, write the passage of the transcript that makes it to a file of its own under decisions/ (decisions/1.txt, decisions/2.txt, and so on), then capture it by running: apogee knowledge capture --source meeting --input decisions/<n>.txt\nCapture each decision once. End your answer with the line "Captured: <n>", naming the record ids the captures printed -- "Captured: 0" when the transcript decided nothing -- and say the task is done.\n', require: ['Captured:'], requireFiles: [], allow: ['run_command', 'write_file'], tools: true },
+      { name: 'changelog-draft', description: 'Turn an excerpt of a git log into a CHANGELOG section.', input: 'The commits, as git log prints their subjects and bodies.', goal: 'Here is an excerpt of a git log:\n\n{{input}}\n\nWrite the CHANGELOG section for these commits, in Markdown. Open with the heading "## Unreleased", then the subsections the commits call for, from "### Added", "### Changed", "### Fixed" and "### Removed", each change one line in plain words a user would understand. Leave out merges and changes no user would notice. Reply with the section only.\n', require: ['## Unreleased'], requireFiles: [], allow: [], tools: false },
+      { name: 'digest-folder', description: 'Read a folder and write a digest of it to DIGEST.md.', input: 'The folder to digest, relative to where the task runs.', goal: 'Read the folder {{input}}: list it, then read every file in it. Then write DIGEST.md in the current folder, in Markdown: a short paragraph saying what the folder holds and what it is for, then one line per file -- its path and, in a few words, what it contains. Change nothing else, and say the task is done once DIGEST.md is written.\n', require: [], requireFiles: ['DIGEST.md'], allow: ['write_file'], tools: true }
+    ];
+  }
+
+  /** The shipped symphonies `/play ` offers, as `symphonies list` describes them. */
+  playable() {
+    return [
+      ['critique-revise', 'Critique a draft against what it is meant to do, then revise it to answer the critique.'],
+      ['describe-answer', 'Describe an image with the vision member, then answer a question about it from the description.'],
+      ['digest', 'Summarize and check a passage by playing summarize-verify, then card it with a title, tags and a one-line summary.'],
+      ['extract-actions', 'Pull the action items out of notes -- who does what, by when -- as one JSON document, held to its schema.'],
+      ['extract-facts', 'Pull the key facts out of a text as one JSON document, held to its schema.'],
+      ['redact-text', 'List the personal details and secrets in a text, then rewrite it with placeholders in their place.'],
+      ['summarize-verify', 'Summarize a passage, then check the summary against the passage and correct it.']
     ];
   }
 
@@ -3080,8 +3161,8 @@ class Component extends DCLogic {
     if (cmd === 'deny') { note(arg ? arg + ' refused for this session, without asking' : '/deny needs a tool or website'); return; }
     if (cmd === 'revoke') { note(arg ? 'forgot this session’s answer for ' + arg : '/revoke needs a tool or website', { sessionAllow: s.sessionAllow.filter((a) => a.label !== arg) }); return; }
     if (cmd === 'permissions') { this.setState(Object.assign({ overlay: 'settings', settingsPane: 'permissions' }, clear)); return; }
-    if (cmd === 'help') { note('commands: ' + this.commands().map((c) => '/' + c[0]).join(' ')); return; }
-    if (this.commands().some((c) => c[0] === cmd)) { note('/' + cmd + (arg ? ' ' + arg : '') + ' — noted; this prototype doesn’t act on it'); return; }
+    if (cmd === 'help') { note('commands: ' + this.commands(!!(this.chatDefs().find((d) => d.id === this.state.chatId) || {}).exec).map((c) => '/' + c[0]).join(' ')); return; }
+    if (this.commands(true).some((c) => c[0] === cmd)) { note('/' + cmd + (arg ? ' ' + arg : '') + ' — noted; this prototype doesn’t act on it'); return; }
     note('/' + cmd + ' isn’t a command — type / to see them');
   }
 
@@ -3719,6 +3800,9 @@ class Component extends DCLogic {
       isWal: cid === 'wal',
       isCrash: cid === 'crash',
       isPr: cid === 'pr',
+      isPlay: cid === 'play',
+      execOn: !!def.exec,
+      execBanner: def.exec || '',
       isKv: cid === 'kv',
       isStub: !!def.stub,
       stubText: def.stub ? 'This session’s history isn’t part of the prototype. Here it would show its ' + def.stub + ' exchanges with ' + find(def.model).name + '. You can still type below.' : '',
@@ -3732,8 +3816,11 @@ class Component extends DCLogic {
 
     /* ---------- composer ---------- */
     const draft = s.draftBy[cid] || '';
-    const slashQ = draft.indexOf('/') === 0 && draft.indexOf(' ') < 0 ? draft.slice(1).toLowerCase() : null;
-    const slashList = slashQ != null ? this.commands().filter((c) => c[0].indexOf(slashQ) === 0) : [];
+    const playM = def.exec ? /^\/play ([^\s]*)$/.exec(draft) : null;
+    const slashQ = draft.indexOf('/') === 0 && draft.indexOf(' ') < 0 ? draft.slice(1).toLowerCase() : playM ? 'play ' + playM[1].toLowerCase() : null;
+    const slashList = playM
+      ? this.playable().filter((p) => p[0].indexOf(playM[1].toLowerCase()) === 0).map((p) => ['play ' + p[0], '', p[1], true])
+      : slashQ != null ? this.commands(!!def.exec).filter((c) => c[0].indexOf(slashQ) === 0) : [];
     const mentionMatch = /(^|\s)@([^\s]*)$/.exec(draft);
     const mentionQ = mentionMatch ? mentionMatch[2].toLowerCase() : null;
     const mentionList = mentionQ != null ? this.repoFiles().filter((f) => f[0].toLowerCase().indexOf(mentionQ) >= 0).slice(0, 7) : [];
@@ -3741,6 +3828,7 @@ class Component extends DCLogic {
     const mentionOpen = mentionQ != null && !s.menuDismissed && !slashOpen;
     const keep = (e) => e.preventDefault();
     const pickSlash = (c) => {
+      if (c[3]) { this.setDraft('/' + c[0] + ' '); return; }
       if (!c[1]) { this.setState({ draftBy: Object.assign({}, this.state.draftBy, { [cid]: '/' + c[0] }) }); setTimeout(() => this.send(), 0); return; }
       this.setDraft('/' + c[0] + ' ');
     };
@@ -3938,6 +4026,7 @@ class Component extends DCLogic {
         if (st.newPrivate) { this.setState({ screen: 'chat', chatId: 'private', privateOpen: true, extra: Object.assign({}, st.extra, { private: [] }), menu: null }); return; }
         this.setState({ screen: 'chat', chatId: 'new', menu: null, modelBy: Object.assign({}, st.modelBy, { new: undefined }), extra: Object.assign({}, st.extra, { new: [] }) });
       },
+      newExecute: () => this.setState({ overlay: 'execute', menu: null, ex: { suite: '', model: '', folder: '', orchestrate: false } }),
       newPrivate: () => { const st = this.state; this.setState({ screen: 'chat', chatId: 'private', privateOpen: true, extra: Object.assign({}, st.extra, { private: [] }), chipsBy: Object.assign({}, st.chipsBy, { private: [] }), menu: null }); },
       toggleMonitor: () => this.setState({ monitor: !this.state.monitor }),
       toggleConsole: () => this.setState({ console: !this.state.console }),
@@ -4635,7 +4724,7 @@ class Component extends DCLogic {
       recallSize: s.recallCount ? '41 MB index on this Mac' : 'nothing stored',
       nothingToForget: s.recallCount === 0,
       forget: () => this.setState({ confirm: { kind: 'forget' } }),
-      keys: [['New session', '⌘N'], ['New private session', '⇧⌘N'], ['Switch model', '⇧⌘M'], ['Show or hide the inspector', '⌥⌘I'], ['System monitor', '⌥⌘M'], ['Console', '⇧⌘K'], ['Settings', '⌘,'], ['Stop the answer', '⌘.'], ['Search sessions', '⇧⌘F'], ['Sessions, Models, Suites, Tasks, Code graph, Video, Voice, Knowledge, Training, Library', '⌘1 – ⌘9, ⌘0'], ['Models library', '⇧⌘L'], ['Send', '⏎'], ['New line', '⇧⏎'], ['Commands', '/'], ['Mention a file', '@'], ['Allow once on a permission card', '⏎'], ['Deny on a permission card', 'esc'], ['Pick an answer on a card', '1 – 4'], ['Play or pause the focused player', 'space'], ['Generate, Speak, Plan or Render, from its form', '⌘⏎'], ['Hide the sidebar', '⌃⌘S']].map((x) => ({ label: x[0], keys: x[1] }))
+      keys: [['New session', '⌘N'], ['New private session', '⇧⌘N'], ['New execute session', '⌥⌘N'], ['Switch model', '⇧⌘M'], ['Show or hide the inspector', '⌥⌘I'], ['System monitor', '⌥⌘M'], ['Console', '⇧⌘K'], ['Settings', '⌘,'], ['Stop the answer', '⌘.'], ['Search sessions', '⇧⌘F'], ['Sessions, Models, Suites, Tasks, Code graph, Video, Voice, Knowledge, Training, Library', '⌘1 – ⌘9, ⌘0'], ['Models library', '⇧⌘L'], ['Send', '⏎'], ['New line', '⇧⏎'], ['Commands', '/'], ['Mention a file', '@'], ['Allow once on a permission card', '⏎'], ['Deny on a permission card', 'esc'], ['Pick an answer on a card', '1 – 4'], ['Play or pause the focused player', 'space'], ['Generate, Speak, Plan or Render, from its form', '⌘⏎'], ['Hide the sidebar', '⌃⌘S']].map((x) => ({ label: x[0], keys: x[1] }))
     };
 
     /* ---------- suites ---------- */
@@ -4683,16 +4772,34 @@ class Component extends DCLogic {
       resume: () => updTask({ status: 'running', since: this.state.clock, haltAt: null }),
       rerun: () => { const st = this.state; const id = 't' + st.clock; this.setState({ tasks: [Object.assign({}, taskCur, { id: id, kind: 'generic', status: 'running', base: 0, since: st.clock, rounds: Math.min(32, (taskCur.rounds || 8) * 2), started: 'today ' + this.nowTime(), haltAt: null })].concat(st.tasks), taskId: id }); },
       stop: () => updTask({ status: 'cancelled', base: elapsedNow(), since: null, haltAt: null }),
-      openNew: () => this.setState({ overlay: 'newtask', newTask: { goal: '', suite: 'coding', rounds: '8', writes: 'allow', cmds: 'none', require: '', requireFile: '' } })
+      openNew: () => this.setState({ overlay: 'newtask', newTask: { goal: '', suite: 'coding', rounds: '8', writes: 'allow', cmds: 'none', require: '', requireFile: '', recipe: '', input: '', grants: [] } })
     };
     const updNt = (patch) => this.setState({ newTask: Object.assign({}, this.state.newTask, patch) });
-    const ntParts = ['apogee task run', '"' + (nt.goal.trim() || '…').replace(/"/g, '\\"') + '"', '--tools'];
+    const rc = nt.recipe ? this.recipes().find((r) => r.name === nt.recipe) : null;
+    const shq = (w) => (/^[A-Za-z0-9_.\/:=@%+,-]+$/.test(w) ? w : "'" + w.replace(/'/g, "'\\''") + "'");
+    const given = rc ? rc.allow.filter((g) => (nt.grants || []).indexOf(g) >= 0) : [];
+    const ntInput = (nt.input || '').trim();
+    const ntParts = rc ? ['apogee task run --recipe ' + rc.name] : ['apogee task run', '"' + (nt.goal.trim() || '…').replace(/"/g, '\\"') + '"', '--tools'];
+    if (rc && rc.input) ntParts.push('--input ' + shq(ntInput || '…'));
     if (nt.require.trim()) ntParts.push('--require "' + nt.require.trim().replace(/"/g, '\\"') + '"');
     if (nt.requireFile.trim()) ntParts.push('--require-file ' + nt.requireFile.trim());
     if (nt.rounds !== '8') ntParts.push('--rounds ' + nt.rounds);
-    if (nt.writes === 'allow') ntParts.push('--allow write_file');
-    if (nt.cmds === 'allow') ntParts.push('--allow run_command');
+    if (rc) given.forEach((g) => ntParts.push('--allow ' + g));
+    if (!rc && nt.writes === 'allow') ntParts.push('--allow write_file');
+    if (!rc && nt.cmds === 'allow') ntParts.push('--allow run_command');
     ntParts.push('--suite ' + nt.suite, '--output-format stream-json');
+    // The recipe as the hand-typed run it is: its goal rendered, its checks first, --tools, its rounds.
+    const expParts = rc ? ['apogee task run', shq(rc.goal.replace(/\{\{[^}]*\}\}/g, ntInput || '…'))] : [];
+    if (rc) {
+      rc.require.forEach((r) => expParts.push('--require ' + shq(r)));
+      rc.requireFiles.forEach((f) => expParts.push('--require-file ' + shq(f)));
+      if (nt.require.trim()) expParts.push('--require ' + shq(nt.require.trim()));
+      if (nt.requireFile.trim()) expParts.push('--require-file ' + shq(nt.requireFile.trim()));
+      if (rc.tools) expParts.push('--tools');
+      expParts.push('--rounds ' + nt.rounds);
+      given.forEach((g) => expParts.push('--allow ' + g));
+      expParts.push('--suite ' + nt.suite);
+    }
     const ntv = {
       goal: nt.goal,
       onGoal: (e) => updNt({ goal: e.target.value }),
@@ -4707,15 +4814,54 @@ class Component extends DCLogic {
       writes: [['none', 'Refused'], ['allow', 'Granted']].map((o) => seg(nt.writes, o[0], o[1], () => updNt({ writes: o[0] }))),
       cmds: [['none', 'Refused'], ['allow', 'Granted']].map((o) => seg(nt.cmds, o[0], o[1], () => updNt({ cmds: o[0] }))),
       command: ntParts.join(' '),
-      cantStart: !nt.goal.trim(),
+      recipe: nt.recipe || '',
+      recipeOptions: [{ value: '', label: 'None: write the goal' }].concat(this.recipes().map((r) => ({ value: r.name, label: r.name }))),
+      onRecipe: (e) => updNt({ recipe: e.target.value, input: '', grants: [], rounds: '8' }),
+      hasRecipe: !!rc,
+      noRecipe: !rc,
+      recipeDesc: rc ? rc.description : '',
+      recipeTakesInput: !!(rc && rc.input),
+      recipeInput: rc ? rc.input : '',
+      input: nt.input || '',
+      onInput: (e) => updNt({ input: e.target.value }),
+      hasGrants: !!(rc && rc.allow.length),
+      grants: rc ? rc.allow.map((g) => ({ name: g, on: given.indexOf(g) >= 0, toggle: () => updNt({ grants: given.indexOf(g) >= 0 ? given.filter((x) => x !== g) : given.concat([g]) }) })) : [],
+      expansion: expParts.join(' '),
+      cantStart: rc ? !!(rc.input && !ntInput) : !nt.goal.trim(),
       cancel: () => this.setState({ overlay: null }),
       start: () => {
         const st = this.state;
         const n = st.newTask;
         const id = 't' + st.clock;
-        const task = { id: id, goal: n.goal.trim(), kind: 'generic', status: 'running', base: 0, since: st.clock, rounds: Number(n.rounds), suite: suitesDef[n.suite].name, started: 'today ' + this.nowTime(), writes: n.writes, cmds: n.cmds, haltAt: null };
+        const task = { id: id, goal: rc ? rc.goal.replace(/\{\{[^}]*\}\}/g, ntInput).trim() : n.goal.trim(), kind: 'generic', status: 'running', base: 0, since: st.clock, rounds: Number(n.rounds), suite: suitesDef[n.suite].name, started: 'today ' + this.nowTime(), writes: n.writes, cmds: n.cmds, haltAt: null };
         this.setState({ tasks: [task].concat(st.tasks), taskId: id, overlay: null, screen: 'tasks' });
       }
+    };
+
+    /* ---------- the execute door ---------- */
+    const exS = s.ex || { suite: '', model: '', folder: '', orchestrate: false };
+    const updEx = (patch) => this.setState({ ex: Object.assign({}, this.state.ex || exS, patch) });
+    const exCanOrch = true; // a suite named, or the config's default (coding here)
+    const exParts = ['apogee execute --tools'];
+    if (exS.model) exParts.push('-m ' + exS.model);
+    if (exS.suite) exParts.push('--suite ' + exS.suite);
+    if (exS.orchestrate && exCanOrch) exParts.push('--orchestrate');
+    const ex = {
+      suites: [{ value: '', label: 'The default suite (coding)' }].concat(Object.keys(suitesDef).map((k) => ({ value: k, label: k }))),
+      suite: exS.suite,
+      onSuite: (e) => updEx({ suite: e.target.value }),
+      models: [{ value: '', label: exS.suite ? 'The suite’s chat member' : 'The default backend' }].concat(['gpt-oss-20b', 'qwen3-0.6b', 'claude-sonnet-5'].map((m) => ({ value: m, label: m }))),
+      model: exS.model,
+      onModel: (e) => updEx({ model: e.target.value }),
+      folder: exS.folder || 'Your home folder',
+      orchestrate: !!exS.orchestrate,
+      cantOrchestrate: !exCanOrch,
+      orchColor: exCanOrch ? 'var(--text-primary)' : 'var(--text-tertiary)',
+      toggleOrchestrate: () => updEx({ orchestrate: !exS.orchestrate }),
+      note: 'Opened in a project -- a git repository, or a folder holding AGENTS.md or CLAUDE.md -- the session reads the file into every request, carries the coder persona, and attaches the folder; its notices say so.',
+      command: (exS.folder ? 'cd ' + exS.folder + ' && ' : '') + exParts.join(' '),
+      cancel: () => this.setState({ overlay: null }),
+      open: () => this.setState({ overlay: null, screen: 'chat', chatId: 'play' })
     };
 
     /* ---------- library ---------- */
@@ -5637,6 +5783,7 @@ class Component extends DCLogic {
       settingsOpen: s.overlay === 'settings',
       downloadOpen: s.overlay === 'download',
       newTaskOpen: s.overlay === 'newtask',
+      executeOpen: s.overlay === 'execute',
       storeSheetOpen: s.overlay === 'store',
       confirmOpen: !!s.confirm,
       toastOn: !!s.toast,
@@ -5647,7 +5794,7 @@ class Component extends DCLogic {
       openPdf: () => this.say('Opens the source in Preview at that page (prototype)')
     };
 
-    return { ui: ui, nav: nav, mon: mon, con: con, kno: kno, trn: trn, lb: lb, chat: chat, tg: tg, rt: rt, wal: wal, cr: cr, pr: pr, cmp: cmp, ins: ins, mdl: mdl, st: st, sh: sh, dlg: dlg, cf: cf, set: setv, sui: sui, tsk: tsk, nt: ntv, gr: gr, vid: vid, comp: comp, vox: vox, rtc: rtc };
+    return { ui: ui, nav: nav, mon: mon, con: con, kno: kno, trn: trn, lb: lb, chat: chat, tg: tg, rt: rt, wal: wal, cr: cr, pr: pr, cmp: cmp, ins: ins, mdl: mdl, st: st, sh: sh, dlg: dlg, cf: cf, set: setv, sui: sui, tsk: tsk, nt: ntv, ex: ex, gr: gr, vid: vid, comp: comp, vox: vox, rtc: rtc };
   }
 }
 </script>

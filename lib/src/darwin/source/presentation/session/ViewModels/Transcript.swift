@@ -270,9 +270,19 @@ public struct Transcript: Equatable {
         } else {
             var activity = Activity()
             activity.live = true
+            activity.typed = typed(turn)
             change(&activity)
             append(.activity(activity), turn: turn)
         }
+    }
+
+    /// What the person sent as `turn`.
+    private func typed(_ turn: Int?) -> String? {
+        guard let turn else { return nil }
+        for item in items.reversed() where item.turn == turn {
+            if case .user(let text) = item.content { return text }
+        }
+        return nil
     }
 
     /// The live section closes: the answer started, a question stood, the turn ended.
@@ -373,8 +383,13 @@ public struct Activity: Equatable {
     public var live = false
     /// The reasoning was ended at its budget.
     public var budgetReached = false
+    /// What the turn was sent as -- a `/play` names its symphony there.
+    public var typed: String?
 
     public init() {}
+
+    /// The symphony the lines narrate being played, when they narrate one.
+    public var play: PlayNarration? { PlayNarration(lines: lines, typed: typed) }
 }
 
 public struct Answer: Equatable {

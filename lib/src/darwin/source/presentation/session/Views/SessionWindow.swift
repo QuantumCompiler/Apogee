@@ -93,6 +93,13 @@ struct ConversationView<Accessory: View>: View {
             Text(model.transcript.model ?? "apogee")
                 .font(.apogeeTitle)
                 .foregroundStyle(Palette.textPrimary)
+            if let banner = model.executeBanner {
+                Text(banner)
+                    .font(.apogeeMeta)
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+                    .help("Opened as apogee execute: its suite's symphonies play with /play")
+            }
             Spacer()
             if model.transcript.turnInFlight {
                 ProgressView().controlSize(.small)

@@ -46,6 +46,36 @@ public final class SessionLibraryViewModel {
         /// (the CLI's 52d), else `--no-recall` and deleted when it closes.
         case privately
         case chat(String)
+        /// `apogee execute`, as its door's sheet launches it.
+        case execute(ChatLaunch)
+    }
+
+    /// The execute door (the CLI's 27s, 41a-41c; the TUI's picker door, ADR
+    /// 0011): `apogee execute` under a suite or bare on one model, opened in a
+    /// folder -- a project's context and the coder persona come with one, said
+    /// by the session's own notices -- and the suite's symphonies offered to
+    /// its chat model with `--orchestrate`.
+    public struct ExecuteForm: Equatable, Sendable {
+        /// `--suite`; `nil` leaves it to the config: its default suite, else
+        /// bare on the model.
+        public var suite: String?
+        /// `-m`; empty is the suite's chat member, or the default backend.
+        public var model = ""
+        /// The folder it opens in; the home folder when `nil`.
+        public var folder: URL?
+        /// `--orchestrate`, a suite's alone.
+        public var orchestrate = false
+
+        public init() {}
+
+        /// The launch, as typed: orchestrate only where `orchestrates` says
+        /// a suite is there to offer.
+        public func launch(orchestrates: Bool) -> ChatLaunch {
+            let model = model.trimmingCharacters(in: .whitespaces)
+            return ChatLaunch(
+                settings: model.isEmpty ? nil : RunSettings(model: model),
+                execute: ChatLaunch.Execute(suite: suite, orchestrate: orchestrate && orchestrates), folder: folder)
+        }
     }
 
     public private(set) var chats: [ChatSummary] = []
@@ -69,6 +99,13 @@ public final class SessionLibraryViewModel {
     }
     /// Says one line in the window's toast.
     public var say: (@MainActor (String) -> Void)?
+    /// The execute door's sheet, open, and what it says.
+    public var executeDoorOpen = false
+    public var executeForm = ExecuteForm()
+    /// The configured suites, `config get suites` as last read.
+    public private(set) var suites: [String] = []
+    /// `models.default_suite`: empty when none is set, `nil` unread.
+    public private(set) var defaultSuite: String?
 
     private let starter: any ChatStarting
     private let runner: any CommandRunning
@@ -95,6 +132,8 @@ public final class SessionLibraryViewModel {
     /// The ids listed when a new session opened: the one it is saved as is
     /// the one that appears.
     private var listedBeforeNew: Set<String>?
+    /// The symphonies an execute session's `/play` offers.
+    private var plays: [PlayChoice] = []
 
     public init(
         starter: any ChatStarting, runner: any CommandRunning, preferences: Preferences,
@@ -287,6 +326,43 @@ public final class SessionLibraryViewModel {
         await open(.privately)
     }
 
+    /// ⌥⌘N: the execute door, with the suites read for it.
+    public func openExecuteDoor() async {
+        executeForm = ExecuteForm()
+        executeDoorOpen = true
+        await readSuites()
+    }
+
+    /// `config get suites` and `config get models.default_suite`.
+    private func readSuites() async {
+        guard let found else { return }
+        if case .done(let text) = await runner.command(binary: found.url, ["config", "get", "suites"]) {
+            suites = Suite.names(text)
+        }
+        if case .done(let text) = await runner.command(binary: found.url, ["config", "get", "models.default_suite"]) {
+            defaultSuite = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    /// The configured backends, as `models list` named them: the door's models.
+    public var modelChoices: [String] { backends }
+
+    /// Whether the door's session has a suite to orchestrate: one named, or
+    /// the default. Bare, the CLI refuses `--orchestrate`.
+    public var canOrchestrate: Bool {
+        executeForm.suite != nil || !(defaultSuite ?? "").isEmpty
+    }
+
+    /// The door's session, as the sheet says it: the catalog read first, for
+    /// `/play`; then the one live child, as every opening is.
+    public func openExecute() async {
+        executeDoorOpen = false
+        if let found, let document = await runner.read(binary: found.url, ["symphonies", "list"]).document {
+            plays = Symphony.list(from: document).map { PlayChoice(name: $0.name, description: $0.description) }
+        }
+        await open(.execute(executeForm.launch(orchestrates: canOrchestrate)))
+    }
+
     /// Whether a private session writes nothing (this build has `--private`),
     /// or is deleted when it closes; unknown until a session has spoken.
     public var privateIsNothingWritten: Bool { lastAccepts?.contains("set") ?? false }
@@ -337,6 +413,12 @@ public final class SessionLibraryViewModel {
             current = SessionViewModel(starter: starter, launch: ChatLaunch(resume: id))
             listedBeforeNew = nil
             preferences.openChat = id
+        case .execute(let launch):
+            current = SessionViewModel(starter: starter, launch: launch)
+            current.plays = plays
+            current.defaultSuite = defaultSuite
+            listedBeforeNew = Set(chats.map(\.id))
+            preferences.openChat = nil
         }
         current.observer = { [weak self] event in self?.observe(event) }
         current.onAction = { [weak self] action in self?.act(action) }

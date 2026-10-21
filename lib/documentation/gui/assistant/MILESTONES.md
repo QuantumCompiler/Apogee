@@ -686,3 +686,65 @@ Every screen stays a machine-mode client of the binary, tested hermetically.
   - MCP: nothing at launch, a preset registered byte-identically, disable, a tool tried as typed.
 - **Drawn offscreen over the real binary in the scratch home:** an agent with its files; `critique-revise` played on the mock, with each stage's answer and the output; the connected `code` server with its tools, `code-exec`'s description and `self`'s refusal.
 - Bare `lib/scripts/cicd.sh --test` passed in 7m26s: the CLI's 3,593 tests, none failing, and the app's 282 cases, none failing and none skipped, with no warning.
+
+### 2026-10-21 — `execute-sessions-plays` (backlog item 2f): execute sessions, plays and recipes
+
+**Why.** The session window spoke plain chat. The CLI's session surface is wider, and the parity audit named what was missing:
+- **execute sessions:** under a suite, bare on one model, or in a project, with `--orchestrate` offering the symphonies as tools;
+- **plays:** `/play` in a session;
+- **task recipes:** `task run --recipe`.
+
+- [x] **The execute door** (`PresentationSessions`, `Views/ExecuteDoor.swift`): ⌥⌘N, the sidebar's hammer, or New Execute Session… in the File menu.
+  - **The sheet:** the suite (a configured one, or left to the config: its default suite, else bare), the model (`-m`), the folder it opens in, and orchestrate, with the command shown as it will run.
+  - **The suites are read when the door opens:** `config get suites` and `config get models.default_suite`.
+  - **Orchestrate** is offered only where a suite is there to offer: one named, or the default. Bare, the CLI refuses it.
+- [x] **The launch** (`BusinessSession`, `ChatLaunch`):
+  - `ChatLaunch.Execute` (`--suite`, `--orchestrate`) makes the child `apogee execute`, with the same two stream-json directions;
+  - `ChatLaunch.folder` is where the child works;
+  - `ApogeeClient` opens a launch in its folder.
+  - A session paused and resumed reopens as it opened (`execute --resume <id> --suite …`), in its folder.
+  - A project's context file and the coder persona are said by the session's own `notice`s.
+- [x] **Plays** (`PresentationSession`):
+  - `/play` is offered in an execute session only (the CLI's execute-only rows), with its description in the CLI's words.
+  - After `/play `, the symphony catalog is offered from `symphonies list`, read when the door opens a session. A name completes the line; the input follows, and the line is sent as typed.
+  - **Narration** (`ViewModels/Play.swift`, `PlayNarration`): a play's `tool_status` lines are kept as the CLI wrote them, and read only to say which stage it is on. The activity's summary is `playing summarize-verify · stage 2 of 2`, then `played … · 2 stages`, and each stage line carries its `1/2` mark. The model's own play (`play — the model chose …`) is named by that line; a typed one by its `/play`.
+  - **The header's banner:** `execute · suite coding · orchestrating · in ingest`.
+- [x] **Recipes** (`BusinessReads`, `Recipes.swift`, `TaskRecipe`; `PresentationTasks`):
+  - The new-task sheet's Recipe picker lists `task recipes`. The chosen recipe is read whole (`task recipes show`): what it does, its input with the CLI's description of it, and its suggested grants as unticked toggles.
+  - **The launch** is `task run --recipe <name> --input …`, plus the person's own checks, `--rounds` only when moved off the recipe's, and an `--allow` per ticked grant.
+  - **The expansion** is shown before it runs: the hand-typed twin, with the goal rendered as the CLI renders it, the recipe's checks before any typed, `--tools`, its rounds, its agent and the grants given. It is quoted as a shell takes it (`NewTaskForm.typed`).
+- [x] **The parity table:**
+  - `execute` is a screen of `PresentationSessions`: 23 screens, 1 gap (`review`, 2g);
+  - `task`'s note now covers recipes;
+  - `analyze` stays the console's.
+- [x] **The design (canvas version 40):**
+  - the prototype's execute chat with a play narrated, `/play` and its catalog in the slash menu, the door's sheet, and the new-task sheet's recipe picker with its expansion;
+  - the boards `ScreenSessionPlay`, `ScreenSessionExecute` and `ScreenNewTaskRecipe` (44);
+  - the contract board's rows: 52 ready and 21 gaps, with **gap G23**, "An execute session's suite and its orchestration, in its session event";
+  - ⌥⌘N on the Layout board and in Settings › Keyboard.
+
+  The health check passes all 44 start screens.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The door is a sheet in Sessions on ⌥⌘N, not a place.** An execute session is a session: the one live child, listed and paused like any other.
+- **There is no bare choice while a default suite is set.** `execute` refuses `--suite off`, so the door offers each suite and "left to the config", and names the default where one is set.
+- **The banner says what the launch said, and no count.** The `session` event names the model only. So the suite comes from the door's flags (or the config's default, read), and orchestration is said without the `orchestrating N` the terminal prints. Recorded as **G23**.
+- **A saved execute conversation reopened from the list resumes as chat.** `chats list` does not say how a conversation was opened. The door's flags last while it is the open session, paused and resumed with them.
+- **`/play` is an execute session's alone,** as the CLI's slash rows are. In a chat, `/play` is a prompt like any text, and the app offers nothing after it.
+- **A recipe launches as `--recipe`** (the ledger keeps its provenance), and its hand-typed twin is drawn from the recipe's own document by the CLI's expansion rules: shown, never run.
+  - Suggested grants start unticked.
+  - The sheet's write and command toggles are hidden for a recipe: its tools are its own.
+
+**Verified.**
+- `scripts/build.sh test`: 303 cases, no Swift warning. They read streams recorded from the installed binary over a scratch home with mock members (`execute-play`, `execute-orchestrate`, `execute-play-refused`, `execute-project`) and the recipe documents (`task-recipes`, `task-recipe-show`). New tests cover:
+  - the launch per rung (left to the config, `--suite`, `--orchestrate`, bare `-m`, resumed) and its folder, a real child started there;
+  - the door end to end: suites read, launch argv, orchestrate never sent without a suite, the banner in each case, the catalog handed to `/play`;
+  - `/play` offered, completed and sent as typed in execute and absent in chat;
+  - narration over each recorded stream: a typed play, the model's own, a refused one (the CLI's error, no narration made up), a project's notices, a chain's stage line;
+  - recipes read, the launch argv (input, grants only ticked, rounds only moved), the expansion byte for byte. Its goal is the very text `task run --recipe digest-folder --input docs` wrote to its ledger, read back from the binary.
+- **Drawn offscreen over the real binary in a scratch home:**
+  - the door's sheet;
+  - an execute session opened by the door in a project, with `/play echo2 hello` played through the app's own client: the persona and project notices, the two stages, and the answer;
+  - the `/play ` catalog;
+  - the new-task sheet with `digest-folder`, its input and grant, and the expansion.
+- Bare `lib/scripts/cicd.sh --test` passed in 7m19s: the CLI's 3,593 tests, none failing, and the app's 303 cases, none failing and none skipped, with no warning.

@@ -30,6 +30,8 @@ struct InputBar: View {
                     // ⏎ on a suggestion runs it; otherwise it sends.
                     if let command = model.slashSuggestions.first {
                         model.run(command)
+                    } else if let play = model.playSuggestions.first {
+                        model.complete(play: play.name)
                     } else if let path = model.mentionSuggestions.first {
                         model.complete(mention: path)
                     } else {

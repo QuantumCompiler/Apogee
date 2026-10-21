@@ -208,7 +208,8 @@ struct TaskDetail: View {
     }
 }
 
-/// The new task: the goal, its checks, its budget, and what it may do.
+/// The new task: the goal -- written here, or a recipe's -- its checks, its
+/// budget, and what it may do. A recipe's expansion is shown before it runs.
 struct NewTaskSheet: View {
     @Bindable var model: TasksViewModel
     @State private var choosingFolder = false
@@ -217,13 +218,49 @@ struct NewTaskSheet: View {
         VStack(alignment: .leading, spacing: Spacing.m) {
             Text("New task").font(.apogeeHeading)
             Form {
-                TextField("Goal", text: $model.form.goal, axis: .vertical).lineLimit(2...4)
+                Picker("Recipe", selection: Binding(get: { model.form.recipe?.name }, set: { name in Task { await model.choose(recipe: name) } })) {
+                    Text("None: write the goal").tag(String?.none)
+                    ForEach(model.recipes) { recipe in
+                        Text(recipe.name).tag(String?.some(recipe.name))
+                    }
+                }
+                if let recipe = model.form.recipe {
+                    LabeledContent("Does") {
+                        Text(recipe.description).fixedSize(horizontal: false, vertical: true)
+                    }
+                    if recipe.takesInput {
+                        LabeledContent("Input") {
+                            VStack(alignment: .leading, spacing: Spacing.xs) {
+                                TextField("Input", text: $model.form.input, axis: .vertical).labelsHidden().lineLimit(1...3)
+                                Text(recipe.input).font(.apogeeSmall).foregroundStyle(Palette.textTertiary)
+                            }
+                        }
+                    }
+                    if !recipe.allow.isEmpty {
+                        LabeledContent("Suggests") {
+                            VStack(alignment: .leading, spacing: Spacing.xs) {
+                                ForEach(recipe.allow, id: \.self) { grant in
+                                    Toggle("Allow \(grant)", isOn: Binding(
+                                        get: { model.form.grants.contains(grant) },
+                                        set: { if $0 { model.form.grants.insert(grant) } else { model.form.grants.remove(grant) } }))
+                                }
+                                Text("Given only if ticked: a grant the recipe suggests is never assumed.")
+                                    .font(.apogeeSmall)
+                                    .foregroundStyle(Palette.textTertiary)
+                            }
+                        }
+                    }
+                } else {
+                    TextField("Goal", text: $model.form.goal, axis: .vertical).lineLimit(2...4)
+                }
                 TextField("The answer must contain (one per line)", text: $model.form.requires, axis: .vertical).lineLimit(1...4)
                 TextField("These files must exist (one per line)", text: $model.form.requireFiles, axis: .vertical).lineLimit(1...4)
                 Stepper("Up to \(model.form.rounds) rounds after the plan", value: $model.form.rounds, in: 1...32)
-                Toggle("Let the model use tools", isOn: $model.form.tools)
-                Toggle("Allow it to write and edit files", isOn: $model.form.allowWrites)
-                Toggle("Allow it to run commands", isOn: $model.form.allowCommands)
+                if model.form.recipe == nil {
+                    Toggle("Let the model use tools", isOn: $model.form.tools)
+                    Toggle("Allow it to write and edit files", isOn: $model.form.allowWrites)
+                    Toggle("Allow it to run commands", isOn: $model.form.allowCommands)
+                }
                 TextField("Model", text: $model.form.model, prompt: Text("the configured default"))
                 LabeledContent("Works in") {
                     HStack {
@@ -231,6 +268,9 @@ struct NewTaskSheet: View {
                         Button("Choose…") { choosingFolder = true }
                     }
                 }
+            }
+            if let failure = model.recipeFailure {
+                Text(failure).font(.apogeeSmall).foregroundStyle(Palette.error)
             }
             Text("Tasks never ask. A tool that would ask is denied unless it is allowed here, and every use is recorded.")
                 .font(.apogeeSmall)
@@ -241,10 +281,25 @@ struct NewTaskSheet: View {
                     .foregroundStyle(Palette.warning)
             }
             if let arguments = model.form.arguments {
-                Text((["apogee"] + arguments).joined(separator: " "))
+                Text(NewTaskForm.typed(arguments))
                     .font(.apogeeCode)
                     .foregroundStyle(Palette.textTertiary)
                     .textSelection(.enabled)
+            }
+            if let expansion = model.form.expansion {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    Text("The same run as typing")
+                        .font(.apogeeSmall)
+                        .foregroundStyle(Palette.textSecondary)
+                    Text(NewTaskForm.typed(expansion))
+                        .font(.apogeeCode)
+                        .foregroundStyle(Palette.textSecondary)
+                        .textSelection(.enabled)
+                        .lineLimit(8)
+                }
+                .padding(Spacing.s)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Palette.code, in: RoundedRectangle(cornerRadius: Radius.control))
             }
             HStack {
                 Spacer()
@@ -255,7 +310,8 @@ struct NewTaskSheet: View {
             }
         }
         .padding(Spacing.xl)
-        .frame(width: 600)
+        .frame(width: 640)
+        .task { await model.readRecipes() }
         .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { model.form.folder = url }
         }

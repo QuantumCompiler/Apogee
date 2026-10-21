@@ -30,7 +30,8 @@ struct KeyMapTests {
             #expect(listed.contains(binding.chord.symbols), "\(binding.label) on \(binding.chord.symbols)")
         }
         #expect(KeyMap.reference.contains(KeyReference("Sessions, Models, Suites, Tasks, Code graph, Video, Voice, Knowledge, Training, Library", "⌘1 – ⌘9, ⌘0")))
-        #expect(KeyMap.reference.count == 21)
+        #expect(KeyMap.reference.contains(KeyReference("New execute session", "⌥⌘N")))
+        #expect(KeyMap.reference.count == 22)
     }
 
     @Test("chords are written as the Mac's menus write them")

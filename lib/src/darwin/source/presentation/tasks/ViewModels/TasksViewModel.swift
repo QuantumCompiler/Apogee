@@ -48,6 +48,10 @@ public final class TasksViewModel {
     public private(set) var runs: [Run] = []
     public var sheetOpen = false
     public var form = NewTaskForm()
+    /// The recipes the sheet offers, `task recipes` as last read.
+    public private(set) var recipes: [TaskRecipe] = []
+    /// Why the recipes, or the one chosen, could not be read -- the CLI's words.
+    public private(set) var recipeFailure: String?
     public private(set) var failure: String?
     public var say: (@MainActor (String) -> Void)?
 
@@ -156,6 +160,40 @@ public final class TasksViewModel {
 
     // MARK: - Starting
 
+    /// The sheet opened: `task recipes`, read for its picker.
+    public func readRecipes() async {
+        guard let binary else { return }
+        let outcome = await runner.read(binary: binary, ["task", "recipes"])
+        if let document = outcome.document {
+            recipes = TaskRecipe.list(from: document)
+            recipeFailure = nil
+        } else {
+            recipeFailure = outcome.failure
+        }
+    }
+
+    /// Picks a recipe for the sheet -- `task recipes show <name>`, for its
+    /// goal -- or none, for a goal written here. Its rounds become the
+    /// sheet's; none of its suggested grants is ticked.
+    public func choose(recipe name: String?) async {
+        guard let name else {
+            form.recipe = nil
+            form.grants = []
+            return
+        }
+        guard let binary else { return }
+        let outcome = await runner.read(binary: binary, ["task", "recipes", "show", name])
+        guard let document = outcome.document, let recipe = TaskRecipe(document: document) else {
+            recipeFailure = outcome.failure ?? "the recipe could not be read"
+            return
+        }
+        recipeFailure = nil
+        form.recipe = recipe
+        form.input = ""
+        form.grants = []
+        form.rounds = recipe.rounds ?? 8
+    }
+
     /// Starts the sheet's task: `task run …`, followed live.
     public func start() {
         guard let arguments = form.arguments else { return }
@@ -257,6 +295,14 @@ public struct NewTaskForm: Equatable {
     public var model = ""
     /// The folder it works in; the home folder when `nil`.
     public var folder: URL?
+    /// The recipe the run is, `show`'s document -- its goal, checks and tools
+    /// in place of the typed ones; `nil` for a goal written here.
+    public var recipe: TaskRecipe?
+    /// The recipe's input, read into its goal.
+    public var input = ""
+    /// The recipe's suggested grants the person gave: each an `--allow` on
+    /// the line, as typing it would be -- never one they did not tick.
+    public var grants: Set<String> = []
 
     public init() {}
 
@@ -264,8 +310,10 @@ public struct NewTaskForm: Equatable {
         text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 
-    /// The run, as a person would type it; `nil` until it has a goal.
+    /// The run, as a person would type it; `nil` until it has a goal -- or,
+    /// with a recipe, its input when the recipe reads one.
     public var arguments: [String]? {
+        if let recipe { return recipeArguments(recipe) }
         let goal = goal.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !goal.isEmpty else { return nil }
         var arguments = ["task", "run", goal]
@@ -277,13 +325,78 @@ public struct NewTaskForm: Equatable {
             if allowWrites { arguments += ["--allow", "write_file", "--allow", "edit_file"] }
             if allowCommands { arguments += ["--allow", "run_command"] }
         }
+        return arguments + modelArguments + ["--output-format", "stream-json"]
+    }
+
+    /// `task run --recipe <name>`: the recipe's own checks, tools and rounds
+    /// are the CLI's to add; the line carries what the person changed.
+    private func recipeArguments(_ recipe: TaskRecipe) -> [String]? {
+        let input = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if recipe.takesInput && input.isEmpty { return nil }
+        var arguments = ["task", "run", "--recipe", recipe.name]
+        if recipe.takesInput { arguments += ["--input", input] }
+        for text in Self.lines(requires) { arguments += ["--require", text] }
+        for file in Self.lines(requireFiles) { arguments += ["--require-file", file] }
+        if let rounds = typedRounds(recipe) { arguments += ["--rounds", rounds] }
+        for grant in givenGrants(recipe) { arguments += ["--allow", grant] }
+        return arguments + modelArguments + ["--output-format", "stream-json"]
+    }
+
+    /// The same run as a hand-typed line -- the recipe expanded as the CLI
+    /// expands it: its goal rendered, its checks before the typed ones,
+    /// `--tools`, its rounds unless changed, its agent. Shown, never run.
+    public var expansion: [String]? {
+        guard let recipe, recipeArguments(recipe) != nil,
+            let goal = recipe.renderedGoal(input: input.trimmingCharacters(in: .whitespacesAndNewlines))
+        else { return nil }
+        var arguments = ["task", "run", goal]
+        for text in recipe.require + Self.lines(requires) { arguments += ["--require", text] }
+        for file in recipe.requireFiles + Self.lines(requireFiles) { arguments += ["--require-file", file] }
+        if recipe.tools { arguments.append("--tools") }
+        if let rounds = typedRounds(recipe) ?? recipe.rounds.map(String.init) { arguments += ["--rounds", rounds] }
+        if !recipe.agent.isEmpty { arguments += ["--agent", recipe.agent] }
+        for grant in givenGrants(recipe) { arguments += ["--allow", grant] }
+        return arguments + modelArguments
+    }
+
+    /// The recipe's suggested grants left ungiven: said, as the CLI says them.
+    public var ungivenGrants: [String] {
+        guard let recipe else { return [] }
+        return recipe.allow.filter { !grants.contains($0) }
+    }
+
+    private func givenGrants(_ recipe: TaskRecipe) -> [String] {
+        recipe.allow.filter { grants.contains($0) }
+    }
+
+    /// `--rounds` only when the person moved it off the recipe's.
+    private func typedRounds(_ recipe: TaskRecipe) -> String? {
+        let rounds = min(32, max(1, rounds))
+        return rounds == (recipe.rounds ?? 8) ? nil : String(rounds)
+    }
+
+    private var modelArguments: [String] {
         let model = model.trimmingCharacters(in: .whitespaces)
-        if !model.isEmpty { arguments += ["-m", model] }
-        return arguments + ["--output-format", "stream-json"]
+        return model.isEmpty ? [] : ["-m", model]
     }
 
     /// Whether it has a check: a task with none is done when the model says so.
-    public var hasChecks: Bool { !Self.lines(requires).isEmpty || !Self.lines(requireFiles).isEmpty }
+    public var hasChecks: Bool {
+        !Self.lines(requires).isEmpty || !Self.lines(requireFiles).isEmpty
+            || !(recipe?.require.isEmpty ?? true) || !(recipe?.requireFiles.isEmpty ?? true)
+    }
+
+    /// `arguments` as a person would type them at a shell: `apogee task run
+    /// 'Digest docs' --rounds 8`.
+    public static func typed(_ arguments: [String]) -> String {
+        (["apogee"] + arguments).map(quoted).joined(separator: " ")
+    }
+
+    static func quoted(_ word: String) -> String {
+        let plain = word.allSatisfy { $0.isLetter || $0.isNumber || "-_./:=@%+,".contains($0) }
+        if plain && !word.isEmpty { return word }
+        return "'" + word.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
 }
 
 /// A live run folded from its stream, and nothing else: the ledger's
