@@ -20,4 +20,4 @@
 - [ ] The library lists every stored kind with details; delete/rename/repair run with confirmation and read-back; roles move through their verbs and show through `models status`.
 - [ ] The details pane renders prose fields today and the typed `data` when present; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0; gated on [`app-shell.md`](app-shell.md) (1e). Out of scope: downloads ([`downloads-jobs.md`](downloads-jobs.md)), suites (1k), any CLI change.
+**Scope note.** Earmarked for v0.2.0; gated on 1e, the app shell (shipped 2026-10-20: [MILESTONES → Milestone B](../assistant/MILESTONES.md#milestone-b--the-designs-screens)). Out of scope: downloads ([`downloads-jobs.md`](downloads-jobs.md)), suites (1k), any CLI change.

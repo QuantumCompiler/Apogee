@@ -20,4 +20,4 @@
 - [ ] A task launched from the sheet streams its plan, rounds and finish; halt/cancel/resume work; tasks from elsewhere list and refresh on focus.
 - [ ] The sheet assembles exactly the flags a hand-typed run takes and says tasks never ask; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0; gated on [`app-shell.md`](app-shell.md) (1e). Out of scope: recipes UI (a later item if wanted), any CLI change.
+**Scope note.** Earmarked for v0.2.0; gated on 1e, the app shell (shipped 2026-10-20: [MILESTONES → Milestone B](../assistant/MILESTONES.md#milestone-b--the-designs-screens)). Out of scope: recipes UI (a later item if wanted), any CLI change.

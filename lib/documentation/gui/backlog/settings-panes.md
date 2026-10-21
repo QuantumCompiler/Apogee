@@ -20,4 +20,4 @@
 - [ ] All five panes work over the real verbs with read-back; a key lands via stdin and is retained nowhere; check renders with remedies and working fix/bootstrap buttons.
 - [ ] The three themes switch live from the tokens; G15's keys show read-only with the honest hint until `config set` exists; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0; gated on [`app-shell.md`](app-shell.md) (1e). Out of scope: the CLI growths (52e), a keyboard-remapping UI (the list is shown, not edited).
+**Scope note.** Earmarked for v0.2.0; gated on 1e, the app shell (shipped 2026-10-20: [MILESTONES → Milestone B](../assistant/MILESTONES.md#milestone-b--the-designs-screens)). Out of scope: the CLI growths (52e), a keyboard-remapping UI (the list is shown, not edited).

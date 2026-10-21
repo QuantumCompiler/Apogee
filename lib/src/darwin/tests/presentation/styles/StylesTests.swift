@@ -19,6 +19,9 @@ struct StylesTests {
         #expect(Palette.windowToken == ColorToken("surface.window", light: 0xF7F7F5, dark: 0x131415))
         #expect(Palette.accentToken == ColorToken("status.accent", light: 0x0B7A68, dark: 0x7FD4C1))
         #expect(Palette.errorToken == ColorToken("status.error", light: 0xB3261E, dark: 0xF2836F))
+        #expect(Palette.sidebarToken == ColorToken("surface.sidebar", light: 0xEEEEEA, dark: 0x0E0F10))
+        #expect(Palette.selectionToken == ColorToken("surface.selection", light: 0xE1E4E1, dark: 0x25282B))
+        #expect(Palette.apiToken == ColorToken("model.api", light: 0x9F5600, dark: 0xE9A23B))
     }
 
     @Test("the type scale descends, and the spacing steps ascend")
@@ -27,5 +30,6 @@ struct StylesTests {
         let spacing = [Spacing.xxs, Spacing.xs, Spacing.s, Spacing.m, Spacing.l, Spacing.xl, Spacing.xxl]
         #expect(spacing == spacing.sorted())
         #expect(Layout.windowMinWidth > Layout.conversationMax)
+        #expect(Layout.sidebar > Layout.sidebarCollapsed)
     }
 }

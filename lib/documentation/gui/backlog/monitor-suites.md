@@ -20,4 +20,4 @@
 - [ ] The monitor shows the system read live while open and stops when closed, with the app's children's memory beside it.
 - [ ] Suites list their members with an honest fit verdict (unknowns said); membership edits read back; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0; gated on [`app-shell.md`](app-shell.md) (1e). Out of scope: G10's CLI read (deferred per the design), suite editing beyond the existing verbs.
+**Scope note.** Earmarked for v0.2.0; gated on 1e, the app shell (shipped 2026-10-20: [MILESTONES → Milestone B](../assistant/MILESTONES.md#milestone-b--the-designs-screens)). Out of scope: G10's CLI read (deferred per the design), suite editing beyond the existing verbs.

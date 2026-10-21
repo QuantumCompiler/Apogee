@@ -27,4 +27,14 @@ public enum Layout {
     public static let windowMinHeight: CGFloat = 640
     /// The widest a conversation's column grows.
     public static let conversationMax: CGFloat = 860
+    /// The sidebar, and the column of icons it becomes in a narrow window.
+    public static let sidebar: CGFloat = 256
+    public static let sidebarCollapsed: CGFloat = 56
+    /// A screen's header: its title and its own controls.
+    public static let header: CGFloat = 52
+    /// A place's button in the sidebar.
+    public static let placeWidth: CGFloat = 40
+    public static let placeHeight: CGFloat = 34
+    /// The widest the media screens' content grows.
+    public static let mediaContentMax: CGFloat = 820
 }

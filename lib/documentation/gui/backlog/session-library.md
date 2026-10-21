@@ -20,4 +20,4 @@
 - [ ] The library lists, opens (resume), renames and deletes sessions through the cores, reading back after every change; the inspector shows the live session's model and roles.
 - [ ] Exactly one session child lives at a time; the glyph fallback renders until 52a's fields exist; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0; gated on [`app-shell.md`](app-shell.md) (1e). Out of scope: the session states and input extras ([`session-states.md`](session-states.md)), private sessions (there), search.
+**Scope note.** Earmarked for v0.2.0; gated on 1e, the app shell (shipped 2026-10-20: [MILESTONES → Milestone B](../assistant/MILESTONES.md#milestone-b--the-designs-screens)). Out of scope: the session states and input extras ([`session-states.md`](session-states.md)), private sessions (there), search.

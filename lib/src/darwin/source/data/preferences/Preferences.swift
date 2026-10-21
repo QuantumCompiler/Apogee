@@ -15,6 +15,8 @@ public final class Preferences: Sendable {
     /// The keys, spelled once.
     enum Key {
         static let binaryOverride = "binaryOverride"
+        static let route = "route"
+        static let sidebarHidden = "sidebarHidden"
     }
 
     public init(store: any KeyValueStore) {
@@ -39,6 +41,27 @@ public final class Preferences: Sendable {
         set {
             store.set(newValue?.path, forKey: Key.binaryOverride)
         }
+    }
+
+    /// The place the window last showed, by its name; `nil` before the first.
+    public var route: String? {
+        get { store.string(forKey: Key.route).flatMap { $0.isEmpty ? nil : $0 } }
+        set { store.set(newValue, forKey: Key.route) }
+    }
+
+    /// Whether the person hid the sidebar.
+    public var sidebarHidden: Bool {
+        get { bool(Key.sidebarHidden) }
+        set { setBool(newValue, Key.sidebarHidden) }
+    }
+
+    /// A flag, kept as `true` or absent.
+    func bool(_ key: String) -> Bool {
+        store.string(forKey: key) == "true"
+    }
+
+    func setBool(_ value: Bool, _ key: String) {
+        store.set(value ? "true" : nil, forKey: key)
     }
 }
 

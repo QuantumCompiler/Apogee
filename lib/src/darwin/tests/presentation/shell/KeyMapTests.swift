@@ -1,0 +1,55 @@
+import Testing
+
+@testable import PresentationShell
+
+@Suite("KeyMap")
+struct KeyMapTests {
+    @Test("the places are the design's seven, in its order, on ⌘1 to ⌘7")
+    func places() {
+        #expect(Destination.allCases.map(\.title) == ["Sessions", "Models", "Suites", "Tasks", "Code graph", "Video", "Voice"])
+        #expect(Destination.allCases.map(\.key.symbols) == ["⌘1", "⌘2", "⌘3", "⌘4", "⌘5", "⌘6", "⌘7"])
+        for destination in Destination.allCases {
+            #expect(KeyMap.chord(for: .go(destination)) == destination.key)
+        }
+    }
+
+    @Test("every place and overlay the shell owns has a key, and no two share one")
+    func everyCommandHasOneKey() {
+        let chords = KeyMap.shell.map(\.chord)
+        #expect(Set(chords).count == chords.count)
+        #expect(KeyMap.chord(for: .modelsLibrary)?.symbols == "⇧⌘L")
+        #expect(KeyMap.chord(for: .toggleMonitor)?.symbols == "⌥⌘M")
+        #expect(KeyMap.chord(for: .toggleSidebar)?.symbols == "⌃⌘S")
+        #expect(KeyMap.chord(for: .openSettings)?.symbols == "⌘,")
+    }
+
+    @Test("each of the shell's keys is the one the design's keyboard list gives")
+    func keysMatchTheDesignList() {
+        let listed = Set(KeyMap.reference.map(\.keys))
+        for binding in KeyMap.shell where !binding.isPlace {
+            #expect(listed.contains(binding.chord.symbols), "\(binding.label) on \(binding.chord.symbols)")
+        }
+        #expect(KeyMap.reference.contains(KeyReference("Sessions, Models, Suites, Tasks, Code graph, Video, Voice", "⌘1 – ⌘7")))
+        #expect(KeyMap.reference.count == 20)
+    }
+
+    @Test("chords are written as the Mac's menus write them")
+    func symbols() {
+        #expect(KeyChord("n", [.shift, .command]).symbols == "⇧⌘N")
+        #expect(KeyChord("i", [.command, .option]).symbols == "⌥⌘I")
+        #expect(KeyChord("s", [.control, .command]).symbols == "⌃⌘S")
+        #expect(KeyChord("x", [.control, .option, .shift, .command]).symbols == "⌃⌥⇧⌘X")
+    }
+
+    @Test("every place but Sessions is an honest placeholder: what will be there, and today's command")
+    func placeholders() {
+        #expect(Destination.sessions.placeholder == nil)
+        for destination in Destination.allCases where destination != .sessions {
+            let placeholder = try! #require(destination.placeholder)
+            #expect(placeholder.title == "Not built yet")
+            #expect(placeholder.about.hasSuffix("will be here."))
+            #expect(placeholder.command.hasPrefix("apogee "))
+        }
+        #expect(Overlay.monitor.placeholder.command == "apogee system")
+    }
+}

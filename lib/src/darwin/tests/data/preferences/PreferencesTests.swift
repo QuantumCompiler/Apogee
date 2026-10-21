@@ -21,4 +21,20 @@ struct PreferencesTests {
     func emptyIsNone() {
         #expect(Preferences(store: MemoryStore(["binaryOverride": ""])).binaryOverride == nil)
     }
+
+    @Test("the route and the sidebar's state are remembered, and a store without them is the defaults")
+    func windowState() {
+        let store = MemoryStore()
+        let preferences = Preferences(store: store)
+        #expect(preferences.route == nil)
+        #expect(!preferences.sidebarHidden)
+        preferences.route = "models"
+        preferences.sidebarHidden = true
+        let again = Preferences(store: store)
+        #expect(again.route == "models")
+        #expect(again.sidebarHidden)
+        again.sidebarHidden = false
+        #expect(store.string(forKey: "sidebarHidden") == nil)
+        #expect(Preferences(store: MemoryStore(["route": ""])).route == nil)
+    }
 }

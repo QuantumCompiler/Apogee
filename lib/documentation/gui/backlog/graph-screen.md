@@ -20,4 +20,4 @@
 - [ ] The screen searches, explains and navigates a fixture graph from the documents alone; rebuild runs supervised and the view refreshes.
 - [ ] Layout is deterministic under test and computed in the view-model; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0; gated on [`app-shell.md`](app-shell.md) (1e). Out of scope: prose-graph/communities views (a later item), any CLI change, embedding the HTML export.
+**Scope note.** Earmarked for v0.2.0; gated on 1e, the app shell (shipped 2026-10-20: [MILESTONES → Milestone B](../assistant/MILESTONES.md#milestone-b--the-designs-screens)). Out of scope: prose-graph/communities views (a later item), any CLI change, embedding the HTML export.
