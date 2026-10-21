@@ -2490,6 +2490,24 @@ The specced premise of class 1, that the scripts enumerate what they remove, was
 
 **Verified.** Twelve tests run as concurrent pairs on one tree after the change, every pair passing: the six that failed in the reproduction, `cli.config_lifecycle`, `cli.reference_driver`, `cli.install_parity` (with its channel-probe fixture), `cli.shell_completion`, `cli.complete_lifecycle`, `cli.install_is_ours_only`. No run left a directory behind. `make -C lib/src/cli test` twice back to back: 3,593 of 3,593 both times (7 and 9 minutes), the two standing skips the only cases not run, and no directory left in the build tree; the first run that preceded the change, the same code in this tree, was 3,593 of 3,593 too, alone in its tree while another session's gate ran in the main checkout's. CI's tier gating is unchanged: `ci.yml` and `cicd.sh --unit-tests` are untouched, the executable tier stays `make test`'s, and the two standing skips (the libass caption burn, pdftotext) stay skips.
 
+### 2026-10-20 — `ci-test-log-granularity` (maintenance item M18): a line per test, with its time
+
+**Goal.** Running `make test` locally prints a line per case (`Test #3586: cli.tui_shell … Passed 11.57 sec`), and the user wanted CI's logs to read the same way (their ask, 2026-10-20). By construction CI's unit-test jobs run `cicd.sh --unit-tests`, which runs the Catch2 binary directly (the 2026-09-22 decision: no executable, no ctest), and Catch2's default report says nothing about a passing case. A green job's log showed the totals and nothing else.
+
+- [x] **`lib/scripts/cicd.sh`**: the one `apogee_tests` invocation runs `--reporter console --reporter automake::out=- --durations yes`, with the comment saying why. The console reporter prints `<seconds> s: <name>` as each case completes, and a case with sections gets one such line per section pass. The Automake reporter then prints `:test-result: PASS|FAIL|SKIP <name>`. The console's own report is unchanged: each failure's block, and the totals. Declared once, so a local `--unit-tests` run and every CI runner print the same lines.
+- [x] **`lib/scripts/ci-annotate.sh` taught the new shape.** A failed case's Catch2 block ends at the first per-case line as well as at the next header or the closing rule. Without that, a failure's block ran on through every passing case after it, up to the annotation's byte cap.
+
+**Decisions made while building** (2026-10-20, each recorded for veto):
+- **The [default] call: the reporter and flags.** Catch2 v3.7.1 has no stock reporter that prints a case's name, result and time on one line. The console reporter has the time and not the result; Automake has the result and not the time. So two reporters share stdout, each case's time line or lines followed by its result line. That is roughly 7,900 lines on a green run, against the ~3,550 the item estimated: 4,334 time lines and 3,533 result lines. A one-line shape would need a reporter of our own compiled into the test binary, which is outside "Catch2's own reporting".
+- **The other platforms, not run here.** `out=-` is Catch2's portable spelling of stdout, and nothing in the change is platform-specific. The Linux container (`make linux-tests`) was not running, and starting a VM was not this run's call. The first CI run on the branch shows the five runners, MSYS2's shells among them.
+
+**Verified.**
+- CI's own invocation run locally (`cicd.sh --app cli --platform macos-arm64 --unit-tests --no-defer`) printed 3,533 result lines (3,531 PASS, and SKIP for the two standing skips), each after its time line or lines. The totals are unchanged in shape: `test cases: 3533 | 3531 passed | 2 skipped`.
+- A planted failing case, then a planted case with two failing sections around a passing one, gave `:test-result: FAIL` and exit 42, Catch2's own code. `ci-annotate.sh` produced the summary naming them and one annotation per failure, each ending at its expansion: 746, 734, 718 and 719 bytes. The plants were removed after.
+- A console-only log, the old shape, is annotated byte for byte the same by the parser before and after.
+- `ci.yml` is byte-identical.
+- `lib/scripts/cicd.sh --test` on the branch: green -- the CLI's 3,593 (the two standing skips) and the macOS app's 219 cases, M17's sandboxes included, so its suite ran green a third time in a row.
+
 ## Milestone L — The vendor-CLI family
 
 **Goal.** A fifth backend and, more importantly, the machinery the rest of the vendor-CLI family will be built on: Claude driven through the official `claude` CLI as a **long-lived child process** — the subscription-auth path beside the API-key path from Milestone D. It reuses that backend's IR mapping and typed sinks and none of its HTTP: this one speaks JSONL over pipes.

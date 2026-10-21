@@ -22,6 +22,10 @@
 # The Catch2 half arrived late (2026-09-25): until then a failing unit-test
 # job published only its last 25 lines, which end with the totals and name no
 # test, so four failures on windows-arm64 could be read only by the owner.
+# Since M18 (2026-10-20) the run prints a line per test case as it completes --
+# the console's `<seconds> s: <name>` and Automake's `:test-result: <RESULT>
+# <name>` -- so a failed test case's block ends at the first of those lines
+# too, or it would run on through every passing case after it.
 #
 # Lines are compacted first: ctest pads names with dots to the terminal width,
 # and 40 padded lines alone overflowed the limit and hid the summary the first
@@ -66,13 +70,15 @@ if grep -q 'The following tests FAILED' "$log"; then
 elif grep -Eq '^test cases:.*[0-9]+ failed' "$log"; then
     # Catch2's console report. A test case's block opens with a header -- a
     # line of dashes, its name (and section, if any), a line of dashes -- and
-    # runs to the next header or the closing line of '='. Only blocks with a
-    # FAILED in them are failures: a skipped test case prints a block too.
+    # runs to the next header, the closing line of '=', or the first per-case
+    # line (a duration or a result, M18). Only blocks with a FAILED in them are
+    # failures: a skipped test case prints a block too.
     blocks="$(mktemp -d "${TMPDIR:-/tmp}/ci-annotate.XXXXXX")"
     tr -d '\r' <"$log" | awk -v dir="$blocks" '
         function flush() { if (block != "" && block ~ /FAILED/) { n++; printf "%s", block > (dir "/" n) ; close(dir "/" n) } block = "" }
         /^-{70,}$/ { if (!header) { flush(); header = 1 } else { header = 0 } block = block $0 "\n"; next }
         /^={70,}$/ { flush(); next }
+        /^[0-9]+\.[0-9]+ s: |^:test-result: / { flush(); next }
         block != "" { block = block $0 "\n" }
         END { flush() }'
     name_of() {  # the test case name: the line after the first line of dashes

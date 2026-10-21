@@ -104,7 +104,7 @@ Apogee/
     │   │                      (MinGW-w64 preferred), from a build's compile_commands.json; pr-ci's
     │   │                      stand-in when the Windows cross-build cannot run
     │   ├── ci-annotate.sh   — On a failed CI step, publishes the ctest summary -- or Catch2's, for the
-    │   │                      unit-test jobs -- and each failed test's output as error annotations
+    │   │                      unit-test jobs, each block cut at the per-case lines (M18) -- and each failed test's output as error annotations
     │   │                      (public through the API; the log is not)
     │   └── release-from-pr.sh — The release after a merge: v<VERSION>, with the PR's own CI archives (checked
     │                          against the merged tree and lib/release/VERSION) or, the CLI unchanged, the latest release's;
@@ -1044,7 +1044,7 @@ Run from `lib/src/cli`, or with `make -C lib/src/cli <target>` from anywhere.
 
 | Command | Does |
 |---|---|
-| `lib/scripts/cicd.sh --test` | **The repo-wide entry point.** Builds every app for the host target and runs its suite — the developer's gate before a push, and since 2026-09-22 CI's first stage too. `--app cli|darwin|all` picks the applications (every one by default, and only those that build for the target; the CLI pipeline passes `--app cli`, 2026-10-20); `--platform`, `--fresh`, `--clean`, `--jobs` too; `--no-defer` turns a target this host cannot build from a deferral into a failure (every CI runner passes it); `--clone-llama` proves the llama.cpp pin resolves and stops (one of CI's two first-stage jobs); **`--unit-tests`** builds the `apogee_tests` target alone and runs that binary — the source-level suite, no `apogee` executable, no ctest — which is what both pipelines gate their builds on (2026-09-22); `APOGEE_CMAKE_ARGS` appends configure flags (a toolchain file, e.g. a MinGW cross-compile from macOS). |
+| `lib/scripts/cicd.sh --test` | **The repo-wide entry point.** Builds every app for the host target and runs its suite — the developer's gate before a push, and since 2026-09-22 CI's first stage too. `--app cli|darwin|all` picks the applications (every one by default, and only those that build for the target; the CLI pipeline passes `--app cli`, 2026-10-20); `--platform`, `--fresh`, `--clean`, `--jobs` too; `--no-defer` turns a target this host cannot build from a deferral into a failure (every CI runner passes it); `--clone-llama` proves the llama.cpp pin resolves and stops (one of CI's two first-stage jobs); **`--unit-tests`** builds the `apogee_tests` target alone and runs that binary — the source-level suite, no `apogee` executable, no ctest, each test case printed as it completes with its time and then its result (`--reporter console --reporter automake::out=- --durations yes`, M18) — which is what both pipelines gate their builds on (2026-09-22); `APOGEE_CMAKE_ARGS` appends configure flags (a toolchain file, e.g. a MinGW cross-compile from macOS). |
 | `make test` | The same thing for the CLI alone (it calls `cicd.sh --app cli`). |
 | `make build [PRESET=…]` | Configure and build one preset. |
 | `make install [PREFIX=…] [MODE=…]` | Build, then install the binary to `$PREFIX/bin` (default `~/.local`, so no sudo). `MODE=dev` or `MODE=test` installs that channel's `apogee-dev`/`apogee-test` beside `apogee` -- see [Install channels](#install-channels). Since 51 it ends with `apogee bootstrap` after `check --fix`, as both installers do -- `APOGEE_MINIMAL_INSTALL=1 make install` skips it. |
