@@ -210,6 +210,24 @@ struct CheckPassOptions {
 /// -- never by a second copy of either.
 [[nodiscard]] bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options);
 
+/// One command a remedy runs, as typed, and whether the next one runs when
+/// it fails: `brew unlink ffmpeg` fails harmlessly where Homebrew's ffmpeg is
+/// not installed.
+struct RemedyCommand {
+    std::vector<std::string> argv;
+    bool may_fail = false;
+};
+
+/// What brings an ffmpeg that burns captions on macOS (52e): Homebrew's
+/// keg-only ffmpeg-full, linked over its ffmpeg. Declared once -- `check`'s
+/// `ffmpeg captions` remedy types it as one line, and `apogee bootstrap` runs
+/// it (2026-10-21).
+[[nodiscard]] std::vector<RemedyCommand> macos_captions_remedy();
+
+/// Commands as the one line a person types: `&&` after one that must
+/// succeed, `;` after one that may fail.
+[[nodiscard]] std::string remedy_line(const std::vector<RemedyCommand>& commands);
+
 class CheckCommand final : public Command {
 public:
     [[nodiscard]] std::string_view name() const noexcept override;

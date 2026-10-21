@@ -2008,6 +2008,12 @@ TEST_CASE("config set moves each allow-listed scalar in place, comments kept, as
         "<test>");
     CHECK(kinds.knowledge.auto_capture);
     CHECK(kinds.ui.thinking_display == apogee::harness::ThinkingDisplay::Raw);
+
+    // M19: the lasting choice of the training environment's Python has a
+    // command, and the loader reads what it wrote.
+    CHECK(apogee::harness::parse_config(
+              set_scalar(kCommented, "training.python", "/opt/homebrew/bin/python3.12"), "<test>")
+              .training.python == "/opt/homebrew/bin/python3.12");
 }
 
 TEST_CASE("config set refuses every key outside its table, naming the right door",

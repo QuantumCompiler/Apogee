@@ -2972,3 +2972,39 @@ TEST_CASE("an encoder listing is read by its name column alone", "[check][video]
     CHECK_FALSE(apogee::platform::encoder_listed(" V....D mpeg4  not libx264\n", "libx264"));
     CHECK_FALSE(apogee::platform::encoder_listed("Encoders:\n V..... = Video\n", "libx264"));
 }
+
+TEST_CASE("the environment's row names its Python, and voice it cannot take names the rebuild",
+          "[commands][check][training][m19]") {
+    // The user's environment (2026-10-21): Homebrew's 3.14.5, five sets, its
+    // version only in pyvenv.cfg. 'train setup --with voice' could never
+    // succeed there, so the row says why and names the remedy that does.
+    Install install;
+    install.seed();
+    REQUIRE(apogee::harness::seed_data_directory(install.root).ok());
+    CheckInputs inputs = inputs_for(install);
+    write_fake_interpreter(install);
+    install.write("training/venv/apogee.json",
+                  R"({"base_python": "/opt/homebrew/bin/python3", "created_at": "x",
+                      "sets": ["prepare", "mlx", "convert", "mlx-vlm", "video"]})");
+    install.write("training/venv/pyvenv.cfg", "home = /x\nversion = 3.14.5\n");
+
+    const CheckReport report = run_checks(inputs);
+    const apogee::commands::CheckRow* env = row_with(report, "python env");
+    REQUIRE(env != nullptr);
+    CHECK(env->detail.find("(Python 3.14.5); sets: prepare, mlx, convert, mlx-vlm, video") !=
+          std::string::npos);
+    const apogee::commands::CheckRow* voice = row_in(report, "Video", "voice runtime");
+    REQUIRE(voice != nullptr);
+    CHECK(voice->status == Status::Skipped);
+    CHECK(voice->detail ==
+          "not set up -- the Python environment is on Python 3.14.5, and the "
+          "voice set runs on >=3.10,<3.13");
+    CHECK(voice->remedy == "apogee train setup --rebuild --with voice");
+
+    // On a Python it runs on, the row is as it was: install it.
+    install.write("training/venv/pyvenv.cfg", "home = /x\nversion = 3.12.13\n");
+    const CheckReport fits = run_checks(inputs);
+    const apogee::commands::CheckRow* installable = row_in(fits, "Video", "voice runtime");
+    REQUIRE(installable != nullptr);
+    CHECK(installable->remedy == "apogee train setup --with voice");
+}

@@ -3103,6 +3103,9 @@ std::vector<SettableScalar> settable_scalars() {
          .min = 1,
          .max = 20,
          .about = "how many results a search returns"},
+        {.key = "training.python",
+         .kind = ScalarKind::Text,
+         .about = "the Python a new training environment is made from (M19)"},
     };
 }
 

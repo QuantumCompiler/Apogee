@@ -51,6 +51,9 @@ struct RegistrationStep {
     harness::BackendType type = harness::BackendType::Mock;
     Outcome outcome = Outcome::Register;
     std::string detail;
+    /// The model the entry names, for a type that runs none without one:
+    /// Ollama's, when its store holds exactly one (2026-10-21). Empty else.
+    std::string model{};
 };
 
 /// The whole pass, before anything is written.
@@ -73,9 +76,20 @@ struct RegistrationPlan {
 [[nodiscard]] bool has_provider_backend(const harness::Config& config) noexcept;
 
 /// The pass over `statuses` (one per provider, in table order) against
-/// `config`: one step per offerable provider.
+/// `config`: one step per offerable provider. `ollama_models` are the models
+/// Ollama's store holds (`ollama_models_here`): with exactly one, the Ollama
+/// CLI registers with it, as `config add-backend ollama --type ollama-cli
+/// --model <it>` would write; with several, none is chosen for the person
+/// and the step names them (2026-10-21).
 [[nodiscard]] RegistrationPlan plan_registration(
-    const std::vector<backends::ProviderStatus>& statuses, const harness::Config& config);
+    const std::vector<backends::ProviderStatus>& statuses, const harness::Config& config,
+    const std::vector<std::string>& ollama_models = {});
+
+/// The models Ollama's store holds, as `ollama list` names them -- its cloud
+/// models too -- read by the store's one walk (`models::list_manifests`),
+/// sorted. Reading the store is no probe: it holds model files, never a
+/// credential (`models/source_ollama.h`).
+[[nodiscard]] std::vector<std::string> ollama_models_here();
 
 /// The cache's providers in knowledge-table order.
 [[nodiscard]] std::vector<backends::ProviderStatus> cached_statuses(

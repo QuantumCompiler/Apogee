@@ -229,7 +229,7 @@ std::string register_provider(const std::filesystem::path& config_path, std::str
             chosen.push_back(std::move(status));
         }
     }
-    const RegistrationPlan plan = plan_registration(chosen, config);
+    const RegistrationPlan plan = plan_registration(chosen, config, ollama_models_here());
     apply_registration(config_path, plan);
     std::string said = render_registration(plan, /*applied=*/true);
     // Registration brings the models (M13), on this -- the user's -- word.
@@ -314,7 +314,8 @@ void ProvidersCommand::bind(CLI::App& root, const RootContext& context) {
             std::cout << "\nno config file yet -- 'apogee config init' writes one\n";
             return;
         }
-        const RegistrationPlan plan = plan_registration(report.providers, *config);
+        const RegistrationPlan plan =
+            plan_registration(report.providers, *config, ollama_models_here());
         if (!flags->register_found) {
             std::vector<std::string> fetched;
             if (flags->refresh) {

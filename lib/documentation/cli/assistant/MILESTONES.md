@@ -2543,6 +2543,43 @@ The specced premise of class 1, that the scripts enumerate what they remove, was
 
 **Verified.** In a sandbox (`APOGEE_HOME`, `PREFIX` and the test channel, so no completion was written, and `APOGEE_MINIMAL_INSTALL=1` so no runtime was downloaded), `make update` was driven through a pseudo-terminal answering the reset's prompt. The planted home held a stored model, a chat, an environment marker and a configured backend. With `KEEP=sessions` it exited 0: nothing to migrate, the plan keeping `models/` and `sessions/`, the reset's check passing, then the bootstrap. The model and the chat were kept, and the environment and the backend reset. Without `KEEP` the model was kept and the chat removed. `install_parity`'s Makefile order rule (the first `check --fix` before the first `bootstrap`) holds, lines 138 and 140.
 
+### 2026-10-21 — Bootstrap growths: the code-execution server, Ollama's one model, ffmpeg-full
+
+**Why.** After `make update`, `apogee check` still showed three things left undone that the user wanted an update to do (their call, 2026-10-21): the code-execution server not registered (a skip naming `mcp create`), Ollama installed but not registered (it needs a model, and its store holds exactly one), and no burned-in captions (Homebrew's ffmpeg has no libass). The bootstrap every install path runs now does all three, each step said and never fatal. The voice runtime, the fourth thing left, is M19's.
+
+- [x] **The code-execution server** (`cli/bootstrap_cmd`): a step after the runtime sets and before the providers, `apogee mcp create code --from code-exec`, 47c's preset run as the binary's child like every step. It comes after the runtimes so it runs under the environment they made.
+  - Skipped, said, when it is registered already under any name (`operations::registered_code_exec_server`, the doctor's own read).
+  - Skipped, naming the way, when another server holds the name `code`. A second bootstrap is quiet about it.
+- [x] **Ollama's one model** (`cli/provider_offer`): `plan_registration` takes Ollama's models, read by `ollama_models_here` over `models::list_manifests`. That is the store's one walk, factored out of `list_store` and now counting a cloud model's manifest too: its weights live on Ollama's servers, so `list_store` (local weights) still passes over it, while `ollama list` and a registration count it.
+  - With exactly one, the Ollama CLI is registered with it, the entry `config add-backend ollama --type ollama-cli --model <it>` writes, through the one editor: `registered ollama (ollama-cli, with Ollama's one model, gpt-oss:20b-cloud)`.
+  - With several, none is chosen and the line names them.
+  - With none, nothing changes.
+  - `providers scan --register`, the shell's register key and the first-launch offer all pass the listing, so every door registers alike.
+- [x] **ffmpeg with captions**, the bootstrap's last step, on macOS with `brew` on PATH and an ffmpeg without the `subtitles` filter. The filter is found by `check`'s own probe (`platform::ffmpeg_listing` and `filter_listed`).
+  - It runs `check`'s remedy in order: `brew install ffmpeg-full`, `brew unlink ffmpeg` (which may fail where Homebrew's ffmpeg is not installed), then `brew link --force ffmpeg-full`. These go through `BootstrapSeams::run_program`, a seam of its own, since every other step runs the binary.
+  - The remedy is declared once, `macos_captions_remedy()` in `check.h`. `check` types it as its line with `remedy_line`, byte for byte the text it printed before; the bootstrap runs the same commands.
+  - Otherwise the step is skipped with its reason: not macOS, no Homebrew, no ffmpeg answering, or captions already burnable.
+  - A failing install or link ends the step there, naming the command.
+- [x] **The plan's facts**: `BootstrapHost` holds what `bootstrap_plan` is decided by, read before the first step and only when the bootstrap is not minimal, so `--minimal` and `APOGEE_MINIMAL_INSTALL` still skip it whole and run nothing: the host shape, macOS, Homebrew, the ffmpeg probe, and the code-execution registration. The JSON summary grows additively: an external step's `command` is its line as typed (`brew …`).
+- [x] **The suite stays hermetic about Ollama**: `support/hermetic_home.cpp` points `OLLAMA_MODELS` at an empty directory of the run's own, as it does `APOGEE_HOME`, so a developer's pulled models never decide what a test registers.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The ffmpeg swap changes a system package for every macOS install that has Homebrew**, not only the user's. Homebrew's `ffmpeg` is unlinked and `ffmpeg-full` linked in its place, which every other program on the machine then runs. It is the one bootstrap step outside Apogee's own environment, and SPEC's install non-goal was amended for it the same day. `--minimal` skips it with the rest.
+- **Ollama's one model is registered even when it is a cloud model.** The user's is `gpt-oss:20b-cloud`, which runs on Ollama's servers, so prompts sent to that backend leave the machine. The count is `ollama list`'s, and a cloud manifest is a model there.
+- **No ffmpeg at all is skipped, not installed.** The step replaces an ffmpeg that cannot burn captions; a machine with none is `check`'s to name.
+- **Several Ollama models choose none**, naming them. Which one is the person's to say.
+- **The refs keep `list_store`'s spelling**, the registry dropped. A model from another registry (`hf.co/…`) is named as the walk names it.
+
+**Verified.** `bootstrap_cmd_test`:
+- the plan with its two new steps;
+- every step in order, renumbered;
+- the code-execution step's three outcomes;
+- the captions step: every skip reason, the user's Mac running Homebrew's three commands in order through the seam with a failed unlink tolerated, and a failed install ending the step there with `check`'s line equal to the declaration's.
+
+`provider_offer_test`: one Ollama model registered byte for byte as `config add-backend` writes, a second pass finding it registered, several named and none chosen, and the store's models read with a cloud manifest among them. `source_ollama_test`: `list_manifests` and `list_store` over one local and one cloud manifest. `lib/scripts/cicd.sh --test`: the CLI's 3,602 green (the two standing skips) with no warning. The macOS app's suite passed 345 and failed one GUI case this change does not touch, `StoreJobsTests/storeOpensTheSheets()`, on a sheet's values under load. Rerun alone (`cicd.sh --app darwin --test`), the suite passed all 346. Formatting was then applied to three of this change's files, whitespace only, and the bootstrap, registration, Ollama and provider cases ran green again.
+
+**Not run here:** a real bootstrap. It installs into the real environment, links Homebrew packages, and registers into the real config, so no test ran one.
+
 ## Milestone L — The vendor-CLI family
 
 **Goal.** A fifth backend and, more importantly, the machinery the rest of the vendor-CLI family will be built on: Claude driven through the official `claude` CLI as a **long-lived child process** — the subscription-auth path beside the API-key path from Milestone D. It reuses that backend's IR mapping and typed sinks and none of its HTTP: this one speaks JSONL over pipes.
@@ -5574,6 +5611,59 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,269
 The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,277 tests, none failing, one skipped for want of `pdftotext` -- `cli.datasets_lifecycle`, `cli.train_lifecycle` and `harness.layering` among them. `clang-format` is clean on every touched file.
 
 ---
+
+### 2026-10-21 — `train-setup-python-fit` (maintenance item M19): a Python every set runs on
+
+**Why.** The user's bootstrap installed 7 of 9 sets: the `voice` set was refused by pip (`kokoro` 0.9.4 runs on `>=3.10,<3.13`). `train setup` had built the one environment from whatever `python3` was on PATH, Homebrew's 3.14.5, with 3.10 to 3.13 beside it.
+- The sets carried no range, so nothing could choose against them.
+- An environment, once made, was kept whatever its Python, and a later `training.python` was silently ignored.
+- `config set` could not write that key.
+- `check`'s voice remedy, `train setup --with voice`, could not succeed.
+
+- [x] **`training/python_env`**: each set's Python range is carried beside its packages and hosts, with its reviewed date (`python_range`, `python_ranges_reviewed`, ADR 0009's discipline):
+  - `voice` runs on `>=3.10,<3.13`;
+  - `mlx` on `>=3.11`;
+  - every other set on `>=3.10`.
+
+  Other additions:
+  - `PythonVersion`: the record's `base_version` (written since M19), else the `version` that `python -m venv` wrote into `pyvenv.cfg`. Read, never asked of Python.
+  - `python_candidates`: `python3.<minor>`, `python3` and `python` on PATH, each asked its version, one reached by two names listed once, newest first.
+  - `choose_base_python`: the newest candidate every set the host can install runs on, since one environment serves them all and the bootstrap makes it at its first set. Failing that, the newest the requested sets run on, naming what it leaves out. Failing that, a refusal naming the range, what was found and `brew install python@3.12`. The person's word (`training.python`, or `--python`) is used as given; one outside a requested set's range is refused naming both, never swapped.
+  - `install` refuses a set its environment's Python cannot run, before pip, naming `apogee train setup --rebuild --with <set>`.
+  - `rebuild` moves the old environment aside, makes the new one, reinstalls every recorded set in its order, and puts the old one back if anything fails.
+- [x] **`train setup`**:
+  - says which interpreter and why: `from …/python3.12 (Python 3.12.13) -- the newest Python every set this host can install runs on (>=3.11,<3.13); passed over python3 (3.14.5), python3.13 (3.13.13): the 'voice' set runs on >=3.10,<3.13`;
+  - `--python <path>` (completed as a path) for a new or rebuilt environment, and refused with an environment there unless `--rebuild`;
+  - `--rebuild`, asked `[y/N]` at a terminal and refused on a pipe naming `--yes`, so neither the bootstrap's children nor any pipe replace gigabytes unasked;
+  - the `python env` line names the version.
+
+  `require_python_env`, the door every other command takes, chooses the same way.
+- [x] **`check`**: the `python env` row names the environment's Python. The `voice runtime` row on an environment voice cannot run on says so (`the Python environment is on Python 3.14.5, and the voice set runs on >=3.10,<3.13`) and names the remedy that works, `apogee train setup --rebuild --with voice`.
+- [x] **`config set training.python <path>`** joins 52e's table (text), through the one editor and its admin twin.
+- [x] **`reference/training.md`** describes the choice, the ranges, `--python`, `--rebuild` and the doctor's rows. Its "nothing runs `setup` for you" line, untrue since 51's bootstrap, is corrected.
+
+**Decisions made while building** (2026-10-21, each recorded for veto; the item's five `[default]` calls taken as written):
+- **The ranges are carried, not asked.** They come from PyPI's published `requires_python`, read on the date recorded, so setup stays offline and deterministic. A stale range fails as before, in pip's words.
+- **The candidates are PATH's, by name.** No prefix scan, and no `pyenv` or `uv`.
+- **Requested sets decide when no interpreter fits every host set,** and the words name the sets left out.
+- **`--rebuild` asks, and `--yes` answers.** A rebuild without `--python` chooses again.
+- **`training.python` joins `config set`.** `--python` writes nothing.
+- **A rebuild keeps the old environment until the new one is whole.** It is moved aside and put back on any failure, so a failed rebuild leaves what was there.
+- **The bootstrap needed nothing:** its first set's `train setup` makes the environment on the choice made against every set the host can install. On the user's machine an existing 3.14 environment stays until a rebuild. A `make update`, whose reset removes `training/`, makes the next one on 3.12, and voice installs there.
+
+**Verified.**
+- `python_env_test`:
+  - the ranges and their date;
+  - the versions parsed;
+  - a set refused before pip on the user's 3.14.5 environment, read from `pyvenv.cfg`;
+  - a rebuild reinstalling the five recorded sets in order, and one failing at its third pip put back as it was;
+  - on a scripted PATH of the user's `python3` (3.14.5), `python3.13` and `python3.12`: the choice and its exact words, a named Python refused never swapped, the requested sets deciding when nothing fits every set, and the refusal naming what was found.
+- `train_test`: setup making the environment on 3.12 and saying why; an environment made on `python3` refusing voice before pip, `--python` asking for `--rebuild`, `--rebuild` refused on a pipe, and `--rebuild --yes` reinstalling the five sets and then voice on 3.12.
+- `check_test`: the environment row naming 3.14.5, and the voice row naming the range and the rebuild.
+- `config_edit_test`: `training.python` written and read back.
+- `lib/scripts/cicd.sh --test`: green with the bootstrap's growths beside it -- the CLI's 3,610 (the two standing skips) and the macOS app's suite, no warning.
+
+**Not run on real packages:** no interpreter or pip ran in the suite. The user's own `make update` is the live run.
 
 ## Milestone AA — The four layers
 

@@ -45,14 +45,39 @@ apogee train setup                        # create the environment, install noth
 apogee train setup --with prepare         # + the `datasets` library, for Parquet
 apogee train setup --trainer auto         # + the trainer stack for this host
 apogee train setup --trainer mlx --with convert
+apogee train setup --python python3.12    # this Python for a new environment, this run
+apogee train setup --rebuild              # remake it on a Python every set runs on (asked)
 ```
 
-Creates `training/venv/` from `training.python` in the config (or `python3`
-on PATH) with `python -m venv`, then installs the requirement sets asked for
-with the environment's own pip. Nothing else ever installs a Python package,
-and nothing runs `setup` for you: a fresh install downloads nothing unasked.
-A command that needs the environment and finds it missing asks on a
-terminal, and on a pipe refuses naming this command.
+Creates `training/venv/` with `python -m venv`, then installs the requirement
+sets asked for with the environment's own pip. **Which Python** (since M19,
+2026-10-21): the newest interpreter on PATH -- `python3.<minor>`, `python3`,
+`python`, each asked its version -- that every set this host can install
+runs on, because one environment serves them all. Each set's range is
+carried from its packages' published `requires_python` (read 2026-10-21):
+`voice` runs on `>=3.10,<3.13` (Kokoro and misaki), `mlx` on `>=3.11`
+(mlx-lm), every other set on `>=3.10` -- so an Apple-silicon Mac whose
+`python3` is 3.13 or newer gets its environment from a 3.12 or 3.11 beside it,
+and setup says which and why. `training.python` in the config (`config set
+training.python <path>` writes it), or `--python` for one run, is used as
+given; one outside a requested set's range is refused before anything is
+installed, naming both. No interpreter is ever downloaded: with none that
+fits, setup says what it found and where one comes from (`brew install
+python@3.12`).
+
+An environment already there is kept. A set its Python does not run on is
+refused before pip, naming `apogee train setup --rebuild --with <set>`;
+`--rebuild` chooses again, asks `[y/N]` at a terminal (on a pipe it needs
+`--yes`), and reinstalls every set the environment held, in its order -- a
+rebuild that fails puts the old environment back as it was. `apogee check`'s
+`python env` row names the environment's Python, and a set's row that its
+Python cannot take names that rebuild.
+
+Nothing else ever installs a Python package. Every install's last step,
+`apogee bootstrap` (51), runs this command for the sets this host can
+install -- `APOGEE_MINIMAL_INSTALL=1` skips it -- and otherwise a command
+that needs the environment and finds it missing asks on a terminal, and on a
+pipe refuses naming this command.
 
 | Set | Packages | Needed by |
 |---|---|---|
@@ -67,7 +92,7 @@ PATH, and says so when neither fits. Versions are floors, not exact pins.
 
 ```jsonc
 "training": {
-  "python": "/opt/homebrew/bin/python3.12",   // the interpreter the venv is seeded FROM
+  "python": "/opt/homebrew/bin/python3.12",   // the interpreter the venv is seeded FROM (config set training.python)
   "trainer": "auto",            // mlx on Apple Silicon, peft with nvidia-smi; or name one
   "judge_backend": "paid",      // judges eval items with no `expected`; unset = they skip
   "eval_suite_path": "~/.apogee/training/suites/mine.jsonl",   // `train eval` without --suite
