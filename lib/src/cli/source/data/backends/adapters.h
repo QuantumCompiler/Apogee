@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <string>
@@ -36,6 +37,10 @@ struct WeightHashing {
     std::filesystem::path memo{};
     /// Reads one file; `models::file_sha256` when unset.
     FileHasher hasher{};
+    /// Whether a hash read here is written back to `memo`. A load remembers
+    /// what it read; the doctor reads the memo and writes nothing (53c:
+    /// `check` edits nothing on the machine, a cache included).
+    bool remember = true;
 };
 
 /// The sha256 that pins an adapter to its base (53a). For a file -- a GGUF --
@@ -60,6 +65,33 @@ struct AdapterCheck {
     bool directories = false;
     WeightHashing hashing{};
 };
+
+/// What one adapter's own files say, before any base is read (53c): the
+/// facts `adapter_refusal` refuses a load on, in its order -- the doctor
+/// words a row of each, a load the first that is not `Pinned`.
+enum class AdapterFiles : std::uint8_t {
+    /// There, the kind its runtime reads, and pinned to some base -- whether
+    /// that base is the one the entry runs is the weights' to say.
+    Pinned,
+    /// Not there.
+    Missing,
+    /// There, but not what its runtime reads: a llamacpp entry applies a
+    /// GGUF LoRA file, an mlx entry a directory holding `adapter_config.json`.
+    WrongKind,
+    /// The kind its runtime reads, pinned to no base: written by hand.
+    Unpinned,
+};
+
+/// `adapter`'s own facts against the entry `check` describes (53c), its
+/// base never read.
+[[nodiscard]] AdapterFiles adapter_files(const harness::AdapterConfig& adapter,
+                                         const AdapterCheck& check);
+
+/// `adapters` as `config set-backend --adapters` spells them (53c):
+/// `<path>[:<scale>]`, comma-joined, quoted where a shell would split them,
+/// `""` for none -- the whole set a fix names, so it drops nothing it did not
+/// mean to.
+[[nodiscard]] std::string spell_adapters(const std::vector<harness::AdapterConfig>& adapters);
 
 /// Why `adapters` cannot apply over `check.base`, or empty when they can:
 /// file facts, in order -- an adapter not there, or not the kind its runtime

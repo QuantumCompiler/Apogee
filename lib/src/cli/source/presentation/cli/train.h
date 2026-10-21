@@ -25,7 +25,8 @@
 ///   promote   fuse -> convert -> verify -> register through the one config
 ///             editor -> the version ledger, with retention; with --adapter
 ///             (53b) no fuse: the adapter alone, a GGUF LoRA or an mlx-lm
-///             directory, registered on the entry's adapters over its base
+///             directory, registered on the entry's adapters over its base --
+///             over a quantized base, gated there (53c)
 ///   rollback  repoint a backend at its previous version; delete nothing
 ///   versions  a backend's ledger
 ///   status    the cycle, the active pipeline, the runs, the active versions
@@ -114,6 +115,13 @@ struct StudentResolution {
 [[nodiscard]] std::filesystem::path resolve_dataset(const std::filesystem::path& datasets_dir,
                                                     std::string_view name_or_path,
                                                     std::string& error);
+
+/// The base the entry `name` serves an adapter on (53c), read with no weights
+/// loaded: a GGUF's precision from its header's `general.file_type`, an MLX
+/// directory's from its `config.json`. What `train promote --adapter` gates
+/// on when it is quantized, and what the doctor's re-promote door asks.
+[[nodiscard]] training::ServingBase serving_base(const std::string& name,
+                                                 const harness::BackendConfig& backend);
 
 /// The eval suite `--suite` (or `training.eval_suite_path`) names: a file
 /// path; else `training/suites/<name>.jsonl`; else `training/datasets/

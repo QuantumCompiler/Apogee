@@ -7,12 +7,14 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <random>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "support/env_guard.h"
+#include "training/eval.h"
 #include "training/manifest.h"
 #include "training/mock_trainer.h"
 #include "training/store.h"
@@ -1101,4 +1103,268 @@ TEST_CASE(
     CHECK(recorded.gguf_path.empty());
     CHECK(recorded.mlx_path.empty());
     CHECK(recorded.adapter());
+}
+
+// ---------------------------------------------------------------------------
+// The gate on the base that serves (53c): a candidate bound for a quantized
+// base scored there, once, over scripted closures.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+using apogee::training::CandidateReply;
+using apogee::training::CandidateRunner;
+using apogee::training::EvalItem;
+using apogee::training::EvalOptions;
+using apogee::training::gate_on_serving_base;
+using apogee::training::plan_serving_gate;
+using apogee::training::ServingGate;
+using apogee::training::ServingGateRequest;
+using apogee::training::ServingRunnerFactory;
+
+/// A runner answering every prompt with `answer` -- or the prompt itself
+/// when it is empty -- counting what it is asked; failing when told to.
+class Answering final : public CandidateRunner {
+public:
+    Answering(std::string answer, int& asked, bool fail)
+        : answer_{std::move(answer)}, asked_{asked}, fail_{fail} {}
+
+    CandidateReply run(std::string_view prompt,
+                       const apogee::harness::CancellationToken& cancellation) override {
+        ++asked_;
+        CandidateReply reply;
+        if (fail_ || cancellation.stop_requested()) {
+            reply.error = "the runtime stopped";
+            return reply;
+        }
+        reply.ok = true;
+        reply.text = answer_.empty() ? std::string{prompt} : answer_;
+        return reply;
+    }
+
+private:
+    std::string answer_;
+    int& asked_;
+    bool fail_;
+};
+
+/// The serving base's runtime, scripted: what the tuned candidate answers,
+/// what refuses to build, and every build and ask counted -- so a test pins
+/// which closure the gate scored on.
+struct Served {
+    std::string answer{};
+    std::string refuse_tuned{};
+    std::string refuse_bare{};
+    bool fail = false;
+    int tuned = 0;
+    int bare = 0;
+    int asked = 0;
+
+    [[nodiscard]] ServingRunnerFactory factory() {
+        return [this](bool tuned_build, std::string& error) -> std::unique_ptr<CandidateRunner> {
+            const std::string& refused = tuned_build ? refuse_tuned : refuse_bare;
+            if (!refused.empty()) {
+                error = refused;
+                return nullptr;
+            }
+            ++(tuned_build ? tuned : bare);
+            return std::make_unique<Answering>(tuned_build ? answer : "base says no", asked, fail);
+        };
+    }
+};
+
+/// A request scoring two substring items on a Q4_K_M base.
+ServingGateRequest on_q4(GateMode mode = GateMode::Hard, bool force = false) {
+    ServingGateRequest request;
+    request.base = {.backend = "local",
+                    .weights = "/models/m/gguf/0123456789ab/m-Q4_K_M.gguf",
+                    .label = "m-Q4_K_M.gguf",
+                    .precision = "Q4_K_M",
+                    .quantized = true};
+    request.items = {EvalItem{.prompt = "say hello", .expected = "hello"},
+                     EvalItem{.prompt = "say bye", .expected = "bye"}};
+    request.suite = "kit:demo";
+    request.mode = mode;
+    request.force = force;
+    return request;
+}
+
+constexpr std::string_view kWhere = "m-Q4_K_M.gguf (Q4_K_M), the base 'local' serves";
+
+}  // namespace
+
+TEST_CASE(
+    "a candidate bound for a quantized base is scored there, once, whatever its run's own eval "
+    "said",
+    "[training][promote][gate][serving]") {
+    const apogee::testing::TempDir root{"serving-" + std::to_string(std::random_device{}())};
+    CHECK(apogee::training::describe(on_q4().base) == "m-Q4_K_M.gguf (Q4_K_M)");
+
+    // The run's own eval FAILED where its trainer ran; on the base that will
+    // serve, the candidate passes -- and that is the verdict.
+    Served served;
+    const ServingGate passing =
+        gate_on_serving_base(complete_run(root.path(), true, false), on_q4(), served.factory(), {});
+    CHECK(passing.verdict.ok);
+    CHECK(passing.verdict.warning.empty());
+    REQUIRE(passing.results.has_value());
+    CHECK(passing.results->passed);
+    CHECK(passing.results->num_passed == 2);
+    CHECK(passing.results->suite == "kit:demo");
+    // The serving closure, its candidate built once and asked each item; no
+    // baseline without a judge, and nothing else is asked.
+    CHECK(served.tuned == 1);
+    CHECK(served.bare == 0);
+    CHECK(served.asked == 2);
+
+    // The run's own eval PASSED; on the quantized base the candidate
+    // degrades under the floor -- refused, saying where it was scored.
+    Served degraded{.answer = "something else"};
+    const ServingGate refused =
+        gate_on_serving_base(complete_run(root.path()), on_q4(), degraded.factory(), {});
+    CHECK_FALSE(refused.verdict.ok);
+    CHECK(refused.verdict.error == "the eval gate failed for run r1, scored on " +
+                                       std::string{kWhere} +
+                                       " (0%: 0/2 passed). Fix the training or the suite, then "
+                                       "promote again, or pass --force to skip the gate");
+    REQUIRE(refused.results.has_value());
+    CHECK_FALSE(refused.results->passed);
+    CHECK(degraded.asked == 2);
+
+    // Soft: let through, said, and the failing score kept for the record.
+    Served soft_run{.answer = "say hello"};
+    const ServingGate soft = gate_on_serving_base(complete_run(root.path()), on_q4(GateMode::Soft),
+                                                  soft_run.factory(), {});
+    CHECK(soft.verdict.ok);
+    CHECK(
+        soft.verdict.warning.starts_with("gate_mode is soft: the eval gate failed for run r1, "
+                                         "scored on " +
+                                         std::string{kWhere} + " (50%: 1/2 passed)"));
+    REQUIRE(soft.results.has_value());
+
+    // The version records the gate that let it through, never the run's
+    // own eval: where it scored, and how.
+    VersionEntry version = entry(1, root.path());
+    version.eval_score = 1.0;
+    version.eval_passed = true;
+    apogee::training::record_serving_gate(version, soft, on_q4().base);
+    CHECK(version.eval_score == 0.5);
+    CHECK(version.eval_passed == false);
+    CHECK(version.eval_scored_on == "m-Q4_K_M.gguf (Q4_K_M)");
+}
+
+TEST_CASE(
+    "the gate on the serving base: --force scores nothing, no suite refuses a hard gate, and "
+    "an incomplete run never passes",
+    "[training][promote][gate][serving]") {
+    const apogee::testing::TempDir root{"serving-" + std::to_string(std::random_device{}())};
+
+    // --force: no eval at all, no judge paid -- and said.
+    Served forced;
+    const ServingGate skipped = gate_on_serving_base(
+        complete_run(root.path()), on_q4(GateMode::Hard, true), forced.factory(), {});
+    CHECK(skipped.verdict.ok);
+    CHECK(skipped.verdict.warning ==
+          "promoting despite the gate (--force): run r1 was not scored on " + std::string{kWhere});
+    CHECK_FALSE(skipped.results.has_value());
+    CHECK(forced.tuned + forced.bare + forced.asked == 0);
+    CHECK_FALSE(plan_serving_gate(complete_run(root.path()), on_q4(GateMode::Hard, true)).score);
+    // The version then carries no eval, not its run's.
+    VersionEntry version = entry(1, root.path());
+    version.eval_score = 1.0;
+    version.eval_passed = true;
+    apogee::training::record_serving_gate(version, skipped, on_q4().base);
+    CHECK_FALSE(version.eval_score.has_value());
+    CHECK_FALSE(version.eval_passed.has_value());
+    CHECK(version.eval_scored_on.empty());
+
+    // No suite: a hard gate refuses before anything is built, naming the
+    // flag; a soft one lets it through, said.
+    ServingGateRequest bare = on_q4();
+    bare.items.clear();
+    const apogee::training::ServingPlan plan = plan_serving_gate(complete_run(root.path()), bare);
+    CHECK_FALSE(plan.verdict.ok);
+    CHECK_FALSE(plan.score);
+    CHECK(plan.verdict.error ==
+          "no eval suite to score run r1 on " + std::string{kWhere} +
+              " -- pass --suite <path|name>, or set training.eval_suite_path, or pass --force to "
+              "skip the gate");
+    Served unasked;
+    CHECK_FALSE(
+        gate_on_serving_base(complete_run(root.path()), bare, unasked.factory(), {}).verdict.ok);
+    bare.mode = GateMode::Soft;
+    const ServingGate soft =
+        gate_on_serving_base(complete_run(root.path()), bare, unasked.factory(), {});
+    CHECK(soft.verdict.ok);
+    CHECK(soft.verdict.warning.starts_with("gate_mode is soft: no eval suite"));
+    CHECK(unasked.tuned + unasked.bare == 0);
+
+    // A run that did not complete is refused, whatever the mode or --force.
+    RunManifest crashed = complete_run(root.path());
+    crashed.status = std::string{apogee::training::kStatusFailed};
+    const ServingGate dead =
+        gate_on_serving_base(crashed, on_q4(GateMode::Soft, true), unasked.factory(), {});
+    CHECK_FALSE(dead.verdict.ok);
+    CHECK(dead.verdict.error.find("only a complete run can be promoted") != std::string::npos);
+}
+
+TEST_CASE(
+    "a candidate the serving base cannot build or ask is held to the gate unscored; a judge or "
+    "baseline that fails never costs it",
+    "[training][promote][gate][serving]") {
+    const apogee::testing::TempDir root{"serving-" + std::to_string(std::random_device{}())};
+
+    // The runtime cannot build the candidate: nothing to say for it.
+    Served unbuilt{.refuse_tuned = "llama.cpp is not in this build"};
+    const ServingGate no_runtime =
+        gate_on_serving_base(complete_run(root.path()), on_q4(), unbuilt.factory(), {});
+    CHECK_FALSE(no_runtime.verdict.ok);
+    CHECK(no_runtime.verdict.error == "run r1 could not be scored on " + std::string{kWhere} +
+                                          ": llama.cpp is not in this build, or pass --force to "
+                                          "skip the gate");
+    CHECK_FALSE(no_runtime.results.has_value());
+    // Built, but it cannot answer: the eval aborts, held the same way.
+    Served broken{.fail = true};
+    const ServingGate aborted =
+        gate_on_serving_base(complete_run(root.path()), on_q4(), broken.factory(), {});
+    CHECK_FALSE(aborted.verdict.ok);
+    CHECK(aborted.verdict.error.find("could not be scored on " + std::string{kWhere} +
+                                     ": candidate inference") != std::string::npos);
+
+    // A judged suite: the baseline -- the bare serving base -- is built for
+    // the judge alone, and a judge that fails is a tie, which passes.
+    ServingGateRequest judged = on_q4();
+    judged.items = {EvalItem{.prompt = "write a haiku"}};
+    EvalOptions options;
+    options.judge_backend = "judge";
+    options.judge = [](std::string_view, std::string_view, std::string_view,
+                       const apogee::harness::CancellationToken&) {
+        return apogee::training::JudgeReply{.ok = false, .text = {}, .error = "judge down"};
+    };
+    Served judging;
+    const ServingGate tied =
+        gate_on_serving_base(complete_run(root.path()), judged, judging.factory(), options);
+    CHECK(tied.verdict.ok);
+    REQUIRE(tied.results.has_value());
+    CHECK(tied.results->items.front().judge_winner == "tie");
+    CHECK(judging.tuned == 1);
+    CHECK(judging.bare == 1);
+    // A baseline the runtime cannot build leaves the judged items to skip,
+    // counted -- never a refusal.
+    Served baseless{.refuse_bare = "no memory for a second copy"};
+    const ServingGate skipped =
+        gate_on_serving_base(complete_run(root.path()), judged, baseless.factory(), options);
+    CHECK(skipped.verdict.ok);
+    REQUIRE(skipped.results.has_value());
+    CHECK(skipped.results->num_skipped == 1);
+
+    // Cancelled mid-eval: said as cancelled, no verdict either way.
+    EvalOptions cancelling;
+    cancelling.cancellation = apogee::harness::CancellationToken::create();
+    cancelling.cancellation.cancel();
+    Served stopped;
+    const ServingGate cancelled =
+        gate_on_serving_base(complete_run(root.path()), on_q4(), stopped.factory(), cancelling);
+    CHECK(cancelled.cancelled);
+    CHECK_FALSE(cancelled.results.has_value());
 }

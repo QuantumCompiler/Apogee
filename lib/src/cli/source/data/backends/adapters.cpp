@@ -71,9 +71,10 @@ public:
         }
     }
 
-    /// Writes what was read since the memo was opened, when anything was.
+    /// Writes what was read since the memo was opened, when anything was --
+    /// and when asked to remember it.
     void save() {
-        if (!changed_ || hashing_.memo.empty()) {
+        if (!changed_ || hashing_.memo.empty() || !hashing_.remember) {
             return;
         }
         try {
@@ -131,49 +132,33 @@ private:
     bool changed_ = false;
 };
 
-/// The set as `config set-backend --adapters` spells it, every adapter in it:
-/// a fix that names one would drop the rest.
-[[nodiscard]] std::string spelled(const std::vector<harness::AdapterConfig>& adapters) {
-    std::string out;
-    for (const harness::AdapterConfig& adapter : adapters) {
-        std::string item = adapter.path;
-        if (adapter.scale != 1.0) {
-            std::ostringstream scale;
-            scale << adapter.scale;
-            item += ":" + scale.str();
-        }
-        out += (out.empty() ? "" : ",") + item;
-    }
-    return out.find_first_of(" '\"") == std::string::npos ? out : "\"" + out + "\"";
-}
-
 /// The command that writes an entry's adapters.
 [[nodiscard]] std::string retake(const AdapterCheck& check) {
     return "apogee config set-backend " + check.backend + " --adapters";
 }
 
-/// Why `adapter` is not the kind of file its runtime reads, or empty.
+/// Why `adapter` is not the kind of file its runtime reads, or empty: its
+/// file facts alone, whatever its pin.
 [[nodiscard]] std::string file_refusal(const harness::AdapterConfig& adapter,
                                        const AdapterCheck& check) {
-    const fs::path path{adapter.path};
-    std::error_code code;
-    if (!fs::exists(path, code)) {
-        return "the adapter " + adapter.path +
-               " is not there -- restore it, or take the adapters off with " + retake(check) +
-               " \"\"";
-    }
-    if (check.directories) {
-        if (!fs::is_directory(path, code) ||
-            !fs::is_regular_file(path / "adapter_config.json", code)) {
+    switch (adapter_files(adapter, check)) {
+        case AdapterFiles::Missing:
             return "the adapter " + adapter.path +
-                   " is not an mlx-lm adapter directory (it holds no adapter_config.json) -- "
-                   "name the directory its training wrote, with " +
-                   retake(check) + " <directory>";
-        }
-    } else if (!fs::is_regular_file(path, code)) {
-        return "the adapter " + adapter.path +
-               " is not a file -- a llamacpp entry applies a GGUF LoRA file, named with " +
-               retake(check) + " <file.gguf>";
+                   " is not there -- restore it, or take the adapters off with " + retake(check) +
+                   " \"\"";
+        case AdapterFiles::WrongKind:
+            if (check.directories) {
+                return "the adapter " + adapter.path +
+                       " is not an mlx-lm adapter directory (it holds no adapter_config.json) -- "
+                       "name the directory its training wrote, with " +
+                       retake(check) + " <directory>";
+            }
+            return "the adapter " + adapter.path +
+                   " is not a file -- a llamacpp entry applies a GGUF LoRA file, named with " +
+                   retake(check) + " <file.gguf>";
+        case AdapterFiles::Pinned:
+        case AdapterFiles::Unpinned:
+            break;
     }
     return {};
 }
@@ -216,6 +201,39 @@ private:
 
 }  // namespace
 
+AdapterFiles adapter_files(const harness::AdapterConfig& adapter, const AdapterCheck& check) {
+    const fs::path path{adapter.path};
+    std::error_code code;
+    if (!fs::exists(path, code)) {
+        return AdapterFiles::Missing;
+    }
+    const bool kind = check.directories
+                          ? fs::is_directory(path, code) &&
+                                fs::is_regular_file(path / "adapter_config.json", code)
+                          : fs::is_regular_file(path, code);
+    if (!kind) {
+        return AdapterFiles::WrongKind;
+    }
+    return adapter.base_sha256.empty() ? AdapterFiles::Unpinned : AdapterFiles::Pinned;
+}
+
+std::string spell_adapters(const std::vector<harness::AdapterConfig>& adapters) {
+    std::string out;
+    for (const harness::AdapterConfig& adapter : adapters) {
+        std::string item = adapter.path;
+        if (adapter.scale != 1.0) {
+            std::ostringstream scale;
+            scale << adapter.scale;
+            item += ":" + scale.str();
+        }
+        out += (out.empty() ? "" : ",") + item;
+    }
+    if (out.empty()) {
+        return "\"\"";
+    }
+    return out.find_first_of(" '\"") == std::string::npos ? out : "\"" + out + "\"";
+}
+
 std::string weights_sha256(const fs::path& weights, const WeightHashing& hashing) {
     Memo memo{hashing};
     std::string sha256 = hash_weights(weights, memo);
@@ -235,7 +253,7 @@ std::string adapter_refusal(const std::vector<harness::AdapterConfig>& adapters,
         }
         if (adapter.base_sha256.empty()) {
             return "the adapter " + adapter.path + " is pinned to no base -- " + retake(check) +
-                   " " + spelled(adapters) + " records the base each applies over";
+                   " " + spell_adapters(adapters) + " records the base each applies over";
         }
     }
     const std::string base = weights_sha256(check.base, check.hashing);
@@ -252,7 +270,7 @@ std::string adapter_refusal(const std::vector<harness::AdapterConfig>& adapters,
                    ") -- an adapter applies only over the weights it was trained on: point "
                    "model_path back at them, or, if these are the ones it was made for, pin it "
                    "again with " +
-                   retake(check) + " " + spelled(adapters);
+                   retake(check) + " " + spell_adapters(adapters);
         }
     }
     return {};

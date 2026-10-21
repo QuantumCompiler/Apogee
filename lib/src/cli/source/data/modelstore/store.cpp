@@ -116,6 +116,20 @@ std::string weights_handle(std::string_view model, std::string_view format, std:
     return std::string{model} + "/" + std::string{format} + "/" + std::string{id};
 }
 
+std::string weights_label(const std::filesystem::path& path) {
+    const std::filesystem::path normal = path.lexically_normal();
+    // A directory named with its trailing slash is still that directory.
+    const std::filesystem::path named = normal.has_filename() ? normal : normal.parent_path();
+    const std::string last = named.filename().string();
+    const std::filesystem::path format = named.parent_path().filename();
+    if (is_weight_id(last) && is_store_format(format.string()) &&
+        named.parent_path().has_parent_path()) {
+        return weights_handle(named.parent_path().parent_path().filename().string(),
+                              format.string(), last);
+    }
+    return last;
+}
+
 std::optional<WeightsHandle> parse_weights_handle(std::string_view text) {
     const std::size_t first = text.find('/');
     const std::size_t second =

@@ -114,7 +114,16 @@ version's GGUF exists and the backend points at it), every named
 pipeline's student and datasets, the cycle's configuration (the pipeline
 and backend it names must exist; a non-`llamacpp` backend fails), a halted
 cycle with `apogee train cycle resume` as the remedy, and `paths.hf_dir`
-when set.
+when set. Its `Adapters` section (53c) has a row for every adapter an entry
+applies: its scale one the loader allows, its file there and the kind its
+runtime reads, pinned, and the base's weights the ones it was pinned to --
+the hash read from the memo a load keeps, never written, and a base the
+doctor cannot read skipped, never passed. Each failure names its doors, each
+a command that runs as printed: the set without it, the set pinned again,
+`--model-path` back to the weights it was pinned to when the store holds
+them, and -- for a version `train promote --adapter` made, when its base
+changed -- that run promoted again, its gate scoring it over the base the
+entry serves now.
 
 ### The script protocol
 
@@ -425,7 +434,7 @@ and re-runs only with `--force`.
 ```bash
 apogee train promote <run-id> --as <backend> [--force] [--quantize TYPE] [--keep-fused]
 apogee train promote <run-id> --as <backend> --target mlx [--force]
-apogee train promote <run-id> --as <backend> --adapter [--force]
+apogee train promote <run-id> --as <backend> --adapter [--force] [--suite <path|name>] [--judge <backend>]
 ```
 
 The only path from a run to inference, in order: the **eval gate** (hard by
@@ -504,6 +513,33 @@ into a backend holding adapter versions is refused (it would replace the
 base under them), and an adapter promote into one holding merged versions
 (its `model_path` is a fine-tune, not the base the adapter was trained
 over).
+
+**Onto a quantized base** (53c): an adapter is trained against
+full-precision weights, and running it over a quantized base costs quality
+nobody measured -- so when the entry's base is quantized (a GGUF whose
+header's `general.file_type` is `Q4_K_M` or any other quantized type, an MLX
+directory whose `config.json` says 4-bit or a publisher's quantization), the
+gate scores the candidate **where it will serve**. After the adapter is built
+and pinned, and before anything is registered, the suite runs through the
+entry's own runtime -- llama.cpp or mlx-lm, the quantized base with every
+adapter the entry will apply, greedy at the trainer's 256-token answer budget
+-- and a judge, when there is one, compares it with the bare base on the same
+runtime. That eval is the gate, one per candidate: the run's recorded eval,
+scored where its trainer ran, is not read, and no full-precision score is
+computed beside it -- so no `train eval` is needed first. The suite is
+`--suite`, else the run's recorded eval's, else `training.eval_suite_path`;
+the judge `--judge`, else the recorded eval's, else `training.judge_backend`.
+The report says where it scored -- `[promote] scored on
+tiny-Q4_K_M.gguf (Q4_K_M): 100% (24/24)` while it runs, `eval: 100% (24/24),
+scored on tiny-Q4_K_M.gguf (Q4_K_M)` in the summary -- and the ledger records
+it as the version's `eval_scored_on`. A candidate under the floor (the gate's
+100%) is refused saying where it was scored, its adapter removed, the config
+and the ledger unchanged; `gate_mode: soft` makes that a warning, and
+`--force` skips the scoring altogether, said. With no suite anywhere a hard
+gate refuses before anything is built, naming `--suite`; `--suite` and
+`--judge` on any other promote are refused, since there the run's recorded
+eval gates. A mock run is scored by the mock's own candidate over the base's
+path, so the chain runs on the real binary with nothing installed.
 
 ### `train rollback`, `versions`, `status`
 

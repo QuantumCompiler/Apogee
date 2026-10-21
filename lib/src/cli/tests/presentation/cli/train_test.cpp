@@ -18,6 +18,7 @@
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
 #include "support/env_guard.h"
+#include "support/gguf_builder.h"
 
 /// `apogee train setup` refusals -- an interpreter named in the config that
 /// does not exist, an unknown requirement set, a bad trainer name -- each
@@ -1006,6 +1007,204 @@ TEST_CASE(
     CHECK_FALSE(std::filesystem::exists(fixture.training / "versions" / "based"));
 }
 
+// ---------------------------------------------------------------------------
+// The gate on the base that serves (53c): an adapter onto a quantized base is
+// scored there, through the real command tree on the mock trainer.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// An entry over a Q4_K_M base -- a header that says so, in the store -- a
+/// stand-in the mock's candidate runs over, appended under `backends:`.
+std::filesystem::path add_q4_entry(const RunFixture& fixture, std::string_view name) {
+    const std::filesystem::path base =
+        fixture.home / "models" / "tiny" / "gguf" / "cccccccccccc" / "tiny-Q4_K_M.gguf";
+    apogee::testing::GgufBuilder header;
+    header.magic().u32(3).u64(1).u64(2);
+    header.string_kv("general.architecture", "llama");
+    header.u32_kv("general.file_type", 15);  // MOSTLY_Q4_K_M
+    header.tensor("token_embd.weight");
+    write_file(base, header.bytes());
+    write_file(fixture.base.config_path, read_file(fixture.base.config_path) + "  " +
+                                             std::string{name} +
+                                             ":\n    type: llamacpp\n    model_path: " +
+                                             apogee::harness::yaml_scalar(base.string()) + "\n");
+    return base;
+}
+
+/// A complete mock run over `dataset`, its id.
+std::string trained_on(const RunFixture& fixture, const std::string& dataset) {
+    std::string err;
+    REQUIRE(fixture.run(
+                {"train", "run", "tiny", "--dataset", dataset, "--trainer", "mock", "--iters", "2"},
+                nullptr, &err) == 0);
+    return apogee::training::TrainingStore{fixture.training}.list_runs().front().id;
+}
+
+}  // namespace
+
+TEST_CASE(
+    "train promote --adapter onto a quantized base scores the candidate there, once, says so, "
+    "and a candidate under the floor never registers",
+    "[commands][train][promote][adapter][serving]") {
+    const RunFixture fixture;
+    (void)add_q4_entry(fixture, "q4");
+    (void)add_base_entry(fixture, "based");
+    const std::string suite = (fixture.home / "suite.jsonl").string();
+    const std::string id = fixture.trained();
+    std::string out;
+    std::string err;
+
+    // No suite anywhere -- the run never evaluated, none configured: refused
+    // before anything is built, naming the flag.
+    CHECK(fixture.run({"train", "promote", id, "--as", "q4", "--adapter"}, &out, &err) == 1);
+    CHECK(err.find("no eval suite to score run " + id +
+                   " on tiny-Q4_K_M.gguf (Q4_K_M), the base 'q4' serves -- pass --suite "
+                   "<path|name>") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "versions"));
+    // --suite has nothing to act on where the run's own eval gates -- past
+    // that gate, here by --force.
+    CHECK(fixture.run(
+              {"train", "promote", id, "--as", "based", "--adapter", "--suite", suite, "--force"},
+              &out, &err) == 1);
+    CHECK(err.find("--suite has nothing to act on: this promote is gated on run " + id +
+                   "'s recorded eval") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "versions"));
+
+    // With a suite: no `train eval` first -- the one eval is the gate's, on
+    // the base the version will serve on, and the report says where.
+    const std::string before = read_file(fixture.base.config_path);
+    REQUIRE(fixture.run({"train", "promote", id, "--as", "q4", "--adapter", "--suite", suite}, &out,
+                        &err) == 0);
+    INFO(out << err);
+    CHECK(err.find("[promote] scoring the candidate where it will serve: tiny-Q4_K_M.gguf "
+                   "(Q4_K_M), the base 'q4' serves -- suite " +
+                   suite + " (2 item(s)); no judge: unmatched items skip") != std::string::npos);
+    CHECK(err.find("[promote] scored on tiny-Q4_K_M.gguf (Q4_K_M): 100% (2/2)") !=
+          std::string::npos);
+    CHECK(out.find("  eval:    100% (2/2), scored on tiny-Q4_K_M.gguf (Q4_K_M)\n") !=
+          std::string::npos);
+    // The full-precision score was never computed: the run has no eval.
+    CHECK_FALSE(fixture.manifest(id).eval.has_value());
+    // The version records the gate that let it through, and where.
+    const apogee::training::VersionLedger ledger = ledger_of(fixture, "q4");
+    REQUIRE(ledger.find(1) != nullptr);
+    CHECK(ledger.find(1)->eval_passed == true);
+    CHECK(ledger.find(1)->eval_score == 1.0);
+    CHECK(ledger.find(1)->eval_scored_on == "tiny-Q4_K_M.gguf (Q4_K_M)");
+    CHECK(read_file(fixture.base.config_path) != before);
+
+    // A candidate that degrades below the floor where it serves: refused,
+    // saying where, the adapter it built removed, nothing registered.
+    write_file(fixture.training / "datasets" / "degraded.jsonl",
+               "{\"mock\": {\"answer\": \"something else entirely\"}}\n");
+    const std::string degraded = trained_on(fixture, "degraded");
+    const std::string at_v1 = read_file(fixture.base.config_path);
+    CHECK(fixture.run({"train", "promote", degraded, "--as", "q4", "--adapter", "--suite", suite},
+                      &out, &err) == 1);
+    CHECK(err.find("the eval gate failed for run " + degraded +
+                   ", scored on tiny-Q4_K_M.gguf (Q4_K_M), the base 'q4' serves (50%: 1/2 "
+                   "passed)") != std::string::npos);
+    CHECK(err.find("the adapter was removed, and the config and the version ledger are "
+                   "unchanged") != std::string::npos);
+    CHECK(read_file(fixture.base.config_path) == at_v1);
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "versions" / "q4" / "v2.lora.gguf"));
+    CHECK(ledger_of(fixture, "q4").active_version == 1);
+    CHECK(ledger_of(fixture, "q4").versions.size() == 1);
+
+    // --force skips the gate, as it says: nothing scored, the version
+    // carrying no eval, and said.
+    REQUIRE(fixture.run({"train", "promote", degraded, "--as", "q4", "--adapter", "--force"}, &out,
+                        &err) == 0);
+    CHECK(err.find("promoting despite the gate (--force): run " + degraded +
+                   " was not scored on tiny-Q4_K_M.gguf (Q4_K_M), the base 'q4' serves") !=
+          std::string::npos);
+    CHECK(err.find("[promote] scoring") == std::string::npos);
+    const apogee::training::VersionLedger forced = ledger_of(fixture, "q4");
+    REQUIRE(forced.find(2) != nullptr);
+    CHECK_FALSE(forced.find(2)->eval_passed.has_value());
+    CHECK(forced.find(2)->eval_scored_on.empty());
+}
+
+TEST_CASE(
+    "the doctor's door for a promoted adapter whose base changed promotes its run again, and "
+    "runs as printed",
+    "[commands][train][check][adapters][doors]") {
+    const RunFixture fixture;
+    const std::filesystem::path based = add_base_entry(fixture, "based");
+    const std::filesystem::path q4 = add_q4_entry(fixture, "q4");
+    const std::string suite = (fixture.home / "suite.jsonl").string();
+    const std::string id = fixture.trained();
+    (void)fixture.evaluated(id);
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"train", "promote", id, "--as", "based", "--adapter"}, &out, &err) == 0);
+    const std::string unscored = fixture.trained(3);
+    REQUIRE(fixture.run({"train", "promote", unscored, "--as", "q4", "--adapter", "--suite", suite},
+                        &out, &err) == 0);
+
+    // Both bases rewritten under their adapters.
+    write_file(based, "GGUF other base weights");
+    apogee::testing::GgufBuilder header;
+    header.magic().u32(3).u64(1).u64(2);
+    header.string_kv("general.architecture", "qwen2");
+    header.u32_kv("general.file_type", 15);
+    header.tensor("token_embd.weight");
+    write_file(q4, header.bytes());
+
+    const auto adapter_row = [&fixture](const std::string& name) {
+        std::string json;
+        std::string ignored;
+        (void)fixture.run({"check", "--output-format", "json"}, &json, &ignored);
+        const nlohmann::json document = nlohmann::json::parse(json);
+        for (const nlohmann::json& row : document.at("rows")) {
+            if (row.at("section") == "Adapters" && row.at("name") == name) {
+                return row;
+            }
+        }
+        return nlohmann::json{};
+    };
+    // Each door as a person types it after `apogee`: before ` to `, its
+    // blank filled.
+    const auto door_of = [](std::string remedy, const std::string& blank,
+                            const std::string& filled) {
+        remedy.resize(remedy.find(" to "));
+        if (const std::size_t at = remedy.find(blank); at != std::string::npos) {
+            remedy.replace(at, blank.size(), filled);
+        }
+        std::vector<std::string> words;
+        std::istringstream in{remedy};
+        for (std::string word; in >> word;) {
+            words.push_back(word);
+        }
+        REQUIRE(words.front() == "apogee");
+        words.erase(words.begin());
+        return words;
+    };
+
+    // The run's own eval gates the full-precision base's: the door is the
+    // promote alone.
+    const nlohmann::json changed = adapter_row("based: v1.lora.gguf");
+    REQUIRE(changed.is_object());
+    CHECK(changed["status"] == "fail");
+    CHECK(changed["detail"].get<std::string>().find("than the base " + based.string() +
+                                                    " holds now") != std::string::npos);
+    const std::string remedy = changed["remedy"];
+    CHECK(remedy == "apogee train promote " + id +
+                        " --as based --adapter to promote its run again over these weights");
+    REQUIRE(fixture.run(door_of(remedy, {}, {}), &out, &err) == 0);
+    CHECK(adapter_row("based: v2.lora.gguf")["status"] == "ok");
+
+    // A quantized base's gate scores there, and nothing names its suite: the
+    // door says to, and runs with the blank filled.
+    const std::string q4_remedy = adapter_row("q4: v1.lora.gguf")["remedy"];
+    CHECK(q4_remedy == "apogee train promote " + unscored +
+                           " --as q4 --adapter --suite <path|name> to promote its run again "
+                           "over these weights");
+    REQUIRE(fixture.run(door_of(q4_remedy, "<path|name>", suite), &out, &err) == 0);
+    CHECK(adapter_row("q4: v2.lora.gguf")["status"] == "ok");
+}
+
 TEST_CASE("train promote completes its --adapter flag",
           "[commands][train][promote][adapter][completion]") {
     // ADR 0007: a new flag is offered the moment it exists.
@@ -1021,6 +1220,38 @@ TEST_CASE("train promote completes its --adapter flag",
     std::cout.rdbuf(old_out);
     CHECK(code == 0);
     CHECK(captured.str().find("--adapter\n") != std::string::npos);
+}
+
+TEST_CASE("train promote completes its --suite and --judge flags",
+          "[commands][train][promote][serving][completion]") {
+    // ADR 0007: the gate's two flags (53c), offered the moment they exist --
+    // and their values answered as train eval's are.
+    const Fixture fixture;
+    for (const auto& [typed, offered] :
+         {std::pair<std::string, std::string>{"--su", "--suite\n"}, {"--ju", "--judge\n"}}) {
+        const std::ostringstream captured;
+        std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
+        int code = -1;
+        {
+            apogee::commands::RootCommand root{apogee::commands::default_registry()};
+            std::vector<const char*> argv{"apogee",  "__complete", "train",
+                                          "promote", "r1",         typed.c_str()};
+            code = root.run(static_cast<int>(argv.size()), argv.data());
+        }
+        std::cout.rdbuf(old_out);
+        CHECK(code == 0);
+        CHECK(captured.str().find(offered) != std::string::npos);
+    }
+    const std::ostringstream captured;
+    std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
+    {
+        apogee::commands::RootCommand root{apogee::commands::default_registry()};
+        std::vector<const char*> argv{"apogee", "__complete", "train", "promote",
+                                      "r1",     "--judge",    ""};
+        (void)root.run(static_cast<int>(argv.size()), argv.data());
+    }
+    std::cout.rdbuf(old_out);
+    CHECK(captured.str().find("local") != std::string::npos);
 }
 
 TEST_CASE(

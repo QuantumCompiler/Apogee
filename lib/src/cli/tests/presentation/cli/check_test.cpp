@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <random>
 #include <string>
 #include <tuple>
@@ -13,8 +14,10 @@
 #include <vector>
 
 #include "agentloop/recall.h"
+#include "backends/adapters.h"
 #include "backends/provider_cache.h"
 #include "backends/provider_table.h"
+#include "cli/line_tokens.h"
 #include "contracts/assets.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
@@ -29,6 +32,7 @@
 #include "platform/ffmpeg.h"
 #include "platform/platform.h"
 #include "secrets/store.h"
+#include "support/cli_home.h"
 #include "support/env_guard.h"
 #include "support/fake_existence_view.h"
 #include "support/gguf_builder.h"
@@ -3048,4 +3052,344 @@ TEST_CASE("the environment's row names its Python, and voice it cannot take name
     const apogee::commands::CheckRow* installable = row_in(fits, "Video", "voice runtime");
     REQUIRE(installable != nullptr);
     CHECK(installable->remedy == "apogee train setup --with voice");
+}
+
+// ---------------------------------------------------------------------------
+// The adapter rows (53c): every registered adapter's state, read through
+// 53a's one implementation, each failure's doors run as printed.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// The Adapters section's rows, in order, as copies.
+[[nodiscard]] std::vector<apogee::commands::CheckRow> adapters_section(const CheckReport& report) {
+    std::vector<apogee::commands::CheckRow> rows;
+    std::ranges::copy_if(report.rows, std::back_inserter(rows),
+                         [](const auto& row) { return row.section == "Adapters"; });
+    return rows;
+}
+
+/// An install whose entry `local` runs a base GGUF and applies adapters --
+/// written by the test into its own config, read as the command reads it.
+struct AdapterInstall {
+    Install install;
+    std::filesystem::path base = install.root / "local" / "m-Q4_K_M.gguf";
+    std::string base_bytes = apogee::testing::minimal_gguf("llama");
+    std::string pin = apogee::models::sha256_hex(base_bytes);
+    std::filesystem::path loras = install.root / "loras";
+
+    AdapterInstall() {
+        install.seed();
+        install.write("local/m-Q4_K_M.gguf", base_bytes);
+        install.write("loras/style.gguf", "a style");
+        install.write("loras/tone.gguf", "a tone");
+    }
+
+    /// `adapters` -- a flow list's items -- on the entry, and the inputs that
+    /// read it.
+    [[nodiscard]] CheckInputs with(const std::string& adapters) const {
+        CheckInputs inputs = inputs_for(install);
+        install.write("config/config.yaml",
+                      "backends:\n  local:\n    type: llamacpp\n    model_path: " + base.string() +
+                          "\n    adapters: [" + adapters + "]\n");
+        load_into(inputs);
+        REQUIRE(inputs.config_error.empty());
+        return inputs;
+    }
+
+    [[nodiscard]] std::string item(const std::string& file, const std::string& extra = {}) const {
+        return "{path: " + (loras / file).string() + extra + ", base_sha256: " + pin + "}";
+    }
+};
+
+}  // namespace
+
+TEST_CASE("the doctor names every adapter's state: applied, missing, the wrong kind, unpinned",
+          "[commands][check][adapters]") {
+    const AdapterInstall fixture;
+    std::filesystem::create_directories(fixture.loras / "a-directory");
+    const CheckInputs inputs = fixture.with(
+        fixture.item("style.gguf", ", scale: 0.5") + ", " + fixture.item("gone.gguf") + ", " +
+        fixture.item("a-directory") + ", {path: " + (fixture.loras / "tone.gguf").string() + "}");
+    const CheckReport report = run_checks(inputs);
+    const std::vector<apogee::commands::CheckRow> rows = adapters_section(report);
+    REQUIRE(rows.size() == 4);
+    const std::string all = (fixture.loras / "style.gguf").string() + ":0.5," +
+                            (fixture.loras / "gone.gguf").string() + "," +
+                            (fixture.loras / "a-directory").string() + "," +
+                            (fixture.loras / "tone.gguf").string();
+
+    // Applied: over the base it was pinned to, at its scale.
+    CHECK(rows[0].name == "local: style.gguf");
+    CHECK(rows[0].status == Status::Ok);
+    CHECK(rows[0].detail ==
+          "applies over m-Q4_K_M.gguf at scale 0.5, pinned to its weights "
+          "(sha256 " +
+              fixture.pin.substr(0, 12) + ")");
+    // Missing: named, and the set without it is the door that takes it off.
+    CHECK(rows[1].name == "local: gone.gguf");
+    CHECK(rows[1].status == Status::Fail);
+    CHECK(rows[1].detail == "not there: " + (fixture.loras / "gone.gguf").string());
+    CHECK(rows[1].remedy == "apogee config set-backend local --adapters " +
+                                (fixture.loras / "style.gguf").string() + ":0.5," +
+                                (fixture.loras / "a-directory").string() + "," +
+                                (fixture.loras / "tone.gguf").string() + " to take it off");
+    // A directory where llama.cpp reads a GGUF LoRA file.
+    CHECK(rows[2].name == "local: a-directory");
+    CHECK(rows[2].status == Status::Fail);
+    CHECK(rows[2].detail.starts_with("not a file -- a llamacpp entry applies a GGUF LoRA file"));
+    // Written by hand, pinned to nothing: the whole set pinned is its door.
+    CHECK(rows[3].name == "local: tone.gguf");
+    CHECK(rows[3].status == Status::Fail);
+    CHECK(rows[3].detail.starts_with("pinned to no base"));
+    CHECK(rows[3].remedy == "apogee config set-backend local --adapters " + all +
+                                " to pin the set to the weights model_path names");
+
+    // The doctor writes nothing: not even the hash memo a load keeps.
+    CHECK_FALSE(std::filesystem::exists(fixture.install.root / "cache" / "weight-hashes.json"));
+    // And with no adapter anywhere, no section at all.
+    CheckInputs plain = inputs_for(fixture.install);
+    fixture.install.write(
+        "config/config.yaml",
+        "backends:\n  local:\n    type: llamacpp\n    model_path: " + fixture.base.string() + "\n");
+    load_into(plain);
+    CHECK(adapters_section(run_checks(plain)).empty());
+}
+
+TEST_CASE(
+    "the doctor's pin row: the base changed under it is a failure naming the base, and one it "
+    "cannot read is skipped, never passed",
+    "[commands][check][adapters]") {
+    const AdapterInstall fixture;
+    // The weights the adapter was pinned to, kept in the store under their id.
+    fixture.install.write("models/m/gguf/" + fixture.pin.substr(0, 12) + "/m-F16.gguf",
+                          fixture.base_bytes);
+    const std::filesystem::path stored =
+        fixture.install.root / "models" / "m" / "gguf" / fixture.pin.substr(0, 12) / "m-F16.gguf";
+    // The entry's base now holds other weights.
+    const std::string other = apogee::testing::minimal_gguf("qwen2");
+    fixture.install.write("local/m-Q4_K_M.gguf", other);
+    const CheckInputs inputs = fixture.with(fixture.item("style.gguf"));
+    const CheckReport report = run_checks(inputs);
+    const std::vector<apogee::commands::CheckRow> rows = adapters_section(report);
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0].status == Status::Fail);
+    CHECK(rows[0].detail == "pinned to other weights (sha256 " + fixture.pin.substr(0, 12) +
+                                ") than the base " + fixture.base.string() + " holds now (" +
+                                apogee::models::sha256_hex(other).substr(0, 12) +
+                                ") -- an adapter applies only over the weights it was trained "
+                                "on, so a load refuses it");
+    // Its doors: back to the weights it was made for, or -- these being them
+    // -- the set pinned again.
+    CHECK(rows[0].remedy == "apogee config set-backend local --model-path " + stored.string() +
+                                " to run it over the weights it was pinned to, or apogee config "
+                                "set-backend local --adapters " +
+                                (fixture.loras / "style.gguf").string() +
+                                " to pin the set to these weights, if they are the ones it was "
+                                "made for");
+
+    // The memo a load keeps is read, never written: a base it holds is not
+    // read again -- the doctor's hash is 53a's own.
+    const std::filesystem::path memo = fixture.install.root / "cache" / "weight-hashes.json";
+    apogee::backends::WeightHashing remembered{.memo = memo};
+    REQUIRE(apogee::backends::weights_sha256(fixture.base, remembered) ==
+            apogee::models::sha256_hex(other));
+    nlohmann::json held = nlohmann::json::parse(std::ifstream{memo});
+    const std::string key = std::filesystem::absolute(fixture.base).lexically_normal().string();
+    held["files"][key]["sha256"] = fixture.pin;  // a memo that says it is the pinned base
+    std::ofstream{memo, std::ios::binary} << held.dump(2);
+    const std::string written = held.dump(2);
+    const CheckReport trusted = run_checks(inputs);
+    CHECK(adapters_section(trusted).front().status == Status::Ok);
+    std::ifstream after{memo, std::ios::binary};
+    CHECK(std::string{std::istreambuf_iterator<char>{after}, {}} == written);
+
+    // A base that cannot be read: the pin cannot be checked -- skipped, with
+    // the door back to the stored weights, never a pass.
+    std::filesystem::remove(fixture.base);
+    const CheckReport unread = run_checks(inputs);
+    const std::vector<apogee::commands::CheckRow> skipped = adapters_section(unread);
+    REQUIRE(skipped.size() == 1);
+    CHECK(skipped[0].status == Status::Skipped);
+    CHECK(skipped[0].detail.starts_with("its pin cannot be checked: the base weights at " +
+                                        fixture.base.string() + " could not be read"));
+    CHECK(skipped[0].remedy.starts_with("apogee config set-backend local --model-path " +
+                                        stored.string()));
+    // The scale is the loader's to refuse; asked again of a config read any
+    // other way, out of range is a failure with the set at scale 1 its door.
+    CheckInputs scaled = fixture.with(fixture.item("style.gguf"));
+    scaled.config.backends.at("local").adapters.front().scale = 3.0;
+    const CheckReport strong = run_checks(scaled);
+    const std::vector<apogee::commands::CheckRow> out_of_range = adapters_section(strong);
+    REQUIRE(out_of_range.size() == 1);
+    CHECK(out_of_range[0].status == Status::Fail);
+    CHECK(out_of_range[0].detail == "applied at scale 3 -- a scale is above 0 and at most 2");
+    CHECK(out_of_range[0].remedy == "apogee config set-backend local --adapters " +
+                                        (fixture.loras / "style.gguf").string() +
+                                        " to apply it at scale 1");
+}
+
+TEST_CASE("an mlx entry's adapter is a directory, pinned to the model directory's weights",
+          "[commands][check][adapters][mlx]") {
+    Install install;
+    install.seed();
+    // A stored MLX model, named by its handle; its adapter as mlx-lm writes one.
+    install.write("models/m/mlx/0123456789ab/config.json", R"({"model_type": "llama"})");
+    install.write("models/m/mlx/0123456789ab/model.safetensors", "the shard");
+    install.write("loras/tone/adapter_config.json", "{}");
+    install.write("loras/tone/adapters.safetensors", "the delta");
+    install.write("loras/flat.safetensors", "not a directory");
+    const std::filesystem::path model = install.root / "models" / "m" / "mlx" / "0123456789ab";
+    const std::string pin = apogee::backends::weights_sha256(model);
+    CheckInputs inputs = inputs_for(install);
+    const auto entry = [&](const std::string& name, const std::string& adapter) {
+        return "  " + name + ":\n    type: mlx\n    model_path: " + model.string() +
+               "\n    adapters: [{path: " + (install.root / "loras" / adapter).string() +
+               ", base_sha256: " + pin + "}]\n";
+    };
+    install.write("config/config.yaml",
+                  "backends:\n" + entry("fast", "tone") + entry("flat", "flat.safetensors"));
+    load_into(inputs);
+    REQUIRE(inputs.config_error.empty());
+    const CheckReport report = run_checks(inputs);
+    const std::vector<apogee::commands::CheckRow> rows = adapters_section(report);
+    REQUIRE(rows.size() == 2);
+    CHECK(rows[0].name == "fast: tone");
+    CHECK(rows[0].status == Status::Ok);
+    CHECK(rows[0].detail ==
+          "applies over m/mlx/0123456789ab at scale 1, pinned to its weights "
+          "(sha256 " +
+              pin.substr(0, 12) + ")");
+    CHECK(rows[1].name == "flat: flat.safetensors");
+    CHECK(rows[1].status == Status::Fail);
+    CHECK(
+        rows[1].detail.starts_with("not an mlx-lm adapter directory (it holds no "
+                                   "adapter_config.json)"));
+    CHECK(rows[1].remedy == "apogee config set-backend flat --adapters \"\" to take it off");
+}
+
+namespace {
+
+/// Each door a remedy names -- `<command> to <what it does>`, joined by
+/// `, or ` -- as the words a person types after `apogee`.
+[[nodiscard]] std::vector<std::vector<std::string>> doors_of(const std::string& remedy) {
+    std::vector<std::vector<std::string>> doors;
+    std::size_t start = 0;
+    while (start < remedy.size()) {
+        const std::size_t end = remedy.find(", or ", start);
+        std::string door = remedy.substr(start, end == std::string::npos ? end : end - start);
+        if (const std::size_t to = door.find(" to "); to != std::string::npos) {
+            door.resize(to);
+        }
+        apogee::commands::LineTokens tokens = apogee::commands::line_tokens(door);
+        REQUIRE(tokens.error.empty());
+        REQUIRE_FALSE(tokens.words.empty());
+        REQUIRE(tokens.words.front() == "apogee");
+        tokens.words.erase(tokens.words.begin());
+        doors.push_back(std::move(tokens.words));
+        if (end == std::string::npos) {
+            break;
+        }
+        start = end + 5;
+    }
+    return doors;
+}
+
+/// The Adapters rows `check --output-format json` prints for `home`.
+[[nodiscard]] nlohmann::json adapter_rows(const apogee::testing::CliHome& home) {
+    std::string out;
+    std::string err;
+    (void)home.run({"check", "--output-format", "json"}, &out, &err);
+    const nlohmann::json document = nlohmann::json::parse(out);
+    nlohmann::json rows = nlohmann::json::array();
+    for (const nlohmann::json& row : document.at("rows")) {
+        if (row.at("section") == "Adapters") {
+            rows.push_back(row);
+        }
+    }
+    return rows;
+}
+
+/// A home whose entry `local` runs a base GGUF and applies `adapters` (a
+/// flow list's items, `{loras}` standing for the adapters' directory and
+/// `{pin}` for the base's hash), with the files a scenario breaks.
+struct DoorHome {
+    apogee::testing::CliHome home{""};
+    std::filesystem::path base = home.home() / "local" / "m-Q4_K_M.gguf";
+    std::string base_bytes = apogee::testing::minimal_gguf("llama");
+    std::string pin = apogee::models::sha256_hex(base_bytes);
+    std::filesystem::path loras = home.home() / "loras";
+
+    explicit DoorHome(std::string adapters) {
+        std::filesystem::create_directories(base.parent_path());
+        std::ofstream{base, std::ios::binary} << base_bytes;
+        std::filesystem::create_directories(loras / "a-directory");
+        std::ofstream{loras / "style.gguf", std::ios::binary} << "a style";
+        std::ofstream{loras / "tone.gguf", std::ios::binary} << "a tone";
+        for (const auto& [mark, value] :
+             {std::pair<std::string, std::string>{"{loras}", loras.string()}, {"{pin}", pin}}) {
+            for (std::size_t at = adapters.find(mark); at != std::string::npos;
+                 at = adapters.find(mark)) {
+                adapters.replace(at, mark.size(), value);
+            }
+        }
+        std::ofstream{home.config_path(), std::ios::binary}
+            << "backends:\n  local:\n    type: llamacpp\n    model_path: " + base.string() +
+                   "\n    adapters: [" + adapters + "]\n";
+    }
+};
+
+}  // namespace
+
+TEST_CASE("every door an adapter row names runs as printed, and the row then passes",
+          "[commands][check][adapters][doors]") {
+    // M14's bar for 53c's rows: each door run against the state it was
+    // named for -- a fresh copy of it per door -- and the doctor asked again.
+    const std::string style = "{path: {loras}/style.gguf, base_sha256: {pin}}";
+    const std::vector<std::pair<std::string, std::string>> scenarios{
+        {"missing", style + ", {path: {loras}/gone.gguf, base_sha256: {pin}}"},
+        {"the wrong kind", style + ", {path: {loras}/a-directory, base_sha256: {pin}}"},
+        {"unpinned", style + ", {path: {loras}/tone.gguf}"},
+        {"base changed", style},
+    };
+    for (const auto& [scenario, adapters] : scenarios) {
+        INFO(scenario);
+        // Init-captures: AppleClang 15 takes no structured binding as itself.
+        const auto broken = [&kind = scenario, &items = adapters] {
+            auto made = std::make_unique<DoorHome>(items);
+            if (kind == "base changed") {
+                // The weights it was pinned to kept in the store, and the
+                // entry's base rewritten under it.
+                const std::filesystem::path kept =
+                    made->home.models() / "m" / "gguf" / made->pin.substr(0, 12) / "m-F16.gguf";
+                std::filesystem::create_directories(kept.parent_path());
+                std::ofstream{kept, std::ios::binary} << made->base_bytes;
+                std::ofstream{made->base, std::ios::binary}
+                    << apogee::testing::minimal_gguf("qwen2");
+            }
+            return made;
+        };
+        const auto failing = [](const nlohmann::json& rows) {
+            std::vector<nlohmann::json> out;
+            std::ranges::copy_if(rows, std::back_inserter(out),
+                                 [](const nlohmann::json& row) { return row["status"] != "ok"; });
+            return out;
+        };
+        const std::unique_ptr<DoorHome> named = broken();
+        const std::vector<nlohmann::json> before = failing(adapter_rows(named->home));
+        REQUIRE(before.size() == 1U);
+        REQUIRE(before.front()["status"] == "fail");
+        const std::vector<std::vector<std::string>> doors =
+            doors_of(before.front()["remedy"].get<std::string>());
+        CHECK(doors.size() == (scenario == "base changed" ? 2U : 1U));
+        for (const std::vector<std::string>& door : doors) {
+            const std::unique_ptr<DoorHome> state = broken();
+            std::string out;
+            INFO(nlohmann::json(door).dump());
+            REQUIRE(state->home.run(door, &out) == 0);
+            const nlohmann::json after = adapter_rows(state->home);
+            CHECK_FALSE(after.empty());
+            CHECK(failing(after).empty());
+        }
+    }
 }

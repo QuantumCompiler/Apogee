@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -22,6 +24,7 @@
 #include "agentloop/retriever.h"
 #include "agentloop/structured.h"
 #include "ansi/ansi.h"
+#include "backends/adapters.h"
 #include "backends/mlx_local.h"
 #include "backends/prompt_cache.h"
 #include "backends/provider_cache.h"
@@ -32,6 +35,7 @@
 #include "cli/helpers.h"
 #include "cli/models_pull.h"
 #include "cli/provider_offer.h"
+#include "cli/train.h"
 #include "contracts/assets.h"
 #include "contracts/config_edit.h"
 #include "contracts/config_migrate.h"
@@ -927,6 +931,243 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
         // Apogee bundles none and downloads none without being asked.
         add(report, Status::Ok, "Models", "models/",
             "no models installed -- Apogee bundles none; pull one with 'apogee models pull'");
+    }
+}
+
+/// `text` as one word of a command a person copies: double-quoted when a
+/// shell would split it, as `--adapters` spells a set (53a).
+[[nodiscard]] std::string shell_word(const std::string& text) {
+    return text.find_first_of(" '\"") == std::string::npos ? text : "\"" + text + "\"";
+}
+
+/// The door that promotes `run` onto `name` again (53c), as it would run
+/// now, so it runs as printed: on a quantized base its gate scores the
+/// candidate there and needs a suite -- named where neither the run's
+/// recorded eval nor the config names one; on any other base the gate reads
+/// the run's recorded eval, which is scored first where none passed and the
+/// gate is hard.
+[[nodiscard]] std::string promote_again_door(const CheckInputs& inputs,
+                                             const training::TrainingStore& store,
+                                             const std::string& run, const std::string& name,
+                                             bool quantized) {
+    const std::string promote = "apogee train promote " + run + " --as " + name + " --adapter";
+    std::string error;
+    const std::optional<training::RunManifest> manifest =
+        training::read_manifest(store.run_dir(run), error);
+    const std::optional<training::EvalResults> recorded =
+        manifest.has_value() ? manifest->eval : std::nullopt;
+    if (quantized) {
+        const bool suite_known = (recorded.has_value() && !recorded->suite.empty()) ||
+                                 !inputs.config.training.eval_suite_path.empty();
+        return promote + (suite_known ? "" : " --suite <path|name>");
+    }
+    const bool hard = training::gate_mode_from_string(
+                          inputs.config.training.effective_gate_mode()) == training::GateMode::Hard;
+    if (hard && !(recorded.has_value() && recorded->passed)) {
+        return "apogee train eval " + run + " --suite <path|name> --force && " + promote;
+    }
+    return promote;
+}
+
+/// The `Adapters` section (53c): a row for every adapter an entry applies,
+/// its facts read through 53a's one implementation (`backends/adapters`) --
+/// a scale the loader allows; its file there and the kind its runtime reads;
+/// pinned; and the base's weights the ones it was pinned to, the base hashed
+/// once per entry and only when a pin asks. That hash comes from the memo a
+/// load keeps, read and never written back: the doctor edits nothing, a
+/// cache included. Each failure names its doors, each a command that runs as
+/// printed -- for a version `train promote --adapter` made, the promote that
+/// makes it again -- and a pin that cannot be checked is skipped, never
+/// passed. Absent when no entry applies an adapter.
+void check_adapters(CheckReport& report, const CheckInputs& inputs) {
+    if (inputs.config_missing || !inputs.config_error.empty()) {
+        return;
+    }
+    const training::TrainingStore store{inputs.home / "training"};
+    const models::StoreRoots roots = check_roots(inputs);
+    for (const auto& [name, backend] : inputs.config.backends) {
+        if (backend.adapters.empty() || !harness::takes_adapters(backend.type)) {
+            continue;
+        }
+        const bool mlx = backend.type == harness::BackendType::Mlx;
+        const std::filesystem::path base{harness::expand_env_and_home(backend.model_path)};
+        const backends::AdapterCheck check{
+            .backend = name,
+            .base = base,
+            .directories = mlx,
+            .hashing = {.memo = inputs.home / "cache" / "weight-hashes.json", .remember = false}};
+        const std::string set_backend = "apogee config set-backend " + name;
+        const std::string pin_all =
+            set_backend + " --adapters " + backends::spell_adapters(backend.adapters);
+
+        // The run a promoted version came from (53b's ledger), while its
+        // manifest is still there to promote it from again.
+        std::string ledger_error;
+        const std::optional<training::VersionLedger> ledger =
+            training::load_ledger(store.versions_dir(), name, ledger_error);
+        const auto promoted_from = [&](const harness::AdapterConfig& adapter) {
+            if (!ledger.has_value()) {
+                return std::string{};
+            }
+            std::error_code code;
+            for (const training::VersionEntry& version : ledger->versions) {
+                if (version.adapter() && training::valid_run_id(version.run_id) &&
+                    std::filesystem::path{version.adapter_path}.lexically_normal() ==
+                        std::filesystem::path{adapter.path}.lexically_normal() &&
+                    std::filesystem::is_regular_file(
+                        training::manifest_path(store.run_dir(version.run_id)), code)) {
+                    return version.run_id;
+                }
+            }
+            return std::string{};
+        };
+        // The weights an adapter was pinned to, when the store holds them
+        // apart from the base -- filed under the hash's first twelve
+        // characters -- so a door can point model_path back at them.
+        const auto stored_base = [&](const std::string& pin) {
+            const std::string id = pin.substr(0, models::kWeightIdLength);
+            const auto elsewhere = [&base](const std::filesystem::path& found) {
+                return found.lexically_normal() != base.lexically_normal();
+            };
+            if (mlx) {
+                for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
+                    if (stored.id == id && elsewhere(stored.dir)) {
+                        return stored.dir;
+                    }
+                }
+            } else {
+                for (const models::StoredGguf& stored : models::list_store_ggufs(roots)) {
+                    if (stored.id == id && elsewhere(stored.file)) {
+                        return stored.file;
+                    }
+                }
+            }
+            return std::filesystem::path{};
+        };
+
+        std::optional<std::string> base_sha256;  // read once, when a pin asks
+        // What the base is, for a promoted version's door (its header alone).
+        std::optional<training::ServingBase> serving;
+        for (std::size_t index = 0; index < backend.adapters.size(); ++index) {
+            const harness::AdapterConfig& adapter = backend.adapters[index];
+            // A directory named with its trailing slash is still that directory.
+            const std::filesystem::path named =
+                std::filesystem::path{adapter.path}.lexically_normal();
+            const std::string label =
+                name + ": " +
+                (named.has_filename() ? named : named.parent_path()).filename().string();
+            std::vector<harness::AdapterConfig> rest = backend.adapters;
+            rest.erase(rest.begin() + static_cast<std::ptrdiff_t>(index));
+            const std::string take_off =
+                set_backend + " --adapters " + backends::spell_adapters(rest) + " to take it off";
+            const std::string run = promoted_from(adapter);
+            if (!run.empty() && !serving.has_value()) {
+                serving = serving_base(name, backend);
+            }
+            const std::string promote_again =
+                run.empty() ? std::string{}
+                            : promote_again_door(inputs, store, run, name, serving->quantized);
+            std::ostringstream scale;
+            scale << adapter.scale;
+
+            // The scale the loader allows (53a), asked again: the doctor
+            // never assumes how its config was read.
+            if (!std::isfinite(adapter.scale) || adapter.scale <= 0.0 ||
+                adapter.scale > harness::kMaxAdapterScale || (mlx && adapter.scale != 1.0)) {
+                std::vector<harness::AdapterConfig> plain = backend.adapters;
+                plain[index].scale = 1.0;
+                add(report, Status::Fail, "Adapters", label,
+                    "applied at scale " + scale.str() +
+                        (mlx ? " -- mlx-lm applies an adapter at the scale its training wrote, "
+                               "so an mlx entry's is 1"
+                             : " -- a scale is above 0 and at most 2"),
+                    set_backend + " --adapters " + backends::spell_adapters(plain) +
+                        " to apply it at scale 1");
+                continue;
+            }
+            switch (backends::adapter_files(adapter, check)) {
+                case backends::AdapterFiles::Missing:
+                    add(report, Status::Fail, "Adapters", label, "not there: " + adapter.path,
+                        (promote_again.empty() ? std::string{}
+                                               : promote_again + " to make it again from its run, "
+                                                                 "or ") +
+                            take_off);
+                    continue;
+                case backends::AdapterFiles::WrongKind:
+                    add(report, Status::Fail, "Adapters", label,
+                        (mlx ? "not an mlx-lm adapter directory (it holds no "
+                               "adapter_config.json): "
+                             : "not a file -- a llamacpp entry applies a GGUF LoRA file: ") +
+                            adapter.path,
+                        take_off);
+                    continue;
+                case backends::AdapterFiles::Unpinned:
+                    add(report, Status::Fail, "Adapters", label,
+                        "pinned to no base -- a load refuses it until the set is pinned to the "
+                        "weights it applies over",
+                        pin_all + " to pin the set to the weights model_path names");
+                    continue;
+                case backends::AdapterFiles::Pinned:
+                    break;
+            }
+            const std::string pin = adapter.base_sha256.substr(0, models::kWeightIdLength);
+            const auto point_back = [&] {
+                const std::filesystem::path pinned = stored_base(adapter.base_sha256);
+                return pinned.empty()
+                           ? std::string{}
+                           : set_backend + " --model-path " + shell_word(pinned.string()) +
+                                 " to run it over the weights it was pinned to";
+            };
+            if (backend.model_path.empty()) {
+                add(report, Status::Skipped, "Adapters", label,
+                    "its pin cannot be checked: " + name +
+                        " names no model_path, the weights it applies over",
+                    point_back());
+                continue;
+            }
+            if (!base_sha256.has_value()) {
+                // The slow part, when the memo does not hold the base: a
+                // whole read of its weights.
+                say(inputs, "checking adapters: " + name + "'s base");
+                base_sha256 = backends::weights_sha256(base, check.hashing);
+            }
+            if (base_sha256->empty()) {
+                add(report, Status::Skipped, "Adapters", label,
+                    "its pin cannot be checked: the base weights at " + base.string() +
+                        " could not be read -- the backend's own row says why",
+                    point_back());
+                continue;
+            }
+            if (*base_sha256 != adapter.base_sha256) {
+                // The re-promote door for a version the ledger knows: its
+                // gate runs again over the weights the entry serves now.
+                std::string doors;
+                const auto door = [&doors](const std::string& line) {
+                    if (!line.empty()) {
+                        doors += (doors.empty() ? "" : ", or ") + line;
+                    }
+                };
+                door(promote_again.empty()
+                         ? std::string{}
+                         : promote_again + " to promote its run again over these weights");
+                door(point_back());
+                door(promote_again.empty()
+                         ? pin_all +
+                               " to pin the set to these weights, if they are the ones "
+                               "it was made for"
+                         : std::string{});
+                add(report, Status::Fail, "Adapters", label,
+                    "pinned to other weights (sha256 " + pin + ") than the base " + base.string() +
+                        " holds now (" + base_sha256->substr(0, models::kWeightIdLength) +
+                        ") -- an adapter applies only over the weights it was trained on, so a "
+                        "load refuses it",
+                    doors);
+                continue;
+            }
+            add(report, Status::Ok, "Adapters", label,
+                "applies over " + models::weights_label(base) + " at scale " + scale.str() +
+                    ", pinned to its weights (sha256 " + pin + ")");
+        }
     }
 }
 
@@ -2314,6 +2555,8 @@ CheckReport run_checks(const CheckInputs& inputs) {
     check_version(report, inputs);
     say(inputs, "checking config");
     check_config(report, inputs);
+    say(inputs, "checking adapters");
+    check_adapters(report, inputs);
     say(inputs, "checking providers");
     check_providers(report, inputs);
     say(inputs, "checking tools");

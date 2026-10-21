@@ -1228,13 +1228,15 @@ The version ledgers under `training/versions/`: `200 {"object": "list",
 "data": [ledger]}`, or with `?backend=<name>` that backend's ledger alone
 (`404` when it has none). A ledger is `{backend_name, active_version,
 versions: [{version, run_id, gguf_path | mlx_path | adapter_path +
-base_sha256, promoted_at[, eval_score, eval_passed, pruned_at,
-fused_path]}]}` -- a GGUF version names its `gguf_path`, an MLX one (`train
-promote --target mlx`) its `mlx_path` directory, and an adapter version
-(`train promote --adapter`, 53b) its `adapter_path` -- a GGUF LoRA, or an
-mlx-lm adapter directory, registered on the entry's `adapters:` over its
-untouched base -- with the `base_sha256` it was pinned to; a pruned entry
-stays as history with the time retention removed its file.
+base_sha256, promoted_at[, eval_score, eval_passed, eval_scored_on,
+pruned_at, fused_path]}]}` -- a GGUF version names its `gguf_path`, an MLX
+one (`train promote --target mlx`) its `mlx_path` directory, and an adapter
+version (`train promote --adapter`, 53b) its `adapter_path` -- a GGUF LoRA,
+or an mlx-lm adapter directory, registered on the entry's `adapters:` over
+its untouched base -- with the `base_sha256` it was pinned to, and, when its
+gate scored it on the quantized base the entry serves (53c), where:
+`eval_scored_on`, `<base> (<precision>)`; a pruned entry stays as history
+with the time retention removed its file.
 
 ### `GET /v1/admin/training/cycle`
 

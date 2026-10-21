@@ -33,6 +33,10 @@ struct VersionEntry {
     /// Absent when no eval ran before the promotion (`--force`).
     std::optional<double> eval_score{};
     std::optional<bool> eval_passed{};
+    /// Where that eval scored the candidate, when not where its trainer ran
+    /// it (53c): `<base> (<precision>)`, the quantized base an adapter
+    /// version serves on. Empty for a version gated on its run's own eval.
+    std::string eval_scored_on{};
     /// Set when retention removed the file; the entry stays as history, so
     /// a rollback can name what it can no longer reach.
     /// The fine-tuned SafeTensors weights this version was converted from,

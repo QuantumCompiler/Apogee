@@ -222,6 +222,13 @@ struct GgufInfo {
 /// `parsed == false` with a reason a user can act on.
 [[nodiscard]] GgufInfo inspect_gguf(const std::filesystem::path& path);
 
+/// llama.cpp's own name for a `general.file_type` -- `llama_ftype` as the
+/// pinned `llama.h` numbers it, `LLAMA_FTYPE_MOSTLY_` dropped: `Q4_K_M`,
+/// `F16`, `BF16`, `F32` -- what a person calls the precision (53c: where an
+/// adapter's gate scored it). Empty for a number it does not define,
+/// `kUnknownFileType` among them.
+[[nodiscard]] std::string file_type_name(std::uint32_t file_type);
+
 /// What a model file with no chat template is, in the one wording the
 /// conversation's warning and `models info` share (26r): "most likely a base
 /// (pretrained) model: it continues text rather than answering, so …".

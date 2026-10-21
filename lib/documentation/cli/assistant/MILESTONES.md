@@ -9364,3 +9364,38 @@ Decisions taken while building, for veto:
 
 **Not done:** the real end-to-end run (train → adapter promote → chat on the entry) is the user's.
 
+### 2026-10-21 — `adapter-doctor-and-gate` (backlog item 53c): the doctor names every adapter, and the gate scores on the base that serves
+
+**Why.** Two gaps the adapter path opened. `check` had no adapter row, so a deleted adapter or a base changed under one surfaced as a load failure. And an adapter trained against full-precision weights was gated where the trainer ran it, not on the quantized base its entry would serve it on.
+
+- [x] **`check`'s Adapters section**, one row per registered adapter (`<backend>: <file>`), shown only when an entry has adapters, so a fresh install's report is unchanged.
+  - **The checks run in a load's order:** the scale, the file present and of the right kind, pinned, then the base's hash against the pin, through 53a's one `weights_sha256`. The doctor reads the hash memo and never writes it.
+  - **A base that cannot be read reports skipped,** never ok.
+  - **A mismatch is a FAIL naming the base and both hashes,** with fixes that run as printed: re-promote the run, point `--model-path` back at the pinned weights where the store holds them, or re-pin a hand-added adapter with `set-backend --adapters`.
+- [x] **The serving-base gate.** A `train promote --adapter` onto an entry whose base is quantized scores the candidate on that base. That means the base plus every adapter the entry will serve with, after the adapter is built and pinned and before the config is touched.
+  - The report says `scored on <base> (<precision>)`, the same text in the progress line, the summary, the refusal and the ledger's new `eval_scored_on`.
+  - It is the only eval: no full-precision score is computed.
+  - Below the floor the candidate is refused, the adapter removed, the config and ledger unchanged. `gate_mode: soft` warns instead. `run_eval`'s never-fail contract stands.
+  - `training/` gets a closure. `cli/train.cpp` builds it from the entry's own runtime.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The wording**, the item's default: `scored on tiny-Q4_K_M.gguf (Q4_K_M)`, and the doctor's rows saying what they found with their fixes joined by `, or`.
+- **`train promote` gains `--suite` and `--judge`** for this gate. Otherwise its suite could come only from a full-precision eval, which the item rules out. On any other promote they are refused as having nothing to act on.
+- **`--force` skips the serving eval entirely**, as its name says, since a judge may cost money.
+- **"Quantized" is the GGUF header's file type, or an MLX config declaring its bits.** F16, BF16 or unknown keeps the recorded-eval gate.
+- **Scoring is temperature 0 at the trainer's 256-token budget,** a side request that never writes the prompt cache. The judge's baseline is the bare base on the same runtime, built only when there is a judge.
+
+**Verified.**
+- 16 new cases:
+  - the adapters reader's memo-free read and per-adapter facts;
+  - GGUF file type names;
+  - the gate over closures: scored on the serving closure only, a degraded candidate refused, soft and `--force`, no suite, a failing judge, cancellation;
+  - the ledger round trip;
+  - the doctor matrix, with every fix run as printed against its broken state and the row passing after;
+  - the end-to-end Q4 promote;
+  - the new flags' completion.
+- 34 ctest cases pass, the `cli.*` lifecycles that run `check` among them.
+- Bare `lib/scripts/cicd.sh --test`: green. The CLI's 3686 tests and the macOS app's 342 cases passed, with no warning.
+
+**Not done:** the real adapter-on-Q4 eval is the user's run. With a judge, the candidate and its baseline load the base twice. Merged `--quantize` promotes, the regime and the cycle are unchanged.
+

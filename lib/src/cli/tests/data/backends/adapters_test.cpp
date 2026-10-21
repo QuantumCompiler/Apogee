@@ -6,6 +6,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <random>
 #include <string>
 #include <string_view>
@@ -23,9 +24,12 @@
 namespace {
 
 namespace fs = std::filesystem;
+using apogee::backends::adapter_files;
 using apogee::backends::adapter_refusal;
 using apogee::backends::AdapterCheck;
+using apogee::backends::AdapterFiles;
 using apogee::backends::pin_adapters;
+using apogee::backends::spell_adapters;
 using apogee::backends::WeightHashing;
 using apogee::backends::weights_sha256;
 using apogee::harness::AdapterConfig;
@@ -228,4 +232,65 @@ TEST_CASE("pinning makes each path absolute and records the base's hash on every
     std::vector<AdapterConfig> orphan{{.path = adapters[0].path}};
     CHECK_THAT(pin_adapters(orphan, scratch.check()),
                ContainsSubstring("could not be read to pin the adapters to"));
+}
+
+TEST_CASE("a read that does not remember answers from the memo and writes nothing back",
+          "[backends][adapters][hash]") {
+    // 53c: the doctor reads the hash a load remembered, and never writes the
+    // cache -- `check` edits nothing on the machine.
+    Scratch scratch;
+    const std::string expected = apogee::models::sha256_hex("base weights");
+    REQUIRE(weights_sha256(scratch.base, scratch.hashing) == expected);
+    REQUIRE(scratch.reads.size() == 1);
+    std::ifstream before_in{scratch.memo, std::ios::binary};
+    const std::string before{std::istreambuf_iterator<char>{before_in}, {}};
+    WeightHashing reading = scratch.hashing;
+    reading.remember = false;
+    // Held by the memo: answered with no read.
+    CHECK(weights_sha256(scratch.base, reading) == expected);
+    CHECK(scratch.reads.size() == 1);
+    // Changed since: read again, and the memo left exactly as it was.
+    write(scratch.base, "other base weights");
+    CHECK(weights_sha256(scratch.base, reading) ==
+          apogee::models::sha256_hex("other base weights"));
+    CHECK(scratch.reads.size() == 2);
+    std::ifstream after_in{scratch.memo, std::ios::binary};
+    CHECK(std::string{std::istreambuf_iterator<char>{after_in}, {}} == before);
+    // With no memo at all, nothing is created.
+    fs::remove(scratch.memo);
+    CHECK(weights_sha256(scratch.base, reading) ==
+          apogee::models::sha256_hex("other base weights"));
+    CHECK_FALSE(fs::exists(scratch.memo));
+}
+
+TEST_CASE("an adapter's own facts are read one by one, its base never",
+          "[backends][adapters][refusal]") {
+    // 53c: the doctor's row for each adapter, in the order a load refuses on.
+    Scratch scratch;
+    const fs::path lora = scratch.dir.path() / "style.gguf";
+    write(lora, "lora");
+    const fs::path directory = scratch.dir.path() / "tone";
+    write(directory / "adapter_config.json", "{}");
+    const std::string pin = apogee::models::sha256_hex("base weights");
+    CHECK(adapter_files({.path = lora.string(), .base_sha256 = pin}, scratch.check()) ==
+          AdapterFiles::Pinned);
+    CHECK(adapter_files({.path = lora.string()}, scratch.check()) == AdapterFiles::Unpinned);
+    CHECK(adapter_files({.path = "/gone/x.gguf", .base_sha256 = pin}, scratch.check()) ==
+          AdapterFiles::Missing);
+    // The kind each runtime reads: a GGUF LoRA file, an mlx-lm directory.
+    CHECK(adapter_files({.path = directory.string(), .base_sha256 = pin}, scratch.check()) ==
+          AdapterFiles::WrongKind);
+    CHECK(adapter_files({.path = lora.string(), .base_sha256 = pin}, scratch.check(true)) ==
+          AdapterFiles::WrongKind);
+    CHECK(adapter_files({.path = directory.string(), .base_sha256 = pin}, scratch.check(true)) ==
+          AdapterFiles::Pinned);
+    CHECK(scratch.reads.empty());
+}
+
+TEST_CASE("a set is spelled as set-backend takes it back, an empty one as a quoted nothing",
+          "[backends][adapters][pin]") {
+    CHECK(spell_adapters({}) == "\"\"");
+    CHECK(spell_adapters({{.path = "/l/a.gguf"}, {.path = "/l/b.gguf", .scale = 0.5}}) ==
+          "/l/a.gguf,/l/b.gguf:0.5");
+    CHECK(spell_adapters({{.path = "/my loras/a.gguf"}}) == "\"/my loras/a.gguf\"");
 }

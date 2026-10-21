@@ -4,29 +4,28 @@
 #include <array>
 #include <cctype>
 #include <system_error>
+#include <utility>
 
 namespace apogee::training {
 
-GateVerdict eval_gate(const RunManifest& manifest, GateMode mode, bool force) {
+namespace {
+
+/// Why a run cannot be promoted whatever the gate says, or empty: only a
+/// complete run has an adapter to judge.
+[[nodiscard]] std::string incomplete(const RunManifest& manifest) {
+    if (manifest.complete()) {
+        return {};
+    }
+    return "run " + manifest.run_id + " is " +
+           (manifest.status.empty() ? std::string{"incomplete"} : manifest.status) +
+           (manifest.error.empty() ? std::string{} : " (" + manifest.error + ")") +
+           " -- only a complete run can be promoted";
+}
+
+/// The gate's one rule over a `problem` -- none passes; `force` and a soft
+/// gate let it through, said; a hard one refuses, naming the way past it.
+[[nodiscard]] GateVerdict judged(const std::string& problem, GateMode mode, bool force) {
     GateVerdict verdict;
-    if (!manifest.complete()) {
-        verdict.error = "run " + manifest.run_id + " is " +
-                        (manifest.status.empty() ? std::string{"incomplete"} : manifest.status) +
-                        (manifest.error.empty() ? std::string{} : " (" + manifest.error + ")") +
-                        " -- only a complete run can be promoted";
-        return verdict;
-    }
-    std::string problem;
-    if (!manifest.eval.has_value()) {
-        problem = "no eval results for run " + manifest.run_id + ". Run 'apogee train eval " +
-                  manifest.run_id + " --suite <path>' first";
-    } else if (!manifest.eval->passed) {
-        const int percent = static_cast<int>(manifest.eval->score * 100.0 + 0.5);
-        problem = "the eval gate failed for run " + manifest.run_id + " (" +
-                  std::to_string(percent) + "%: " + std::to_string(manifest.eval->num_passed) +
-                  "/" + std::to_string(manifest.eval->total) +
-                  " passed). Fix the training or the suite, then re-run eval";
-    }
     if (problem.empty()) {
         verdict.ok = true;
         return verdict;
@@ -43,6 +42,129 @@ GateVerdict eval_gate(const RunManifest& manifest, GateMode mode, bool force) {
     }
     verdict.error = problem + ", or pass --force to skip the gate";
     return verdict;
+}
+
+/// A score as the gate's sentences give it: `50%: 1/2 passed`.
+[[nodiscard]] std::string tally(const EvalResults& results) {
+    const int percent = static_cast<int>(results.score * 100.0 + 0.5);
+    return std::to_string(percent) + "%: " + std::to_string(results.num_passed) + "/" +
+           std::to_string(results.total) + " passed";
+}
+
+/// Where the serving gate scores, for a sentence: `<label> (<precision>), the
+/// base '<backend>' serves`.
+[[nodiscard]] std::string serving_place(const ServingBase& base) {
+    return describe(base) + ", the base '" + base.backend + "' serves";
+}
+
+}  // namespace
+
+GateVerdict eval_gate(const RunManifest& manifest, GateMode mode, bool force) {
+    if (std::string refused = incomplete(manifest); !refused.empty()) {
+        GateVerdict verdict;
+        verdict.error = std::move(refused);
+        return verdict;
+    }
+    std::string problem;
+    if (!manifest.eval.has_value()) {
+        problem = "no eval results for run " + manifest.run_id + ". Run 'apogee train eval " +
+                  manifest.run_id + " --suite <path>' first";
+    } else if (!manifest.eval->passed) {
+        problem = "the eval gate failed for run " + manifest.run_id + " (" + tally(*manifest.eval) +
+                  "). Fix the training or the suite, then re-run eval";
+    }
+    return judged(problem, mode, force);
+}
+
+std::string describe(const ServingBase& base) {
+    return base.precision.empty() ? base.label : base.label + " (" + base.precision + ")";
+}
+
+ServingPlan plan_serving_gate(const RunManifest& manifest, const ServingGateRequest& request) {
+    ServingPlan plan;
+    if (std::string refused = incomplete(manifest); !refused.empty()) {
+        plan.verdict.error = std::move(refused);
+        return plan;
+    }
+    if (request.force) {
+        // Skipped, as the flag says: no eval is run -- and no judge is paid
+        // -- for a verdict nobody will heed.
+        plan.verdict =
+            judged("run " + manifest.run_id + " was not scored on " + serving_place(request.base),
+                   request.mode, true);
+        return plan;
+    }
+    if (request.items.empty()) {
+        plan.verdict = judged("no eval suite to score run " + manifest.run_id + " on " +
+                                  serving_place(request.base) +
+                                  " -- pass --suite <path|name>, or set "
+                                  "training.eval_suite_path",
+                              request.mode, false);
+        return plan;
+    }
+    plan.verdict.ok = true;
+    plan.score = true;
+    return plan;
+}
+
+ServingGate gate_on_serving_base(const RunManifest& manifest, const ServingGateRequest& request,
+                                 const ServingRunnerFactory& runners, EvalOptions options) {
+    ServingGate gate;
+    const ServingPlan plan = plan_serving_gate(manifest, request);
+    if (!plan.score) {
+        gate.verdict = plan.verdict;
+        return gate;
+    }
+    const std::string place = serving_place(request.base);
+    const auto unscored = [&](const std::string& why) {
+        return judged("run " + manifest.run_id + " could not be scored on " + place + ": " + why,
+                      request.mode, false);
+    };
+    std::string error;
+    const std::unique_ptr<CandidateRunner> candidate =
+        runners ? runners(true, error) : std::unique_ptr<CandidateRunner>{};
+    if (candidate == nullptr) {
+        gate.verdict = unscored(error.empty() ? std::string{"no runtime to run it on"} : error);
+        return gate;
+    }
+    // The untuned base through the same runtime, for the judge alone. One
+    // that cannot be built leaves the judged items to skip, counted --
+    // never a reason to refuse what the substring items can still say.
+    std::unique_ptr<CandidateRunner> baseline;
+    if (options.judge) {
+        std::string ignored;
+        baseline = runners(false, ignored);
+    }
+    options.baseline = baseline.get();
+    EvalRun run = run_eval(request.items, *candidate, options);
+    if (run.cancelled) {
+        gate.cancelled = true;
+        return gate;
+    }
+    if (!run.ok) {
+        gate.verdict = unscored(run.error);
+        return gate;
+    }
+    run.results.suite = request.suite;
+    gate.verdict =
+        judged(run.results.passed ? std::string{}
+                                  : "the eval gate failed for run " + manifest.run_id +
+                                        ", scored on " + place + " (" + tally(run.results) +
+                                        "). Fix the training or the suite, then promote again",
+               request.mode, false);
+    gate.results = std::move(run.results);
+    return gate;
+}
+
+void record_serving_gate(VersionEntry& entry, const ServingGate& gate, const ServingBase& base) {
+    entry.eval_score.reset();
+    entry.eval_passed.reset();
+    entry.eval_scored_on.clear();
+    if (gate.results.has_value()) {
+        entry.eval_score = gate.results->score;
+        entry.eval_passed = gate.results->passed;
+        entry.eval_scored_on = describe(base);
+    }
 }
 
 namespace {

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -10,6 +11,8 @@
 #include <vector>
 
 #include "contracts/cancellation.h"
+#include "training/eval.h"
+#include "training/kit.h"
 #include "training/manifest.h"
 #include "training/store.h"
 #include "training/trainer.h"
@@ -34,6 +37,13 @@
 /// already runs. The gate is the same one, before either: the mode changes
 /// what is written, never what is judged.
 ///
+/// **Judged where it serves** (53c): an adapter bound for a quantized base --
+/// weights its full-precision training never ran on -- is scored on that
+/// base, through a closure the command builds from the entry's own runtime,
+/// once it is built and pinned and before the config is touched. That eval
+/// is its gate, and its only one; every other promotion is gated on its run's
+/// recorded eval, as before.
+///
 /// Nothing here edits the config or knows a backend type: the conversions,
 /// the header check and the quantizer arrive as closures, and the config
 /// edit is the command's (`cli/train.cpp`, the composition root). What
@@ -56,6 +66,92 @@ struct GateVerdict {
 /// a warning under Soft; a failed eval likewise; `force` turns a refusal
 /// into a warning; a run that did not complete is refused whatever the mode.
 [[nodiscard]] GateVerdict eval_gate(const RunManifest& manifest, GateMode mode, bool force);
+
+/// The base a promoted adapter will serve on (53c), as the command reads it
+/// from the target entry: plain facts -- the weights, the name a sentence
+/// gives them, their precision -- so this package never names a runtime.
+struct ServingBase {
+    /// The entry the version registers on.
+    std::string backend{};
+    /// Its `model_path`: the weights the adapter applies over.
+    std::filesystem::path weights{};
+    /// The weights as a sentence names them: a GGUF's file name, a stored
+    /// MLX model's `<model>/mlx/<id>`.
+    std::string label{};
+    /// How they are stored -- `Q4_K_M`, `F16`, `4-bit`, `bf16` -- or empty
+    /// when nothing says.
+    std::string precision{};
+    /// Quantized: weights the full-precision training never ran on, so the
+    /// gate scores the candidate here rather than where its trainer ran it.
+    bool quantized = false;
+};
+
+/// The base as the gate's every word names it (53c): `<label> (<precision>)`,
+/// or the label alone when nothing says its precision -- what a report says
+/// it was "scored on", and what the version's ledger entry records.
+[[nodiscard]] std::string describe(const ServingBase& base);
+
+/// The candidate on the serving base (53c): the run's adapter over it, with
+/// every adapter the entry will apply -- or, `tuned` false, the bare base,
+/// the judge's baseline. The composition root builds it from the target
+/// entry's own runtime, so this package never names one; null with `error`
+/// set when it cannot be built.
+using ServingRunnerFactory =
+    std::function<std::unique_ptr<CandidateRunner>(bool tuned, std::string& error)>;
+
+/// What the gate on the serving base scores with (53c).
+struct ServingGateRequest {
+    ServingBase base{};
+    /// The suite's items, and where they came from; empty when nothing named
+    /// one.
+    std::vector<EvalItem> items{};
+    std::string suite{};
+    GateMode mode = GateMode::Hard;
+    bool force = false;
+};
+
+/// The gate on the serving base before anything is built (53c), so its
+/// refusals come before the adapter is converted: a run that is not complete
+/// refused whatever the mode, as `eval_gate` refuses it; `--force` skipping
+/// the scoring, said; no suite to score on refused under a hard gate, a
+/// warning under a soft one. `score` says whether `gate_on_serving_base` will
+/// run an eval at all.
+struct ServingPlan {
+    GateVerdict verdict{};
+    bool score = false;
+};
+
+[[nodiscard]] ServingPlan plan_serving_gate(const RunManifest& manifest,
+                                            const ServingGateRequest& request);
+
+/// What the gate on the serving base found.
+struct ServingGate {
+    GateVerdict verdict{};
+    bool cancelled = false;
+    /// The one eval, when it ran -- what the version records.
+    std::optional<EvalResults> results{};
+};
+
+/// The eval gate on the base the version will serve on (53c): one eval per
+/// candidate, there and nowhere else -- the run's recorded eval, scored where
+/// its trainer ran, is never read, and no full-precision score is computed
+/// beside it. `plan_serving_gate` first; then `run_eval` over the factory's
+/// candidate -- its baseline built only when `options` carries a judge --
+/// under its never-fail contract, a baseline that cannot be built leaving
+/// judged items to skip, counted; then the gate's own rule, 100%, a hard gate
+/// refusing and a soft one warning, every word saying where it scored. A
+/// candidate that cannot be built or asked has nothing to say for itself,
+/// and is held to the gate as unscored.
+[[nodiscard]] ServingGate gate_on_serving_base(const RunManifest& manifest,
+                                               const ServingGateRequest& request,
+                                               const ServingRunnerFactory& runners,
+                                               EvalOptions options);
+
+/// `entry` as the gate on its serving base let it through (53c): its eval
+/// that gate's and where it scored, or none when it ran no eval (`--force`,
+/// or a soft gate with no suite) -- the run's own eval, scored where its
+/// trainer ran, is never this version's.
+void record_serving_gate(VersionEntry& entry, const ServingGate& gate, const ServingBase& base);
 
 /// The fused SafeTensors directory → a GGUF at the path given. The error
 /// text, or empty.

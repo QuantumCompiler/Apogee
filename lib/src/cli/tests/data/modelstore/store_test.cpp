@@ -84,6 +84,19 @@ TEST_CASE("a handle is read without asking the disk, and only a handle is one", 
     }
 }
 
+TEST_CASE("weights are named for a sentence: a stored directory by its handle, a file by its name",
+          "[models][store]") {
+    // 53c: where the gate says it scored, and the doctor's rows.
+    using apogee::models::weights_label;
+    CHECK(weights_label("/h/models/org--m/mlx/0123456789ab") == "org--m/mlx/0123456789ab");
+    CHECK(weights_label("/h/models/org--m/mlx/0123456789ab/") == "org--m/mlx/0123456789ab");
+    CHECK(weights_label("/h/models/org--m/gguf/0123456789ab/m-Q4_K_M.gguf") == "m-Q4_K_M.gguf");
+    CHECK(weights_label("/elsewhere/base.gguf") == "base.gguf");
+    // An id under no format of the store is a name like any.
+    CHECK(weights_label("/h/other/0123456789ab") == "0123456789ab");
+    CHECK(weights_label("/h/models/org--m/mlx/not-an-id") == "not-an-id");
+}
+
 TEST_CASE("a SafeTensors set's id covers its shards and nothing else", "[models][store]") {
     using apogee::models::snapshot_weight_id;
     using apogee::models::SnapshotFile;

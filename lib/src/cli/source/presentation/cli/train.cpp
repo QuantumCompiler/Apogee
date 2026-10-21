@@ -9,6 +9,7 @@
 #include <cmath>
 #include <csignal>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -53,6 +54,7 @@
 #include "training/regime.h"
 #include "training/regime_specs.h"
 #include "training/script_runner.h"
+#include "training/script_trainer.h"
 #include "training/store.h"
 #include "views/status_line.h"
 #include "views/terminal.h"
@@ -341,6 +343,11 @@ struct PromoteRequest {
     /// the entry's `adapters:` over the base it runs -- the fuse skipped.
     /// Off, the default: the merged promote, byte for byte as before.
     bool adapter = false;
+    /// `--suite` and `--judge` (53c): what the gate on a quantized base
+    /// scores the candidate with -- `train eval`'s own two, for the promote
+    /// that runs its eval where the version will serve.
+    std::string suite{};
+    std::string judge{};
 };
 
 struct PromoteChecks {
@@ -350,6 +357,13 @@ struct PromoteChecks {
     std::string existing_key;
     /// The target, resolved.
     training::PromoteTarget target = training::PromoteTarget::Gguf;
+    /// An adapter promote onto an entry whose base is quantized (53c): its
+    /// gate scores the candidate on that base, after the adapter is built --
+    /// the run's recorded eval, scored where its trainer ran, is not it.
+    bool on_serving_base = false;
+    training::ServingGateRequest serving{};
+    /// The judge that gate asks, resolved; empty for none.
+    std::string judge_key{};
 };
 
 /// The backend type a promotion's target registers: llamacpp runs a GGUF,
@@ -359,19 +373,106 @@ struct PromoteChecks {
                                                   : harness::BackendType::LlamaCpp;
 }
 
+/// The suite and the judge the gate on a serving base scores with (53c),
+/// found as `train eval` finds them: the flag, else what the run's recorded
+/// eval was judged by, else the config's. A name that cannot be read is
+/// refused by name, before anything is built; no suite at all is the plan's
+/// to say. Nothing is read for a gate `--force` skips.
+[[nodiscard]] std::string serving_gate_inputs(const harness::Config& config,
+                                              const training::RunManifest& manifest,
+                                              const PromoteRequest& request,
+                                              PromoteChecks& checks) {
+    checks.serving.mode = training::gate_mode_from_string(config.training.effective_gate_mode());
+    checks.serving.force = request.force;
+    if (request.force) {
+        return {};
+    }
+    const std::optional<training::EvalResults>& recorded = manifest.eval;
+    std::string suite = request.suite;
+    std::string from = "--suite";
+    if (suite.empty() && recorded.has_value() && !recorded->suite.empty()) {
+        // A kit is recorded as `kit:<name>`, the name `--suite` takes.
+        suite = recorded->suite.starts_with("kit:") ? recorded->suite.substr(4) : recorded->suite;
+        from = "the suite run " + manifest.run_id + " was evaluated on";
+    }
+    if (suite.empty()) {
+        suite = config.training.eval_suite_path;
+        from = "training.eval_suite_path";
+    }
+    if (!suite.empty()) {
+        const SuiteResolution resolved = resolve_suite(harness::training_dir(), suite);
+        if (!resolved.error.empty()) {
+            return from + ": " + resolved.error;
+        }
+        checks.serving.items = resolved.items;
+        checks.serving.suite = resolved.label;
+    }
+    std::string judge = request.judge;
+    if (judge.empty() && recorded.has_value()) {
+        judge = recorded->judge_backend;
+    }
+    if (judge.empty()) {
+        judge = config.training.judge_backend;
+    }
+    if (!judge.empty()) {
+        const TeacherResolution resolved = resolve_teacher(config, judge);
+        if (resolved.key.empty()) {
+            return "judge: " + resolved.error;
+        }
+        checks.judge_key = resolved.key;
+    }
+    return {};
+}
+
 /// Every refusal before the expensive part.
 [[nodiscard]] PromoteChecks precheck_promotion(const harness::Config& config,
                                                const training::RunManifest& manifest,
                                                const PromoteRequest& request) {
     PromoteChecks checks;
-    const training::GateVerdict gate = training::eval_gate(
-        manifest, training::gate_mode_from_string(config.training.effective_gate_mode()),
-        request.force);
-    if (!gate.ok) {
-        checks.error = gate.error;
-        return checks;
+    // 53c: an adapter onto an entry whose base is quantized is gated where it
+    // will serve, once it is built; every other promote on its run's eval.
+    if (request.adapter) {
+        const std::string key = configured_backend_key(config, request.backend);
+        const harness::BackendConfig* entry = key.empty() ? nullptr : config.find_backend(key);
+        if (entry != nullptr && !entry->model_path.empty() &&
+            harness::takes_adapters(entry->type)) {
+            checks.serving.base = serving_base(key, *entry);
+            checks.on_serving_base = checks.serving.base.quantized;
+        }
     }
-    checks.warning = gate.warning;
+    if (checks.on_serving_base) {
+        if (std::string refused = serving_gate_inputs(config, manifest, request, checks);
+            !refused.empty()) {
+            checks.error = std::move(refused);
+            return checks;
+        }
+        const training::ServingPlan plan = training::plan_serving_gate(manifest, checks.serving);
+        if (!plan.verdict.ok) {
+            checks.error = plan.verdict.error;
+            return checks;
+        }
+        checks.warning = plan.verdict.warning;
+    } else {
+        const training::GateVerdict gate = training::eval_gate(
+            manifest, training::gate_mode_from_string(config.training.effective_gate_mode()),
+            request.force);
+        if (!gate.ok) {
+            checks.error = gate.error;
+            return checks;
+        }
+        checks.warning = gate.warning;
+        if (!request.suite.empty() || !request.judge.empty()) {
+            checks.error =
+                std::string{request.suite.empty() ? "--judge" : "--suite"} +
+                " has nothing to act on: this promote is gated on run " + manifest.run_id +
+                "'s recorded eval -- only an adapter promote onto an entry whose base is "
+                "quantized scores its candidate where it will serve. Drop it, or score the "
+                "run with 'apogee train eval " +
+                manifest.run_id +
+                (request.suite.empty() ? " --judge <backend>'" : " --suite <path|name>'");
+            return checks;
+        }
+    }
     if (request.backend.empty() || request.backend.find_first_of("/\\ \t") != std::string::npos) {
         checks.error = "--as must be a plain backend name (got '" + request.backend + "')";
         return checks;
@@ -464,6 +565,12 @@ struct PromoteChecks {
     return checks;
 }
 
+/// The gate on the serving base (53c), scoring the candidate with
+/// `adapters` -- every adapter the entry will apply once the version is
+/// registered.
+using ServingScorer =
+    std::function<training::ServingGate(const std::vector<harness::AdapterConfig>& adapters)>;
+
 struct PromoteOutcome {
     bool ok = false;
     bool cancelled = false;
@@ -485,6 +592,10 @@ struct PromoteOutcome {
     std::string base_sha256{};
     /// The version's size on disk.
     std::int64_t bytes = 0;
+    /// The gate on the serving base (53c): its eval, when it scored the
+    /// candidate, and what a soft gate let through.
+    std::optional<training::EvalResults> scored{};
+    std::string warning{};
 };
 
 /// The model store's roots as a promotion sees them: `paths.hf_dir` for
@@ -782,12 +893,16 @@ struct PromoteOutcome {
 /// entry runs, and registered on its `adapters:` through the one editor in
 /// place of the active version's. The entry's `model_path`, and the base it
 /// names, are never touched. A failure at any step leaves the config and the
-/// ledger as they were.
+/// ledger as they were. Onto a quantized base (53c) the gate runs between
+/// the pin and the config, `score` scoring the candidate there with every
+/// adapter the entry will apply: a candidate under the gate's floor is
+/// removed, never registered.
 [[nodiscard]] PromoteOutcome promote_adapter_run(
     const harness::Config& config, const std::filesystem::path& config_path,
     const training::TrainingStore& store, const training::RunManifest& manifest,
     const training::AdapterConverter& convert, const PromoteRequest& request,
-    const training::MessageSink& on_message, const harness::CancellationToken& cancellation) {
+    const ServingScorer& score, const training::MessageSink& on_message,
+    const harness::CancellationToken& cancellation) {
     PromoteOutcome outcome;
     const auto refuse = [&outcome](std::string error) {
         outcome.refused = true;
@@ -870,11 +985,39 @@ struct PromoteOutcome {
         return outcome;
     }
     outcome.base_sha256 = fresh.front().base_sha256;
+    const std::vector<harness::AdapterConfig> adapters =
+        with_version_adapter(entry.adapters, replaced, fresh.front());
+
+    // 53c: on a quantized base the gate scores the candidate where it will
+    // serve -- built and pinned, the config not yet touched -- and a
+    // candidate under its floor goes no further.
+    std::optional<training::ServingGate> gated;
+    if (checks.on_serving_base && score) {
+        training::ServingGate gate = score(adapters);
+        if (gate.cancelled) {
+            unstore();
+            outcome.cancelled = true;
+            outcome.error = "cancelled";
+            return outcome;
+        }
+        if (!gate.verdict.ok) {
+            unstore();
+            outcome.refused = true;
+            outcome.error = gate.verdict.error +
+                            " -- the adapter was removed, and the config and the version ledger "
+                            "are unchanged";
+            return outcome;
+        }
+        if (gate.results.has_value()) {
+            // A gate that let it through unscored said so at the precheck.
+            outcome.warning = gate.verdict.warning;
+            outcome.scored = gate.results;
+        }
+        gated = std::move(gate);
+    }
 
     // The adapter exists, reads whole and is pinned: now, and only now, the
     // config -- the entry's `adapters:` through the one editor.
-    const std::vector<harness::AdapterConfig> adapters =
-        with_version_adapter(entry.adapters, replaced, fresh.front());
     try {
         harness::edit_config_file(config_path, [&](std::string_view content) {
             return harness::set_backend_adapters(content, ledger.backend, adapters);
@@ -894,6 +1037,9 @@ struct PromoteOutcome {
     training::VersionEntry version =
         training::promotion_entry(manifest, plan, training::rfc3339_now());
     version.base_sha256 = outcome.base_sha256;
+    if (gated.has_value()) {
+        training::record_serving_gate(version, *gated, checks.serving.base);
+    }
     outcome.pruned =
         training::record_promotion(ledger, std::move(version), config.training.retain_versions,
                                    training::rfc3339_now(), remove_promoted);
@@ -906,19 +1052,131 @@ struct PromoteOutcome {
     return outcome;
 }
 
+/// One prompt answered by an entry's own runtime (53c) -- llama.cpp or
+/// mlx-lm, with the adapters it will serve with -- greedy and at the
+/// trainer's own answer budget, as the candidate is asked where its trainer
+/// ran it, and a side request no conversation's cache keeps.
+class ServedCandidate final : public training::CandidateRunner {
+public:
+    explicit ServedCandidate(std::shared_ptr<harness::LLMProvider> provider)
+        : provider_{std::move(provider)} {}
+
+    [[nodiscard]] training::CandidateReply run(
+        std::string_view prompt, const harness::CancellationToken& cancellation) override {
+        training::CandidateReply reply;
+        harness::ChatRequest request;
+        request.messages.push_back(harness::ChatMessage::user(std::string{prompt}));
+        request.temperature = 0.0;
+        request.max_tokens = training::kCandidateMaxTokens;
+        request.transient.side_request = true;
+        try {
+            reply.text = provider_->chat(request, cancellation).message.content.plain_text();
+            reply.ok = true;
+        } catch (const std::exception& e) {
+            reply.error = e.what();
+        }
+        return reply;
+    }
+
+private:
+    std::shared_ptr<harness::LLMProvider> provider_;
+};
+
+/// The gate's inference on the serving base (53c), handed to `training/`
+/// whole: the mock's for a mock run, as its converter is -- its candidate
+/// over the base's path, scripted by the run's adapter, so the chain runs on
+/// the real binary with nothing installed -- else the entry itself, built as
+/// it runs with `adapters` on it (none for the judge's baseline): the
+/// quantized weights, the runtime and the adapters that will answer once the
+/// version is registered.
+[[nodiscard]] training::ServingRunnerFactory serving_runners(
+    const harness::Config& config, const std::filesystem::path& config_path,
+    const training::ServingBase& base, const training::RunManifest& manifest,
+    std::string_view trainer_name, std::vector<harness::AdapterConfig> adapters) {
+    if (trainer_name == "mock") {
+        return [weights = base.weights, adapter = std::filesystem::path{manifest.adapter_dir}](
+                   bool tuned, std::string&) -> std::unique_ptr<training::CandidateRunner> {
+            training::MockTrainer mock;
+            return mock.candidate_runner(weights, tuned ? adapter : std::filesystem::path{});
+        };
+    }
+    return [&config, config_path, key = base.backend, adapters = std::move(adapters)](
+               bool tuned, std::string& error) -> std::unique_ptr<training::CandidateRunner> {
+        harness::BackendConfig served = harness::backend_as_run(config, key);
+        served.adapters = tuned ? adapters : std::vector<harness::AdapterConfig>{};
+        backends::BuildOptions options;
+        options.config_path = config_path;
+        std::shared_ptr<harness::LLMProvider> provider =
+            backends::make_provider(key, served, error, options);
+        if (provider == nullptr) {
+            return nullptr;
+        }
+        return std::make_unique<ServedCandidate>(std::move(provider));
+    };
+}
+
 /// `train promote --adapter` (53b), after the shared refusals: the converter
 /// composed here -- the GGUF target's alone; an MLX one converts nothing, so
-/// none need be installed -- the adapter promote run, and its report.
+/// none need be installed -- and, onto a quantized base (53c), the gate's
+/// inference there and its judge, then the adapter promote run, and its
+/// report.
 void run_adapter_promote(const harness::Config& config, const std::filesystem::path& config_path,
                          const training::TrainingStore& store,
                          const training::RunManifest& manifest, const PromoteRequest& request,
-                         training::PromoteTarget target, std::string_view trainer_name) {
-    const bool mlx = target == training::PromoteTarget::Mlx;
+                         const PromoteChecks& checks, std::string_view trainer_name) {
+    const bool mlx = checks.target == training::PromoteTarget::Mlx;
     const training::AdapterConverter convert =
         mlx ? training::AdapterConverter{} : make_adapter_converter(config, trainer_name);
     const InterruptScope interrupt;
+    const training::ServingBase& base = checks.serving.base;
+    const std::string where = training::describe(base);
+    std::optional<Providers> providers;
+    if (checks.on_serving_base && !checks.judge_key.empty()) {
+        providers.emplace(config, config_path);
+    }
+    const ServingScorer score = [&](const std::vector<harness::AdapterConfig>& adapters) {
+        if (!training::plan_serving_gate(manifest, checks.serving).score) {
+            return training::gate_on_serving_base(manifest, checks.serving, {}, {});
+        }
+        training::EvalOptions options;
+        if (!checks.judge_key.empty()) {
+            options.judge = make_judge(providers->harness, checks.judge_key);
+            options.judge_backend = checks.judge_key;
+        }
+        const bool tty = platform::is_terminal(platform::StandardStream::Err);
+        options.on_progress = [tty](int done, int total) {
+            if (tty) {
+                std::cerr << "\r[promote] scoring: " << done << "/" << total << " item(s)"
+                          << std::flush;
+            }
+        };
+        options.cancellation = InterruptScope::token();
+        std::cerr << "[promote] scoring the candidate where it will serve: " << where
+                  << ", the base '" << base.backend << "' serves -- suite " << checks.serving.suite
+                  << " (" << checks.serving.items.size() << " item(s))"
+                  << (checks.judge_key.empty() ? std::string{"; no judge: unmatched items skip"}
+                                               : ", judge " + checks.judge_key)
+                  << "\n";
+        training::ServingGate gate = training::gate_on_serving_base(
+            manifest, checks.serving,
+            serving_runners(config, config_path, base, manifest, trainer_name, adapters),
+            std::move(options));
+        if (tty) {
+            std::cerr << "\n";
+        }
+        if (gate.results.has_value()) {
+            std::cerr << "[promote] scored on " << where << ": " << percent(gate.results->score)
+                      << " (" << gate.results->num_passed << "/" << gate.results->total << ")"
+                      << (gate.results->num_skipped > 0
+                              ? "; " + std::to_string(gate.results->num_skipped) +
+                                    " item(s) with no `expected` skipped and auto-passed"
+                              : std::string{})
+                      << "\n";
+        }
+        return gate;
+    };
     const PromoteOutcome result = promote_adapter_run(
-        config, config_path, store, manifest, convert, request,
+        config, config_path, store, manifest, convert, request, score,
         [](std::string_view text) { std::cerr << "[promote] " << text << "\n"; },
         InterruptScope::token());
     if (result.cancelled) {
@@ -931,6 +1189,9 @@ void run_adapter_promote(const harness::Config& config, const std::filesystem::p
         std::cerr << "apogee train: promote failed: " << result.error << "\n";
         throw CLI::RuntimeError(kBackendError);
     }
+    if (!result.warning.empty()) {
+        std::cerr << "apogee train: warning: " << result.warning << "\n";
+    }
     std::cout << "updated backend " << result.backend_key << " -> v" << result.version
               << " (adapter)\n"
               << "  adapter: " << result.weights_path << " (" << human_size(result.bytes)
@@ -938,7 +1199,11 @@ void run_adapter_promote(const harness::Config& config, const std::filesystem::p
               << "  base:    " << result.base_path << " (untouched; pinned by sha256 "
               << result.base_sha256.substr(0, 12) << ")\n"
               << "  config:  " << config_path.string() << "\n";
-    if (manifest.eval.has_value()) {
+    if (result.scored.has_value()) {
+        std::cout << "  eval:    " << percent(result.scored->score) << " ("
+                  << result.scored->num_passed << "/" << result.scored->total << "), scored on "
+                  << where << "\n";
+    } else if (!checks.on_serving_base && manifest.eval.has_value()) {
         std::cout << "  eval:    " << percent(manifest.eval->score) << " ("
                   << manifest.eval->num_passed << "/" << manifest.eval->total << ")\n";
     }
@@ -1359,6 +1624,34 @@ std::filesystem::path resolve_dataset(const std::filesystem::path& datasets_dir,
     error = "no dataset named '" + std::string{name_or_path} +
             "' and no such file -- 'apogee datasets list' shows the datasets";
     return {};
+}
+
+training::ServingBase serving_base(const std::string& name, const harness::BackendConfig& backend) {
+    training::ServingBase base;
+    base.backend = name;
+    base.weights = std::filesystem::path{harness::expand_env_and_home(backend.model_path)};
+    base.label = models::weights_label(base.weights);
+    if (backend.model_path.empty()) {
+        return base;
+    }
+    if (backend.type == harness::BackendType::Mlx) {
+        // `config.json` alone: mlx-lm's quantization, a publisher's, or a
+        // floating-point type -- "4-bit (affine, group 64)" said as "4-bit".
+        const models::MlxQuantization quantization =
+            models::read_mlx_config(base.weights).quantization;
+        base.quantized = quantization.quantized() || !quantization.method.empty();
+        if (base.quantized || !quantization.dtype.empty()) {
+            base.precision = quantization.describe();
+            base.precision.resize(std::min(base.precision.size(), base.precision.find(" (")));
+        }
+        return base;
+    }
+    const models::GgufInfo info = models::inspect_gguf(base.weights);
+    if (info.parsed) {
+        base.precision = models::file_type_name(info.file_type);
+        base.quantized = info.is_quantized();
+    }
+    return base;
 }
 
 SuiteResolution resolve_suite(const std::filesystem::path& training_dir,
@@ -2069,6 +2362,8 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     auto promote_trainer = std::make_shared<std::string>();
     auto promote_target = std::make_shared<std::string>();
     auto promote_adapter = std::make_shared<bool>(false);
+    auto promote_suite = std::make_shared<std::string>();
+    auto promote_judge = std::make_shared<std::string>();
     CLI::App* promote = cmd->add_subcommand(
         "promote",
         "Fuse, verify, and register the run: a GGUF on a llamacpp backend, or with --target mlx "
@@ -2100,8 +2395,21 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         "No fuse: register the adapter itself on an existing entry's adapters, over the base it "
         "runs -- a GGUF LoRA converted from a peft run for a llamacpp entry, an mlx run's "
         "adapter directory as it is for an mlx entry (default: merge)");
+    promote
+        ->add_option("--suite", *promote_suite,
+                     "With --adapter onto an entry whose base is quantized: the suite the gate "
+                     "scores the candidate on, there -- as train eval takes it (default: the "
+                     "run's recorded eval's, else training.eval_suite_path)")
+        ->type_name(kSuiteValue);
+    promote
+        ->add_option("--judge", *promote_judge,
+                     "With --adapter onto an entry whose base is quantized: the backend that "
+                     "judges items without `expected` (default: the run's recorded eval's, else "
+                     "training.judge_backend; none skips them)")
+        ->type_name(kBackendValue);
     promote->callback([&context, promote_id, promote_as, promote_force, promote_quantize,
-                       promote_keep, promote_trainer, promote_target, promote_adapter]() {
+                       promote_keep, promote_trainer, promote_target, promote_adapter,
+                       promote_suite, promote_judge]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_strict(context, config_path);
         const training::TrainingStore store{harness::training_dir()};
@@ -2112,6 +2420,8 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         request.quantize = *promote_quantize;
         request.keep_fused = *promote_keep;
         request.adapter = *promote_adapter;
+        request.suite = *promote_suite;
+        request.judge = *promote_judge;
         if (!promote_target->empty()) {
             request.target = training::promote_target_from_string(*promote_target);
             if (!request.target.has_value()) {
@@ -2130,7 +2440,7 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         const std::string trainer_name = choose_trainer(config, *promote_trainer, manifest.trainer);
         if (request.adapter) {
             // No fuse, so no trainer is built (53b).
-            run_adapter_promote(config, config_path, store, manifest, request, checks.target,
+            run_adapter_promote(config, config_path, store, manifest, request, checks,
                                 trainer_name);
             return;
         }

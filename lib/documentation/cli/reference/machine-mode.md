@@ -1023,7 +1023,13 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   listings; each missing ability is `skipped` — optional, as pdftotext is,
   so a fresh install stays green — its `remedy` the command that brings it on
   that platform, and an ffmpeg missing or not answering skips both too; neither
-  is ever a pass.
+  is ever a pass. Since 53c an `Adapters` section, present when an entry
+  applies an adapter: a row per adapter, named `<backend>: <file>` -- `fail`
+  when it is not there, not the kind its runtime reads, pinned to no base, at a
+  scale the loader refuses, or pinned to other weights than the base holds
+  now; `skipped` when the base cannot be read to check its pin -- each failure's
+  `remedy` its doors, `, or `-joined, each a command before ` to <what it
+  does>`.
 - **`providers scan`** (since 37b): a row per provider in the knowledge table, as the human scan prints them -- `provider` (`claude`), `type` (`claude-cli`), `label` (`Claude CLI`), `tier` (`credentials found`, `verified 2026-10-06`, `not found`), `backend` (which configured backends reach it, `not registered` when it could be, else empty) and `evidence`, a line each. It is the explicit scan, so it may start a vendor's binary for its version as the human scan does. With `--register`, what registering did is the document's `registration` and the rosters it fetched its `rosters`, a line each; with `--refresh`, the rosters re-fetched are `rosters` too.
 - **`knowledge list`** and **`knowledge info`** (since 37c): the records the
   human list counts, newest first and kept to `--status`/`--discipline` as it
@@ -1060,8 +1066,10 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   a list -- each version its `gguf_path`, an MLX one's `mlx_path`, or since
   53b an adapter version's `adapter_path` (a GGUF LoRA, or an mlx-lm adapter
   directory, registered on the entry's `adapters:` over its untouched base)
-  and the `base_sha256` it was pinned to. A backend with no history is
-  refused as the text refuses it.
+  and the `base_sha256` it was pinned to -- and since 53c, for one its gate
+  scored on the quantized base the entry serves, `eval_scored_on` (`<base>
+  (<precision>)`). A backend with no history is refused as the text refuses
+  it.
 - **`datasets list`**, **`datasets info`** and **`datasets kits`** (since
   37f): the control plane's bodies -- each dataset's `name`, `path`, `lines`,
   `bytes` and `shape`; each kit's `name`, `path`, `description`,

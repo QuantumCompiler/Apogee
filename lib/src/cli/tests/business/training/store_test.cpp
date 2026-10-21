@@ -259,6 +259,45 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "a version gated on its serving base round-trips where it was scored; one gated on its "
+    "run's eval is written as before",
+    "[training][store][ledger][serving]") {
+    // 53c: the eval that let an adapter version through on a quantized base
+    // says where it scored -- and only that one.
+    const apogee::testing::TempDir root{"store-serving-" + std::to_string(std::random_device{}())};
+    const TrainingStore store{root.path()};
+    VersionLedger ledger;
+    ledger.backend = "q4";
+    ledger.active_version = 1;
+    VersionEntry served;
+    served.version = 1;
+    served.run_id = "r1";
+    served.adapter_path = (store.versions_dir() / "q4" / "v1.lora.gguf").string();
+    served.base_sha256 = std::string(64, 'd');
+    served.promoted_at = "2026-10-21T12:00:00Z";
+    served.eval_score = 0.75;
+    served.eval_passed = false;
+    served.eval_scored_on = "tiny-Q4_K_M.gguf (Q4_K_M)";
+    ledger.versions = {served};
+    REQUIRE(apogee::training::save_ledger(store.versions_dir(), ledger).empty());
+    const std::optional<VersionLedger> back = store.list_versions("q4");
+    REQUIRE(back.has_value());
+    REQUIRE(back->versions.size() == 1);
+    CHECK(back->versions[0].eval_scored_on == "tiny-Q4_K_M.gguf (Q4_K_M)");
+    CHECK(back->versions[0].eval_score == 0.75);
+    CHECK(apogee::training::ledger_to_json(*back)["versions"][0]["eval_scored_on"] ==
+          "tiny-Q4_K_M.gguf (Q4_K_M)");
+    // Not scored there: no key at all, so every earlier ledger reads and
+    // writes as it did.
+    served.eval_scored_on.clear();
+    ledger.versions = {served};
+    CHECK_FALSE(apogee::training::ledger_to_json(ledger)["versions"][0].contains("eval_scored_on"));
+    CHECK(apogee::training::ledger_from_json(apogee::training::ledger_to_json(ledger))
+              .versions[0]
+              .eval_scored_on.empty());
+}
+
+TEST_CASE(
     "pipelines list newest first with an unreadable manifest skipped, one by id or "
     "nothing, the running one active, and the summary JSON",
     "[training][store][pipeline]") {

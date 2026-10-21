@@ -123,6 +123,12 @@ struct WeightsHandle {
 [[nodiscard]] std::string weights_handle(std::string_view model, std::string_view format,
                                          std::string_view id);
 
+/// How a sentence names the weights at `path`, asking nothing of the disk
+/// (53c): a directory the store files by id -- an MLX model -- by its handle,
+/// `<model>/<format>/<id>`, since its id alone says nothing to a person; a
+/// file -- a GGUF -- or anything else by its last component.
+[[nodiscard]] std::string weights_label(const std::filesystem::path& path);
+
 /// `text` read as a handle, asking nothing of the disk: a model name with no
 /// separator in it, a format, an id. Nullopt for anything else -- a path, a
 /// bare model, a ref. What a record's `ref` names when a conversion or a
