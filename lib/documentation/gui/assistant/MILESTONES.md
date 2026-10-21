@@ -590,3 +590,52 @@ Every screen stays a machine-mode client of the binary, tested hermetically.
   - the keys and places at eight.
 - **Drawn offscreen over the real binary in the scratch home:** a question answered with its scores and a record open; a collection's health, sources and a search as printed; the notes graph's report, then Heat pump's communities, decision and relations.
 - Bare `lib/scripts/cicd.sh --test`: green -- the CLI's 3593 tests (the two usual skips) and the app's 266 cases.
+
+### 2026-10-20 — `training-studio` (backlog item 2d): runs, regimes and datasets
+
+**Why.** The whole training track had no GUI place: the kits and regimes, a run's gate and promotion, the datasets. The TUI has had Train and Datasets since 37f.
+
+- [x] **The Training place** (⌘9, the ninth place; `PresentationTraining`, `source/presentation/training/`, a new module), with tabs Runs · Regimes · Datasets.
+  - `TrainingViewModel` reads `train status`, `train versions`, `train regime list`, `datasets kits`, `datasets list`, and `models list --all` for the students (the stored SafeTensors sets by handle) and the backends.
+  - **Runs:**
+    - the runs (running first, each once), each with its trainer, loss and the gate's verdict, said plainly ("failed the gate (46%) -- promote refuses it unless forced");
+    - **New run…** (`train run <handle> --dataset <d> [--method] [--iters] [--batch-size] [--num-layers] [--grad-checkpoint] [--mask-prompt]`), launched only from the sheet;
+    - **Gate it** (`train eval <run>`);
+    - **Promote…** (`train promote <run> --as <backend> [--target] [--quantize] [--force]`, the sheet saying the gate's verdict first);
+    - the promoted versions per backend, with **Roll back…** (`train rollback`, confirmed).
+  - **Regimes:** each one's kits in order, and **Run this regime** (`train regime run <name>`).
+  - **Datasets:**
+    - the datasets and the kits;
+    - **New dataset…** (`datasets create <name> --from template|sessions|empty`);
+    - **Synthesize…** (`datasets synth <name> --teacher --kit [--count] [--topic]`, a cloud teacher said to be billed);
+    - **Prepare a file…** (`datasets prepare <path>`);
+    - **Delete…** (`datasets delete <name> --yes`, after the person's word).
+  - Every long act is supervised on the jobs core with Stop, its busy line in the CLI's words.
+- [x] **The reads** (`Training.swift`): `TrainingRun`, `TrainingStatus`, `VersionLedger`, `TrainingRegime`, `TrainingKit`, `TrainingDataset`.
+- [x] **The parity table:** `train` and `datasets` are screens of `PresentationTraining` (19 screens, 5 gaps).
+- [x] **The design (canvas version 38):**
+  - the prototype's Training place (⌘9: a gated run, a run's busy line, the regimes, the datasets and kits);
+  - the boards `ScreenTraining` and `ScreenTrainingDatasets`;
+  - the contract board's TRAINING rows (46 ready) and **gap G21**, "A run's progress is text", with its fallback;
+  - the Layout board's ⌘1 – ⌘9.
+
+  The health check passes all 38 start screens.
+
+**Decisions made while building** (2026-10-20, each recorded for veto):
+- **The trainer's stream does not reach a driver.** The item assumed it did ("rendered as received, no fallback needed"), but `train run` takes no `--output-format`, and its iterations reach stderr as text (`[train] iter 2/4 · loss 0.6200 · …`). The run's busy line is shown verbatim and nothing is decided from it. The machine face is recorded as **G21**, for later CLI growth (52b's shape for the pulls and the media runs). This is a premise correction recorded for the user.
+- **One place, three tabs, ⌘9.** Training is its own place rather than a Models tab: its acts (runs, gates, promotions) are hours long and its own.
+- **Students are the stored SafeTensors sets by handle.** `train run` takes a handle, checked against the binary.
+- **Gate and regime runs take the CLI's defaults** (the run's own suite, the regime's own tuning). Their flags stay the console's until a sheet wants them.
+
+**Verified.**
+- `scripts/build.sh test`: 273 cases, no Swift warning. Most tests read documents recorded from the installed binary over a scratch home (`train-status`, `train-regimes`, `train-regime`, `datasets-kits|list|info`, `train-run.err`): a run on `--trainer mock` gated on a kit, the seeded regimes and kits, and a dataset from the template. A promoted version needs a real conversion, so its ledger is the CLI's own shape, written out. The tests cover:
+  - the run with its loss, gate verdict and score;
+  - the regimes, kits and datasets, and the version ledger (GGUF or MLX, active, pruned);
+  - every act argv-exact: run (with every option), gate, promote (`--force` only when chosen), regime, create, synthesize, delete (`--yes` only after the confirm), rollback;
+  - a run supervised with the trainer's busy line;
+  - nothing started until the sheet's launch;
+  - the places and keys at nine.
+- **Drawn offscreen over the real binary in the scratch home:** the runs with the gated run open, the regimes, the datasets, and the promote sheet with the gate's verdict.
+- Bare `lib/scripts/cicd.sh --test`: green -- the CLI's 3593 tests (the two usual skips) and the app's 273 cases.
+
+**Not run:** real training. No venv was created and no model was trained, by the standing rule. Hours-long runs are the user's.

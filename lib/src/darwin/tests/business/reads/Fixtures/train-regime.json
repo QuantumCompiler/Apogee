@@ -1,0 +1,20 @@
+{
+ "config": false,
+ "count": 0,
+ "description": "The four general kits as one gated pipeline -- instruction-following, structured output, summarization, then reasoning.",
+ "iters": 0,
+ "kits": [
+  "instruction-following",
+  "structured-output",
+  "summarization",
+  "reasoning"
+ ],
+ "name": "foundation",
+ "object": "training.regime",
+ "path": "/Users/someone/.apogee/training/regimes/foundation.yaml",
+ "promote_as": "",
+ "source": "seeded",
+ "student": "",
+ "teacher": "",
+ "temperature": 0.0
+}

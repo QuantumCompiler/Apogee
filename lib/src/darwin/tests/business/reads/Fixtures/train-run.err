@@ -1,0 +1,7 @@
+[train] run 20261021-051826: mock lora on student, dataset data.jsonl
+[train] mock trainer: 4 iteration(s), method lora
+[train] iter 1/4 · loss 0.7200 · lr 1.00e-04 · 10.0 it/s
+[train] iter 2/4 · loss 0.6200 · lr 1.00e-04 · 10.0 it/s
+[train] iter 3/4 · loss 0.5200 · lr 1.00e-04 · 10.0 it/s
+[train] iter 4/4 · loss 0.4200 · lr 1.00e-04 · 10.0 it/s
+[train] adapter saved to /Users/someone/.apogee/training/runs/20261021-051826/adapters

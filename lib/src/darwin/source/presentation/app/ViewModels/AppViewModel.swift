@@ -7,6 +7,7 @@ import Observation
 import PresentationCompose
 import PresentationGraph
 import PresentationKnowledge
+import PresentationTraining
 import PresentationModels
 import PresentationConsole
 import PresentationMonitor
@@ -40,6 +41,7 @@ final class AppViewModel {
     let graph: GraphViewModel
     let records: RecordsViewModel
     let collections: CollectionsViewModel
+    let training: TrainingViewModel
     let video: VideoViewModel
     let compose: ComposeViewModel
     let voice: VoiceViewModel
@@ -80,6 +82,8 @@ final class AppViewModel {
         records.say = { [weak shell] text in shell?.say(text) }
         let collections = CollectionsViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
         collections.say = { [weak shell] text in shell?.say(text) }
+        let training = TrainingViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
+        training.say = { [weak shell] text in shell?.say(text) }
         let video = VideoViewModel(
             starter: jobs ?? JobStarter(), preferences: preferences, home: FileManager.default.homeDirectoryForCurrentUser)
         video.say = { [weak shell] text in shell?.say(text) }
@@ -105,13 +109,14 @@ final class AppViewModel {
         }
         // Sessions in view or not: the library keeps its one child to the
         // session on screen. A place coming into view reads again.
-        shell.routeChanged = { [weak sessions, weak models, weak tasks, weak suites, weak graph, weak video, weak compose, weak voice, weak records, weak collections] destination in
+        shell.routeChanged = { [weak sessions, weak models, weak tasks, weak suites, weak graph, weak video, weak compose, weak voice, weak records, weak collections, weak training] destination in
             Task {
                 if destination == .sessions { await sessions?.cameIntoView() } else { await sessions?.leftView() }
                 if destination == .models { await models?.appeared() }
                 if destination == .tasks { await tasks?.appeared() }
                 if destination == .suites { await suites?.appeared() }
                 if destination == .graph { await graph?.appeared() }
+                if destination == .training { await training?.appeared() }
                 if destination == .knowledge {
                     await records?.appeared()
                     await collections?.appeared()
@@ -134,6 +139,7 @@ final class AppViewModel {
         self.graph = graph
         self.records = records
         self.collections = collections
+        self.training = training
         self.video = video
         self.compose = compose
         self.voice = voice
@@ -156,6 +162,7 @@ final class AppViewModel {
         await graph.connect(binary: sessions.binaryURL)
         await records.connect(binary: sessions.binaryURL)
         await collections.connect(binary: sessions.binaryURL)
+        await training.connect(binary: sessions.binaryURL)
         video.connect(binary: sessions.binaryURL)
         compose.connect(binary: sessions.binaryURL)
         await voice.connect(binary: sessions.binaryURL)

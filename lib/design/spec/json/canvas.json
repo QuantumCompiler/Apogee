@@ -461,6 +461,24 @@
       "y": 2720,
       "title": "Knowledge · collections, a search",
       "page": "build"
+    },
+    "ScreenTraining.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 21280,
+      "y": 2720,
+      "title": "Training · a run, gated",
+      "page": "build"
+    },
+    "ScreenTrainingDatasets.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 22800,
+      "y": 2720,
+      "title": "Training · datasets and kits",
+      "page": "build"
     }
   },
   "createdOnFiles": {
@@ -491,8 +509,8 @@
     },
     "library": {
       "kind": "title1",
-      "maxW": 21200,
-      "text": "Screens — models, suites, tasks, the code graph and knowledge",
+      "maxW": 24240,
+      "text": "Screens — models, suites, tasks, the code graph, knowledge and training",
       "x": 0,
       "y": 2420,
       "page": "build"
@@ -569,6 +587,8 @@
     "ScreenGraphProse.dc.html",
     "ScreenKnowledge.dc.html",
     "ScreenCollections.dc.html",
+    "ScreenTraining.dc.html",
+    "ScreenTrainingDatasets.dc.html",
     "ScreenVideoClip.dc.html",
     "ScreenVideoRun.dc.html",
     "ScreenVideoConsent.dc.html",

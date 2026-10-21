@@ -54,9 +54,9 @@ public enum ParityTable {
         CommandPlace("bootstrap", .screen(module: "PresentationSettings"), "Settings › Backends & keys: install runtimes and register providers"),
         CommandPlace("knowledge", .screen(module: "PresentationKnowledge"), "Knowledge › Records: list, ask, capture, link, move, delete, export"),
         CommandPlace("embed", .screen(module: "PresentationKnowledge"), "Knowledge › Collections: list, health, search, ingest, delete"),
+        CommandPlace("train", .screen(module: "PresentationTraining"), "Training › Runs and Regimes: runs launched, gated, promoted, rolled back"),
+        CommandPlace("datasets", .screen(module: "PresentationTraining"), "Training › Datasets: create, synthesize, prepare, delete; the kits"),
         // --- gaps: each named by its queued item --------------------------------
-        CommandPlace("train", .queued(item: "2d"), "the training studio"),
-        CommandPlace("datasets", .queued(item: "2d"), "the datasets store and its miner"),
         CommandPlace("agents", .queued(item: "2e"), "the agents library"),
         CommandPlace("mcp", .queued(item: "2e"), "the MCP servers and presets"),
         CommandPlace("symphonies", .queued(item: "2e"), "the symphony catalog and shows"),

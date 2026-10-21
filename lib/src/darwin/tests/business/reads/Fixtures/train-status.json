@@ -1,0 +1,27 @@
+{
+ "active_pipeline": null,
+ "cycle": null,
+ "cycle_active": false,
+ "latest_pipeline": null,
+ "pipelines": 0,
+ "recent_runs": [
+  {
+   "base_model": "/Users/someone/work/student",
+   "dataset": "/Users/someone/work/data.jsonl",
+   "eval_passed": false,
+   "eval_score": 0.4583333333333333,
+   "final_loss": 0.42,
+   "finished_at": "2026-10-21T05:18:26Z",
+   "id": "20261021-051826",
+   "iterations": 4,
+   "kind": "run",
+   "method": "lora",
+   "started_at": "2026-10-21T05:18:26Z",
+   "status": "complete",
+   "trainer": "mock"
+  }
+ ],
+ "running": [],
+ "runs": 1,
+ "versions": []
+}

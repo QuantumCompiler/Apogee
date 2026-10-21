@@ -1,0 +1,59 @@
+{
+ "data": [
+  {
+   "config": false,
+   "count": 0,
+   "description": "The four general kits as one gated pipeline -- instruction-following, structured output, summarization, then reasoning.",
+   "iters": 0,
+   "kits": [
+    "instruction-following",
+    "structured-output",
+    "summarization",
+    "reasoning"
+   ],
+   "name": "foundation",
+   "path": "/Users/someone/.apogee/training/regimes/foundation.yaml",
+   "promote_as": "",
+   "source": "seeded",
+   "student": "",
+   "teacher": "",
+   "temperature": 0.0
+  },
+  {
+   "config": false,
+   "count": 0,
+   "description": "The harness chores as one gated pipeline -- the utility role's rewrites and summaries, the extraction role's schema-held JSON, then tool calls.",
+   "iters": 0,
+   "kits": [
+    "utility-chores",
+    "extraction-fidelity",
+    "tool-calling"
+   ],
+   "name": "harness-helpers",
+   "path": "/Users/someone/.apogee/training/regimes/harness-helpers.yaml",
+   "promote_as": "",
+   "source": "seeded",
+   "student": "",
+   "teacher": "",
+   "temperature": 0.0
+  },
+  {
+   "config": false,
+   "count": 0,
+   "description": "The knowledge-capture clerk's chore as one gated stage -- a raw discussion read into a canonical intent record.",
+   "iters": 0,
+   "kits": [
+    "knowledge-capture"
+   ],
+   "name": "knowledge",
+   "path": "/Users/someone/.apogee/training/regimes/knowledge.yaml",
+   "promote_as": "",
+   "source": "seeded",
+   "student": "",
+   "teacher": "",
+   "temperature": 0.0
+  }
+ ],
+ "object": "list",
+ "problems": []
+}

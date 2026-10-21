@@ -131,6 +131,7 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{p.isVideo}}"><svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="4" width="9" height="8" rx="1.5"></rect><path d="M10.75 7.2L14.25 5v6l-3.5-2.2"></path></svg></sc-if>
 <sc-if value="{{p.isVoice}}"><svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 7v2M4.75 5v6M7.5 2.5v11M10.25 5v6M13 6.5v3"></path></svg></sc-if>
 <sc-if value="{{p.isKnowledge}}"><svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h3v11H3zM7 2.5h3v11H7z"></path><path d="M10.6 3.2l2.5.7-2.5 9.4-2.5-.7z"></path></svg></sc-if>
+<sc-if value="{{p.isTraining}}"><svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6L8 3l6.5 3L8 9z"></path><path d="M4 7.3v3.4C5.5 12 10.5 12 12 10.7V7.3M14.5 6v4"></path></svg></sc-if>
 <sc-if value="{{p.hasBadge}}"><span aria-hidden="true" style="position: absolute; top: 6px; right: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--status-accent); box-shadow: 0 0 0 2px var(--surface-sidebar)"></span></sc-if>
 </button>
 </sc-for>
@@ -1019,6 +1020,64 @@ a{color:inherit}a:hover{color:inherit}
 <sc-for list="{{kno.sources}}" as="src"><div style="display: flex; align-items: center; min-height: 28px; border-bottom: 1px solid var(--line-border)"><span style="flex: 1 1 auto">{{src.name}}</span><button type="button" class="btn-g" onClick="{{src.remove}}" style="height: 24px; font-size: var(--t-small)">Remove…</button></div></sc-for>
 </div>
 </div>
+</div>
+</sc-if>
+</sc-if>
+
+<sc-if value="{{ui.isTraining}}">
+<header class="ap-tools" style="flex: 0 0 52px; display: flex; align-items: center; gap: 14px; padding: 0 16px 0 24px; border-bottom: 1px solid var(--line-border)">
+<h1 style="margin: 0; font-size: var(--t-title); font-weight: 600">Training</h1>
+<span style="font-size: var(--t-small); color: var(--text-tertiary)">Fine-tune a stored model, gate it, promote it</span>
+<span style="flex: 1 1 auto"></span>
+<div role="group" aria-label="Show" class="seg">
+<button type="button" aria-pressed="{{trn.runsOn}}" onClick="{{trn.showRuns}}" style="background: {{trn.runsBg}}; color: var(--text-primary)">Runs</button>
+<button type="button" aria-pressed="{{trn.regOn}}" onClick="{{trn.showRegimes}}" style="background: {{trn.regBg}}; color: var(--text-primary)">Regimes</button>
+<button type="button" aria-pressed="{{trn.dsOn}}" onClick="{{trn.showDatasets}}" style="background: {{trn.dsBg}}; color: var(--text-primary)">Datasets</button>
+</div>
+<sc-if value="{{trn.runsOn}}"><button type="button" class="btn-g" onClick="{{trn.newRun}}">New run…</button></sc-if>
+<sc-if value="{{trn.dsOn}}"><button type="button" class="btn-g" onClick="{{trn.newDataset}}">New dataset…</button><button type="button" class="btn-g" onClick="{{trn.synth}}">Synthesize…</button><button type="button" class="btn-g" onClick="{{trn.prepare}}">Prepare a file…</button></sc-if>
+</header>
+<sc-if value="{{trn.running}}"><div style="display: flex; align-items: center; gap: 10px; padding: 8px 24px; border-bottom: 1px solid var(--line-border)"><span style="font-size: var(--t-small)">Training</span><span class="mono" style="flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-meta); color: var(--text-secondary)">[train] iter 2/4 · loss 0.6200 · lr 1.00e-04 · 10.0 it/s</span><button type="button" class="btn-g" onClick="{{trn.stop}}" style="height: 26px">Stop</button></div></sc-if>
+<sc-if value="{{trn.runsOn}}">
+<div style="flex: 1 1 0; min-height: 0; display: flex">
+<div style="flex: 1 1 0; min-width: 0; overflow-y: auto; padding: 12px 10px">
+<sc-for list="{{trn.runs}}" as="r" hint-placeholder-count="2">
+<button type="button" class="hv" onClick="{{r.pick}}" aria-current="{{r.current}}" style="width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 12px; padding: 10px 12px; margin-bottom: 2px; border: 0; border-radius: 7px; background: {{r.bg}}; text-align: left; color: var(--text-primary)">
+<span class="mono" style="font-size: var(--t-body)">{{r.id}}</span><span style="font-size: var(--t-meta); color: var(--text-secondary)">{{r.status}}</span>
+<span style="font-size: var(--t-meta); color: {{r.gateColor}}">{{r.meta}}</span>
+</button>
+</sc-for>
+</div>
+<aside class="ap-detail" aria-label="Run" style="flex: 0 0 380px; min-height: 0; overflow-y: auto; padding: 18px 20px; background: var(--surface-inspector); border-left: 1px solid var(--line-border)">
+<h2 class="mono" style="margin: 0; font-size: var(--t-title); font-weight: 600">{{trn.cur.id}}</h2>
+<div style="margin-top: 6px; color: {{trn.cur.gateColor}}">{{trn.cur.gate}}</div>
+<sc-for list="{{trn.cur.facts}}" as="f"><h3 class="lbl" style="margin: 14px 0 4px">{{f.label}}</h3><div style="overflow-wrap: anywhere">{{f.value}}</div></sc-for>
+<div style="display: flex; gap: 8px; margin-top: 18px"><button type="button" class="btn-g" onClick="{{trn.gate}}">Gate it</button><button type="button" class="btn-g" onClick="{{trn.promote}}">Promote…</button></div>
+</aside>
+</div>
+</sc-if>
+<sc-if value="{{trn.regOn}}">
+<div style="flex: 1 1 0; min-height: 0; display: flex">
+<nav aria-label="Regimes" style="flex: 0 0 280px; min-height: 0; overflow-y: auto; padding: 12px 10px; background: var(--surface-sidebar); border-right: 1px solid var(--line-border)">
+<sc-for list="{{trn.regimes}}" as="g" hint-placeholder-count="3"><button type="button" class="hv" onClick="{{g.pick}}" aria-current="{{g.current}}" style="width: 100%; display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; margin-bottom: 4px; border: 0; border-radius: 7px; background: {{g.bg}}; text-align: left; color: var(--text-primary)"><span>{{g.name}}</span><span style="font-size: var(--t-meta); color: var(--text-tertiary)">{{g.meta}}</span></button></sc-for>
+</nav>
+<div style="flex: 1 1 0; min-width: 0; overflow-y: auto; padding: 22px 28px 32px"><div style="max-width: 760px">
+<div style="display: flex; align-items: center; gap: 10px"><h2 style="flex: 1 1 auto; margin: 0; font-size: var(--t-h2); font-weight: 600">{{trn.reg.name}}</h2><button type="button" class="btn-g" onClick="{{trn.runRegime}}">Run this regime</button></div>
+<p style="margin: 8px 0 0; color: var(--text-secondary)">{{trn.reg.description}}</p>
+<h3 class="lbl" style="margin: 20px 0 6px">KITS, IN ORDER</h3>
+<sc-for list="{{trn.reg.kits}}" as="k"><div>{{k.line}}</div></sc-for>
+</div></div>
+</div>
+</sc-if>
+<sc-if value="{{trn.dsOn}}">
+<div style="flex: 1 1 0; min-height: 0; display: flex">
+<nav aria-label="Datasets" style="flex: 0 0 300px; min-height: 0; overflow-y: auto; padding: 12px 10px; background: var(--surface-sidebar); border-right: 1px solid var(--line-border)">
+<button type="button" class="hv" aria-current="true" style="width: 100%; display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border: 0; border-radius: 7px; background: var(--surface-selection); text-align: left; color: var(--text-primary)"><span>heat-notes</span><span style="font-size: var(--t-meta); color: var(--text-tertiary)">2 examples · chat</span></button>
+<h3 class="lbl" style="margin: 18px 12px 6px">KITS</h3>
+<sc-for list="{{trn.kits}}" as="k"><div style="padding: 4px 12px"><div style="font-size: var(--t-small)">{{k.name}}</div><div style="font-size: var(--t-meta); color: var(--text-tertiary)">{{k.meta}}</div></div></sc-for>
+</nav>
+<div style="flex: 1 1 0; min-width: 0; padding: 22px 28px"><div style="display: flex; align-items: center; gap: 10px"><h2 style="flex: 1 1 auto; margin: 0; font-size: var(--t-h2); font-weight: 600">heat-notes</h2><button type="button" class="btn-g" onClick="{{trn.delDataset}}" style="color: var(--status-error)">Delete…</button></div>
+<p style="margin: 8px 0 0">2 examples · chat · 449 bytes</p><div class="mono" style="margin-top: 4px; font-size: var(--t-meta); color: var(--text-tertiary)">~/.apogee/training/datasets/heat-notes.jsonl</div></div>
 </div>
 </sc-if>
 </sc-if>
@@ -2020,7 +2079,7 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{ui.toastOn}}"><div role="status" style="position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 80; max-width: calc(100% - 48px); padding: 9px 16px; border-radius: 8px; background: var(--text-primary); color: var(--surface-window); font-size: var(--t-small); box-shadow: 0 8px 24px rgba(0,0,0,.3)">{{ui.toastText}}</div></sc-if>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","monitor","console","knowledge","knowledge:collections","graph:prose","models","models:downloads","models:store","models:convert","models:register","models:roles","download","suites","tasks","newtask","graph","video","video:run","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions"],"default":"chat"},"still":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
+<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","monitor","console","knowledge","knowledge:collections","graph:prose","training","training:datasets","models","models:downloads","models:store","models:convert","models:register","models:roles","download","suites","tasks","newtask","graph","video","video:run","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions"],"default":"chat"},"still":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
 class Component extends DCLogic {
   constructor(props) {
     super(props);
@@ -2032,6 +2091,7 @@ class Component extends DCLogic {
       console: false,
       con: null,
       kn: { tab: 'records', asked: false, branch: '', sel: '', coll: 'notes', searched: false },
+      tr: { tab: 'runs', sel: '20261021-051826', regime: 'foundation', dataset: 'heat-notes', running: false },
       confirm: null,
       settingsPane: 'general',
       menu: null,
@@ -2215,6 +2275,7 @@ class Component extends DCLogic {
       }
     } else if (where === 'download') set({ screen: 'models', overlay: 'download', dl: { repo: 'Wan-AI/Wan2.1-T2V-1.3B-Diffusers', format: 'gguf', quant: 'Q4_K_M' } });
     else if (where === 'graph' && sub === 'prose') set({ screen: 'graph', gView: 'prose' });
+    else if (where === 'training') set({ screen: 'training', tr: sub === 'datasets' ? { tab: 'datasets', sel: '20261021-051826', regime: 'foundation', running: false } : { tab: 'runs', sel: '20261021-051826', regime: 'foundation', running: true } });
     else if (where === 'knowledge') set({ screen: 'knowledge', kn: sub === 'collections' ? { tab: 'collections', coll: 'notes', searched: true } : { tab: 'records', asked: true, branch: '', sel: 'kr-20261021T045944Z-1e2354', coll: 'notes', searched: false } });
     else if (where === 'suites' || where === 'tasks' || where === 'graph' || where === 'voice') set({ screen: where });
     else if (where === 'newtask') set({ screen: 'tasks', overlay: 'newtask', newTask: { goal: 'Make tests/test_parsers.py pass on Python 3.12', suite: 'coding', rounds: '8', writes: 'allow', cmds: 'allow', require: '', requireFile: '' } });
@@ -3780,9 +3841,9 @@ class Component extends DCLogic {
     const runningJobs = s.jobs.filter((j) => j.state === 'running' && !j.finished).length;
     const runningTasks = s.tasks.filter((t) => t.status === 'running' && this.taskView(t).isRunning).length;
     const videoBusy = (s.vrun && !s.vrun.stopped ? 1 : 0) + (s.crender ? 1 : 0);
-    const places = [['chat', 'Sessions', '⌘1', 0], ['models', 'Models', '⌘2', runningJobs], ['suites', 'Suites', '⌘3', 0], ['tasks', 'Tasks', '⌘4', runningTasks], ['graph', 'Code graph', '⌘5', 0], ['video', 'Video', '⌘6', videoBusy], ['voice', 'Voice', '⌘7', s.vsay ? 1 : 0], ['knowledge', 'Knowledge', '⌘8', 0]].map((p) => ({
+    const places = [['chat', 'Sessions', '⌘1', 0], ['models', 'Models', '⌘2', runningJobs], ['suites', 'Suites', '⌘3', 0], ['tasks', 'Tasks', '⌘4', runningTasks], ['graph', 'Code graph', '⌘5', 0], ['video', 'Video', '⌘6', videoBusy], ['voice', 'Voice', '⌘7', s.vsay ? 1 : 0], ['knowledge', 'Knowledge', '⌘8', 0], ['training', 'Training', '⌘9', s.tr && s.tr.running ? 1 : 0]].map((p) => ({
       label: p[1], key: p[2], current: s.screen === p[0], bg: s.screen === p[0] ? 'var(--surface-selection)' : '', color: s.screen === p[0] ? 'var(--text-primary)' : 'var(--text-secondary)', weight: s.screen === p[0] ? 500 : 400,
-      isChat: p[0] === 'chat', isModels: p[0] === 'models', isSuites: p[0] === 'suites', isTasks: p[0] === 'tasks', isGraph: p[0] === 'graph', isVideo: p[0] === 'video', isVoice: p[0] === 'voice', isKnowledge: p[0] === 'knowledge',
+      isChat: p[0] === 'chat', isModels: p[0] === 'models', isSuites: p[0] === 'suites', isTasks: p[0] === 'tasks', isGraph: p[0] === 'graph', isVideo: p[0] === 'video', isVoice: p[0] === 'voice', isKnowledge: p[0] === 'knowledge', isTraining: p[0] === 'training',
       hasBadge: p[3] > 0, badge: p[3] + ' running', badgeColor: 'var(--status-accent)',
       aria: p[1] + ' ' + p[2] + (p[3] > 0 ? ' · ' + p[3] + ' running' : ''),
       go: () => this.setState({ screen: p[0], menu: null })
@@ -4520,7 +4581,7 @@ class Component extends DCLogic {
       recallSize: s.recallCount ? '41 MB index on this Mac' : 'nothing stored',
       nothingToForget: s.recallCount === 0,
       forget: () => this.setState({ confirm: { kind: 'forget' } }),
-      keys: [['New session', '⌘N'], ['New private session', '⇧⌘N'], ['Switch model', '⇧⌘M'], ['Show or hide the inspector', '⌥⌘I'], ['System monitor', '⌥⌘M'], ['Console', '⇧⌘K'], ['Settings', '⌘,'], ['Stop the answer', '⌘.'], ['Search sessions', '⇧⌘F'], ['Sessions, Models, Suites, Tasks, Code graph, Video, Voice, Knowledge', '⌘1 – ⌘8'], ['Models library', '⇧⌘L'], ['Send', '⏎'], ['New line', '⇧⏎'], ['Commands', '/'], ['Mention a file', '@'], ['Allow once on a permission card', '⏎'], ['Deny on a permission card', 'esc'], ['Pick an answer on a card', '1 – 4'], ['Play or pause the focused player', 'space'], ['Generate, Speak, Plan or Render, from its form', '⌘⏎'], ['Hide the sidebar', '⌃⌘S']].map((x) => ({ label: x[0], keys: x[1] }))
+      keys: [['New session', '⌘N'], ['New private session', '⇧⌘N'], ['Switch model', '⇧⌘M'], ['Show or hide the inspector', '⌥⌘I'], ['System monitor', '⌥⌘M'], ['Console', '⇧⌘K'], ['Settings', '⌘,'], ['Stop the answer', '⌘.'], ['Search sessions', '⇧⌘F'], ['Sessions, Models, Suites, Tasks, Code graph, Video, Voice, Knowledge, Training', '⌘1 – ⌘9'], ['Models library', '⇧⌘L'], ['Send', '⏎'], ['New line', '⇧⏎'], ['Commands', '/'], ['Mention a file', '@'], ['Allow once on a permission card', '⏎'], ['Deny on a permission card', 'esc'], ['Pick an answer on a card', '1 – 4'], ['Play or pause the focused player', 'space'], ['Generate, Speak, Plan or Render, from its form', '⌘⏎'], ['Hide the sidebar', '⌃⌘S']].map((x) => ({ label: x[0], keys: x[1] }))
     };
 
     /* ---------- suites ---------- */
@@ -4601,6 +4662,40 @@ class Component extends DCLogic {
         const task = { id: id, goal: n.goal.trim(), kind: 'generic', status: 'running', base: 0, since: st.clock, rounds: Number(n.rounds), suite: suitesDef[n.suite].name, started: 'today ' + this.nowTime(), writes: n.writes, cmds: n.cmds, haltAt: null };
         this.setState({ tasks: [task].concat(st.tasks), taskId: id, overlay: null, screen: 'tasks' });
       }
+    };
+
+    /* ---------- training ---------- */
+    const trs = s.tr || { tab: 'runs' };
+    const trPatch = (p) => this.setState({ tr: Object.assign({}, trs, p) });
+    const trRuns = [
+      { id: '20261021-051826', status: 'complete', meta: 'lora · mock · loss 0.4200 · failed the gate (46%) -- promote refuses it unless forced', gate: 'failed the gate (46%) -- promote refuses it unless forced', failed: true, facts: [['TRAINED', '/Users/someone/work/student'], ['ON', '/Users/someone/work/data.jsonl'], ['HOW', 'lora · mock · 4 iterations'], ['FINAL LOSS', '0.4200'], ['RAN', '2026-10-21T05:18:26Z → 2026-10-21T05:18:26Z']] }
+    ];
+    const trRegimes = [
+      { name: 'foundation', description: 'The four general kits as one gated pipeline -- instruction-following, structured output, summarization, then reasoning.', kits: ['instruction-following', 'structured-output', 'summarization', 'reasoning'] },
+      { name: 'harness-helpers', description: "The harness chores as one gated pipeline -- the utility role's rewrites and summaries, the extraction role's schema-held JSON, then tool calls.", kits: ['utility-chores', 'extraction-fidelity', 'tool-calling'] },
+      { name: 'knowledge', description: "The knowledge-capture clerk's chore as one gated stage -- a raw discussion read into a canonical intent record.", kits: ['knowledge-capture'] }
+    ];
+    const trCur = trRuns.find((r) => r.id === trs.sel) || trRuns[0];
+    const trReg = trRegimes.find((g) => g.name === trs.regime) || trRegimes[0];
+    const trn = {
+      runsOn: (trs.tab || 'runs') === 'runs', regOn: trs.tab === 'regimes', dsOn: trs.tab === 'datasets',
+      runsBg: (trs.tab || 'runs') === 'runs' ? 'var(--surface-control)' : 'transparent', regBg: trs.tab === 'regimes' ? 'var(--surface-control)' : 'transparent', dsBg: trs.tab === 'datasets' ? 'var(--surface-control)' : 'transparent',
+      showRuns: () => trPatch({ tab: 'runs' }), showRegimes: () => trPatch({ tab: 'regimes' }), showDatasets: () => trPatch({ tab: 'datasets' }),
+      running: !!trs.running,
+      stop: () => trPatch({ running: false }),
+      runs: trRuns.map((r) => ({ id: r.id, status: r.status, meta: r.meta, gateColor: r.failed ? 'var(--status-error)' : 'var(--text-tertiary)', current: r.id === trCur.id, bg: r.id === trCur.id ? 'var(--surface-selection)' : '', pick: () => trPatch({ sel: r.id }) })),
+      cur: { id: trCur.id, gate: trCur.gate, gateColor: trCur.failed ? 'var(--status-error)' : 'var(--text-secondary)', facts: trCur.facts.map((f) => ({ label: f[0], value: f[1] })) },
+      regimes: trRegimes.map((g) => ({ name: g.name, meta: g.kits.length + (g.kits.length === 1 ? ' kit' : ' kits') + ' · seeded', current: g.name === trReg.name, bg: g.name === trReg.name ? 'var(--surface-selection)' : '', pick: () => trPatch({ regime: g.name }) })),
+      reg: { name: trReg.name, description: trReg.description, kits: trReg.kits.map((k, i) => ({ line: (i + 1) + '. ' + k })) },
+      kits: [['extraction-fidelity', 24], ['instruction-following', 24], ['knowledge-capture', 24], ['reasoning', 24], ['structured-output', 24], ['summarization', 24], ['tool-calling', 32], ['utility-chores', 24]].map((k) => ({ name: k[0], meta: k[1] + ' eval items' })),
+      newRun: () => trPatch({ running: true }),
+      gate: () => this.say('apogee train eval ' + trCur.id + ' (prototype)'),
+      promote: () => this.say('apogee train promote ' + trCur.id + ' --as <backend>: the gate honoured unless forced (prototype)'),
+      runRegime: () => this.say('apogee train regime run ' + trReg.name + ' (prototype)'),
+      newDataset: () => this.say('apogee datasets create <name> --from template (prototype)'),
+      synth: () => this.say('apogee datasets synth <name> --teacher <backend> --kit <kit> (prototype)'),
+      prepare: () => this.say('apogee datasets prepare <file> (prototype)'),
+      delDataset: () => this.say('apogee datasets delete heat-notes --yes: confirmed first (prototype)')
     };
 
     /* ---------- knowledge ---------- */
@@ -5458,6 +5553,7 @@ class Component extends DCLogic {
       isVideo: s.screen === 'video',
       isVoice: s.screen === 'voice',
       isKnowledge: s.screen === 'knowledge',
+      isTraining: s.screen === 'training',
       runtimeOpen: !!s.rtAsk && !s.rtAsk.hidden,
       monitorOpen: s.monitor,
       consoleOpen: s.console,
@@ -5474,7 +5570,7 @@ class Component extends DCLogic {
       openPdf: () => this.say('Opens the source in Preview at that page (prototype)')
     };
 
-    return { ui: ui, nav: nav, mon: mon, con: con, kno: kno, chat: chat, tg: tg, rt: rt, wal: wal, cr: cr, pr: pr, cmp: cmp, ins: ins, mdl: mdl, st: st, sh: sh, dlg: dlg, cf: cf, set: setv, sui: sui, tsk: tsk, nt: ntv, gr: gr, vid: vid, comp: comp, vox: vox, rtc: rtc };
+    return { ui: ui, nav: nav, mon: mon, con: con, kno: kno, trn: trn, chat: chat, tg: tg, rt: rt, wal: wal, cr: cr, pr: pr, cmp: cmp, ins: ins, mdl: mdl, st: st, sh: sh, dlg: dlg, cf: cf, set: setv, sui: sui, tsk: tsk, nt: ntv, gr: gr, vid: vid, comp: comp, vox: vox, rtc: rtc };
   }
 }
 </script>
