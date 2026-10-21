@@ -20,4 +20,4 @@
 - [ ] An execute session opens from the picker with suite/model/project/orchestrate, behaving as the flags say; plays narrate in the transcript.
 - [ ] The new-task sheet offers recipes with their expansion shown before launch; `analyze`'s classification stands in the table; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0 (track 2); gated on [`parity-law-and-table.md`](parity-law-and-table.md) (2a) and [`agents-mcp-symphonies.md`](agents-mcp-symphonies.md) (2e — the symphony catalog plays draw on). Out of scope: new protocol lines (none needed — measured), the console (2b).
+**Scope note.** Earmarked for v0.2.0 (track 2); gated on 2a, the parity law (shipped 2026-10-20: [MILESTONES → Milestone C](../../assistant/MILESTONES.md#milestone-c--cli-parity)) and [`agents-mcp-symphonies.md`](agents-mcp-symphonies.md) (2e — the symphony catalog plays draw on). Out of scope: new protocol lines (none needed — measured), the console (2b).

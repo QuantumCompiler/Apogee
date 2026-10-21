@@ -21,4 +21,4 @@
 - [ ] Knowledge and Collections screens list, query, mutate-with-read-back and export over the real commands; ingest and graph builds run supervised with stop.
 - [ ] The graph screen shows prose graphs, communities and decision nodes beside the code graph; retrieval honesty reads as the CLI says it; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0 (track 2); gated on [`parity-law-and-table.md`](parity-law-and-table.md) (2a). Out of scope: new CLI streams for ingest/builds (recorded later), the console (2b), recall settings (Settings owns them).
+**Scope note.** Earmarked for v0.2.0 (track 2); gated on 2a, the parity law (shipped 2026-10-20: [MILESTONES → Milestone C](../../assistant/MILESTONES.md#milestone-c--cli-parity)). Out of scope: new CLI streams for ingest/builds (recorded later), the console (2b), recall settings (Settings owns them).

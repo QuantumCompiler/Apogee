@@ -20,4 +20,4 @@
 - [ ] The three screens list/show/create over the real commands; a definition edits in-app, validated by the binary, refusals verbatim.
 - [ ] A symphony plays into the live session with its stages narrated; MCP shows presets and registers one byte-identically; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0 (track 2); gated on [`parity-law-and-table.md`](parity-law-and-table.md) (2a). Out of scope: a structured definition form (text first), orchestrate mode (the execute item's), any scaffold change.
+**Scope note.** Earmarked for v0.2.0 (track 2); gated on 2a, the parity law (shipped 2026-10-20: [MILESTONES → Milestone C](../../assistant/MILESTONES.md#milestone-c--cli-parity)). Out of scope: a structured definition form (text first), orchestrate mode (the execute item's), any scaffold change.

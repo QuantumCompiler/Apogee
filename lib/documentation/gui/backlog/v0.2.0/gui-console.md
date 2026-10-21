@@ -21,4 +21,4 @@
 - [ ] Any non-carved command runs from the console as typed, output streamed, stoppable; Tab completes from the binary's own candidates.
 - [ ] The three carve-outs refuse with the table's reasons; the design board and contract-board row exist; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0 (track 2); gated on [`parity-law-and-table.md`](parity-law-and-table.md) (2a). Out of scope: per-family screens (2c–2g), scoped-grammar mirroring, any CLI change.
+**Scope note.** Earmarked for v0.2.0 (track 2); gated on 2a, the parity law (shipped 2026-10-20: [MILESTONES → Milestone C](../../assistant/MILESTONES.md#milestone-c--cli-parity)). Out of scope: per-family screens (2c–2g), scoped-grammar mirroring, any CLI change.

@@ -20,4 +20,4 @@
 - [ ] Train lists regimes/kits/history from documents, launches runs supervised with the protocol's own steps, and drives promote/rollback with confirmations and read-back.
 - [ ] Datasets lists and mines over the real commands; the boards exist; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0 (track 2); gated on [`parity-law-and-table.md`](parity-law-and-table.md) (2a). Out of scope: `train setup` beyond what Settings' install consents already do, any trainer change, the cycle's unattended scheduling (the CLI's own).
+**Scope note.** Earmarked for v0.2.0 (track 2); gated on 2a, the parity law (shipped 2026-10-20: [MILESTONES → Milestone C](../../assistant/MILESTONES.md#milestone-c--cli-parity)). Out of scope: `train setup` beyond what Settings' install consents already do, any trainer change, the cycle's unattended scheduling (the CLI's own).

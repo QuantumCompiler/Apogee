@@ -20,4 +20,4 @@
 - [ ] A dry review runs supervised and renders its findings; posting requires the shown-batch click and passes exactly the CLI's flags; silence renders as the valid pass it is.
 - [ ] Targets and sweeps list, launch and read back; skills list and show; the board exists; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0 (track 2); gated on [`parity-law-and-table.md`](parity-law-and-table.md) (2a). Out of scope: webhooks (the CLI's recorded later), skill editing beyond the files (2e's editor pattern applies later if wanted), any forge change.
+**Scope note.** Earmarked for v0.2.0 (track 2); gated on 2a, the parity law (shipped 2026-10-20: [MILESTONES → Milestone C](../../assistant/MILESTONES.md#milestone-c--cli-parity)). Out of scope: webhooks (the CLI's recorded later), skill editing beyond the files (2e's editor pattern applies later if wanted), any forge change.

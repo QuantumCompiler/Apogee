@@ -462,3 +462,41 @@ Decisions taken while building, for veto:
 - Bare `lib/scripts/cicd.sh --test`: green -- the CLI's 3593 tests (the two usual skips) and the app's 240 cases.
 
 **Not run:** the app on the user's real store. The screen was drawn offscreen over its mirrored metadata; running it for real is the user's step.
+
+## Milestone C — CLI parity
+
+**Goal.** The GUI does everything the CLI and the TUI do: the user's mandate from their first hands-on run, 2026-10-20, recorded as the SPEC's **Full parity** principle. Track 2 gives it teeth and fills the gaps:
+- the parity law and its table (2a);
+- the console, which runs any verb (2b);
+- the families with no place yet: knowledge and collections, training, agents, MCP and symphonies, execute sessions, and review (2c–2g);
+- the model store's own verbs (2h, 2i).
+
+Every screen stays a machine-mode client of the binary, tested hermetically.
+
+### 2026-10-20 — `parity-law-and-table` (backlog item 2a): every command has a place
+
+**Why.** Nothing held the GUI to the CLI's whole surface. The audit against the TUI's own table (`tui_parity.cpp`, the CLI's ADR 0010) found 8 command families with no GUI place and no recorded carve-outs. The TUI never drifted because its law is mechanical, and the GUI had no analog.
+
+- [x] **ADR 0003** (`lib/documentation/gui/adrs/parity.md`): every top-level command the CLI offers a person has one classified place in the GUI: a screen named by its module, the console, a gap named by its queued item, a carve-out with its reason, or plumbing. It is in the house shape and indexed.
+- [x] **`ParityTable`** (`source/presentation/shell/ViewModels/Parity.swift`), the GUI's `tui_parity`, as one SwiftUI-free declaration, beside the shell's places.
+  - **Today's truth:** 15 screens (chat, chats, models, config, version, tui, system, check, providers, graph, task, auth, video, voice, bootstrap); 9 gaps by item (knowledge and embed 2c; train and datasets 2d; agents, mcp and symphonies 2e; execute 2f; review 2g); the console's 2 (`analyze`, `complete`); 3 carve-outs; 3 plumbing.
+  - **The carve-outs**, each with the GUI's own reason: `serve` (a daemon the app would orphan), `reset` (it deletes the data directory the running app stands on), `uninstall` (the app never uninstalls the binary it runs).
+  - `ParityTable.refusal(of:)` is the console's refusal; `violations(words:)` is the law over a word list.
+- [x] **The fixture**: `tests/presentation/shell/Fixtures/command-words.txt` holds the 29 top-level words `apogee __complete ""` answers, sorted. They are recorded from the installed `apogee 0.1.9 (31b170c)` in a throwaway home by `scripts/refresh-parity-fixture.sh`, beside `capture-fixture.sh`.
+- [x] **The checklist** (CLAUDE.md, Implementing a Feature) carries the rule: a CLI command added or removed is classified in the same change.
+
+**Decisions made while building** (2026-10-20, each recorded for veto):
+- **The word list is a committed fixture refreshed by a script** (the open call's default). No test asks a binary, which keeps it hermetic, like the protocol fixture. A live pass is the refresh script, run against a new CLI.
+- **The table lives in `PresentationShell`, and its check in the shell's own tests.** The doc suggested `tests/architecture/`, but the table names each command's place as `Destination` names the places, the console (2b) reads its refusals from it, and every module's tests mirror the module (ADR 0001).
+- **`tui` is a screen: the window itself.** The app is the full-screen shell's counterpart, as the TUI's own table names the shell. It is not a fourth carve-out.
+- **A gap's item is held to the backlog index.** A queued row whose item no longer has an index row fails the suite. Shipping 2c–2g therefore forces their rows to name the screens that now draw them, and the table cannot keep claiming a gap is queued.
+- **Plumbing is classified but exempt from the vanished check**, since completion never lists it.
+
+**Verified.**
+- `scripts/build.sh test`: 246 cases, no Swift warning. New:
+  - every fixture word is placed and nothing classified has vanished;
+  - a planted `frobnicate` fails by name, a removed `voice` fails as vanished, and an empty list never passes;
+  - the census is pinned;
+  - every screen's module has its folder, and every gap's item is an index row;
+  - the console's refusals give the carve-outs' reasons and nothing else.
+- Bare `lib/scripts/cicd.sh --test`: green -- the CLI's 3593 tests (the two usual skips) and the app's 246 cases.
