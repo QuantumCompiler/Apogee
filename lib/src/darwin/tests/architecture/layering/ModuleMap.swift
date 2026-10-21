@@ -3,8 +3,16 @@ import Foundation
 /// The app's module map, as `Apogee.xcodeproj` declares it: every target, the
 /// folder it builds, what it depends on and links, what it embeds -- read from
 /// `project.pbxproj` itself, so the check reads exactly the graph Xcode
-/// builds -- and which test bundles the shared scheme runs.
+/// builds -- which test bundles the shared scheme runs, and what each other
+/// shared scheme builds and tests (ADR 0004).
 struct ModuleMap {
+    /// A shared scheme besides `Apogee`: what its Build action builds and its
+    /// Test action runs, by target name.
+    struct Scheme: Equatable {
+        let built: [String]
+        let tested: [String]
+    }
+
     enum Kind: Equatable {
         case framework, application, test
         case other(String)
@@ -61,15 +69,18 @@ struct ModuleMap {
     let projectOutsideSettings: [String]
     /// The test bundles the shared scheme `Apogee` runs; `nil` without the scheme.
     let schemeTestables: [String]?
+    /// The other shared schemes, by their names.
+    let schemes: [String: Scheme]
 
     init(
         targets: [Target], packageReferences: Int = 0, projectOutsideSettings: [String] = [],
-        schemeTestables: [String]?
+        schemeTestables: [String]?, schemes: [String: Scheme] = [:]
     ) {
         self.targets = targets
         self.packageReferences = packageReferences
         self.projectOutsideSettings = projectOutsideSettings
         self.schemeTestables = schemeTestables
+        self.schemes = schemes
     }
 
     /// Settings that would let a target find or link something this project
@@ -95,11 +106,38 @@ struct ModuleMap {
         else { throw MapError.malformed("not a property list") }
         let scheme = try? String(
             contentsOf: project.appendingPathComponent("xcshareddata/xcschemes/Apogee.xcscheme"), encoding: .utf8)
-        try self.init(projectPlist: plist, schemeXML: scheme)
+        try self.init(projectPlist: plist, schemeXML: scheme, schemes: Self.sharedSchemes(of: project))
     }
 
-    /// The project from its parsed property list, and the shared scheme's XML.
-    init(projectPlist plist: [String: Any], schemeXML: String?) throws {
+    /// The project's shared schemes besides `Apogee`, read from
+    /// `xcshareddata/xcschemes/`.
+    static func sharedSchemes(of project: URL) -> [String: Scheme] {
+        let folder = project.appendingPathComponent("xcshareddata/xcschemes")
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        var schemes: [String: Scheme] = [:]
+        for file in files where file.pathExtension == "xcscheme" && file.deletingPathExtension().lastPathComponent != "Apogee" {
+            guard let xml = try? String(contentsOf: file, encoding: .utf8) else { continue }
+            schemes[file.deletingPathExtension().lastPathComponent] = scheme(xml)
+        }
+        return schemes
+    }
+
+    /// What a scheme's Build action builds and its Test action runs.
+    static func scheme(_ xml: String) -> Scheme {
+        Scheme(built: blueprints(in: xml, between: "<BuildActionEntries>", and: "</BuildActionEntries>"), tested: testables(inScheme: xml))
+    }
+
+    /// The `BlueprintName`s of the `BuildableReference`s between two tags.
+    static func blueprints(in xml: String, between open: String, and close: String) -> [String] {
+        guard let start = xml.range(of: open), let end = xml.range(of: close) else { return [] }
+        return xml[start.upperBound..<end.lowerBound].components(separatedBy: "BlueprintName = \"").dropFirst().compactMap {
+            $0.split(separator: "\"", maxSplits: 1).first.map(String.init)
+        }
+    }
+
+    /// The project from its parsed property list, the shared scheme's XML,
+    /// and the other shared schemes.
+    init(projectPlist plist: [String: Any], schemeXML: String?, schemes: [String: Scheme] = [:]) throws {
         guard let objects = plist["objects"] as? [String: [String: Any]],
             let rootID = plist["rootObject"] as? String, let root = objects[rootID]
         else { throw MapError.malformed("no objects or root object") }
@@ -194,7 +232,7 @@ struct ModuleMap {
         self.init(
             targets: targets, packageReferences: ids(root["packageReferences"]).count,
             projectOutsideSettings: outside(root["buildConfigurationList"]),
-            schemeTestables: schemeXML.map(Self.testables(inScheme:)))
+            schemeTestables: schemeXML.map(Self.testables(inScheme:)), schemes: schemes)
     }
 
     /// The `BlueprintName`s of a scheme's `<Testables>`, skipped ones left out.

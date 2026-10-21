@@ -95,3 +95,17 @@ struct QuestionCardView: View {
         return multiple ? (on ? "checkmark.square.fill" : "square") : (on ? "largecircle.fill.circle" : "circle")
     }
 }
+
+#if DEBUG
+#Preview("Asked, with room for the person's own words") {
+    QuestionCardView(card: SessionPreview.question()) { _ in }
+        .frame(width: 640)
+        .padding(Spacing.xl)
+}
+
+#Preview("Answered") {
+    QuestionCardView(card: SessionPreview.question(SessionPreview.noteAnswers)) { _ in }
+        .frame(width: 640)
+        .padding(Spacing.xl)
+}
+#endif

@@ -335,3 +335,104 @@ enum TaskStatusWords {
         }
     }
 }
+
+#if DEBUG
+#Preview("A task out of rounds, read") {
+    let tasks = TasksPreview.tasks()
+    TasksScreen(model: tasks)
+        .frame(width: 1100, height: 680)
+        .task {
+            await tasks.connect(binary: previewBinary)
+            await tasks.select(TasksPreview.task)
+        }
+}
+
+#Preview("No tasks yet") {
+    let tasks = TasksPreview.tasks(listing: TasksPreview.empty)
+    TasksScreen(model: tasks)
+        .frame(width: 1100, height: 600)
+        .task { await tasks.connect(binary: previewBinary) }
+}
+
+#Preview("The list: a task, read") {
+    let tasks = TasksPreview.tasks()
+    TaskList(model: tasks)
+        .frame(width: 300, height: 360)
+        .task {
+            await tasks.connect(binary: previewBinary)
+            await tasks.select(TasksPreview.task)
+        }
+}
+
+#Preview("The list: a task starting") {
+    let tasks = TasksPreview.tasks(listing: TasksPreview.empty)
+    TaskList(model: tasks)
+        .frame(width: 300, height: 360)
+        .task {
+            await tasks.connect(binary: previewBinary)
+            TasksPreview.startRecorded(tasks)
+        }
+}
+
+#Preview("The list: Apogee not installed") {
+    let tasks = TasksPreview.tasks()
+    TaskList(model: tasks)
+        .frame(width: 300, height: 360)
+        .task { await tasks.connect(binary: nil) }
+}
+
+#Preview("A run in its first round") {
+    let tasks = TasksPreview.tasks(listing: TasksPreview.empty, said: TasksPreview.firstRound)
+    TaskDetail(model: tasks)
+        .frame(width: 800, height: 680)
+        .task {
+            await tasks.connect(binary: previewBinary)
+            TasksPreview.startRecorded(tasks)
+        }
+}
+
+#Preview("A task out of rounds, read from the ledger") {
+    let tasks = TasksPreview.tasks()
+    TaskDetail(model: tasks)
+        .frame(width: 800, height: 680)
+        .task {
+            await tasks.connect(binary: previewBinary)
+            await tasks.select(TasksPreview.task)
+        }
+}
+
+#Preview("No task chosen") {
+    TaskDetail(model: TasksPreview.tasks())
+        .frame(width: 800, height: 500)
+}
+
+#Preview("New task: nothing written yet") {
+    let tasks = TasksPreview.tasks()
+    NewTaskSheet(model: tasks)
+        .task {
+            await tasks.connect(binary: previewBinary)
+            await tasks.readRecipes()
+        }
+}
+
+#Preview("New task: a goal and its check") {
+    let tasks = TasksPreview.tasks()
+    NewTaskSheet(model: tasks)
+        .task {
+            await tasks.connect(binary: previewBinary)
+            await tasks.readRecipes()
+            TasksPreview.fillRecorded(tasks)
+        }
+}
+
+#Preview("New task: a recipe, its input given") {
+    let tasks = TasksPreview.tasks()
+    NewTaskSheet(model: tasks)
+        .task {
+            await tasks.connect(binary: previewBinary)
+            await tasks.readRecipes()
+            await tasks.choose(recipe: "digest-folder")
+            tasks.form.input = "docs"
+        }
+}
+#endif

@@ -144,3 +144,47 @@ struct SuiteDetail: View {
         }
     }
 }
+
+#if DEBUG
+#Preview("Two suites, coding the default and open") {
+    let suites = SuitesPreview.model()
+    SuitesScreen(model: suites)
+        .frame(width: 1100, height: 560)
+        .task { await suites.connect(binary: previewBinary) }
+}
+
+#Preview("No suites yet") {
+    let suites = SuitesPreview.model(over: SuitesPreview.empty)
+    SuitesScreen(model: suites)
+        .frame(width: 1100, height: 480)
+        .task { await suites.connect(binary: previewBinary) }
+}
+
+#Preview("Apogee isn't installed") {
+    let suites = SuitesPreview.model()
+    SuitesScreen(model: suites)
+        .frame(width: 1100, height: 480)
+        .task { await suites.connect(binary: nil) }
+}
+
+#Preview("The default suite, too big for this Mac") {
+    let suites = SuitesPreview.model()
+    SuiteDetail(model: suites, suite: SuitesPreview.suite("coding"))
+        .frame(width: 820, height: 420)
+        .task { await suites.connect(binary: previewBinary) }
+}
+
+#Preview("A suite whose fit is unknown: a member states no size") {
+    let suites = SuitesPreview.model()
+    SuiteDetail(model: suites, suite: SuitesPreview.suite("research"))
+        .frame(width: 820, height: 420)
+        .task { await suites.connect(binary: previewBinary) }
+}
+
+#Preview("A suite that fits, one backend in two roles") {
+    let suites = SuitesPreview.model(over: SuitesPreview.one)
+    SuiteDetail(model: suites, suite: SuitesPreview.suite("duo"))
+        .frame(width: 820, height: 420)
+        .task { await suites.connect(binary: previewBinary) }
+}
+#endif

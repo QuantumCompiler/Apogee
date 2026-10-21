@@ -363,3 +363,91 @@ struct EditorSheet: View {
         .frame(width: 720)
     }
 }
+
+#if DEBUG
+#Preview("Agents, triage open") {
+    let agents = LibraryPreview.agents()
+    LibraryScreen(agents: agents, symphonies: LibraryPreview.symphonies(), mcp: LibraryPreview.mcp())
+        .frame(width: 1100, height: 640)
+        .task {
+            await agents.connect(binary: previewBinary)
+            agents.selected = "triage"
+        }
+}
+
+#Preview("A list beside a page") {
+    ListPage(rows: LibraryPreview.agentRows, selected: "triage", pick: { _ in }) { agent in
+        Text(agent.name).font(.apogeeBody)
+    } page: {
+        Text("triage").font(.apogeeHeading).padding(Spacing.xl)
+    }
+    .frame(width: 900, height: 480)
+}
+
+#Preview("Agents: a shipped one, and the person's own") {
+    let agents = LibraryPreview.agents()
+    AgentsView(model: agents)
+        .frame(width: 1000, height: 560)
+        .task {
+            await agents.connect(binary: previewBinary)
+            agents.selected = "triage"
+        }
+}
+
+#Preview("Symphonies: one played") {
+    let symphonies = LibraryPreview.symphonies()
+    SymphoniesView(model: symphonies)
+        .frame(width: 1000, height: 760)
+        .task {
+            await symphonies.connect(binary: previewBinary)
+            if let critique = symphonies.symphonies.first(where: { $0.name == "critique-revise" }) {
+                symphonies.select(critique)
+                symphonies.input = "A draft README for the tool."
+                symphonies.playIt()
+            }
+        }
+}
+
+#Preview("Symphonies: playing") {
+    let symphonies = LibraryPreview.symphonies(playing: true)
+    SymphoniesView(model: symphonies)
+        .frame(width: 1000, height: 600)
+        .task {
+            await symphonies.connect(binary: previewBinary)
+            if let critique = symphonies.symphonies.first(where: { $0.name == "critique-revise" }) {
+                symphonies.select(critique)
+                symphonies.input = "A draft README for the tool."
+                symphonies.playIt()
+            }
+        }
+}
+
+#Preview("MCP servers and presets") {
+    let mcp = LibraryPreview.mcp()
+    MCPView(model: mcp)
+        .frame(width: 1000, height: 620)
+        .task {
+            mcp.use(binary: previewBinary)
+            await mcp.refresh()
+            mcp.selected = "code"
+        }
+}
+
+#Preview("New agent") {
+    let agents = LibraryPreview.agents()
+    AgentSheet(model: agents)
+        .task {
+            agents.createForm.name = "triage"
+            agents.createForm.description = "Sort incoming issues by area"
+        }
+}
+
+#Preview("Editing the person's own prompt") {
+    EditorSheet(
+        editor: .constant(
+            DefinitionEditor(
+                title: "triage", path: "/Users/someone/.apogee/prompts/triage.txt",
+                original: LibraryPreview.triagePrompt, text: LibraryPreview.triagePrompt + "\nFile each issue under one area.\n")),
+        save: {}, restore: nil, close: {})
+}
+#endif

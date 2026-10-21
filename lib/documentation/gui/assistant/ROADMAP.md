@@ -33,6 +33,7 @@ The documentation tree was restructured per application (2026-10-20, the user's 
 - [x] **The media studio** *(1m, 1n and 1o, shipped 2026-10-20 — [MILESTONES → Milestone B](MILESTONES.md#milestone-b--the-designs-screens))* — clips from the Movies records, compose with scene progress from the project document, voice with the document's timings.
 - [x] **Settings** *(1p, shipped 2026-10-20 — [MILESTONES → Milestone B](MILESTONES.md#milestone-b--the-designs-screens))* — five panes over the real verbs, keys via stdin retained nowhere, the three-theme switch in `styles`.
 - [x] **Design board corrections** *(1q, shipped 2026-10-20 — [MILESTONES → Milestone B](MILESTONES.md#milestone-b--the-designs-screens))* — macOS 27+ stands; the probe-found gaps join the board's ledger; republished per its law.
+- [x] **ADR 0004** *(adopted 2026-10-21 — [MILESTONES → Milestone A](MILESTONES.md#milestone-a--the-macos-application))* — every Presentation module of the macOS app has its own shared scheme, and every view it draws a hermetic `#Preview` over the binary's recorded documents (the user's call, 2026-10-21), held by the layering check.
 - See the [`backlog/`](../backlog/README.md) index for the work queue.
 
 ### v0.2.0 — Track 2, CLI parity

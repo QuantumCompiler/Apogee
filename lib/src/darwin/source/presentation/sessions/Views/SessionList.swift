@@ -261,3 +261,66 @@ struct RenameSheet: View {
         dismiss()
     }
 }
+
+#if DEBUG
+#Preview("Not read yet") {
+    SessionList(library: SessionsPreview.library(), shell: SessionsPreview.shell())
+        .frame(width: 256, height: 480)
+}
+
+#Preview("Read: each row's glyph its backend's kind") {
+    let library = SessionsPreview.library()
+    SessionList(library: library, shell: SessionsPreview.shell())
+        .frame(width: 256, height: 480)
+        .task { await library.start(inView: false) }
+}
+
+#Preview("Every date group") {
+    let library = SessionsPreview.library(chats: SessionsPreview.everyGroup)
+    SessionList(library: library, shell: SessionsPreview.shell())
+        .frame(width: 256, height: 480)
+        .task { await library.start(inView: false) }
+}
+
+#Preview("Searching") {
+    let library = SessionsPreview.library(chats: SessionsPreview.everyGroup)
+    SessionList(library: library, shell: SessionsPreview.shell())
+        .frame(width: 256, height: 480)
+        .task {
+            await library.start(inView: false)
+            library.query = "plan"
+        }
+}
+
+#Preview("Apogee isn't installed") {
+    let library = SessionsPreview.library(missing: true)
+    SessionList(library: library, shell: SessionsPreview.shell())
+        .frame(width: 256, height: 480)
+        .task { await library.start(inView: false) }
+}
+
+#Preview("A private session open") {
+    let library = SessionsPreview.library(lines: [SessionsPreview.newerBuild])
+    SessionList(library: library, shell: SessionsPreview.shell())
+        .frame(width: 256, height: 480)
+        .task {
+            await library.start(inView: true)
+            await SessionsPreview.until { library.privateIsNothingWritten }
+            await library.newPrivateSession()
+        }
+}
+
+#Preview("Each kind of model, and the neutral glyph") {
+    HStack(spacing: Spacing.l) {
+        KindGlyph(kind: .local)
+        KindGlyph(kind: .api)
+        KindGlyph(kind: .subscription)
+        KindGlyph(kind: nil)
+    }
+    .padding(Spacing.xl)
+}
+
+#Preview("Renaming a saved session") {
+    RenameSheet(chat: SessionsPreview.chats[0]) { _ in }
+}
+#endif

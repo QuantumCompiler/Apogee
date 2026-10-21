@@ -74,3 +74,23 @@ struct PermissionCardView: View {
         }
     }
 }
+
+#if DEBUG
+#Preview("Asking to write a file") {
+    PermissionCardView(card: SessionPreview.permission()) { _ in }
+        .frame(width: 640)
+        .padding(Spacing.xl)
+}
+
+#Preview("Allowed once") {
+    PermissionCardView(card: SessionPreview.permission(SessionPreview.noteAnswers)) { _ in }
+        .frame(width: 640)
+        .padding(Spacing.xl)
+}
+
+#Preview("Denied") {
+    PermissionCardView(card: SessionPreview.permission([SessionPreview.noteAnswers[0], "no"])) { _ in }
+        .frame(width: 640)
+        .padding(Spacing.xl)
+}
+#endif

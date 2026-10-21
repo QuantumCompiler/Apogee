@@ -456,3 +456,173 @@ struct IngestSheet: View {
         }
     }
 }
+
+#if DEBUG
+#Preview("Records, one open") {
+    let records = KnowledgePreview.records()
+    KnowledgeScreen(records: records, collections: KnowledgePreview.collections())
+        .frame(width: 1100, height: 640)
+        .task {
+            await records.connect(binary: previewBinary)
+            records.select(KnowledgePreview.record("kr-20261021T045944Z-3346a9"))
+        }
+}
+
+#Preview("Apogee not installed") {
+    let records = KnowledgePreview.records()
+    KnowledgeScreen(records: records, collections: KnowledgePreview.collections())
+        .frame(width: 1100, height: 480)
+        .task { await records.connect(binary: nil) }
+}
+
+#Preview("Records: every branch") {
+    let records = KnowledgePreview.records()
+    RecordsView(model: records)
+        .frame(width: 900, height: 560)
+        .task { await records.connect(binary: previewBinary) }
+}
+
+#Preview("Records: a question answered, with scores") {
+    let records = KnowledgePreview.records()
+    RecordsView(model: records)
+        .frame(width: 900, height: 560)
+        .task {
+            await records.connect(binary: previewBinary)
+            records.question = KnowledgePreview.recordsQuestion
+            await records.search()
+            if let first = records.query?.matches.first { records.select(first.record) }
+        }
+}
+
+#Preview("Records: a branch with none") {
+    let records = KnowledgePreview.records()
+    RecordsView(model: records)
+        .frame(width: 900, height: 480)
+        .task {
+            await records.connect(binary: previewBinary)
+            records.branch = "superseded"
+        }
+}
+
+#Preview("Records: a capture running") {
+    let records = KnowledgePreview.records()
+    RecordsView(model: records)
+        .frame(width: 900, height: 560)
+        .task {
+            await records.connect(binary: previewBinary)
+            records.newCapture()
+            records.captureForm.text = KnowledgePreview.conversation
+            records.capture()
+        }
+}
+
+#Preview("A shipped record, linked") {
+    RecordPage(model: KnowledgePreview.records(), record: KnowledgePreview.record("kr-20261021T045944Z-3346a9"))
+        .frame(width: 380, height: 640)
+        .background(Palette.inspector)
+}
+
+#Preview("A rejected record, linked to nothing yet") {
+    RecordPage(model: KnowledgePreview.records(), record: KnowledgePreview.record("kr-20261021T045944Z-1e2354"))
+        .frame(width: 380, height: 640)
+        .background(Palette.inspector)
+}
+
+#Preview("Collections: read, none chosen") {
+    let collections = KnowledgePreview.collections()
+    CollectionsView(model: collections)
+        .frame(width: 1000, height: 560)
+        .task { await collections.connect(binary: previewBinary) }
+}
+
+#Preview("Collections: notes, searched") {
+    let collections = KnowledgePreview.collections()
+    CollectionsView(model: collections)
+        .frame(width: 1000, height: 620)
+        .task {
+            await KnowledgePreview.openNotes(collections)
+            collections.question = KnowledgePreview.collectionQuestion
+            await collections.search()
+        }
+}
+
+#Preview("Collections: an ingest running") {
+    let collections = KnowledgePreview.collections(said: [KnowledgePreview.ingesting])
+    CollectionsView(model: collections)
+        .frame(width: 1000, height: 620)
+        .task {
+            await KnowledgePreview.openNotes(collections)
+            collections.newIngest(into: "notes")
+            collections.ingestForm.path = "/Users/someone/notes"
+            collections.ingest()
+        }
+}
+
+#Preview("Collections: Apogee not installed") {
+    let collections = KnowledgePreview.collections()
+    CollectionsView(model: collections)
+        .frame(width: 1000, height: 480)
+        .task { await collections.connect(binary: nil) }
+}
+
+#Preview("A text-only collection") {
+    CollectionPage(model: KnowledgePreview.collections(), info: KnowledgePreview.notes)
+        .frame(width: 720, height: 560)
+}
+
+#Preview("A collection searched: the CLI's own lines") {
+    let collections = KnowledgePreview.collections()
+    CollectionPage(model: collections, info: KnowledgePreview.notes)
+        .frame(width: 720, height: 720)
+        .task {
+            await KnowledgePreview.openNotes(collections)
+            collections.question = KnowledgePreview.collectionQuestion
+            await collections.search()
+        }
+}
+
+#Preview("A run started, nothing said yet") {
+    RunLine(progress: JobProgress()) {}
+        .frame(width: 520)
+}
+
+#Preview("An ingest's busy line") {
+    RunLine(progress: KnowledgePreview.progress([KnowledgePreview.ingesting])) {}
+        .frame(width: 520)
+}
+
+#Preview("Capture: nothing written yet") {
+    let records = KnowledgePreview.records()
+    CaptureSheet(model: records)
+        .task { records.newCapture() }
+}
+
+#Preview("Capture: the clerk overridden where the person says") {
+    let records = KnowledgePreview.records()
+    CaptureSheet(model: records)
+        .task {
+            records.newCapture()
+            records.captureForm.text = KnowledgePreview.conversation
+            records.captureForm.status = "rejected"
+            records.captureForm.discipline = "ux"
+            records.captureForm.link = "PROJ-9"
+        }
+}
+
+#Preview("Ingest: nothing chosen yet") {
+    let collections = KnowledgePreview.collections()
+    IngestSheet(model: collections)
+        .task { collections.newIngest() }
+}
+
+#Preview("Ingest: a folder, embedded, its graph after") {
+    let collections = KnowledgePreview.collections()
+    IngestSheet(model: collections)
+        .task {
+            collections.newIngest(into: "notes")
+            collections.ingestForm.path = "/Users/someone/notes"
+            collections.ingestForm.retriever = "vector"
+            collections.ingestForm.graph = true
+        }
+}
+#endif

@@ -312,3 +312,89 @@ struct NewGraphSheet: View {
         }
     }
 }
+
+#if DEBUG
+#Preview("A code graph searched, a node explained") {
+    let graph = GraphPreview.graph()
+    GraphScreen(model: graph, shell: GraphPreview.shell())
+        .frame(width: 1200, height: 720)
+        .task { await GraphPreview.searched(graph) }
+}
+
+#Preview("A collection graph's report") {
+    let graph = GraphPreview.graph(GraphPreview.prose)
+    GraphScreen(model: graph, shell: GraphPreview.shell())
+        .frame(width: 1100, height: 720)
+        .task { await graph.connect(binary: previewBinary) }
+}
+
+#Preview("A collection graph not built yet") {
+    let graph = GraphPreview.graph(GraphPreview.unbuilt)
+    GraphScreen(model: graph, shell: GraphPreview.shell())
+        .frame(width: 1100, height: 520)
+        .task { await graph.connect(binary: previewBinary) }
+}
+
+#Preview("A rebuild running") {
+    let graph = GraphPreview.graph()
+    GraphScreen(model: graph, shell: GraphPreview.shell())
+        .frame(width: 1100, height: 520)
+        .task {
+            await graph.connect(binary: previewBinary)
+            graph.rebuild()
+        }
+}
+
+#Preview("No code graph yet") {
+    let graph = GraphPreview.graph(GraphPreview.none)
+    GraphScreen(model: graph, shell: GraphPreview.shell())
+        .frame(width: 1100, height: 520)
+        .task { await graph.connect(binary: previewBinary) }
+}
+
+#Preview("Apogee not installed") {
+    let graph = GraphPreview.graph()
+    GraphScreen(model: graph, shell: GraphPreview.shell())
+        .frame(width: 1100, height: 520)
+        .task { await graph.connect(binary: nil) }
+}
+
+#Preview("The neighbourhood of runner fetch") {
+    let graph = GraphPreview.graph()
+    GraphCanvas(model: graph, result: GraphPreview.query)
+        .frame(width: 800, height: 600)
+        .task { await GraphPreview.searched(graph) }
+}
+
+#Preview("A class explained: its callers, where it is defined") {
+    let graph = GraphPreview.graph()
+    ExplainCard(model: graph)
+        .frame(width: 300, height: 640)
+        .task { await GraphPreview.searched(graph) }
+}
+
+#Preview("An entity explained: its community and decision") {
+    let graph = GraphPreview.graph(GraphPreview.prose)
+    ExplainCard(model: graph)
+        .frame(width: 300, height: 640)
+        .task {
+            await graph.connect(binary: previewBinary)
+            await graph.select("Heat pump")
+        }
+}
+
+#Preview("A decision record attached") {
+    DecisionLine(decision: GraphPreview.report.decisions[0])
+        .padding(Spacing.l)
+        .frame(width: 420)
+}
+
+#Preview("A report: summary, communities, decisions, busiest") {
+    ReportView(model: GraphPreview.graph(GraphPreview.prose), report: GraphPreview.report)
+        .frame(width: 800, height: 720)
+}
+
+#Preview("New code graph: nothing chosen yet") {
+    NewGraphSheet { _, _ in }
+}
+#endif

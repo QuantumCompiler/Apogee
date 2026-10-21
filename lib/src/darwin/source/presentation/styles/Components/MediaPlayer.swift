@@ -32,3 +32,11 @@ public struct MediaPlayer: NSViewRepresentable {
         view.player?.pause()
     }
 }
+
+#if DEBUG
+#Preview("Nothing loaded") {
+    // No clip of the person's: an empty player, its controls drawn.
+    MediaPlayer(url: URL(fileURLWithPath: "/dev/null"))
+        .frame(width: 640, height: 360)
+}
+#endif

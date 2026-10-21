@@ -106,3 +106,21 @@ struct AnyLabelStyle: LabelStyle {
         make(configuration)
     }
 }
+
+#if DEBUG
+#Preview("The sidebar") {
+    Sidebar(model: ShellPreview.shell(), compact: false) {
+        Text("The saved sessions").font(.apogeeSmall).padding(Spacing.m)
+    }
+    .frame(width: 256, height: 640)
+}
+
+#Preview("A place, current and not") {
+    let shell = ShellPreview.shell(at: .models)
+    HStack {
+        PlaceButton(destination: .models, model: shell)
+        PlaceButton(destination: .library, model: shell)
+    }
+    .padding(Spacing.l)
+}
+#endif

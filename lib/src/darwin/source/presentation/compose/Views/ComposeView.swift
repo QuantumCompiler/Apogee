@@ -323,3 +323,131 @@ struct ComposeSheet: View {
         }
     }
 }
+
+#if DEBUG
+#Preview("A composition made, its scenes") {
+    ComposeView(model: ComposePreview.made("view-made"))
+        .frame(width: 1100, height: 760)
+}
+
+#Preview("No compositions yet") {
+    ComposeView(model: ComposePreview.compositions(ComposePreview.folder("view-empty")))
+        .frame(width: 1000, height: 560)
+}
+
+#Preview("Rendering: scene 2 of 3") {
+    ComposeView(model: ComposePreview.rendering("view-rendering"))
+        .frame(width: 1100, height: 720)
+}
+
+#Preview("An edit, its changes") {
+    ComposeView(model: ComposePreview.edited("view-edited"))
+        .frame(width: 1100, height: 760)
+}
+
+#Preview("Made: its video, its scenes, its captions") {
+    let model = ComposePreview.made("page-made")
+    if let project = model.selectedProject {
+        ProjectPage(model: model, project: project)
+            .frame(width: 820, height: 860)
+    }
+}
+
+#Preview("Stopped: the finished scenes stand") {
+    let model = ComposePreview.tidesComposition("page-stopped", status: "cancelled", made: 2)
+    if let project = model.selectedProject {
+        ProjectPage(model: model, project: project)
+            .frame(width: 820, height: 640)
+    }
+}
+
+#Preview("Planned, not rendered yet") {
+    let model = ComposePreview.tidesComposition("page-planned", status: "planned", made: 0)
+    if let project = model.selectedProject {
+        ProjectPage(model: model, project: project)
+            .frame(width: 820, height: 640)
+    }
+}
+
+#Preview("Rendering scene 2 of 3") {
+    let model = ComposePreview.rendering("page-rendering")
+    if let project = model.selectedProject {
+        ProjectPage(model: model, project: project)
+            .frame(width: 820, height: 640)
+    }
+}
+
+#Preview("An edit, from its own comparison") {
+    let model = ComposePreview.edited("page-edited")
+    if let project = model.selectedProject {
+        ProjectPage(model: model, project: project)
+            .frame(width: 820, height: 720)
+    }
+}
+
+#Preview("A scene spoken and rendered") {
+    if let scene = ComposePreview.project(ComposePreview.heatPumps)?.scenes.first {
+        SceneCard(scene: scene, live: false)
+            .frame(width: 640)
+            .padding(Spacing.l)
+    }
+}
+
+#Preview("A scene spoken, not rendered") {
+    if let scene = ComposePreview.project(ComposePreview.heatPumps)?.scenes.last {
+        SceneCard(scene: scene, live: false)
+            .frame(width: 640)
+            .padding(Spacing.l)
+    }
+}
+
+#Preview("A scene rendering now") {
+    if let scene = ComposePreview.project(ComposePreview.heatPumps)?.scenes.last {
+        SceneCard(scene: scene, live: true)
+            .frame(width: 640)
+            .padding(Spacing.l)
+    }
+}
+
+#Preview("An edit's changes, from its own comparison (52c)") {
+    if let edited = ComposePreview.project(ComposePreview.heatPumpsEdited) {
+        let diff = MediaLibrary.diff(edited: edited, parent: ComposePreview.project(ComposePreview.heatPumps))
+        DiffList(changes: diff.changes, compared: diff.compared)
+            .frame(width: 640)
+            .padding(Spacing.l)
+    }
+}
+
+#Preview("Before 52c: compared scene by scene") {
+    if let edited = ComposePreview.project(ComposePreview.heatPumpsCompared) {
+        let diff = MediaLibrary.diff(edited: edited, parent: ComposePreview.project(ComposePreview.heatPumps))
+        DiffList(changes: diff.changes, compared: diff.compared)
+            .frame(width: 640)
+            .padding(Spacing.l)
+    }
+}
+
+#Preview("New composition") {
+    let model = ComposePreview.compositions(ComposePreview.folder("sheet-new"))
+    ComposeSheet(model: model)
+        .task {
+            model.newComposition()
+            model.form.brief = "how a heat pump works"
+        }
+}
+
+#Preview("New composition, planned first (52c)") {
+    let model = ComposePreview.compositions(ComposePreview.folder("sheet-plan"), plansAlone: true)
+    ComposeSheet(model: model)
+        .task {
+            model.newComposition()
+            model.form.brief = "how a heat pump works"
+        }
+}
+
+#Preview("An edit, its changes previewed") {
+    let model = ComposePreview.editing("sheet-edit")
+    ComposeSheet(model: model)
+        .task { await model.previewEdit() }
+}
+#endif

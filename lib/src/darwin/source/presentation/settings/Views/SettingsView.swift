@@ -336,3 +336,109 @@ struct PermissionsPane: View {
         }
     }
 }
+
+#if DEBUG
+#Preview("General, read") {
+    let model = SettingsPreview.settings()
+    SettingsView(model: model)
+        .task { await SettingsPreview.read(model) }
+}
+
+#Preview("Backends & keys: a key set, a check failing") {
+    let model = SettingsPreview.settings(.backends)
+    SettingsView(model: model)
+        .task { await SettingsPreview.read(model) }
+}
+
+#Preview("Apogee not installed") {
+    let model = SettingsPreview.settings()
+    SettingsView(model: model)
+        .task { await model.connect(binary: nil, version: nil) }
+}
+
+#Preview("A labelled row") {
+    SettingRow(label: "Command-line tool") {
+        Text(previewBinary.path).font(.apogeeCode)
+    }
+    .padding(Spacing.xl)
+    .frame(width: 640)
+}
+
+#Preview("General: the installed apogee") {
+    let model = SettingsPreview.settings()
+    VStack(alignment: .leading, spacing: Spacing.xl) { GeneralPane(model: model) }
+        .padding(Spacing.xl)
+        .frame(width: 680)
+        .task { await SettingsPreview.read(model) }
+}
+
+#Preview("General: not read yet") {
+    VStack(alignment: .leading, spacing: Spacing.xl) { GeneralPane(model: SettingsPreview.settings()) }
+        .padding(Spacing.xl)
+        .frame(width: 680)
+}
+
+#Preview("Appearance: following the system") {
+    VStack(alignment: .leading, spacing: Spacing.xl) { AppearancePane(theme: SettingsPreview.settings().theme) }
+        .padding(Spacing.xl)
+        .frame(width: 680)
+}
+
+#Preview("Appearance: high contrast, large") {
+    let theme = SettingsPreview.settings().theme
+    VStack(alignment: .leading, spacing: Spacing.xl) { AppearancePane(theme: theme) }
+        .padding(Spacing.xl)
+        .frame(width: 680)
+        .task {
+            theme.choice = .contrast
+            theme.size = .large
+        }
+}
+
+#Preview("Backends: a key set, a check failing") {
+    let model = SettingsPreview.settings(.backends)
+    VStack(alignment: .leading, spacing: Spacing.xl) { BackendsPane(model: model) }
+        .padding(Spacing.xl)
+        .frame(width: 680)
+        .task { await SettingsPreview.read(model) }
+}
+
+#Preview("Backends: check --fix running") {
+    let model = SettingsPreview.settings(.backends)
+    VStack(alignment: .leading, spacing: Spacing.xl) { BackendsPane(model: model) }
+        .padding(Spacing.xl)
+        .frame(width: 680)
+        .task {
+            await SettingsPreview.read(model)
+            model.fix(["check", "--fix"])
+        }
+}
+
+#Preview("An API key, typed once") {
+    KeySheet(provider: "anthropic") { _ in }
+}
+
+#Preview("Video & voice: the store's pipeline") {
+    let model = SettingsPreview.settings(.media)
+    VStack(alignment: .leading, spacing: Spacing.xl) { MediaPane(model: model) }
+        .padding(Spacing.xl)
+        .frame(width: 680)
+        .task { await SettingsPreview.read(model) }
+}
+
+#Preview("Permissions, before 52e: set in the config file") {
+    let model = SettingsPreview.settings(.permissions)
+    VStack(alignment: .leading, spacing: Spacing.xl) { PermissionsPane(model: model) }
+        .padding(Spacing.xl)
+        .frame(width: 680)
+        .task { await SettingsPreview.read(model) }
+}
+
+#Preview("Permissions, with 52e: set here") {
+    let model = SettingsPreview.settings(.permissions, track52: true)
+    VStack(alignment: .leading, spacing: Spacing.xl) { PermissionsPane(model: model) }
+        .padding(Spacing.xl)
+        .frame(width: 680)
+        .task { await SettingsPreview.read(model) }
+}
+#endif

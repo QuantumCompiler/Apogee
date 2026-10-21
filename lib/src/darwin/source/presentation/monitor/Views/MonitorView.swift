@@ -83,3 +83,17 @@ public struct MonitorView: View {
         }
     }
 }
+
+#if DEBUG
+#Preview("The machine, a session's child running") {
+    MonitorView(model: MonitorPreview.monitor(children: MonitorPreview.session)) {}
+}
+
+#Preview("The machine, no children running") {
+    MonitorView(model: MonitorPreview.monitor()) {}
+}
+
+#Preview("Apogee isn't installed") {
+    MonitorView(model: MonitorPreview.monitor(binary: nil)) {}
+}
+#endif

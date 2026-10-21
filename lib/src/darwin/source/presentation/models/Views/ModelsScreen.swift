@@ -398,3 +398,97 @@ struct RenameModelSheet: View {
         .frame(width: 460)
     }
 }
+
+#if DEBUG
+#Preview("Backends: local first, then cloud and subscriptions, one open") {
+    let models = ModelsPreview.models()
+    ModelTable(model: models)
+        .frame(width: 760, height: 440)
+        .task {
+            await models.connect(binary: previewBinary)
+            if let gguf = models.rows.first(where: { $0.backend == "qwen3-8b-Q4KM" }) { await models.select(gguf) }
+        }
+}
+
+#Preview("Backends: Apogee isn't installed") {
+    let models = ModelsPreview.models()
+    ModelTable(model: models)
+        .frame(width: 760, height: 240)
+        .task { await models.connect(binary: nil) }
+}
+
+#Preview("Details: a GGUF backend's typed facts and lineage") {
+    let models = ModelsPreview.models()
+    ModelDetails(model: models)
+        .frame(width: 380, height: 620)
+        .task {
+            await models.connect(binary: previewBinary)
+            if let gguf = models.rows.first(where: { $0.backend == "qwen3-8b-Q4KM" }) { await models.select(gguf) }
+        }
+}
+
+#Preview("Details: a registered GGUF's record alone, as recorded") {
+    let models = ModelsPreview.models(over: ModelsPreview.storeRunner)
+    ModelDetails(model: models)
+        .frame(width: 380, height: 760)
+        .task {
+            await models.connect(binary: previewBinary)
+            if let q4 = models.rows.first(where: { $0.backend == "llama3.2-1b-Q4KM" }) { await models.select(q4) }
+        }
+}
+
+#Preview("Roles: chat set, embedding by the default, vision unset") {
+    let models = ModelsPreview.models()
+    RolesView(model: models)
+        .frame(width: 960, height: 420)
+        .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Each backend's kind, as marked") {
+    VStack(alignment: .leading, spacing: Spacing.s) {
+        ForEach(ModelsPreview.rows) { row in
+            HStack(spacing: Spacing.s) {
+                KindMark(kind: row.kind)
+                Text(row.name).font(.apogeeBody)
+            }
+        }
+    }
+    .padding(Spacing.xl)
+}
+
+#Preview("Rename a GGUF backend's model") {
+    if let row = ModelsPreview.rows.first(where: { $0.backend == "qwen3-8b-Q4KM" }) {
+        RenameModelSheet(row: row) { _ in }
+    }
+}
+
+#Preview("Backends, a GGUF backend's details open") {
+    let models = ModelsPreview.models()
+    let store = ModelsPreview.store()
+    ModelsScreen(model: models, store: store, shell: ModelsPreview.shell()) {
+        DownloadsView(model: ModelsPreview.converting())
+    }
+    .frame(width: 1200, height: 640)
+    .task {
+        await models.connect(binary: previewBinary)
+        await store.connect(binary: previewBinary)
+        if let gguf = models.rows.first(where: { $0.backend == "qwen3-8b-Q4KM" }) { await models.select(gguf) }
+    }
+}
+
+#Preview("Stored weights, the registered Q4_K_M open") {
+    let models = ModelsPreview.models(over: ModelsPreview.storeRunner)
+    let store = ModelsPreview.store()
+    ModelsScreen(model: models, store: store, shell: ModelsPreview.shell()) {
+        DownloadsView(model: ModelsPreview.jobs())
+    }
+    .frame(width: 1300, height: 680)
+    .task {
+        await models.connect(binary: previewBinary)
+        await store.connect(binary: previewBinary)
+        models.tab = .store
+        await store.refresh()
+        await store.select(ModelsPreview.q4)
+    }
+}
+#endif

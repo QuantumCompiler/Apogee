@@ -519,3 +519,140 @@ struct StepsList: View {
         }
     }
 }
+
+#if DEBUG
+#Preview("Stored weights: two snapshots folded") {
+    let store = ModelsPreview.store()
+    StoreTable(store: store)
+        .frame(width: 900, height: 560)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+        }
+}
+
+#Preview("Stored weights: every set, the consumed shown, the Q4_K_M open") {
+    let store = ModelsPreview.store(showingAll: true)
+    StoreTable(store: store)
+        .frame(width: 900, height: 640)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            await store.select(ModelsPreview.q4)
+        }
+}
+
+#Preview("Register the MLX model, named as config scan names it") {
+    let store = ModelsPreview.store()
+    RegisterSheet(store: store)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            if let mlx = store.sets.first(where: { $0.handle == ModelsPreview.mlx }) { await store.askToRegister(mlx) }
+        }
+}
+
+#Preview("Register the F16 GGUF: a window and an attention cache chosen") {
+    let store = ModelsPreview.store()
+    RegisterSheet(store: store)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            if let f16 = store.sets.first(where: { $0.handle == ModelsPreview.f16 }) {
+                await store.askToRegister(f16)
+                store.register?.window = "16384"
+                store.register?.cache = "f16"
+            }
+        }
+}
+
+#Preview("Rename a model's folder") {
+    RenameStoredSheet(model: "Llama3.2-1B-Instruct") { _ in }
+}
+
+#Preview("Convert to GGUF, then quantize to two levels") {
+    let store = ModelsPreview.store(showingAll: true)
+    ConvertSheet(store: store)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            if let snapshot = store.sets.first(where: { $0.handle == ModelsPreview.snapshot }) {
+                store.askToConvert(snapshot, mlx: false)
+                store.convertForm?.levels = ["Q4_K_M", "Q8_0"]
+            }
+        }
+}
+
+#Preview("Convert to MLX, 4bit the default") {
+    let store = ModelsPreview.store(showingAll: true)
+    ConvertSheet(store: store)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            if let snapshot = store.sets.first(where: { $0.handle == ModelsPreview.snapshot }) {
+                store.askToConvert(snapshot, mlx: true)
+            }
+        }
+}
+
+#Preview("Quantize the F16 GGUF to Q4_K_M, registered") {
+    let store = ModelsPreview.store()
+    QuantizeSheet(store: store)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            if let f16 = store.sets.first(where: { $0.handle == ModelsPreview.f16 }) { store.askToQuantize(f16) }
+        }
+}
+
+#Preview("Quantize to Q8_0, not registered") {
+    let store = ModelsPreview.store()
+    QuantizeSheet(store: store)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            if let f16 = store.sets.first(where: { $0.handle == ModelsPreview.f16 }) {
+                store.askToQuantize(f16)
+                store.quantizeForm?.choose("Q8_0")
+                store.quantizeForm?.register = false
+            }
+        }
+}
+
+#Preview("A conversion's steps, each size an estimate") {
+    StepsList(steps: ModelsPreview.conversion.steps)
+        .padding(Spacing.xl)
+}
+
+#Preview("Stored weights beside the open set") {
+    let store = ModelsPreview.store()
+    StoreView(store: store, shell: ModelsPreview.shell()) { _ in }
+        .frame(width: 1300, height: 680)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.select(ModelsPreview.q4)
+        }
+}
+
+#Preview("A registered GGUF: made from, its backend") {
+    let store = ModelsPreview.store()
+    StoreDetails(store: store, shell: ModelsPreview.shell()) { _ in }
+        .frame(width: 380, height: 760)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            await store.select(ModelsPreview.q4)
+        }
+}
+
+#Preview("A SafeTensors snapshot: what was made from it") {
+    let store = ModelsPreview.store(showingAll: true)
+    StoreDetails(store: store, shell: ModelsPreview.shell()) { _ in }
+        .frame(width: 380, height: 760)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            await store.select(ModelsPreview.snapshot)
+        }
+}
+#endif

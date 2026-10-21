@@ -464,3 +464,162 @@ struct SheetFrame<Fields: View>: View {
         .frame(width: 560)
     }
 }
+
+#if DEBUG
+#Preview("Runs: one, failed its gate") {
+    let training = TrainingPreview.training()
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 640)
+        .task { await TrainingPreview.read(training) }
+}
+
+#Preview("A run training") {
+    let training = TrainingPreview.training(said: TrainingPreview.running)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 640)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newRun()
+            training.startRun()
+        }
+}
+
+#Preview("A promotion the gate refused") {
+    let training = TrainingPreview.training(said: TrainingPreview.refused, finishes: true)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 640)
+        .task {
+            await TrainingPreview.read(training)
+            TrainingPreview.promoting(training)
+            training.promote()
+        }
+}
+
+#Preview("Apogee not installed") {
+    let training = TrainingPreview.training()
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 480)
+        .task { await training.connect(binary: nil) }
+}
+
+#Preview("Runs: read, one open") {
+    let training = TrainingPreview.training()
+    RunsView(model: training)
+        .frame(width: 900, height: 520)
+        .task { await TrainingPreview.read(training) }
+}
+
+#Preview("Runs: none read") {
+    RunsView(model: TrainingPreview.training())
+        .frame(width: 900, height: 400)
+}
+
+#Preview("A run that failed its gate") {
+    RunPage(model: TrainingPreview.training(), run: TrainingPreview.run)
+        .frame(width: 380, height: 520)
+        .background(Palette.inspector)
+}
+
+#Preview("Regimes: foundation open") {
+    let training = TrainingPreview.training()
+    RegimesView(model: training)
+        .frame(width: 900, height: 520)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.selectedRegime = "foundation"
+        }
+}
+
+#Preview("Datasets: heat-notes open, and the kits") {
+    let training = TrainingPreview.training()
+    DatasetsView(model: training)
+        .frame(width: 900, height: 640)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.selectedDataset = "heat-notes"
+        }
+}
+
+#Preview("New run: the first stored set, on heat-notes") {
+    let training = TrainingPreview.training()
+    RunSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newRun()
+        }
+}
+
+#Preview("New run: QLoRA, tuned") {
+    let training = TrainingPreview.training()
+    RunSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newRun()
+            training.runForm.method = "qlora"
+            training.runForm.iters = "200"
+            training.runForm.batchSize = "2"
+            training.runForm.gradCheckpoint = true
+            training.runForm.maskPrompt = true
+        }
+}
+
+#Preview("Promote: a run that failed its gate") {
+    let training = TrainingPreview.training()
+    PromoteSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            TrainingPreview.promoting(training)
+        }
+}
+
+#Preview("Promote: forced past the gate, quantized") {
+    let training = TrainingPreview.training()
+    PromoteSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            TrainingPreview.promoting(training)
+            training.promoteForm.target = "gguf"
+            training.promoteForm.quantize = "Q4_K_M"
+            training.promoteForm.force = true
+        }
+}
+
+#Preview("Synthesize: a teacher, a kit") {
+    let training = TrainingPreview.training()
+    SynthSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newSynthesis()
+            training.synthForm.name = "clerk-data"
+            training.synthForm.count = "50"
+        }
+}
+
+#Preview("New dataset: nothing named yet") {
+    let training = TrainingPreview.training()
+    CreateSheet(model: training)
+        .task { training.newDataset() }
+}
+
+#Preview("New dataset: from your chats") {
+    let training = TrainingPreview.training()
+    CreateSheet(model: training)
+        .task {
+            training.newDataset()
+            training.createName = "notes"
+            training.createFrom = "sessions"
+        }
+}
+
+#Preview("A sheet's frame: its command as typed") {
+    SheetFrame(title: "New dataset", arguments: ["datasets", "create", "notes", "--from", "sessions"], action: "Create", act: {}, cancel: {}) {
+        TextField("Dataset name", text: .constant("notes")).textFieldStyle(.roundedBorder)
+    }
+}
+
+#Preview("A sheet's frame: nothing to run yet") {
+    SheetFrame(title: "New dataset", arguments: nil, action: "Create", act: {}, cancel: {}) {
+        TextField("Dataset name", text: .constant("")).textFieldStyle(.roundedBorder)
+    }
+}
+#endif

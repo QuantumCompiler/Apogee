@@ -159,6 +159,67 @@ Decisions taken while building, for veto:
 **Verified.** The failing Debug build reproduced in the user's own derived data, then succeeded there after both fixes; `scripts/build.sh test`: 103 tests pass, no warning.
 
 
+### 2026-10-21 — module schemes and previews (ADR 0004): every module alone, every view seen
+
+**Why.** The user's call of 2026-10-21: each Presentation module gets its own scheme, and the views it creates can be previewed with `#Preview`. Until then:
+- the one shared scheme, `Apogee`, built and tested everything;
+- no view of the 122 had a preview;
+- every screen in track 2 was drawn by a render harness written by hand in a scratch folder and never kept.
+
+[ADR 0004](../adrs/module-schemes-and-previews.md) records the rule, and this change adopted it whole.
+
+- [x] **19 shared schemes**, one per Presentation module, `styles` and `app` included (`xcshareddata/xcschemes/Presentation<Package>.xcscheme`). Each builds its framework and runs its own test bundle alone, so Cmd-U in it tests that module. `Apogee` stays the one full build: `scripts/build.sh`, CI and the check go through it.
+- [x] **274 named `#Preview`s over the 122 views**, every one inside `#if DEBUG`, each named for the state it shows:
+  - not read, read, failed, running;
+  - a question or a permission waiting;
+  - a play narrated or refused;
+  - a session ended, failed or paused;
+  - a sheet empty and filled.
+- [x] **Each module's `Previews/`:**
+  - `PreviewSupport.swift`, the fakes:
+    - `PreviewRunner` answers each argv by its longest matching prefix;
+    - `PreviewJob` and `PreviewJobs` say recorded updates and end as a child does;
+    - the session's `PreviewChat` and `PreviewChats` play a recorded stream as the binary paces it: up to its `session`, then to each `question`, ending as a child that exited or failed;
+  - `PreviewDocuments.swift`, the recorded fixtures copied byte for byte;
+  - `<Module>Previews.swift`, the view-models driven through their public API.
+
+  Each module keeps its own copy, as each test bundle keeps its own scripted support. The media places write their records to a folder under the temporary directory. No preview starts `apogee`, reads `~/.apogee` or the person's folders, or reaches the network.
+- [x] **The layering check holds it** (`ModuleMap` now reads every shared scheme). Each rule is pinned on a planted violation:
+  - every Presentation module has a scheme named for it, building that target and running that bundle;
+  - every top-level view in a module's sources is constructed by a `#Preview` in its own file;
+  - previews and `Previews/` files sit wholly inside `#if DEBUG`;
+  - `PreviewProvider` appears nowhere;
+  - no preview names a real starter or runner (`ApogeeClient`, `ReadRunner`, `JobStarter`, `ProcessSpawner`).
+- [x] **Docs:**
+  - CLAUDE.md's checklist (a new view has its preview, a new Presentation module its scheme) and its map;
+  - the Presentation card's "Seen on its own" and "Changing this layer";
+  - DEVELOPER.md's tree, the layering check, "Adding a module" and "Previewing a view".
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **Declared dependencies, never reached around.** Where a preview must make another layer's type (a `ReadDocument`, a `ChildExit`, a `ShellViewModel`'s `Preferences`), its target declares that module. Twelve edges joined eight targets, each downward and allowed by ADR 0001; the ADR's Landed note lists them. Swift would have let the types be made through an initializer's parameter with no import. That leaves the link to auto-linking, the cause of 2026-10-20's Debug link failure.
+- **A state with no recording has no preview**, rather than an invented one. The ADR's Landed note lists them: compose's failure, a few failed list reads, a website permission, a card with several questions.
+- **Documents beyond the two fixture folders,** each cited in a comment beside it:
+  - those the module's own tests hold inline;
+  - the CLI's pinned `write_file` diff for the permission card's change, from `fs_test.cpp`, since no recorded session carries a diff.
+
+  A trimmed recording counts as a slice: review's empty targets, the store without its voice model.
+- **One stream's values were adapted:** compose's rendering preview says scene 2 of 3 to fit its test's three-scene project, from a recorded two-scene stream.
+
+**Verified.**
+- `check-previews` (the check's preview rules, scripted) finds nothing across the 19 modules. Each module's scheme builds alone in Debug with no warning.
+- Headless runs of the previews' setups against the Debug frameworks reached the states they are named for:
+  - a play running and narrated;
+  - a question waiting;
+  - a session ended, failed and paused;
+  - a run training;
+  - an ingest running;
+  - a refused promotion;
+  - the media places' records.
+
+  Offscreen renders drew the library's, the session's, and the tasks', knowledge and training places'.
+- `scripts/build.sh test`: 336 cases (331 before, plus five layering tests), no Swift warning. `thisProjectHoldsTheLaw` holds the real project to every new rule.
+- Bare `lib/scripts/cicd.sh --test`: exit 0, the CLI's 3,597 tests and the app's 336 cases passing.
+
 ---
 
 ## Milestone B — The design's screens

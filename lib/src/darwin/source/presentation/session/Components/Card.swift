@@ -26,3 +26,21 @@ struct CardLabel: View {
             .foregroundStyle(Palette.textTertiary)
     }
 }
+
+#if DEBUG
+#Preview("A card, accented for what it asks") {
+    Card(accent: Palette.warning) {
+        CardLabel(text: PermissionCardView.label(SessionPreview.permission().question))
+        Text(SessionPreview.permission().question.items.first?.question ?? "")
+            .font(.apogeeHeading)
+            .foregroundStyle(Palette.textPrimary)
+    }
+    .frame(width: 520)
+    .padding(Spacing.xl)
+}
+
+#Preview("A card's label") {
+    CardLabel(text: "Apogee is asking")
+        .padding(Spacing.xl)
+}
+#endif

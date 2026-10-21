@@ -289,3 +289,111 @@ struct DiffView: View {
         return Palette.textSecondary
     }
 }
+
+#if DEBUG
+#Preview("A new session") {
+    let model = SessionPreview.session(SessionPreview.mockActor)
+    EmptySessionView(model: model)
+        .frame(width: 760, height: 420)
+        .task { await SessionPreview.ready(model) }
+}
+
+#Preview("Private: nothing written") {
+    let model = SessionPreview.session([SessionPreview.newerBuild], launch: SessionPreview.privately)
+    EmptySessionView(model: model)
+        .frame(width: 760, height: 460)
+        .task { await SessionPreview.ready(model) }
+}
+
+#Preview("Private on an older build: deleted on close") {
+    let model = SessionPreview.session([SessionPreview.olderBuild], launch: SessionPreview.noRecall)
+    EmptySessionView(model: model)
+        .frame(width: 760, height: 460)
+        .task { await SessionPreview.ready(model) }
+}
+
+// The meter's states, as the session's tests reach them (SessionStatesTests' `meter`).
+#Preview("Context: the window unknown") {
+    MeterView(meter: ContextMeter(used: nil, window: nil))
+        .padding(Spacing.xl)
+}
+
+#Preview("Context: no turn reported yet") {
+    MeterView(meter: ContextMeter(used: nil, window: 8192))
+        .padding(Spacing.xl)
+}
+
+#Preview("Context: a tenth full") {
+    MeterView(meter: ContextMeter(used: 100, window: 1000))
+        .padding(Spacing.xl)
+}
+
+#Preview("Context: past 80%, warning") {
+    MeterView(meter: ContextMeter(used: 6800, window: 8192))
+        .padding(Spacing.xl)
+}
+
+#Preview("Attached, on a build before detach") {
+    let model = SessionPreview.session([SessionPreview.olderBuild])
+    AttachmentChips(model: model)
+        .frame(width: 640)
+        .padding(Spacing.xl)
+        .task {
+            await SessionPreview.ready(model)
+            model.attach("report.pdf")
+        }
+}
+
+#Preview("Attached, each detachable") {
+    let model = SessionPreview.session([SessionPreview.newerBuild])
+    AttachmentChips(model: model)
+        .frame(width: 640)
+        .padding(Spacing.xl)
+        .task {
+            await SessionPreview.ready(model)
+            model.attach("report.pdf")
+            model.attach("src")
+        }
+}
+
+#Preview("Slash commands after /") {
+    let model = SessionPreview.session([SessionPreview.newerBuild])
+    SuggestionList(model: model)
+        .frame(width: 640)
+        .padding(Spacing.xl)
+        .task {
+            await SessionPreview.ready(model)
+            model.draft = "/"
+        }
+}
+
+#Preview("Symphonies after /play") {
+    let model = SessionPreview.session(SessionPreview.executePlay, launch: SessionPreview.execute())
+    SuggestionList(model: model)
+        .frame(width: 640)
+        .padding(Spacing.xl)
+        .task {
+            model.plays = SessionPreview.plays
+            await SessionPreview.ready(model)
+            model.draft = "/play "
+        }
+}
+
+#Preview("Settings, moved by the set line") {
+    let model = SessionPreview.session([SessionPreview.newerBuild])
+    SettingsSheet(model: model)
+        .task { await SessionPreview.ready(model) }
+}
+
+#Preview("Settings, on a build that restarts for them") {
+    let model = SessionPreview.session([SessionPreview.olderBuild])
+    SettingsSheet(model: model)
+        .task { await SessionPreview.ready(model) }
+}
+
+#Preview("A new file's change, folded") {
+    DiffView(diff: SessionPreview.newFileDiff)
+        .frame(width: 560)
+        .padding(Spacing.xl)
+}
+#endif

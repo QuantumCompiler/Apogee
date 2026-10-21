@@ -13,3 +13,4 @@ The standing rules of the GUI's architecture, each written once, dated, and kept
 | [0001](layer-enforcement.md) | Four layers, dependencies point down — regardless of language and framework |
 | [0002](presentation-mvvm.md) | Presentation modules are MVVM (`Views/`, `ViewModels/`, module-specific extras), sharing one `styles` module |
 | [0003](parity.md) | Every CLI capability has a classified place in the GUI — a screen, the console, or a carve-out with its reason — held to the binary's own command words |
+| [0004](module-schemes-and-previews.md) | The macOS app: every Presentation module has its own shared scheme, and every view it draws has a hermetic `#Preview` over the binary's recorded documents |

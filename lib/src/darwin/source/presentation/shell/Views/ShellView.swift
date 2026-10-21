@@ -146,3 +146,38 @@ struct ToastView: View {
             .accessibilityAddTraits(.updatesFrequently)
     }
 }
+
+#if DEBUG
+#Preview("The window, on Models") {
+    ShellView(model: ShellPreview.shell(at: .models)) {
+        Text("The saved sessions").font(.apogeeSmall).padding(Spacing.m)
+    } screen: { destination in
+        PlaceholderScreen(destination)
+    } overlay: { _ in
+        EmptyView()
+    }
+    .frame(width: 1200, height: 720)
+}
+
+#Preview("A place with nothing drawn") {
+    PlaceholderScreen(.knowledge)
+        .frame(width: 800, height: 400)
+}
+
+#Preview("A screen's header and its controls") {
+    ScreenHeader(title: "Models") {
+        Button("New task…") {}
+    }
+    .frame(width: 800)
+}
+
+#Preview("A place not built yet") {
+    PlaceholderView(symbol: Destination.models.symbol, placeholder: ShellPreview.placeholder)
+        .frame(width: 800, height: 500)
+}
+
+#Preview("The toast") {
+    ToastView(toast: Toast(id: 1, text: "Renamed to qwen3-8b-chat"))
+        .padding(Spacing.xl)
+}
+#endif

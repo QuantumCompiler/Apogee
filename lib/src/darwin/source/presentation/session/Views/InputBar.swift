@@ -68,3 +68,36 @@ struct InputBar: View {
         if case .stopping = model.transcript.status { true } else { false }
     }
 }
+
+#if DEBUG
+#Preview("Ready, a message typed") {
+    let model = SessionPreview.session(SessionPreview.mockActor)
+    InputBar(model: model)
+        .frame(width: 760)
+        .task {
+            await SessionPreview.ready(model)
+            model.draft = SessionPreview.noteTurn
+        }
+}
+
+#Preview("A turn in flight: Stop") {
+    let model = SessionPreview.session(SessionPreview.mockActor, silentFrom: "question")
+    InputBar(model: model)
+        .frame(width: 760)
+        .task { await SessionPreview.converse(model, typed: SessionPreview.noteTurn) }
+}
+
+#Preview("Waiting on an answer") {
+    let model = SessionPreview.session(SessionPreview.mockActor)
+    InputBar(model: model)
+        .frame(width: 760)
+        .task { await SessionPreview.converse(model, typed: SessionPreview.noteTurn) }
+}
+
+#Preview("Starting apogee") {
+    let model = SessionPreview.session(SessionPreview.mockActor, silentFrom: "session")
+    InputBar(model: model)
+        .frame(width: 760)
+        .task { model.start() }
+}
+#endif

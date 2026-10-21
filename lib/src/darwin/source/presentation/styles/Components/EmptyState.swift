@@ -31,3 +31,9 @@ public struct EmptyState: View {
         .frame(maxWidth: Layout.conversationMax)
     }
 }
+
+#if DEBUG
+#Preview("Starting") {
+    EmptyState(symbol: "hourglass", title: "Starting Apogee", message: "Looking for the apogee command.")
+}
+#endif

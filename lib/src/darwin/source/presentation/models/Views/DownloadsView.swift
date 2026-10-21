@@ -201,3 +201,64 @@ struct DownloadCard: View {
         return progress.busy ?? ""
     }
 }
+
+#if DEBUG
+#Preview("The pull form: full weights, converted at two levels") {
+    let jobs = ModelsPreview.jobs()
+    DownloadsView(model: jobs)
+        .frame(width: 900, height: 420)
+        .task {
+            jobs.reference = "Qwen/Qwen3-8B"
+            jobs.convert = true
+            jobs.chosenLevels = ["Q4_K_M", "Q8_0"]
+        }
+}
+
+#Preview("A conversion running its first step") {
+    DownloadsView(model: ModelsPreview.converting())
+        .frame(width: 900, height: 560)
+}
+
+// A card reads its download, which is not observed: each card here is drawn
+// anew as its job speaks (`.id`), as the Jobs tab's list redraws on `revision`.
+
+#Preview("A pull streaming: its first stage and its bytes") {
+    @Previewable @State var jobs = ModelsPreview.pulling()
+    if let download = jobs.downloads.first {
+        DownloadCard(download: download, model: jobs)
+            .id(jobs.revision)
+            .padding(Spacing.xl)
+            .frame(width: 760)
+    }
+}
+
+#Preview("A conversion running: its steps and its time") {
+    @Previewable @State var jobs = ModelsPreview.converting()
+    if let download = jobs.downloads.first {
+        DownloadCard(download: download, model: jobs)
+            .id(jobs.revision)
+            .padding(Spacing.xl)
+            .frame(width: 760)
+    }
+}
+
+#Preview("A check passed, in the CLI's words") {
+    @Previewable @State var jobs = ModelsPreview.checked()
+    if let download = jobs.downloads.first {
+        DownloadCard(download: download, model: jobs)
+            .id(jobs.revision)
+            .padding(Spacing.xl)
+            .frame(width: 760)
+    }
+}
+
+#Preview("A pull failed at its last step, the CLI's way on offered") {
+    @Previewable @State var jobs = ModelsPreview.pullFailed()
+    if let download = jobs.downloads.first {
+        DownloadCard(download: download, model: jobs)
+            .id(jobs.revision)
+            .padding(Spacing.xl)
+            .frame(width: 760)
+    }
+}
+#endif

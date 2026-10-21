@@ -142,3 +142,122 @@ struct MissingBinaryView: View {
         .frame(maxWidth: Layout.conversationMax)
     }
 }
+
+#if DEBUG
+#Preview("Starting") {
+    SessionWindow(model: SessionPreview.session(SessionPreview.mockActor))
+        .frame(width: 900, height: 640)
+}
+
+#Preview("Apogee isn't installed") {
+    let model = SessionPreview.missing()
+    SessionWindow(model: model)
+        .frame(width: 900, height: 640)
+        .task { model.start() }
+}
+
+#Preview("A new session") {
+    let model = SessionPreview.session(SessionPreview.mockActor)
+    SessionWindow(model: model)
+        .frame(width: 900, height: 640)
+        .task { await SessionPreview.ready(model) }
+}
+
+#Preview("Thinking") {
+    let model = SessionPreview.session(SessionPreview.mockActor, silentFrom: "question")
+    SessionWindow(model: model)
+        .frame(width: 900, height: 640)
+        .task { await SessionPreview.converse(model, typed: SessionPreview.noteTurn) }
+}
+
+#Preview("A question waiting") {
+    let model = SessionPreview.session(SessionPreview.mockActor)
+    SessionWindow(model: model)
+        .frame(width: 900, height: 720)
+        .task { await SessionPreview.converse(model, typed: SessionPreview.noteTurn) }
+}
+
+#Preview("A permission waiting") {
+    let model = SessionPreview.session(SessionPreview.mockActor)
+    SessionWindow(model: model)
+        .frame(width: 900, height: 720)
+        .task { await SessionPreview.converse(model, typed: SessionPreview.noteTurn, answers: [SessionPreview.noteAnswers[0]]) }
+}
+
+#Preview("Answering") {
+    let model = SessionPreview.session(SessionPreview.mockActor, silentFrom: "answer_end")
+    SessionWindow(model: model)
+        .frame(width: 900, height: 720)
+        .task { await SessionPreview.converse(model, typed: SessionPreview.noteTurn, answers: SessionPreview.noteAnswers) }
+}
+
+#Preview("Answered") {
+    let model = SessionPreview.session(SessionPreview.mockActor)
+    SessionWindow(model: model)
+        .frame(width: 900, height: 720)
+        .task { await SessionPreview.converse(model, typed: SessionPreview.noteTurn, answers: SessionPreview.noteAnswers) }
+}
+
+#Preview("A play running") {
+    let model = SessionPreview.session(SessionPreview.executePlay, silentFrom: "answer_start", launch: SessionPreview.execute())
+    SessionWindow(model: model)
+        .frame(width: 900, height: 640)
+        .task { await SessionPreview.converse(model, typed: SessionPreview.playTurn) }
+}
+
+#Preview("A play narrated") {
+    let model = SessionPreview.session(SessionPreview.executePlay, launch: SessionPreview.execute())
+    SessionWindow(model: model)
+        .frame(width: 900, height: 640)
+        .task { await SessionPreview.converse(model, typed: SessionPreview.playTurn) }
+}
+
+#Preview("A play refused: the turn failed") {
+    let model = SessionPreview.session(SessionPreview.executePlayRefused, launch: SessionPreview.execute())
+    SessionWindow(model: model)
+        .frame(width: 900, height: 640)
+        .task { await SessionPreview.converse(model, typed: SessionPreview.refusedTurn) }
+}
+
+#Preview("Ended: the child exited after its answer") {
+    let model = SessionPreview.session(SessionPreview.mockActor, ending: PreviewChat.wentWhenAsked)
+    SessionWindow(model: model)
+        .frame(width: 900, height: 720)
+        .task { await SessionPreview.converse(model, typed: SessionPreview.noteTurn, answers: SessionPreview.noteAnswers) }
+}
+
+#Preview("Ended: failed, the stderr behind it") {
+    let model = SessionPreview.session([SessionPreview.bareSession], ending: SessionPreview.wentAway)
+    SessionWindow(model: model)
+        .frame(width: 900, height: 520)
+        .task { await SessionPreview.converse(model, typed: SessionPreview.noteTurn) }
+}
+
+#Preview("Paused: freed for another session") {
+    let model = SessionPreview.session(SessionPreview.mockActor)
+    SessionWindow(model: model)
+        .frame(width: 900, height: 720)
+        .task {
+            await SessionPreview.converse(model, typed: SessionPreview.noteTurn, answers: SessionPreview.noteAnswers)
+            await model.pause()
+        }
+}
+
+#Preview("The conversation, a host's control at the header's end") {
+    let model = SessionPreview.session(SessionPreview.mockActor)
+    ConversationView(model: model, accessory: Image(systemName: "sidebar.right").foregroundStyle(Palette.textTertiary))
+        .frame(width: 900, height: 720)
+        .task { await SessionPreview.converse(model, typed: SessionPreview.noteTurn, answers: SessionPreview.noteAnswers) }
+}
+
+#Preview("How to install, and where it looked") {
+    @Previewable @State var model = SessionPreview.missing()
+    Group {
+        if case .missing(let hint, let places) = model.connection {
+            MissingBinaryView(hint: hint, places: places, retry: model.start)
+        }
+    }
+    .frame(width: 760, height: 520)
+    .task { model.start() }
+}
+#endif

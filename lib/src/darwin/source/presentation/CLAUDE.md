@@ -6,12 +6,14 @@
 
 **Shape** ([ADR 0002](../../../../documentation/gui/adrs/presentation-mvvm.md)): every module but `styles` is `Views/` + `ViewModels/`, with any further directory it genuinely needs; a view binds to its view-model, the view-model consumes Business, and no file under `ViewModels/` imports a UI framework. `styles` -- colors, type, spacing and the common components -- leans on no sibling, and every other module may use it; a component a second module wants is promoted there, never copied.
 
+**Seen on its own** ([ADR 0004](../../../../documentation/gui/adrs/module-schemes-and-previews.md)): every module, `styles` and `app` included, has its own shared scheme named for its target, which builds it and runs its tests alone; every view it draws has a named `#Preview` in its own file, built over the module's own fakes and the binary's recorded documents in `Previews/`. All of it sits inside `#if DEBUG`, and a preview never starts the binary.
+
 **The entry point** is not a module: the application target `Apogee` builds `source/main/`, one file that starts `PresentationApp`'s `ApogeeApp` -- the composition root, as the CLI's `source/main.cpp` is -- and embeds exactly the frameworks its links reach at run time, so a module a Presentation module starts linking is embedded the same day.
 
 **May import:** every layer below, the UI frameworks, and `styles` from any module.
 
-**Enforced by:** [`tests/architecture/layering`](../../tests/architecture/layering/LayeringCheck.swift): the edges, the MVVM shape, the view-models' imports and `styles`' independence.
+**Enforced by:** [`tests/architecture/layering`](../../tests/architecture/layering/LayeringCheck.swift): the edges, the MVVM shape, the view-models' imports, `styles`' independence, each module's scheme and every view's preview.
 
-**Changing this layer:** a new module is a directory `source/presentation/<package>/` with `Views/` and `ViewModels/`, a framework target named `Presentation<Package>` in `Apogee.xcodeproj` building that folder, its test bundle at `tests/presentation/<package>/` in the shared scheme, and its name on this card's **Modules** line.
+**Changing this layer:** a new module is a directory `source/presentation/<package>/` with `Views/` and `ViewModels/`, a framework target named `Presentation<Package>` in `Apogee.xcodeproj` building that folder, its test bundle at `tests/presentation/<package>/` in the shared scheme, its own shared scheme `Apogee.xcodeproj/xcshareddata/xcschemes/Presentation<Package>.xcscheme` building the target and running that bundle, a `#Preview` for every view it draws with its fakes and documents in `Previews/`, and its name on this card's **Modules** line.
 
 **Depth:** [the GUI's ADRs](../../../../documentation/gui/adrs/README.md) · [the design](../../../../design/spec/README.md) · [DEVELOPER.md](../../../../documentation/gui/assistant/DEVELOPER.md).

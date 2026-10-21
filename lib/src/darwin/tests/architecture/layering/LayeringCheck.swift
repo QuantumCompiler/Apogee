@@ -1,7 +1,8 @@
 import Foundation
 
-/// ADR 0001 and ADR 0002, mechanically: the module map and the sources held to
-/// the four layers, the downward law and Presentation's MVVM shape.
+/// ADR 0001, ADR 0002 and ADR 0004, mechanically: the module map and the
+/// sources held to the four layers, the downward law, Presentation's MVVM
+/// shape, and its modules' schemes and previews.
 ///
 /// The map is `Apogee.xcodeproj`. A module is a framework target building one
 /// folder, `source/<layer>/<package>/`, and named `<Layer><Package>` -- where
@@ -25,6 +26,11 @@ import Foundation
 /// - the application embeds exactly the frameworks it needs at run time;
 /// - every module has its mirroring test bundle, and the shared scheme runs
 ///   every test bundle;
+/// - every Presentation module has its own shared scheme, named for it,
+///   building it and running its test bundle alone (ADR 0004);
+/// - every view a Presentation file declares has a `#Preview` in that file;
+///   previews and `Previews/` support sit inside `#if DEBUG`, use no
+///   `PreviewProvider`, and never name a real starter (ADR 0004);
 /// - each layer's card, `source/<layer>/CLAUDE.md`, names exactly its modules.
 struct LayeringCheck {
     /// Lowest first: a module may depend on its own layer or any before it.
@@ -45,6 +51,10 @@ struct LayeringCheck {
 
     /// The Presentation module that is the layer's own floor.
     static let stylesPackage = "styles"
+
+    /// What a preview may never name: the starters and runners that reach the
+    /// real binary or the person's machine (ADR 0004).
+    static let realStarters = ["ApogeeClient", "ReadRunner", "JobStarter", "ProcessSpawner"]
 
     let map: ModuleMap
     let tree: SourceTree
@@ -69,6 +79,10 @@ struct LayeringCheck {
                 of: module.target, at: module.path, layer: module.layer, byName: byName)
             if module.layer == "presentation" && module.package != Self.stylesPackage {
                 found += mvvmShape(of: module)
+            }
+            if module.layer == "presentation" {
+                found += moduleScheme(of: module)
+                found += previews(of: module)
             }
         }
         found += application(byName: byName)
@@ -334,6 +348,99 @@ struct LayeringCheck {
         return map.targets.filter { $0.kind == .test && !testables.contains($0.name) }.map {
             "\($0.name) is not a testable of the shared scheme Apogee: its tests would never run"
         }
+    }
+
+    // MARK: - Schemes and previews (ADR 0004)
+
+    /// A Presentation module's own shared scheme: named for it, building it,
+    /// running its test bundle alone.
+    private func moduleScheme(of module: Module) -> [String] {
+        let name = module.target.name
+        guard let scheme = map.schemes[name] else {
+            return ["\(name) has no shared scheme (xcshareddata/xcschemes/\(name).xcscheme): a Presentation module is built, previewed and tested on its own"]
+        }
+        var found: [String] = []
+        if !scheme.built.contains(name) {
+            found.append("the scheme \(name) builds \(scheme.built.joined(separator: ", ")), not \(name)")
+        }
+        if scheme.tested != [name + "Tests"] {
+            found.append("the scheme \(name) runs \(scheme.tested.isEmpty ? "no tests" : scheme.tested.joined(separator: ", ")): it runs \(name)Tests alone")
+        }
+        return found
+    }
+
+    /// Every view a file declares has a `#Preview` in it; previews and their
+    /// support stay debug-only, macro-only, and hermetic.
+    private func previews(of module: Module) -> [String] {
+        var found: [String] = []
+        for file in tree.swiftFiles(under: module.path) {
+            let source = tree.contents(of: file) ?? ""
+            let lines = source.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            if source.contains("PreviewProvider") {
+                found.append("\(file) uses PreviewProvider: a view is previewed with #Preview")
+            }
+            if file.dropFirst(module.path.count + 1).hasPrefix("Previews/") {
+                let content = lines.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                if content.first != "#if DEBUG" || content.last != "#endif" {
+                    found.append("\(file) is preview support outside #if DEBUG: previews never ship")
+                }
+                found += Self.realStarters.filter { Self.names($0, in: source) }.map {
+                    "\(file) names \($0): a preview never starts the binary"
+                }
+                continue
+            }
+            let views = Self.declaredViews(in: source)
+            guard let first = source.range(of: "#Preview") else {
+                found += views.map { "\(file) declares \($0) with no #Preview: every view a module draws is previewable" }
+                continue
+            }
+            let previews = String(source[first.lowerBound...])
+            for view in views where !Self.constructs(view, in: previews) {
+                found.append("\(file): \(view) has no #Preview")
+            }
+            var debug = false
+            for line in lines {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed == "#if DEBUG" { debug = true } else if trimmed == "#endif" { debug = false }
+                if trimmed.hasPrefix("#Preview") && !debug {
+                    found.append("\(file) has a #Preview outside #if DEBUG: previews never ship")
+                    break
+                }
+            }
+            found += Self.realStarters.filter { Self.names($0, in: previews) }.map {
+                "\(file) names \($0) in its previews: a preview never starts the binary"
+            }
+        }
+        return found
+    }
+
+    /// The views a file declares at its top level, private helpers left out:
+    /// a `struct` conforming to `View` or a representable.
+    static func declaredViews(in source: String) -> [String] {
+        let pattern = #"^(?:public |internal |package )?struct ([A-Za-z_][A-Za-z0-9_]*)(?:<[^\n{]*?>)?\s*:\s*([^{\n]*)\{"#
+        let regex = try! NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines])
+        let range = NSRange(source.startIndex..., in: source)
+        return regex.matches(in: source, range: range).compactMap { match in
+            guard let name = Range(match.range(at: 1), in: source), let conformances = Range(match.range(at: 2), in: source)
+            else { return nil }
+            let list = source[conformances]
+            let isView = list.split(whereSeparator: { ",: ".contains($0) }).contains {
+                $0 == "View" || $0 == "NSViewRepresentable" || $0 == "NSViewControllerRepresentable"
+            }
+            return isView ? String(source[name]) : nil
+        }
+    }
+
+    /// Whether `text` builds `view`: `View(`, `View {` or `View<`.
+    static func constructs(_ view: String, in text: String) -> Bool {
+        let regex = try! NSRegularExpression(pattern: "\\b" + view + #"\s*[({<]"#)
+        return regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+    }
+
+    /// Whether `word` appears in `text` as a word.
+    static func names(_ word: String, in text: String) -> Bool {
+        let regex = try! NSRegularExpression(pattern: "\\b" + word + "\\b")
+        return regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
     }
 
     // MARK: - Layer cards

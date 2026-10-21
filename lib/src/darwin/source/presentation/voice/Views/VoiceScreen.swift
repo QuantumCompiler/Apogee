@@ -249,3 +249,81 @@ struct SaySheet: View {
         .frame(width: 560)
     }
 }
+
+#if DEBUG
+#Preview("A speech, its second sentence lit") {
+    let model = VoicePreview.speeches("screen-read")
+    VoiceScreen(model: model)
+        .frame(width: 1100, height: 600)
+        .task { await VoicePreview.playing(model, at: 1.2) }
+}
+
+#Preview("No speeches yet") {
+    let model = VoicePreview.speeches("screen-empty", spoken: false)
+    VoiceScreen(model: model)
+        .frame(width: 1100, height: 600)
+        .task { await model.connect(binary: previewBinary) }
+}
+
+#Preview("Speaking: segment 1 of 2") {
+    let model = VoicePreview.speeches("screen-running", starter: PreviewJobs(said: VoicePreview.segment))
+    VoiceScreen(model: model)
+        .frame(width: 1100, height: 600)
+        .task { await VoicePreview.say(model) }
+}
+
+#Preview("Refused for its runtime: asking to install") {
+    let model = VoicePreview.speeches("screen-refused", starter: VoicePreview.refused)
+    VoiceScreen(model: model)
+        .frame(width: 1100, height: 600)
+        .task { await VoicePreview.say(model) }
+}
+
+#Preview("Not installed: the refusal stands") {
+    let model = VoicePreview.speeches("screen-declined", starter: VoicePreview.refused)
+    VoiceScreen(model: model)
+        .frame(width: 1100, height: 600)
+        .task {
+            await VoicePreview.say(model)
+            await VoicePreview.until { model.consent != nil }
+            model.decline()
+        }
+}
+
+#Preview("Hello there: its first sentence lit") {
+    let model = VoicePreview.speeches("page-first")
+    if let speech = VoicePreview.spoken(by: model) {
+        SpeechPage(model: model, speech: speech)
+            .frame(width: 800, height: 420)
+            .task { await VoicePreview.playing(model, at: 0) }
+    }
+}
+
+#Preview("Its second sentence lit") {
+    let model = VoicePreview.speeches("page-second")
+    if let speech = VoicePreview.spoken(by: model) {
+        SpeechPage(model: model, speech: speech)
+            .frame(width: 800, height: 420)
+            .task { await VoicePreview.playing(model, at: 1.2) }
+    }
+}
+
+#Preview("Say something, in the model's own voices") {
+    let model = VoicePreview.speeches("sheet-voices")
+    SaySheet(model: model)
+        .task {
+            await model.connect(binary: previewBinary)
+            model.text = "Hello there. How are you?"
+            model.voice = "bf_emma"
+        }
+}
+
+#Preview("Say something, no voice model in the store") {
+    let model = VoicePreview.speeches("sheet-no-model", runner: VoicePreview.noVoiceModel)
+    SaySheet(model: model)
+        .task {
+            await model.connect(binary: previewBinary)
+            model.text = "Hello there. How are you?"
+        }
+}
+#endif

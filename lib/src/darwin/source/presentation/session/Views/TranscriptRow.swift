@@ -233,3 +233,149 @@ struct EndedCard: View {
         }
     }
 }
+
+#if DEBUG
+#Preview("A turn that asked, wrote and answered") {
+    let model = SessionPreview.session(SessionPreview.mockActor)
+    let transcript = SessionPreview.folded(SessionPreview.mockActor, typed: SessionPreview.noteTurn, answers: SessionPreview.noteAnswers)
+    VStack(alignment: .leading, spacing: Spacing.m) {
+        ForEach(transcript.items) { TranscriptRow(item: $0, model: model) }
+    }
+    .frame(width: 720)
+    .padding(Spacing.xl)
+}
+
+#Preview("Recalled chats, and the sources drawn on") {
+    let model = SessionPreview.session(SessionPreview.mockActor)
+    VStack(alignment: .leading, spacing: Spacing.m) {
+        ForEach(SessionPreview.recalledAndSources.items) { TranscriptRow(item: $0, model: model) }
+    }
+    .frame(width: 720)
+    .padding(Spacing.xl)
+}
+
+#Preview("A plan drawn in place, among notices") {
+    let model = SessionPreview.session(SessionPreview.mockActor)
+    VStack(alignment: .leading, spacing: Spacing.m) {
+        ForEach(SessionPreview.plan.items) { TranscriptRow(item: $0, model: model) }
+    }
+    .frame(width: 720)
+    .padding(Spacing.xl)
+}
+
+#Preview("An answer and its tokens") {
+    let model = SessionPreview.session(SessionPreview.mockActor)
+    VStack(alignment: .leading, spacing: Spacing.m) {
+        ForEach(SessionPreview.answered.items) { TranscriptRow(item: $0, model: model) }
+    }
+    .frame(width: 720)
+    .padding(Spacing.xl)
+}
+
+#Preview("The turn failed") {
+    let model = SessionPreview.session(SessionPreview.mockActor)
+    VStack(alignment: .leading, spacing: Spacing.m) {
+        ForEach(SessionPreview.failed.items) { TranscriptRow(item: $0, model: model) }
+    }
+    .frame(width: 720)
+    .padding(Spacing.xl)
+}
+
+#Preview("Stopped mid-answer") {
+    let model = SessionPreview.session(SessionPreview.mockActor)
+    VStack(alignment: .leading, spacing: Spacing.m) {
+        ForEach(SessionPreview.stopped.items) { TranscriptRow(item: $0, model: model) }
+    }
+    .frame(width: 720)
+    .padding(Spacing.xl)
+}
+
+#Preview("Opened in a project: the session's notices") {
+    let model = SessionPreview.session(SessionPreview.mockActor)
+    let transcript = SessionPreview.folded(SessionPreview.executeProject, typed: "hi")
+    VStack(alignment: .leading, spacing: Spacing.m) {
+        ForEach(transcript.items) { TranscriptRow(item: $0, model: model) }
+    }
+    .frame(width: 720)
+    .padding(Spacing.xl)
+}
+
+#Preview("What this app does not know yet") {
+    let model = SessionPreview.session(SessionPreview.mockActor)
+    VStack(alignment: .leading, spacing: Spacing.m) {
+        ForEach(SessionPreview.unknown.items) { TranscriptRow(item: $0, model: model) }
+    }
+    .frame(width: 720)
+    .padding(Spacing.xl)
+}
+
+#Preview("The excerpts, numbered") {
+    SourcesRow(sources: SessionPreview.sources)
+        .padding(Spacing.xl)
+}
+
+#Preview("Chips on one line") {
+    FlowChips(items: SessionPreview.plays.prefix(3).map(\.name))
+        .font(.apogeeMeta)
+        .padding(Spacing.xl)
+}
+
+#Preview("Chips wrapped to a narrow width") {
+    FlowChips(items: SessionPreview.plays.map(\.name))
+        .font(.apogeeMeta)
+        .frame(width: 280)
+        .padding(Spacing.xl)
+}
+
+#Preview("A quiet line") {
+    QuietLine(symbol: "info.circle", text: "persona: coder, the shipped coding prompt, in every request -- -s replaces it")
+        .padding(Spacing.xl)
+}
+
+#Preview("Thinking, open while live") {
+    let transcript = SessionPreview.folded(SessionPreview.mockActor, typed: SessionPreview.noteTurn, silentFrom: "question")
+    ActivityView(activity: SessionPreview.activity(transcript))
+        .frame(width: 640)
+        .padding(Spacing.xl)
+}
+
+#Preview("Thought, closed to its line") {
+    let transcript = SessionPreview.folded(SessionPreview.mockActor, typed: SessionPreview.noteTurn, answers: SessionPreview.noteAnswers)
+    ActivityView(activity: SessionPreview.activity(transcript))
+        .frame(width: 640)
+        .padding(Spacing.xl)
+}
+
+#Preview("A play, its stage live") {
+    let transcript = SessionPreview.folded(SessionPreview.executePlay, typed: SessionPreview.playTurn, silentFrom: "answer_start")
+    ActivityView(activity: SessionPreview.activity(transcript))
+        .frame(width: 640)
+        .padding(Spacing.xl)
+}
+
+#Preview("A play, played") {
+    let transcript = SessionPreview.folded(SessionPreview.executePlay, typed: SessionPreview.playTurn)
+    ActivityView(activity: SessionPreview.activity(transcript))
+        .frame(width: 640)
+        .padding(Spacing.xl)
+}
+
+#Preview("The model's own play") {
+    let transcript = SessionPreview.folded(SessionPreview.executeOrchestrate, typed: "go")
+    ActivityView(activity: SessionPreview.activity(transcript))
+        .frame(width: 640)
+        .padding(Spacing.xl)
+}
+
+#Preview("Ended") {
+    EndedCard(ending: SessionPreview.finished) {}
+        .frame(width: 640)
+        .padding(Spacing.xl)
+}
+
+#Preview("Ended: failed, the details behind it") {
+    EndedCard(ending: SessionPreview.failedEnding) {}
+        .frame(width: 640)
+        .padding(Spacing.xl)
+}
+#endif

@@ -487,3 +487,207 @@ struct SweepSheet: View {
         .frame(width: 560)
     }
 }
+
+#if DEBUG
+#Preview("A dry run, its finding") {
+    let model = ReviewPreview.review(ReviewPreview.reviewed(ReviewDocuments.runDry))
+    ReviewScreen(model: model)
+        .frame(width: 1000, height: 640)
+        .task { await ReviewPreview.reviewing(model) }
+}
+
+#Preview("Reviewing, in the CLI's narration") {
+    let model = ReviewPreview.review(ReviewPreview.reviewing)
+    ReviewScreen(model: model)
+        .frame(width: 1000, height: 480)
+        .task { await ReviewPreview.reviewing(model) }
+}
+
+#Preview("Asking before posting the batch") {
+    let model = ReviewPreview.review(ReviewPreview.reviewed(ReviewDocuments.runDry))
+    ReviewScreen(model: model)
+        .frame(width: 1000, height: 640)
+        .task {
+            await ReviewPreview.reviewing(model)
+            await ReviewPreview.settled(model)
+            model.askToPost()
+        }
+}
+
+#Preview("The forge refused: gh is not installed") {
+    let model = ReviewPreview.review(ReviewPreview.refusedByForge)
+    ReviewScreen(model: model)
+        .frame(width: 1000, height: 480)
+        .task { await ReviewPreview.reviewing(model) }
+}
+
+#Preview("Apogee not installed") {
+    let model = ReviewPreview.review()
+    ReviewScreen(model: model)
+        .frame(width: 1000, height: 480)
+        .task { await model.connect(binary: nil) }
+}
+
+#Preview("Targets and the last sweep") {
+    let model = ReviewPreview.review(ReviewPreview.swept)
+    ReviewScreen(model: model)
+        .frame(width: 1000, height: 760)
+        .task {
+            model.tab = .targets
+            await ReviewPreview.sweeping(model)
+        }
+}
+
+#Preview("Skills: the security lens open") {
+    let model = ReviewPreview.review()
+    ReviewScreen(model: model)
+        .frame(width: 1100, height: 720)
+        .task {
+            model.tab = .skills
+            await model.connect(binary: previewBinary)
+            await model.show(skill: "security")
+        }
+}
+
+#Preview("Reviewing a merge request") {
+    RunningLine(doing: "Reviewing acme/widget#12", busy: "[review] hunting with security", stop: {})
+        .frame(width: 900)
+}
+
+#Preview("Nothing reviewed yet") {
+    let model = ReviewPreview.review()
+    RunsView(model: model)
+        .frame(width: 900, height: 360)
+        .task { await model.connect(binary: previewBinary) }
+}
+
+#Preview("Reviews: a dry run, its finding") {
+    let model = ReviewPreview.review(ReviewPreview.reviewed(ReviewDocuments.runDry))
+    RunsView(model: model)
+        .frame(width: 900, height: 560)
+        .task { await ReviewPreview.reviewing(model) }
+}
+
+#Preview("Reviews: silence") {
+    let model = ReviewPreview.review(ReviewPreview.reviewed(ReviewDocuments.runSilent))
+    RunsView(model: model)
+        .frame(width: 900, height: 420)
+        .task { await ReviewPreview.reviewing(model) }
+}
+
+#Preview("A dry run: what it found, to post") {
+    if let run = ReviewPreview.run(ReviewDocuments.runDry) {
+        RunPage(run: run, post: {}, canPost: true)
+            .padding(Spacing.xl)
+            .frame(width: 860)
+    }
+}
+
+#Preview("Posted: a comment and a summary") {
+    if let run = ReviewPreview.run(ReviewDocuments.runPosted) {
+        RunPage(run: run, post: {}, canPost: false)
+            .padding(Spacing.xl)
+            .frame(width: 860)
+    }
+}
+
+#Preview("Silence is a complete review") {
+    if let run = ReviewPreview.run(ReviewDocuments.runSilent) {
+        RunPage(run: run, post: {}, canPost: false)
+            .padding(Spacing.xl)
+            .frame(width: 860)
+    }
+}
+
+#Preview("Refused posting on a pipe: nobody to ask") {
+    if let run = ReviewPreview.run(ReviewDocuments.runRefused) {
+        RunPage(run: run, post: {}, canPost: false)
+            .padding(Spacing.xl)
+            .frame(width: 860)
+    }
+}
+
+#Preview("A high-severity finding") {
+    if let finding = ReviewPreview.run(ReviewDocuments.runDry)?.findings.first {
+        FindingCard(finding: finding)
+            .padding(Spacing.xl)
+            .frame(width: 860)
+    }
+}
+
+#Preview("Targets: one posts, one keeps documents") {
+    let model = ReviewPreview.review()
+    TargetsView(model: model)
+        .frame(width: 900, height: 360)
+        .task { await model.connect(binary: previewBinary) }
+}
+
+#Preview("No sweep targets yet") {
+    let model = ReviewPreview.review(runner: ReviewPreview.noTargets)
+    TargetsView(model: model)
+        .frame(width: 900, height: 240)
+        .task { await model.connect(binary: previewBinary) }
+}
+
+#Preview("A dry sweep: one merge request reviewed") {
+    if let sweep = ReviewPreview.sweep {
+        SweepPage(sweep: sweep)
+            .padding(Spacing.xl)
+            .frame(width: 860)
+    }
+}
+
+#Preview("Skills, none chosen") {
+    let model = ReviewPreview.review()
+    SkillsView(model: model)
+        .frame(width: 1000, height: 620)
+        .task { await model.connect(binary: previewBinary) }
+}
+
+#Preview("The security lens, its prompt") {
+    let model = ReviewPreview.review()
+    SkillsView(model: model)
+        .frame(width: 1000, height: 720)
+        .task {
+            await model.connect(binary: previewBinary)
+            await model.show(skill: "security")
+        }
+}
+
+#Preview("Add a target: a repository, two lenses") {
+    let model = ReviewPreview.review()
+    TargetSheet(model: model)
+        .task {
+            model.newTarget()
+            model.targetForm.name = "gadget"
+            model.targetForm.place = "acme/gadget"
+            model.targetForm.skills = ["security", "concurrency"]
+        }
+}
+
+#Preview("Add a target: an owner on GitLab, posting") {
+    let model = ReviewPreview.review()
+    TargetSheet(model: model)
+        .task {
+            model.newTarget()
+            model.targetForm.name = "gadget"
+            model.targetForm.isOwner = true
+            model.targetForm.place = "acme"
+            model.targetForm.forge = "gitlab"
+            model.targetForm.host = "git.example.com"
+            model.targetForm.post = true
+            model.targetForm.drafts = true
+        }
+}
+
+#Preview("Sweep one target, from a date") {
+    let model = ReviewPreview.review()
+    SweepSheet(model: model)
+        .task {
+            await model.connect(binary: previewBinary)
+            model.newSweep()
+            model.sweepForm.targets = ["widget"]
+            model.sweepForm.since = "2026-10-01"
+        }
+}
+#endif

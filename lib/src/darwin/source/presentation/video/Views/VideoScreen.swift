@@ -342,3 +342,112 @@ struct ConsentSheet: View {
         .frame(width: 580)
     }
 }
+
+#if DEBUG
+#Preview("Clips: a final, made from its draft") {
+    VideoScreen(model: VideoPreview.library("screen-read", selecting: "lighthouse.mp4")) {
+        Text("The compositions").font(.apogeeSmall).padding(Spacing.m)
+    }
+    .frame(width: 1100, height: 720)
+}
+
+#Preview("No clips yet") {
+    VideoScreen(model: VideoPreview.empty("screen-empty")) {
+        Text("The compositions").font(.apogeeSmall).padding(Spacing.m)
+    }
+    .frame(width: 1100, height: 600)
+}
+
+#Preview("Generating: step 3 of 50") {
+    VideoScreen(model: VideoPreview.generating("screen-running", starter: PreviewJobs(said: VideoPreview.step))) {
+        Text("The compositions").font(.apogeeSmall).padding(Spacing.m)
+    }
+    .frame(width: 1100, height: 600)
+}
+
+#Preview("Refused for its runtime: asking to install") {
+    VideoScreen(model: VideoPreview.generating("screen-refused", starter: VideoPreview.refused)) {
+        Text("The compositions").font(.apogeeSmall).padding(Spacing.m)
+    }
+    .frame(width: 1100, height: 600)
+}
+
+#Preview("Clips beside a clip's page, a record whose clip is gone") {
+    ClipsView(model: VideoPreview.library("clips-gone", gone: true, selecting: "lighthouse.mp4"))
+        .frame(width: 1000, height: 640)
+}
+
+#Preview("Clips: none picked yet") {
+    ClipsView(model: VideoPreview.library("clips-unpicked"))
+        .frame(width: 1000, height: 480)
+}
+
+#Preview("A run: step 3 of 50") {
+    let model = VideoPreview.generating("run-running", starter: PreviewJobs(said: VideoPreview.step))
+    RunRow(model: model, run: VideoPreview.progress(VideoPreview.step))
+        .frame(width: 264)
+        .padding(Spacing.s)
+}
+
+#Preview("A run made") {
+    RunRow(model: VideoPreview.library("run-made"), run: VideoPreview.progress(VideoPreview.step + [VideoPreview.ended(0)]))
+        .frame(width: 264)
+        .padding(Spacing.s)
+}
+
+#Preview("A run failed, in the CLI's words") {
+    RunRow(
+        model: VideoPreview.library("run-failed"),
+        run: VideoPreview.progress([.event(.error(VideoPreview.refusal)), VideoPreview.ended(1)])
+    )
+    .frame(width: 264)
+    .padding(Spacing.s)
+}
+
+#Preview("A final, made from its draft") {
+    let model = VideoPreview.library("page-final")
+    if let clip = VideoPreview.clip("lighthouse.mp4", of: model) {
+        ClipPage(model: model, clip: clip)
+            .frame(width: 800, height: 760)
+    }
+}
+
+#Preview("A draft, its final not made") {
+    let model = VideoPreview.library("page-draft")
+    if let clip = VideoPreview.clip("lighthouse-draft.mp4", of: model) {
+        ClipPage(model: model, clip: clip)
+            .frame(width: 800, height: 760)
+    }
+}
+
+#Preview("New clip") {
+    let model = VideoPreview.library("sheet-new")
+    ClipSheet(model: model)
+        .task {
+            model.newClip()
+            model.form.prompt = "A lighthouse at dusk"
+        }
+}
+
+#Preview("Run again, from a record") {
+    let model = VideoPreview.library("sheet-again")
+    ClipSheet(model: model)
+        .task {
+            if let clip = VideoPreview.clip("lighthouse-draft.mp4", of: model) { model.newClip(from: clip) }
+        }
+}
+
+#Preview("Continue the clip") {
+    let model = VideoPreview.library("sheet-extend")
+    ClipSheet(model: model)
+        .task {
+            if let clip = VideoPreview.clip("lighthouse.mp4", of: model) { model.newClip(from: clip, extend: true) }
+        }
+}
+
+#Preview("Install what video needs") {
+    ConsentSheet(
+        consent: VideoViewModel.Consent(arguments: VideoViewModel.installCommand(in: VideoPreview.refusal) ?? [], said: VideoPreview.refusal),
+        install: {}, decline: {})
+}
+#endif

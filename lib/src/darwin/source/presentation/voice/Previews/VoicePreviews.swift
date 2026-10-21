@@ -1,0 +1,103 @@
+#if DEBUG
+import BusinessJobs
+import BusinessMedia
+import DataPreferences
+import Foundation
+
+/// The Voice place's view-model for its previews (ADR 0004): a home of its
+/// own under the temporary folder -- its `Music/Apogee` holding the record
+/// the module's tests write -- the store's voice model from the recorded
+/// documents, and preferences held in memory. Never the person's speeches or
+/// defaults, and nothing starts the binary.
+@MainActor
+enum VoicePreview {
+    /// The store, as tests/presentation/voice reads it: its voice model by its
+    /// handle, and that model's voices.
+    static let runner = PreviewRunner(reads: [
+        (["models", "list"], VoiceDocuments.modelsList),
+        (["models", "info", "Kokoro-82M/voice/5f3a2c91d0e4"], VoiceDocuments.voiceInfo),
+    ])
+
+    /// A store with no voice model: models-stored-list.json, its voice row
+    /// taken out.
+    static let noVoiceModel = PreviewRunner(reads: [(["models", "list"], withoutVoice(VoiceDocuments.modelsList))])
+
+    static func withoutVoice(_ list: String) -> String {
+        guard var document = (try? JSONSerialization.jsonObject(with: Data(list.utf8))) as? [String: Any],
+            let rows = document["data"] as? [[String: Any]]
+        else { return list }
+        document["data"] = rows.filter { $0["format"] as? String != "voice" }
+        return (try? JSONSerialization.data(withJSONObject: document)).map { String(decoding: $0, as: UTF8.self) } ?? list
+    }
+
+    /// tests/presentation/voice/VoiceViewModelTests.swift's `speech`: two
+    /// sentences on the file's own clock, `OUT` its WAV.
+    static let speech = #"{"object":"voice.speech","status":"done","output":"OUT","sidecar":"OUT.json","model":{"name":"kokoro"},"voice":"af_heart","language":"en-us","speed":1,"text":"Hello there. How are you?","segments":[{"text":"Hello there. How are you?","seconds":2.4,"offset":0,"sentences":[{"text":"Hello there.","seconds":1.0,"offset":0},{"text":"How are you?","seconds":1.4,"offset":1.0}]}],"seconds":2.4,"created_at":"2026-10-20T10:00:00Z"}"#
+
+    /// The refusal of a run whose runtime is not installed, in the CLI's words
+    /// (VoiceViewModelTests' consent test).
+    static let refusal = "apogee voice: the voice runtime is not installed -- run 'apogee train setup --with voice'"
+
+    /// A 52b run refused for its runtime: the stream's error, then its end.
+    static let refused = PreviewJobs(said: [.event(.error(refusal))], finishes: true, status: 1)
+
+    /// A 52b run's first segment spoken, as tests/business/jobs/JobsTests.swift
+    /// reads the stream's line.
+    static let segment: [JobUpdate] = [.event(.segment(index: 1, of: 2, seconds: 2.4, scene: nil))]
+
+    /// One preview's home, `ApogeePreviews/voice/<name>`, made fresh -- with
+    /// the test's speech spoken into its `Music/Apogee` as `hello.wav`, a
+    /// stand-in WAV, as there.
+    static func home(_ name: String, spoken: Bool = true) -> URL {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("ApogeePreviews/voice/\(name)")
+        let folder = home.appendingPathComponent("Music/Apogee")
+        try? FileManager.default.removeItem(at: home)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        if spoken {
+            let out = folder.appendingPathComponent("hello.wav").path
+            try? Data("RIFF".utf8).write(to: URL(fileURLWithPath: out))
+            try? speech.replacingOccurrences(of: "OUT", with: out).write(toFile: out + ".json", atomically: true, encoding: .utf8)
+        }
+        return home
+    }
+
+    /// The view-model over `home`, not yet connected (`connect` reads the store).
+    static func speeches(
+        _ name: String, spoken: Bool = true, runner: PreviewRunner = runner, starter: PreviewJobs = PreviewJobs()
+    ) -> VoiceViewModel {
+        let model = VoiceViewModel(runner: runner, starter: starter, preferences: Preferences(store: MemoryStore()), home: home(name, spoken: spoken))
+        model.streams = { true }
+        return model
+    }
+
+    /// The speech the module's tests read, as the library scans it.
+    static func spoken(by model: VoiceViewModel) -> SpeechRecord? {
+        MediaLibrary.speeches(in: model.folders).records.first
+    }
+
+    /// Connected, the speech picked, and the player's clock at `position`.
+    static func playing(_ model: VoiceViewModel, at position: Double) async {
+        await model.connect(binary: previewBinary)
+        if let speech = model.speeches.first { model.select(speech) }
+        model.position = position
+    }
+
+    /// Connected, then the test's text said in `bf_emma` at 1.2× -- the
+    /// say test's own sheet.
+    static func say(_ model: VoiceViewModel) async {
+        await model.connect(binary: previewBinary)
+        model.text = "Hello there. How are you?"
+        model.voice = "bf_emma"
+        model.speed = 1.2
+        model.speak()
+    }
+
+    /// Waits, a few seconds at most, for what a run's end sets.
+    static func until(_ condition: @MainActor () -> Bool) async {
+        for _ in 0..<250 {
+            if condition() { return }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+}
+#endif

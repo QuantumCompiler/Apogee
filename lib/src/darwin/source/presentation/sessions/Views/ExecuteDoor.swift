@@ -113,3 +113,36 @@ struct ExecuteDoorSheet: View {
         return "cd \(folder.path) && \(line)"
     }
 }
+
+#if DEBUG
+#Preview("Under a suite, orchestrating, in a project") {
+    let library = SessionsPreview.library()
+    ExecuteDoorSheet(library: library)
+        .task {
+            await library.start(inView: false)
+            await library.openExecuteDoor()
+            library.executeForm.suite = "duo"
+            library.executeForm.orchestrate = true
+            library.executeForm.folder = SessionsPreview.project
+        }
+}
+
+#Preview("Bare on one model: nothing to orchestrate") {
+    let library = SessionsPreview.library()
+    ExecuteDoorSheet(library: library)
+        .task {
+            await library.start(inView: false)
+            await library.openExecuteDoor()
+        }
+}
+
+#Preview("Left to the config's default suite") {
+    let library = SessionsPreview.library(defaultSuite: "duo")
+    ExecuteDoorSheet(library: library)
+        .task {
+            await library.start(inView: false)
+            await library.openExecuteDoor()
+            library.executeForm.orchestrate = true
+        }
+}
+#endif

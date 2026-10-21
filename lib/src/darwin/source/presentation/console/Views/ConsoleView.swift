@@ -139,3 +139,50 @@ public struct ConsoleView: View {
         }
     }
 }
+
+#if DEBUG
+#Preview("Nothing run yet") {
+    ConsoleView(model: ConsolePreview.console()) {}
+}
+
+#Preview("A command refused, then one run to its end") {
+    let console = ConsolePreview.console(saying: ConsolePreview.scan, finishes: true)
+    ConsoleView(model: console) {}
+        .frame(width: 900, height: 560)
+        .task {
+            console.input = "reset"
+            console.run()
+            console.input = "config scan"
+            console.run()
+        }
+}
+
+#Preview("Running: a symphony at its first stage") {
+    let console = ConsolePreview.console(saying: ConsolePreview.playing)
+    ConsoleView(model: console) {}
+        .frame(width: 900, height: 480)
+        .task {
+            console.input = #"symphonies play critique-revise --input "A draft README for the tool." --output-format json"#
+            console.run()
+        }
+}
+
+#Preview("A run that failed, its stderr kept") {
+    let console = ConsolePreview.console(saying: ConsolePreview.refused, finishes: true)
+    ConsoleView(model: console) {}
+        .frame(width: 900, height: 480)
+        .task {
+            console.input = "review mr acme/widget#12 --dry-run --output-format json"
+            console.run()
+        }
+}
+
+#Preview("Tab: the binary's candidates for the word") {
+    let console = ConsolePreview.console()
+    ConsoleView(model: console) {}
+        .task {
+            console.input = "models li"
+            await console.complete()
+        }
+}
+#endif

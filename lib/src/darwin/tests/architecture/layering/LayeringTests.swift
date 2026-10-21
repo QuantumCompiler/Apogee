@@ -11,7 +11,7 @@ private let project = appRoot.appendingPathComponent("Apogee.xcodeproj")
 
 @Suite("The layering check, on this project")
 struct LayeringOnThisProjectTests {
-    @Test("Apogee.xcodeproj and the sources hold ADR 0001 and ADR 0002")
+    @Test("Apogee.xcodeproj and the sources hold ADR 0001, ADR 0002 and ADR 0004")
     func thisProjectHoldsTheLaw() throws {
         let map = try ModuleMap(projectAt: project)
         let violations = LayeringCheck(map: map, tree: DiskTree(root: appRoot)).violations()
@@ -48,11 +48,21 @@ struct LayeringOnThisProjectTests {
         plist["objects"] = objects
         let scheme = try String(
             contentsOf: project.appendingPathComponent("xcshareddata/xcschemes/Apogee.xcscheme"), encoding: .utf8)
-        let map = try ModuleMap(projectPlist: plist, schemeXML: scheme)
+        let map = try ModuleMap(projectPlist: plist, schemeXML: scheme, schemes: ModuleMap.sharedSchemes(of: project))
         let violations = LayeringCheck(map: map, tree: DiskTree(root: appRoot)).violations()
         #expect(violations == [
             "upward edge: DataProtocol (data) depends on BusinessSession (business) -- dependencies point down"
         ])
+    }
+
+    @Test("every Presentation module's own scheme is on disk, read for what it builds and tests")
+    func moduleSchemesOnDisk() throws {
+        let map = try ModuleMap(projectAt: project)
+        let presentation = map.targets.filter { $0.kind == .framework && $0.name.hasPrefix("Presentation") }.map(\.name)
+        #expect(presentation.count >= 19)
+        for name in presentation {
+            #expect(map.schemes[name] == ModuleMap.Scheme(built: [name], tested: [name + "Tests"]), "\(name)")
+        }
     }
 
     @Test("the scheme's testables are read by name, a skipped one left out")
@@ -101,6 +111,10 @@ private struct Planted {
         test("ArchitectureLayeringTests", "tests/architecture/layering"),
     ]
     var packageReferences = 0
+    var schemes: [String: ModuleMap.Scheme] = [
+        "PresentationStyles": .init(built: ["PresentationStyles"], tested: ["PresentationStylesTests"]),
+        "PresentationApp": .init(built: ["PresentationApp"], tested: ["PresentationAppTests"]),
+    ]
     var schemeTestables: [String]? = [
         "InfrastructureProcessTests", "DataProtocolTests", "BusinessSessionTests", "PresentationStylesTests",
         "PresentationAppTests", "ArchitectureLayeringTests",
@@ -166,7 +180,8 @@ private struct Planted {
 
     func violations() -> [String] {
         LayeringCheck(
-            map: ModuleMap(targets: targets, packageReferences: packageReferences, schemeTestables: schemeTestables),
+            map: ModuleMap(
+                targets: targets, packageReferences: packageReferences, schemeTestables: schemeTestables, schemes: schemes),
             tree: PlantedTree(files: files)
         ).violations()
     }
@@ -286,6 +301,7 @@ struct LayeringPlantedTests {
         planted.files["source/presentation/CLAUDE.md"] = "**Modules:** `styles`, `app`, `extra`.\n"
         planted.targets.append(Planted.test("PresentationExtraTests", "tests/presentation/extra"))
         planted.schemeTestables?.append("PresentationExtraTests")
+        planted.schemes["PresentationExtra"] = .init(built: ["PresentationExtra"], tested: ["PresentationExtraTests"])
         planted.change("Apogee") { $0.embedded.append("PresentationExtra") }
         #expect(planted.violations() == [
             "Apogee does not embed InfrastructureProcess, which it needs at run time: the app would not launch",
@@ -329,6 +345,77 @@ struct LayeringPlantedTests {
         #expect(planted.violations() == [
             "the shared scheme Apogee (xcshareddata/xcschemes/Apogee.xcscheme) is missing: it is what runs the tests"
         ])
+    }
+
+    @Test("a Presentation module without its own scheme fails, and so does a scheme that builds or tests the wrong target")
+    func moduleSchemes() {
+        var planted = Planted()
+        planted.schemes.removeValue(forKey: "PresentationStyles")
+        planted.schemes["PresentationApp"] = .init(built: ["Apogee"], tested: ["PresentationAppTests", "BusinessSessionTests"])
+        #expect(planted.violations() == [
+            "PresentationStyles has no shared scheme (xcshareddata/xcschemes/PresentationStyles.xcscheme): a Presentation module is built, previewed and tested on its own",
+            "the scheme PresentationApp builds Apogee, not PresentationApp",
+            "the scheme PresentationApp runs PresentationAppTests, BusinessSessionTests: it runs PresentationAppTests alone",
+        ])
+    }
+
+    @Test("a view without its #Preview fails by name; one preview per view, a private helper left out")
+    func viewsArePreviewed() {
+        var planted = Planted()
+        planted.files["source/presentation/app/Views/Screen.swift"] = """
+            import SwiftUI
+            public struct Screen: View { var body: some View { Row() } }
+            struct Row: View { var body: some View { Text("a") } }
+            private struct Helper: View { var body: some View { Text("b") } }
+            struct Model: Equatable {}
+            #if DEBUG
+            #Preview("Read") { Screen() }
+            #endif
+            """
+        planted.files["source/presentation/styles/Components/Empty.swift"] = "import SwiftUI\nstruct Empty: View { var body: some View { Text(\"\") } }\n"
+        #expect(planted.violations() == [
+            "source/presentation/styles/Components/Empty.swift declares Empty with no #Preview: every view a module draws is previewable",
+            "source/presentation/app/Views/Screen.swift: Row has no #Preview",
+        ])
+        planted.files["source/presentation/app/Views/Screen.swift"]? += "#if DEBUG\n#Preview { Row() }\n#endif\n"
+        planted.files["source/presentation/styles/Components/Empty.swift"]? += "#if DEBUG\n#Preview { Empty() }\n#endif\n"
+        #expect(planted.violations() == [])
+    }
+
+    @Test("previews stay debug-only, macro-only and hermetic")
+    func previewsAreHermetic() {
+        var planted = Planted()
+        planted.files["source/presentation/app/Views/Screen.swift"] = """
+            import SwiftUI
+            struct Screen: View { var body: some View { Text("a") } }
+            #Preview { Screen(model: AppModel(runner: ReadRunner())) }
+            struct Screen_Previews: PreviewProvider { static var previews: some View { Screen() } }
+            """
+        planted.files["source/presentation/app/Previews/Fakes.swift"] = "import BusinessSession\nlet client = ApogeeClient(identity: .init(version: \"0\"))\n"
+        #expect(planted.violations() == [
+            "source/presentation/app/Previews/Fakes.swift is preview support outside #if DEBUG: previews never ship",
+            "source/presentation/app/Previews/Fakes.swift names ApogeeClient: a preview never starts the binary",
+            "source/presentation/app/Views/Screen.swift uses PreviewProvider: a view is previewed with #Preview",
+            "source/presentation/app/Views/Screen.swift has a #Preview outside #if DEBUG: previews never ship",
+            "source/presentation/app/Views/Screen.swift names ReadRunner in its previews: a preview never starts the binary",
+        ])
+    }
+
+    @Test("views are found as Swift declares them: generic, public, representable; never a private helper or a non-view")
+    func declaredViews() {
+        let source = """
+            public struct ModelsScreen<Downloads: View>: View {
+            struct ListPage<Row: Identifiable, Label: View>: View {
+            struct MediaPlayer: NSViewRepresentable {
+            private struct Hidden: View {
+            fileprivate struct AlsoHidden: View {
+            struct Box<V: View>: Equatable {
+                struct Nested: View {
+            struct Plain: Equatable, Sendable {
+            """
+        #expect(LayeringCheck.declaredViews(in: source) == ["ModelsScreen", "ListPage", "MediaPlayer"])
+        #expect(LayeringCheck.constructs("Row", in: "#Preview { Row(model: m) }"))
+        #expect(!LayeringCheck.constructs("Row", in: "#Preview { RowLabel() }"))
     }
 
     @Test("a layer card that misses a module, or is missing, fails")

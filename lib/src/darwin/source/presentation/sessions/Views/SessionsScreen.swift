@@ -194,3 +194,69 @@ public struct SessionCommands: Commands {
         }
     }
 }
+
+#if DEBUG
+#Preview("Starting") {
+    SessionsScreen(library: SessionsPreview.library(), shell: SessionsPreview.shell())
+        .frame(width: 1100, height: 720)
+}
+
+#Preview("A new session answered, the inspector beside it") {
+    let library = SessionsPreview.library()
+    SessionsScreen(library: library, shell: SessionsPreview.shell())
+        .frame(width: 1200, height: 760)
+        .task {
+            library.inspectorOpen = true
+            await library.start(inView: true)
+            await SessionsPreview.converse(library.current, typed: SessionsPreview.noteTurn, answers: SessionsPreview.noteAnswers)
+        }
+}
+
+#Preview("A question waiting") {
+    let library = SessionsPreview.library()
+    SessionsScreen(library: library, shell: SessionsPreview.shell())
+        .frame(width: 1100, height: 760)
+        .task {
+            await library.start(inView: true)
+            await SessionsPreview.converse(library.current, typed: SessionsPreview.noteTurn)
+        }
+}
+
+#Preview("Apogee isn't installed") {
+    let library = SessionsPreview.library(missing: true)
+    SessionsScreen(library: library, shell: SessionsPreview.shell())
+        .frame(width: 1100, height: 720)
+        .task { await library.start(inView: true) }
+}
+
+#Preview("A delete waiting on the person's word") {
+    let library = SessionsPreview.library()
+    SessionsScreen(library: library, shell: SessionsPreview.shell())
+        .frame(width: 1100, height: 720)
+        .task {
+            await library.start(inView: true)
+            if let chat = library.chats.first { library.askToDelete(chat) }
+        }
+}
+
+#Preview("A saved session: its model, the last turn, the roles") {
+    @Previewable @State var library = SessionsPreview.library(openChat: "c1")
+    InspectorPane(inspector: library.inspector) {}
+        .frame(width: 360, height: 640)
+        .task {
+            await library.start(inView: true)
+            await SessionsPreview.converse(library.current, typed: SessionsPreview.noteTurn, answers: SessionsPreview.noteAnswers)
+            await library.refreshRoles()
+        }
+}
+
+#Preview("A new session, not saved yet") {
+    @Previewable @State var library = SessionsPreview.library()
+    InspectorPane(inspector: library.inspector) {}
+        .frame(width: 360, height: 640)
+        .task {
+            await library.start(inView: true)
+            await SessionsPreview.converse(library.current, typed: SessionsPreview.noteTurn)
+        }
+}
+#endif
