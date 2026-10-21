@@ -57,9 +57,7 @@ public enum Destination: String, CaseIterable, Sendable, Identifiable {
         case .tasks:
             nil
         case .graph:
-            Placeholder(
-                about: "The code graph's symbols, their callers and callees, and its files will be here.",
-                command: "apogee graph stats")
+            nil
         case .video:
             Placeholder(
                 about: "Your clips and compositions, and making new ones, will be here.",

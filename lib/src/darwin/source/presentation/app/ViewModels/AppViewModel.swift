@@ -4,6 +4,7 @@ import BusinessSession
 import DataPreferences
 import Foundation
 import Observation
+import PresentationGraph
 import PresentationModels
 import PresentationMonitor
 import PresentationSessions
@@ -29,6 +30,7 @@ final class AppViewModel {
     let tasks: TasksViewModel
     let monitor: MonitorViewModel
     let suites: SuitesViewModel
+    let graph: GraphViewModel
 
     init(
         info: [String: Any]?, preferences: Preferences, starter: (any ChatStarting)? = nil,
@@ -58,6 +60,8 @@ final class AppViewModel {
         }
         let suites = SuitesViewModel(runner: runner ?? ReadRunner())
         suites.say = { [weak shell] text in shell?.say(text) }
+        let graph = GraphViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
+        graph.say = { [weak shell] text in shell?.say(text) }
         sessions.say = { [weak shell] text in shell?.say(text) }
         models.say = { [weak shell] text in shell?.say(text) }
         models.useInSession = { [weak shell, weak sessions] backend in
@@ -66,12 +70,13 @@ final class AppViewModel {
         }
         // Sessions in view or not: the library keeps its one child to the
         // session on screen. A place coming into view reads again.
-        shell.routeChanged = { [weak sessions, weak models, weak tasks, weak suites] destination in
+        shell.routeChanged = { [weak sessions, weak models, weak tasks, weak suites, weak graph] destination in
             Task {
                 if destination == .sessions { await sessions?.cameIntoView() } else { await sessions?.leftView() }
                 if destination == .models { await models?.appeared() }
                 if destination == .tasks { await tasks?.appeared() }
                 if destination == .suites { await suites?.appeared() }
+                if destination == .graph { await graph?.appeared() }
             }
         }
         self.shell = shell
@@ -81,6 +86,7 @@ final class AppViewModel {
         self.tasks = tasks
         self.monitor = monitor
         self.suites = suites
+        self.graph = graph
     }
 
     convenience init(bundle: Bundle) {
@@ -95,5 +101,6 @@ final class AppViewModel {
         await tasks.connect(binary: sessions.binaryURL)
         monitor.connect(binary: sessions.binaryURL)
         await suites.connect(binary: sessions.binaryURL)
+        await graph.connect(binary: sessions.binaryURL)
     }
 }

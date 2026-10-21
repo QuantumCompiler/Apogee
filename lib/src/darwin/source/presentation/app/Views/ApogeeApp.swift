@@ -1,3 +1,4 @@
+import PresentationGraph
 import PresentationModels
 import PresentationMonitor
 import PresentationSessions
@@ -30,6 +31,7 @@ public struct ApogeeApp: App {
                     }
                 case .tasks: TasksScreen(model: model.tasks)
                 case .suites: SuitesScreen(model: model.suites)
+                case .graph: GraphScreen(model: model.graph, shell: model.shell)
                 default: PlaceholderScreen(destination)
                 }
             } overlay: { overlay in
