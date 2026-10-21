@@ -13,10 +13,27 @@ public struct ChatLaunch: Sendable, Equatable {
     /// The saved conversation to carry on -- `--resume <id>` -- or `nil` for
     /// a new one.
     public var resume: String?
+    /// The run settings to start with: `-m`, `-s`, `--think`, `--effort`.
+    /// (Temperature has no launch flag; only the `set` line moves it.)
+    public var settings: RunSettings
+    /// A chat that writes nothing (`--private`, the CLI's 52d) -- never with
+    /// `resume`, which the CLI refuses.
+    public var privately: Bool
+    /// Recall no earlier chats (`--no-recall`): a private session's fallback
+    /// on a build before `--private`.
+    public var noRecall: Bool
 
-    public init(tools: Bool = true, resume: String? = nil) {
+    public init(
+        tools: Bool = true, resume: String? = nil, settings: RunSettings? = nil, privately: Bool = false,
+        noRecall: Bool = false
+    ) {
         self.tools = tools
         self.resume = resume
+        // `nil` rather than a default naming DataProtocol's type: a default
+        // argument is compiled into its caller (CLAUDE.md -> Code Style).
+        self.settings = settings ?? RunSettings()
+        self.privately = privately
+        self.noRecall = noRecall
     }
 
     /// The arguments after `apogee`.
@@ -32,6 +49,12 @@ public struct ChatLaunch: Sendable, Equatable {
         if let resume {
             arguments += ["--resume", resume]
         }
+        if let model = settings.model { arguments += ["-m", model] }
+        if let system = settings.system { arguments += ["-s", system] }
+        if let think = settings.think { arguments += ["--think", think] }
+        if let effort = settings.effort, effort != "auto" { arguments += ["--effort", effort] }
+        if privately { arguments.append("--private") }
+        if noRecall { arguments.append("--no-recall") }
         return arguments
     }
 

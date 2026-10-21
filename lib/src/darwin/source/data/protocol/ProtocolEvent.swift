@@ -15,8 +15,12 @@ public struct ProtocolEvent: Sendable, Equatable {
         case thinking(budgetReached: Bool)
         /// A chunk of reasoning. Droppable.
         case thinkingDelta(String)
-        /// What a turn was handed from earlier conversations.
+        /// What a turn was handed from earlier conversations; since the CLI's
+        /// 52a, `recalled` names the chats.
         case memory(chats: Int, decisions: Int)
+        /// The excerpts retrieval sent the model this turn (52a), in order:
+        /// number them to cite them.
+        case sources([Source])
         /// A tool, or another model call, at work -- a line for display.
         case toolStatus(String)
         /// A line for the user that is neither progress nor an error.
@@ -58,6 +62,68 @@ public struct ProtocolEvent: Sendable, Equatable {
 
     /// The turn the event belongs to: the number of the `user` line it answers.
     public var turn: Int? { fields["turn"]?.intValue }
+
+    /// A `memory` event's chats, named (the CLI's 52a); empty from a build
+    /// before it, which gives counts alone.
+    public var recalled: [RecalledChat] {
+        (fields["sessions"]?.arrayValue ?? []).compactMap { entry in
+            guard let id = entry["id"]?.stringValue else { return nil }
+            return RecalledChat(id: id, name: entry["name"]?.stringValue ?? id, updated: entry["updated"]?.stringValue)
+        }
+    }
+}
+
+/// A past chat a turn recalled: what `--resume` takes, and the name and time
+/// the recall index recorded.
+public struct RecalledChat: Sendable, Equatable {
+    public let id: String
+    public let name: String
+    public let updated: String?
+
+    public init(id: String, name: String, updated: String?) {
+        self.id = id
+        self.name = name
+        self.updated = updated
+    }
+}
+
+/// One excerpt a turn's retrieval sent the model: its file, where in it, and
+/// its score on its retriever's own scale.
+public struct Source: Sendable, Equatable {
+    public let file: String
+    /// `[first, last]` when the excerpt's chunks record them.
+    public let pages: [Int]?
+    public let lines: [Int]?
+    /// Seconds, for a recording.
+    public let times: [Double]?
+    public let score: Double?
+    /// `lexical`, `vector` or `hybrid` -- scores of different retrievers do not compare.
+    public let retriever: String?
+
+    public init(file: String, pages: [Int]?, lines: [Int]?, times: [Double]?, score: Double?, retriever: String?) {
+        self.file = file
+        self.pages = pages
+        self.lines = lines
+        self.times = times
+        self.score = score
+        self.retriever = retriever
+    }
+
+    /// Where in the file, as a person reads it: `pages 41–42`, `line 12`, `0:30–1:05`.
+    public var place: String? {
+        func span(_ range: [String]) -> String? {
+            guard let first = range.first else { return nil }
+            let last = range.count > 1 ? range[1] : first
+            return first == last ? first : "\(first)–\(last)"
+        }
+        if let pages, let text = span(pages.map(String.init)) { return (pages.count > 1 && pages[0] != pages[1] ? "pages " : "page ") + text }
+        if let lines, let text = span(lines.map(String.init)) { return (lines.count > 1 && lines[0] != lines[1] ? "lines " : "line ") + text }
+        if let times {
+            let clock = times.map { t in String(format: "%d:%02d", Int(t) / 60, Int(t) % 60) }
+            return span(clock)
+        }
+        return nil
+    }
 }
 
 /// The `session` event's facts.
@@ -68,12 +134,15 @@ public struct SessionInfo: Sendable, Equatable {
     public let nextTurn: Int
     /// Absent from a binary that predates them.
     public let capabilities: Capabilities?
+    /// A chat that writes nothing: `chat --private` (the CLI's 52d).
+    public let isPrivate: Bool
 
-    public init(protocolVersion: Int, model: String, nextTurn: Int, capabilities: Capabilities?) {
+    public init(protocolVersion: Int, model: String, nextTurn: Int, capabilities: Capabilities?, isPrivate: Bool = false) {
         self.protocolVersion = protocolVersion
         self.model = model
         self.nextTurn = nextTurn
         self.capabilities = capabilities
+        self.isPrivate = isPrivate
     }
 }
 

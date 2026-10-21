@@ -1,4 +1,5 @@
 import BusinessSession
+import DataProtocol
 import DataPreferences
 import Foundation
 import InfrastructureProcess
@@ -33,6 +34,17 @@ struct ChatLaunchTests {
             "--resume", "20261021-003843-0fc4",
         ])
         #expect(ChatLaunch().resume == nil)
+    }
+
+    @Test("the run settings are the flags a person would type; a private chat is --private, its fallback --no-recall")
+    func settingsAndPrivate() {
+        let base = ["chat", "--output-format", "stream-json", "--input-format", "stream-json", "--tools"]
+        #expect(ChatLaunch(resume: "c1", settings: RunSettings(model: "claude", system: "Be brief.", think: "off", effort: "high")).arguments
+            == base + ["--resume", "c1", "-m", "claude", "-s", "Be brief.", "--think", "off", "--effort", "high"])
+        #expect(ChatLaunch(settings: RunSettings(effort: "auto", temperature: 0.2)).arguments == base,
+            "auto effort is the default, and temperature has no launch flag")
+        #expect(ChatLaunch(privately: true).arguments == base + ["--private"])
+        #expect(ChatLaunch(noRecall: true).arguments == base + ["--no-recall"])
     }
 
     @Test("a client starts a chat in the user's home unless given a folder, and says hello first")

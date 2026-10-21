@@ -117,6 +117,21 @@ public actor MachineSession {
         try write(.attach(path: path, graph: graph))
     }
 
+    /// Detaches what was attached under `path` (the CLI's 52d).
+    public func detach(path: String) throws {
+        try write(.detach(path: path))
+    }
+
+    /// Moves the run settings from the next turn (52d); each said in a notice.
+    public func set(_ settings: RunSettings) throws {
+        try write(.set(settings))
+    }
+
+    /// Compacts the conversation now (52d).
+    public func compact() throws {
+        try write(.compact)
+    }
+
     /// Stops the turn in flight the protocol's way: it still ends in its one
     /// `result`, `finish_reason: "cancelled"`, and the session goes on. With
     /// no turn in flight the child ignores it.

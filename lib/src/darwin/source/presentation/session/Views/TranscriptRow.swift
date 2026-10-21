@@ -37,6 +37,19 @@ struct TranscriptRow: View {
             }
         case .notice(let text):
             QuietLine(symbol: "info.circle", text: text)
+        case .recalled(let recall):
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                QuietLine(symbol: "clock.arrow.circlepath", text: recall.summary)
+                ForEach(recall.chats, id: \.id) { chat in
+                    Button(chat.name) { model.onAction?(.openChat(chat.id)) }
+                        .buttonStyle(.link)
+                        .font(.apogeeMeta)
+                        .padding(.leading, Spacing.l)
+                        .help("Open this session")
+                }
+            }
+        case .sources(let sources):
+            SourcesRow(sources: sources)
         case .question(let card):
             QuestionCardView(card: card) { model.answer(item.id, with: $0) }
         case .permission(let card):
@@ -48,6 +61,10 @@ struct TranscriptRow: View {
                     .font(.apogeeBody)
                     .foregroundStyle(Palette.textPrimary)
                     .textSelection(.enabled)
+                if model.lastSent != nil && item.id == model.transcript.items.last?.id {
+                    Button("Try again") { model.retry() }
+                        .disabled(!model.transcript.acceptsInput)
+                }
             }
         case .stopped:
             QuietLine(symbol: "stop.circle", text: "stopped")
@@ -77,6 +94,46 @@ struct TranscriptRow: View {
         case "done": "checkmark.circle"
         case "active": "circle.dotted"
         default: "circle"
+        }
+    }
+}
+
+/// The excerpts a turn drew on, numbered as the answer cites them.
+struct SourcesRow: View {
+    let sources: [Source]
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+            Image(systemName: "text.quote")
+                .foregroundStyle(Palette.textTertiary)
+            FlowChips(items: sources.enumerated().map { index, source in
+                "[\(index + 1)] \(source.file)" + (source.place.map { " · \($0)" } ?? "")
+            })
+        }
+        .font(.apogeeMeta)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Sources: " + sources.map(\.file).joined(separator: ", "))
+    }
+}
+
+/// Chips that wrap to the width they have.
+struct FlowChips: View {
+    let items: [String]
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Spacing.xs) { chips }
+            VStack(alignment: .leading, spacing: Spacing.xs) { chips }
+        }
+    }
+
+    private var chips: some View {
+        ForEach(items, id: \.self) { item in
+            Text(item)
+                .foregroundStyle(Palette.textSecondary)
+                .padding(.horizontal, Spacing.s)
+                .padding(.vertical, Spacing.xxs)
+                .background(Palette.control, in: RoundedRectangle(cornerRadius: Radius.chip))
         }
     }
 }

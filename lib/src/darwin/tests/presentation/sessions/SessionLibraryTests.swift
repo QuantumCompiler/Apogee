@@ -250,7 +250,7 @@ struct SessionLibraryTests {
         let library = library(runner, ScriptedStarter(sessions: [ScriptedSession()]))
         await library.start(inView: false)
         #expect(library.chats.allSatisfy { library.kind(of: $0) == nil })
-        #expect(!runner.calls.contains("read models list"), "no backend named: no models read")
+        #expect(runner.calls.filter { $0 == "read models list" }.count == 1, "read once at launch, for the meter's windows and the settings' models")
         runner.reading(["chats", "list"], #"{"object":"list","data":[{"id":"c2","name":"Plans","turns":3,"updated":"2026-10-20T15:00:00Z","backend":"claude","model":""},{"id":"c1","name":"Recipes","turns":1,"updated":"2026-10-12T09:00:00Z","backend":"actor","model":""}]}"#)
         runner.reading(["models", "list"], #"{"object":"list","data":[{"backend":"claude","backend_type":"anthropic"},{"backend":"actor","backend_type":"mock"}]}"#)
         await library.refresh()
@@ -307,4 +307,103 @@ func tail(_ text: String) -> BoundedTail {
     var tail = BoundedTail()
     tail.append(Data((text + "\n").utf8))
     return tail
+}
+
+@Suite("SessionLibraryPrivate", .timeLimit(.minutes(1)))
+@MainActor
+struct SessionLibraryPrivateTests {
+    static let old = #"{"type":"session","protocol_version":1,"model":"local","next_turn":1,"capabilities":{"events":[],"accepts":["user","answer","attach","hello","cancel"],"tools":true,"ask":true,"schema":"2026-10-13"}}"#
+    static let new = #"{"type":"session","protocol_version":1,"model":"local","next_turn":1,"capabilities":{"events":[],"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"tools":true,"ask":true,"schema":"2026-10-20"}}"#
+    static let list = #"{"object":"list","data":[{"id":"c1","name":"Recipes","turns":1,"updated":"2026-10-12T09:00:00Z"}]}"#
+    static let models = #"{"object":"list","data":[{"backend":"local","backend_type":"llamacpp","model":"qwen"},{"backend":"claude","backend_type":"anthropic"}]}"#
+
+    func library(_ runner: ScriptedRunner, _ sessions: [ScriptedSession]) -> (SessionLibraryViewModel, ScriptedStarter) {
+        let starter = ScriptedStarter(sessions: sessions)
+        return (SessionLibraryViewModel(starter: starter, runner: runner, preferences: Preferences(store: MemoryStore())), starter)
+    }
+
+    @Test("on a build with --private, a private session is --private: nothing to delete, never listed")
+    func privateWritesNothing() async {
+        let runner = ScriptedRunner()
+        runner.reading(["chats", "list"], Self.list)
+        runner.reading(["models", "list"], Self.models)
+        let first = ScriptedSession()
+        let second = ScriptedSession()
+        let third = ScriptedSession()
+        runner.reading(["models", "info", "local"], #"{"name":"local","fields":[{"field":"backend","value":"local"},{"field":"window","value":"8192 tokens (the default; trained for 32768)"}]}"#)
+        let (library, starter) = library(runner, [first, second, third])
+        await library.start(inView: true)
+        first.emit(Self.new)
+        #expect(await eventually { library.privateIsNothingWritten })
+        #expect(await eventually { library.current.contextWindow == 8192 }, "the session's model's window, from models info")
+        #expect(library.current.modelChoices == ["local", "claude"])
+        await library.newPrivateSession()
+        #expect(await eventually { starter.openedCount == 2 })
+        #expect(starter.launches.last == ChatLaunch(privately: true))
+        await library.newSession()
+        #expect(!runner.calls.contains { $0.hasPrefix("run chats delete") })
+    }
+
+    @Test("on an older build a private session is --no-recall, kept out of the list, and deleted when it closes")
+    func privateFallback() async {
+        let runner = ScriptedRunner()
+        runner.reading(["chats", "list"], Self.list)
+        let first = ScriptedSession()
+        let second = ScriptedSession()
+        let third = ScriptedSession()
+        let (library, starter) = library(runner, [first, second, third])
+        await library.start(inView: true)
+        first.emit(Self.old)
+        _ = await eventually { library.current.transcript.status == .ready }
+        #expect(!library.privateIsNothingWritten)
+        await library.newPrivateSession()
+        #expect(await eventually { starter.openedCount == 2 })
+        #expect(starter.launches.last == ChatLaunch(noRecall: true))
+        second.emit(Self.old)
+        _ = await eventually { library.current.transcript.status == .ready }
+        runner.reading(["chats", "list"], #"{"object":"list","data":[{"id":"p9","name":"secret","turns":1,"updated":"2026-10-20T17:00:00Z"},{"id":"c1","name":"Recipes","turns":1,"updated":"2026-10-12T09:00:00Z"}]}"#)
+        library.current.draft = "something private"
+        library.current.submit()
+        second.emit(#"{"type":"result","text":"ok","turn":1}"#)
+        #expect(await eventually { library.current.chatID == "p9" })
+        #expect(library.groups.flatMap(\.chats).map(\.id) == ["c1"], "the private one is never listed")
+        await library.newSession()
+        #expect(runner.calls.contains("run chats delete p9"), "deleted when it closed, as it promised")
+    }
+
+    @Test("a model's window: 52e's typed data first, else the window field's count; none is unknown")
+    func windows() throws {
+        let typed = try #require(ReadDocument(text: #"{"name":"q","fields":[{"field":"window","value":"4096 tokens (context_size)"}],"data":{"window":{"tokens":32768,"source":"default"}}}"#))
+        #expect(SessionLibraryViewModel.window(in: typed) == 32768)
+        let fields = try #require(ReadDocument(text: #"{"name":"q","fields":[{"field":"window","value":"8192 tokens (the default)"}]}"#))
+        #expect(SessionLibraryViewModel.window(in: fields) == 8192)
+        let api = try #require(ReadDocument(text: #"{"name":"claude","fields":[{"field":"backend","value":"claude"},{"field":"type","value":"anthropic"}]}"#))
+        #expect(SessionLibraryViewModel.window(in: api) == nil)
+        let unknown = try #require(ReadDocument(text: #"{"name":"m","fields":[{"field":"window","value":"window unknown -- config.json could not be read"}]}"#))
+        #expect(SessionLibraryViewModel.window(in: unknown) == nil)
+    }
+
+    @Test("the window's acts reach the library: rename, delete, the inspector, a recalled chat")
+    func actsFromTheWindow() async {
+        let runner = ScriptedRunner()
+        runner.reading(["chats", "list"], Self.list)
+        let first = ScriptedSession()
+        let second = ScriptedSession()
+        let store = MemoryStore(["openChat": "c1"])
+        let starter = ScriptedStarter(sessions: [first, second])
+        let library = SessionLibraryViewModel(starter: starter, runner: runner, preferences: Preferences(store: store))
+        await library.start(inView: true)
+        first.emit(Self.new)
+        _ = await eventually { library.current.transcript.status == .ready }
+        library.current.onAction?(.rename)
+        #expect(library.renaming?.id == "c1")
+        library.current.onAction?(.delete)
+        #expect(library.pending == .delete(library.chats[0]))
+        library.dismissPending()
+        library.current.onAction?(.toggleInspector)
+        #expect(library.inspectorOpen)
+        runner.reading(["chats", "list"], #"{"object":"list","data":[{"id":"c7","name":"Older","turns":1,"updated":"2026-10-01T09:00:00Z"},{"id":"c1","name":"Recipes","turns":1,"updated":"2026-10-12T09:00:00Z"}]}"#)
+        library.current.onAction?(.openChat("c7"))
+        #expect(await eventually { starter.launches.last?.resume == "c7" })
+    }
 }

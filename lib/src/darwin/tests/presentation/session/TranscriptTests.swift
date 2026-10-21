@@ -16,6 +16,8 @@ struct TranscriptTests {
             case .activity(let a): "activity\(a.live ? " live" : ""): \(a.reasoning)|\(a.lines.joined(separator: ","))"
             case .answer(let a): "answer\(a.finished ? "" : " streaming"): \(a.text)"
             case .notice(let text): "notice: \(text)"
+            case .recalled(let recall): "recalled: \(recall.chats.map(\.name).joined(separator: ","))"
+            case .sources(let sources): "sources: \(sources.map(\.file).joined(separator: ","))"
             case .question(let card): "question: \(card.answers?.joined(separator: ",") ?? "waiting")"
             case .permission(let card): "permission: \(card.answer ?? "waiting")"
             case .error(let message): "error: \(message)"

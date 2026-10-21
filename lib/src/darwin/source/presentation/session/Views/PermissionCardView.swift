@@ -31,6 +31,10 @@ struct PermissionCardView: View {
                         .font(.apogeeSmall)
                         .foregroundStyle(Palette.textSecondary)
                         .textSelection(.enabled)
+                } else if let diff = card.question.detail, Self.isFileChange(card.question) {
+                    // The change itself, since the CLI's 52a; a build before
+                    // it names the path alone (the design's G1 fallback).
+                    DiffView(diff: diff)
                 }
                 HStack(spacing: Spacing.s) {
                     Button("Allow once") { answer("yes") }.keyboardShortcut(.defaultAction)
@@ -55,6 +59,10 @@ struct PermissionCardView: View {
         case "write_note", "delete_note": "Change a note"
         default: question.outbound ? "Visit a new website" : "Permission"
         }
+    }
+
+    static func isFileChange(_ question: Question) -> Bool {
+        question.tool == "write_file" || question.tool == "edit_file"
     }
 
     static func said(_ answer: String) -> String {

@@ -10,7 +10,6 @@ public struct SessionList: View {
     private let shell: ShellViewModel
     @FocusState private var searching: Bool
     @State private var closed: Set<String> = []
-    @State private var renaming: ChatSummary?
 
     public init(library: SessionLibraryViewModel, shell: ShellViewModel) {
         self.library = library
@@ -24,6 +23,16 @@ public struct SessionList: View {
                     .font(.apogeeSmall.weight(.medium))
                     .foregroundStyle(Palette.textSecondary)
                 Spacer()
+                Button {
+                    shell.go(.sessions)
+                    Task { await library.newPrivateSession() }
+                } label: {
+                    Image(systemName: "eye.slash")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.textSecondary)
+                .help("New private session ⇧⌘N")
+                .accessibilityLabel("New private session")
                 Button {
                     shell.go(.sessions)
                     Task { await library.newSession() }
@@ -45,6 +54,9 @@ public struct SessionList: View {
                 .padding(.bottom, Spacing.xs)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
+                    if library.current.privateMode != nil {
+                        openPrivateRow
+                    }
                     ForEach(library.groups) { group in
                         groupView(group)
                     }
@@ -61,10 +73,31 @@ public struct SessionList: View {
             }
         }
         .onChange(of: library.searchRequests) { searching = true }
-        .sheet(item: $renaming) { chat in
-            RenameSheet(chat: chat) { name in
-                Task { await library.rename(chat, to: name) }
+    }
+
+    /// The private session open now: it is in no saved list.
+    private var openPrivateRow: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text("Open now")
+                .font(.apogeeSmall.weight(.medium))
+                .foregroundStyle(Palette.textSecondary)
+                .padding(.horizontal, Spacing.s)
+                .frame(height: 26)
+            Button {
+                shell.go(.sessions)
+            } label: {
+                HStack(spacing: Spacing.s) {
+                    Image(systemName: "eye.slash").font(.system(size: 11)).frame(width: 14)
+                    Text("Private session").frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .font(.apogeeSmall)
+                .foregroundStyle(Palette.textPrimary)
+                .padding(.leading, Spacing.l)
+                .frame(height: 28)
+                .background(Palette.selection, in: RoundedRectangle(cornerRadius: Radius.row))
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
         }
     }
 
@@ -123,8 +156,15 @@ public struct SessionList: View {
         .buttonStyle(.plain)
         .help(chat.backend.map { "\(chat.name) · \($0)" } ?? chat.name)
         .contextMenu {
-            Button("Rename…") { renaming = chat }
-            Button("Delete…", role: .destructive) { library.askToDelete(chat) }
+            // Both ask in the Sessions place, so it comes into view.
+            Button("Rename…") {
+                shell.go(.sessions)
+                library.renaming = chat
+            }
+            Button("Delete…", role: .destructive) {
+                shell.go(.sessions)
+                library.askToDelete(chat)
+            }
         }
         .accessibilityAddTraits(current ? .isSelected : [])
     }

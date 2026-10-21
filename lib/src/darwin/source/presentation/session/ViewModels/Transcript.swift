@@ -37,6 +37,11 @@ public struct Transcript: Equatable {
     public private(set) var status: Status = .connecting
     /// The model the session named.
     public private(set) var model: String?
+    /// The line types the session reads, as its `session` event announced
+    /// them: what decides whether `detach`, `set` and `compact` are offered.
+    public private(set) var accepts: [String] = []
+    /// The session said it writes nothing (`"private": true`, the CLI's 52d).
+    public private(set) var isPrivate = false
     /// Moves with every change: what a view watches to follow the end.
     public private(set) var revision = 0
     private var nextID = 0
@@ -110,6 +115,12 @@ public struct Transcript: Equatable {
         revision += 1
     }
 
+    /// A line the app says of what it did -- an attach, a restart -- quiet,
+    /// kept, as the session's own notices are.
+    public mutating func note(_ text: String) {
+        append(.notice(text), turn: nil)
+    }
+
     /// A line could not be sent: the session had ended.
     public mutating func notSent(_ reason: String) {
         append(.error(reason), turn: nil)
@@ -134,6 +145,8 @@ public struct Transcript: Equatable {
         case .session(let info):
             model = info.model
             nextTurn = info.nextTurn
+            accepts = info.capabilities?.accepts ?? []
+            isPrivate = info.isPrivate
             if status == .connecting {
                 status = .ready
             }
@@ -157,7 +170,15 @@ public struct Transcript: Equatable {
             updateActivity(turn) { $0.lines.append(text) }
             setStatus(.working(turn: turn ?? 0))
         case .memory(let chats, let decisions):
-            append(.notice(Self.recalled(chats: chats, decisions: decisions)), turn: turn)
+            let named = event.recalled
+            if named.isEmpty {
+                // A build before the CLI's 52a counts the chats, and names none.
+                append(.notice(Self.recalled(chats: chats, decisions: decisions)), turn: turn)
+            } else {
+                append(.recalled(Recall(chats: named, decisions: decisions)), turn: turn)
+            }
+        case .sources(let sources):
+            append(.sources(sources), turn: turn)
         case .notice(let text):
             append(.notice(text), turn: turn)
         case .todo(let todo):
@@ -309,6 +330,10 @@ public struct TranscriptItem: Equatable, Identifiable {
         case answer(Answer)
         /// A line the session said for the user, quiet, kept.
         case notice(String)
+        /// The past chats a turn recalled, named (52a), each one openable.
+        case recalled(Recall)
+        /// The excerpts a turn's retrieval sent, numbered for citing (52a).
+        case sources([Source])
         case question(QuestionCard)
         case permission(PermissionCard)
         /// The turn failed, in the CLI's own words.
@@ -321,6 +346,20 @@ public struct TranscriptItem: Equatable, Identifiable {
         case unknown(type: String)
         /// The session is over, and why.
         case ended(Ending)
+    }
+}
+
+/// What a turn recalled: the chats by name, and how many decisions.
+public struct Recall: Equatable {
+    public let chats: [RecalledChat]
+    public let decisions: Int
+
+    /// "recalled 1 earlier chat" / "and 2 decisions".
+    public var summary: String {
+        let count = chats.count
+        var text = "recalled \(count) earlier \(count == 1 ? "chat" : "chats")"
+        if decisions > 0 { text += " and \(decisions) \(decisions == 1 ? "decision" : "decisions")" }
+        return text
     }
 }
 

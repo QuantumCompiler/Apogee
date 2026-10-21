@@ -22,13 +22,29 @@ public enum EventDecoder {
             return .session(
                 SessionInfo(
                     protocolVersion: version, model: model, nextTurn: fields["next_turn"]?.intValue ?? 1,
-                    capabilities: fields["capabilities"].flatMap(capabilities)))
+                    capabilities: fields["capabilities"].flatMap(capabilities),
+                    isPrivate: fields["private"]?.boolValue ?? false))
         case "thinking":
             return .thinking(budgetReached: fields["budget_reached"]?.boolValue ?? false)
         case "thinking_delta":
             return string("text").map { .thinkingDelta($0) }
         case "memory":
             return .memory(chats: fields["chats"]?.intValue ?? 0, decisions: fields["decisions"]?.intValue ?? 0)
+        case "sources":
+            guard let sources = fields["sources"]?.arrayValue else { return nil }
+            return .sources(
+                sources.compactMap { entry in
+                    guard let file = entry["file"]?.stringValue else { return nil }
+                    func ints(_ key: String) -> [Int]? { entry[key]?.arrayValue?.compactMap(\.intValue) }
+                    func numbers(_ key: String) -> [Double]? {
+                        entry[key]?.arrayValue?.compactMap { if case .number(let n) = $0 { n } else { nil } }
+                    }
+                    var score: Double? = nil
+                    if case .number(let n)? = entry["score"] { score = n }
+                    return Source(
+                        file: file, pages: ints("pages"), lines: ints("lines"), times: numbers("times"), score: score,
+                        retriever: entry["retriever"]?.stringValue)
+                })
         case "tool_status":
             return string("text").map { .toolStatus($0) }
         case "notice":

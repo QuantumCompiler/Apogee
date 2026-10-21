@@ -1,5 +1,6 @@
 import BusinessSession
 import DataDiscovery
+import DataProtocol
 import Foundation
 import Observation
 
@@ -33,9 +34,26 @@ public final class SessionViewModel {
     /// Told every event, after the transcript has folded it: how the library
     /// reads back what a turn changed.
     public var observer: (@MainActor (SessionEvent) -> Void)?
+    /// Where the acts the library owns go: a new session, rename, delete ...
+    public var onAction: (@MainActor (SessionAction) -> Void)?
+    /// What was attached this session, by the path given: the input's chips.
+    public private(set) var attachments: [String] = []
+    /// The run settings as last chosen: the launch's, then each change.
+    public private(set) var settings: RunSettings
+    /// The context window of the session's model in tokens, when the library
+    /// could read it (a stored model's `window` in `models list`).
+    public var contextWindow: Int?
+    /// The models the settings sheet offers: the configured backends.
+    public var modelChoices: [String] = []
+    /// What the window should present for the person: files, settings.
+    public var presenting: Presenting?
+    /// The folder the session works in, which `@` completes paths from.
+    public var folder: URL = FileManager.default.homeDirectoryForCurrentUser
+    /// The last turn sent, for Try again.
+    public private(set) var lastSent: String?
 
     private let starter: any ChatStarting
-    private let launch: ChatLaunch
+    private var launch: ChatLaunch
     private var session: (any ChatSession)?
     private var outbox: AsyncStream<Outbound>.Continuation?
     /// Its child is being ended to free it, not for good.
@@ -48,6 +66,10 @@ public final class SessionViewModel {
         case user(String)
         case answer(String)
         case cancel
+        case attach(String)
+        case detach(String)
+        case set(RunSettings)
+        case compact
     }
 
     /// A new chat.
@@ -60,6 +82,21 @@ public final class SessionViewModel {
         self.starter = starter
         self.launch = launch
         chatID = launch.resume
+        settings = launch.settings
+    }
+
+    /// How this session is kept private, when it is.
+    public var privateMode: PrivateMode? {
+        if launch.privately || transcript.isPrivate { return .nothingWritten }
+        return launch.noRecall ? .deletedOnClose : nil
+    }
+
+    /// What a private session's state says of what is kept.
+    public static func privateWords(_ mode: PrivateMode) -> String {
+        switch mode {
+        case .nothingWritten: "Nothing of this session is written: no transcript, no recall in later sessions."
+        case .deletedOnClose: "Never recalled in later sessions, and deleted when you close it. This apogee writes it until then."
+        }
     }
 
     /// The library found this session saved as `id`.
@@ -122,6 +159,10 @@ public final class SessionViewModel {
             case .user(let text): _ = try? await session.send(user: text)
             case .answer(let text): try? await session.answer(text)
             case .cancel: try? await session.cancel()
+            case .attach(let path): try? await session.attach(path: path, graph: nil)
+            case .detach(let path): try? await session.detach(path: path)
+            case .set(let settings): try? await session.set(settings)
+            case .compact: try? await session.compact()
             }
         }
     }
@@ -174,10 +215,159 @@ public final class SessionViewModel {
     /// Sends the draft as a turn.
     public func submit() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard canSend, let outbox else { return }
+        guard canSend else { return }
         draft = ""
+        send(text)
+    }
+
+    private func send(_ text: String) {
+        guard let outbox else { return }
+        lastSent = text
         transcript.userSent(text)
         outbox.yield(.user(text))
+    }
+
+    /// Sends the last turn again, as typed, after a turn failed -- whatever
+    /// is in the draft stays there.
+    public func retry() {
+        guard let lastSent, transcript.acceptsInput else { return }
+        send(lastSent)
+    }
+
+    // MARK: - The input's reach
+
+    /// Whether the session takes `detach`, `set`, `compact` -- the CLI's 52d,
+    /// announced in its `capabilities.accepts`.
+    public var canDetach: Bool { transcript.accepts.contains("detach") }
+    public var canSet: Bool { transcript.accepts.contains("set") }
+    public var canCompact: Bool { transcript.accepts.contains("compact") }
+
+    /// Attaches a file, folder or glob: its outcome arrives as notices.
+    public func attach(_ path: String) {
+        guard let outbox else { return }
+        if !attachments.contains(path) { attachments.append(path) }
+        outbox.yield(.attach(path))
+    }
+
+    /// Detaches it, where the build takes `detach`; else there is no way to,
+    /// and the chip offers none (the design's G2 fallback).
+    public func detach(_ path: String) {
+        guard canDetach, let outbox else { return }
+        attachments.removeAll { $0 == path }
+        outbox.yield(.detach(path))
+    }
+
+    /// Compacts the conversation now, where the build takes `compact`.
+    public func compact() {
+        guard canCompact, let outbox else { return }
+        outbox.yield(.compact)
+    }
+
+    /// Moves the run settings. A build that takes `set` moves them from the
+    /// next turn and says each; an older one is restarted with the new flags,
+    /// carrying the conversation on with `--resume`, and the app says so.
+    public func apply(_ change: RunSettings) async {
+        guard !change.isEmpty else { return }
+        settings = settings.merging(change)
+        if canSet, let outbox {
+            outbox.yield(.set(change))
+            return
+        }
+        launch.settings = settings
+        let carried = chatID != nil || !transcript.items.contains { if case .user = $0.content { true } else { false } }
+        transcript.note(
+            carried
+                ? "restarting with \(Self.words(change)) -- this apogee changes settings by restarting the session; the conversation carries on, and a local model loads again"
+                : "restarting with \(Self.words(change)) -- the earlier turns can't be carried on: this session isn't in the saved list")
+        await restart()
+    }
+
+    /// Ends the child and starts it again on `launch`, resuming the saved
+    /// conversation when there is one.
+    private func restart() async {
+        if let session, transcript.status != .ended {
+            pausing = true
+            await session.stop(grace: .seconds(5))
+            await running?.value
+        }
+        if chatID == nil {
+            let notes = transcript.items.filter { if case .notice = $0.content { true } else { false } }
+            transcript = Transcript()
+            for case .notice(let text) in notes.map(\.content) { transcript.note(text) }
+        } else {
+            transcript.reopening()
+        }
+        running = Task { await connect() }
+    }
+
+    static func words(_ settings: RunSettings) -> String {
+        var parts: [String] = []
+        if let model = settings.model { parts.append("model \(model)") }
+        if let think = settings.think { parts.append("thinking \(think)") }
+        if let effort = settings.effort { parts.append("effort \(effort)") }
+        if settings.system != nil { parts.append("a new system prompt") }
+        if let temperature = settings.temperature { parts.append("temperature \(temperature.formatted())") }
+        return parts.joined(separator: ", ")
+    }
+
+    /// The context meter: the last finished turn's input tokens against the
+    /// window.
+    public var meter: ContextMeter {
+        var used: Int?
+        for item in transcript.items.reversed() {
+            if case .answer(let answer) = item.content, answer.finished, let usage = answer.usage {
+                used = usage.inputTokens
+                break
+            }
+        }
+        return ContextMeter(used: used, window: contextWindow)
+    }
+
+    // MARK: - Slash commands and mentions
+
+    /// The commands the draft's `/` names, those this build can carry out.
+    public var slashSuggestions: [SlashCommand] {
+        guard draft.hasPrefix("/"), !draft.contains(" ") else { return [] }
+        let typed = draft.lowercased()
+        return SlashCommand.all.filter { $0.name.hasPrefix(typed) && available($0) }
+    }
+
+    /// Whether a command has what it needs now: `/compact` and `/detach` the
+    /// 52d lines, `/stop` a turn in flight, `/rename` and `/delete` a saved
+    /// conversation.
+    public func available(_ command: SlashCommand) -> Bool {
+        switch command.act {
+        case .compact: canCompact && outbox != nil
+        case .detachAll: canDetach && !attachments.isEmpty
+        case .stop: canCancel
+        case .library(.rename), .library(.delete): chatID != nil && privateMode == nil
+        default: true
+        }
+    }
+
+    /// Runs a slash command: the draft is cleared, the act done or handed on.
+    public func run(_ command: SlashCommand) {
+        guard available(command) else { return }
+        draft = ""
+        switch command.act {
+        case .library(let action): onAction?(action)
+        case .present(let what): presenting = what
+        case .compact: compact()
+        case .detachAll: attachments.forEach(detach)
+        case .stop: cancel()
+        }
+    }
+
+    /// The paths `@` offers for what is typed after it.
+    public var mentionSuggestions: [String] {
+        guard let typed = Mentions.typing(in: draft) else { return [] }
+        return Mentions.candidates(for: typed, in: folder)
+    }
+
+    /// Completes the `@` mention being typed with `path`.
+    public func complete(mention path: String) {
+        guard let typed = Mentions.typing(in: draft) else { return }
+        draft = String(draft.dropLast(typed.count)) + path + (path.hasSuffix("/") ? "" : " ")
     }
 
     /// Answers the question or permission card `id`: one answer per item, in order.

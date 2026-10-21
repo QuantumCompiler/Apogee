@@ -1,4 +1,5 @@
 import DataDiscovery
+import DataProtocol
 import Foundation
 
 /// A driven chat session, as whoever renders one sees it: the events it says,
@@ -11,6 +12,14 @@ public protocol ChatSession: AnyObject, Sendable {
     func send(user text: String) async throws -> Int
     /// Answers the standing question's next item.
     func answer(_ text: String) async throws
+    /// Attaches a file, folder or glob.
+    func attach(path: String, graph: String?) async throws
+    /// Detaches it again (52d).
+    func detach(path: String) async throws
+    /// Moves the run settings from the next turn (52d).
+    func set(_ settings: RunSettings) async throws
+    /// Compacts the conversation now (52d).
+    func compact() async throws
     /// Stops the turn in flight, the protocol's way.
     func cancel() async throws
     /// Ends the session the protocol's way: its input closes.

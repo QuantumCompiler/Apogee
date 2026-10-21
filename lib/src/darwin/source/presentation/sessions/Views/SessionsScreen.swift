@@ -54,6 +54,11 @@ public struct SessionsScreen: View {
         } message: {
             Text(pendingMessage)
         }
+        .sheet(item: $library.renaming) { chat in
+            RenameSheet(chat: chat) { name in
+                Task { await library.rename(chat, to: name) }
+            }
+        }
         .alert(
             "That didn't work", isPresented: Binding(get: { library.failure != nil }, set: { if !$0 { library.dismissFailure() } })
         ) {
@@ -153,6 +158,18 @@ public struct SessionCommands: Commands {
                 Task { await library.newSession() }
             }
             .keyboardShortcut("n", modifiers: .command)
+            Button("New Private Session") {
+                shell.go(.sessions)
+                Task { await library.newPrivateSession() }
+            }
+            .keyboardShortcut("n", modifiers: [.shift, .command])
+        }
+        CommandGroup(after: .toolbar) {
+            Button("Session Settings…") {
+                shell.go(.sessions)
+                library.current.presenting = .settings
+            }
+            .keyboardShortcut("m", modifiers: [.shift, .command])
         }
         CommandGroup(after: .sidebar) {
             Button("Search Sessions") {

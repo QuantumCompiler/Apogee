@@ -42,6 +42,9 @@ public final class SessionLibraryViewModel {
     /// What to open.
     public enum Target: Equatable {
         case new
+        /// A session that writes nothing: `--private` where the build has it
+        /// (the CLI's 52d), else `--no-recall` and deleted when it closes.
+        case privately
         case chat(String)
     }
 
@@ -59,6 +62,8 @@ public final class SessionLibraryViewModel {
     public private(set) var failure: String?
     /// Moves when the person asked to search (⇧⌘F): the field takes focus.
     public private(set) var searchRequests = 0
+    /// The saved conversation being renamed: the sheet's.
+    public var renaming: ChatSummary?
     public var inspectorOpen: Bool {
         didSet { preferences.inspectorOpen = inspectorOpen }
     }
@@ -71,6 +76,12 @@ public final class SessionLibraryViewModel {
     private let now: () -> Date
     private var found: FoundBinary?
     private var kinds: [String: ModelKind] = [:]
+    /// The configured backends, from `models list`.
+    private var backends: [String] = []
+    private var modelsRead = false
+    /// The line types the last session announced: whether this build has
+    /// the CLI's 52d (`set`, `detach`, `compact` -- and `chat --private`).
+    private var lastAccepts: [String]?
     private var inView = false
     /// The open session leaves view mid-turn: pause it when the turn ends.
     private var pauseWhenIdle = false
@@ -107,6 +118,7 @@ public final class SessionLibraryViewModel {
             self.found = found
         }
         await refresh()
+        await readModels()
         let last = preferences.openChat.flatMap { id in chats.contains { $0.id == id } ? id : nil }
         make(last.map(Target.chat) ?? .new, starter: located)
         if inView { current.start() }
@@ -141,9 +153,10 @@ public final class SessionLibraryViewModel {
         return current.transcript.turnInFlight
     }
 
-    /// The window closed: the open session ends.
+    /// The window closed: the open session ends (and a private one on the
+    /// fallback is deleted).
     public func shutDown() async {
-        await current.shutDown()
+        await close(current)
     }
 
     // MARK: - Reading
@@ -161,11 +174,39 @@ public final class SessionLibraryViewModel {
         chats = ChatSummary.list(from: document)
         listing = .read
         identifyNewSession()
-        if chats.contains(where: { $0.backend != nil }),
-            let models = await runner.read(binary: found.url, ["models", "list"]).document
-        {
-            kinds = ModelKind.byBackend(from: models)
+        if chats.contains(where: { $0.backend != nil }) && !modelsRead {
+            await readModels()
         }
+    }
+
+    /// Reads `models list` once: each backend's kind (the glyphs) and the
+    /// configured backends (the settings sheet's choices).
+    private func readModels() async {
+        guard let found, let models = await runner.read(binary: found.url, ["models", "list"]).document else { return }
+        modelsRead = true
+        kinds = ModelKind.byBackend(from: models)
+        var names: [String] = []
+        for entry in models.entries ?? [] {
+            if let backend = entry["backend"]?.stringValue, !names.contains(backend) { names.append(backend) }
+        }
+        backends = names
+        current.modelChoices = names
+    }
+
+    /// The window of the model a session names, for its meter: `models info
+    /// <model>` -- a stored set's typed `data.window.tokens` (the CLI's 52e),
+    /// else the leading count of its `window` field ("8192 tokens (the
+    /// default)"). An API model states none: unknown, never guessed.
+    private func readWindow(of model: String, for session: SessionViewModel) async {
+        guard let found, let info = await runner.read(binary: found.url, ["models", "info", model]).document else { return }
+        session.contextWindow = Self.window(in: info)
+    }
+
+    static func window(in info: ReadDocument) -> Int? {
+        if let tokens = info.value["data"]?["window"]?["tokens"]?.intValue, tokens > 0 { return tokens }
+        guard let text = Field.list(from: info).first(where: { $0.label == "window" })?.value else { return nil }
+        let digits = text.prefix { $0.isNumber }
+        return Int(digits).flatMap { $0 > 0 ? $0 : nil }
     }
 
     /// Reads `models status` for the inspector.
@@ -184,12 +225,14 @@ public final class SessionLibraryViewModel {
     /// choose: the one id that appeared since it opened is it. Two at once
     /// (another session saved meanwhile) name none, rather than guess.
     private func identifyNewSession() {
-        guard current.chatID == nil, let before = listedBeforeNew else { return }
+        guard current.chatID == nil, current.privateMode != .nothingWritten, let before = listedBeforeNew else { return }
         let appeared = chats.map(\.id).filter { !before.contains($0) }
         if appeared.count == 1, let id = appeared.first {
             current.identify(id)
             listedBeforeNew = nil
-            preferences.openChat = id
+            if current.privateMode == nil {
+                preferences.openChat = id
+            }
         }
     }
 
@@ -210,6 +253,15 @@ public final class SessionLibraryViewModel {
     public func newSession() async {
         await open(.new)
     }
+
+    /// ⇧⌘N.
+    public func newPrivateSession() async {
+        await open(.privately)
+    }
+
+    /// Whether a private session writes nothing (this build has `--private`),
+    /// or is deleted when it closes; unknown until a session has spoken.
+    public var privateIsNothingWritten: Bool { lastAccepts?.contains("set") ?? false }
 
     /// ⇧⌘F.
     public func requestSearch() {
@@ -232,7 +284,7 @@ public final class SessionLibraryViewModel {
     /// Ends the open session's child -- a turn in it is cancelled the
     /// protocol's way -- then opens `target`: never two children at once.
     private func switchTo(_ target: Target) async {
-        await current.shutDown()
+        await close(current)
         make(target, starter: located)
         if inView { current.start() }
         await refresh()
@@ -244,12 +296,46 @@ public final class SessionLibraryViewModel {
             current = SessionViewModel(starter: starter)
             listedBeforeNew = Set(chats.map(\.id))
             preferences.openChat = nil
+        case .privately:
+            let nothingWritten = privateIsNothingWritten
+            current = SessionViewModel(
+                starter: starter, launch: ChatLaunch(privately: nothingWritten, noRecall: !nothingWritten))
+            listedBeforeNew = nothingWritten ? nil : Set(chats.map(\.id))
+            preferences.openChat = nil
         case .chat(let id):
             current = SessionViewModel(starter: starter, launch: ChatLaunch(resume: id))
             listedBeforeNew = nil
             preferences.openChat = id
         }
         current.observer = { [weak self] event in self?.observe(event) }
+        current.onAction = { [weak self] action in self?.act(action) }
+        current.modelChoices = backends
+    }
+
+    /// Ends `session`'s child; a private session on the fallback is then
+    /// deleted, as it promised -- once the list has named it.
+    private func close(_ session: SessionViewModel) async {
+        await session.shutDown()
+        guard session.privateMode == .deletedOnClose, let found else { return }
+        if session.chatID == nil { await refresh() }
+        guard let id = session.chatID else { return }
+        let outcome = await runner.command(binary: found.url, ["chats", "delete", id])
+        if let failure = outcome.failure {
+            self.failure = "The private session was not deleted: \(failure)"
+        }
+        await refresh()
+    }
+
+    /// An act the open session's window hands up.
+    private func act(_ action: SessionAction) {
+        switch action {
+        case .newSession: Task { await newSession() }
+        case .newPrivateSession: Task { await newPrivateSession() }
+        case .rename: renaming = currentChat
+        case .delete: if let chat = currentChat { askToDelete(chat) }
+        case .toggleInspector: inspectorOpen.toggle()
+        case .openChat(let id): Task { await open(.chat(id)) }
+        }
     }
 
     private var located: any ChatStarting {
@@ -259,6 +345,10 @@ public final class SessionLibraryViewModel {
     private func observe(_ event: SessionEvent) {
         guard case .event(let event) = event else { return }
         switch event.kind {
+        case .session(let info):
+            lastAccepts = info.capabilities?.accepts ?? []
+            let session = current
+            Task { await readWindow(of: info.model, for: session) }
         case .result, .error:
             // A turn ended: what it changed is read back, and a session out
             // of view is paused now it is idle.
@@ -325,7 +415,9 @@ public final class SessionLibraryViewModel {
     /// The list, filtered and grouped by date, newest first.
     public var groups: [ChatGroup] {
         let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
-        let shown = needle.isEmpty ? chats : chats.filter { $0.name.lowercased().contains(needle) }
+        // A private session on the fallback is saved until it closes: never listed.
+        let listed = current.privateMode == nil ? chats : chats.filter { $0.id != current.chatID }
+        let shown = needle.isEmpty ? listed : listed.filter { $0.name.lowercased().contains(needle) }
         return ChatGroup.grouping(shown, now: now())
     }
 

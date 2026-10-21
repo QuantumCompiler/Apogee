@@ -38,6 +38,10 @@ final class ScriptedSession: ChatSession, @unchecked Sendable {
     }
 
     func answer(_ text: String) async throws { log.withLock { $0.append("answer: \(text)") } }
+    func attach(path: String, graph: String?) async throws { log.withLock { $0.append("attach: \(path)") } }
+    func detach(path: String) async throws { log.withLock { $0.append("detach: \(path)") } }
+    func set(_ settings: RunSettings) async throws { log.withLock { $0.append("set: \(DriverLine.set(settings).encoded)") } }
+    func compact() async throws { log.withLock { $0.append("compact") } }
     func cancel() async throws { log.withLock { $0.append("cancel") } }
     func close() async { log.withLock { $0.append("close") } }
     /// Stopped, it ends -- as a real session's child does.

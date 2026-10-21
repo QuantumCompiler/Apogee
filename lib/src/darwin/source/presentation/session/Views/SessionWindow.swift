@@ -27,6 +27,23 @@ public struct SessionWindow<Accessory: View>: View {
         .background(Palette.window)
         // Esc stops the turn in flight, through the protocol's cancel.
         .onExitCommand { model.cancel() }
+        .sheet(item: Binding(get: { model.presenting == .settings ? Presenting.settings : nil }, set: { if $0 == nil { model.presenting = nil } })) { _ in
+            SettingsSheet(model: model)
+        }
+        .fileImporter(
+            isPresented: Binding(get: { model.presenting == .files }, set: { if !$0 { model.presenting = nil } }),
+            allowedContentTypes: [.item, .folder], allowsMultipleSelection: true
+        ) { result in
+            if case .success(let urls) = result {
+                urls.forEach { model.attach($0.path) }
+            }
+        }
+        // A file dropped on the session is attached.
+        .dropDestination(for: URL.self) { urls, _ in
+            guard case .connected = model.connection else { return false }
+            urls.filter(\.isFileURL).forEach { model.attach($0.path) }
+            return !urls.isEmpty
+        }
     }
 }
 
@@ -46,6 +63,9 @@ struct ConversationView<Accessory: View>: View {
             header
             Divider()
             ScrollViewReader { proxy in
+                if model.transcript.items.isEmpty && model.transcript.status == .ready {
+                    EmptySessionView(model: model)
+                } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Spacing.m) {
                         ForEach(model.transcript.items) { item in
@@ -60,6 +80,7 @@ struct ConversationView<Accessory: View>: View {
                     if let last = model.transcript.items.last {
                         proxy.scrollTo(last.id, anchor: .bottom)
                     }
+                }
                 }
             }
             Divider()
@@ -76,6 +97,8 @@ struct ConversationView<Accessory: View>: View {
             if model.transcript.turnInFlight {
                 ProgressView().controlSize(.small)
             }
+            MeterView(meter: model.meter)
+            Divider().frame(height: 18)
             Text(model.statusText)
                 .font(.apogeeMeta)
                 .foregroundStyle(model.transcript.status == .ended ? Palette.error : Palette.textSecondary)
