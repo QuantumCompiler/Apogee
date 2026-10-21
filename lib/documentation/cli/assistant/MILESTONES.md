@@ -5612,6 +5612,59 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,277
 
 ---
 
+### 2026-10-21 — `train-setup-python-fit` (maintenance item M19): a Python every set runs on
+
+**Why.** The user's bootstrap installed 7 of 9 sets: the `voice` set was refused by pip (`kokoro` 0.9.4 runs on `>=3.10,<3.13`). `train setup` had built the one environment from whatever `python3` was on PATH, Homebrew's 3.14.5, with 3.10 to 3.13 beside it.
+- The sets carried no range, so nothing could choose against them.
+- An environment, once made, was kept whatever its Python, and a later `training.python` was silently ignored.
+- `config set` could not write that key.
+- `check`'s voice remedy, `train setup --with voice`, could not succeed.
+
+- [x] **`training/python_env`**: each set's Python range is carried beside its packages and hosts, with its reviewed date (`python_range`, `python_ranges_reviewed`, ADR 0009's discipline):
+  - `voice` runs on `>=3.10,<3.13`;
+  - `mlx` on `>=3.11`;
+  - every other set on `>=3.10`.
+
+  Other additions:
+  - `PythonVersion`: the record's `base_version` (written since M19), else the `version` that `python -m venv` wrote into `pyvenv.cfg`. Read, never asked of Python.
+  - `python_candidates`: `python3.<minor>`, `python3` and `python` on PATH, each asked its version, one reached by two names listed once, newest first.
+  - `choose_base_python`: the newest candidate every set the host can install runs on, since one environment serves them all and the bootstrap makes it at its first set. Failing that, the newest the requested sets run on, naming what it leaves out. Failing that, a refusal naming the range, what was found and `brew install python@3.12`. The person's word (`training.python`, or `--python`) is used as given; one outside a requested set's range is refused naming both, never swapped.
+  - `install` refuses a set its environment's Python cannot run, before pip, naming `apogee train setup --rebuild --with <set>`.
+  - `rebuild` moves the old environment aside, makes the new one, reinstalls every recorded set in its order, and puts the old one back if anything fails.
+- [x] **`train setup`**:
+  - says which interpreter and why: `from …/python3.12 (Python 3.12.13) -- the newest Python every set this host can install runs on (>=3.11,<3.13); passed over python3 (3.14.5), python3.13 (3.13.13): the 'voice' set runs on >=3.10,<3.13`;
+  - `--python <path>` (completed as a path) for a new or rebuilt environment, and refused with an environment there unless `--rebuild`;
+  - `--rebuild`, asked `[y/N]` at a terminal and refused on a pipe naming `--yes`, so neither the bootstrap's children nor any pipe replace gigabytes unasked;
+  - the `python env` line names the version.
+
+  `require_python_env`, the door every other command takes, chooses the same way.
+- [x] **`check`**: the `python env` row names the environment's Python. The `voice runtime` row on an environment voice cannot run on says so (`the Python environment is on Python 3.14.5, and the voice set runs on >=3.10,<3.13`) and names the remedy that works, `apogee train setup --rebuild --with voice`.
+- [x] **`config set training.python <path>`** joins 52e's table (text), through the one editor and its admin twin.
+- [x] **`reference/training.md`** describes the choice, the ranges, `--python`, `--rebuild` and the doctor's rows. Its "nothing runs `setup` for you" line, untrue since 51's bootstrap, is corrected.
+
+**Decisions made while building** (2026-10-21, each recorded for veto; the item's five `[default]` calls taken as written):
+- **The ranges are carried, not asked.** They come from PyPI's published `requires_python`, read on the date recorded, so setup stays offline and deterministic. A stale range fails as before, in pip's words.
+- **The candidates are PATH's, by name.** No prefix scan, and no `pyenv` or `uv`.
+- **Requested sets decide when no interpreter fits every host set,** and the words name the sets left out.
+- **`--rebuild` asks, and `--yes` answers.** A rebuild without `--python` chooses again.
+- **`training.python` joins `config set`.** `--python` writes nothing.
+- **A rebuild keeps the old environment until the new one is whole.** It is moved aside and put back on any failure, so a failed rebuild leaves what was there.
+- **The bootstrap needed nothing:** its first set's `train setup` makes the environment on the choice made against every set the host can install. On the user's machine an existing 3.14 environment stays until a rebuild. A `make update`, whose reset removes `training/`, makes the next one on 3.12, and voice installs there.
+
+**Verified.**
+- `python_env_test`:
+  - the ranges and their date;
+  - the versions parsed;
+  - a set refused before pip on the user's 3.14.5 environment, read from `pyvenv.cfg`;
+  - a rebuild reinstalling the five recorded sets in order, and one failing at its third pip put back as it was;
+  - on a scripted PATH of the user's `python3` (3.14.5), `python3.13` and `python3.12`: the choice and its exact words, a named Python refused never swapped, the requested sets deciding when nothing fits every set, and the refusal naming what was found.
+- `train_test`: setup making the environment on 3.12 and saying why; an environment made on `python3` refusing voice before pip, `--python` asking for `--rebuild`, `--rebuild` refused on a pipe, and `--rebuild --yes` reinstalling the five sets and then voice on 3.12.
+- `check_test`: the environment row naming 3.14.5, and the voice row naming the range and the rebuild.
+- `config_edit_test`: `training.python` written and read back.
+- `lib/scripts/cicd.sh --test`: green with the bootstrap's growths beside it -- the CLI's 3,610 (the two standing skips) and the macOS app's suite, no warning.
+
+**Not run on real packages:** no interpreter or pip ran in the suite. The user's own `make update` is the live run.
+
 ## Milestone AA — The four layers
 
 **Goal.** Make the CLI's source say what it is: four layers -- **Presentation → Business → Data → Infrastructure** -- each package in one, each including only its own layer and those below, the law enforced by the build itself. Asked for by the user on 2026-10-03 and specced from a spike that measured the real include graph into the standing **Architecture** queue (A1–A4, A5 joining the same day). In C++ nothing makes this free the way Go's ban on import cycles does, which is why the layering here has always been a guarded convention, and this milestone turns it into structure.

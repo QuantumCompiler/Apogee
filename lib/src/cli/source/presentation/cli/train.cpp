@@ -96,6 +96,8 @@ std::string describe_status(const training::PythonEnvStatus& status) {
         sets += sets.empty() ? set : ", " + set;
     }
     return "at " + status.interpreter.parent_path().parent_path().string() +
+           (status.base_version.known() ? " (Python " + status.base_version.str() + ")"
+                                        : std::string{}) +
            (sets.empty() ? std::string{"; no requirement sets installed"} : "; sets: " + sets);
 }
 
@@ -1190,6 +1192,30 @@ std::string render_iteration(const training::ProgressEvent& event) {
 
 // --- setup (the datasets item) ------------------------------------------------------
 
+namespace {
+
+/// The sets this host can install -- the bootstrap's own table (51) -- which
+/// one environment serves, so its Python is chosen against them all (M19).
+[[nodiscard]] std::vector<training::RequirementSet> host_sets(const training::HostShape& host) {
+    std::vector<training::RequirementSet> sets;
+    for (const std::string_view name : training::requirement_set_names()) {
+        const std::optional<training::RequirementSet> set =
+            training::requirement_set_from_string(name);
+        if (set.has_value() &&
+            training::set_unfit_reason(*set, host.apple_silicon, host.nvidia_smi).empty()) {
+            sets.push_back(*set);
+        }
+    }
+    return sets;
+}
+
+/// " (Python 3.12.13)", or nothing for a version not said.
+[[nodiscard]] std::string python_note(const training::PythonVersion& version) {
+    return version.known() ? " (Python " + version.str() + ")" : std::string{};
+}
+
+}  // namespace
+
 training::PythonEnv require_python_env(const harness::Config& config, std::string_view purpose) {
     training::PythonEnv env{harness::training_venv_dir()};
     if (env.exists()) {
@@ -1212,20 +1238,22 @@ training::PythonEnv require_python_env(const harness::Config& config, std::strin
     if (answer != "y" && answer != "Y" && answer != "yes") {
         fail_user("not created. Run 'apogee train setup' when ready");
     }
-    std::string error;
-    const std::filesystem::path base = training::locate_base_python(config.training.python, error);
-    if (base.empty()) {
-        fail_user(error);
+    const training::PythonChoice choice =
+        training::choose_base_python(config.training.python, host_sets(training::detect_host()), {},
+                                     training::default_command_runner());
+    if (choice.path.empty()) {
+        fail_user(choice.error);
     }
-    std::cerr << "creating the Python environment from " << base.string() << " ...\n";
-    if (const std::string failure = env.create(base); !failure.empty()) {
+    std::cerr << "creating the Python environment from " << choice.path.string()
+              << python_note(choice.version) << " -- " << choice.reason << " ...\n";
+    if (const std::string failure = env.create(choice.path, {}, choice.version); !failure.empty()) {
         fail_user(failure);
     }
     return env;
 }
 
 void run_train_setup(const harness::Config& config, const SetupRequest& request) {
-    training::PythonEnv env{harness::training_venv_dir()};
+    training::PythonEnv env{harness::training_venv_dir(), request.runner};
     std::vector<training::RequirementSet> sets = request.with;
     if (!request.trainer.empty()) {
         std::string trainer = request.trainer;
@@ -1247,20 +1275,76 @@ void run_train_setup(const harness::Config& config, const SetupRequest& request)
         }
     }
 
-    if (!env.exists()) {
-        std::string error;
-        const std::filesystem::path base =
-            training::locate_base_python(config.training.python, error);
-        if (base.empty()) {
-            fail_user(error);
+    // The Python is chosen against every set this host can install (M19):
+    // one environment serves them all, and the bootstrap makes it at its
+    // first set, so a choice that fit only that set would doom a later one.
+    const std::vector<training::RequirementSet> host =
+        host_sets(request.host.value_or(training::detect_host()));
+    const auto choose = [&]() {
+        const bool flag = !request.python.empty();
+        training::PythonChoice choice =
+            training::choose_base_python(flag ? request.python : config.training.python, host, sets,
+                                         request.runner, flag ? "--python" : "training.python");
+        if (choice.path.empty()) {
+            fail_user(choice.error);
         }
-        std::cout << "creating " << env.dir().string() << " from " << base.string() << " ...\n";
-        if (const std::string failure = env.create(base); !failure.empty()) {
+        return choice;
+    };
+    if (!env.exists()) {
+        const training::PythonChoice choice = choose();
+        std::cout << "creating " << env.dir().string() << " from " << choice.path.string()
+                  << python_note(choice.version) << " -- " << choice.reason << " ...\n";
+        if (const std::string failure = env.create(choice.path, {}, choice.version);
+            !failure.empty()) {
             fail_user(failure);
         }
         std::cout << "created\n";
+    } else if (request.rebuild) {
+        const training::PythonEnvStatus before = env.status();
+        const training::PythonChoice choice = choose();
+        std::string recorded;
+        for (const std::string& set : before.sets) {
+            recorded += (recorded.empty() ? "" : ", ") + set;
+        }
+        // Gigabytes of packages are replaced only on the person's word: asked
+        // at a terminal, `--yes` where nobody can be -- a pipe, the bootstrap.
+        if (!request.yes) {
+            const bool interactive =
+                platform::is_terminal(platform::StandardStream::In) && !stdin_is_piped();
+            if (!interactive) {
+                fail_user("the environment at " + env.dir().string() +
+                          " is replaced only on your word -- rerun with --yes: apogee train "
+                          "setup --rebuild --yes");
+            }
+            std::cerr << "Rebuild " << env.dir().string() << python_note(before.base_version)
+                      << " on " << choice.path.string() << python_note(choice.version)
+                      << ", reinstalling " << (recorded.empty() ? "no sets" : recorded)
+                      << "? What pip installed there is downloaded again. [y/N] " << std::flush;
+            std::string answer;
+            std::getline(std::cin, answer);
+            if (answer != "y" && answer != "Y" && answer != "yes") {
+                fail_user("not rebuilt");
+            }
+        }
+        std::cout << "rebuilding " << env.dir().string() << " from " << choice.path.string()
+                  << python_note(choice.version) << " -- " << choice.reason
+                  << (recorded.empty() ? std::string{} : "; reinstalling " + recorded) << " ...\n"
+                  << std::flush;
+        if (const std::string failure = env.rebuild(choice.path, choice.version);
+            !failure.empty()) {
+            fail_user(failure);
+        }
+        std::cout << "rebuilt\n";
     } else {
-        std::cout << "environment already exists at " << env.dir().string() << "\n";
+        if (!request.python.empty()) {
+            fail_user(
+                "--python chooses the Python a new environment is made from, and one "
+                "exists at " +
+                env.dir().string() + python_note(env.status().base_version) +
+                " -- add --rebuild to replace it");
+        }
+        std::cout << "environment already exists at " << env.dir().string()
+                  << python_note(env.status().base_version) << "\n";
     }
 
     for (const training::RequirementSet set : sets) {
@@ -1304,6 +1388,9 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     // ---- setup -------------------------------------------------------------
     auto setup_trainer = std::make_shared<std::string>();
     auto setup_with = std::make_shared<std::vector<std::string>>();
+    auto setup_python = std::make_shared<std::string>();
+    auto setup_rebuild = std::make_shared<bool>(false);
+    auto setup_yes = std::make_shared<bool>(false);
     CLI::App* setup = cmd->add_subcommand(
         "setup", "Create the Python environment under training/venv and install requirement sets");
     setup
@@ -1314,10 +1401,23 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         ->add_option("--with", *setup_with,
                      "Install a requirement set: prepare (Parquet), mlx, peft, convert")
         ->type_name(words_value(training::requirement_set_names()));
-    setup->callback([&context, setup_trainer, setup_with]() {
+    setup
+        ->add_option("--python", *setup_python,
+                     "The Python a new or rebuilt environment is made from, for this run "
+                     "(training.python keeps one); by default the newest every set here runs on")
+        ->type_name(kPathValue);
+    setup->add_flag("--rebuild", *setup_rebuild,
+                    "Replace the environment on a Python every set runs on, reinstalling each "
+                    "set it holds (asked first)");
+    setup->add_flag("-y,--yes", *setup_yes, "Rebuild without asking (a pipe, a script)");
+    setup->callback([&context, setup_trainer, setup_with, setup_python, setup_rebuild,
+                     setup_yes]() {
         const harness::Config config = load_config_or_default(context);
         SetupRequest request;
         request.trainer = *setup_trainer;
+        request.python = *setup_python;
+        request.rebuild = *setup_rebuild;
+        request.yes = *setup_yes;
         for (const std::string& name : *setup_with) {
             const std::optional<training::RequirementSet> set =
                 training::requirement_set_from_string(name);

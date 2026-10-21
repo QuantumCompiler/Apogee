@@ -1420,3 +1420,156 @@ TEST_CASE(
     REQUIRE(consented.run({"train", "cycle", "status"}, &out, &err) == 0);
     CHECK(out.find("sessions consumed: through 2026-09-19T10:00:00Z") != std::string::npos);
 }
+
+// --- M19: the environment's Python, chosen and said ------------------------------------
+
+#include <CLI/CLI.hpp>
+
+#include <map>
+
+#include "platform/platform.h"
+#include "training/python_env.h"
+
+namespace {
+
+/// A machine for `train setup`: its own home, a PATH of fake interpreters
+/// that say their versions, and a runner standing in for Python and pip --
+/// every command recorded, a `venv` made as Python makes one.
+struct SetupMachine {
+    apogee::testing::TempDir home{"setup-home-" + std::to_string(std::random_device{}())};
+    apogee::testing::EnvGuard apogee_home{"APOGEE_HOME", home.path().string()};
+    apogee::testing::TempDir bin{"setup-path-" + std::to_string(std::random_device{}())};
+    apogee::testing::EnvGuard path{"PATH", bin.path().string()};
+    std::map<std::string, std::string> versions{
+        {"python3", "3.14.5"}, {"python3.13", "3.13.13"}, {"python3.12", "3.12.13"}};
+    std::vector<apogee::platform::ChildCommand> commands;
+
+    SetupMachine() {
+        for (const auto& [name, version] : versions) {
+            std::ofstream{bin.path() / name} << "#!/bin/sh\n";
+            std::filesystem::permissions(bin.path() / name, std::filesystem::perms::owner_all);
+        }
+    }
+
+    [[nodiscard]] apogee::commands::SetupRequest request(
+        std::vector<apogee::training::RequirementSet> with) {
+        apogee::commands::SetupRequest out;
+        out.with = std::move(with);
+        out.host = apogee::training::HostShape{.apple_silicon = true, .nvidia_smi = false};
+        out.runner = [this](const apogee::platform::ChildCommand& command,
+                            const apogee::harness::CancellationToken&) {
+            commands.push_back(command);
+            apogee::training::CommandResult result;
+            result.exit_code = 0;
+            const std::string name = std::filesystem::path{command.program}.filename().string();
+            if (!command.arguments.empty() && command.arguments[0] == "-c") {
+                result.out = versions.at(name) + "\n";
+            } else if (command.arguments.size() >= 3 && command.arguments[1] == "venv") {
+                const std::filesystem::path venv{command.arguments[2]};
+                std::filesystem::create_directories(venv / "bin");
+                std::ofstream{venv / "bin" / "python"} << "#!fake";
+                std::ofstream{venv / "pyvenv.cfg"} << "version = " << versions.at(name) << "\n";
+            }
+            return result;
+        };
+        return out;
+    }
+
+    /// Runs a setup; the exit code (0 for success) and every line said.
+    int run(const apogee::harness::Config& config, const apogee::commands::SetupRequest& request,
+            std::string* said) const {
+        const std::ostringstream captured;
+        std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
+        std::streambuf* old_err = std::cerr.rdbuf(captured.rdbuf());
+        int code = 0;
+        try {
+            apogee::commands::run_train_setup(config, request);
+        } catch (const CLI::RuntimeError& e) {
+            code = e.get_exit_code();
+        }
+        std::cout.rdbuf(old_out);
+        std::cerr.rdbuf(old_err);
+        *said = captured.str();
+        return code;
+    }
+
+    [[nodiscard]] std::vector<std::string> pips() const {
+        std::vector<std::string> out;
+        for (const apogee::platform::ChildCommand& command : commands) {
+            if (command.arguments.size() >= 5 && command.arguments[1] == "pip") {
+                out.push_back(command.arguments[4]);
+            }
+        }
+        return out;
+    }
+};
+
+}  // namespace
+
+TEST_CASE("train setup makes the environment on the newest Python every set runs on, and says why",
+          "[commands][train][setup][m19]") {
+    if (apogee::platform::host_target().starts_with("windows")) {
+        SKIP("the scripted interpreters are POSIX files on a POSIX PATH");
+    }
+    SetupMachine machine;
+    std::string said;
+    REQUIRE(machine.run({}, machine.request({apogee::training::RequirementSet::Prepare}), &said) ==
+            0);
+    INFO(said);
+    CHECK(said.find("from " + (machine.bin.path() / "python3.12").string() +
+                    " (Python 3.12.13) -- the newest Python every set this host can install runs "
+                    "on (>=3.11,<3.13); passed over python3 (3.14.5), python3.13 (3.13.13): the "
+                    "'voice' set runs on >=3.10,<3.13") != std::string::npos);
+    CHECK(said.find("(Python 3.12.13); sets: prepare") != std::string::npos);
+    CHECK(machine.pips() == std::vector<std::string>{"datasets>=3.0"});
+}
+
+TEST_CASE("an environment on 3.14 refuses voice before pip; --rebuild asks, then reinstalls all",
+          "[commands][train][setup][m19]") {
+    if (apogee::platform::host_target().starts_with("windows")) {
+        SKIP("the scripted interpreters are POSIX files on a POSIX PATH");
+    }
+    using apogee::training::RequirementSet;
+    // The user's environment: made from python3 (3.14.5), five sets in it.
+    SetupMachine machine;
+    std::string said;
+    apogee::commands::SetupRequest made =
+        machine.request({RequirementSet::Prepare, RequirementSet::Mlx, RequirementSet::Convert,
+                         RequirementSet::MlxVlm, RequirementSet::Video});
+    made.python = "python3";
+    REQUIRE(machine.run({}, made, &said) == 0);
+    CHECK(said.find("(Python 3.14.5) -- as named") != std::string::npos);
+
+    // Voice: refused before pip, the last line the rebuild that works.
+    machine.commands.clear();
+    CHECK(machine.run({}, machine.request({RequirementSet::Voice}), &said) != 0);
+    CHECK(said.find("is on Python 3.14.5, and the 'voice' set runs on >=3.10,<3.13 -- rebuild it "
+                    "on a Python that fits: apogee train setup --rebuild --with voice") !=
+          std::string::npos);
+    CHECK(machine.pips().empty());
+
+    // --python names a new environment's Python; with one there, it asks for --rebuild.
+    apogee::commands::SetupRequest named = machine.request({});
+    named.python = "python3.12";
+    CHECK(machine.run({}, named, &said) != 0);
+    CHECK(said.find("add --rebuild to replace it") != std::string::npos);
+
+    // Nobody to ask (the suite's stdin is not a terminal): refused, naming --yes.
+    apogee::commands::SetupRequest rebuild = machine.request({RequirementSet::Voice});
+    rebuild.rebuild = true;
+    CHECK(machine.run({}, rebuild, &said) != 0);
+    CHECK(said.find("rerun with --yes: apogee train setup --rebuild --yes") != std::string::npos);
+    CHECK(machine.pips().empty());
+
+    // With --yes: made again on 3.12, every recorded set reinstalled, then voice.
+    rebuild.yes = true;
+    REQUIRE(machine.run({}, rebuild, &said) == 0);
+    INFO(said);
+    CHECK(said.find("rebuilding") != std::string::npos);
+    CHECK(said.find("(Python 3.12.13)") != std::string::npos);
+    CHECK(said.find("reinstalling prepare, mlx, convert, mlx-vlm, video") != std::string::npos);
+    CHECK(machine.pips() == std::vector<std::string>{"datasets>=3.0", "mlx-lm>=0.21", "torch>=2.11",
+                                                     "mlx-vlm>=0.3", "torch>=2.6", "torch>=2.6"});
+    CHECK(said.find("(Python 3.12.13); sets: prepare, mlx, convert, mlx-vlm, video, voice") !=
+          std::string::npos);
+}

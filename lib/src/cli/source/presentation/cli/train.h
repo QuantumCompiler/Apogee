@@ -67,6 +67,18 @@ struct SetupRequest {
     /// `auto`, `mlx`, `peft`, or empty for no trainer stack.
     std::string trainer;
     std::vector<training::RequirementSet> with;
+    /// `--python` (M19): the interpreter a new or rebuilt environment is made
+    /// from, for this run; `training.python` keeps one.
+    std::string python;
+    /// `--rebuild`: the environment replaced on a Python every set runs on,
+    /// each recorded set reinstalled -- asked first.
+    bool rebuild = false;
+    /// `--yes`: the rebuild's answer, where nobody can be asked.
+    bool yes = false;
+    /// What runs Python and pip; a test scripts it.
+    training::CommandRunner runner = training::default_command_runner();
+    /// The host's facts, detected when not given.
+    std::optional<training::HostShape> host;
 };
 
 /// Runs a setup, printing each step. Throws the CLI's user error on failure.

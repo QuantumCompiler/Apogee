@@ -1914,10 +1914,23 @@ void check_video(CheckReport& report, const CheckInputs& inputs) {
     }
     // The speech runtime (50a): the same reading of files, its own set.
     const video::VideoReadiness voice = video::probe_voice(host);
+    // An environment on a Python the voice set does not run on can never
+    // take it by installing (M19): said, with the remedy that works.
+    const training::PythonVersion on = training::PythonEnv{host.venv}.status().base_version;
+    const training::PythonRange voice_range =
+        training::python_range(training::RequirementSet::Voice);
     switch (voice.refusal) {
         case video::VideoRefusal::NoEnvironment:
         case video::VideoRefusal::NoTorch:
         case video::VideoRefusal::NoKokoro:
+            if (voice.refusal != video::VideoRefusal::NoEnvironment && on.known() &&
+                !voice_range.contains(on)) {
+                add(report, Status::Skipped, "Video", "voice runtime",
+                    "not set up -- the Python environment is on Python " + on.str() +
+                        ", and the voice set runs on " + voice_range.describe(),
+                    "apogee train setup --rebuild --with voice");
+                break;
+            }
             add(report, Status::Skipped, "Video", "voice runtime", "not set up -- " + voice.reason,
                 std::string{video::kVoiceSetupRemedy});
             break;
@@ -1988,6 +2001,8 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
         }
         add(report, Status::Ok, "Training", "python env",
             "at " + env.dir().string() +
+                (status.base_version.known() ? " (Python " + status.base_version.str() + ")"
+                                             : std::string{}) +
                 (sets.empty() ? std::string{"; no requirement sets installed"}
                               : "; sets: " + sets));
     }

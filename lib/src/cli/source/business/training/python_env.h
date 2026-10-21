@@ -73,6 +73,45 @@ enum class RequirementSet : std::uint8_t {
 /// any host's. Empty when it is for this one.
 [[nodiscard]] std::string set_unfit_reason(RequirementSet set, bool apple_silicon, bool nvidia_smi);
 
+/// A Python's version, as `sys.version_info` states it (M19).
+struct PythonVersion {
+    int major = 0;
+    int minor = 0;
+    int patch = 0;
+
+    /// `3.12.13`; empty for the zero value, which means unknown.
+    [[nodiscard]] std::string str() const;
+
+    [[nodiscard]] bool known() const noexcept {
+        return major > 0;
+    }
+
+    /// `3.12.13` or `3.12`; nullopt for anything else.
+    [[nodiscard]] static std::optional<PythonVersion> parse(std::string_view text);
+    auto operator<=>(const PythonVersion&) const = default;
+};
+
+/// The Pythons a set's packages run on (M19): the `requires_python` PyPI
+/// publishes for each package's current release, carried with the date they
+/// were read -- ADR 0009's discipline for facts that go stale -- so a choice
+/// is made before an environment exists, not after pip refuses. Python 3
+/// minors; `below` 0 is no upper bound.
+struct PythonRange {
+    int at_least = 0;
+    int below = 0;
+
+    [[nodiscard]] bool contains(const PythonVersion& version) const noexcept;
+    /// `>=3.11`, `>=3.10,<3.13`.
+    [[nodiscard]] std::string describe() const;
+};
+
+/// One set's range, from the sets' table.
+[[nodiscard]] PythonRange python_range(RequirementSet set) noexcept;
+/// The range every one of `sets` runs on: their intersection.
+[[nodiscard]] PythonRange python_range(std::span<const RequirementSet> sets) noexcept;
+/// When the ranges were last read against PyPI.
+[[nodiscard]] std::string_view python_ranges_reviewed() noexcept;
+
 /// What the environment holds, read from `apogee.json` and the filesystem.
 struct PythonEnvStatus {
     /// The interpreter exists.
@@ -80,6 +119,9 @@ struct PythonEnvStatus {
     std::filesystem::path interpreter;
     /// The interpreter it was seeded from.
     std::string base_python;
+    /// Its version: the record's `base_version`, else `pyvenv.cfg`'s
+    /// `version` (written by `python -m venv`) -- read, never asked of Python.
+    PythonVersion base_version;
     std::string created_at;
     /// Requirement sets installed, by name.
     std::vector<std::string> sets;
@@ -105,14 +147,26 @@ public:
 
     [[nodiscard]] PythonEnvStatus status() const;
 
-    /// Creates the environment from `base_python` (`python -m venv`). The
-    /// error text, or empty. An existing environment is left alone.
+    /// Creates the environment from `base_python` (`python -m venv`),
+    /// recording its version when known. The error text, or empty. An
+    /// existing environment is left alone.
     [[nodiscard]] std::string create(const std::filesystem::path& base_python,
-                                     const harness::CancellationToken& cancellation = {});
+                                     const harness::CancellationToken& cancellation = {},
+                                     const PythonVersion& version = {});
 
     /// Installs `set` into the environment with its own pip and records it.
-    /// The error text, or empty.
+    /// The error text, or empty. An environment whose Python the set does
+    /// not run on is refused before pip, naming the rebuild (M19).
     [[nodiscard]] std::string install(RequirementSet set,
+                                      const harness::CancellationToken& cancellation = {});
+
+    /// Replaces the environment with one made from `base_python`, every set
+    /// the record lists reinstalled in its order (M19). The old one is moved
+    /// aside first and put back if anything fails, so a failed rebuild
+    /// leaves what was there. Asking the person is the caller's. The error
+    /// text, or empty.
+    [[nodiscard]] std::string rebuild(const std::filesystem::path& base_python,
+                                      const PythonVersion& version,
                                       const harness::CancellationToken& cancellation = {});
 
     /// The record's path: `<dir>/apogee.json`.
@@ -138,7 +192,50 @@ private:
 /// and `~` expanded) when non-empty, else `python3` then `python` on PATH.
 /// Empty with `error` set when none is found or the configured one is not
 /// there.
+/// `source` names where `configured` came from in a refusal.
 [[nodiscard]] std::filesystem::path locate_base_python(std::string_view configured,
-                                                       std::string& error);
+                                                       std::string& error,
+                                                       std::string_view source = "training.python");
+
+/// `interpreter`'s version, asked through `runner` (`-c "import sys; ..."`);
+/// the zero value when it does not answer.
+[[nodiscard]] PythonVersion probe_python_version(const std::filesystem::path& interpreter,
+                                                 const CommandRunner& runner);
+
+/// An interpreter on this machine and its version.
+struct PythonCandidate {
+    std::filesystem::path path;
+    PythonVersion version;
+};
+
+/// The interpreters on PATH by name (M19): `python3.<minor>` for 3.10 to
+/// 3.30, newest first, then `python3`, then `python` -- each asked its
+/// version through `runner`, one reached by two names listed once. No
+/// install prefix beyond PATH is searched and nothing is installed.
+[[nodiscard]] std::vector<PythonCandidate> python_candidates(const CommandRunner& runner);
+
+/// The interpreter a new environment is made from, and why (M19).
+struct PythonChoice {
+    std::filesystem::path path;
+    PythonVersion version;
+    /// Why this one, in the words setup says.
+    std::string reason;
+    /// Why none: set exactly when `path` is empty.
+    std::string error;
+};
+
+/// The choice. `configured` (`training.python`, or `--python` for the run)
+/// is the person's word, used as given -- one whose version is outside
+/// `requested`'s range is refused naming both, never swapped. Otherwise the
+/// newest candidate every set in `host` runs on (what this host can install:
+/// one environment serves them all, and the bootstrap makes it at its first
+/// set); else the newest `requested` runs on, naming what it leaves out;
+/// else refused, naming the range, what was found and where an interpreter
+/// comes from.
+[[nodiscard]] PythonChoice choose_base_python(std::string_view configured,
+                                              std::span<const RequirementSet> host,
+                                              std::span<const RequirementSet> requested,
+                                              const CommandRunner& runner,
+                                              std::string_view source = "training.python");
 
 }  // namespace apogee::training
