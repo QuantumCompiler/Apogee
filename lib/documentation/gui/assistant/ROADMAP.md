@@ -39,12 +39,12 @@ The documentation tree was restructured per application (2026-10-20, the user's 
 
 ## Fast follow
 
-*(empty)*
+- [ ] **Stored weights by handle** — maintenance item M1 *([stored-weights-by-handle.md](../backlog/maintenance/stored-weights-by-handle.md))*: the user's run of the built app showed none of their SafeTensors sets. The CLI names every stored, unconfigured row `(not configured)`, and the GUI keyed rows by that name, so 18 stored rows drew as one, and info, delete and repair, Voice's voices and Settings' pipelines were all asked for `(not configured)`. The fix names a stored row by its handle and says the fold. Best built before `v0.2.0` merges.
 
 ## Unspecced ideas
 
 - **`Apogee.app` in releases** — the merge's release carrying the ad-hoc-signed app beside the CLI's archives. The user's 2026-10-20 call kept it a CI artifact until the session window shipped, which it now has (1c); how the release scripts take it is its own item, on the user's word.
-- **Setting the binary override in the app** — today the override is the `binaryOverride` default (`defaults write com.quantumcompiler.apogee binaryOverride /path/to/apogee`); a "Locate apogee…" chooser on the not-found screen would set it (1c's note).
+- **Setting the binary override from the not-found screen** — since 1p, Settings › General's "Use another apogee…" sets the `binaryOverride` default; a "Locate apogee…" chooser on the not-found screen itself would set it before any session starts (1c's note).
 - **The answer as Markdown** — the window shows an answer as its exact text; rendering its Markdown, as the CLI's terminal does, is a deliberate later step (1c's note).
 
 ## Ideas / candidate features

@@ -44,4 +44,12 @@ Every item document follows this shape (sections in order; omit one only when it
 
 Priority-ordered: the topmost item whose gate is satisfied is the next one to build.
 
-**Track 1, the macOS application** (1a–1q) has shipped: opened 2026-10-20 from that day's GUI spike (the user's call: Swift and SwiftUI, macOS first, unsigned ad-hoc) and grown the same day by the design-completion split, it is complete in **v0.2.0** — in development on its branch, released when it merges into `stable`. Its story is [ROADMAP.md](../assistant/ROADMAP.md), and each item's record is in [MILESTONES.md](../assistant/MILESTONES.md): the app, its client core, the session window and its pipeline in [Milestone A](../assistant/MILESTONES.md#milestone-a--the-macos-application) (1a–1d), every screen of the design in [Milestone B](../assistant/MILESTONES.md#milestone-b--the-designs-screens) (1e–1q). No table is open: the next GUI item opens one.
+**Track 1, the macOS application** (1a–1q) has shipped: opened 2026-10-20 from that day's GUI spike (the user's call: Swift and SwiftUI, macOS first, unsigned ad-hoc) and grown the same day by the design-completion split, it is complete in **v0.2.0** — in development on its branch, released when it merges into `stable`. Its story is [ROADMAP.md](../assistant/ROADMAP.md), and each item's record is in [MILESTONES.md](../assistant/MILESTONES.md): the app, its client core, the session window and its pipeline in [Milestone A](../assistant/MILESTONES.md#milestone-a--the-macos-application) (1a–1d), every screen of the design in [Milestone B](../assistant/MILESTONES.md#milestone-b--the-designs-screens) (1e–1q). No version table is open; the standing Maintenance table below holds the GUI's upkeep.
+
+### Maintenance
+
+Upkeep and fixes, claimable at any time by name: opened 2026-10-20 with its first item, mirroring the CLI's conventions (`M<n>` ever-assigned, the documents in `maintenance/`). **M1** comes from the user's run of the built app the same day, when the Models library showed none of the store's SafeTensors sets: every stored row arrives named by the CLI's `(not configured)` placeholder, and the GUI keyed rows by it.
+
+| # | Item | Version | File | Status |
+|---|---|---|---|---|
+| M1 | Stored weights by handle — every stored set its own row, named by its handle; info, delete, repair and rename run with the name each verb takes; the fold said, with `--all` on asking; Voice's voice model and Settings' pipelines by handle | Maintenance | [`stored-weights-by-handle.md`](maintenance/stored-weights-by-handle.md) | 🟢 |
