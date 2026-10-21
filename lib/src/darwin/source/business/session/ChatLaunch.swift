@@ -10,9 +10,13 @@ public struct ChatLaunch: Sendable, Equatable {
     /// default. With tools on, the session's asks reach the driver as
     /// `question` events.
     public var tools: Bool
+    /// The saved conversation to carry on -- `--resume <id>` -- or `nil` for
+    /// a new one.
+    public var resume: String?
 
-    public init(tools: Bool = true) {
+    public init(tools: Bool = true, resume: String? = nil) {
         self.tools = tools
+        self.resume = resume
     }
 
     /// The arguments after `apogee`.
@@ -24,6 +28,9 @@ public struct ChatLaunch: Sendable, Equatable {
         ]
         if tools {
             arguments.append("--tools")
+        }
+        if let resume {
+            arguments += ["--resume", resume]
         }
         return arguments
     }

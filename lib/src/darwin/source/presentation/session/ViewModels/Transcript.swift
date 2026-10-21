@@ -26,6 +26,9 @@ public struct Transcript: Equatable {
         case waiting(turn: Int)
         /// A `cancel` was sent; the turn's result has not arrived.
         case stopping(turn: Int)
+        /// Its child was ended to free it, while out of view; it resumes when
+        /// it is back.
+        case paused
         /// The session is over.
         case ended
     }
@@ -48,7 +51,7 @@ public struct Transcript: Equatable {
     public var turnInFlight: Bool {
         switch status {
         case .thinking, .working, .answering, .waiting: true
-        case .connecting, .ready, .stopping, .ended: false
+        case .connecting, .ready, .stopping, .paused, .ended: false
         }
     }
 
@@ -94,6 +97,19 @@ public struct Transcript: Equatable {
         }
     }
 
+    /// The child was ended to free it: the conversation stays, quiet.
+    public mutating func paused() {
+        closeActivity()
+        status = .paused
+        revision += 1
+    }
+
+    /// A new child resumes the conversation: it waits for its `session` event.
+    public mutating func reopening() {
+        status = .connecting
+        revision += 1
+    }
+
     /// A line could not be sent: the session had ended.
     public mutating func notSent(_ reason: String) {
         append(.error(reason), turn: nil)
@@ -120,6 +136,13 @@ public struct Transcript: Equatable {
             nextTurn = info.nextTurn
             if status == .connecting {
                 status = .ready
+            }
+            if items.isEmpty && info.nextTurn > 1 {
+                // A resumed conversation: the CLI hands no read of its saved
+                // turns to a driver, so say they are there rather than show
+                // a conversation that seems to start here.
+                let earlier = info.nextTurn - 1
+                append(.notice(Self.resumed(earlier: earlier)), turn: nil)
             }
             revision += 1
         case .thinking(let budgetReached):
@@ -257,6 +280,10 @@ public struct Transcript: Equatable {
                 revision += 1
             }
         }
+    }
+
+    static func resumed(earlier: Int) -> String {
+        "resumed: \(earlier) earlier \(earlier == 1 ? "turn" : "turns") of this conversation \(earlier == 1 ? "isn't" : "aren't") shown here -- apogee keeps \(earlier == 1 ? "it" : "them"), and the model still has \(earlier == 1 ? "it" : "them")"
     }
 
     static func recalled(chats: Int, decisions: Int) -> String {

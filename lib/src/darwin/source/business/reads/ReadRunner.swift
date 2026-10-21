@@ -10,8 +10,8 @@ import InfrastructureProcess
 /// document and nothing else (machine-mode.md -> Everything else is a CLI
 /// command).
 public struct ReadRunner: Sendable {
-    private let spawner: any ChildSpawner
-    private let timeout: Duration
+    let spawner: any ChildSpawner
+    let timeout: Duration
 
     /// Over real processes. (Not a default argument: Swift compiles those
     /// into the caller, which would then have to link InfrastructureProcess.)

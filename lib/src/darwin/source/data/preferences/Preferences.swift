@@ -17,6 +17,8 @@ public final class Preferences: Sendable {
         static let binaryOverride = "binaryOverride"
         static let route = "route"
         static let sidebarHidden = "sidebarHidden"
+        static let inspectorOpen = "inspectorOpen"
+        static let openChat = "openChat"
     }
 
     public init(store: any KeyValueStore) {
@@ -53,6 +55,19 @@ public final class Preferences: Sendable {
     public var sidebarHidden: Bool {
         get { bool(Key.sidebarHidden) }
         set { setBool(newValue, Key.sidebarHidden) }
+    }
+
+    /// Whether the inspector is open beside a session.
+    public var inspectorOpen: Bool {
+        get { bool(Key.inspectorOpen) }
+        set { setBool(newValue, Key.inspectorOpen) }
+    }
+
+    /// The saved conversation open in Sessions, by its id; `nil` for a new
+    /// one not yet saved.
+    public var openChat: String? {
+        get { store.string(forKey: Key.openChat).flatMap { $0.isEmpty ? nil : $0 } }
+        set { store.set(newValue, forKey: Key.openChat) }
     }
 
     /// A flag, kept as `true` or absent.

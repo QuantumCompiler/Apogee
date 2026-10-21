@@ -25,12 +25,38 @@ extension MachineSession: ChatSession {}
 /// `ApogeeClient` is the app's.
 public protocol ChatStarting: Sendable {
     func locateBinary() async -> DiscoveryOutcome
-    func openChat(binary: URL) -> any ChatSession
+    /// A chat on `binary`, started as `launch` says: new, or resuming one.
+    func openChat(binary: URL, launch: ChatLaunch) -> any ChatSession
+}
+
+extension ChatStarting {
+    /// A new chat.
+    public func openChat(binary: URL) -> any ChatSession {
+        openChat(binary: binary, launch: ChatLaunch())
+    }
 }
 
 extension ApogeeClient: ChatStarting {
-    public func openChat(binary: URL) -> any ChatSession {
-        startChat(binary: binary)
+    public func openChat(binary: URL, launch: ChatLaunch) -> any ChatSession {
+        startChat(binary: binary, launch: launch)
+    }
+}
+
+/// A starter whose binary was already found: discovery runs once, and each
+/// session after opens on what it found.
+public struct LocatedStarter: ChatStarting {
+    public let found: FoundBinary
+    private let base: any ChatStarting
+
+    public init(base: any ChatStarting, found: FoundBinary) {
+        self.base = base
+        self.found = found
+    }
+
+    public func locateBinary() async -> DiscoveryOutcome { .found(found, skipped: []) }
+
+    public func openChat(binary: URL, launch: ChatLaunch) -> any ChatSession {
+        base.openChat(binary: binary, launch: launch)
     }
 }
 

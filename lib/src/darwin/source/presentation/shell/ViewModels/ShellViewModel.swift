@@ -19,6 +19,9 @@ public final class ShellViewModel {
     public private(set) var width: Double?
     /// The one line at the bottom of the window, if one is showing.
     public private(set) var toast: Toast?
+    /// Told each time the place shown changes: how a screen learns it came
+    /// into view or left it.
+    public var routeChanged: (@MainActor (Destination) -> Void)?
 
     private let preferences: Preferences
     private var nextToast = 0
@@ -46,8 +49,10 @@ public final class ShellViewModel {
 
     /// Shows `destination`, and remembers it for the next launch.
     public func go(_ destination: Destination) {
+        guard destination != route else { return }
         route = destination
         preferences.route = destination.rawValue
+        routeChanged?(destination)
     }
 
     public func open(_ overlay: Overlay) {

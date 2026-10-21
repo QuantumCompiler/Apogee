@@ -1,4 +1,4 @@
-import PresentationSession
+import PresentationSessions
 import PresentationShell
 import PresentationStyles
 import SwiftUI
@@ -16,22 +16,25 @@ public struct ApogeeApp: App {
         // would mean a second.
         Window(model.title, id: "main") {
             ShellView(model: model.shell) {
-                SessionListPlaceholder()
+                SessionList(library: model.sessions, shell: model.shell)
             } screen: { destination in
                 switch destination {
-                case .sessions: SessionWindow(model: model.session)
+                case .sessions: SessionsScreen(library: model.sessions, shell: model.shell)
                 default: PlaceholderScreen(destination)
                 }
             }
             .frame(minWidth: Layout.windowMinWidth, minHeight: Layout.windowMinHeight)
             .navigationSubtitle(model.versionLine)
-            .task { model.session.start() }
+            .task { await model.start() }
             // The window closing ends its session: the turn cancelled, the
             // child asked to go, terminated only if it will not.
-            .onDisappear { Task { await model.session.shutDown() } }
+            .onDisappear { Task { await model.sessions.shutDown() } }
         }
         .windowResizability(.contentMinSize)
-        .commands { ShellCommands(model: model.shell) }
+        .commands {
+            ShellCommands(model: model.shell)
+            SessionCommands(library: model.sessions, shell: model.shell)
+        }
 
         Settings {
             SettingsPlaceholder()

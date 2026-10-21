@@ -20,4 +20,4 @@
 - [ ] Every designed session state renders from its events; attach and `@` work with their notices; the meter tracks usage against the window.
 - [ ] Mid-session settings apply via restart-resume and say so; private runs with the fallback said honestly; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0; gated on [`session-library.md`](session-library.md) (1f). Out of scope: the CLI growths themselves (track 52), sources/recall chips' final form (upgrades when 52a lands).
+**Scope note.** Earmarked for v0.2.0; gated on 1f, the session library (shipped 2026-10-20: [MILESTONES → Milestone B](../assistant/MILESTONES.md#milestone-b--the-designs-screens)). Out of scope: the CLI growths themselves (track 52), sources/recall chips' final form (upgrades when 52a lands).

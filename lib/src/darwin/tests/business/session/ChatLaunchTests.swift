@@ -26,6 +26,15 @@ struct ChatLaunchTests {
         ])
     }
 
+    @Test("a saved conversation is carried on with --resume and its id, after the flags")
+    func resume() {
+        #expect(ChatLaunch(resume: "20261021-003843-0fc4").arguments == [
+            "chat", "--output-format", "stream-json", "--input-format", "stream-json", "--tools",
+            "--resume", "20261021-003843-0fc4",
+        ])
+        #expect(ChatLaunch().resume == nil)
+    }
+
     @Test("a client starts a chat in the user's home unless given a folder, and says hello first")
     func clientStartsInHome() async throws {
         let fake = try FakeApogee()

@@ -80,3 +80,27 @@ struct ReadRunnerTests {
         #expect(reason.contains("/nonexistent/apogee"))
     }
 }
+
+@Suite("CommandRunning", .timeLimit(.minutes(1)))
+struct CommandRunningTests {
+    @Test("a command runs exactly as typed -- no --output-format added -- and says what it printed")
+    func done() async throws {
+        let fake = try FakeRead()
+        let binary = try fake.binary(#"echo "renamed: $*""#)
+        let outcome = await ReadRunner().command(binary: binary, ["chats", "title", "c1", "Plans for the week"])
+        #expect(outcome == .done(stdout: "renamed: chats title c1 Plans for the week"))
+        #expect(outcome.succeeded && outcome.failure == nil)
+    }
+
+    @Test("a refusal is its stderr's last line, word for word, with how it exited")
+    func refused() async throws {
+        let fake = try FakeRead()
+        let binary = try fake.binary("echo \"apogee chats: no chat named 'nope'\" >&2; exit 1")
+        let outcome = await ReadRunner().command(binary: binary, ["chats", "delete", "nope"])
+        #expect(!outcome.succeeded)
+        #expect(outcome.failure == "apogee chats: no chat named 'nope' (exited with status 1)")
+        let read = await ReadRunner().read(binary: binary, ["chats", "list"])
+        #expect(read.document == nil)
+        #expect(read.failure == "apogee chats: no chat named 'nope' (exited with status 1)")
+    }
+}

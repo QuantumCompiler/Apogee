@@ -69,6 +69,22 @@ struct TranscriptTests {
         #expect(transcript.acceptsInput)
     }
 
+    @Test("a resumed conversation says its earlier turns are kept but not shown; a new one says nothing")
+    func resumedSaysSo() {
+        var resumed = Transcript()
+        resumed.apply(.event(EventDecoder.decode(line: #"{"type":"session","protocol_version":1,"model":"m","next_turn":4}"#)))
+        #expect(shape(resumed) == [
+            "notice: resumed: 3 earlier turns of this conversation aren't shown here -- apogee keeps them, and the model still has them"
+        ])
+        #expect(resumed.status == .ready)
+        var one = Transcript()
+        one.apply(.event(EventDecoder.decode(line: #"{"type":"session","protocol_version":1,"model":"m","next_turn":2}"#)))
+        #expect(shape(one) == ["notice: resumed: 1 earlier turn of this conversation isn't shown here -- apogee keeps it, and the model still has it"])
+        var fresh = Transcript()
+        fresh.apply(.event(EventDecoder.decode(line: #"{"type":"session","protocol_version":1,"model":"m","next_turn":1}"#)))
+        #expect(fresh.items.isEmpty)
+    }
+
     @Test("the answer shown is exactly its deltas joined")
     func deltasJoined() {
         var transcript = Transcript()

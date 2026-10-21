@@ -105,6 +105,72 @@ struct SessionViewModelTests {
         #expect(model.transcript.items.isEmpty)
     }
 
+    @Test("paused, a saved session keeps its conversation with no ending card, and resumes it with --resume")
+    func pauseAndResume() async throws {
+        let first = ScriptedSession()
+        let second = ScriptedSession()
+        let starter = ScriptedStarter(sessions: [first, second])
+        let model = SessionViewModel(starter: starter, launch: ChatLaunch(resume: "c1"))
+        var seen: [String] = []
+        model.observer = { event in if case .event(let e) = event { seen.append(e.type) } else { seen.append("ended") } }
+        model.start()
+        first.emit(session)
+        #expect(await eventually { model.transcript.status == .ready })
+        model.draft = "hello"
+        model.submit()
+        first.emit(#"{"type":"result","text":"hi","turn":1}"#)
+        #expect(await eventually { model.transcript.status == .ready })
+        let kept = model.transcript.items
+        await model.pause()
+        #expect(model.isPaused)
+        #expect(model.statusText == "Paused")
+        #expect(first.calls.last == "stop")
+        #expect(model.transcript.items == kept, "no ending card: the session was freed, not finished")
+        model.resume()
+        #expect(await eventually { starter.openedCount == 2 })
+        #expect(starter.launches.map(\.resume) == ["c1", "c1"])
+        #expect(model.transcript.status == .connecting)
+        second.emit(#"{"type":"session","protocol_version":1,"model":"fake","next_turn":2}"#)
+        #expect(await eventually { model.transcript.status == .ready })
+        #expect(model.transcript.items == kept)
+        #expect(seen == ["session", "result", "ended", "session"], "the observer is told every event, the pause's end too")
+    }
+
+    @Test("a session the library identified resumes by that id; one never saved starts afresh")
+    func identifiedOrFresh() async {
+        let first = ScriptedSession()
+        let second = ScriptedSession()
+        let starter = ScriptedStarter(sessions: [first, second])
+        let model = SessionViewModel(starter: starter)
+        model.start()
+        first.emit(session)
+        #expect(await eventually { model.transcript.status == .ready })
+        model.draft = "hello"
+        model.submit()
+        first.emit(#"{"type":"result","text":"hi","turn":1}"#)
+        #expect(await eventually { model.transcript.status == .ready })
+        await model.pause()
+        model.resume()
+        #expect(await eventually { starter.openedCount == 2 })
+        #expect(starter.launches.map(\.resume) == [nil, nil])
+        #expect(model.transcript.items.isEmpty, "nothing of an unsaved session could be resumed")
+
+        let third = ScriptedSession()
+        let fourth = ScriptedSession()
+        let again = ScriptedStarter(sessions: [third, fourth])
+        let named = SessionViewModel(starter: again)
+        named.start()
+        third.emit(session)
+        #expect(await eventually { named.transcript.status == .ready })
+        named.identify("c9")
+        named.identify("c10")
+        #expect(named.chatID == "c9", "an id, once known, stays")
+        await named.pause()
+        named.resume()
+        #expect(await eventually { again.openedCount == 2 })
+        #expect(again.launches.map(\.resume) == [nil, "c9"])
+    }
+
     @Test("the window over a real session: the recorded mock-actor conversation, answered, every line byte-exact")
     func mockActorEndToEnd() async throws {
         let child = ReplayChild(replaying: mockActorLines)

@@ -48,7 +48,11 @@ final class ScriptedSession: ChatSession, @unchecked Sendable {
     func answer(_ text: String) async throws { log.withLock { $0.append("answer: \(text)") } }
     func cancel() async throws { log.withLock { $0.append("cancel") } }
     func close() async { log.withLock { $0.append("close") } }
-    func stop(grace: Duration) async { log.withLock { $0.append("stop") } }
+    /// Stopped, it ends -- as a real session's child does.
+    func stop(grace: Duration) async {
+        log.withLock { $0.append("stop") }
+        end(.finished)
+    }
 }
 
 /// Where a test's sessions come from: a fixed discovery outcome, and the
@@ -68,11 +72,15 @@ final class ScriptedStarter: ChatStarting, @unchecked Sendable {
         versionLine: "apogee 0.1.9 (7072bdf, 2026-10-19, macos-arm64)")
 
     var openedCount: Int { opened.withLock { $0 } }
+    private let launched = Mutex<[ChatLaunch]>([])
+    /// How each session was started, in order.
+    var launches: [ChatLaunch] { launched.withLock { $0 } }
 
     func locateBinary() async -> DiscoveryOutcome { outcome }
 
-    func openChat(binary: URL) -> any ChatSession {
+    func openChat(binary: URL, launch: ChatLaunch) -> any ChatSession {
         opened.withLock { $0 += 1 }
+        launched.withLock { $0.append(launch) }
         return sessions.withLock { $0.removeFirst() }
     }
 }
@@ -176,9 +184,9 @@ struct ReplayStarter: ChatStarting {
 
     func locateBinary() async -> DiscoveryOutcome { .found(ScriptedStarter.binary, skipped: []) }
 
-    func openChat(binary: URL) -> any ChatSession {
+    func openChat(binary: URL, launch: ChatLaunch) -> any ChatSession {
         MachineSession.start(
-            spawner: ReplaySpawner(child: child), command: ChatLaunch().command(binary: binary),
+            spawner: ReplaySpawner(child: child), command: launch.command(binary: binary),
             hello: .hello(clientName: "Apogee", clientVersion: "0.2.0", wants: ["tools"]))
     }
 }

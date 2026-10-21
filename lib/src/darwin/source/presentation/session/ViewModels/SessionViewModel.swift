@@ -27,10 +27,21 @@ public final class SessionViewModel {
     public private(set) var transcript = Transcript()
     /// What the user is typing.
     public var draft = ""
+    /// The saved conversation this is, by its id: the one it resumed, or the
+    /// one the library found it saved as. `nil` for a new one not yet known.
+    public private(set) var chatID: String?
+    /// Told every event, after the transcript has folded it: how the library
+    /// reads back what a turn changed.
+    public var observer: (@MainActor (SessionEvent) -> Void)?
 
     private let starter: any ChatStarting
+    private let launch: ChatLaunch
     private var session: (any ChatSession)?
     private var outbox: AsyncStream<Outbound>.Continuation?
+    /// Its child is being ended to free it, not for good.
+    private var pausing = false
+    /// The session's run: located, opened, its events read to the end.
+    private var running: Task<Void, Never>?
 
     /// A line to write, queued so lines leave in the order the user made them.
     private enum Outbound {
@@ -39,8 +50,23 @@ public final class SessionViewModel {
         case cancel
     }
 
-    public init(starter: any ChatStarting) {
+    /// A new chat.
+    public convenience init(starter: any ChatStarting) {
+        self.init(starter: starter, launch: ChatLaunch())
+    }
+
+    /// A chat started as `launch` says -- new, or resuming a saved one.
+    public init(starter: any ChatStarting, launch: ChatLaunch) {
         self.starter = starter
+        self.launch = launch
+        chatID = launch.resume
+    }
+
+    /// The library found this session saved as `id`.
+    public func identify(_ id: String) {
+        if chatID == nil {
+            chatID = id
+        }
     }
 
     // MARK: - The session
@@ -55,7 +81,7 @@ public final class SessionViewModel {
         }
         connection = .locating
         transcript = Transcript()
-        Task { await connect() }
+        running = Task { await connect() }
     }
 
     private func connect() async {
@@ -66,13 +92,22 @@ public final class SessionViewModel {
                 places: skipped.map { "\($0.candidate.url.path): \($0.reason)" })
         case .found(let found, _):
             connection = .connected(binary: found.url.path, version: found.version)
-            let session = starter.openChat(binary: found.url)
+            var launch = self.launch
+            launch.resume = chatID
+            let session = starter.openChat(binary: found.url, launch: launch)
             self.session = session
             let (lines, outbox) = AsyncStream.makeStream(of: Outbound.self)
             self.outbox = outbox
             Task { await Self.write(lines, to: session) }
             for await event in session.events {
-                transcript.apply(event)
+                if case .ended = event, pausing {
+                    // Freed, not finished: no ending card.
+                    pausing = false
+                    transcript.paused()
+                } else {
+                    transcript.apply(event)
+                }
+                observer?(event)
             }
             outbox.finish()
             self.outbox = nil
@@ -95,6 +130,34 @@ public final class SessionViewModel {
     /// to go, terminated only if it will not.
     public func shutDown() async {
         await session?.stop(grace: .seconds(5))
+    }
+
+    /// Whether its child was ended to free it, to be resumed when it is back
+    /// in view.
+    public var isPaused: Bool { transcript.status == .paused }
+
+    /// Ends the child to free it -- its model unloads -- keeping the
+    /// conversation shown; `resume()` carries it on with `--resume`. Returns
+    /// once the child has gone.
+    public func pause() async {
+        guard let session, transcript.status != .ended, !isPaused else { return }
+        pausing = true
+        await session.stop(grace: .seconds(5))
+        // Returns once its events are read to the end: paused, not pausing.
+        await running?.value
+    }
+
+    /// Carries a paused session on: a new child resuming the saved
+    /// conversation. One that was never saved -- no turn sent, or its id never
+    /// found -- starts afresh instead, since nothing of it could be resumed.
+    public func resume() {
+        guard isPaused else { return }
+        if chatID == nil {
+            transcript = Transcript()
+        } else {
+            transcript.reopening()
+        }
+        running = Task { await connect() }
     }
 
     // MARK: - The user's acts
@@ -145,6 +208,7 @@ public final class SessionViewModel {
         }
         return switch transcript.status {
         case .connecting: "Starting apogee"
+        case .paused: "Paused"
         case .ready: "Ready"
         case .thinking: "Thinking"
         case .working: "Working"
@@ -160,7 +224,7 @@ public final class SessionViewModel {
         switch transcript.status {
         case .waiting: "Answer the question above"
         case .ended: "The session has ended"
-        case .connecting: "Starting apogee"
+        case .connecting, .paused: "Starting apogee"
         default: "Message Apogee"
         }
     }

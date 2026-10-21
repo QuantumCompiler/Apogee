@@ -2,11 +2,14 @@ import PresentationStyles
 import SwiftUI
 
 /// The window's content: one chat session, or why there is none yet.
-public struct SessionWindow: View {
+/// `accessory` sits at the header's end: the controls of whatever hosts it.
+public struct SessionWindow<Accessory: View>: View {
     @Bindable private var model: SessionViewModel
+    private let accessory: Accessory
 
-    public init(model: SessionViewModel) {
+    public init(model: SessionViewModel, @ViewBuilder accessory: () -> Accessory) {
         self.model = model
+        self.accessory = accessory()
     }
 
     public var body: some View {
@@ -17,7 +20,7 @@ public struct SessionWindow: View {
             case .missing(let hint, let places):
                 MissingBinaryView(hint: hint, places: places, retry: model.start)
             case .connected:
-                ConversationView(model: model)
+                ConversationView(model: model, accessory: accessory)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -27,9 +30,16 @@ public struct SessionWindow: View {
     }
 }
 
+extension SessionWindow where Accessory == EmptyView {
+    public init(model: SessionViewModel) {
+        self.init(model: model) { EmptyView() }
+    }
+}
+
 /// The header, the transcript and the input.
-struct ConversationView: View {
+struct ConversationView<Accessory: View>: View {
     @Bindable var model: SessionViewModel
+    let accessory: Accessory
 
     var body: some View {
         VStack(spacing: 0) {
@@ -69,6 +79,7 @@ struct ConversationView: View {
             Text(model.statusText)
                 .font(.apogeeMeta)
                 .foregroundStyle(model.transcript.status == .ended ? Palette.error : Palette.textSecondary)
+            accessory
         }
         .padding(.horizontal, Spacing.l)
         .frame(height: 44)

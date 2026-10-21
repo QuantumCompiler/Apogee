@@ -160,7 +160,8 @@ struct EndedCard: View {
                 }
                 .font(.apogeeMeta)
             }
-            Button("Start a new session", action: restart)
+            // A saved conversation is resumed; one never saved starts afresh.
+            Button("Start again", action: restart)
         }
     }
 }
