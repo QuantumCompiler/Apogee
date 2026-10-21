@@ -2486,7 +2486,7 @@ The specced premise of class 1, that the scripts enumerate what they remove, was
 - **The [default] call: the shared helper is taken.** All 26 shell scripts shared the pattern, so there is one helper per runner language: shell, and CMake. The Python driver does it inline, being one file that is read as a worked example.
 - **No regression pin.** No product regression was found, and the pin bar is for product regressions. The concurrent-pairs run below is the recorded proof, not a new ctest case: new coverage is out of scope.
 - **`bare_help.cmake` is left as it is.** Its one write is an empty stdin file, which two runs write identically.
-- **Not fixed, and named: two runs still share the build itself.** One tree's `cmake --build`, including `cli.channel_probe_build`, which builds a target inside the tree, can race another run's. No failure came from it, since both are no-ops on an unchanged tree. A lock on the build tree in `lib/scripts/cicd.sh` would close it, and that is the user's call.
+- **Not fixed, and named: two runs still share the build itself.** One tree's `cmake --build`, including `cli.channel_probe_build`, which builds a target inside the tree, can race another run's. No failure came from it, since both are no-ops on an unchanged tree. A lock on the build tree in `lib/scripts/cicd.sh` would close it, and that is the user's call. *Closed the same day, on the user's word: one run at a time in a build tree (below).*
 
 **Verified.** Twelve tests run as concurrent pairs on one tree after the change, every pair passing: the six that failed in the reproduction, `cli.config_lifecycle`, `cli.reference_driver`, `cli.install_parity` (with its channel-probe fixture), `cli.shell_completion`, `cli.complete_lifecycle`, `cli.install_is_ours_only`. No run left a directory behind. `make -C lib/src/cli test` twice back to back: 3,593 of 3,593 both times (7 and 9 minutes), the two standing skips the only cases not run, and no directory left in the build tree; the first run that preceded the change, the same code in this tree, was 3,593 of 3,593 too, alone in its tree while another session's gate ran in the main checkout's. CI's tier gating is unchanged: `ci.yml` and `cicd.sh --unit-tests` are untouched, the executable tier stays `make test`'s, and the two standing skips (the libass caption burn, pdftotext) stay skips.
 
@@ -2507,6 +2507,23 @@ The specced premise of class 1, that the scripts enumerate what they remove, was
 - A console-only log, the old shape, is annotated byte for byte the same by the parser before and after.
 - `ci.yml` is byte-identical.
 - `lib/scripts/cicd.sh --test` on the branch: green -- the CLI's 3,593 (the two standing skips) and the macOS app's 219 cases, M17's sandboxes included, so its suite ran green a third time in a row.
+
+### 2026-10-20 — One run at a time in a build tree (after M17)
+
+**Goal.** M17 gave every test run its own scratch directory, and named what it left open: two runs of `cicd.sh` in one checkout still configured, built and tested in the same `build/<target>`. One example is a `make test` started while a gate runs. The user's call, the same day: a second run waits instead of building over the first.
+
+- [x] **`lib/scripts/cicd.sh`**: `build_target` holds `<tree>.lock` from configure to the last test. The lock is a directory beside an application's `build/<target>` with the run's pid in it, so the CLI's `--clean` and the app's `clean`, which remove the tree, never remove the lock. A second run logs `waiting: another run (pid …) is building in <tree>; this one continues when it ends (remove <lock> if no run is)` and polls every five seconds. The lock is held tree by tree, so a second run starts on the CLI while the first is busy with the macOS app. `mkdir` is the atomic step on macOS, Linux and MSYS2 alike. A lock whose pid is no longer running is taken over, said in a line, and the EXIT trap lets go on any way out. The CI runners hold one run each, so for them nothing changes.
+
+**Decisions made while building** (2026-10-20, each recorded for veto):
+- **It waits, without a timeout.** A second run is the person's own and can be stopped with Ctrl-C. The waiting line names the pid and the lock, for a lock whose pid was reused by another process after its run died.
+- **Raw `ctest` is not covered.** Only `cicd.sh` (and `make test` through it) takes the lock. M17's per-run scratch directories are what keep a raw `ctest` run's tests apart.
+
+**Verified.**
+- Two `cicd.sh --app cli --unit-tests` runs started three seconds apart on one tree: the second said it was waiting at 22:03:34 and began configuring at 22:05:14, the second the first finished. Both were green, 3,533 cases each, and no lock was left.
+- A lock left with a pid that was not running was taken over, and said.
+- Ctrl-C (SIGINT to the whole process group) partway through the suite exited by the signal with no lock left.
+- A run that failed at configure (cmake not on PATH) exited 127, its own code, with no lock left.
+- `lib/scripts/cicd.sh --test`: green -- the CLI's 3,593 (the two standing skips) and the macOS app's 241 cases, each tree's lock taken and let go.
 
 ## Milestone L — The vendor-CLI family
 

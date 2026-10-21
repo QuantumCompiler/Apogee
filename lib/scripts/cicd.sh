@@ -261,13 +261,56 @@ clone_llama() {
 
 # Builds one application for one target, in the checkout at $1.
 # $3 is the app name; its build root is <root>/lib/src/<app>.
+# One run at a time in a build tree (2026-10-20, after M17). Two runs of this
+# script in one checkout -- `make test` started while a gate ran -- built and
+# tested in the same build/<target> at once: the suite's scratch homes collided
+# (M17 gave each run its own) and the builds raced each other. A run now holds
+# <tree>.lock, a directory beside the tree with its pid in it, from configure
+# to the last test, and a second run says it is waiting and on whom, and
+# continues when the first lets go -- tree by tree, so it can start on one
+# application while the first is busy with the next. mkdir is atomic on every
+# host this runs on; a lock whose run is gone is taken over; the EXIT trap lets
+# go on any way out, a failure and Ctrl-C included. Outside a tree's own
+# directory, so --clean never removes a lock a run holds.
+build_lock=""
+acquire_build_lock() {
+    local tree="$1" lock="$1.lock" holder said=0
+    mkdir -p "$(dirname "$tree")"
+    until mkdir "$lock" 2>/dev/null; do
+        holder="$(cat "${lock}/pid" 2>/dev/null || true)"
+        if [[ -n "$holder" ]] && ! kill -0 "$holder" 2>/dev/null; then
+            log "taking over ${lock}: the run that held it (pid ${holder}) is gone"
+            rm -rf "$lock"
+            continue
+        fi
+        if [[ $said -eq 0 ]]; then
+            log "waiting: another run (pid ${holder:-unknown}) is building in ${tree}; this one continues when it ends (remove ${lock} if no run is)"
+            said=1
+        fi
+        sleep 5
+    done
+    echo "$$" >"${lock}/pid"
+    build_lock="$lock"
+}
+release_build_lock() {
+    if [[ -n "$build_lock" ]]; then
+        rm -rf "$build_lock"
+    fi
+    build_lock=""
+}
+trap release_build_lock EXIT
+
 build_target() {
     local root="$1" target="$2" app="$3"
     local app_dir="${root}/lib/src/${app}"
     if [[ -f "${app_dir}/CMakeLists.txt" ]]; then
+        acquire_build_lock "${app_dir}/build/${target}"
         build_cmake_app "$root" "$target" "$app"
+        release_build_lock
     elif [[ -x "${app_dir}/scripts/build.sh" ]]; then
+        acquire_build_lock "${app_dir}/build/${target}"
         build_script_app "$root" "$target" "$app"
+        release_build_lock
     else
         log "NOTICE: no CMakeLists.txt or scripts/build.sh at ${app_dir} — skipping app '${app}'."
     fi
