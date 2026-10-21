@@ -928,6 +928,86 @@ TEST_CASE("a draft head is refused at every conversion door, its base named, not
                    "alone") != std::string::npos);
 }
 
+TEST_CASE("a diffusion model is refused at every conversion door, and offered no conversion",
+          "[commands][models][mlx][convert][diffusion]") {
+    // The user's run (M20, 2026-10-21): an MLX conversion of
+    // Wan-AI--Wan2.2-TI2V-5B ran three seconds and failed in mlx-lm's words.
+    // Its weights are a diffusers transformer, which neither converter takes:
+    // refused before anything runs, and `models info` offers no conversion.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    const std::string handle = "Wan-AI--Wan2.2-TI2V-5B/safetensors/6ef9b00b8b83";
+    const std::filesystem::path wan =
+        home.models() / "Wan-AI--Wan2.2-TI2V-5B" / "safetensors" / "6ef9b00b8b83";
+    write_mlx_model(wan, {.bits = 0, .format = "pt"});
+    apogee::testing::write_fixture_file(wan / "config.json",
+                                        R"({"_class_name": "WanModel", "_diffusers_version":
+            "0.33.0", "model_type": "ti2v", "dim": 3072, "num_layers": 30})");
+    const std::string refused =
+        "'" + handle +
+        "' is a diffusion model's weights (WanModel, a diffusers class): neither converter takes "
+        "one -- llama.cpp's finds a model by its architectures, and mlx-lm's builds a language "
+        "model";
+
+    std::string out;
+    // The user's command, and the chain the app now builds, refused alike.
+    CHECK(home.run({"models", "convert", handle, "--mlx"}, &out) != 0);
+    INFO(out);
+    CHECK(out.find(refused) != std::string::npos);
+    CHECK(home.run({"models", "convert", handle, "--mlx", "--register-with", "8bit,4bit"}, &out) !=
+          0);
+    CHECK(out.find(refused) != std::string::npos);
+    CHECK(out.find("[1/") == std::string::npos);
+    CHECK(home.run({"models", "convert", handle}, &out) != 0);
+    CHECK(out.find(refused) != std::string::npos);
+    const StoreRoots roots = StoreRoots::at(home.models());
+    CHECK(apogee::models::list_store_mlx(roots).empty());
+    CHECK(apogee::models::list_store_ggufs(roots).empty());
+    CHECK(apogee::models::find_abandoned_staging(roots).empty());
+
+    // `models info` says what it is and offers nothing; its data says none.
+    REQUIRE(home.run({"models", "info", handle}, &out) == 0);
+    CHECK(out.find("format:       SafeTensors -- a diffusion model's weights, not runnable and "
+                   "not convertible") != std::string::npos);
+    CHECK(out.find("made from it: nothing -- no conversion takes these weights") !=
+          std::string::npos);
+    CHECK(out.find("makes a GGUF of it") == std::string::npos);
+    std::string err;
+    REQUIRE(home.run({"models", "info", handle, "--output-format", "json"}, &out, &err) == 0);
+    const nlohmann::json document = nlohmann::json::parse(out);
+    CHECK(document["data"]["converts_to"] == nlohmann::json::array());
+
+    // A draft head is offered none either; a language model's snapshot both,
+    // its line as before.
+    const std::filesystem::path head =
+        home.models() / "Gemma4-12B-Assistant" / "safetensors" / "43b42c6289a0";
+    write_mlx_model(head, {.bits = 0, .format = "pt"});
+    apogee::testing::write_fixture_file(head / "config.json",
+                                        R"({"architectures": ["Gemma4UnifiedAssistantForCausalLM"],
+            "model_type": "gemma4_unified_assistant", "backbone_hidden_size": 3840})");
+    REQUIRE(home.run({"models", "info", "Gemma4-12B-Assistant/safetensors/43b42c6289a0"}, &out) ==
+            0);
+    CHECK(out.find("made from it: nothing -- no conversion takes these weights") !=
+          std::string::npos);
+    REQUIRE(home.run({"models", "info", "Gemma4-12B-Assistant/safetensors/43b42c6289a0",
+                      "--output-format", "json"},
+                     &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out)["data"]["converts_to"] == nlohmann::json::array());
+    const std::filesystem::path llama =
+        home.models() / "Llama3.2-1B-Instruct" / "safetensors" / "edaba290ce7f";
+    write_mlx_model(llama, {.bits = 0, .format = "pt"});
+    REQUIRE(home.run({"models", "info", "Llama3.2-1B-Instruct/safetensors/edaba290ce7f"}, &out) ==
+            0);
+    CHECK(out.find("made from it: nothing yet -- 'apogee models convert "
+                   "Llama3.2-1B-Instruct/safetensors/edaba290ce7f' makes a GGUF of it (--mlx an "
+                   "MLX model)") != std::string::npos);
+    REQUIRE(home.run({"models", "info", "Llama3.2-1B-Instruct/safetensors/edaba290ce7f",
+                      "--output-format", "json"},
+                     &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out)["data"]["converts_to"] ==
+          nlohmann::json::array({"gguf", "mlx"}));
+}
+
 TEST_CASE("convert --mlx --register converts once and registers what the hint would",
           "[commands][models][mlx][convert][chain]") {
     // M16: the printed `config add-backend … --type mlx` line, executed.

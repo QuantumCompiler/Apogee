@@ -104,6 +104,40 @@ struct ConfigWidth {
 [[nodiscard]] std::string draft_head_note(const DraftHead& head,
                                           const std::vector<std::string>& bases);
 
+/// A **diffusion model's** weights (M20, 2026-10-21): a component of a
+/// diffusers pipeline -- a video model's transformer, `WanModel` -- whose
+/// `config.json` names the class diffusers builds it as (`_class_name`, beside
+/// the `_diffusers_version` that wrote it) and no `architectures`. Neither
+/// converter Apogee runs takes one: llama.cpp's finds a model by its
+/// architectures, and mlx-lm's builds a language model by its `model_type`.
+/// So no surface offers one as a model to convert; each says what it is.
+struct DiffusionModel {
+    /// `_class_name`: the class diffusers builds it as.
+    std::string class_name;
+};
+
+/// The diffusion model `dir`'s `config.json` describes: one naming a
+/// `_class_name` with a `_diffusers_version` and no `architectures`. nullopt
+/// for anything else, or for a directory with no readable `config.json`.
+[[nodiscard]] std::optional<DiffusionModel> snapshot_diffusion_model(
+    const std::filesystem::path& dir);
+
+/// What a diffusion model is, in the one wording every surface uses: "a
+/// diffusion model's weights (<class>, a diffusers class): neither converter
+/// takes one -- llama.cpp's finds a model by its architectures, and mlx-lm's
+/// builds a language model".
+[[nodiscard]] std::string describe_diffusion_model(const DiffusionModel& model);
+
+/// The refusal a conversion of one says, `subject` its name or path.
+[[nodiscard]] std::string diffusion_model_refusal(std::string_view subject,
+                                                  const DiffusionModel& model);
+
+/// The formats a SafeTensors set converts to, decided once from its own files
+/// (M20): `gguf` and `mlx` for a language model's weights, none for a draft
+/// head or a diffusion model's. What both conversion ladders refuse, what
+/// `models info` offers, and its `data.converts_to`, all read this.
+[[nodiscard]] std::vector<std::string> snapshot_conversions(const std::filesystem::path& dir);
+
 /// Every snapshot directory directly under `root`, sorted by name.
 [[nodiscard]] std::vector<std::filesystem::path> list_snapshots(const std::filesystem::path& root);
 

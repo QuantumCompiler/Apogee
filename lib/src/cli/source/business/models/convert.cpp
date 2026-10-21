@@ -124,6 +124,10 @@ std::string conversion_refusal(const std::filesystem::path& snapshot,
     if (const std::optional<DraftHead> head = snapshot_draft_head(snapshot)) {
         return draft_head_refusal(snapshot.string(), *head, {});
     }
+    // Nor does llama.cpp's converter take a diffusion model's weights (M20).
+    if (const std::optional<DiffusionModel> diffusion = snapshot_diffusion_model(snapshot)) {
+        return diffusion_model_refusal(snapshot.string(), *diffusion);
+    }
     // --- rung 2: never replace ----------------------------------------------
     std::error_code code;
     if (std::filesystem::exists(output, code)) {
@@ -211,6 +215,10 @@ std::string mlx_conversion_refusal(const std::filesystem::path& snapshot,
     // (2026-10-21).
     if (const std::optional<DraftHead> head = snapshot_draft_head(snapshot)) {
         return draft_head_refusal(snapshot.string(), *head, {});
+    }
+    // Nor for a diffusion model's: it builds language models (M20).
+    if (const std::optional<DiffusionModel> diffusion = snapshot_diffusion_model(snapshot)) {
+        return diffusion_model_refusal(snapshot.string(), *diffusion);
     }
     // --- rung 2: never replace ---------------------------------------------------
     std::error_code code;

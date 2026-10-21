@@ -1001,3 +1001,72 @@ TEST_CASE("a draft head's base is the stored model of its family as wide as the 
     wide.backbone_hidden_size = 0;
     CHECK(apogee::models::draft_head_bases(store.roots, wide).empty());
 }
+
+namespace {
+
+/// Wan2.2-TI2V-5B's own config.json, as the user's store holds it: a
+/// diffusers transformer (M20, 2026-10-21).
+constexpr const char* kWanConfig = R"({
+  "_class_name": "WanModel",
+  "_diffusers_version": "0.33.0",
+  "dim": 3072,
+  "eps": 1e-06,
+  "ffn_dim": 14336,
+  "freq_dim": 256,
+  "in_dim": 48,
+  "model_type": "ti2v",
+  "num_heads": 24,
+  "num_layers": 30,
+  "out_dim": 48,
+  "text_len": 512
+})";
+
+}  // namespace
+
+TEST_CASE("a diffusion model is read from its config: its diffusers class, and no architectures",
+          "[models][store][diffusion]") {
+    const Store store;
+    const std::filesystem::path wan = store.root.path() / "wan";
+    place_snapshot_with(wan, kWanConfig);
+    const std::optional<apogee::models::DiffusionModel> read =
+        apogee::models::snapshot_diffusion_model(wan);
+    REQUIRE(read.has_value());
+    CHECK(read->class_name == "WanModel");
+
+    // A language model is none, and neither is a config that names its
+    // architectures whatever else it says, or one diffusers did not write.
+    const std::filesystem::path llama = store.root.path() / "llama";
+    place_snapshot_with(llama, R"({"architectures": ["LlamaForCausalLM"], "model_type": "llama"})");
+    CHECK_FALSE(apogee::models::snapshot_diffusion_model(llama).has_value());
+    const std::filesystem::path named = store.root.path() / "named";
+    place_snapshot_with(named, R"({"_class_name": "WanModel", "_diffusers_version": "0.33.0",
+                                   "architectures": ["LlamaForCausalLM"]})");
+    CHECK_FALSE(apogee::models::snapshot_diffusion_model(named).has_value());
+    const std::filesystem::path unwritten = store.root.path() / "unwritten";
+    place_snapshot_with(unwritten, R"({"_class_name": "WanModel"})");
+    CHECK_FALSE(apogee::models::snapshot_diffusion_model(unwritten).has_value());
+    CHECK_FALSE(apogee::models::snapshot_diffusion_model(store.root.path() / "absent").has_value());
+
+    // One wording, and the refusal built on it.
+    CHECK(apogee::models::describe_diffusion_model(*read) ==
+          "a diffusion model's weights (WanModel, a diffusers class): neither converter takes one "
+          "-- llama.cpp's finds a model by its architectures, and mlx-lm's builds a language "
+          "model");
+    CHECK(apogee::models::diffusion_model_refusal("'Wan-AI--Wan2.2-TI2V-5B'", *read) ==
+          "'Wan-AI--Wan2.2-TI2V-5B' is " + apogee::models::describe_diffusion_model(*read));
+}
+
+TEST_CASE("which conversions a set takes is one decision: a language model both, a draft head or "
+          "a diffusion model none",
+          "[models][store][diffusion][draft_head]") {
+    const Store store;
+    const std::filesystem::path wan = store.root.path() / "wan";
+    place_snapshot_with(wan, kWanConfig);
+    const std::filesystem::path head = store.root.path() / "head";
+    place_snapshot_with(head, kAssistantConfig);
+    const std::filesystem::path llama = store.root.path() / "llama";
+    place_snapshot_with(llama, R"({"architectures": ["LlamaForCausalLM"], "model_type": "llama"})");
+    CHECK(apogee::models::snapshot_conversions(wan).empty());
+    CHECK(apogee::models::snapshot_conversions(head).empty());
+    CHECK(apogee::models::snapshot_conversions(llama) == std::vector<std::string>{"gguf", "mlx"});
+}

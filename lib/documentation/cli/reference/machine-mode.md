@@ -983,7 +983,13 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   `pulled`, `converted`, `quantized`, `trained`). Each is what the format's own
   reader states — the GGUF header, an MLX model's files — and `null` where it
   states nothing (a pipeline's window, any cache but a GGUF's): an unknown is
-  never guessed. A backend's document has no `data`.
+  never guessed. Since M20, a SafeTensors set's `data` also carries
+  `converts_to`, the formats `models convert` takes it to — `["gguf","mlx"]`
+  for a language model's weights, `[]` for a draft head's or a diffusion
+  model's, which every conversion refuses. It is decided once, from the set's
+  own `config.json`, by the same function that makes those refusals, and it is
+  `null` on the other formats, which are what conversions make. A backend's
+  document has no `data`.
 - **`chats list`**: newest first, each conversation's `id`, `updated`, `turns`
   and `name`, and since 52a the `backend` it runs on and the roster `model` it
   pinned there with `-m` or `/model` — empty when it runs on the backend's own

@@ -453,6 +453,23 @@ TEST_CASE("a draft head is refused by both ladders, whatever type it is converte
           std::string::npos);
 }
 
+TEST_CASE("a diffusion model is refused by both ladders before any converter runs",
+          "[models][convert][mlx][diffusion]") {
+    // The user's Wan2.2-TI2V-5B (M20, 2026-10-21): its MLX conversion ran
+    // three seconds and failed in mlx-lm's own words -- the weights are a
+    // diffusers transformer, which neither converter takes.
+    const MlxWork work;
+    write_file(work.snapshot / "config.json",
+               R"({"_class_name": "WanModel", "_diffusers_version": "0.33.0",
+                   "model_type": "ti2v", "dim": 3072})");
+    const std::string mlx = apogee::models::mlx_conversion_refusal(work.snapshot, work.out);
+    CHECK(mlx == work.snapshot.string() +
+                     " is a diffusion model's weights (WanModel, a diffusers class): neither "
+                     "converter takes one -- llama.cpp's finds a model by its architectures, and "
+                     "mlx-lm's builds a language model");
+    CHECK(apogee::models::conversion_refusal(work.snapshot, work.root.path() / "out.gguf") == mlx);
+}
+
 TEST_CASE("the MLX size estimate follows the bits", "[models][convert][mlx]") {
     CHECK(apogee::models::estimated_mlx_bytes(1'000'000'000, 4) == 500'000'000 + 62'500'000);
     CHECK(apogee::models::estimated_mlx_bytes(1'000'000'000, 8) == 1'000'000'000 + 62'500'000);

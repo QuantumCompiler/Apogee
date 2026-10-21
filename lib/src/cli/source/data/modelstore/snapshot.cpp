@@ -11,6 +11,7 @@
 #include <system_error>
 
 #include "modelstore/sidecar.h"
+#include "modelstore/store.h"
 
 namespace apogee::models {
 
@@ -232,6 +233,36 @@ std::string draft_head_note(const DraftHead& head, const std::vector<std::string
     const std::string base = base_of(head, bases);
     return "draft head -- runs beside " + (base.empty() ? std::string{"its base model"} : base) +
            ", never alone";
+}
+
+std::optional<DiffusionModel> snapshot_diffusion_model(const std::filesystem::path& dir) {
+    const nlohmann::json config = read_model_config(dir);
+    if (!config.is_object() || config.contains("architectures")) {
+        return std::nullopt;
+    }
+    const auto class_name = config.find("_class_name");
+    if (class_name == config.end() || !class_name->is_string() ||
+        class_name->get<std::string>().empty() || !config.contains("_diffusers_version")) {
+        return std::nullopt;
+    }
+    return DiffusionModel{.class_name = class_name->get<std::string>()};
+}
+
+std::string describe_diffusion_model(const DiffusionModel& model) {
+    return "a diffusion model's weights (" + model.class_name +
+           ", a diffusers class): neither converter takes one -- llama.cpp's finds a model by its "
+           "architectures, and mlx-lm's builds a language model";
+}
+
+std::string diffusion_model_refusal(std::string_view subject, const DiffusionModel& model) {
+    return std::string{subject} + " is " + describe_diffusion_model(model);
+}
+
+std::vector<std::string> snapshot_conversions(const std::filesystem::path& dir) {
+    if (snapshot_draft_head(dir).has_value() || snapshot_diffusion_model(dir).has_value()) {
+        return {};
+    }
+    return {std::string{kGgufFormat}, std::string{kMlxFormat}};
 }
 
 bool is_download_record(const std::filesystem::path& file) {

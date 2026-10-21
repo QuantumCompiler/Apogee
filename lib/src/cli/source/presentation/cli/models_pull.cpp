@@ -790,6 +790,12 @@ SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view
         choice.error = models::draft_head_refusal("'" + std::string{given} + "'", *head,
                                                   models::draft_head_bases(roots, *head));
         choice.path.clear();
+    } else if (const std::optional<models::DiffusionModel> diffusion =
+                   models::snapshot_diffusion_model(choice.path)) {
+        // Neither converter takes one (M20): refused before any Python starts.
+        choice.error =
+            models::diffusion_model_refusal("'" + std::string{given} + "'", *diffusion);
+        choice.path.clear();
     }
     return choice;
 }

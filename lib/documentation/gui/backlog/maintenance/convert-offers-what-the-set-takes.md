@@ -1,6 +1,6 @@
 # Convert offers what the set takes
 
-**What / why.** On 2026-10-21 the user started an MLX conversion of `Wan-AI--Wan2.2-TI2V-5B/safetensors/6ef9b00b8b83` from Stored weights. It ran three seconds and failed in mlx-lm's words: `FileNotFoundError: No safetensors found in …`. The set is a diffusion model's transformer, which no converter Apogee runs takes (the CLI's [M20](../../../cli/backlog/maintenance/conversions-say-what-a-set-takes.md) has the measurements). The app offered the conversion because it offers **Convert to GGUF…** and **Convert to MLX…** on every SafeTensors set (`lib/src/darwin/source/presentation/models/Views/StoreView.swift:272–273`). It does the same on the user's four Assistant sets, which the CLI refuses as draft heads ("Draft Heads", 2026-10-21).
+**What / why.** On 2026-10-21 the user started an MLX conversion of `Wan-AI--Wan2.2-TI2V-5B/safetensors/6ef9b00b8b83` from Stored weights. It ran three seconds and failed in mlx-lm's words: `FileNotFoundError: No safetensors found in …`. The set is a diffusion model's transformer, which no converter Apogee runs takes (the CLI's [M20](../../../cli/assistant/MILESTONES.md#milestone-n--model-operations) has the measurements). The app offered the conversion because it offers **Convert to GGUF…** and **Convert to MLX…** on every SafeTensors set (`lib/src/darwin/source/presentation/models/Views/StoreView.swift:272–273`). It does the same on the user's four Assistant sets, which the CLI refuses as draft heads ("Draft Heads", 2026-10-21).
 
 The app is right not to decide this itself: what a set's weights are is the CLI's to say (CLAUDE.md → ⚠ The GUI is a machine-mode client). Today the CLI says it only in prose. `models info`'s `format:` line reads "a draft head's weights, not runnable and not convertible", and its "made from it" line still offers both conversions. M20 gives the fact a typed home: `data.converts_to`, `[]` for a set that takes none. This item makes Stored weights offer exactly what that field names.
 
@@ -33,6 +33,6 @@ The app is right not to decide this itself: what a set's weights are is the CLI'
 - [ ] Against a binary without M20, Stored weights behaves as today.
 - [ ] Previews cover a set with no conversion. `check-previews`, the layering check and `lib/scripts/cicd.sh --test` pass, with no Swift warning.
 
-**Scope note.** Maintenance, gated on the CLI's [M20](../../../cli/backlog/maintenance/conversions-say-what-a-set-takes.md), which states `converts_to`. Out of scope:
+**Scope note.** Maintenance, its gate open: the CLI's [M20](../../../cli/assistant/MILESTONES.md#milestone-n--model-operations), shipped 2026-10-21, states `converts_to`. Out of scope:
 - **The convert sheet's commands:** [M2](../../assistant/MILESTONES.md#milestone-c--cli-parity).
 - **Converting a diffusion model to MLX at all:** a CLI capability. It is a spike, on the user's word.

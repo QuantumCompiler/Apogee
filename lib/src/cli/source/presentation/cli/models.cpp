@@ -1277,11 +1277,17 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     out << "weights:      " << handle << "\n";
     out << "path:         " << stored.dir.string() << "\n";
     const std::optional<models::DraftHead> head = models::snapshot_draft_head(stored.dir);
+    const std::optional<models::DiffusionModel> diffusion =
+        models::snapshot_diffusion_model(stored.dir);
     if (head.has_value()) {
         out << "format:       SafeTensors -- a draft head's weights, not runnable and not "
                "convertible\n";
         out << "draft head:   "
             << models::describe_draft_head(*head, models::draft_head_bases(roots, *head)) << "\n";
+    } else if (diffusion.has_value()) {
+        out << "format:       SafeTensors -- a diffusion model's weights, not runnable and not "
+               "convertible\n";
+        out << "diffusion:    " << models::describe_diffusion_model(*diffusion) << "\n";
     } else {
         out << "format:       SafeTensors -- full weights, trainable, not runnable\n";
     }
@@ -1302,7 +1308,11 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
             mlx_made.push_back(models::weights_handle(mlx.model, models::kMlxFormat, mlx.id));
         }
     }
-    if (!consumed.has_value() && mlx_made.empty()) {
+    if (!consumed.has_value() && mlx_made.empty() &&
+        models::snapshot_conversions(stored.dir).empty()) {
+        // What no conversion takes is offered none (M20).
+        out << "made from it: nothing -- no conversion takes these weights\n";
+    } else if (!consumed.has_value() && mlx_made.empty()) {
         out << "made from it: nothing yet -- 'apogee models convert " << handle
             << "' makes a GGUF of it (--mlx an MLX model)\n";
     } else {
@@ -1779,6 +1789,8 @@ namespace {
         {"format", target.format},           {"handle", handle},  {"bytes", nullptr},
         {"architecture", nullptr},           {"window", nullptr}, {"cache", nullptr},
         {"lineage", nlohmann::json::array()}};
+    // A SafeTensors set's conversions, below; null for what conversions make.
+    data["converts_to"] = nullptr;
     if (target.format == models::kGgufFormat) {
         for (const models::StoredGguf& stored : models::list_store_ggufs(roots, target.model)) {
             if (stored.id != target.id) {
@@ -1852,6 +1864,8 @@ namespace {
                 data["architecture"] = architecture;
             }
             data["lineage"] = lineage_entries(lineage, lineage.origin_of(handle));
+            // The formats it converts to, as the ladders decide (M20).
+            data["converts_to"] = models::snapshot_conversions(dir);
         }
     }
     if (dir.empty()) {

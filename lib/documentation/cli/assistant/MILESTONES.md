@@ -3971,6 +3971,35 @@ The user's four Assistant snapshots (12B, 26B, E2B, E4B) are all draft heads, ea
 
 **Not done:** using the draft heads. Speculative decoding with Gemma 4's assistants through llama.cpp's MTP support was never measured (26k measured Qwen's MTP head, 1.14×). That would be a spike, on the user's word.
 
+### 2026-10-21 — `conversions-say-what-a-set-takes` (maintenance item M20): one decision, read everywhere
+
+**Why.** The user's run of the macOS app: an MLX conversion of `Wan-AI--Wan2.2-TI2V-5B` ran three seconds and ended in mlx-lm's words, `FileNotFoundError: No safetensors found in …`. The set is a diffusers transformer: its `config.json` names `_class_name: WanModel`, written by `_diffusers_version` 0.33.0, with no `architectures`. Neither converter takes one. Yet both ladders let it through to Python, and `models info` offered both conversions for it. It made the same offer for a draft head, beside a `format:` line calling it not convertible. The app, which decides nothing about weights itself, offered the buttons accordingly.
+
+- [x] **`modelstore/snapshot.h`**:
+  - `snapshot_diffusion_model(dir)` reads the fact from `config.json` alone: a `_class_name` with a `_diffusers_version` and no `architectures`.
+  - `describe_diffusion_model` and `diffusion_model_refusal` are the one wording.
+  - `snapshot_conversions(dir)` is the one decision: `gguf` and `mlx` for a language model's weights, none for a draft head or a diffusion model.
+- [x] **Refused before anything runs:** both ladders (`conversion_refusal`, `mlx_conversion_refusal`), and `choose_snapshot`, the door every conversion takes from the command line, `--register` chains included. The user's command now ends in under half a second, naming `WanModel`, with nothing staged.
+- [x] **`models info`** frames the set (`format: SafeTensors -- a diffusion model's weights, not runnable and not convertible`, and a `diffusion:` line). For a set the decision says takes nothing, its "made from it" line reads `nothing -- no conversion takes these weights`, a draft head included. A language model's snapshot reads as before.
+- [x] **`models info --output-format json`**: a SafeTensors set's `data` carries `converts_to`, `null` on the other formats. The field is additive (ADR 0006) and documented in `machine-mode.md`. It is the fact the GUI's M3 waits on.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The fact is the config's own declaration**, the item's default: a diffusers class with its version and no `architectures`, never a name.
+- **The field is `converts_to`**, the store's format words, `[]` for none, `null` off SafeTensors, the item's default.
+- **The GGUF conversion is refused too**, the item's default, as the draft-heads change decided for its case.
+- **The fixture is Wan's own `config.json`, written inline** in `store_test` as the draft-head configs are, rather than as a file under `tests/fixtures/`. The decision reads the config alone, so the weights are not needed.
+
+**Verified.**
+- `store_test`: the reader over Wan's own `config.json`, a language model's, one naming `architectures` and one diffusers did not write. The wording, and the decision over all three kinds.
+- `convert_test`: both ladders refuse before the converter seam.
+- `models_mlx_test` on the command line: the user's command, the chain the GUI builds and the GGUF form all refused with nothing made or staged. Then `models info`'s lines and `converts_to` for a diffusion model, a draft head and a language model.
+- Probed with the built binary on a mirror of the user's store: refused in 0.47 s. `converts_to` is `[]` for Wan and `["gguf","mlx"]` for Qwen3-VL-8B.
+- Bare `lib/scripts/cicd.sh --test`: green. The CLI's 3,614 tests passed, the four new cases among them, and the macOS app's 341 cases, with no warning.
+
+**Not done:**
+- **`config scan`'s count** still includes a diffusion model among the SafeTensors snapshots that "register when converted". Its text is what the GUI's register sheet reads, so a new line kind there waits on a change that updates both.
+- **Converting a diffusion model, or any type mlx-lm does not build, to MLX:** a capability, not upkeep. A spike, on the user's word.
+
 ## Milestone O — Local multimodal
 
 **Goal.** Make `VisionCapable` tell the truth on the local backend: wire llama.cpp's `mtmd`, add `mmproj_path`, and close the cross-surface guard gap that let one surface accept a picture the other refused.
