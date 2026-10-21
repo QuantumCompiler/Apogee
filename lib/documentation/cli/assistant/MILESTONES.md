@@ -2525,6 +2525,24 @@ The specced premise of class 1, that the scripts enumerate what they remove, was
 - A run that failed at configure (cmake not on PATH) exited 127, its own code, with no lock left.
 - `lib/scripts/cicd.sh --test`: green -- the CLI's 3,593 (the two standing skips) and the macOS app's 241 cases, each tree's lock taken and let go.
 
+### 2026-10-21 — `make update`: the models always kept, the bootstrap last (replacing M9's `reinstall`)
+
+**Why.** The user's call: `make reinstall KEEP=…` becomes `make update`. `KEEP` is optional and the models are kept whatever it says. When a later change alters how models are stored, the update brings them along rather than removing them. The same morning's install had come back with no Python environment and no registered backends, which showed an ordering bug in `reinstall`: it ran `make install`, whose last step is `apogee bootstrap` (runtimes installed, providers and stored models registered), and only then `apogee reset --keep models`, which removed the environment and the config the bootstrap had just made.
+
+- [x] **`make update [KEEP="<row> …"] [MODE=…]`** (`lib/src/cli/Makefile`) runs a fresh build (`--clean-first`), then installs the files alone with `install-files` (the binary, and the completions for release). It then runs three steps on the installed binary:
+  1. `models migrate --yes`: the stored models moved to this build's store layout. A future change to how models are stored ships its move there, and every update runs it. Nothing to move is a no-op, and it creates no data directory.
+  2. `reset --keep models` plus each `KEEP` word, deduplicated (`$(sort models $(KEEP))`). Every other row is reset and the skeleton re-seeded and checked by the reset's own `check --fix`. Its prompt is never answered for the person.
+  3. `bootstrap`, last, so nothing it makes is reset away.
+- [x] **`install`** is unchanged in what it runs. It is now `install-files` followed by `check --fix`, `bootstrap` and the PATH note (`path-note`, shared with `update`). `install_parity`'s order holds: the Makefile's first `check --fix` comes before its first `bootstrap`.
+- [x] **`reinstall` is gone**, the user's call. No alias is kept.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The build stays a clean one**, as `reinstall`'s was. An incremental `make install` remains for an install that needs no reset.
+- **`models migrate` runs before the reset.** The reset's own check must pass for the target to go on, and a store still in an older layout would fail it.
+- **The migration is given `--yes`, the reset never.** A migration moves models and removes nothing, while the reset's confirmation belongs to the person.
+
+**Verified.** In a sandbox (`APOGEE_HOME`, `PREFIX` and the test channel, so no completion was written, and `APOGEE_MINIMAL_INSTALL=1` so no runtime was downloaded), `make update` was driven through a pseudo-terminal answering the reset's prompt. The planted home held a stored model, a chat, an environment marker and a configured backend. With `KEEP=sessions` it exited 0: nothing to migrate, the plan keeping `models/` and `sessions/`, the reset's check passing, then the bootstrap. The model and the chat were kept, and the environment and the backend reset. Without `KEEP` the model was kept and the chat removed. `install_parity`'s Makefile order rule (the first `check --fix` before the first `bootstrap`) holds, lines 138 and 140.
+
 ## Milestone L — The vendor-CLI family
 
 **Goal.** A fifth backend and, more importantly, the machinery the rest of the vendor-CLI family will be built on: Claude driven through the official `claude` CLI as a **long-lived child process** — the subscription-auth path beside the API-key path from Milestone D. It reuses that backend's IR mapping and typed sinks and none of its HTTP: this one speaks JSONL over pipes.
