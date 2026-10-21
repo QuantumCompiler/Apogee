@@ -42,20 +42,20 @@ Apogee/
 │   └── actions/package/     — The one packaging step every build uses: package.sh (built) or cli-from-release.sh
 │                              (copied), then the artifact upload
 ├── .claude/
-│   └── skills/
-│       ├── apogee-cli-backlog-create-item/ — Repo-local skill: spec a new item into the backlog + index + roadmap
-│       ├── apogee-cli-backlog-create-spike/ — Repo-local skill: turn a spike's findings (chat or attached write-up) into the whole split's documents
-│       ├── apogee-cli-backlog-execute-call-resolution/ — Repo-local skill: resolve a group's open calls one by one; answers recorded as dated decisions, consequences propagated
-│       ├── apogee-cli-backlog-execute-group/ — Repo-local skill: run a whole index table unsupervised, serially; one commit per shipped item
-│       ├── apogee-cli-backlog-execute-item/ — Repo-local skill: take the next backlog item per the docs-first process
-│       ├── apogee-cli-backlog-investigate-bug/ — Repo-local skill: reproduce a bug to root cause in a sandbox, then spec its fix as a Maintenance item
-│       ├── apogee-cli-backlog-investigate-spike/ — Repo-local skill: evidence-gathering spike in a sandbox; reports findings + the documents to create, creates nothing
-│       ├── apogee-cli-backlog-swap-item/   — Repo-local skill: move an item between index tables (re-id, close the gap, sweep refs)
-│       ├── apogee-cli-backlog-swap-version/ — Repo-local skill: slide the queued releases by one version, either direction
-│       ├── apogee-cli-maintenance-update-documents/ — Repo-local skill: pre-MR docs pass — reconcile every doc against the branch diff
-│       ├── apogee-cli-maintenance-update-release/ — Repo-local skill: advance the live version pointer + reconcile its documents
-│       ├── apogee-cli-maintenance-summarize-pull-request/ — Repo-local skill: draft the MR description from the branch's docs evidence
-│       └── apogee-cli-maintenance-summarize-release/ — Repo-local skill: draft a version's GitHub release notes in the published format
+│   └── skills/          — One agnostic set serving both applications: each skill resolves CLI vs GUI from the ask, asking when ambiguous (2026-10-20)
+│       ├── apogee-backlog-create-item/ — Repo-local skill: spec a new item into the backlog + index + roadmap
+│       ├── apogee-backlog-create-spike/ — Repo-local skill: turn a spike's findings (chat or attached write-up) into the whole split's documents
+│       ├── apogee-backlog-execute-call-resolution/ — Repo-local skill: resolve a group's open calls one by one; answers recorded as dated decisions, consequences propagated
+│       ├── apogee-backlog-execute-group/ — Repo-local skill: run a whole index table unsupervised, serially; one commit per shipped item
+│       ├── apogee-backlog-execute-item/ — Repo-local skill: take the next backlog item per the docs-first process
+│       ├── apogee-backlog-investigate-bug/ — Repo-local skill: reproduce a bug to root cause in a sandbox, then spec its fix as a Maintenance item
+│       ├── apogee-backlog-investigate-spike/ — Repo-local skill: evidence-gathering spike in a sandbox; reports findings + the documents to create, creates nothing
+│       ├── apogee-backlog-swap-item/   — Repo-local skill: move an item between index tables (re-id, close the gap, sweep refs)
+│       ├── apogee-backlog-swap-version/ — Repo-local skill: slide the queued releases by one version, either direction
+│       ├── apogee-maintenance-update-documents/ — Repo-local skill: pre-MR docs pass — reconcile every doc against the branch diff
+│       ├── apogee-maintenance-update-release/ — Repo-local skill: advance the live version pointer + reconcile its documents
+│       ├── apogee-maintenance-summarize-pull-request/ — Repo-local skill: draft the MR description from the branch's docs evidence
+│       └── apogee-maintenance-summarize-release/ — Repo-local skill: draft a version's GitHub release notes in the published format
 ├── .gitattributes           — Every text file is LF on every platform (Windows checkouts had rewritten
 │                              the byte-exact shipped assets with CRLF, 2026-09-20)
 ├── .gitignore

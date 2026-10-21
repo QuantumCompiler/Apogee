@@ -47,8 +47,8 @@ The same day, the user set the rule this record holds: the lists are updated dur
 ## Enforcement
 
 - **Where work is judged.** The per-change checklist in [CLAUDE.md](../assistant/CLAUDE.md) (Implementing a Feature) names the rule. Two skills check it:
-  - the pre-MR docs pass (`apogee-cli-maintenance-update-documents`) audits the lists whenever a branch touches backends, rosters, completion or model selection;
-  - the release roll (`apogee-cli-maintenance-update-release`) checks both lists against their sources at its gate.
+  - the pre-MR docs pass (`apogee-maintenance-update-documents`) audits the lists whenever a branch touches backends, rosters, completion or model selection;
+  - the release roll (`apogee-maintenance-update-release`) checks both lists against their sources at its gate.
 
   [DEVELOPER.md](../assistant/DEVELOPER.md) carries the recipe.
 - **Where users look.** The reviewed date is in `models list` and `models info`.

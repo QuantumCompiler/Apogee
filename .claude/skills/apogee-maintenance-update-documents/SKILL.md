@@ -1,0 +1,63 @@
+---
+name: apogee-maintenance-update-documents
+description: Pre-MR documentation reconciliation — audit every doc in the repo against what the current branch actually changed, fix drift, and report what still needs the user. Run before opening a merge request ("update the docs", "docs pass before the MR", "reconcile documentation", "about to open an MR/PR").
+---
+
+# Apogee Document Update (pre-MR pass)
+
+Apogee's docs are the source of truth — a merge request whose docs lag its code ships drift that the next agent will faithfully build on. This skill reconciles every document against the branch's actual changes before the MR is opened.
+
+## 0. Which applications?
+
+Apogee's documentation is per application ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/cli/` and `lib/documentation/gui/`, written `<home>` below. **The branch decides the scope**: this pass covers every application the diff touched — both homes when both moved, each walked against its own docs. Repo-wide machinery (the pipeline, the release law) is recorded in the CLI's docs and audited once. If the user names a scope the diff disagrees with, ask with AskUserQuestion rather than guessing.
+
+## 1. Establish what this branch changed
+
+```bash
+git diff --stat stable...HEAD
+```
+
+plus `git status` for anything uncommitted. The diff is the audit scope: every claim the docs make about changed areas gets checked; docs about untouched areas are left alone (no drive-by rewrites — small diffs review better).
+
+Where the branch touched the **CLI**, the audit includes the completion surface (its ADR 0007): any new or changed verb, flag, value set or name kind must be accurately tab-completable in this same branch — a verb reachable but not completable is a finding to fix, not a footnote. Where it touched the **GUI**, the audit includes its own laws: the machine-mode-client invariant (nothing linked, nothing reimplemented, unknown events tolerated) and its ADRs.
+
+## 2. Walk the documents against the diff
+
+Work through the system in this order (read `CLAUDE.md` (`<home>/assistant/CLAUDE.md`) → Documentation and Status first — it defines the flow this skill enforces):
+
+1. **Backlog** (`<home>/backlog/` (`<home>/backlog/README.md`)):
+   - Any item this branch **completed** → its work is recorded in MILESTONES.md, its document is **deleted**, its index row removed, and the track preamble above the index tables updated. A completed item still sitting in the backlog is the system's cardinal violation.
+   - Any item this branch **started** → index row marked in progress.
+   - Any **gate the branch satisfied** → downstream items' status lines updated.
+   - Any decision made while building → a dated entry in the affected item's **Decisions made** (and `[default:]` calls that were exercised recorded as decisions).
+   - **The in-development version's table, once empty, is retired here** — every item it held shipped or moved (the version is `lib/release/VERSION`, the branch's name). The merge *is* the release (CLAUDE.md (`<home>/assistant/CLAUDE.md`) → Versioning), so a release's table never outlives its pull request (the user's call, 2026-10-16).
+     - Remove its `### v<x.y.z>` heading, its track preambles and the empty table from the index; its directory is gone with its last document.
+     - The shipped-tracks paragraph above the tables then names its tracks as complete in that version — in development on its branch, released when the branch merges into `stable` — and names the earliest table still open. The release roll later adds the release's link and date (`/apogee-maintenance-update-release`).
+     - A table with rows still standing is never retired: report the rows; moving them is `/apogee-backlog-swap-item`'s, on the user's word. The standing **Architecture** and **Maintenance** tables are never retired, however empty.
+2. **MILESTONES.md (`<home>/assistant/MILESTONES.md`)** — shipped work folded into the right lettered milestone (goal, what was built, trade-offs), or a new milestone for a genuinely new area.
+3. **ROADMAP.md (`<home>/assistant/ROADMAP.md`)** — checkboxes for shipped themes; the "decisions needed" list still accurate; nothing shipped still listed as pending.
+4. **CLAUDE.md (`<home>/assistant/CLAUDE.md`)** — the Codebase Map covers every file/package the branch added, moved, or deleted; Stack & environment still true; new hard rules earned on this branch promoted into Invariants (`## ⚠` once test-locked); Code Style additions recorded.
+5. **DEVELOPER.md (`<home>/assistant/DEVELOPER.md`)** — directory tree current; package sections exist for new packages; build/test command sections match reality (including `lib/scripts/cicd.sh` behavior); "Adding a new X" recipes added when the branch created an extension point.
+6. **SPEC.md (`<home>/assistant/SPEC.md`)** — only if scope, non-goals, principles, or surfaces actually changed; revisions carry a date, per house style.
+7. **Root `README.md`** — if one exists and the branch changed how the project builds or installs, it says so. (There is deliberately **no** repo-root `CLAUDE.md` pointer — `<home>/assistant/CLAUDE.md` is the entry point.)
+8. **Skills** (`.claude/skills/*/SKILL.md`) — any paths or process steps they reference that this branch moved or renamed.
+9. **The pipeline** — if the diff touches `.github/` or `lib/scripts/`, walk DEVELOPER.md → Changing the pipeline (`lib/documentation/cli/assistant/DEVELOPER.md#changing-the-pipeline`) against it: `pr-ci.sh` mirrors any changed pull-request job, `changed.sh` covers anything new the CLI build reads, and `required-checks.py`'s stated assumptions still hold. If a CI job's name, matrix or set changed, the required checks must be re-applied before the merge. Run `lib/scripts/required-checks.py --pr <N>` (the dry run; it reads, never writes) if the pull request exists, and carry its output into the report.
+10. **The carried model lists** (ADR 0009 (`<home>/adrs/built-in-model-lists.md`)) — check them whenever the diff touches a backend (`source/data/backends/`), the rosters, completion or model selection, or whenever a vendor has shipped, renamed or retired a model since a list's `…Reviewed` date.
+    - Read `built_in_rosters()`'s tables in `model_roster.cpp` against their sources, as the DEVELOPER.md recipe (`<home>/assistant/DEVELOPER.md#updating-a-carried-model-list`) names them.
+    - A stale list is a finding, fixed in this branch by that recipe: rows, reviewed date, the roster test, a MILESTONES line.
+    - A CLI that has gained a list command means its carried list goes and `CatalogListing` comes, in this branch.
+    - Carry each list's reviewed date into the report.
+
+## 3. Mechanical validation
+
+After the edits, verify the whole system (script it — don't eyeball):
+
+- every relative `.md` link in `lib/documentation/`, `.claude/skills/` and the eight layer cards (`lib/src/cli/{source,tests}/<layer>/CLAUDE.md`) resolves, and `harness.layer_context` passes -- the cards, the ADR index and ADRs 0001/0008 agree with `cmake/modules.cmake`;
+- the backlog index rows exactly match the documents on disk, numbering is sequential, and every gate names an existing item earlier in the order;
+- no version table is left empty — the in-development version's emptied table was retired above — and every version table's directory matches its rows;
+- every open call in every item is tagged `[user]` / `[default: …]` / `(consumed decision)`;
+- no template markers or `_TODO:_` placeholders were newly introduced without being deliberate.
+
+## 4. Report
+
+Summarize for the MR description: which docs changed and why, which backlog items were completed/started/re-gated, whether the in-development version's table was retired (or why not), any decisions recorded, and — explicitly — anything found that needs the **user** (an unanswered `[user]` call the branch stepped around, a SPEC-shape change made without a recorded decision, and — when the branch changed the pipeline's jobs — that `lib/scripts/required-checks.py --pr <N> --apply` must run after the pull request's CI passes and before it merges, which only they should run). Remind that `lib/scripts/cicd.sh --test` should be green before the MR is opened — this skill covers the docs half of "done", not the build half.
