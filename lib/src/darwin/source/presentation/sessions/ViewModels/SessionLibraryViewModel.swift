@@ -85,6 +85,8 @@ public final class SessionLibraryViewModel {
     /// The event types the last session announced: whether this build streams
     /// a long job's progress (the CLI's 52b announces `job`).
     private var lastEvents: [String]?
+    /// The vocabulary's date the last session announced.
+    private var lastSchema: String?
     /// The model the next new session starts on, once.
     private var nextModel: String?
     private var inView = false
@@ -270,6 +272,10 @@ public final class SessionLibraryViewModel {
     /// session announced; `false` until one has -- the fallback.
     public var streamsJobs: Bool { lastEvents?.contains("job") ?? false }
 
+    /// Whether the build carries the CLI's whole track 52 (schema 2026-10-20
+    /// or later): a new brief planned alone (52c's dry run) among it.
+    public var hasTrack52: Bool { (lastSchema ?? "") >= "2026-10-20" }
+
     /// The binary the library found, for the other places' reads.
     public var binaryURL: URL? { found?.url }
 
@@ -370,6 +376,7 @@ public final class SessionLibraryViewModel {
         case .session(let info):
             lastAccepts = info.capabilities?.accepts ?? []
             lastEvents = info.capabilities?.events ?? []
+            lastSchema = info.capabilities?.schema
             let session = current
             Task { await readWindow(of: info.model, for: session) }
         case .result, .error:

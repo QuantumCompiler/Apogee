@@ -1,3 +1,4 @@
+import PresentationCompose
 import PresentationGraph
 import PresentationModels
 import PresentationMonitor
@@ -35,11 +36,7 @@ public struct ApogeeApp: App {
                 case .graph: GraphScreen(model: model.graph, shell: model.shell)
                 case .video:
                     VideoScreen(model: model.video) {
-                        PlaceholderView(
-                            symbol: "film.stack",
-                            placeholder: Placeholder(
-                                about: "Compositions -- a brief made into a narrated video, scene by scene -- will be here.",
-                                command: "apogee video compose --help"))
+                        ComposeView(model: model.compose)
                     }
                 default: PlaceholderScreen(destination)
                 }
