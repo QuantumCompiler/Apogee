@@ -875,3 +875,54 @@ Every screen stays a machine-mode client of the binary, tested hermetically.
   - Backends holding only backends, M1's tests carried over.
 - **Drawn offscreen over the real binary on that store:** Stored weights with the registered Q4_K_M open (its made-from lines, sizes, actions); the register sheet for the F16 with the CLI's name; Backends with Show its weights.
 - Bare `lib/scripts/cicd.sh --test` passed in 7m23s: the CLI's 3,593 tests, none failing, and the app's 323 cases, none failing and none skipped, with no warning.
+
+### 2026-10-21 — `convert-quantize-jobs` (backlog item 2i): the store's long runs as jobs
+
+**Why.** This is the second half of the user's ask of 2026-10-20 ("look at like the safe tensors and then convert them and everything else like you can in the CLI"). 2h gave every stored set a place, but no path reached `models convert` or `models quantize`, and Check its files held the Models place through a re-hash with no Stop.
+
+- [x] **The convert sheet** (`ConvertSheet` over `ConvertForm`) opens from a SafeTensors set's **Convert to GGUF…** and **Convert to MLX…**. It is one command, the CLI's own chain:
+  - the precision `-t`: GGUF f16 (the default, left out), bf16, f32, q8_0, auto; MLX 4bit (the default), 3bit, 6bit, 8bit, mxfp4;
+  - **Then quantize to** (GGUF) or **Also make, one conversion each** (MLX), as `--register-with` in the CLI's order;
+  - **Register what's made** (`--register`), on by default and forced on by a level;
+  - **Names begin with** (`--base-name`), and MLX's **Model type** (`--model-type`);
+  - the steps listed, each with an estimate labelled "about" (bits per weight over the set's stated bytes), and the names it registers by the CLI's naming (`<base>-F16`, `<base>-Q4KM`, `<base>-4bit`);
+  - the command, shown as typed.
+- [x] **The quantize sheet** (`QuantizeSheet` over `QuantizeForm`) opens from an unquantized GGUF's **Quantize…**. A GGUF is unquantized by the precision its row states, else by the level its file is named with.
+  - The level is Q4_K_M by default (left out), with estimates.
+  - **Register it**, and its name: `<base>-<level>`, following the level until typed.
+  - `models quantize` registers nothing, so the job then runs `config add-backend <name> --type llamacpp --model-path <the new file>`. The new file comes from the read-back's `models info` of the set that landed. A refusal leaves the GGUF made and is said in the CLI's words.
+- [x] **Check the files** is `models repair <handle>` as a job, from every set under Stored weights and from a backend's More menu. `ModelsViewModel.repair` hands the check to the jobs core and no longer holds the place.
+- [x] **The Jobs tab** grows from 1i's Downloads (`DownloadsViewModel`), and holds pulls, conversions, quantizations and checks. Until G18:
+  - each step ticks as the sets it makes land in `models list --all`, read again as the verb speaks (at most every two seconds) and at its end;
+  - a registration ticks when the run ends well;
+  - the running step shows how long it has run, with no percent;
+  - the CLI's busy line and text show as said, and decide nothing;
+  - Stop is the interrupt: the sets already made stay;
+  - a resume command the CLI names runs as typed (1i).
+- [x] **At the end:** the CLI's own last words (a check's result is its last line, G20's fallback), the store read back, and **Show the weights**, which opens the first set it made under Stored weights.
+- [x] **The design:** no change. The sheets and the Jobs card take the prototype's words (the boards `ScreenModelsConvert` and `ScreenModelsDownloads`, "Models · jobs"), so the canvas stays at version 42. The health check passes all 48 start screens.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The sheets build the CLI's own chain:** one `models convert … --register-with …` (the item's decision). Only quantize's registration is the app's second command, because the verb has none.
+- **Ticks are counted, never matched.** The k-th set to land ticks the k-th step that makes one, in the order the CLI makes them; nothing is read from a set's name to decide which step it was.
+- **Estimates come from bits per weight over the stated bytes, said "about"** (the item's default). Where no size is stated, there is no estimate.
+- **The register names on the convert sheet** are the CLI's documented naming (`models_pull.h`: the level without its underscores), shown and never passed. The CLI names them itself.
+- **Check the files leaves the one-shot path for a job** (the item's default). Its result is the exit and the last line.
+- **The quantize sheet offers Q2_K to Q8_0,** as the design does. The CLI's `-t F16` is a console line.
+
+**Verified.**
+- `scripts/build.sh test`: 331 cases, no Swift warning. New tests cover:
+  - the convert form's argv matrix (GGUF and MLX, precision, levels, register, base name, model type), each flag pinned to the binary's own `--help` text, recorded as `models-convert-help.txt` and `models-quantize-help.txt`;
+  - the steps, names and estimates;
+  - the quantize form, with and without its registration;
+  - the base name rule;
+  - supervised runs over scripted jobs and read-backs:
+    - a conversion's steps ticking as sets land, and Show the weights;
+    - Stop keeping what landed, and the CLI's resume command run as typed;
+    - a quantization registering from the read-back, and a refused registration said;
+    - a check passing and failing;
+  - Stored weights opening the sheets by format and handing the jobs on.
+
+  Nothing converts: the standing rule.
+- **Drawn offscreen over the real binary on 2h's scratch store:** the convert sheet for the Llama SafeTensors set, and the quantize sheet for its F16. No job was started on real weights; a real conversion through the app is the user's run.
+- Bare `lib/scripts/cicd.sh --test` passed in 7m28s: the CLI's 3,593 tests, none failing, and the app's 331 cases, none failing and none skipped, with no warning.

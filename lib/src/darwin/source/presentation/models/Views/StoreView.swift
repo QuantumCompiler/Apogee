@@ -25,6 +25,12 @@ struct StoreView: View {
         .sheet(item: Binding(get: { store.register.map(RegisterID.init) }, set: { if $0 == nil { store.register = nil } })) { _ in
             RegisterSheet(store: store)
         }
+        .sheet(isPresented: Binding(get: { store.convertForm != nil }, set: { if !$0 { store.convertForm = nil } })) {
+            ConvertSheet(store: store)
+        }
+        .sheet(isPresented: Binding(get: { store.quantizeForm != nil }, set: { if !$0 { store.quantizeForm = nil } })) {
+            QuantizeSheet(store: store)
+        }
         .sheet(item: Binding(get: { store.renaming.map(RenameID.init) }, set: { if $0 == nil { store.renaming = nil } })) { id in
             RenameStoredSheet(model: id.model) { name in Task { await store.rename(id.model, to: name) } }
         }
@@ -262,6 +268,13 @@ struct StoreDetails: View {
 
     @ViewBuilder private func actions(_ set: StoredSet) -> some View {
         HStack(spacing: Spacing.s) {
+            if set.format == "safetensors" {
+                Button("Convert to GGUF…") { store.askToConvert(set, mlx: false) }
+                Button("Convert to MLX…") { store.askToConvert(set, mlx: true) }
+            }
+            if store.isUnquantized(set) {
+                Button("Quantize…") { store.askToQuantize(set) }
+            }
             if set.isRunnable && set.backend == nil && !set.consumed {
                 Button("Register…") { Task { await store.askToRegister(set) } }
             }
@@ -276,6 +289,8 @@ struct StoreDetails: View {
             if set.format == "voice" { Button("Open Voice") { shell.go(.voice) } }
         }
         HStack(spacing: Spacing.s) {
+            Button("Check the files") { store.check(set) }
+                .help("apogee models repair \(set.handle)")
             if let path = store.path {
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
             }
@@ -384,5 +399,123 @@ struct RenameStoredSheet: View {
         }
         .padding(Spacing.xl)
         .frame(width: 460)
+    }
+}
+
+/// The convert sheet: `models convert`, one command -- the precision, further
+/// levels, registering what is made -- with the steps it takes, each sized
+/// as an estimate.
+struct ConvertSheet: View {
+    @Bindable var store: StoreViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        if let form = store.convertForm {
+            VStack(alignment: .leading, spacing: Spacing.m) {
+                Text(form.mlx ? "Convert to MLX" : "Convert to GGUF").font(.apogeeHeading)
+                Text(form.handle).font(.apogeeCode).foregroundStyle(Palette.textTertiary)
+                Text(form.mlx
+                    ? "An MLX model, made by mlx-lm's converter on this Mac and kept beside these weights in the model's mlx/ folder."
+                    : "A GGUF, made by llama.cpp's converter on this Mac and kept beside these weights in the model's gguf/ folder. Quantized copies are made from it.")
+                    .font(.apogeeSmall).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true)
+                Form {
+                    Picker("Precision", selection: Binding(get: { store.convertForm?.precision }, set: { store.convertForm?.precision = $0 })) {
+                        Text("\(form.mlx ? "4bit" : "f16"), the default").tag(String?.none)
+                        ForEach(form.precisions.dropFirst(), id: \.self) { Text($0 == "auto" ? "auto, as the weights are" : $0).tag(String?.some($0)) }
+                    }
+                    LabeledContent(form.mlx ? "Also make, one conversion each" : "Then quantize to") {
+                        HStack(spacing: Spacing.xs) {
+                            ForEach(form.levelChoices, id: \.self) { level in
+                                Toggle(level, isOn: Binding(
+                                    get: { store.convertForm?.levels.contains(level) ?? false },
+                                    set: { on in
+                                        if on { store.convertForm?.levels.insert(level) } else { store.convertForm?.levels.remove(level) }
+                                    }))
+                                    .toggleStyle(.button)
+                            }
+                        }
+                        .font(.apogeeMeta.monospaced())
+                    }
+                    Toggle("Register what's made", isOn: Binding(get: { store.convertForm?.register ?? false }, set: { store.convertForm?.register = $0 }))
+                        .disabled(!form.levels.isEmpty)
+                    TextField("Names begin with", text: Binding(get: { store.convertForm?.baseName ?? "" }, set: { store.convertForm?.baseName = $0 }), prompt: Text(modelBaseName(form.handle.split(separator: "/").first.map(String.init) ?? "")))
+                    if form.mlx {
+                        TextField("Model type", text: Binding(get: { store.convertForm?.modelType ?? "" }, set: { store.convertForm?.modelType = $0 }), prompt: Text("as its config says"))
+                    }
+                }
+                StepsList(steps: form.steps)
+                Text("Sizes are estimated from bits per weight. Whether the converter takes this architecture is learned by converting: if it can't, the job stops with the converter's own reason.")
+                    .font(.apogeeSmall).foregroundStyle(Palette.textTertiary).fixedSize(horizontal: false, vertical: true)
+                Text((["apogee"] + form.arguments).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+                HStack {
+                    Spacer()
+                    Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                    Button("Convert") { store.convert() }.keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(Spacing.xl)
+            .frame(width: 620)
+        }
+    }
+}
+
+/// The quantize sheet: `models quantize`, and -- asked -- the backend that
+/// registers what it made.
+struct QuantizeSheet: View {
+    @Bindable var store: StoreViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        if let form = store.quantizeForm {
+            VStack(alignment: .leading, spacing: Spacing.m) {
+                Text("Quantize \(form.handle.split(separator: "/").first.map(String.init) ?? form.handle)").font(.apogeeHeading)
+                Text(form.handle).font(.apogeeCode).foregroundStyle(Palette.textTertiary)
+                Text("A smaller copy beside it, made by llama.cpp. The unquantized GGUF stays.")
+                    .font(.apogeeSmall).foregroundStyle(Palette.textSecondary)
+                Form {
+                    Picker("Level", selection: Binding(get: { store.quantizeForm?.level ?? "Q4_K_M" }, set: { store.quantizeForm?.choose($0) })) {
+                        ForEach(QuantizeForm.levels, id: \.self) { level in
+                            Text(level + (level == "Q4_K_M" ? ", the default" : "") + (Estimate.size(level, from: form.bytes).map { " · \($0)" } ?? "")).tag(level)
+                        }
+                    }
+                    Toggle("Register it", isOn: Binding(get: { store.quantizeForm?.register ?? false }, set: { store.quantizeForm?.register = $0 }))
+                    if form.register {
+                        TextField("Name", text: Binding(get: { store.quantizeForm?.name ?? "" }, set: { store.quantizeForm?.rename($0) }))
+                    }
+                }
+                StepsList(steps: form.steps)
+                Text("Sizes are estimated from bits per weight against the unquantized GGUF's 16.")
+                    .font(.apogeeSmall).foregroundStyle(Palette.textTertiary)
+                Text((["apogee"] + form.arguments).joined(separator: " ") + (form.register ? "\nthen  apogee config add-backend \(form.name) --type llamacpp --model-path <the new file>" : ""))
+                    .font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+                HStack {
+                    Spacer()
+                    Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                    Button("Quantize") { store.quantize() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(form.register && form.name.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .padding(Spacing.xl)
+            .frame(width: 560)
+        }
+    }
+}
+
+/// A store job's steps as its sheet lists them, sizes as estimates.
+struct StepsList: View {
+    let steps: [StoreStep]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text("STEPS").font(.system(size: TypeScale.label, weight: .medium, design: .monospaced)).foregroundStyle(Palette.textTertiary)
+            ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                HStack(spacing: Spacing.s) {
+                    Text("\(index + 1)").font(.apogeeMeta.monospacedDigit()).foregroundStyle(Palette.textTertiary)
+                    Text(step.label).font(.apogeeSmall)
+                    if let estimate = step.estimate { Text(estimate).font(.apogeeMeta).foregroundStyle(Palette.textTertiary) }
+                }
+            }
+        }
     }
 }

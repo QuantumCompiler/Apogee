@@ -251,7 +251,7 @@ struct ModelDetails: View {
                 Button("Assign a role…") { model.tab = .roles }
                 if row.section == "local" {
                     Button("Rename…") { model.renaming = row }
-                    Button("Check its files") { Task { await model.repair(row) } }
+                    Button("Check its files") { model.repair(row) }
                 }
                 if let path = model.path {
                     Button("Show in Finder") {

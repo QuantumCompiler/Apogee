@@ -2,7 +2,8 @@ import BusinessJobs
 import PresentationStyles
 import SwiftUI
 
-/// The Downloads tab: the pull form, and each run's steps, bytes and log.
+/// The Jobs tab: the pull form, and each run -- a pull, a conversion, a
+/// quantization, a check -- with its steps, bytes or time, and log.
 public struct DownloadsView: View {
     @Bindable private var model: DownloadsViewModel
 
@@ -14,7 +15,7 @@ public struct DownloadsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.l) {
                 form
-                Text("Each download runs as steps. A step that stops runs again from its start; the steps before it are kept and never repeated.")
+                Text("Downloads, conversions and checks run as steps. A step that stops runs again from its start; the steps before it are kept and never repeated.")
                     .font(.apogeeSmall)
                     .foregroundStyle(Palette.textSecondary)
                 // Read so a change to any download redraws the list.
@@ -92,6 +93,36 @@ struct DownloadCard: View {
                 }
                 Button(logOpen ? "Hide log" : "Log") { logOpen.toggle() }.buttonStyle(.link)
             }
+            if !download.steps.isEmpty {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(Array(download.steps.enumerated()), id: \.offset) { index, step in
+                        let state = download.state(of: index)
+                        HStack(spacing: Spacing.s) {
+                            Image(systemName: state == .done ? "checkmark.circle" : state == .running ? "circle.dotted" : "circle")
+                                .foregroundStyle(state == .waiting ? Palette.textTertiary : Palette.textSecondary)
+                            Text("\(index + 1)").font(.apogeeMeta.monospacedDigit()).foregroundStyle(Palette.textTertiary)
+                            Text(step.label).font(.apogeeSmall)
+                            if let estimate = step.estimate { Text(estimate).font(.apogeeMeta).foregroundStyle(Palette.textTertiary) }
+                        }
+                    }
+                }
+            }
+            if download.kind != .pull {
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    Text((download.isRunning ? "running for " : "ran for ") + model.elapsed(download) + (download.isRunning ? " -- no percent: the verb says none (G18)" : ""))
+                        .font(.apogeeMeta)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+            }
+            if download.isRunning, download.kind != .pull, let busy = progress.busy {
+                Text(busy).font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary).lineLimit(1)
+            }
+            if let outcome = download.outcome {
+                Text(outcome).font(.apogeeSmall).foregroundStyle(Palette.textSecondary).textSelection(.enabled)
+            }
+            if !download.isRunning, download.kind != .pull, download.kind != .check, let first = download.firstLanded {
+                Button("Show the weights") { model.showWeights?(first) }
+            }
             if !progress.stages.isEmpty {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     ForEach(progress.orderedStages, id: \.index) { entry in
@@ -104,7 +135,7 @@ struct DownloadCard: View {
                     }
                 }
             }
-            if download.isRunning {
+            if download.isRunning && download.kind == .pull {
                 if let fraction = progress.bytes?.fraction {
                     ProgressView(value: fraction)
                 } else {

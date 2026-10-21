@@ -70,6 +70,33 @@ final class AppViewModel {
         let store = StoreViewModel(runner: runner ?? ReadRunner())
         let downloads = DownloadsViewModel(starter: jobs ?? JobStarter())
         downloads.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
+        downloads.reader = runner ?? ReadRunner()
+        // Show the weights: the set a store job made, open under Stored weights.
+        downloads.showWeights = { [weak models, weak store] name in
+            models?.tab = .store
+            Task {
+                await store?.refresh()
+                let handle = name.contains("/") ? name : store?.handle(forBackend: name) ?? name
+                await store?.select(handle)
+            }
+        }
+        // The store's long runs, started from Stored weights, followed on Jobs.
+        store.startConvert = { [weak models, weak downloads] form in
+            downloads?.convert(form)
+            models?.tab = .jobs
+        }
+        store.startQuantize = { [weak models, weak downloads] form in
+            downloads?.quantize(form)
+            models?.tab = .jobs
+        }
+        store.startCheck = { [weak models, weak downloads] name in
+            downloads?.check(name)
+            models?.tab = .jobs
+        }
+        models.checkFiles = { [weak models, weak downloads] name in
+            downloads?.check(name)
+            models?.tab = .jobs
+        }
         downloads.finished = { [weak models, weak store] in
             Task {
                 await models?.refresh()

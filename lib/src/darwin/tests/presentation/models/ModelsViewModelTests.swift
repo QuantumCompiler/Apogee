@@ -125,9 +125,12 @@ struct ModelsViewModelTests {
         await model.rename(gguf, to: "qwen3-8b-chat")
         #expect(runner.calls.contains("run models rename qwen3-8b qwen3-8b-chat"))
         #expect(model.rows.first { $0.backend == "qwen-mlx" }!.renameName == "qwen-mlx")
-        runner.commanding(["models", "repair"], .done(stdout: "qwen3-8b-Q4KM: 1 file verified against its record\n"))
-        await model.repair(gguf)
-        #expect(said.last == "qwen3-8b-Q4KM: 1 file verified against its record")
+        var checked: [String] = []
+        model.checkFiles = { checked.append($0) }
+        model.repair(gguf)
+        #expect(checked == ["qwen3-8b-Q4KM"], "a check is a job on the Jobs tab, never a one-shot that holds the place")
+        #expect(!runner.calls.contains { $0.hasPrefix("run models repair") })
+        #expect(said.isEmpty || !said.contains { $0.contains("verified") })
         runner.commanding(["models", "rename"], .failed(exit: ChildExit(reason: .exited, status: 1), stderrTail: tail("apogee models: no model named 'x'")))
         await model.rename(gguf, to: "other")
         #expect(model.failure == "apogee models: no model named 'x' (exited with status 1)")
@@ -211,8 +214,10 @@ struct ModelsViewModelTests {
         model.askToDelete(set)
         await model.confirmDelete(andBackends: false)
         #expect(runner.calls.contains("run models delete Llama3.2-1B-Instruct/safetensors/edaba290ce7f --yes"))
-        await model.repair(model.rows[1])
-        #expect(runner.calls.contains("run models repair Qwen3-VL-8B-Instruct/safetensors/63f2634a2019"))
+        var checked: [String] = []
+        model.checkFiles = { checked.append($0) }
+        model.repair(model.rows[1])
+        #expect(checked == ["Qwen3-VL-8B-Instruct/safetensors/63f2634a2019"], "by its handle")
         await model.rename(model.rows[1], to: "qwen-vl")
         #expect(runner.calls.contains("run models rename Qwen3-VL-8B-Instruct qwen-vl"))
         #expect(!runner.calls.contains { $0.contains(ModelRow.unconfigured) })

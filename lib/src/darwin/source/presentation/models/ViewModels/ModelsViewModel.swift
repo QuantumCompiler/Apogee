@@ -64,6 +64,9 @@ public final class ModelsViewModel {
     public private(set) var failure: String?
     /// Says one line in the window's toast.
     public var say: (@MainActor (String) -> Void)?
+    /// Checks a model's files as a job on the Jobs tab (2i): the
+    /// composition's way to it.
+    public var checkFiles: (@MainActor (String) -> Void)?
     /// Starts a new session on a backend: the composition's way to Sessions.
     public var useInSession: (@MainActor (String) -> Void)?
 
@@ -278,9 +281,10 @@ public final class ModelsViewModel {
     }
 
     /// `models repair <name>`: verifies against the record, fixes a damaged
-    /// SafeTensors set in place; what it found is its own words.
-    public func repair(_ row: ModelRow) async {
-        await run(["models", "repair", row.name], doing: "Checking \(row.name)", done: nil)
+    /// SafeTensors set in place -- a re-hash of up to tens of gigabytes, so a
+    /// job on the Jobs tab, with Stop, its result in its own words (2i).
+    public func repair(_ row: ModelRow) {
+        checkFiles?(row.name)
     }
 
     /// Points a role at a backend: its `config set-default…` verb, read back

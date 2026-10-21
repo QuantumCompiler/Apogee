@@ -134,6 +134,13 @@ public final class StoreViewModel {
     public private(set) var infos: [String: ModelInfo] = [:]
     public private(set) var selected: String?
     public var register: RegisterForm?
+    /// The convert and quantize sheets, open (2i).
+    public var convertForm: ConvertForm?
+    public var quantizeForm: QuantizeForm?
+    /// Starts a store job on the Jobs tab: the composition's way to it.
+    public var startConvert: (@MainActor (ConvertForm) -> Void)?
+    public var startQuantize: (@MainActor (QuantizeForm) -> Void)?
+    public var startCheck: (@MainActor (String) -> Void)?
     public var pending: Pending?
     /// Whether a delete takes the backends that run from it too: the
     /// person's choice, never implied.
@@ -250,7 +257,7 @@ public final class StoreViewModel {
 
     /// A stated size in the CLI's own units: whole KiB and MiB, GiB to a
     /// tenth, each truncated as the CLI truncates them.
-    public static func size(_ bytes: Int) -> String {
+    public nonisolated static func size(_ bytes: Int) -> String {
         let bytes = max(bytes, 0)
         if bytes < 1024 { return "\(bytes) B" }
         if bytes < 1 << 20 { return "\(bytes >> 10) KiB" }
@@ -345,6 +352,49 @@ public final class StoreViewModel {
     /// How many sets the store holds that no backend points at.
     public var unregistered: Int {
         sets.filter { $0.isRunnable && $0.backend == nil && !$0.consumed && $0.cliState != "safetensors" }.count
+    }
+
+    // MARK: - The long runs (2i)
+
+    /// Whether a GGUF is unquantized -- F16, BF16 or F32 -- by the precision
+    /// its row states, else by the level its file is named with (the CLI
+    /// names what it makes `<base>-<level>.gguf`).
+    public func isUnquantized(_ set: StoredSet) -> Bool {
+        guard set.format == "gguf" else { return false }
+        let levels = ["F16", "BF16", "F32"]
+        if let precision = set.precision { return levels.contains(precision.uppercased()) }
+        guard let path = infos[set.handle]?.field("model_path") else { return false }
+        let stem = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent.uppercased()
+        return levels.contains { stem.hasSuffix("-" + $0) }
+    }
+
+    /// Opens the convert sheet: a GGUF for llama.cpp, or an MLX model.
+    public func askToConvert(_ set: StoredSet, mlx: Bool) {
+        guard set.format == "safetensors" else { return }
+        convertForm = ConvertForm(handle: set.handle, mlx: mlx, bytes: bytes(set))
+    }
+
+    public func convert() {
+        guard let form = convertForm else { return }
+        convertForm = nil
+        startConvert?(form)
+    }
+
+    /// Opens the quantize sheet, its name the CLI's `<base>-<level>`.
+    public func askToQuantize(_ set: StoredSet) {
+        guard isUnquantized(set) else { return }
+        quantizeForm = QuantizeForm(handle: set.handle, base: modelBaseName(set.model), bytes: bytes(set))
+    }
+
+    public func quantize() {
+        guard let form = quantizeForm else { return }
+        quantizeForm = nil
+        startQuantize?(form)
+    }
+
+    /// Check the files: `models repair <handle>`, as a job.
+    public func check(_ set: StoredSet) {
+        startCheck?(set.handle)
     }
 
     // MARK: - Removing
