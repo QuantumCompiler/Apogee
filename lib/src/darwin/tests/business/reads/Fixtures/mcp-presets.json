@@ -1,0 +1,47 @@
+{
+ "data": [
+  {
+   "args": [
+    "/Users/someone/.apogee/training/scripts/code_exec_server.py"
+   ],
+   "command": "/opt/homebrew/bin/python3",
+   "description": "Runs Python for any model, local or cloud: a working directory kept for the session and deleted after it, the network off, each run bounded -- Apogee's code-execution server",
+   "host_entry": {
+    "name": "code",
+    "server": {
+     "args": [
+      "/Users/someone/.apogee/training/scripts/code_exec_server.py"
+     ],
+     "command": "/opt/homebrew/bin/python3"
+    }
+   },
+   "name": "code-exec",
+   "provides": "run_python, write_input",
+   "register": "apogee mcp create code --from code-exec",
+   "registers_into_apogee": true,
+   "runnable": true
+  },
+  {
+   "args": [
+    "__mcp-tools"
+   ],
+   "command": "/Users/taylor/.local/bin/apogee",
+   "description": "Apogee's own read-only tools, served on stdio for another MCP host (a desktop assistant, an editor)",
+   "host_entry": {
+    "name": "apogee",
+    "server": {
+     "args": [
+      "__mcp-tools"
+     ],
+     "command": "/Users/taylor/.local/bin/apogee"
+    }
+   },
+   "name": "self",
+   "provides": "the read-only native tools: files, git, notes, document search, graph navigation",
+   "refusal": "'self' is Apogee's own tools, served for another MCP host: registered into Apogee it would serve Apogee the tools it already has natively. Give another host its entry instead (apogee mcp presets)",
+   "registers_into_apogee": false,
+   "runnable": true
+  }
+ ],
+ "object": "list"
+}

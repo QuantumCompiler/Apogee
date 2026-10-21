@@ -106,7 +106,7 @@ public enum KeyMap {
         KeyReference("Settings", "⌘,"),
         KeyReference("Stop the answer", "⌘."),
         KeyReference("Search sessions", "⇧⌘F"),
-        KeyReference("Sessions, Models, Suites, Tasks, Code graph, Video, Voice, Knowledge, Training", "⌘1 – ⌘9"),
+        KeyReference("Sessions, Models, Suites, Tasks, Code graph, Video, Voice, Knowledge, Training, Library", "⌘1 – ⌘9, ⌘0"),
         KeyReference("Models library", "⇧⌘L"),
         KeyReference("Send", "⏎"),
         KeyReference("New line", "⇧⏎"),

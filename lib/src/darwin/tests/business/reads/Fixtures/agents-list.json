@@ -1,0 +1,173 @@
+{
+ "data": [
+  {
+   "bundled": true,
+   "collection": "",
+   "description": "Offline, diff-first security review of the branch under review: findings with impact, remediation and CWE, and a verdict",
+   "mcp": [],
+   "model": "",
+   "name": "security-review",
+   "output_format": "auto",
+   "overrides_bundled": false,
+   "prompts": [
+    "prompts/security-review.txt"
+   ],
+   "questions": false,
+   "save_dir": "",
+   "save_filename": "",
+   "save_subdir": "security-review",
+   "schemas": [
+    "schemas/security-review-output.json"
+   ],
+   "tools": "read-only"
+  },
+  {
+   "bundled": true,
+   "collection": "",
+   "description": "Categorized release notes (features, fixes, breaking changes) for a commit range or the branch under review",
+   "mcp": [],
+   "model": "",
+   "name": "release-notes",
+   "output_format": "auto",
+   "overrides_bundled": false,
+   "prompts": [
+    "prompts/release-notes.txt"
+   ],
+   "questions": false,
+   "save_dir": "",
+   "save_filename": "",
+   "save_subdir": "release-notes",
+   "schemas": [
+    "schemas/release-notes-output.json"
+   ],
+   "tools": "read-only"
+  },
+  {
+   "bundled": true,
+   "collection": "",
+   "description": "Merge-readiness review of the branch under review against acceptance criteria and ADRs from a collection; peer review or self review with a paste-ready description",
+   "mcp": [],
+   "model": "",
+   "name": "merge-request",
+   "output_format": "auto",
+   "overrides_bundled": false,
+   "prompts": [
+    "prompts/merge-request.txt"
+   ],
+   "questions": false,
+   "save_dir": "",
+   "save_filename": "",
+   "save_subdir": "merge-request",
+   "schemas": [
+    "schemas/merge-request-output.json"
+   ],
+   "tools": "read-only"
+  },
+  {
+   "bundled": true,
+   "collection": "",
+   "description": "Correctness and simplification review of a diff, a file or the branch under review: findings with location, severity and a suggested fix, and a verdict",
+   "mcp": [],
+   "model": "",
+   "name": "code-review",
+   "output_format": "auto",
+   "overrides_bundled": false,
+   "prompts": [
+    "prompts/code-review.txt"
+   ],
+   "questions": false,
+   "save_dir": "",
+   "save_filename": "",
+   "save_subdir": "code-review",
+   "schemas": [
+    "schemas/code-review-output.json"
+   ],
+   "tools": "read-only"
+  },
+  {
+   "bundled": true,
+   "collection": "",
+   "description": "The behaviors a diff, a file or the branch under review adds that no test would notice breaking, each with a suggested test",
+   "mcp": [],
+   "model": "",
+   "name": "test-gaps",
+   "output_format": "auto",
+   "overrides_bundled": false,
+   "prompts": [
+    "prompts/test-gaps.txt"
+   ],
+   "questions": false,
+   "save_dir": "",
+   "save_filename": "",
+   "save_subdir": "test-gaps",
+   "schemas": [
+    "schemas/test-gaps-output.json"
+   ],
+   "tools": "read-only"
+  },
+  {
+   "bundled": true,
+   "collection": "",
+   "description": "Documentation statements the branch under review made untrue, checked against a collection of the project's docs (--rag) and its files, each with an edit",
+   "mcp": [],
+   "model": "",
+   "name": "doc-drift",
+   "output_format": "auto",
+   "overrides_bundled": false,
+   "prompts": [
+    "prompts/doc-drift.txt"
+   ],
+   "questions": false,
+   "save_dir": "",
+   "save_filename": "",
+   "save_subdir": "doc-drift",
+   "schemas": [
+    "schemas/doc-drift-output.json"
+   ],
+   "tools": "read-only"
+  },
+  {
+   "bundled": true,
+   "collection": "",
+   "description": "Minutes from a meeting transcript: decisions, action items with owner and due date, and open questions",
+   "mcp": [],
+   "model": "",
+   "name": "meeting-minutes",
+   "output_format": "auto",
+   "overrides_bundled": false,
+   "prompts": [
+    "prompts/meeting-minutes.txt"
+   ],
+   "questions": false,
+   "save_dir": "",
+   "save_filename": "",
+   "save_subdir": "meeting-minutes",
+   "schemas": [
+    "schemas/meeting-minutes-output.json"
+   ],
+   "tools": "read-only"
+  },
+  {
+   "bundled": false,
+   "collection": "",
+   "description": "Sort incoming issues by area",
+   "mcp": [],
+   "model": "",
+   "name": "triage",
+   "output_format": "auto",
+   "overrides_bundled": false,
+   "prompts": [
+    "prompts/triage.txt"
+   ],
+   "questions": false,
+   "save_dir": "",
+   "save_filename": "",
+   "save_subdir": "triage",
+   "schemas": [
+    "schemas/triage-output.json"
+   ],
+   "tools": "read-only"
+  }
+ ],
+ "object": "list"
+}

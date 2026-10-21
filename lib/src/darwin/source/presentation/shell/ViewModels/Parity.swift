@@ -56,10 +56,10 @@ public enum ParityTable {
         CommandPlace("embed", .screen(module: "PresentationKnowledge"), "Knowledge › Collections: list, health, search, ingest, delete"),
         CommandPlace("train", .screen(module: "PresentationTraining"), "Training › Runs and Regimes: runs launched, gated, promoted, rolled back"),
         CommandPlace("datasets", .screen(module: "PresentationTraining"), "Training › Datasets: create, synthesize, prepare, delete; the kits"),
+        CommandPlace("agents", .screen(module: "PresentationLibrary"), "Library › Agents: list, create, delete, the person's own files edited in place"),
+        CommandPlace("mcp", .screen(module: "PresentationLibrary"), "Library › MCP servers: connect state, presets registered, enable, disable, a tool tried"),
+        CommandPlace("symphonies", .screen(module: "PresentationLibrary"), "Library › Symphonies: the catalog, a play supervised, own spec files edited and checked"),
         // --- gaps: each named by its queued item --------------------------------
-        CommandPlace("agents", .queued(item: "2e"), "the agents library"),
-        CommandPlace("mcp", .queued(item: "2e"), "the MCP servers and presets"),
-        CommandPlace("symphonies", .queued(item: "2e"), "the symphony catalog and shows"),
         CommandPlace("execute", .queued(item: "2f"), "execute sessions: suite, model, project folder, orchestrate"),
         CommandPlace("review", .queued(item: "2g"), "reviews, targets and sweeps, the skills"),
         // --- the console's: run there as typed ----------------------------------

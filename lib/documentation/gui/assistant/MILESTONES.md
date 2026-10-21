@@ -639,3 +639,50 @@ Every screen stays a machine-mode client of the binary, tested hermetically.
 - Bare `lib/scripts/cicd.sh --test`: green -- the CLI's 3593 tests (the two usual skips) and the app's 273 cases.
 
 **Not run:** real training. No venv was created and no model was trained, by the standing rule. Hours-long runs are the user's.
+
+### 2026-10-20 — `agents-mcp-symphonies` (backlog item 2e): the library's resources
+
+**Why.** Three resource families had no GUI place: agents, MCP servers and symphonies. The TUI has had them since 37d and 37g.
+
+- [x] **The Library place** (⌘0, the tenth place; `PresentationLibrary`, `source/presentation/library/`, a new module), with tabs Agents · Symphonies · MCP servers.
+  - **`AgentsViewModel`:**
+    - `agents list`, the shipped agents and the person's own;
+    - **New agent…** (`agents create <name> [--description] [--model] [--tools] [--no-schema]`, byte for byte the scaffold's own create);
+    - **Delete…** (`agents delete --purge` or `--keep-files`, as chosen; the CLI asks nothing on a pipe);
+    - the person's own prompt and schema files **edited in place**, at the paths `agents list` names under the data directory, which comes from `apogee config path`.
+  - **`SymphoniesViewModel`:**
+    - the catalog (`symphonies list`, its three sources shown);
+    - **Play** (`symphonies play <name> --input <text> --output-format json`, supervised: the stage lines as it goes, each stage's answer and the output from the play's document);
+    - the person's own spec file edited in place and then **checked by the binary**: `symphonies show` either refuses the file in its words or lists its problems, and **Put it back as it was** restores it;
+    - **Copy** (`symphonies create <name> --from`) and **Delete…** (a config entry's `symphonies delete`).
+  - **`MCPViewModel`:**
+    - `mcp list`, each server's state and tools (its environment said only as set or not), read when the place opens because listing connects to every server;
+    - the presets, each **registered** byte-identically (`mcp create <name> --from <preset>`) or showing its refusal in the CLI's words;
+    - **Enable/Disable**, and **Try it** (`mcp test <server> <tool> <json>`, its answer as printed).
+  - `LibraryScreen` and `DefinitionEditor` (the editor sheet with the binary's word under it).
+- [x] **The reads** (`Library.swift`): `AgentEntry`, `MCPServer`, `MCPPreset`, `Symphony` (with `Stage`, `isOwnFile`), `SymphonyPlay`.
+- [x] **The parity table:** `agents`, `mcp` and `symphonies` are screens of `PresentationLibrary` (22 screens; 2 gaps, `execute` 2f and `review` 2g).
+- [x] **The design (canvas version 39):**
+  - the prototype's Library place on ⌘0;
+  - the boards `ScreenLibrary`, `ScreenLibrarySymphonies` and `ScreenLibraryMCP`;
+  - the contract board's LIBRARY rows (49 ready) and **gap G22**, "An agent's files are checked only when it runs";
+  - the Layout board's ⌘1 – ⌘9, ⌘0.
+
+  The health check passes all 41 start screens.
+
+**Decisions made while building** (2026-10-20, each recorded for veto):
+- **One place, three tabs, on ⌘0.** The design's law gives every place a key, and ⌘1–⌘9 were taken, so the tenth place takes ⌘0. One tabbed Library holds the three families, where three places would have had no keys.
+- **A play inside the live session is 2f's.** `/play` is an `execute` session's turn (machine-mode.md), and the session window drives `chat`, where it would be plain text. So 2e's plays run on their own, supervised and narrated. The in-session play lands with 2f's execute door.
+- **In-app editing covers the person's own files only:** an agent's prompt and schema, and a `file` symphony's spec. A shipped starter or a config entry is edited at a prompt (`symphonies edit`, the $EDITOR's), as the page says. The CLI's own edit of a starter writes a config entry that stands in for it, and the app does not reimplement that.
+- **No GUI-side parser.** A symphony's save is checked by `symphonies show`. Nothing in this build checks an agent's files short of running it, so a save is read back and said as such, and the gap is recorded as **G22**.
+- **MCP servers are listed when the place opens, never at launch:** listing starts every server.
+
+**Verified.**
+- `scripts/build.sh test`: 282 cases, no Swift warning. They read documents recorded from the installed binary over a scratch home (`agents-list`, `mcp-list`, `mcp-presets`, `symphonies-list`, `symphony-show`, `symphony-play`): the shipped agents and one scaffolded, `code-exec` registered and connected, the starters with a spec file and a config entry, and a play on a mock backend. New tests cover:
+  - every read;
+  - create, delete (purge and keep), a shipped agent's files read-only, an own file written where the CLI reads it and said honestly;
+  - a play argv-exact and supervised, with its document read;
+  - an own spec saved, refused verbatim by a scripted `symphonies show`, and put back;
+  - MCP: nothing at launch, a preset registered byte-identically, disable, a tool tried as typed.
+- **Drawn offscreen over the real binary in the scratch home:** an agent with its files; `critique-revise` played on the mock, with each stage's answer and the output; the connected `code` server with its tools, `code-exec`'s description and `self`'s refusal.
+- Bare `lib/scripts/cicd.sh --test` passed in 7m26s: the CLI's 3,593 tests, none failing, and the app's 282 cases, none failing and none skipped, with no warning.

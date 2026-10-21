@@ -6,8 +6,8 @@ import Testing
 struct KeyMapTests {
     @Test("the places are the design's seven, in its order, on ⌘1 to ⌘7")
     func places() {
-        #expect(Destination.allCases.map(\.title) == ["Sessions", "Models", "Suites", "Tasks", "Code graph", "Video", "Voice", "Knowledge", "Training"])
-        #expect(Destination.allCases.map(\.key.symbols) == ["⌘1", "⌘2", "⌘3", "⌘4", "⌘5", "⌘6", "⌘7", "⌘8", "⌘9"])
+        #expect(Destination.allCases.map(\.title) == ["Sessions", "Models", "Suites", "Tasks", "Code graph", "Video", "Voice", "Knowledge", "Training", "Library"])
+        #expect(Destination.allCases.map(\.key.symbols) == ["⌘1", "⌘2", "⌘3", "⌘4", "⌘5", "⌘6", "⌘7", "⌘8", "⌘9", "⌘0"])
         for destination in Destination.allCases {
             #expect(KeyMap.chord(for: .go(destination)) == destination.key)
         }
@@ -29,7 +29,7 @@ struct KeyMapTests {
         for binding in KeyMap.shell where !binding.isPlace {
             #expect(listed.contains(binding.chord.symbols), "\(binding.label) on \(binding.chord.symbols)")
         }
-        #expect(KeyMap.reference.contains(KeyReference("Sessions, Models, Suites, Tasks, Code graph, Video, Voice, Knowledge, Training", "⌘1 – ⌘9")))
+        #expect(KeyMap.reference.contains(KeyReference("Sessions, Models, Suites, Tasks, Code graph, Video, Voice, Knowledge, Training, Library", "⌘1 – ⌘9, ⌘0")))
         #expect(KeyMap.reference.count == 21)
     }
 

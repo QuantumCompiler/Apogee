@@ -132,6 +132,7 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{p.isVoice}}"><svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 7v2M4.75 5v6M7.5 2.5v11M10.25 5v6M13 6.5v3"></path></svg></sc-if>
 <sc-if value="{{p.isKnowledge}}"><svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h3v11H3zM7 2.5h3v11H7z"></path><path d="M10.6 3.2l2.5.7-2.5 9.4-2.5-.7z"></path></svg></sc-if>
 <sc-if value="{{p.isTraining}}"><svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6L8 3l6.5 3L8 9z"></path><path d="M4 7.3v3.4C5.5 12 10.5 12 12 10.7V7.3M14.5 6v4"></path></svg></sc-if>
+<sc-if value="{{p.isLibrary}}"><svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h4v4h-4zM9.5 3.5h4v4h-4zM2.5 9.5h4v4h-4z"></path><path d="M11.5 9.5v4M9.5 11.5h4"></path></svg></sc-if>
 <sc-if value="{{p.hasBadge}}"><span aria-hidden="true" style="position: absolute; top: 6px; right: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--status-accent); box-shadow: 0 0 0 2px var(--surface-sidebar)"></span></sc-if>
 </button>
 </sc-for>
@@ -1022,6 +1023,57 @@ a{color:inherit}a:hover{color:inherit}
 </div>
 </div>
 </sc-if>
+</sc-if>
+
+<sc-if value="{{ui.isLibrary}}">
+<header class="ap-tools" style="flex: 0 0 52px; display: flex; align-items: center; gap: 14px; padding: 0 16px 0 24px; border-bottom: 1px solid var(--line-border)">
+<h1 style="margin: 0; font-size: var(--t-title); font-weight: 600">Library</h1>
+<span style="font-size: var(--t-small); color: var(--text-tertiary)">The agents, symphonies and MCP servers runs draw on</span>
+<span style="flex: 1 1 auto"></span>
+<div role="group" aria-label="Show" class="seg">
+<button type="button" aria-pressed="{{lb.agOn}}" onClick="{{lb.showAgents}}" style="background: {{lb.agBg}}; color: var(--text-primary)">Agents</button>
+<button type="button" aria-pressed="{{lb.syOn}}" onClick="{{lb.showSymphonies}}" style="background: {{lb.syBg}}; color: var(--text-primary)">Symphonies</button>
+<button type="button" aria-pressed="{{lb.mcOn}}" onClick="{{lb.showMcp}}" style="background: {{lb.mcBg}}; color: var(--text-primary)">MCP servers</button>
+</div>
+<sc-if value="{{lb.agOn}}"><button type="button" class="btn-g" onClick="{{lb.newAgent}}">New agent…</button></sc-if>
+</header>
+<div style="flex: 1 1 0; min-height: 0; display: flex">
+<nav aria-label="Definitions" style="flex: 0 0 300px; min-height: 0; overflow-y: auto; padding: 12px 10px; background: var(--surface-sidebar); border-right: 1px solid var(--line-border)">
+<sc-for list="{{lb.rows}}" as="r" hint-placeholder-count="4"><button type="button" class="hv" onClick="{{r.pick}}" aria-current="{{r.current}}" style="width: 100%; display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; margin-bottom: 4px; border: 0; border-radius: 7px; background: {{r.bg}}; text-align: left; color: var(--text-primary)"><span>{{r.name}}</span><span style="font-size: var(--t-meta); color: var(--text-tertiary)">{{r.meta}}</span></button></sc-for>
+</nav>
+<div style="flex: 1 1 0; min-width: 0; overflow-y: auto; padding: 22px 28px 32px"><div style="max-width: 820px">
+<sc-if value="{{lb.agOn}}">
+<div style="display: flex; align-items: center; gap: 10px"><h2 style="flex: 1 1 auto; margin: 0; font-size: var(--t-h2); font-weight: 600">triage</h2><button type="button" class="btn-g" onClick="{{lb.del}}" style="color: var(--status-error)">Delete…</button></div>
+<p style="margin: 8px 0 0">Sort incoming issues by area</p>
+<p style="margin: 6px 0 0; font-size: var(--t-small); color: var(--text-secondary)">Model: the default · tools: read-only</p>
+<h3 class="lbl" style="margin: 20px 0 6px">FILES</h3>
+<sc-for list="{{lb.files}}" as="f"><div style="display: flex; align-items: center; min-height: 28px"><span class="mono" style="flex: 1 1 auto">{{f.name}}</span><button type="button" class="btn-g" onClick="{{f.edit}}" style="height: 24px; font-size: var(--t-small)">Edit</button></div></sc-for>
+<p class="mono" style="margin: 14px 0 0; font-size: var(--t-meta); color: var(--text-tertiary)">apogee analyze --agent triage runs it.</p>
+</sc-if>
+<sc-if value="{{lb.syOn}}">
+<h2 style="margin: 0; font-size: var(--t-h2); font-weight: 600">critique-revise</h2>
+<p style="margin: 8px 0 0">Critique a draft against what it is meant to do, then revise it to answer the critique.</p>
+<div style="margin-top: 14px; font-weight: 500; font-size: var(--t-small)">1. critique · asks utility</div>
+<div style="margin-top: 6px; font-weight: 500; font-size: var(--t-small)">2. revise · asks chat</div>
+<p style="margin: 12px 0 0; font-size: var(--t-small); color: var(--text-tertiary)">A shipped starter: apogee symphonies edit critique-revise makes it yours, at a prompt.</p>
+<h3 class="lbl" style="margin: 20px 0 6px">PLAY</h3>
+<input type="text" class="inp" value="A draft README for the tool." aria-label="Its input" style="width: 100%"><div style="margin-top: 8px"><button type="button" class="btn-g" onClick="{{lb.play}}">Play</button></div>
+<sc-if value="{{lb.played}}">
+<div class="mono" style="margin-top: 14px; font-size: var(--t-meta); color: var(--text-tertiary)">critique · utility (writer)</div><div style="font-size: var(--t-small)">1. The draft never says who it is for. 2. The second paragraph repeats the first.</div>
+<div class="mono" style="margin-top: 10px; font-size: var(--t-meta); color: var(--text-tertiary)">revise · chat (writer)</div><div style="font-size: var(--t-small)">A tighter draft, for new contributors: what the tool does, then how to run it.</div>
+<h3 class="lbl" style="margin: 16px 0 4px">OUTPUT</h3><div>A tighter draft, for new contributors: what the tool does, then how to run it.</div>
+</sc-if>
+</sc-if>
+<sc-if value="{{lb.mcOn}}">
+<div style="display: flex; align-items: center; gap: 10px"><h2 style="flex: 1 1 auto; margin: 0; font-size: var(--t-h2); font-weight: 600">code</h2><button type="button" class="btn-g" onClick="{{lb.toggle}}">Disable</button></div>
+<div class="mono" style="margin-top: 8px; font-size: var(--t-meta); color: var(--text-secondary)">python3 ~/.apogee/training/scripts/code_exec_server.py</div>
+<p style="margin: 6px 0 0; font-size: var(--t-small); color: var(--text-secondary)">connected · 2 tools: run_python, write_input · environment: none</p>
+<h3 class="lbl" style="margin: 20px 0 6px">PRESETS APOGEE SHIPS</h3>
+<div style="font-weight: 500">code-exec</div><div style="font-size: var(--t-small); color: var(--text-secondary)">Runs Python for any model, local or cloud: a working directory kept for the session and deleted after it, the network off, each run bounded -- Apogee's code-execution server</div>
+<div style="margin-top: 12px; font-weight: 500">self</div><div style="font-size: var(--t-small); color: var(--text-tertiary)">'self' is Apogee's own tools, served for another MCP host: registered into Apogee it would serve Apogee the tools it already has natively. Give another host its entry instead (apogee mcp presets)</div>
+</sc-if>
+</div></div>
+</div>
 </sc-if>
 
 <sc-if value="{{ui.isTraining}}">
@@ -2079,7 +2131,7 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{ui.toastOn}}"><div role="status" style="position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 80; max-width: calc(100% - 48px); padding: 9px 16px; border-radius: 8px; background: var(--text-primary); color: var(--surface-window); font-size: var(--t-small); box-shadow: 0 8px 24px rgba(0,0,0,.3)">{{ui.toastText}}</div></sc-if>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","monitor","console","knowledge","knowledge:collections","graph:prose","training","training:datasets","models","models:downloads","models:store","models:convert","models:register","models:roles","download","suites","tasks","newtask","graph","video","video:run","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions"],"default":"chat"},"still":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
+<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","monitor","console","knowledge","knowledge:collections","graph:prose","training","training:datasets","library","library:symphonies","library:mcp","models","models:downloads","models:store","models:convert","models:register","models:roles","download","suites","tasks","newtask","graph","video","video:run","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions"],"default":"chat"},"still":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
 class Component extends DCLogic {
   constructor(props) {
     super(props);
@@ -2091,6 +2143,7 @@ class Component extends DCLogic {
       console: false,
       con: null,
       kn: { tab: 'records', asked: false, branch: '', sel: '', coll: 'notes', searched: false },
+      lib: { tab: 'agents', agent: 'triage', sym: 'critique-revise', played: false },
       tr: { tab: 'runs', sel: '20261021-051826', regime: 'foundation', dataset: 'heat-notes', running: false },
       confirm: null,
       settingsPane: 'general',
@@ -2275,6 +2328,7 @@ class Component extends DCLogic {
       }
     } else if (where === 'download') set({ screen: 'models', overlay: 'download', dl: { repo: 'Wan-AI/Wan2.1-T2V-1.3B-Diffusers', format: 'gguf', quant: 'Q4_K_M' } });
     else if (where === 'graph' && sub === 'prose') set({ screen: 'graph', gView: 'prose' });
+    else if (where === 'library') set({ screen: 'library', lib: { tab: sub || 'agents', played: sub === 'symphonies' } });
     else if (where === 'training') set({ screen: 'training', tr: sub === 'datasets' ? { tab: 'datasets', sel: '20261021-051826', regime: 'foundation', running: false } : { tab: 'runs', sel: '20261021-051826', regime: 'foundation', running: true } });
     else if (where === 'knowledge') set({ screen: 'knowledge', kn: sub === 'collections' ? { tab: 'collections', coll: 'notes', searched: true } : { tab: 'records', asked: true, branch: '', sel: 'kr-20261021T045944Z-1e2354', coll: 'notes', searched: false } });
     else if (where === 'suites' || where === 'tasks' || where === 'graph' || where === 'voice') set({ screen: where });
@@ -3841,9 +3895,9 @@ class Component extends DCLogic {
     const runningJobs = s.jobs.filter((j) => j.state === 'running' && !j.finished).length;
     const runningTasks = s.tasks.filter((t) => t.status === 'running' && this.taskView(t).isRunning).length;
     const videoBusy = (s.vrun && !s.vrun.stopped ? 1 : 0) + (s.crender ? 1 : 0);
-    const places = [['chat', 'Sessions', '⌘1', 0], ['models', 'Models', '⌘2', runningJobs], ['suites', 'Suites', '⌘3', 0], ['tasks', 'Tasks', '⌘4', runningTasks], ['graph', 'Code graph', '⌘5', 0], ['video', 'Video', '⌘6', videoBusy], ['voice', 'Voice', '⌘7', s.vsay ? 1 : 0], ['knowledge', 'Knowledge', '⌘8', 0], ['training', 'Training', '⌘9', s.tr && s.tr.running ? 1 : 0]].map((p) => ({
+    const places = [['chat', 'Sessions', '⌘1', 0], ['models', 'Models', '⌘2', runningJobs], ['suites', 'Suites', '⌘3', 0], ['tasks', 'Tasks', '⌘4', runningTasks], ['graph', 'Code graph', '⌘5', 0], ['video', 'Video', '⌘6', videoBusy], ['voice', 'Voice', '⌘7', s.vsay ? 1 : 0], ['knowledge', 'Knowledge', '⌘8', 0], ['training', 'Training', '⌘9', s.tr && s.tr.running ? 1 : 0], ['library', 'Library', '⌘0', 0]].map((p) => ({
       label: p[1], key: p[2], current: s.screen === p[0], bg: s.screen === p[0] ? 'var(--surface-selection)' : '', color: s.screen === p[0] ? 'var(--text-primary)' : 'var(--text-secondary)', weight: s.screen === p[0] ? 500 : 400,
-      isChat: p[0] === 'chat', isModels: p[0] === 'models', isSuites: p[0] === 'suites', isTasks: p[0] === 'tasks', isGraph: p[0] === 'graph', isVideo: p[0] === 'video', isVoice: p[0] === 'voice', isKnowledge: p[0] === 'knowledge', isTraining: p[0] === 'training',
+      isChat: p[0] === 'chat', isModels: p[0] === 'models', isSuites: p[0] === 'suites', isTasks: p[0] === 'tasks', isGraph: p[0] === 'graph', isVideo: p[0] === 'video', isVoice: p[0] === 'voice', isKnowledge: p[0] === 'knowledge', isTraining: p[0] === 'training', isLibrary: p[0] === 'library',
       hasBadge: p[3] > 0, badge: p[3] + ' running', badgeColor: 'var(--status-accent)',
       aria: p[1] + ' ' + p[2] + (p[3] > 0 ? ' · ' + p[3] + ' running' : ''),
       go: () => this.setState({ screen: p[0], menu: null })
@@ -4581,7 +4635,7 @@ class Component extends DCLogic {
       recallSize: s.recallCount ? '41 MB index on this Mac' : 'nothing stored',
       nothingToForget: s.recallCount === 0,
       forget: () => this.setState({ confirm: { kind: 'forget' } }),
-      keys: [['New session', '⌘N'], ['New private session', '⇧⌘N'], ['Switch model', '⇧⌘M'], ['Show or hide the inspector', '⌥⌘I'], ['System monitor', '⌥⌘M'], ['Console', '⇧⌘K'], ['Settings', '⌘,'], ['Stop the answer', '⌘.'], ['Search sessions', '⇧⌘F'], ['Sessions, Models, Suites, Tasks, Code graph, Video, Voice, Knowledge, Training', '⌘1 – ⌘9'], ['Models library', '⇧⌘L'], ['Send', '⏎'], ['New line', '⇧⏎'], ['Commands', '/'], ['Mention a file', '@'], ['Allow once on a permission card', '⏎'], ['Deny on a permission card', 'esc'], ['Pick an answer on a card', '1 – 4'], ['Play or pause the focused player', 'space'], ['Generate, Speak, Plan or Render, from its form', '⌘⏎'], ['Hide the sidebar', '⌃⌘S']].map((x) => ({ label: x[0], keys: x[1] }))
+      keys: [['New session', '⌘N'], ['New private session', '⇧⌘N'], ['Switch model', '⇧⌘M'], ['Show or hide the inspector', '⌥⌘I'], ['System monitor', '⌥⌘M'], ['Console', '⇧⌘K'], ['Settings', '⌘,'], ['Stop the answer', '⌘.'], ['Search sessions', '⇧⌘F'], ['Sessions, Models, Suites, Tasks, Code graph, Video, Voice, Knowledge, Training, Library', '⌘1 – ⌘9, ⌘0'], ['Models library', '⇧⌘L'], ['Send', '⏎'], ['New line', '⇧⏎'], ['Commands', '/'], ['Mention a file', '@'], ['Allow once on a permission card', '⏎'], ['Deny on a permission card', 'esc'], ['Pick an answer on a card', '1 – 4'], ['Play or pause the focused player', 'space'], ['Generate, Speak, Plan or Render, from its form', '⌘⏎'], ['Hide the sidebar', '⌃⌘S']].map((x) => ({ label: x[0], keys: x[1] }))
     };
 
     /* ---------- suites ---------- */
@@ -4662,6 +4716,28 @@ class Component extends DCLogic {
         const task = { id: id, goal: n.goal.trim(), kind: 'generic', status: 'running', base: 0, since: st.clock, rounds: Number(n.rounds), suite: suitesDef[n.suite].name, started: 'today ' + this.nowTime(), writes: n.writes, cmds: n.cmds, haltAt: null };
         this.setState({ tasks: [task].concat(st.tasks), taskId: id, overlay: null, screen: 'tasks' });
       }
+    };
+
+    /* ---------- library ---------- */
+    const lbs = s.lib || { tab: 'agents' };
+    const lbPatch = (p) => this.setState({ lib: Object.assign({}, lbs, p) });
+    const lbTab = lbs.tab || 'agents';
+    const lbRows = lbTab === 'agents'
+      ? [['triage', 'yours · read-only'], ['security-review', 'shipped · read-only'], ['release-notes', 'shipped · read-only'], ['code-review', 'shipped · read-only']]
+      : lbTab === 'symphonies'
+        ? [['critique-revise', '2 stages · shipped'], ['digest', '2 stages · shipped'], ['summarize-verify', '2 stages · shipped'], ['quick-check', '1 stage · config'], ['notes-digest', '2 stages · file']]
+        : [['code', 'connected · 2 tools']];
+    const lb = {
+      agOn: lbTab === 'agents', syOn: lbTab === 'symphonies', mcOn: lbTab === 'mcp',
+      agBg: lbTab === 'agents' ? 'var(--surface-control)' : 'transparent', syBg: lbTab === 'symphonies' ? 'var(--surface-control)' : 'transparent', mcBg: lbTab === 'mcp' ? 'var(--surface-control)' : 'transparent',
+      showAgents: () => lbPatch({ tab: 'agents' }), showSymphonies: () => lbPatch({ tab: 'symphonies' }), showMcp: () => lbPatch({ tab: 'mcp' }),
+      rows: lbRows.map((r, i) => ({ name: r[0], meta: r[1], current: i === 0, bg: i === 0 ? 'var(--surface-selection)' : '', pick: () => {} })),
+      files: ['prompts/triage.txt', 'schemas/triage-output.json'].map((f) => ({ name: f, edit: () => this.say('Edited in the app, saved to ' + f + ' (prototype)') })),
+      newAgent: () => this.say('apogee agents create <name> (prototype)'),
+      del: () => this.say('apogee agents delete triage --purge | --keep-files: confirmed first (prototype)'),
+      play: () => lbPatch({ played: true }),
+      played: !!lbs.played,
+      toggle: () => this.say('apogee mcp disable code (prototype)')
     };
 
     /* ---------- training ---------- */
@@ -5554,6 +5630,7 @@ class Component extends DCLogic {
       isVoice: s.screen === 'voice',
       isKnowledge: s.screen === 'knowledge',
       isTraining: s.screen === 'training',
+      isLibrary: s.screen === 'library',
       runtimeOpen: !!s.rtAsk && !s.rtAsk.hidden,
       monitorOpen: s.monitor,
       consoleOpen: s.console,
@@ -5570,7 +5647,7 @@ class Component extends DCLogic {
       openPdf: () => this.say('Opens the source in Preview at that page (prototype)')
     };
 
-    return { ui: ui, nav: nav, mon: mon, con: con, kno: kno, trn: trn, chat: chat, tg: tg, rt: rt, wal: wal, cr: cr, pr: pr, cmp: cmp, ins: ins, mdl: mdl, st: st, sh: sh, dlg: dlg, cf: cf, set: setv, sui: sui, tsk: tsk, nt: ntv, gr: gr, vid: vid, comp: comp, vox: vox, rtc: rtc };
+    return { ui: ui, nav: nav, mon: mon, con: con, kno: kno, trn: trn, lb: lb, chat: chat, tg: tg, rt: rt, wal: wal, cr: cr, pr: pr, cmp: cmp, ins: ins, mdl: mdl, st: st, sh: sh, dlg: dlg, cf: cf, set: setv, sui: sui, tsk: tsk, nt: ntv, gr: gr, vid: vid, comp: comp, vox: vox, rtc: rtc };
   }
 }
 </script>

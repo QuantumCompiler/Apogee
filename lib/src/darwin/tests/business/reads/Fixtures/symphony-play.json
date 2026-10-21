@@ -1,0 +1,24 @@
+{
+ "object": "symphony.play",
+ "output": "A tighter draft, for new contributors: what the tool does, then how to run it.",
+ "stages": [
+  {
+   "answer": "1. The draft never says who it is for.\n2. The second paragraph repeats the first.",
+   "backend": "writer",
+   "cut": false,
+   "name": "critique",
+   "role": "utility",
+   "seconds": 0.0
+  },
+  {
+   "answer": "A tighter draft, for new contributors: what the tool does, then how to run it.",
+   "backend": "writer",
+   "cut": false,
+   "name": "revise",
+   "role": "chat",
+   "seconds": 0.0
+  }
+ ],
+ "suite": null,
+ "symphony": "critique-revise"
+}

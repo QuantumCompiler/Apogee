@@ -1,8 +1,8 @@
 /// A place in the sidebar: one screen of the app, reached by its key.
 ///
-/// The design's nine places, in its order (`main.html`'s places bar,
-/// `BuildLayout.dc.html`'s keys): ⌘1 to ⌘9 -- Knowledge the eighth since 2c,
-/// Training the ninth since 2d. Compositions live under Video,
+/// The design's ten places, in its order (`main.html`'s places bar,
+/// `BuildLayout.dc.html`'s keys): ⌘1 to ⌘9, then ⌘0 -- Knowledge the eighth
+/// since 2c, Training the ninth since 2d, Library the tenth since 2e. Compositions live under Video,
 /// as the design draws them -- its second tab -- not as a place of their own.
 public enum Destination: String, CaseIterable, Sendable, Identifiable {
     case sessions
@@ -14,6 +14,7 @@ public enum Destination: String, CaseIterable, Sendable, Identifiable {
     case voice
     case knowledge
     case training
+    case library
 
     public var id: String { rawValue }
 
@@ -28,6 +29,7 @@ public enum Destination: String, CaseIterable, Sendable, Identifiable {
         case .voice: "Voice"
         case .knowledge: "Knowledge"
         case .training: "Training"
+        case .library: "Library"
         }
     }
 
@@ -43,12 +45,14 @@ public enum Destination: String, CaseIterable, Sendable, Identifiable {
         case .voice: "waveform"
         case .knowledge: "books.vertical"
         case .training: "graduationcap"
+        case .library: "puzzlepiece.extension"
         }
     }
 
-    /// ⌘1 for the first place, ⌘9 for the last.
+    /// ⌘1 for the first place, ⌘9 for the ninth, ⌘0 for the tenth.
     public var key: KeyChord {
-        KeyChord(String(Destination.allCases.firstIndex(of: self)! + 1), .command)
+        let number = Destination.allCases.firstIndex(of: self)! + 1
+        return KeyChord(number == 10 ? "0" : String(number), .command)
     }
 
     /// What a place says while its screen is not built: what will live there,
@@ -72,6 +76,8 @@ public enum Destination: String, CaseIterable, Sendable, Identifiable {
         case .knowledge:
             nil
         case .training:
+            nil
+        case .library:
             nil
         }
     }

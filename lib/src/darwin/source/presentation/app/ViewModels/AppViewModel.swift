@@ -7,6 +7,7 @@ import Observation
 import PresentationCompose
 import PresentationGraph
 import PresentationKnowledge
+import PresentationLibrary
 import PresentationTraining
 import PresentationModels
 import PresentationConsole
@@ -42,6 +43,9 @@ final class AppViewModel {
     let records: RecordsViewModel
     let collections: CollectionsViewModel
     let training: TrainingViewModel
+    let agents: AgentsViewModel
+    let symphonies: SymphoniesViewModel
+    let mcp: MCPViewModel
     let video: VideoViewModel
     let compose: ComposeViewModel
     let voice: VoiceViewModel
@@ -84,6 +88,12 @@ final class AppViewModel {
         collections.say = { [weak shell] text in shell?.say(text) }
         let training = TrainingViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
         training.say = { [weak shell] text in shell?.say(text) }
+        let agents = AgentsViewModel(runner: runner ?? ReadRunner())
+        agents.say = { [weak shell] text in shell?.say(text) }
+        let symphonies = SymphoniesViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
+        symphonies.say = { [weak shell] text in shell?.say(text) }
+        let mcp = MCPViewModel(runner: runner ?? ReadRunner())
+        mcp.say = { [weak shell] text in shell?.say(text) }
         let video = VideoViewModel(
             starter: jobs ?? JobStarter(), preferences: preferences, home: FileManager.default.homeDirectoryForCurrentUser)
         video.say = { [weak shell] text in shell?.say(text) }
@@ -109,7 +119,7 @@ final class AppViewModel {
         }
         // Sessions in view or not: the library keeps its one child to the
         // session on screen. A place coming into view reads again.
-        shell.routeChanged = { [weak sessions, weak models, weak tasks, weak suites, weak graph, weak video, weak compose, weak voice, weak records, weak collections, weak training] destination in
+        shell.routeChanged = { [weak sessions, weak models, weak tasks, weak suites, weak graph, weak video, weak compose, weak voice, weak records, weak collections, weak training, weak agents, weak symphonies, weak mcp] destination in
             Task {
                 if destination == .sessions { await sessions?.cameIntoView() } else { await sessions?.leftView() }
                 if destination == .models { await models?.appeared() }
@@ -117,6 +127,11 @@ final class AppViewModel {
                 if destination == .suites { await suites?.appeared() }
                 if destination == .graph { await graph?.appeared() }
                 if destination == .training { await training?.appeared() }
+                if destination == .library {
+                    await agents?.refresh()
+                    await symphonies?.refresh()
+                    await mcp?.refresh()
+                }
                 if destination == .knowledge {
                     await records?.appeared()
                     await collections?.appeared()
@@ -140,6 +155,9 @@ final class AppViewModel {
         self.records = records
         self.collections = collections
         self.training = training
+        self.agents = agents
+        self.symphonies = symphonies
+        self.mcp = mcp
         self.video = video
         self.compose = compose
         self.voice = voice
@@ -163,6 +181,9 @@ final class AppViewModel {
         await records.connect(binary: sessions.binaryURL)
         await collections.connect(binary: sessions.binaryURL)
         await training.connect(binary: sessions.binaryURL)
+        await agents.connect(binary: sessions.binaryURL)
+        await symphonies.connect(binary: sessions.binaryURL)
+        mcp.use(binary: sessions.binaryURL)
         video.connect(binary: sessions.binaryURL)
         compose.connect(binary: sessions.binaryURL)
         await voice.connect(binary: sessions.binaryURL)

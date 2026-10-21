@@ -1,6 +1,7 @@
 import PresentationCompose
 import PresentationGraph
 import PresentationKnowledge
+import PresentationLibrary
 import PresentationTraining
 import PresentationModels
 import PresentationConsole
@@ -59,6 +60,7 @@ public struct ApogeeApp: App {
                 case .voice: VoiceScreen(model: model.voice)
                 case .knowledge: KnowledgeScreen(records: model.records, collections: model.collections)
                 case .training: TrainingScreen(model: model.training)
+                case .library: LibraryScreen(agents: model.agents, symphonies: model.symphonies, mcp: model.mcp)
                 case .suites: SuitesScreen(model: model.suites)
                 case .graph: GraphScreen(model: model.graph, shell: model.shell)
                 case .video:

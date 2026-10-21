@@ -479,6 +479,33 @@
       "y": 2720,
       "title": "Training · datasets and kits",
       "page": "build"
+    },
+    "ScreenLibrary.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 24320,
+      "y": 2720,
+      "title": "Library · agents",
+      "page": "build"
+    },
+    "ScreenLibrarySymphonies.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 25840,
+      "y": 2720,
+      "title": "Library · a symphony played",
+      "page": "build"
+    },
+    "ScreenLibraryMCP.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 27360,
+      "y": 2720,
+      "title": "Library · MCP servers and presets",
+      "page": "build"
     }
   },
   "createdOnFiles": {
@@ -509,8 +536,8 @@
     },
     "library": {
       "kind": "title1",
-      "maxW": 24240,
-      "text": "Screens — models, suites, tasks, the code graph, knowledge and training",
+      "maxW": 28800,
+      "text": "Screens — models, suites, tasks, the code graph, knowledge, training and the library",
       "x": 0,
       "y": 2420,
       "page": "build"
@@ -589,6 +616,9 @@
     "ScreenCollections.dc.html",
     "ScreenTraining.dc.html",
     "ScreenTrainingDatasets.dc.html",
+    "ScreenLibrary.dc.html",
+    "ScreenLibrarySymphonies.dc.html",
+    "ScreenLibraryMCP.dc.html",
     "ScreenVideoClip.dc.html",
     "ScreenVideoRun.dc.html",
     "ScreenVideoConsent.dc.html",
