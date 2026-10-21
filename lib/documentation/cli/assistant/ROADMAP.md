@@ -229,6 +229,18 @@ The release's LoRA track *(track 53, opened 2026-10-21 from that day's spike)*: 
 - [ ] **The doctor and the gate** *([53c](../backlog/v0.2.0/adapter-doctor-and-gate.md))* — `check` rows per adapter (present, base matching, runnable remedies), and the eval gate scoring each candidate on the base that will actually serve it — the quantized-base quality cost measured per candidate, never assumed.
 - [ ] **One base, many roles** *([53d](../backlog/v0.2.0/one-base-many-roles.md))* — suite members on one base share a single loaded model, each through its own per-context adapter set (the pin's own API design); the footprint prices the shared base once; the RAM saving is the recorded real pass.
 
+The release's MLX-for-every-kind track *(53e–53m, opened 2026-10-21 from that day's spike, the user's call)*: of the user's 18 stored SafeTensors sets, 11 convert to MLX today, 7 of them losing their vision or audio towers, and 7 cannot. MLX libraries build every kind: mlx-vlm, mlx-embeddings, mlx-video and mlx-audio. Apogee's walls are its own: one converter, every MLX directory taken for a chat model, no audio, embedding or drafting on the MLX backend, video and voice on PyTorch alone, and a Wan set pulled without its encoder and VAE.
+
+- [ ] **MLX records say their kind** *([53e](../backlog/v0.2.0/mlx-records-say-their-kind.md))* — each MLX directory's record says `chat`, `vision`, `embedding`, `drafter`, `video` or `voice`, and the listing, `models info`, `config scan --register` and roles follow it.
+- [ ] **Vision and omni through mlx-vlm** *([53f](../backlog/v0.2.0/mlx-vlm-conversions.md))* — towered sets convert with their towers kept, Qwen3-Omni becomes convertible, a `vision` directory runs through mlx-vlm for every turn; `--text-only` keeps the old build.
+- [ ] **Audio into MLX omni models** *([53g](../backlog/v0.2.0/mlx-audio-input.md))* — the mlx backend hears, through mlx-vlm, where the directory has an audio tower.
+- [ ] **Embeddings on MLX** *([53h](../backlog/v0.2.0/mlx-embeddings.md))* — mlx-embeddings converts and serves the embedding role; EmbeddingGemma gains MLX beside its GGUF.
+- [ ] **Gemma 4 drafters on MLX** *([53i](../backlog/v0.2.0/mlx-draft-heads.md))* — the four assistants become drafters beside their bases; built, or first measured, on the user's word.
+- [ ] **Wan pulled whole** *([53j](../backlog/v0.2.0/wan-pulled-whole.md))* — the pull takes Wan's T5 encoder and VAE, the user's set is completed in place, and the refusal says what it lacks and what runs it.
+- [ ] **Wan converted through mlx-video** *([53k](../backlog/v0.2.0/mlx-video-convert.md))* — the original layout to an MLX video directory; mlx-video's GitHub-only install is the user's call.
+- [ ] **`video generate` on MLX** *([53l](../backlog/v0.2.0/mlx-video-generate.md))* — a second engine on the one generation core, chosen by the model's directory.
+- [ ] **Voice on MLX** *([53m](../backlog/v0.2.0/mlx-voice.md))* — Kokoro through mlx-audio, `voice say` on an MLX engine.
+
 ### v0.1.9 — Desktop-parity capabilities
 
 Opened 2026-10-16 (the user's call, from that day's built-in-MCP parity spike — track **47**): the capabilities that make Claude Desktop and ChatGPT feel ahead, shipped Apogee's way. The spike's reframe, measured: MCP servers are provider-neutral (the host already translates per vendor; Apogee itself answers the MCP handshake with 17 tools), so the provider-specific work is the vendors' **server-side tools** — and that is wire work in the backends, settled by the user the same day as **allowed, default-off, per entry** (the dated SPEC principle). In build order:

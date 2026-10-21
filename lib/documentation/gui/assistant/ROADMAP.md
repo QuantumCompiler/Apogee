@@ -50,6 +50,13 @@ Opened 2026-10-20 (the user's call, from the first hands-on run: the GUI does ev
 - [x] **The model store** *(2h, shipped 2026-10-21 — [MILESTONES → Milestone C](MILESTONES.md#milestone-c--cli-parity))* — Backends and Stored weights apart, as the design draws them: every set by its handle, with made-from links; register one or all, remove a backend, delete with or without its backends, rename.
 - [x] **Convert, quantize and check as jobs** *(2i, shipped 2026-10-21 — [MILESTONES → Milestone C](MILESTONES.md#milestone-c--cli-parity))* — the sheets build the CLI's own chain, with names as the CLI gives them; each run is supervised on the Jobs tab, using the G18 and G20 fallbacks.
 
+### v0.2.0 — Track 3, MLX kinds in the app
+
+Opened 2026-10-21 from the CLI's MLX-for-every-kind spike (the user's call): the CLI's 53e–53m make MLX directories of six kinds and add MLX engines for video and voice, and drafters for Gemma 4. The app follows what the binary states.
+
+- [ ] **MLX kinds in Stored weights** *([3a](../backlog/v0.2.0/mlx-kinds-in-stored-weights.md), gated on the CLI's 53e)* — each MLX set says its kind and offers only its kind's actions; the convert sheet says when towers are kept.
+- [ ] **MLX engines and drafters** *([3b](../backlog/v0.2.0/mlx-engines-and-drafters.md), gated on 3a and the CLI's 53i, 53l, 53m)* — drafters paired with their bases, and the clip and say sheets naming their engine.
+
 
 ---
 
