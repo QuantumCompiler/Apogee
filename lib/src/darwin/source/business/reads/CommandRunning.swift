@@ -9,6 +9,22 @@ public protocol CommandRunning: Sendable {
     func read(binary: URL, _ arguments: [String]) async -> ReadOutcome
     /// `apogee <arguments>`, exactly as a person would type it.
     func command(binary: URL, _ arguments: [String]) async -> CommandOutcome
+    /// The same, `input` written to its standard input -- a secret goes this
+    /// way, never on a command line.
+    func command(binary: URL, _ arguments: [String], input: Data?) async -> CommandOutcome
+    /// A read whose document stands whatever its exit: `check` exits
+    /// non-zero when a row fails, and its document says which.
+    func report(binary: URL, _ arguments: [String]) async -> ReadOutcome
+}
+
+extension CommandRunning {
+    public func command(binary: URL, _ arguments: [String], input: Data?) async -> CommandOutcome {
+        await command(binary: binary, arguments)
+    }
+
+    public func report(binary: URL, _ arguments: [String]) async -> ReadOutcome {
+        await read(binary: binary, arguments)
+    }
 }
 
 extension ReadRunner: CommandRunning {
@@ -17,10 +33,33 @@ extension ReadRunner: CommandRunning {
     }
 
     public func command(binary: URL, _ arguments: [String]) async -> CommandOutcome {
+        await command(binary: binary, arguments, input: nil)
+    }
+
+    public func report(binary: URL, _ arguments: [String]) async -> ReadOutcome {
         let run: CapturedRun
         do {
             run = try await spawner.capture(
-                ChildCommand(executable: binary, arguments: arguments), timeout: timeout)
+                ChildCommand(executable: binary, arguments: arguments + ["--output-format", "json"]), timeout: timeout)
+        } catch {
+            return .couldNotStart("\(error)")
+        }
+        if let document = ReadDocument(text: run.stdout) {
+            return .document(document)
+        }
+        if run.timedOut {
+            return .timedOut(after: timeout, stderrTail: run.stderrTail)
+        }
+        return run.exit.succeeded
+            ? .undecodable(stdout: String(run.stdout.prefix(4096)), stderrTail: run.stderrTail)
+            : .failed(exit: run.exit, stderrTail: run.stderrTail)
+    }
+
+    public func command(binary: URL, _ arguments: [String], input: Data?) async -> CommandOutcome {
+        let run: CapturedRun
+        do {
+            run = try await spawner.capture(
+                ChildCommand(executable: binary, arguments: arguments), timeout: timeout, input: input)
         } catch {
             return .couldNotStart("\(error)")
         }

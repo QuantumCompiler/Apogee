@@ -21,6 +21,8 @@ public final class Preferences: Sendable {
         static let openChat = "openChat"
         static let videoFolders = "videoFolders"
         static let voiceFolders = "voiceFolders"
+        static let theme = "theme"
+        static let textSize = "textSize"
     }
 
     public init(store: any KeyValueStore) {
@@ -82,6 +84,18 @@ public final class Preferences: Sendable {
     public var voiceFolders: [String] {
         get { list(Key.voiceFolders) }
         set { setList(newValue, Key.voiceFolders) }
+    }
+
+    /// The Appearance setting's theme, by name; `nil` follows the system.
+    public var theme: String? {
+        get { store.string(forKey: Key.theme).flatMap { $0.isEmpty ? nil : $0 } }
+        set { store.set(newValue, forKey: Key.theme) }
+    }
+
+    /// The Appearance setting's text size, by name; `nil` is medium.
+    public var textSize: String? {
+        get { store.string(forKey: Key.textSize).flatMap { $0.isEmpty ? nil : $0 } }
+        set { store.set(newValue, forKey: Key.textSize) }
     }
 
     /// Paths, kept one a line.

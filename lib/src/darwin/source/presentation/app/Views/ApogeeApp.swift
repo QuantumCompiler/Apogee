@@ -3,6 +3,7 @@ import PresentationGraph
 import PresentationModels
 import PresentationMonitor
 import PresentationSessions
+import PresentationSettings
 import PresentationShell
 import PresentationStyles
 import PresentationSuites
@@ -10,6 +11,25 @@ import PresentationTasks
 import PresentationVideo
 import PresentationVoice
 import SwiftUI
+
+extension View {
+    /// The person's Appearance setting, applied: `styles`' theme and text
+    /// size set, the window's scheme to match, and the views drawn again when
+    /// either changes.
+    func appearance(_ theme: ThemeSettings) -> some View {
+        let applied: Appearance.Theme =
+            switch theme.choice {
+            case .system: .system
+            case .light: .light
+            case .dark: .dark
+            case .contrast: .contrast
+            }
+        Appearance.apply(theme: applied, scale: theme.size.factor)
+        return self
+            .preferredColorScheme(Appearance.colorScheme)
+            .id("\(theme.choice.rawValue)-\(theme.size.rawValue)")
+    }
+}
 
 /// The application: one window -- the shell around every screen -- and the
 /// Settings scene. Started by the `Apogee` target's entry point (source/main),
@@ -47,6 +67,7 @@ public struct ApogeeApp: App {
                 }
             }
             .frame(minWidth: Layout.windowMinWidth, minHeight: Layout.windowMinHeight)
+            .appearance(model.settings.theme)
             .navigationSubtitle(model.versionLine)
             .task { await model.start() }
             // The window closing ends its session: the turn cancelled, the
@@ -60,7 +81,8 @@ public struct ApogeeApp: App {
         }
 
         Settings {
-            SettingsPlaceholder()
+            SettingsView(model: model.settings)
+                .appearance(model.settings.theme)
         }
     }
 }

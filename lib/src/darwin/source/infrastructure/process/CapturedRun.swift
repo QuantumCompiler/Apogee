@@ -16,12 +16,16 @@ public struct CapturedRun: Sendable, Equatable {
 
 extension ChildSpawner {
     /// Runs `command` to its end with its input closed -- a one-shot command
-    /// reads nothing -- stopping it once it runs past `timeout`, or writes more
-    /// than `stdoutLimit` bytes: `terminate` first, `kill` two seconds later.
+    /// reads nothing, or reads `input` and then its end -- stopping it once it
+    /// runs past `timeout`, or writes more than `stdoutLimit` bytes:
+    /// `terminate` first, `kill` two seconds later.
     public func capture(
-        _ command: ChildCommand, timeout: Duration, stdoutLimit: Int = 64 << 20
+        _ command: ChildCommand, timeout: Duration, stdoutLimit: Int = 64 << 20, input: Data? = nil
     ) async throws -> CapturedRun {
         let child = try spawn(command)
+        if let input {
+            try? child.write(input)
+        }
         child.closeInput()
         let stopped = StopFlag()
         let timer = Task {

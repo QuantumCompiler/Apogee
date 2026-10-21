@@ -146,37 +146,3 @@ struct ToastView: View {
             .accessibilityAddTraits(.updatesFrequently)
     }
 }
-
-/// The sidebar's session list, until the library is built: says so.
-public struct SessionListPlaceholder: View {
-    public init() {}
-
-    public var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text("Sessions")
-                .font(.apogeeSmall.weight(.medium))
-                .foregroundStyle(Palette.textSecondary)
-            Text("Your earlier sessions will be listed here. Until then: apogee chats list")
-                .font(.apogeeMeta)
-                .foregroundStyle(Palette.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(Spacing.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// The Settings window, until its panes are built: says so.
-public struct SettingsPlaceholder: View {
-    public init() {}
-
-    public var body: some View {
-        PlaceholderView(
-            symbol: "gearshape",
-            placeholder: Placeholder(
-                about: "General, Appearance, Backends & keys, Video & voice and Permissions will be here.",
-                command: "apogee config get"))
-            .frame(width: 600, height: 420)
-            .background(Palette.window)
-    }
-}

@@ -276,6 +276,9 @@ public final class SessionLibraryViewModel {
     /// or later): a new brief planned alone (52c's dry run) among it.
     public var hasTrack52: Bool { (lastSchema ?? "") >= "2026-10-20" }
 
+    /// The found binary's version, as `apogee version` said it.
+    public var binaryVersion: String? { found?.version }
+
     /// The binary the library found, for the other places' reads.
     public var binaryURL: URL? { found?.url }
 

@@ -92,6 +92,24 @@ struct CommandRunningTests {
         #expect(outcome.succeeded && outcome.failure == nil)
     }
 
+    @Test("input goes to the command's standard input and nowhere else")
+    func input() async throws {
+        let fake = try FakeRead()
+        let binary = try fake.binary(#"read line; echo "got ${#line} characters for $*""#)
+        let outcome = await ReadRunner().command(binary: binary, ["auth", "add", "anthropic", "--stdin"], input: Data("sk-secret\n".utf8))
+        #expect(outcome == .done(stdout: "got 9 characters for auth add anthropic --stdin"))
+    }
+
+    @Test("a report's document stands whatever the exit: check fails and says why in it")
+    func report() async throws {
+        let fake = try FakeRead()
+        let binary = try fake.binary(#"echo '{"rows":[{"name":"a","status":"fail"}],"ok":false,"failures":1}'; exit 1"#)
+        let outcome = await ReadRunner().report(binary: binary, ["check"])
+        #expect(outcome.document?.value["failures"]?.intValue == 1)
+        let read = await ReadRunner().read(binary: binary, ["check"])
+        #expect(read.document == nil, "a read drops it: the exit decides")
+    }
+
     @Test("a refusal is its stderr's last line, word for word, with how it exited")
     func refused() async throws {
         let fake = try FakeRead()

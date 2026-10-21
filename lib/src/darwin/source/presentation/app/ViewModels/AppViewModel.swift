@@ -9,6 +9,7 @@ import PresentationGraph
 import PresentationModels
 import PresentationMonitor
 import PresentationSessions
+import PresentationSettings
 import PresentationShell
 import PresentationSuites
 import PresentationTasks
@@ -37,6 +38,7 @@ final class AppViewModel {
     let video: VideoViewModel
     let compose: ComposeViewModel
     let voice: VoiceViewModel
+    let settings: SettingsViewModel
 
     init(
         info: [String: Any]?, preferences: Preferences, starter: (any ChatStarting)? = nil,
@@ -82,6 +84,9 @@ final class AppViewModel {
             home: FileManager.default.homeDirectoryForCurrentUser)
         voice.say = { [weak shell] text in shell?.say(text) }
         voice.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
+        let settings = SettingsViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter(), preferences: preferences)
+        settings.say = { [weak shell] text in shell?.say(text) }
+        settings.hasTrack52 = { [weak sessions] in sessions?.hasTrack52 ?? false }
         sessions.say = { [weak shell] text in shell?.say(text) }
         models.say = { [weak shell] text in shell?.say(text) }
         models.useInSession = { [weak shell, weak sessions] backend in
@@ -115,6 +120,7 @@ final class AppViewModel {
         self.video = video
         self.compose = compose
         self.voice = voice
+        self.settings = settings
     }
 
     convenience init(bundle: Bundle) {
@@ -133,5 +139,6 @@ final class AppViewModel {
         video.connect(binary: sessions.binaryURL)
         compose.connect(binary: sessions.binaryURL)
         await voice.connect(binary: sessions.binaryURL)
+        await settings.connect(binary: sessions.binaryURL, version: sessions.binaryVersion)
     }
 }

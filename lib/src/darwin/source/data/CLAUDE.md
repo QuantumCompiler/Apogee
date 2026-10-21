@@ -2,7 +2,7 @@
 
 **Position.** Second of the four ([ADR 0001](../../../../documentation/gui/adrs/layer-enforcement.md)): the contracts floor -- the machine-mode protocol as types, decoding that tolerates what it does not know, and the GUI's own persisted state. How the outside world, chiefly the CLI, is reached and represented.
 
-**Modules:** `protocol` -- the machine-mode protocol as types: the events read tolerantly (ProtocolEvent, EventDecoder), the lines written (DriverLine), the reads' documents (ReadDocument), any JSON kept whole (JSONValue); `preferences` -- the GUI's own settings, never the CLI's config: the window's state, the open session, the media folders added (Preferences); `discovery` -- the apogee binary found and verified by running it (BinaryDiscovery).
+**Modules:** `protocol` -- the machine-mode protocol as types: the events read tolerantly (ProtocolEvent, EventDecoder), the lines written (DriverLine), the reads' documents (ReadDocument), any JSON kept whole (JSONValue); `preferences` -- the GUI's own settings, never the CLI's config: the window's state, the open session, the media folders added, the theme and the text size (Preferences); `discovery` -- the apogee binary found and verified by running it (BinaryDiscovery).
 
 **May import:** this layer, Infrastructure, and the system's non-UI frameworks. No UI framework, no module above.
 
