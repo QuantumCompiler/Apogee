@@ -87,7 +87,7 @@ What this item builds:
 - [ ] Stop interrupts the run, the made sets stay, and the CLI's resume command runs.
 - [ ] The full suite is green, and the boards match the screen.
 
-**Scope note.** Earmarked for v0.2.0 (track 2). Gated on [`model-store-screen.md`](model-store-screen.md) (2h): the sheets open from its set details, and its Jobs tab is the home this grows.
+**Scope note.** Earmarked for v0.2.0 (track 2). Gated on 2h, the model store screen ([shipped 2026-10-21](../../assistant/MILESTONES.md#milestone-c--cli-parity)): the sheets open from its set details, and its Jobs tab is the home this grows.
 
 Out of scope:
 - the CLI's G18 and G20 machine faces (later CLI items);

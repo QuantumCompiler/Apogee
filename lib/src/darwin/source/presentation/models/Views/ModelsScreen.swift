@@ -4,14 +4,17 @@ import PresentationShell
 import PresentationStyles
 import SwiftUI
 
-/// The Models place: the library, a model's details beside it, and the roles.
+/// The Models place: the backends and a backend's details, the stored
+/// weights apart (2h), the jobs, and the roles.
 public struct ModelsScreen<Downloads: View>: View {
     @Bindable private var model: ModelsViewModel
+    @Bindable private var store: StoreViewModel
     private let shell: ShellViewModel
     private let downloads: Downloads
 
-    public init(model: ModelsViewModel, shell: ShellViewModel, @ViewBuilder downloads: () -> Downloads) {
+    public init(model: ModelsViewModel, store: StoreViewModel, shell: ShellViewModel, @ViewBuilder downloads: () -> Downloads) {
         self.model = model
+        self.store = store
         self.shell = shell
         self.downloads = downloads()
     }
@@ -21,13 +24,13 @@ public struct ModelsScreen<Downloads: View>: View {
             ScreenHeader(title: "Models") {
                 Picker("Show", selection: $model.tab) {
                     ForEach(ModelsViewModel.Tab.allCases) { tab in
-                        Text(model.count(tab).map { "\(tab.title) \($0)" } ?? tab.title).tag(tab)
+                        Text((tab == .store ? store.sets.count : model.count(tab)).map { "\(tab.title) \($0)" } ?? tab.title).tag(tab)
                     }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .fixedSize()
-                if let working = model.working {
+                if let working = model.working ?? store.working {
                     ProgressView().controlSize(.small)
                     Text(working).font(.apogeeMeta).foregroundStyle(Palette.textSecondary)
                 }
@@ -36,15 +39,21 @@ public struct ModelsScreen<Downloads: View>: View {
             switch model.tab {
             case .roles:
                 RolesView(model: model)
-            case .downloads:
+            case .jobs:
                 downloads
-            default:
+            case .store:
+                StoreView(store: store, shell: shell) { backend in model.useInSession?(backend) }
+            case .backends:
                 HStack(spacing: 0) {
                     ModelTable(model: model)
                     if model.selectedRow != nil && shell.layout.sidePanes {
                         Divider()
-                        ModelDetails(model: model)
-                            .frame(width: 380)
+                        ModelDetails(model: model) { backend in
+                            guard let handle = store.handle(forBackend: backend) else { return }
+                            model.tab = .store
+                            Task { await store.select(handle) }
+                        }
+                        .frame(width: 380)
                     }
                 }
             }
@@ -61,6 +70,16 @@ public struct ModelsScreen<Downloads: View>: View {
             Button("Cancel", role: .cancel) { model.pendingDelete = nil }
         } message: {
             Text("apogee models delete \(model.pendingDelete?.row.name ?? "") -- its files are removed from the store, and this can't be undone.")
+        }
+        .confirmationDialog(
+            "Remove the backend \(model.removing ?? "")?",
+            isPresented: Binding(get: { model.removing != nil }, set: { if !$0 { model.removing = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Remove the backend", role: .destructive) { Task { await model.confirmRemove() } }
+            Button("Cancel", role: .cancel) { model.removing = nil }
+        } message: {
+            Text("apogee config delete-backend \(model.removing ?? "") -- its config entry goes; the weights stay under Stored weights, ready to register again.")
         }
         .sheet(item: $model.renaming) { row in
             RenameModelSheet(row: row) { name in Task { await model.rename(row, to: name) } }
@@ -98,22 +117,6 @@ struct ModelTable: View {
                         .padding(.top, Spacing.m)
                         .padding(.bottom, Spacing.xs)
                     ForEach(group.rows) { row in rowView(row) }
-                }
-                if let folded = model.foldedText {
-                    HStack(spacing: Spacing.s) {
-                        Text(folded).font(.apogeeSmall).foregroundStyle(Palette.textTertiary)
-                        Button("Show them") { Task { await model.showAll(true) } }
-                            .buttonStyle(.link)
-                            .font(.apogeeSmall)
-                    }
-                    .padding(.horizontal, Spacing.l)
-                    .padding(.top, Spacing.s)
-                } else if model.showingAll {
-                    Button("Fold the snapshots conversions consumed") { Task { await model.showAll(false) } }
-                        .buttonStyle(.link)
-                        .font(.apogeeSmall)
-                        .padding(.horizontal, Spacing.l)
-                        .padding(.top, Spacing.s)
                 }
                 if let empty = model.emptyText {
                     Text(empty)
@@ -173,6 +176,8 @@ struct ModelTable: View {
 /// lineage, and what can be done with it.
 struct ModelDetails: View {
     @Bindable var model: ModelsViewModel
+    /// Opens the backend's set under Stored weights.
+    var showWeights: (String) -> Void = { _ in }
 
     var body: some View {
         ScrollView {
@@ -239,6 +244,9 @@ struct ModelDetails: View {
             if !row.isStored && (row.roles.contains("chat") || row.section == "cloud" || row.group == "gguf" || row.group == "mlx") {
                 Button("Use in a new session") { model.useInSession?(row.backend) }
             }
+            if row.group == "gguf" || row.group == "mlx" {
+                Button("Show its weights") { showWeights(row.backend) }
+            }
             Menu("More") {
                 Button("Assign a role…") { model.tab = .roles }
                 if row.section == "local" {
@@ -252,7 +260,8 @@ struct ModelDetails: View {
                 }
                 if row.section == "local" {
                     Divider()
-                    Button("Delete…", role: .destructive) { model.askToDelete(row) }
+                    Button("Remove the backend…") { model.askToRemove(row) }
+                    Button("Delete with its weights…", role: .destructive) { model.askToDelete(row) }
                 }
             }
             .fixedSize()

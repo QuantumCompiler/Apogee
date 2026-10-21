@@ -46,7 +46,7 @@ Opened 2026-10-20 (the user's call, from the first hands-on run: the GUI does ev
 - [x] **Agents, MCP & symphonies** *(2e, shipped 2026-10-20 — [MILESTONES → Milestone C](MILESTONES.md#milestone-c--cli-parity))* — the resource screens, native in-app editing validated by the binary, plays into the session.
 - [x] **Execute sessions, plays & recipes** *(2f, shipped 2026-10-21 — [MILESTONES → Milestone C](MILESTONES.md#milestone-c--cli-parity))* — the picker's execute door, recipe expansion shown before launch, analyze console-covered.
 - [x] **The review screen** *(2g, shipped 2026-10-21 — [MILESTONES → Milestone C](MILESTONES.md#milestone-c--cli-parity))* — dry-run-first, click-consented posting, targets, sweeps and skills; silence a first-class pass.
-- [ ] **The model store** *([2h](../backlog/v0.2.0/model-store-screen.md))* — Backends and Stored weights apart, as the design draws them: every set by its handle, with made-from links; register one or all, remove a backend, delete with or without its backends, rename.
+- [x] **The model store** *(2h, shipped 2026-10-21 — [MILESTONES → Milestone C](MILESTONES.md#milestone-c--cli-parity))* — Backends and Stored weights apart, as the design draws them: every set by its handle, with made-from links; register one or all, remove a backend, delete with or without its backends, rename.
 - [ ] **Convert, quantize and check as jobs** *([2i](../backlog/v0.2.0/convert-quantize-jobs.md))* — the sheets build the CLI's own chain, with names as the CLI gives them; each run is supervised on the Jobs tab, using the G18 and G20 fallbacks.
 
 

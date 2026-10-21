@@ -35,6 +35,7 @@ final class AppViewModel {
     let shell: ShellViewModel
     let sessions: SessionLibraryViewModel
     let models: ModelsViewModel
+    let store: StoreViewModel
     let downloads: DownloadsViewModel
     let tasks: TasksViewModel
     let monitor: MonitorViewModel
@@ -66,9 +67,15 @@ final class AppViewModel {
             starter: starter ?? ApogeeClient(identity: ClientIdentity(version: version ?? "development")),
             runner: runner ?? ReadRunner(), preferences: preferences)
         let models = ModelsViewModel(runner: runner ?? ReadRunner())
+        let store = StoreViewModel(runner: runner ?? ReadRunner())
         let downloads = DownloadsViewModel(starter: jobs ?? JobStarter())
         downloads.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
-        downloads.finished = { [weak models] in Task { await models?.refresh() } }
+        downloads.finished = { [weak models, weak store] in
+            Task {
+                await models?.refresh()
+                await store?.refresh()
+            }
+        }
         let tasks = TasksViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
         tasks.say = { [weak shell] text in shell?.say(text) }
         let console = ConsoleViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
@@ -117,16 +124,20 @@ final class AppViewModel {
         settings.hasTrack52 = { [weak sessions] in sessions?.hasTrack52 ?? false }
         sessions.say = { [weak shell] text in shell?.say(text) }
         models.say = { [weak shell] text in shell?.say(text) }
+        store.say = { [weak shell] text in shell?.say(text) }
         models.useInSession = { [weak shell, weak sessions] backend in
             shell?.go(.sessions)
             Task { await sessions?.newSession(on: backend) }
         }
         // Sessions in view or not: the library keeps its one child to the
         // session on screen. A place coming into view reads again.
-        shell.routeChanged = { [weak sessions, weak models, weak tasks, weak suites, weak graph, weak video, weak compose, weak voice, weak records, weak collections, weak training, weak agents, weak symphonies, weak mcp, weak review] destination in
+        shell.routeChanged = { [weak sessions, weak models, weak store, weak tasks, weak suites, weak graph, weak video, weak compose, weak voice, weak records, weak collections, weak training, weak agents, weak symphonies, weak mcp, weak review] destination in
             Task {
                 if destination == .sessions { await sessions?.cameIntoView() } else { await sessions?.leftView() }
-                if destination == .models { await models?.appeared() }
+                if destination == .models {
+                    await models?.appeared()
+                    if models?.tab == .store { await store?.refresh() }
+                }
                 if destination == .tasks { await tasks?.appeared() }
                 if destination == .suites { await suites?.appeared() }
                 if destination == .graph { await graph?.appeared() }
@@ -151,6 +162,7 @@ final class AppViewModel {
         self.shell = shell
         self.sessions = sessions
         self.models = models
+        self.store = store
         self.downloads = downloads
         self.tasks = tasks
         self.monitor = monitor
@@ -178,6 +190,7 @@ final class AppViewModel {
     func start() async {
         await sessions.start(inView: shell.route == .sessions)
         await models.connect(binary: sessions.binaryURL)
+        await store.connect(binary: sessions.binaryURL)
         downloads.connect(binary: sessions.binaryURL)
         await tasks.connect(binary: sessions.binaryURL)
         monitor.connect(binary: sessions.binaryURL)

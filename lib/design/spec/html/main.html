@@ -4150,7 +4150,7 @@ class Component extends DCLogic {
     const pick = (sid) => () => this.setState({ storeSel: this.state.storeSel === sid ? null : sid, storeAll: this.state.storeAll || !!(sets.find((x) => x.sid === sid) || {}).consumed });
     const openSheet = (sheet) => () => this.setState({ overlay: 'store', sheet: sheet });
     const st = {
-      summary: sets.map((x) => x.dir).filter((d, i, a) => a.indexOf(d) === i).length + ' models, ' + sets.length + ' sets, in ~/.apogee/models',
+      summary: sets.map((x) => x.dir).filter((d, i, a) => a.indexOf(d) === i).length + ' models, ' + sets.length + ' sets, in the model store',
       hasUnreg: unreg.length > 0,
       unregCount: String(unreg.length),
       registerAll: () => this.setState({ confirm: { kind: 'registerAll' } }),
@@ -4196,10 +4196,10 @@ class Component extends DCLogic {
         act('Convert to MLX…', 'btn', openSheet({ kind: 'convert', sid: x.sid, target: 'mlx', ptype: '4bit', levels: [], register: true, base: this.baseName(x.dir), mtype: '' }), 'apogee models convert --mlx');
       } else if (unquantized(x)) {
         act('Quantize…', 'btn-p', openSheet({ kind: 'quantize', sid: x.sid, level: 'Q4_K_M', register: true, name: this.baseName(x.dir) + '-Q4KM', named: false }), 'apogee models quantize');
-        if (x.backendKey) act('Use in the open session', 'btn', useIt);
+        if (x.backendKey) act('Use in a new session', 'btn', useIt);
         else act('Register…', 'btn', openSheet({ kind: 'register', sid: x.sid, name: defaultName(x), ctx: '', cache: 'q8_0' }), 'apogee config add-backend');
       } else if (runnable(x)) {
-        if (x.backendKey) act('Use in the open session', 'btn-p', useIt);
+        if (x.backendKey) act('Use in a new session', 'btn-p', useIt);
         else act('Register…', 'btn-p', openSheet({ kind: 'register', sid: x.sid, name: defaultName(x), ctx: '', cache: 'q8_0' }), 'apogee config add-backend');
       } else if (x.format === 'pipeline') {
         act('New clip with it', 'btn-p', () => this.setState({ screen: 'video', mediaTab: 'clips', cf: this.freshClipForm(x.mediaId) }));

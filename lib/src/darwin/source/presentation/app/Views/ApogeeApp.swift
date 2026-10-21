@@ -54,7 +54,7 @@ public struct ApogeeApp: App {
                 switch destination {
                 case .sessions: SessionsScreen(library: model.sessions, shell: model.shell)
                 case .models:
-                    ModelsScreen(model: model.models, shell: model.shell) {
+                    ModelsScreen(model: model.models, store: model.store, shell: model.shell) {
                         DownloadsView(model: model.downloads)
                     }
                 case .tasks: TasksScreen(model: model.tasks)

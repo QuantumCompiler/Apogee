@@ -13,20 +13,18 @@ import Observation
 @Observable
 public final class ModelsViewModel {
     public enum Tab: String, CaseIterable, Identifiable, Sendable {
-        case all
-        case local
-        case cloud
-        case downloads
+        case backends
+        case store
+        case jobs
         case roles
 
         public var id: String { rawValue }
 
         public var title: String {
             switch self {
-            case .all: "All"
-            case .local: "On this Mac"
-            case .cloud: "Cloud & subscriptions"
-            case .downloads: "Downloads"
+            case .backends: "Backends"
+            case .store: "Stored weights"
+            case .jobs: "Jobs"
             case .roles: "Roles"
             }
         }
@@ -46,12 +44,8 @@ public final class ModelsViewModel {
         public let row: ModelRow
     }
 
-    public var tab: Tab = .all
+    public var tab: Tab = .backends
     public private(set) var rows: [ModelRow] = []
-    /// The stored sets the list folded (a conversion consumed them), and
-    /// whether the person asked to see them: `models list --all`.
-    public private(set) var folded = 0
-    public private(set) var showingAll = false
     public private(set) var listing: Listing = .notRead
     public private(set) var selected: String?
     /// The selected model's `models info`, when read.
@@ -60,6 +54,9 @@ public final class ModelsViewModel {
     public private(set) var roles: [RoleAssignment] = []
     public private(set) var rolesFailure: String?
     public var pendingDelete: PendingDelete?
+    /// A backend whose entry waits on the person's word to go: `config
+    /// delete-backend`, its weights kept under Stored weights.
+    public var removing: String?
     public var renaming: ModelRow?
     /// A command running now, by what it is doing: its buttons wait.
     public private(set) var working: String?
@@ -92,7 +89,6 @@ public final class ModelsViewModel {
     /// Models came into view: read again.
     public func appeared() async {
         guard binary != nil else { return }
-        showingAll = false
         await refresh()
     }
 
@@ -100,10 +96,9 @@ public final class ModelsViewModel {
     public func refresh() async {
         guard let binary else { return }
         if listing != .read { listing = .reading }
-        let outcome = await runner.read(binary: binary, ["models", "list"] + (showingAll ? ["--all"] : []))
+        let outcome = await runner.read(binary: binary, ["models", "list"])
         if let document = outcome.document {
             rows = ModelRow.list(from: document)
-            folded = ModelRow.folded(in: document)
             listing = .read
         } else {
             listing = .failed(outcome.failure ?? "the list could not be read")
@@ -144,26 +139,16 @@ public final class ModelsViewModel {
 
     // MARK: - The list
 
-    /// The rows the tab shows, under the CLI's own groups, in its order.
+    /// The backends, under the CLI's own groups, in its order: what sessions,
+    /// suites and roles can use -- local first, then cloud and subscriptions.
+    /// Stored weights are the store's, under Stored weights (2h).
     public var groups: [ModelGroup] {
-        let shown = rows.filter { row in
-            switch tab {
-            case .local: row.section == "local"
-            case .cloud: row.section == "cloud"
-            default: true
-            }
-        }
-        return ModelGroup.grouping(shown)
+        ModelGroup.grouping(rows.filter { !$0.isStored })
     }
 
-    /// Counts for the tabs.
+    /// The Backends tab's count; the store counts its own.
     public func count(_ tab: Tab) -> Int? {
-        switch tab {
-        case .all: rows.count
-        case .local: rows.filter { $0.section == "local" }.count
-        case .cloud: rows.filter { $0.section == "cloud" }.count
-        case .downloads, .roles: nil
-        }
+        tab == .backends ? rows.filter { !$0.isStored }.count : nil
     }
 
     public var emptyText: String? {
@@ -187,22 +172,6 @@ public final class ModelsViewModel {
         info = nil
         infoFailure = nil
         await readInfo(row.name)
-    }
-
-    /// The folded sets listed too, or folded again: `models list --all`,
-    /// held while the place is open.
-    public func showAll(_ all: Bool) async {
-        guard showingAll != all else { return }
-        showingAll = all
-        await refresh()
-    }
-
-    /// The CLI's own line for the fold, its count from the list.
-    public var foldedText: String? {
-        guard folded > 0, !showingAll else { return nil }
-        return folded == 1
-            ? "1 snapshot consumed by a conversion is folded"
-            : "\(folded) snapshots consumed by conversions are folded"
     }
 
     public func close() {
@@ -285,6 +254,20 @@ public final class ModelsViewModel {
         if andBackends { arguments.append("--and-backends") }
         await run(arguments, doing: "Deleting \(pending.row.name)", done: "Deleted \(pending.row.name)")
         if selected == pending.row.name { close() }
+    }
+
+    /// Asks before removing a backend's entry.
+    public func askToRemove(_ row: ModelRow) {
+        removing = row.backend
+    }
+
+    /// `config delete-backend <name>`: the entry goes; its weights stay under
+    /// Stored weights, ready to register again. Read back.
+    public func confirmRemove() async {
+        guard let name = removing else { return }
+        removing = nil
+        await run(["config", "delete-backend", name], doing: "Removing \(name)", done: "Removed the backend \(name)")
+        if selected == name { close() }
     }
 
     /// `models rename <model> <new name>`, read back.

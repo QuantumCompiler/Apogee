@@ -807,3 +807,71 @@ Every screen stays a machine-mode client of the binary, tested hermetically.
   - the targets, and a sweep that reviewed nothing new past its kept watermark;
   - the security lens whole.
 - Bare `lib/scripts/cicd.sh --test` passed in 7m25s: the CLI's 3,593 tests, none failing, and the app's 314 cases, none failing and none skipped, with no warning.
+
+### 2026-10-21 — `model-store-screen` (backlog item 2h): backends and stored weights, apart
+
+**Why.** On 2026-10-20 the user asked for the store in the GUI: "There's no actual way to look at like the safe tensors and then convert them and everything else like you can in the CLI." The Models place still mixed backends and stored weights in one table. Only `models delete`, `rename` and `repair` reached the store.
+
+- [x] **The tabs are Backends · Stored weights · Jobs · Roles** (`ModelsViewModel.Tab`). Downloads became Jobs, which 2i grows.
+- [x] **Backends lists only what can be used:** local backends, then cloud and subscription ones. A pipeline and a voice model move to Stored weights. A local backend has:
+  - **Show its weights**, which opens its set under Stored weights;
+  - **Remove the backend…**, which asks first and runs `config delete-backend`, the weights kept;
+  - **Delete with its weights…**, which is `models delete --yes`, with `--and-backends` only when chosen.
+- [x] **Stored weights** (`StoreViewModel`, `StoreView`):
+  - **Every set by its handle, grouped by model folder.** Each row shows its format, precision, size and state. The state is "weights only · convert to run", "used by a conversion", "not registered", "backend `<name>`", "pipeline", "voice model", or the CLI's own (`cannot load: …`).
+  - **Each row's made-from line** ("quantized from …"), and each group's count with its size where every set states one.
+  - **The fold** keeps M1's sentence and its Show them (`models list --all`, whose difference from the plain list marks what a conversion consumed).
+  - **"Register the N not registered…"** shows `config scan`'s own report, word for word, then runs `config scan --register`.
+- [x] **A registered set is found through the CLI's own documents.** `models list` names no handle on a backend's row, so a backend's `models info` gives its `model_path`, and `models info <that path>` answers with the set's handle and typed facts. Nothing is parsed from a path.
+- [x] **A set's details:**
+  - the typed size, window and cache, then the record's own lines;
+  - **made from**, each step linked where the store lists the parent, inferred and gone said;
+  - **made from it**, as the CLI's `made from it` lines name them, each linked;
+  - the design's note on why it doesn't run yet;
+  - the model's **Rename…** (`models rename`, its backends following) and **Delete all of it…**;
+  - `apogee models info <handle>`.
+- [x] **The actions by format:**
+  - GGUF or MLX not registered: **Register…**;
+  - registered: **Use in a new session** and **Remove the backend…**;
+  - a pipeline: **New clip with it** and **Make it the default** (`config set-default-video`);
+  - a voice model: **Open Voice**;
+  - every set: **Show in Finder** and **Delete…**.
+
+  Convert, quantize and check its files are 2i's.
+- [x] **Register…** builds `config add-backend <name> --type llamacpp|mlx --model-path <file> [--mmproj-path] [--context-size] [--cache-type]` and shows it as typed:
+  - the name is the one `config scan` lists the path under, the CLI's own naming;
+  - the window and the cache are left out unless changed (q8_0 is the CLI's default), and an MLX backend takes no cache type;
+  - a projector the record names is carried.
+- [x] **Sizes in the CLI's own units:** whole KiB and MiB, and GiB to a tenth, each truncated as `format_progress_size` truncates them.
+- [x] **The design (canvas version 42):** the drift is settled on both sides; see the decisions. The health check passes all 48 start screens.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **Stored weights has its own view-model, `StoreViewModel`,** beside `ModelsViewModel`, which narrows to the backends. M1's handle-keyed verbs on `ModelsViewModel` stay, and are tested.
+- **A registered set's handle is the CLI's answer for its path,** two reads per local backend. A backend outside the store gets no set.
+- **Each set's `models info` is read after the table draws** (the item's default), one at a time.
+  - It was not measured on the person's own store: a probe there would read real user state.
+  - On the scratch store, the reads take well under a second.
+- **The drift settled.**
+  - **The app took the design's words:** the states "pipeline" and "voice model", the format names, each row's made-from line, each group's count and size, the kicker (`GGUF · Q4_K_M`), the design's notes, and "New clip with it".
+  - **The design took two of the app's:** the summary reads "in the model store", since the app can't assume the store is `~/.apogee/models`; and a registered set offers "Use in a new session", the item's own words.
+  - **A set's facts are the record's own lines**, after the typed ones, rather than the prototype's composed list.
+- **Convert, quantize and Check the files are left to 2i.** The design draws them, and 2i builds them on the jobs core.
+
+**Verified.**
+- `scripts/build.sh test`: 323 cases, no Swift warning. They read documents recorded from the installed binary over a scratch store, built from sparse copies of M1's sets and tiny GGUF headers with records (the CLI's own e2e technique; nothing converted or quantized). The store holds:
+  - a pulled Llama SafeTensors set, converted to an F16 GGUF (not registered) and quantized to a Q4_K_M one (registered);
+  - a Gemma SafeTensors set, and the MLX model converted from it (not registered);
+  - a voice model.
+
+  New tests cover:
+  - the sets by handle, the registered one through its backend's documents;
+  - the states, the fold, `--all`'s consumed marks;
+  - made from and made from it, linked;
+  - Register…'s name from `config scan` and its flags, left out unless changed (none for MLX), run as typed and read back;
+  - register all, asked with the scan's report;
+  - deletes with and without `--and-backends`, a backend's removal asked first;
+  - rename by the model folder;
+  - the sizes;
+  - Backends holding only backends, M1's tests carried over.
+- **Drawn offscreen over the real binary on that store:** Stored weights with the registered Q4_K_M open (its made-from lines, sizes, actions); the register sheet for the F16 with the CLI's name; Backends with Show its weights.
+- Bare `lib/scripts/cicd.sh --test` passed in 7m23s: the CLI's 3,593 tests, none failing, and the app's 323 cases, none failing and none skipped, with no warning.

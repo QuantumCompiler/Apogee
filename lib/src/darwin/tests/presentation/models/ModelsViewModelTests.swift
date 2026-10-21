@@ -28,16 +28,17 @@ struct ModelsViewModelTests {
         return model
     }
 
-    @Test("the library lists every kind under the CLI's groups, local first, and the tabs split it")
+    @Test("Backends lists the backends alone under the CLI's groups, local first; stored weights are the store's (2h)")
     func listAndGroups() async {
         let model = await connected(ScriptedRunner())
         #expect(model.listing == .read)
-        #expect(model.groups.map(\.title) == ["GGUF", "MLX", "Pipelines", "Anthropic", "Claude Code"])
-        #expect(model.count(.all) == 5 && model.count(.local) == 3 && model.count(.cloud) == 2)
-        model.tab = .local
-        #expect(model.groups.flatMap(\.rows).map(\.name) == ["qwen3-8b-Q4KM", "qwen-mlx", "Wan2.1-T2V-1.3B/pipeline/7c21e0d4b9a3"])
-        model.tab = .cloud
-        #expect(model.groups.flatMap(\.rows).map(\.kind) == [.api, .subscription])
+        #expect(ModelsViewModel.Tab.allCases.map(\.title) == ["Backends", "Stored weights", "Jobs", "Roles"])
+        #expect(model.tab == .backends)
+        #expect(model.groups.map(\.title) == ["GGUF", "MLX", "Anthropic", "Claude Code"])
+        #expect(model.count(.backends) == 4 && model.count(.store) == nil)
+        #expect(model.groups.flatMap(\.rows).map(\.name) == ["qwen3-8b-Q4KM", "qwen-mlx", "claude", "claude-code"])
+        #expect(!model.groups.flatMap(\.rows).contains { $0.isStored }, "a pipeline lives under Stored weights")
+        #expect(model.groups.flatMap(\.rows).map(\.kind).suffix(2) == [.api, .subscription])
         let pipeline = model.rows.first { $0.format == "pipeline" }!
         #expect(pipeline.components == 5 && pipeline.bytes == 28_000_000_000)
         #expect(pipeline.kind == nil, "a stored pipeline has no backend type: no kind guessed")
@@ -96,6 +97,21 @@ struct ModelsViewModelTests {
         model.askToDelete(row)
         await model.confirmDelete(andBackends: true)
         #expect(runner.calls.contains("run models delete qwen-mlx --yes --and-backends"))
+    }
+
+    @Test("a local backend's entry is removed on asking, its weights kept: config delete-backend, read back")
+    func removeBackend() async {
+        let runner = ScriptedRunner()
+        let model = await connected(runner)
+        let row = model.rows.first { $0.backend == "qwen3-8b-Q4KM" }!
+        await model.select(row)
+        model.askToRemove(row)
+        #expect(model.removing == "qwen3-8b-Q4KM")
+        #expect(!runner.calls.contains("run config delete-backend qwen3-8b-Q4KM"), "asked first")
+        await model.confirmRemove()
+        #expect(runner.calls.contains("run config delete-backend qwen3-8b-Q4KM"))
+        #expect(!runner.calls.contains { $0.hasPrefix("run models delete") }, "the weights stay")
+        #expect(runner.calls.filter { $0 == "read models list" }.count == 2, "read back")
     }
 
     @Test("rename takes the model's name without its level; repair says what the CLI said")
@@ -169,25 +185,17 @@ struct ModelsViewModelTests {
         return model
     }
 
-    @Test("stored weights are each their own row, named by their handle; the fold is said, and --all lists it while the place is open")
+    @Test("stored weights are read, each named by its handle, and drawn under Stored weights, never among the backends")
     func storedWeights() async {
         let runner = ScriptedRunner()
         let model = await recordedLibrary(runner)
-        #expect(model.groups.map(\.title) == ["SafeTensors", "MLX", "Pipelines", "Voices", "Other"])
-        #expect(model.groups.flatMap(\.rows).count == 6, "every row drawn: none shares an identity")
-        #expect(model.groups[0].rows.map(\.name) == [
+        #expect(model.rows.filter(\.isStored).map(\.name) == [
             "Llama3.2-1B-Instruct/safetensors/edaba290ce7f", "Qwen3-VL-8B-Instruct/safetensors/63f2634a2019",
-        ])
-        #expect(model.groups.flatMap(\.rows).map(ModelsViewModel.status) == ["stored", "stored", "not configured", "stored", "stored", "-"],
-                "an MLX model a backend could run is not configured; what no backend runs is stored; a configured row's state is the CLI's")
+            "Gemma4-26B-Instruct/mlx/a88b9f386aff", "Wan2.2-TI2V-5B/pipeline/9b1e47c0a2f6", "Kokoro-82M/voice/5f3a2c91d0e4",
+        ], "every set its own identity")
+        #expect(model.groups.map(\.title) == ["Other"] && model.groups[0].rows.map(\.name) == ["mock-chat"], "Backends draws the backends alone")
         #expect(model.backends == ["mock-chat"], "a role points at a backend, never at stored weights")
-        #expect(model.foldedText == "1 snapshot consumed by a conversion is folded")
-        await model.showAll(true)
-        #expect(runner.calls.contains("read models list --all"))
-        #expect(model.groups[0].rows.first?.name == "Gemma4-26B-Instruct/safetensors/13de95725073")
-        #expect(model.foldedText == nil && model.showingAll)
-        await model.appeared()
-        #expect(!model.showingAll && model.folded == 1)
+        #expect(!runner.calls.contains("read models list --all"), "the fold is the store's to show")
     }
 
     @Test("stored weights' details, delete and repair go by their handle, rename by their directory; the placeholder is never a name")
