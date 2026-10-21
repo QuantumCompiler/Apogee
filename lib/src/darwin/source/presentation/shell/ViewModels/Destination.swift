@@ -57,9 +57,7 @@ public enum Destination: String, CaseIterable, Sendable, Identifiable {
                 about: "Your suites and their members, with whether they fit, will be here.",
                 command: "apogee models status")
         case .tasks:
-            Placeholder(
-                about: "Running and finished tasks, and starting a new one, will be here.",
-                command: "apogee task list")
+            nil
         case .graph:
             Placeholder(
                 about: "The code graph's symbols, their callers and callees, and its files will be here.",

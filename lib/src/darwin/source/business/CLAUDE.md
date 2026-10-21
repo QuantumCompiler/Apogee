@@ -2,7 +2,7 @@
 
 **Position.** Third of the four ([ADR 0001](../../../../documentation/gui/adrs/layer-enforcement.md)): the client core -- the machine-mode session (spawned through Infrastructure, spoken in Data's types), the reads, long-running jobs. What the GUI does; every capability itself is the CLI's.
 
-**Modules:** `session` -- a driven chat session: its child started (ChatLaunch), its events and lines (MachineSession), where it stands (TurnTracker), and the front door (ApogeeClient); `jobs` -- the one supervisor of every long child: a run started, its 52b stream read as events or its prose as lines, its busy line sampled, stopped as Ctrl-C does (SupervisedJob, JobEvent, JobProgress, JobStarter); `reads` -- one read run and its document decoded (ReadRunner), a command a person would type run as typed (CommandRunning, CommandOutcome), and the typed reads the screens share (ChatSummary, Field, ModelKind).
+**Modules:** `session` -- a driven chat session: its child started (ChatLaunch), its events and lines (MachineSession), where it stands (TurnTracker), and the front door (ApogeeClient); `jobs` -- the one supervisor of every long child: a run started, its 52b stream read as events or its prose as lines, its busy line sampled, stopped as Ctrl-C does (SupervisedJob, JobEvent, JobProgress, JobStarter); `reads` -- one read run and its document decoded (ReadRunner), a command a person would type run as typed (CommandRunning, CommandOutcome), and the typed reads the screens share (ChatSummary, Field, ModelKind, ModelRow, ModelInfo, RoleAssignment, TaskSummary, TaskView).
 
 **May import:** this layer, Data, Infrastructure, and the system's non-UI frameworks. No UI framework, nothing of Presentation.
 

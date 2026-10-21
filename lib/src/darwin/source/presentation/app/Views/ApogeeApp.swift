@@ -2,6 +2,7 @@ import PresentationModels
 import PresentationSessions
 import PresentationShell
 import PresentationStyles
+import PresentationTasks
 import SwiftUI
 
 /// The application: one window -- the shell around every screen -- and the
@@ -25,6 +26,7 @@ public struct ApogeeApp: App {
                     ModelsScreen(model: model.models, shell: model.shell) {
                         DownloadsView(model: model.downloads)
                     }
+                case .tasks: TasksScreen(model: model.tasks)
                 default: PlaceholderScreen(destination)
                 }
             }

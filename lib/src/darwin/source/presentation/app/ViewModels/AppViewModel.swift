@@ -7,6 +7,7 @@ import Observation
 import PresentationModels
 import PresentationSessions
 import PresentationShell
+import PresentationTasks
 
 /// The application's state: its name, the build it is, the window around its
 /// screens, and the session library.
@@ -23,6 +24,7 @@ final class AppViewModel {
     let sessions: SessionLibraryViewModel
     let models: ModelsViewModel
     let downloads: DownloadsViewModel
+    let tasks: TasksViewModel
 
     init(
         info: [String: Any]?, preferences: Preferences, starter: (any ChatStarting)? = nil,
@@ -40,6 +42,8 @@ final class AppViewModel {
         let downloads = DownloadsViewModel(starter: jobs ?? JobStarter())
         downloads.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
         downloads.finished = { [weak models] in Task { await models?.refresh() } }
+        let tasks = TasksViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
+        tasks.say = { [weak shell] text in shell?.say(text) }
         sessions.say = { [weak shell] text in shell?.say(text) }
         models.say = { [weak shell] text in shell?.say(text) }
         models.useInSession = { [weak shell, weak sessions] backend in
@@ -48,16 +52,18 @@ final class AppViewModel {
         }
         // Sessions in view or not: the library keeps its one child to the
         // session on screen. A place coming into view reads again.
-        shell.routeChanged = { [weak sessions, weak models] destination in
+        shell.routeChanged = { [weak sessions, weak models, weak tasks] destination in
             Task {
                 if destination == .sessions { await sessions?.cameIntoView() } else { await sessions?.leftView() }
                 if destination == .models { await models?.appeared() }
+                if destination == .tasks { await tasks?.appeared() }
             }
         }
         self.shell = shell
         self.sessions = sessions
         self.models = models
         self.downloads = downloads
+        self.tasks = tasks
     }
 
     convenience init(bundle: Bundle) {
@@ -69,5 +75,6 @@ final class AppViewModel {
         await sessions.start(inView: shell.route == .sessions)
         await models.connect(binary: sessions.binaryURL)
         downloads.connect(binary: sessions.binaryURL)
+        await tasks.connect(binary: sessions.binaryURL)
     }
 }

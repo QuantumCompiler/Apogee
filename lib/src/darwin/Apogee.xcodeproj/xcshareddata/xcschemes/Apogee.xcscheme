@@ -184,6 +184,17 @@
                ReferencedContainer = "container:Apogee.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "991D8053CA92205FF9A2E6CF"
+               BuildableName = "PresentationTasksTests.xctest"
+               BlueprintName = "PresentationTasksTests"
+               ReferencedContainer = "container:Apogee.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction
