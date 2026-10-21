@@ -8,6 +8,7 @@ import PresentationStyles
 import PresentationSuites
 import PresentationTasks
 import PresentationVideo
+import PresentationVoice
 import SwiftUI
 
 /// The application: one window -- the shell around every screen -- and the
@@ -32,13 +33,13 @@ public struct ApogeeApp: App {
                         DownloadsView(model: model.downloads)
                     }
                 case .tasks: TasksScreen(model: model.tasks)
+                case .voice: VoiceScreen(model: model.voice)
                 case .suites: SuitesScreen(model: model.suites)
                 case .graph: GraphScreen(model: model.graph, shell: model.shell)
                 case .video:
                     VideoScreen(model: model.video) {
                         ComposeView(model: model.compose)
                     }
-                default: PlaceholderScreen(destination)
                 }
             } overlay: { overlay in
                 switch overlay {

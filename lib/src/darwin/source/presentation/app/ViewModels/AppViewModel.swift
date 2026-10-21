@@ -13,6 +13,7 @@ import PresentationShell
 import PresentationSuites
 import PresentationTasks
 import PresentationVideo
+import PresentationVoice
 
 /// The application's state: its name, the build it is, the window around its
 /// screens, and the session library.
@@ -35,6 +36,7 @@ final class AppViewModel {
     let graph: GraphViewModel
     let video: VideoViewModel
     let compose: ComposeViewModel
+    let voice: VoiceViewModel
 
     init(
         info: [String: Any]?, preferences: Preferences, starter: (any ChatStarting)? = nil,
@@ -75,6 +77,11 @@ final class AppViewModel {
         compose.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
         compose.plansAlone = { [weak sessions] in sessions?.hasTrack52 ?? false }
         compose.folders = { [weak video] in video?.folders ?? [] }
+        let voice = VoiceViewModel(
+            runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter(), preferences: preferences,
+            home: FileManager.default.homeDirectoryForCurrentUser)
+        voice.say = { [weak shell] text in shell?.say(text) }
+        voice.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
         sessions.say = { [weak shell] text in shell?.say(text) }
         models.say = { [weak shell] text in shell?.say(text) }
         models.useInSession = { [weak shell, weak sessions] backend in
@@ -83,13 +90,14 @@ final class AppViewModel {
         }
         // Sessions in view or not: the library keeps its one child to the
         // session on screen. A place coming into view reads again.
-        shell.routeChanged = { [weak sessions, weak models, weak tasks, weak suites, weak graph, weak video, weak compose] destination in
+        shell.routeChanged = { [weak sessions, weak models, weak tasks, weak suites, weak graph, weak video, weak compose, weak voice] destination in
             Task {
                 if destination == .sessions { await sessions?.cameIntoView() } else { await sessions?.leftView() }
                 if destination == .models { await models?.appeared() }
                 if destination == .tasks { await tasks?.appeared() }
                 if destination == .suites { await suites?.appeared() }
                 if destination == .graph { await graph?.appeared() }
+                if destination == .voice { await voice?.appeared() }
                 if destination == .video {
                     video?.appeared()
                     compose?.appeared()
@@ -106,6 +114,7 @@ final class AppViewModel {
         self.graph = graph
         self.video = video
         self.compose = compose
+        self.voice = voice
     }
 
     convenience init(bundle: Bundle) {
@@ -123,5 +132,6 @@ final class AppViewModel {
         await graph.connect(binary: sessions.binaryURL)
         video.connect(binary: sessions.binaryURL)
         compose.connect(binary: sessions.binaryURL)
+        await voice.connect(binary: sessions.binaryURL)
     }
 }
