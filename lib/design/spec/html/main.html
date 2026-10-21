@@ -787,7 +787,6 @@ a{color:inherit}a:hover{color:inherit}
 <button type="button" onClick="{{r.select}}" aria-current="{{r.current}}" class="hv" style="width: 100%; display: grid; grid-template-columns: minmax(180px, 1fr) 118px 64px 58px 70px 124px; column-gap: 12px; align-items: center; min-height: 44px; padding: 4px 8px; margin: 0 -8px; box-sizing: content-box; border: 0; border-bottom: 1px solid var(--line-border); border-radius: 0; background: {{r.bg}}; color: var(--text-primary); text-align: left; font-size: var(--t-body)">
 <span style="display: flex; align-items: center; gap: 10px; min-width: 0">
 <sc-if value="{{r.isLocal}}"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-label="local" style="color: var(--model-local)"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg></sc-if>
-<sc-if value="{{r.isSnap}}"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-label="downloaded weights" style="color: var(--text-tertiary)"><path d="M8 2l5.5 3v6L8 14l-5.5-3V5z"></path><path d="M2.5 5L8 8l5.5-3M8 8v6"></path></svg></sc-if>
 <sc-if value="{{r.isApi}}"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-label="cloud API, billed" style="color: var(--model-api)"><ellipse cx="8" cy="4.5" rx="5" ry="2"></ellipse><path d="M3 4.5V8c0 1.1 2.2 2 5 2s5-.9 5-2V4.5"></path><path d="M3 8v3.5c0 1.1 2.2 2 5 2s5-.9 5-2V8"></path></svg></sc-if>
 <sc-if value="{{r.isSub}}"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-label="subscription" style="color: var(--model-subscription)"><path d="M12.5 6A4.75 4.75 0 0 0 3.6 5.2"></path><path d="M3.5 10a4.75 4.75 0 0 0 8.9.8"></path><path d="M3.3 2.6v2.8h2.8"></path><path d="M12.7 13.4v-2.8H9.9"></path></svg></sc-if>
 <span style="min-width: 0; display: flex; flex-direction: column; line-height: 1.3"><span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.name}}</span><sc-if value="{{r.hasRoles}}"><span class="mono" style="font-size: var(--t-label); color: var(--status-accent)">{{r.roles}}</span></sc-if></span>
@@ -801,7 +800,7 @@ a{color:inherit}a:hover{color:inherit}
 </sc-if>
 </sc-for>
 <sc-if value="{{mdl.empty}}"><p style="margin: 24px 0; color: var(--text-tertiary)">Nothing here yet.</p></sc-if>
-<p style="margin: 18px 0 0; font-size: var(--t-small); color: var(--text-tertiary)">Memory is the weights plus the attention cache at the model’s default window on this Mac, computed from the file. Cloud models use none.</p>
+<p style="margin: 18px 0 0; max-width: 760px; font-size: var(--t-small); color: var(--text-tertiary)">A backend is a model sessions, suites and roles can use: weights on this Mac registered from the store, or a cloud service. Memory is the weights plus the attention cache at the model’s default window here, computed from the file; cloud models use none. Weights that aren’t a backend yet are under Stored weights.</p>
 </div>
 
 <sc-if value="{{mdl.hasSel}}">
@@ -818,16 +817,6 @@ a{color:inherit}a:hover{color:inherit}
 <div style="display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 6px 10px">
 <sc-for list="{{mdl.sel.facts}}" as="f" hint-placeholder-count="5"><span style="color: var(--text-tertiary)">{{f.label}}</span><span style="overflow-wrap: anywhere; font-family: {{f.font}}; color: {{f.color}}">{{f.value}}</span></sc-for>
 </div>
-<sc-if value="{{mdl.sel.hasComponents}}">
-<h3 class="lbl" style="margin: 20px 0 6px">COMPONENTS · FROM model_index.json</h3>
-<div style="display: flex; flex-direction: column">
-<sc-for list="{{mdl.sel.components}}" as="c" hint-placeholder-count="5"><div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 7px 0; border-bottom: 1px solid var(--line-border)"><span class="mono" style="font-size: var(--t-ui)">{{c.name}}</span><span class="mono" style="font-size: var(--t-meta); color: var(--text-secondary)">{{c.size}}</span><span style="grid-column: 1 / -1; font-size: var(--t-meta); color: var(--text-tertiary)">{{c.detail}}</span></div></sc-for>
-</div>
-</sc-if>
-<sc-if value="{{mdl.sel.hasVoices}}">
-<h3 class="lbl" style="margin: 20px 0 6px">VOICES BY LANGUAGE · {{mdl.sel.voiceTotal}}</h3>
-<sc-for list="{{mdl.sel.voices}}" as="v" hint-placeholder-count="5"><div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line-border)"><span>{{v.lang}}</span><span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">{{v.count}} · {{v.prefix}}</span></div></sc-for>
-</sc-if>
 <sc-if value="{{mdl.sel.hasLineage}}">
 <h3 class="lbl" style="margin: 20px 0 10px">LINEAGE</h3>
 <div style="display: flex; flex-direction: column">
@@ -854,10 +843,81 @@ a{color:inherit}a:hover{color:inherit}
 </div>
 </sc-if>
 
-<sc-if value="{{mdl.isDownloads}}">
+<sc-if value="{{mdl.isStore}}">
+<div style="flex: 1 1 0; min-height: 0; display: flex">
+<div style="flex: 1 1 0; min-width: 0; overflow: auto; padding: 12px 24px 24px">
+<div style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; min-height: 32px; margin-bottom: 4px">
+<span style="font-size: var(--t-small); color: var(--text-secondary)">{{st.summary}}</span>
+<span style="flex: 1 1 auto"></span>
+<sc-if value="{{st.hasUnreg}}"><button type="button" class="btn" onClick="{{st.registerAll}}" title="apogee config scan --register">Register the {{st.unregCount}} not registered…</button></sc-if>
+</div>
+<div class="lbl" style="display: grid; grid-template-columns: minmax(190px, 1fr) 100px 92px 72px minmax(170px, 210px); column-gap: 12px; align-items: center; height: 34px; border-bottom: 1px solid var(--line-strong)"><span>SET</span><span>FORMAT</span><span>PRECISION</span><span style="text-align: right">ON DISK</span><span>STATE</span></div>
+<sc-for list="{{st.groups}}" as="g" hint-placeholder-count="6">
+<div style="display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; padding: 16px 0 6px">
+<span style="font-size: var(--t-body); font-weight: 600">{{g.dir}}</span>
+<span class="mono" style="flex: 1 1 auto; min-width: 0; font-size: var(--t-meta); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{g.origin}}</span>
+<span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">{{g.summary}}</span>
+</div>
+<sc-for list="{{g.sets}}" as="r" hint-placeholder-count="2">
+<button type="button" onClick="{{r.select}}" aria-current="{{r.current}}" class="hv" style="width: 100%; display: grid; grid-template-columns: minmax(190px, 1fr) 100px 92px 72px minmax(170px, 210px); column-gap: 12px; align-items: center; min-height: 44px; padding: 4px 8px; margin: 0 -8px; box-sizing: content-box; border: 0; border-top: 1px solid var(--line-border); border-radius: 0; background: {{r.bg}}; color: var(--text-primary); text-align: left; font-size: var(--t-body)">
+<span style="min-width: 0; display: flex; flex-direction: column; line-height: 1.35"><span class="mono" style="font-size: var(--t-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.short}}</span><sc-if value="{{r.hasFrom}}"><span class="mono" style="font-size: var(--t-label); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.fromText}}</span></sc-if></span>
+<span class="mono" style="justify-self: start; padding: 1px 6px; border-radius: 4px; background: var(--surface-control); font-size: var(--t-label); color: {{r.formatColor}}">{{r.format}}</span>
+<span class="mono" style="font-size: var(--t-ui); color: var(--text-secondary)">{{r.level}}</span>
+<span class="mono" style="font-size: var(--t-ui); text-align: right; color: var(--text-secondary)">{{r.size}}</span>
+<span style="display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--t-small); color: {{r.stateColor}}"><sc-if value="{{r.busy}}"><span class="pulse" style="flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: var(--status-accent)"></span></sc-if><sc-if value="{{r.idle}}"><span style="flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: {{r.dot}}"></span></sc-if><span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.state}}</span></span>
+</button>
+</sc-for>
+</sc-for>
+<sc-if value="{{st.hasFold}}"><div style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line-border); font-size: var(--t-small); color: var(--text-tertiary)"><span>{{st.foldText}}</span><button type="button" class="btn-g" onClick="{{st.toggleAll}}" style="height: 26px; font-size: var(--t-small)">{{st.foldButton}}</button></div></sc-if>
+<p style="margin: 14px 0 0; max-width: 760px; font-size: var(--t-small); color: var(--text-tertiary)">Every set in ~/.apogee/models, read with <span class="mono">models list</span> and <span class="mono">models info</span>. SafeTensors weights don’t run as they are: convert them to GGUF for llama.cpp, or to MLX for Apple silicon. A GGUF or MLX set runs once it is registered as a backend.</p>
+</div>
+
+<sc-if value="{{st.hasSel}}">
+<aside class="ap-detail" aria-label="Stored set" style="flex: 0 0 380px; min-height: 0; overflow-y: auto; background: var(--surface-inspector); border-left: 1px solid var(--line-border); padding: 18px 20px 24px; font-size: var(--t-small)">
+<div style="display: flex; align-items: flex-start; gap: 8px">
+<div style="flex: 1 1 auto; min-width: 0"><div class="lbl">{{st.sel.kicker}}</div><h2 class="mono" style="margin: 4px 0 0; font-size: var(--t-title); line-height: 1.35; font-weight: 600; overflow-wrap: anywhere">{{st.sel.handle}}</h2><div style="display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; color: {{st.sel.stateColor}}"><span style="width: 6px; height: 6px; border-radius: 50%; background: {{st.sel.dot}}"></span>{{st.sel.state}}</div></div>
+<button type="button" class="ib" onClick="{{st.closeSel}}" aria-label="Close details"><svg class="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path></svg></button>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 0 6px">
+<sc-for list="{{st.sel.actions}}" as="a" hint-placeholder-count="4"><button type="button" class="{{a.cls}}" onClick="{{a.run}}" disabled="{{a.disabled}}" title="{{a.title}}">{{a.label}}</button></sc-for>
+</div>
+<sc-if value="{{st.sel.hasNote}}"><p style="margin: 10px 0 0; color: var(--text-secondary)">{{st.sel.note}}</p></sc-if>
+<h3 class="lbl" style="margin: 20px 0 8px">FACTS</h3>
+<div style="display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 6px 10px">
+<sc-for list="{{st.sel.facts}}" as="f" hint-placeholder-count="8"><span style="color: var(--text-tertiary)">{{f.label}}</span><span style="overflow-wrap: anywhere; font-family: {{f.font}}; color: var(--text-primary)">{{f.value}}</span></sc-for>
+</div>
+<sc-if value="{{st.sel.hasComponents}}">
+<h3 class="lbl" style="margin: 20px 0 6px">COMPONENTS · FROM model_index.json</h3>
+<div style="display: flex; flex-direction: column">
+<sc-for list="{{st.sel.components}}" as="c" hint-placeholder-count="5"><div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 7px 0; border-bottom: 1px solid var(--line-border)"><span class="mono" style="font-size: var(--t-ui)">{{c.name}}</span><span class="mono" style="font-size: var(--t-meta); color: var(--text-secondary)">{{c.size}}</span><span style="grid-column: 1 / -1; font-size: var(--t-meta); color: var(--text-tertiary)">{{c.detail}}</span></div></sc-for>
+</div>
+</sc-if>
+<sc-if value="{{st.sel.hasVoices}}">
+<h3 class="lbl" style="margin: 20px 0 6px">VOICES BY LANGUAGE · {{st.sel.voiceTotal}}</h3>
+<sc-for list="{{st.sel.voices}}" as="v" hint-placeholder-count="5"><div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line-border)"><span>{{v.lang}}</span><span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">{{v.count}} · {{v.prefix}}</span></div></sc-for>
+</sc-if>
+<sc-if value="{{st.sel.hasParent}}">
+<h3 class="lbl" style="margin: 20px 0 8px">MADE FROM</h3>
+<sc-for list="{{st.sel.parents}}" as="l"><div style="padding: 4px 0"><sc-if value="{{l.isLink}}"><button type="button" onClick="{{l.go}}" class="mono" style="padding: 0; border: 0; background: transparent; font-size: var(--t-ui); color: var(--status-accent); text-align: left; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; overflow-wrap: anywhere">{{l.label}}</button></sc-if><sc-if value="{{l.notLink}}"><span class="mono" style="font-size: var(--t-ui); overflow-wrap: anywhere">{{l.label}}</span></sc-if><div style="color: var(--text-secondary)">{{l.how}}</div></div></sc-for>
+</sc-if>
+<sc-if value="{{st.sel.hasChildren}}">
+<h3 class="lbl" style="margin: 16px 0 8px">MADE FROM IT</h3>
+<sc-for list="{{st.sel.children}}" as="l"><div style="padding: 4px 0"><button type="button" onClick="{{l.go}}" class="mono" style="padding: 0; border: 0; background: transparent; font-size: var(--t-ui); color: var(--status-accent); text-align: left; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; overflow-wrap: anywhere">{{l.label}}</button><div style="color: var(--text-secondary)">{{l.how}}</div></div></sc-for>
+</sc-if>
+<h3 class="lbl" style="margin: 20px 0 8px">THE MODEL · {{st.sel.dir}}</h3>
+<p style="margin: 0 0 8px; color: var(--text-secondary)">{{st.sel.dirSummary}}</p>
+<div style="display: flex; flex-wrap: wrap; gap: 6px"><button type="button" class="btn-g" onClick="{{st.sel.rename}}">Rename…</button><button type="button" class="btn-g" onClick="{{st.sel.deleteDir}}">Delete all of it…</button></div>
+<h3 class="lbl" style="margin: 20px 0 8px">ON THE COMMAND LINE</h3>
+<div class="mono" style="padding: 8px 10px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); line-height: 1.6; color: var(--text-secondary); overflow-wrap: anywhere">{{st.sel.command}}</div>
+</aside>
+</sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{mdl.isJobs}}">
 <div style="flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 20px 24px 28px">
 <div style="max-width: 980px; display: flex; flex-direction: column; gap: 14px">
-<p style="margin: 0; font-size: var(--t-small); color: var(--text-tertiary)">Each download runs as steps. A step that stops runs again from its start; the steps before it are kept and never repeated.</p>
+<p style="margin: 0; font-size: var(--t-small); color: var(--text-tertiary)">Downloads, conversions and checks run as steps. A step that stops runs again from its start; the steps before it are kept and never repeated.</p>
 <sc-for list="{{mdl.jobs}}" as="j" hint-placeholder-count="2">
 <div class="card" style="padding: 14px 16px">
 <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px">
@@ -868,14 +928,14 @@ a{color:inherit}a:hover{color:inherit}
 <span style="flex: 1 1 auto"></span>
 <sc-if value="{{j.canResume}}"><button type="button" class="btn-p" onClick="{{j.resume}}">Resume from {{j.resumeFrom}}</button></sc-if>
 <sc-if value="{{j.running}}"><button type="button" class="btn-g" onClick="{{j.pause}}">Stop</button></sc-if>
-<sc-if value="{{j.isDone}}"><button type="button" class="btn-g" onClick="{{j.openModel}}">Show in library</button></sc-if>
+<sc-if value="{{j.isDone}}"><button type="button" class="btn-g" onClick="{{j.openModel}}">{{j.openLabel}}</button></sc-if>
 <button type="button" class="mono hv" onClick="{{j.toggleLog}}" aria-expanded="{{j.logOpen}}" style="height: 28px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; font-size: var(--t-meta); color: var(--text-tertiary)">log</button>
 </div>
 <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 12px">
 <sc-for list="{{j.steps}}" as="s" hint-placeholder-count="4">
 <div style="min-width: 0">
 <div style="display: flex; align-items: center; gap: 6px; font-size: var(--t-small)"><span class="mono" style="font-size: var(--t-label); color: var(--text-tertiary)">{{s.n}}</span><span style="color: {{s.labelColor}}">{{s.label}}</span></div>
-<div style="height: 4px; margin: 6px 0; border-radius: 2px; background: var(--line-border); overflow: hidden"><div style="width: {{s.pct}}%; height: 100%; background: {{s.barColor}}"></div></div>
+<div style="height: 4px; margin: 6px 0; border-radius: 2px; background: var(--line-border); overflow: hidden"><div class="{{s.barClass}}" style="width: {{s.pct}}%; height: 100%; background: {{s.barColor}}"></div></div>
 <div class="mono" style="font-size: var(--t-meta); color: {{s.detailColor}}; overflow-wrap: anywhere">{{s.detail}}</div>
 </div>
 </sc-for>
@@ -1770,6 +1830,54 @@ a{color:inherit}a:hover{color:inherit}
 </div>
 </sc-if>
 
+<sc-if value="{{ui.storeSheetOpen}}">
+<div style="position: absolute; inset: 0; z-index: 65; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.45)">
+<div role="dialog" aria-modal="true" aria-labelledby="ss-h" style="width: min(600px, 100%); max-height: 100%; overflow-y: auto; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-card); box-shadow: 0 24px 64px rgba(0,0,0,.45)">
+<div style="padding: 18px 20px 6px"><h2 id="ss-h" style="margin: 0; font-size: var(--t-h2); font-weight: 600">{{sh.title}}</h2><p class="mono" style="margin: 6px 0 0; font-size: var(--t-meta); color: var(--text-tertiary); overflow-wrap: anywhere">{{sh.source}}</p><p style="margin: 6px 0 0; font-size: var(--t-small); color: var(--text-secondary)">{{sh.intro}}</p></div>
+<div style="padding: 12px 20px; display: flex; flex-direction: column; gap: 14px; font-size: var(--t-small)">
+
+<sc-if value="{{sh.isConvert}}">
+<div><div style="margin-bottom: 6px; color: var(--text-secondary)">Make</div><div role="group" aria-label="Make" class="seg" style="display: inline-flex"><sc-for list="{{sh.targets}}" as="t"><button type="button" aria-pressed="{{t.current}}" onClick="{{t.pick}}" style="background: {{t.bg}}; color: {{t.color}}; font-weight: {{t.weight}}">{{t.label}}</button></sc-for></div></div>
+<label style="display: flex; flex-direction: column; gap: 6px; color: var(--text-secondary)">Precision<select class="inp mono" value="{{sh.ptype}}" onChange="{{sh.onPtype}}" style="width: 240px"><sc-for list="{{sh.ptypes}}" as="o"><option value="{{o.value}}">{{o.label}}</option></sc-for></select></label>
+<div><div style="margin-bottom: 6px; color: var(--text-secondary)">{{sh.levelsLabel}}</div><div style="display: flex; flex-wrap: wrap; gap: 6px"><sc-for list="{{sh.levels}}" as="l"><button type="button" aria-pressed="{{l.on}}" onClick="{{l.toggle}}" class="mono" style="height: 28px; padding: 0 10px; border: 1px solid {{l.border}}; border-radius: 6px; background: {{l.bg}}; color: var(--text-primary); font-size: var(--t-ui)">{{l.label}}</button></sc-for></div><div style="margin-top: 6px; color: var(--text-tertiary)">{{sh.levelsNote}}</div></div>
+<div><label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-primary)"><input type="checkbox" checked="{{sh.register}}" onChange="{{sh.toggleRegister}}" disabled="{{sh.registerForced}}" style="accent-color: var(--status-accent)">Register what’s made as backends</label>
+<sc-if value="{{sh.register}}"><div style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; color: var(--text-secondary)"><label style="display: inline-flex; align-items: center; gap: 8px">Names begin<input type="text" class="inp mono" value="{{sh.base}}" onChange="{{sh.onBase}}" style="width: 220px"></label><span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">{{sh.names}}</span></div></sc-if></div>
+<sc-if value="{{sh.isMlx}}"><label style="display: flex; flex-direction: column; gap: 6px; color: var(--text-secondary)">Convert as type <span style="color: var(--text-tertiary)">optional</span><input type="text" class="inp mono" value="{{sh.mtype}}" onChange="{{sh.onMtype}}" placeholder="the architecture mlx-lm reads from the weights" style="width: 100%"></label><div style="margin-top: -8px; color: var(--text-tertiary)">Only for a vendor’s variant that mlx-lm’s converter doesn’t list. The weights are untouched, and the record says it was converted as that type.</div></sc-if>
+</sc-if>
+
+<sc-if value="{{sh.isQuantize}}">
+<label style="display: flex; flex-direction: column; gap: 6px; color: var(--text-secondary)">Level<select class="inp mono" value="{{sh.level}}" onChange="{{sh.onLevel}}" style="width: 240px"><sc-for list="{{sh.qlevels}}" as="o"><option value="{{o.value}}">{{o.label}}</option></sc-for></select></label>
+<div><label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-primary)"><input type="checkbox" checked="{{sh.register}}" onChange="{{sh.toggleRegister}}" style="accent-color: var(--status-accent)">Register it as a backend when it’s made</label>
+<sc-if value="{{sh.register}}"><div style="margin-top: 8px"><input type="text" class="inp mono" value="{{sh.name}}" onChange="{{sh.onName}}" aria-label="Backend name" style="width: 280px"></div></sc-if></div>
+</sc-if>
+
+<sc-if value="{{sh.isRegister}}">
+<label style="display: flex; flex-direction: column; gap: 6px; color: var(--text-secondary)">Backend name<input type="text" class="inp mono" value="{{sh.name}}" onChange="{{sh.onName}}" style="width: 320px"></label>
+<div style="display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px 12px; align-items: center">
+<span style="color: var(--text-secondary)">Runs on</span><span>{{sh.runsOn}}</span>
+<span style="color: var(--text-secondary)">Window</span><select class="inp mono" value="{{sh.ctx}}" onChange="{{sh.onCtx}}" aria-label="Context window" style="width: 240px"><sc-for list="{{sh.ctxs}}" as="o"><option value="{{o.value}}">{{o.label}}</option></sc-for></select>
+<sc-if value="{{sh.isGguf}}"><span style="color: var(--text-secondary)">Attention cache</span><div role="group" aria-label="Attention cache" class="seg" style="display: inline-flex; justify-self: start"><sc-for list="{{sh.caches}}" as="c"><button type="button" aria-pressed="{{c.current}}" onClick="{{c.pick}}" class="mono" style="background: {{c.bg}}; color: {{c.color}}; font-weight: {{c.weight}}; font-size: var(--t-ui)">{{c.label}}</button></sc-for></div></sc-if>
+<sc-if value="{{sh.hasProjector}}"><span style="color: var(--text-secondary)">Projector</span><span>Its <span class="mono">mmproj</span> file goes with it, so the backend can read images.</span></sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{sh.isRename}}">
+<label style="display: flex; flex-direction: column; gap: 6px; color: var(--text-secondary)">New name<input type="text" class="inp mono" value="{{sh.name}}" onChange="{{sh.onName}}" style="width: 320px"></label>
+<div style="color: var(--text-secondary)">{{sh.renameWhat}}</div>
+</sc-if>
+
+<sc-if value="{{sh.hasSteps}}">
+<ol style="margin: 0; padding: 12px 14px 12px 34px; border: 1px solid var(--line-border); border-radius: 8px; background: var(--surface-window); display: flex; flex-direction: column; gap: 4px; color: var(--text-secondary)"><sc-for list="{{sh.steps}}" as="s"><li>{{s.label}}</li></sc-for></ol>
+</sc-if>
+<sc-for list="{{sh.notes}}" as="n"><p style="margin: 0; color: {{n.color}}">{{n.text}}</p></sc-for>
+<sc-if value="{{sh.hasErrors}}"><div role="alert" style="display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--status-error); border-radius: 6px"><sc-for list="{{sh.errors}}" as="e"><span>{{e.text}}</span></sc-for></div></sc-if>
+<div class="mono" style="padding: 8px 10px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); line-height: 1.6; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere">{{sh.command}}</div>
+</div>
+<div style="display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px 18px"><button type="button" class="btn-g" onClick="{{sh.cancel}}">Cancel</button><button type="button" class="btn-p" onClick="{{sh.go}}" disabled="{{sh.cantGo}}">{{sh.goLabel}}</button></div>
+</div>
+</div>
+</sc-if>
+
 <sc-if value="{{ui.runtimeOpen}}">
 <div style="position: absolute; inset: 0; z-index: 66; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.45)">
 <div role="dialog" aria-modal="true" aria-labelledby="rt-h" style="width: min(580px, 100%); max-height: 100%; overflow-y: auto; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-card); box-shadow: 0 24px 64px rgba(0,0,0,.45)">
@@ -1795,8 +1903,8 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{ui.confirmOpen}}">
 <div style="position: absolute; inset: 0; z-index: 70; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.45)">
 <div role="alertdialog" aria-modal="true" aria-labelledby="cf-h" style="width: min(460px, 100%); border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-card); box-shadow: 0 24px 64px rgba(0,0,0,.45)">
-<div style="padding: 18px 20px 4px"><h2 id="cf-h" style="margin: 0; font-size: var(--t-title); font-weight: 600">{{cf.title}}</h2><p style="margin: 6px 0 0; font-size: var(--t-body); color: var(--text-secondary)">{{cf.body}}</p><sc-if value="{{cf.hasDetail}}"><div class="mono" style="margin-top: 10px; padding: 8px 10px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); color: var(--text-secondary); overflow-wrap: anywhere">{{cf.detail}}</div></sc-if></div>
-<div style="display: flex; justify-content: flex-end; gap: 8px; padding: 16px 20px 18px"><button type="button" class="btn-g" onClick="{{cf.cancel}}">Cancel</button><button type="button" class="btn-p" onClick="{{cf.run}}" style="background: var(--status-error); color: var(--surface-window)">{{cf.confirmLabel}}</button></div>
+<div style="padding: 18px 20px 4px"><h2 id="cf-h" style="margin: 0; font-size: var(--t-title); font-weight: 600">{{cf.title}}</h2><p style="margin: 6px 0 0; font-size: var(--t-body); color: var(--text-secondary)">{{cf.body}}</p><sc-if value="{{cf.hasDetail}}"><div class="mono" style="margin-top: 10px; padding: 8px 10px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); line-height: 1.6; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere">{{cf.detail}}</div></sc-if><sc-if value="{{cf.hasCheck}}"><label style="display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; font-size: var(--t-small); color: var(--text-primary); cursor: pointer"><input type="checkbox" checked="{{cf.check}}" onChange="{{cf.toggleCheck}}" style="margin: 2px 0 0; accent-color: var(--status-accent)"><span>{{cf.checkLabel}}<span style="display: block; margin-top: 2px; color: var(--text-tertiary)">{{cf.checkNote}}</span></span></label></sc-if></div>
+<div style="display: flex; justify-content: flex-end; gap: 8px; padding: 16px 20px 18px"><button type="button" class="btn-g" onClick="{{cf.cancel}}">Cancel</button><button type="button" class="btn-p" onClick="{{cf.run}}" style="background: {{cf.runBg}}; color: {{cf.runColor}}">{{cf.confirmLabel}}</button></div>
 </div>
 </div>
 </sc-if>
@@ -1804,7 +1912,7 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{ui.toastOn}}"><div role="status" style="position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 80; max-width: calc(100% - 48px); padding: 9px 16px; border-radius: 8px; background: var(--text-primary); color: var(--surface-window); font-size: var(--t-small); box-shadow: 0 8px 24px rgba(0,0,0,.3)">{{ui.toastText}}</div></sc-if>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","monitor","models","models:downloads","models:roles","download","suites","tasks","newtask","graph","video","video:run","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions"],"default":"chat"},"still":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
+<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","monitor","models","models:downloads","models:store","models:convert","models:register","models:roles","download","suites","tasks","newtask","graph","video","video:run","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions"],"default":"chat"},"still":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
 class Component extends DCLogic {
   constructor(props) {
     super(props);
@@ -1852,10 +1960,20 @@ class Component extends DCLogic {
       custom: [],
       privateOpen: false,
       pending: null,
-      modelsTab: 'all',
+      modelsTab: 'backends',
       selModel: 'gemma-q4',
       loaded: { 'gpt-oss': true, embed: true },
       deleted: {},
+      storeSel: null,
+      storeAll: false,
+      storeAdded: [],
+      storeGone: {},
+      storeReg: {},
+      storeUnreg: {},
+      storeDangling: {},
+      storeRename: {},
+      storeConsumed: {},
+      sheet: null,
       roles: { chat: 'gpt-oss', embedding: 'embed', extraction: '', vision: 'qwenvl', transcription: 'gemma-mlx', utility: '' },
       jobs: [
         { id: 'j1', repo: 'mistralai/Mistral-Small-3.2-24B-Instruct-2506', name: 'Mistral Small 3.2 24B', format: 'gguf', quant: 'Q4_K_M', size: 14.3, dl: 48.1, mid: 47.2, trained: '128K', hash: '5e8c21d0', file: 'Mistral-Small-3.2-24B-Q4_K_M.gguf', state: 'interrupted', failStep: 2, failPct: 38, t0: 0, from: 0, fromPct: 0, pausedAt: null, pausedTotal: 0, finished: false, log: false },
@@ -1966,8 +2084,17 @@ class Component extends DCLogic {
     } else if (where === 'monitor') {
       set({ screen: 'chat', monitor: true, navOpen: Object.assign({}, s.navOpen, { system: true }) });
       s.cs = Object.assign({}, s.cs, { taskgroup: Object.assign({}, s.cs.taskgroup, { progress: 30 }) });
-    } else if (where === 'models') set({ screen: 'models', modelsTab: sub || 'all' });
-    else if (where === 'download') set({ screen: 'models', overlay: 'download', dl: { repo: 'Wan-AI/Wan2.1-T2V-1.3B-Diffusers', format: 'gguf', quant: 'Q4_K_M' } });
+    } else if (where === 'models') {
+      set({ screen: 'models', modelsTab: { downloads: 'jobs', jobs: 'jobs', store: 'store', convert: 'store', register: 'store', roles: 'roles' }[sub] || 'backends' });
+      if (sub === 'store' || sub === 'convert') set({ storeSel: 'safetensors/a04f3e19b2c7' });
+      if (sub === 'convert') set({ overlay: 'store', sheet: { kind: 'convert', sid: 'safetensors/a04f3e19b2c7', target: 'gguf', ptype: 'f16', levels: ['Q4_K_M'], register: true, base: 'Qwen3-14B', mtype: '' } });
+      if (sub === 'register') set({ storeSel: 'mlx/3e9b1c55a0d4', overlay: 'store', sheet: { kind: 'register', sid: 'mlx/3e9b1c55a0d4', name: 'Qwen3-4B-8bit', ctx: '', cache: 'q8_0' } });
+      if (sub === 'downloads' || sub === 'jobs') {
+        const llama = this.storeSets().find((x) => x.sid === 'safetensors/ab28930be261');
+        const job = Object.assign(this.storeJob('convert', llama, { target: 'gguf', ptype: 'f16', levels: ['Q4_K_M'], names: ['Llama3.1-8B-Instruct-F16', 'Llama3.1-8B-Instruct-Q4KM'], command: 'apogee models convert Llama3.1-8B-Instruct/safetensors/ab28930be261 --register-with Q4_K_M' }, 0), { id: 'j2', t0: -20 });
+        set({ jobs: [job].concat(s.jobs) });
+      }
+    } else if (where === 'download') set({ screen: 'models', overlay: 'download', dl: { repo: 'Wan-AI/Wan2.1-T2V-1.3B-Diffusers', format: 'gguf', quant: 'Q4_K_M' } });
     else if (where === 'suites' || where === 'tasks' || where === 'graph' || where === 'voice') set({ screen: where });
     else if (where === 'newtask') set({ screen: 'tasks', overlay: 'newtask', newTask: { goal: 'Make tests/test_parsers.py pass on Python 3.12', suite: 'coding', rounds: '8', writes: 'allow', cmds: 'allow', require: '', requireFile: '' } });
     else if (where === 'video') {
@@ -2036,16 +2163,25 @@ class Component extends DCLogic {
       next.pending = null;
     }
     let changed = false;
+    let added = s.storeAdded;
+    let reg = s.storeReg;
+    let unreg = s.storeUnreg;
+    let used = s.storeConsumed;
     const jobs = s.jobs.map((j) => {
       if (j.state === 'running' && !j.finished && this.jobView(j, clock).finished) {
         changed = true;
-        next.toast = j.name + ' · ' + j.quant + ' is ready in the library';
+        next.toast = j.doneToast || j.name + ' · ' + j.quant + ' is ready in the library';
         next.toastAt = clock;
+        (j.produces || []).forEach((p) => {
+          added = added.concat([p]);
+          if (p.reg) { reg = Object.assign({}, reg, { [p.sid]: p.reg }); unreg = Object.assign({}, unreg, { ['reg-' + p.reg]: false }); }
+        });
+        if (j.consume) used = Object.assign({}, used, { [j.consume]: true });
         return Object.assign({}, j, { finished: true, state: 'done', doneAt: this.nowTime() });
       }
       return j;
     });
-    if (changed) next.jobs = jobs;
+    if (changed) Object.assign(next, { jobs: jobs, storeAdded: added, storeReg: reg, storeUnreg: unreg, storeConsumed: used });
     const vr = s.vrun;
     if (vr && !vr.stopped && clock - vr.t0 >= this.vrunTiming(vr).total) {
       const rec = { id: 'c' + clock, file: vr.file, prompt: vr.prompt, mode: vr.mode, image: vr.image, pipeline: vr.pipeline, preset: vr.preset, steps: vr.steps, w: vr.w, h: vr.h, fps: vr.fps, dur: vr.dur, seed: vr.seed, seedSource: vr.seedSource, loras: vr.loras, parent: vr.parent, took: Math.round((clock - vr.t0) * 0.4) + ' s in this prototype', when: 'Today ' + this.nowTime(), size: (Math.round(vr.dur * vr.w * vr.h / 901120 * 1.7 * 10) / 10) + ' MB' };
@@ -2213,17 +2349,15 @@ class Component extends DCLogic {
 
   baseModels() {
     return [
-      { id: 'gpt-oss', name: 'gpt-oss-20b', short: 'gpt-oss', kind: 'local', chat: true, format: 'GGUF · MXFP4', size: 12.1, win: '32K', trained: '128K', weights: 12.1, cache: 0.6, backend: 'llama.cpp · Metal', path: '~/.apogee/models/gguf/4be1c07e/gpt-oss-20b-mxfp4.gguf', lineage: [['GGUF · MXFP4 · 12.1 GB', 'pulled as GGUF from ggml-org/gpt-oss-20b-GGUF · Sep 14', null]] },
-      { id: 'qwenvl', name: 'Qwen3-VL-8B · Q4_K_M', short: 'qwen3-vl', kind: 'local', chat: true, vision: true, format: 'GGUF · Q4_K_M', size: 5.6, win: '32K', trained: '256K', weights: 5.6, cache: 2.3, backend: 'llama.cpp · Metal · sees images', path: '~/.apogee/models/gguf/6d0e12aa/Qwen3-VL-8B-Instruct-Q4_K_M.gguf', extraFile: ['~/.apogee/models/gguf/6d0e12aa/mmproj-F16.gguf', '0.6 GB'], lineage: [['GGUF · Q4_K_M + vision projector · 5.6 GB', 'pulled as GGUF from Qwen/Qwen3-VL-8B-Instruct-GGUF · Sep 30', null]] },
-      { id: 'gemma-q4', name: 'Gemma 4 12B · Q4_K_M', short: 'gemma', kind: 'local', chat: true, vision: true, format: 'GGUF · Q4_K_M', size: 7.3, win: '32K', trained: '128K', weights: 7.3, cache: 2.6, backend: 'llama.cpp · Metal', path: '~/.apogee/models/gguf/9f3a01c4/gemma-4-12b-it-Q4_K_M.gguf', lineage: [['GGUF · Q4_K_M · 7.3 GB', 'quantized from F16 with llama-quantize · Oct 2', null], ['GGUF · F16 · 24.0 GB', 'converted from a Hugging Face snapshot · Oct 2', 'gemma-f16'], ['Snapshot · SafeTensors · 24.1 GB', 'pulled from google/gemma-4-12b-it · revision 3c1f9a2 · Oct 2', 'gemma-snap']] },
-      { id: 'gemma-f16', name: 'Gemma 4 12B · F16', short: 'gemma', kind: 'local', chat: true, vision: true, format: 'GGUF · F16', size: 24.0, win: '32K', trained: '128K', weights: 24.0, cache: 2.6, backend: 'llama.cpp · Metal', path: '~/.apogee/models/gguf/9f3a01c4/gemma-4-12b-it-F16.gguf', note: 'Kept after quantizing; Gemma 4 12B · Q4_K_M was made from it.', lineage: [['GGUF · F16 · 24.0 GB', 'converted from a Hugging Face snapshot · Oct 2', null], ['Snapshot · SafeTensors · 24.1 GB', 'pulled from google/gemma-4-12b-it · revision 3c1f9a2 · Oct 2', 'gemma-snap']] },
-      { id: 'gemma-mlx', name: 'Gemma 4 12B · MLX', short: 'gemma', kind: 'local', chat: true, hears: true, format: 'MLX · 4-bit', size: 7.4, win: '32K', trained: '128K', weights: 7.4, cache: 2.6, backend: 'MLX · Python child process', path: '~/.apogee/models/mlx/2b7d55e0/gemma-4-12b-it-4bit/', lineage: [['MLX · 4-bit · 7.4 GB', 'converted with mlx_lm.convert · Oct 3', null], ['Snapshot · SafeTensors · 24.1 GB', 'pulled from google/gemma-4-12b-it · revision 3c1f9a2 · Oct 2', 'gemma-snap']] },
-      { id: 'embed', name: 'Embedding-Gemma-300M', short: 'embed', kind: 'local', chat: false, embed: true, format: 'GGUF · Q8_0', size: 0.3, win: '2K', trained: '2K', weights: 0.3, cache: 0, backend: 'llama.cpp · Metal · embeddings', path: '~/.apogee/models/gguf/77c2a9b1/embeddinggemma-300m-Q8_0.gguf', lineage: [['GGUF · Q8_0 · 0.3 GB', 'pulled as GGUF from ggml-org/embeddinggemma-300M-GGUF · Sep 14', null]] },
-      { id: 'qwen06', name: 'Qwen3-0.6B · Q8_0', short: 'qwen3', kind: 'local', chat: true, format: 'GGUF · Q8_0', size: 0.6, win: '32K', trained: '32K', weights: 0.6, cache: 1.8, backend: 'llama.cpp · Metal', path: '~/.apogee/models/gguf/15e0be62/Qwen3-0.6B-Q8_0.gguf', lineage: [['GGUF · Q8_0 · 0.6 GB', 'pulled as GGUF from Qwen/Qwen3-0.6B-GGUF · Sep 20', null]] },
-      { id: 'gemma-snap', name: 'google/gemma-4-12b-it', short: 'gemma', kind: 'snap', chat: false, format: 'SafeTensors · BF16', size: 24.1, win: '—', trained: '128K', snapStatus: 'converted', path: '~/.apogee/models/safetensors/c51d9e07/', note: 'Weights only. Gemma 4 12B · F16 and Gemma 4 12B · MLX were made from it.', lineage: [['Snapshot · SafeTensors · 24.1 GB', 'pulled from google/gemma-4-12b-it · revision 3c1f9a2 · Oct 2', null]] },
-      { id: 'qwen14', name: 'Qwen/Qwen3-14B', short: 'qwen3', kind: 'snap', chat: false, format: 'SafeTensors · BF16', size: 29.5, win: '—', trained: '128K', snapStatus: 'not converted', path: '~/.apogee/models/safetensors/a04f3e19/', note: 'Downloaded weights, not converted yet. Convert them to run the model.', lineage: [['Snapshot · SafeTensors · 29.5 GB', 'pulled from Qwen/Qwen3-14B · revision main · Oct 7', null]] },
-      { id: 'wan22', name: 'Wan 2.2 TI2V-5B', short: 'wan', handle: 'wan2.2-ti2v-5b', kind: 'local', media: 'pipeline', chat: false, format: 'Pipeline', size: 22.8, win: '—', trained: '—', weights: 0, cache: 0, backend: 'diffusers · Python child process · mps', path: '~/.apogee/models/wan2.2-ti2v-5b/pipeline/8c41e2d7/', lineage: [['Pipeline · 5 components · 22.8 GB', 'pulled whole from Wan-AI/Wan2.2-TI2V-5B-Diffusers · Oct 18', null]] },
-      { id: 'kokoro', name: 'Kokoro-82M', short: 'kokoro', handle: 'kokoro-82m', kind: 'local', media: 'voice', chat: false, format: 'Voice · .pth', size: 0.36, win: '—', trained: '—', weights: 0, cache: 0, backend: 'kokoro · Python child process · cpu', path: '~/.apogee/models/kokoro-82m/voice/41d09b3e/', lineage: [['Voice · a checkpoint and 54 voice packs · 0.36 GB', 'pulled from hexgrad/Kokoro-82M · Oct 19', null]] },
+      { id: 'gpt-oss', name: 'gpt-oss-20b', short: 'gpt-oss', kind: 'local', chat: true, format: 'GGUF · MXFP4', size: 12.1, win: '32K', trained: '128K', weights: 12.1, cache: 0.6, backend: 'llama.cpp · Metal', path: '~/.apogee/models/gpt-oss-20b/gguf/4be1c07e2f90/gpt-oss-20b-mxfp4.gguf', lineage: [['GGUF · MXFP4 · 12.1 GB', 'pulled as GGUF from ggml-org/gpt-oss-20b-GGUF · Sep 14', null]] },
+      { id: 'qwenvl', name: 'Qwen3-VL-8B · Q4_K_M', short: 'qwen3-vl', kind: 'local', chat: true, vision: true, format: 'GGUF · Q4_K_M', size: 5.6, win: '32K', trained: '256K', weights: 5.6, cache: 2.3, backend: 'llama.cpp · Metal · sees images', path: '~/.apogee/models/Qwen3-VL-8B-Instruct/gguf/6d0e12aa41b8/Qwen3-VL-8B-Instruct-Q4_K_M.gguf', extraFile: ['~/.apogee/models/Qwen3-VL-8B-Instruct/gguf/6d0e12aa41b8/Qwen3-VL-8B-Instruct-Q4_K_M-mmproj.gguf', '0.6 GB'], lineage: [['GGUF · Q4_K_M + vision projector · 5.6 GB', 'pulled as GGUF from Qwen/Qwen3-VL-8B-Instruct-GGUF · Sep 30', null]] },
+      { id: 'gemma-q4', name: 'Gemma 4 12B · Q4_K_M', short: 'gemma', kind: 'local', chat: true, vision: true, format: 'GGUF · Q4_K_M', size: 7.3, win: '32K', trained: '128K', weights: 7.3, cache: 2.6, backend: 'llama.cpp · Metal', path: '~/.apogee/models/Gemma4-12B-Instruct/gguf/5b7e10aa93c2/gemma-4-12b-it-Q4_K_M.gguf', lineage: [['GGUF · Q4_K_M · 7.3 GB', 'quantized from F16 with llama-quantize · Oct 2', null], ['GGUF · F16 · 24.0 GB', 'converted from a Hugging Face snapshot · Oct 2', 'gemma-f16'], ['Snapshot · SafeTensors · 24.1 GB', 'pulled from google/gemma-4-12b-it · revision 3c1f9a2 · Oct 2', 'store:safetensors/c51d9e07a412']] },
+      { id: 'gemma-f16', name: 'Gemma 4 12B · F16', short: 'gemma', kind: 'local', chat: true, vision: true, format: 'GGUF · F16', size: 24.0, win: '32K', trained: '128K', weights: 24.0, cache: 2.6, backend: 'llama.cpp · Metal', path: '~/.apogee/models/Gemma4-12B-Instruct/gguf/9f3a01c4e2b1/gemma-4-12b-it-F16.gguf', note: 'Kept after quantizing; Gemma 4 12B · Q4_K_M was made from it.', lineage: [['GGUF · F16 · 24.0 GB', 'converted from a Hugging Face snapshot · Oct 2', null], ['Snapshot · SafeTensors · 24.1 GB', 'pulled from google/gemma-4-12b-it · revision 3c1f9a2 · Oct 2', 'store:safetensors/c51d9e07a412']] },
+      { id: 'gemma-mlx', name: 'Gemma 4 12B · MLX', short: 'gemma', kind: 'local', chat: true, hears: true, format: 'MLX · 4-bit', size: 7.4, win: '32K', trained: '128K', weights: 7.4, cache: 2.6, backend: 'MLX · Python child process', path: '~/.apogee/models/Gemma4-12B-Instruct/mlx/2b7d55e0c1f8/', lineage: [['MLX · 4-bit · 7.4 GB', 'converted with mlx_lm.convert · Oct 3', null], ['Snapshot · SafeTensors · 24.1 GB', 'pulled from google/gemma-4-12b-it · revision 3c1f9a2 · Oct 2', 'store:safetensors/c51d9e07a412']] },
+      { id: 'embed', name: 'Embedding-Gemma-300M', short: 'embed', kind: 'local', chat: false, embed: true, format: 'GGUF · Q8_0', size: 0.3, win: '2K', trained: '2K', weights: 0.3, cache: 0, backend: 'llama.cpp · Metal · embeddings', path: '~/.apogee/models/Embedding-Gemma-300M/gguf/77c2a9b1d3e5/embeddinggemma-300m-Q8_0.gguf', lineage: [['GGUF · Q8_0 · 0.3 GB', 'pulled as GGUF from ggml-org/embeddinggemma-300M-GGUF · Sep 14', null]] },
+      { id: 'qwen06', name: 'Qwen3-0.6B · Q8_0', short: 'qwen3', kind: 'local', chat: true, format: 'GGUF · Q8_0', size: 0.6, win: '32K', trained: '32K', weights: 0.6, cache: 1.8, backend: 'llama.cpp · Metal', path: '~/.apogee/models/Qwen3-0.6B/gguf/15e0be62c7a9/Qwen3-0.6B-Q8_0.gguf', lineage: [['GGUF · Q8_0 · 0.6 GB', 'pulled as GGUF from Qwen/Qwen3-0.6B-GGUF · Sep 20', null]] },
+      { id: 'wan22', name: 'Wan 2.2 TI2V-5B', short: 'wan', handle: 'Wan-AI--Wan2.2-TI2V-5B', kind: 'local', media: 'pipeline', chat: false, format: 'Pipeline', size: 22.8, win: '—', trained: '—', weights: 0, cache: 0, backend: 'diffusers · Python child process · mps', path: '~/.apogee/models/Wan-AI--Wan2.2-TI2V-5B/pipeline/8c41e2d7f0a1/', lineage: [['Pipeline · 5 components · 22.8 GB', 'pulled whole from Wan-AI/Wan2.2-TI2V-5B-Diffusers · Oct 18', null]] },
+      { id: 'kokoro', name: 'Kokoro-82M', short: 'kokoro', handle: 'hexgrad--Kokoro-82M', kind: 'local', media: 'voice', chat: false, format: 'Voice · .pth', size: 0.36, win: '—', trained: '—', weights: 0, cache: 0, backend: 'kokoro · Python child process · cpu', path: '~/.apogee/models/hexgrad--Kokoro-82M/voice/41d09b3e5c62/', lineage: [['Voice · a checkpoint and 54 voice packs · 0.36 GB', 'pulled from hexgrad/Kokoro-82M · Oct 19', null]] },
       { id: 'sonnet', name: 'Claude Sonnet', short: 'sonnet', kind: 'api', chat: true, vision: true, key: 'anthropic', provider: 'Anthropic API', format: 'Cloud API', win: '200K', trained: '200K' },
       { id: 'openai', name: 'OpenAI API', short: 'openai', kind: 'api', chat: true, key: 'openai', provider: 'OpenAI API', format: 'Cloud API', win: 'per model', trained: 'per model' },
       { id: 'google', name: 'Gemini API', short: 'gemini', kind: 'api', chat: true, key: 'google', provider: 'Google Gemini API', format: 'Cloud API', win: 'per model', trained: 'per model' },
@@ -2233,19 +2367,179 @@ class Component extends DCLogic {
   }
 
   jobModel(j) {
+    const set = this.storeSets().find((x) => x.backendId === 'dl-' + j.id || x.mediaId === 'dl-' + j.id);
     if (j.format === 'pipeline' || j.format === 'voice') {
-      const handle = j.name.toLowerCase().replace(/[^a-z0-9.]+/g, '-');
+      const handle = set ? set.dir : j.repo.replace('/', '--').replace(/-Diffusers$/, '');
       const pipe = j.format === 'pipeline';
-      return { id: 'dl-' + j.id, name: j.name, short: handle.split('-')[0], handle: handle, kind: 'local', media: j.format, chat: false, format: pipe ? 'Pipeline' : 'Voice · .pth', size: j.size, win: '—', trained: '—', weights: 0, cache: 0, backend: pipe ? 'diffusers · Python child process · mps' : 'kokoro · Python child process · cpu', path: '~/.apogee/models/' + handle + '/' + j.format + '/' + (j.hash || 'e17a90c3') + '/', lineage: [[(pipe ? 'Pipeline · 5 components · ' : 'Voice · ') + j.size + ' GB', (pipe ? 'pulled whole from ' : 'pulled from ') + j.repo + ' · ' + (j.doneAt || 'today'), null]] };
+      return { id: 'dl-' + j.id, name: j.name, short: handle.split('-')[0], handle: handle, kind: 'local', media: j.format, chat: false, format: pipe ? 'Pipeline' : 'Voice · .pth', size: j.size, win: '—', trained: '—', weights: 0, cache: 0, backend: pipe ? 'diffusers · Python child process · mps' : 'kokoro · Python child process · cpu', path: '~/.apogee/models/' + (set ? set.handle : handle + '/' + j.format) + '/', lineage: [[(pipe ? 'Pipeline · 5 components · ' : 'Voice · ') + j.size + ' GB', (pipe ? 'pulled whole from ' : 'pulled from ') + j.repo + ' · ' + (j.doneAt || 'today'), null]] };
     }
     const mlx = j.format === 'mlx';
-    return { id: 'dl-' + j.id, name: j.name + ' · ' + (mlx ? 'MLX' : j.quant), short: j.name.split(' ')[0].toLowerCase(), kind: 'local', chat: true, format: (mlx ? 'MLX · ' : 'GGUF · ') + j.quant, size: j.size, win: '32K', trained: j.trained || '128K', weights: j.size, cache: Math.round(j.size * 3) / 10, backend: mlx ? 'MLX · Python child process' : 'llama.cpp · Metal', path: '~/.apogee/models/' + (mlx ? 'mlx/' : 'gguf/') + (j.hash || 'c0ffee12') + '/' + (j.file || j.name.replace(/ /g, '-') + '-' + j.quant + (mlx ? '/' : '.gguf')), lineage: mlx ? [['MLX · ' + j.quant + ' · ' + j.size + ' GB', 'converted with mlx_lm.convert · ' + (j.doneAt || 'today'), null], ['Snapshot · SafeTensors · ' + j.dl + ' GB', 'pulled from ' + j.repo, null]] : [['GGUF · ' + j.quant + ' · ' + j.size + ' GB', 'quantized from F16 · ' + (j.doneAt || 'today'), null], ['GGUF · F16 · ' + j.mid + ' GB', 'converted from a Hugging Face snapshot', null], ['Snapshot · SafeTensors · ' + j.dl + ' GB', 'pulled from ' + j.repo, null]] };
+    return { id: 'dl-' + j.id, name: j.name + ' · ' + (mlx ? 'MLX' : j.quant), short: j.name.split(' ')[0].toLowerCase(), kind: 'local', chat: true, format: (mlx ? 'MLX · ' : 'GGUF · ') + j.quant, size: j.size, win: '32K', trained: j.trained || '128K', weights: j.size, cache: Math.round(j.size * 3) / 10, backend: mlx ? 'MLX · Python child process' : 'llama.cpp · Metal', path: '~/.apogee/models/' + (set ? set.handle + '/' + set.file : (mlx ? 'mlx/' : 'gguf/') + (j.file || j.name.replace(/ /g, '-') + '-' + j.quant + '.gguf')), lineage: mlx ? [['MLX · ' + j.quant + ' · ' + j.size + ' GB', 'converted with mlx_lm.convert · ' + (j.doneAt || 'today'), null], ['Snapshot · SafeTensors · ' + j.dl + ' GB', 'pulled from ' + j.repo, null]] : [['GGUF · ' + j.quant + ' · ' + j.size + ' GB', 'quantized from F16 · ' + (j.doneAt || 'today'), null], ['GGUF · F16 · ' + j.mid + ' GB', 'converted from a Hugging Face snapshot', null], ['Snapshot · SafeTensors · ' + j.dl + ' GB', 'pulled from ' + j.repo, null]] };
   }
 
   allModels() {
     const s = this.state;
-    const dl = s.jobs.filter((j) => j.finished).map((j) => this.jobModel(j));
-    return this.baseModels().concat(dl).filter((m) => !s.deleted[m.id]);
+    const dl = s.jobs.filter((j) => j.finished && !j.kind).map((j) => this.jobModel(j));
+    const reg = this.storeSets().filter((x) => x.backendId && x.backendId.indexOf('reg-') === 0).map((x) => this.regModel(x, x.backendKey));
+    return this.baseModels().concat(dl, reg).filter((m) => !s.deleted[m.id] && !s.storeUnreg[m.id]);
+  }
+
+  /* ---------- the model store ---------- */
+  storeBase() {
+    const S = (dir, format, id, level, gb, arch, how, origin, when, extra) => Object.assign({ sid: format + '/' + id, dir: dir, format: format, id: id, level: level, gb: gb, arch: arch, how: how, origin: origin, when: when, from: null, consumed: false, backendId: null, mediaId: null, record: '', file: '', projector: false }, extra || {});
+    return [
+      S('Gemma4-12B-Instruct', 'safetensors', 'c51d9e07a412', 'BF16', 24.1, 'Gemma4ForConditionalGeneration', 'pulled', 'google/gemma-4-12b-it · revision 3c1f9a2', 'Oct 2', { consumed: true, record: '7 files on record' }),
+      S('Gemma4-12B-Instruct', 'gguf', '9f3a01c4e2b1', 'F16', 24.0, 'Gemma4ForConditionalGeneration', 'converted', '', 'Oct 2', { from: 'safetensors/c51d9e07a412', backendId: 'gemma-f16', file: 'gemma-4-12b-it-F16.gguf' }),
+      S('Gemma4-12B-Instruct', 'gguf', '5b7e10aa93c2', 'Q4_K_M', 7.3, 'Gemma4ForConditionalGeneration', 'quantized', '', 'Oct 2', { from: 'gguf/9f3a01c4e2b1', backendId: 'gemma-q4', file: 'gemma-4-12b-it-Q4_K_M.gguf' }),
+      S('Gemma4-12B-Instruct', 'mlx', '2b7d55e0c1f8', '4bit', 7.4, 'Gemma4ForConditionalGeneration', 'converted', '', 'Oct 3', { from: 'safetensors/c51d9e07a412', backendId: 'gemma-mlx', record: '10 files on record' }),
+      S('gpt-oss-20b', 'gguf', '4be1c07e2f90', 'MXFP4', 12.1, 'GptOssForCausalLM', 'pulled', 'ggml-org/gpt-oss-20b-GGUF', 'Sep 14', { backendId: 'gpt-oss', file: 'gpt-oss-20b-mxfp4.gguf' }),
+      S('Qwen3-VL-8B-Instruct', 'gguf', '6d0e12aa41b8', 'Q4_K_M', 5.6, 'Qwen3VLForConditionalGeneration', 'pulled', 'Qwen/Qwen3-VL-8B-Instruct-GGUF', 'Sep 30', { backendId: 'qwenvl', file: 'Qwen3-VL-8B-Instruct-Q4_K_M.gguf', projector: true }),
+      S('Embedding-Gemma-300M', 'gguf', '77c2a9b1d3e5', 'Q8_0', 0.3, 'Gemma3TextModel', 'pulled', 'ggml-org/embeddinggemma-300M-GGUF', 'Sep 14', { backendId: 'embed', file: 'embeddinggemma-300m-Q8_0.gguf' }),
+      S('Qwen3-0.6B', 'gguf', '15e0be62c7a9', 'Q8_0', 0.6, 'Qwen3ForCausalLM', 'pulled', 'Qwen/Qwen3-0.6B-GGUF', 'Sep 20', { backendId: 'qwen06', file: 'Qwen3-0.6B-Q8_0.gguf' }),
+      S('Qwen3-14B', 'safetensors', 'a04f3e19b2c7', 'BF16', 29.5, 'Qwen3ForCausalLM', 'pulled', 'Qwen/Qwen3-14B · revision main', 'Oct 7', { record: '9 files on record' }),
+      S('Llama3.1-8B-Instruct', 'safetensors', 'ab28930be261', 'BF16', 16.1, 'LlamaForCausalLM', 'pulled', 'meta-llama/Llama-3.1-8B-Instruct · revision main', 'Oct 9', { record: '12 files on record' }),
+      S('Qwen3-4B', 'safetensors', '71c0a3d9e8f2', 'BF16', 8.0, 'Qwen3ForCausalLM', 'pulled', 'Qwen/Qwen3-4B · revision main', 'Oct 14', { consumed: true, record: '3 files on record' }),
+      S('Qwen3-4B', 'mlx', '3e9b1c55a0d4', '8bit', 4.3, 'Qwen3ForCausalLM', 'converted', '', 'Oct 14', { from: 'safetensors/71c0a3d9e8f2', record: '7 files on record' }),
+      S('Mistral-Small-3.2-24B', 'safetensors', '5e8c21d04f17', 'BF16', 48.1, 'Mistral3ForConditionalGeneration', 'pulled', 'mistralai/Mistral-Small-3.2-24B-Instruct-2506 · revision main', 'Oct 8', { consumed: true, record: '10 files on record' }),
+      S('Mistral-Small-3.2-24B', 'gguf', '0c4d9a7e3b11', 'F16', 47.2, 'Mistral3ForConditionalGeneration', 'converted', '', 'Oct 8', { from: 'safetensors/5e8c21d04f17', file: 'Mistral-Small-3.2-24B-F16.gguf' }),
+      S('Wan-AI--Wan2.2-TI2V-5B', 'pipeline', '8c41e2d7f0a1', '—', 22.8, 'WanPipeline', 'pulled', 'Wan-AI/Wan2.2-TI2V-5B-Diffusers', 'Oct 18', { mediaId: 'wan22', record: '5 components on record' }),
+      S('hexgrad--Kokoro-82M', 'voice', '41d09b3e5c62', '—', 0.36, 'KModel', 'pulled', 'hexgrad/Kokoro-82M', 'Oct 19', { mediaId: 'kokoro', record: 'a checkpoint and 54 voice packs' })
+    ];
+  }
+
+  baseName(dir) {
+    const at = dir.lastIndexOf('--');
+    return at < 0 ? dir : dir.slice(at + 2);
+  }
+
+  levelSuffix(level) {
+    return /bit|mxfp4|mixed/i.test(level) ? level : level.replace(/_/g, '').toUpperCase();
+  }
+
+  estGb(sourceGb, level) {
+    const bits = { f16: 16, bf16: 16, f32: 32, q8_0: 8.5, auto: 16, Q2_K: 2.6, Q3_K_M: 3.9, Q4_K_M: 4.85, Q5_K_M: 5.7, Q6_K: 6.6, Q8_0: 8.5, F16: 16, '3bit': 3.5, '4bit': 4.5, '6bit': 6.5, '8bit': 8.5, mxfp4: 4.25 }[level] || 16;
+    return Math.round(sourceGb * bits / 16 * 10) / 10;
+  }
+
+  fakeId(seed, n) {
+    const h = (x) => ((((x + 7) * 2654435761) >>> 0) ^ (x * 40503)) >>> 0;
+    return (h(seed * 131 + n).toString(16).padStart(8, '0') + h(n * 977 + seed + 3).toString(16).padStart(8, '0')).slice(0, 12);
+  }
+
+  seedOf(text) {
+    return String(text).split('').reduce((a, ch, i) => a + ch.charCodeAt(0) * (i + 3), 0);
+  }
+
+  storeSets() {
+    const s = this.state;
+    const ren = (d) => s.storeRename[d] || d;
+    const jobSets = [];
+    s.jobs.filter((j) => j.finished && !j.kind).forEach((j) => {
+      const dir = j.id === 'j1' ? 'Mistral-Small-3.2-24B' : j.repo.replace('/', '--').replace(/-Diffusers$/, '');
+      const seed = this.seedOf(j.id + j.repo);
+      const blank = { arch: '', origin: '', when: 'Today', from: null, consumed: false, backendId: null, mediaId: null, record: '', file: '', projector: false };
+      if (j.format === 'pipeline' || j.format === 'voice') {
+        jobSets.push(Object.assign({}, blank, { sid: j.format + '/' + this.fakeId(seed, 6), dir: dir, format: j.format, level: '—', gb: j.size, arch: j.format === 'pipeline' ? 'WanPipeline' : 'KModel', how: 'pulled', origin: j.repo, mediaId: 'dl-' + j.id }));
+        return;
+      }
+      const mlx = j.format === 'mlx';
+      const last = Object.assign({}, blank, { sid: (mlx ? 'mlx/' : 'gguf/') + this.fakeId(seed, 9), dir: dir, format: mlx ? 'mlx' : 'gguf', level: j.quant, gb: j.size, file: j.file || (mlx ? '' : this.baseName(dir) + '-' + j.quant + '.gguf'), how: mlx ? 'converted' : 'quantized', backendId: 'dl-' + j.id, keySuffix: this.levelSuffix(j.quant) });
+      if (j.id === 'j1') { jobSets.push(Object.assign(last, { from: 'gguf/0c4d9a7e3b11' })); return; }
+      const had = this.storeBase().find((x) => x.format === 'safetensors' && x.origin.indexOf(j.repo + ' ') === 0);
+      const snap = had || Object.assign({}, blank, { sid: 'safetensors/' + this.fakeId(seed, 7), dir: dir, format: 'safetensors', level: 'BF16', gb: j.dl, how: 'pulled', origin: j.repo + ' · revision main', consumed: true });
+      if (had) last.dir = had.dir;
+      else jobSets.push(snap);
+      if (!mlx && j.quant !== 'F16') {
+        const mid = Object.assign({}, blank, { sid: 'gguf/' + this.fakeId(seed, 8), dir: last.dir, format: 'gguf', level: 'F16', gb: j.mid, file: this.baseName(last.dir) + '-F16.gguf', how: 'converted', from: snap.sid });
+        jobSets.push(mid);
+        last.from = mid.sid;
+      } else {
+        last.from = snap.sid;
+        last.how = 'converted';
+      }
+      jobSets.push(last);
+    });
+    const out = [];
+    const all = this.storeBase().concat(jobSets, s.storeAdded);
+    all.forEach((x) => {
+      if (s.storeGone[x.sid]) return;
+      if (x.mediaId && s.deleted[x.mediaId]) return;
+      const y = Object.assign({}, x);
+      y.id = x.sid.split('/')[1];
+      y.dirRaw = x.dir;
+      y.dir = ren(x.dir);
+      y.handle = y.dir + '/' + x.sid;
+      if (s.storeConsumed[x.sid] || (x.format === 'safetensors' && all.some((z) => z.from === x.sid && !s.storeGone[z.sid]))) y.consumed = true;
+      if (s.storeReg[x.sid]) { y.backendId = 'reg-' + s.storeReg[x.sid]; y.backendKey = s.storeReg[x.sid]; }
+      else if (x.backendId) y.backendKey = x.keySuffix ? this.baseName(y.dir) + '-' + x.keySuffix : x.backendId;
+      if (y.backendId && s.deleted[y.backendId]) return;
+      if (y.backendId && s.storeUnreg[y.backendId]) { y.backendId = null; y.backendKey = null; }
+      out.push(y);
+    });
+    return out;
+  }
+
+  regModel(set, name) {
+    const mlx = set.format === 'mlx';
+    return { id: 'reg-' + name, name: name, short: name.split('-')[0].toLowerCase(), kind: 'local', chat: true, format: (mlx ? 'MLX · ' : 'GGUF · ') + set.level, size: set.gb, win: '32K', trained: '128K', weights: set.gb, cache: Math.round(set.gb * 3) / 10, backend: mlx ? 'MLX · Python child process' : 'llama.cpp · Metal', path: '~/.apogee/models/' + set.handle + '/' + (set.file || ''), lineage: [[(mlx ? 'MLX · ' : 'GGUF · ') + set.level + ' · ' + set.gb + ' GB', 'registered from ' + set.handle, null]] };
+  }
+
+  storeJob(kind, set, opts, clock) {
+    const now = this.nowTime();
+    const seed = this.seedOf(set.sid) + clock * 7 + this.state.jobs.length * 1009;
+    const base = { id: 'j' + clock, kind: kind, repo: set.handle, name: set.dir, quant: '', state: 'running', t0: clock, from: 0, fromPct: 0, pausedAt: null, pausedTotal: 0, finished: false, log: false, produces: [], consume: null, started: now };
+    if (kind === 'repair') {
+      const n = set.record ? (set.record.match(/^\d+ files/) || [''])[0] : '';
+      const said = set.format === 'pipeline' ? 'every file of its 5 components matches its record' : set.format === 'voice' ? 'the checkpoint and all 54 voice packs match their record' : n ? 'all ' + n + ' match their record' : set.projector ? 'the model and its projector match their record' : 'its file matches its record';
+      return Object.assign(base, { target: 'checking its files', steps: [['Read its record', 2, set.record || 'one file on record'], ['Check every file’s size and sha256', 10, 'every file matches']], command: 'apogee models repair ' + set.handle, doneToast: set.handle + ': ' + said });
+    }
+    if (kind === 'quantize') {
+      const gb = this.estGb(set.gb, opts.level);
+      const sid = 'gguf/' + this.fakeId(seed, 1);
+      const steps = [['Quantize to ' + opts.level, 12, opts.level + ' · ' + gb + ' GB']].concat(opts.register ? [['Register ' + opts.name, 2, 'backend ' + opts.name]] : []);
+      return Object.assign(base, { quant: opts.level, target: opts.level + (opts.register ? ', registered as ' + opts.name : ''), steps: steps, produces: [{ sid: sid, dir: set.dirRaw, format: 'gguf', id: sid.split('/')[1], level: opts.level, gb: gb, arch: set.arch, how: 'quantized', origin: '', when: 'Today ' + now, from: set.sid, consumed: false, backendId: null, mediaId: null, record: '', file: set.dirRaw + '-' + opts.level + '.gguf', projector: set.projector, reg: opts.register ? opts.name : null }], command: 'apogee models quantize ' + set.handle + (opts.level !== 'Q4_K_M' ? ' -t ' + opts.level : '') + (opts.register ? '\nthen  apogee config add-backend ' + opts.name + ' --type llamacpp --model-path <the new file>' : ''), doneToast: set.dir + ' · ' + opts.level + ' is made' + (opts.register ? ' and registered as ' + opts.name : '') });
+    }
+    const mlx = opts.target === 'mlx';
+    const main = mlx ? opts.ptype : opts.ptype.toUpperCase();
+    const names = opts.names;
+    const mainSid = (mlx ? 'mlx/' : 'gguf/') + this.fakeId(seed, 0);
+    const produces = [{ sid: mainSid, dir: set.dirRaw, format: mlx ? 'mlx' : 'gguf', id: mainSid.split('/')[1], level: main, gb: this.estGb(set.gb, opts.ptype), arch: set.arch, how: 'converted', origin: '', when: 'Today ' + now, from: set.sid, consumed: false, backendId: null, mediaId: null, record: mlx ? '10 files on record' : '', file: mlx ? '' : set.dirRaw + '-' + main + '.gguf', projector: false, reg: names[0] || null }];
+    opts.levels.forEach((l, i) => {
+      const sid = (mlx ? 'mlx/' : 'gguf/') + this.fakeId(seed, i + 2);
+      produces.push({ sid: sid, dir: set.dirRaw, format: mlx ? 'mlx' : 'gguf', id: sid.split('/')[1], level: l, gb: this.estGb(set.gb, l), arch: set.arch, how: mlx ? 'converted' : 'quantized', origin: '', when: 'Today ' + now, from: mlx ? set.sid : mainSid, consumed: false, backendId: null, mediaId: null, record: mlx ? '10 files on record' : '', file: mlx ? '' : set.dirRaw + '-' + l + '.gguf', projector: false, reg: names[i + 1] || null });
+    });
+    const steps = [['Convert to ' + (mlx ? 'MLX ' : 'GGUF ') + main, 16, main + ' · ' + produces[0].gb + ' GB']].concat(opts.levels.map((l, i) => [(mlx ? 'Convert to MLX ' : 'Quantize to ') + l, mlx ? 14 : 10, l + ' · ' + produces[i + 1].gb + ' GB'])).concat(names.length ? [['Register ' + names.length + (names.length === 1 ? ' backend' : ' backends'), 2, names.join(', ')]] : []);
+    return Object.assign(base, { quant: main, target: (mlx ? 'MLX ' : 'GGUF ') + [main].concat(opts.levels).join(', ') + (names.length ? ', registered' : ''), steps: steps, produces: produces, consume: set.sid, command: opts.command, doneToast: set.dir + ': ' + produces.length + (produces.length === 1 ? ' set' : ' sets') + ' made' + (names.length ? ', ' + names.length + ' registered' : '') });
+  }
+
+  openStore(sid) {
+    this.setState({ screen: 'models', modelsTab: 'store', storeSel: sid, storeAll: true, monitor: false, menu: null });
+  }
+
+  openStoreFor(id) {
+    const x = this.storeSets().find((y) => y.mediaId === id || y.backendId === id);
+    if (x) this.openStore(x.sid);
+    else this.setState({ screen: 'models', modelsTab: 'store' });
+  }
+
+  dropSets(list, andBackends, msg) {
+    const st = this.state;
+    const gone = Object.assign({}, st.storeGone);
+    const deleted = Object.assign({}, st.deleted);
+    const unreg = Object.assign({}, st.storeUnreg);
+    const dangling = Object.assign({}, st.storeDangling);
+    const roles = Object.assign({}, st.roles);
+    const loaded = Object.assign({}, st.loaded);
+    let defaultVideo = st.defaultVideo;
+    list.forEach((x) => {
+      gone[x.sid] = true;
+      if (x.mediaId) { deleted[x.mediaId] = true; if (defaultVideo === x.mediaId) defaultVideo = null; }
+      if (!x.backendId) return;
+      delete loaded[x.backendId];
+      if (andBackends) { unreg[x.backendId] = true; Object.keys(roles).forEach((r) => { if (roles[r] === x.backendId && r !== 'chat') roles[r] = ''; }); }
+      else dangling[x.backendId] = true;
+    });
+    this.say(msg, { storeGone: gone, deleted: deleted, storeUnreg: unreg, storeDangling: dangling, roles: roles, loaded: loaded, defaultVideo: defaultVideo, confirm: null, storeSel: null });
   }
 
   findModel(id) {
@@ -2314,6 +2608,7 @@ class Component extends DCLogic {
   }
 
   jobSteps(j) {
+    if (j.steps) return j.steps.map((x) => [x[0], x[1]]);
     if (j.format === 'pipeline') return [['Download 5 components', 25], ['Check sizes and sha256', 6], ['Add to library', 2]];
     if (j.format === 'voice') return [['Download', 6], ['Check sizes and sha256', 2], ['Add to library', 2]];
     if (j.format === 'mlx') return [['Download', 25], ['Convert to MLX ' + j.quant, 16], ['Add to library', 2]];
@@ -2527,7 +2822,7 @@ class Component extends DCLogic {
       this.setState(Object.assign({ menu: 'model' }, clear));
       return;
     }
-    if (cmd === 'models') { this.setState(Object.assign({ screen: 'models', modelsTab: 'all' }, clear)); return; }
+    if (cmd === 'models') { this.setState(Object.assign({ screen: 'models', modelsTab: 'backends' }, clear)); return; }
     if (cmd === 'suite') { this.setState(Object.assign({ screen: 'suites' }, clear)); return; }
     if (cmd === 'think') {
       if (['on', 'off', 'auto'].indexOf(arg) >= 0) { note('thinking set to ' + arg, { thinkMode: arg }); return; }
@@ -2917,17 +3212,11 @@ class Component extends DCLogic {
     const gpuVal = gpuAt(lastGood);
     const hist = [];
     for (let i = k - 29; i <= k; i += 1) hist.push(i);
-    const locals = models.filter((m) => m.kind === 'local');
-    const snaps = models.filter((m) => m.kind === 'snap');
-    const sumSize = (arr) => Math.round(arr.reduce((a, m) => a + (m.size || 0), 0) * 10) / 10;
-    const ggufGb = sumSize(locals.filter((m) => m.format.indexOf('GGUF') === 0));
-    const mlxGb = sumSize(locals.filter((m) => m.format.indexOf('MLX') === 0));
-    const snapGb = sumSize(snaps);
-    const pipeGb = sumSize(locals.filter((m) => m.media === 'pipeline'));
-    const voiceGb = sumSize(locals.filter((m) => m.media === 'voice'));
-    const midGb = 95.3;
-    const storeGb = Math.round((ggufGb + mlxGb + snapGb + pipeGb + voiceGb + midGb) * 10) / 10;
-    const maxStore = Math.max(ggufGb, mlxGb, snapGb, pipeGb, voiceGb, midGb) || 1;
+    const sets = this.storeSets();
+    const sumSize = (fmt) => Math.round(sets.filter((x) => x.format === fmt).reduce((a, x) => a + x.gb, 0) * 10) / 10;
+    const storeRows = [['GGUF models', sumSize('gguf')], ['MLX models', sumSize('mlx')], ['SafeTensors weights', sumSize('safetensors')], ['Video pipelines', sumSize('pipeline')], ['Voice models', sumSize('voice')]];
+    const storeGb = Math.round(storeRows.reduce((a, r) => a + r[1], 0) * 10) / 10;
+    const maxStore = Math.max.apply(null, storeRows.map((r) => r[1])) || 1;
     const mon = {
       cpu: cpuAt(k),
       gpu: gpuVal,
@@ -2948,9 +3237,9 @@ class Component extends DCLogic {
       models: loadedList.map((m) => ({ name: m.name, gb: gb(memOf(m)), detail: (m.cache ? 'weights ' + m.weights + ' + cache ' + m.cache + ' GB at ' + m.win : 'weights ' + m.weights + ' GB') + ' · held by ' + (m.id === 'embed' ? 'a session, as its embedding helper' : m.id === 'gpt-oss' ? '“TaskGroup timeouts in the ingest runner”' : 'the open session'), actLabel: 'Unload', unload: () => { const l = Object.assign({}, this.state.loaded); delete l[m.id]; this.say('Unloaded ' + m.name + ' · ' + gb(memOf(m)) + ' GB freed', { loaded: l }); } })).concat(procs.map((p) => ({ name: p.name, gb: gb(p.gb), detail: p.detail, actLabel: p.act, unload: p.run }))),
       noModels: loadedList.length === 0 && !procs.length,
       storeGb: gb(storeGb),
-      store: [['GGUF models', ggufGb], ['MLX models', mlxGb], ['Video pipelines', pipeGb], ['Voice models', voiceGb], ['Downloaded weights', snapGb], ['Intermediate files', midGb]].map((r) => ({ label: r[0], gb: gb(r[1]), pct: Math.round(r[1] / maxStore * 100) })),
+      store: storeRows.map((r) => ({ label: r[0], gb: gb(r[1]), pct: Math.round(r[1] / maxStore * 100) })),
       close: () => this.setState({ monitor: false }),
-      openLibrary: () => this.setState({ monitor: false, screen: 'models', modelsTab: 'all' })
+      openLibrary: () => this.setState({ monitor: false, screen: 'models', modelsTab: 'store' })
     };
 
     /* ---------- chat ---------- */
@@ -3142,7 +3431,7 @@ class Component extends DCLogic {
       modelMenuOpen: s.menu === 'model',
       toggleModelMenu: () => this.setState({ menu: this.state.menu === 'model' ? null : 'model' }),
       menuGroups: chatMenuGroups,
-      openLibrary: () => this.setState({ menu: null, screen: 'models', modelsTab: 'all', selModel: modelId }),
+      openLibrary: () => this.setState({ menu: null, screen: 'models', modelsTab: 'backends', selModel: modelId }),
       thinkMenuOpen: s.menu === 'think',
       toggleThinkMenu: () => this.setState({ menu: this.state.menu === 'think' ? null : 'think' }),
       thinkLabel: s.thinkMode + (s.thinkMode !== 'off' && s.effort !== 'default' ? ' · ' + s.effort : ''),
@@ -3320,7 +3609,7 @@ class Component extends DCLogic {
       compact: () => this.runCommand('/compact'),
       facts: facts.map((f) => ({ label: f[0], value: f[1], color: 'var(--text-primary)' })),
       helpers: [helper('Embedding', 'embedding', 'not set — search uses keywords'), helper('Vision', 'vision', 'not set — uses ' + cm.name), helper('Transcription', 'transcription', 'not set — uses ' + cm.name), helper('Utility', 'utility', 'not set — uses ' + cm.name), helper('Extraction', 'extraction', 'not set — uses ' + cm.name)],
-      openModel: () => this.setState({ screen: 'models', modelsTab: 'all', selModel: modelId }),
+      openModel: () => this.setState({ screen: 'models', modelsTab: 'backends', selModel: modelId }),
       openRoles: () => this.setState({ screen: 'models', modelsTab: 'roles' })
     };
 
@@ -3397,18 +3686,282 @@ class Component extends DCLogic {
       }
     };
 
+    /* ---------- stored weights ---------- */
+    const fmtName = { safetensors: 'SafeTensors', gguf: 'GGUF', mlx: 'MLX', pipeline: 'Pipeline', voice: 'Voice' };
+    const unquantized = (x) => x.format === 'gguf' && /^(F16|BF16|F32)$/.test(x.level);
+    const runnable = (x) => x.format === 'gguf' || x.format === 'mlx';
+    const busyOn = {};
+    s.jobs.forEach((j) => { if (j.kind && j.state === 'running' && !j.finished) { const src = sets.find((x) => x.handle === j.repo); if (src) busyOn[src.sid] = j.kind; } });
+    const stateOf = (x) => {
+      if (busyOn[x.sid]) return [busyOn[x.sid] === 'repair' ? 'checking its files' : busyOn[x.sid] === 'quantize' ? 'quantizing' : 'converting', 'var(--status-accent)', 'var(--status-accent)'];
+      if (x.format === 'pipeline') return [s.defaultVideo === x.mediaId ? 'pipeline · default for video' : 'pipeline', 'var(--text-secondary)', 'var(--text-tertiary)'];
+      if (x.format === 'voice') return ['voice model', 'var(--text-secondary)', 'var(--text-tertiary)'];
+      if (x.format === 'safetensors') return x.consumed ? ['used by a conversion', 'var(--text-tertiary)', 'var(--text-tertiary)'] : ['weights only · convert to run', 'var(--text-secondary)', 'var(--status-warning)'];
+      if (x.backendKey) return ['backend ' + x.backendKey + (s.loaded[x.backendId] ? ' · loaded' : ''), 'var(--text-primary)', 'var(--status-accent)'];
+      return ['not registered', 'var(--status-warning)', 'var(--status-warning)'];
+    };
+    const visible = sets.filter((x) => s.storeAll || !x.consumed || x.sid === s.storeSel);
+    const consumedN = sets.filter((x) => x.consumed).length;
+    const unreg = sets.filter((x) => runnable(x) && !x.backendKey);
+    const defaultName = (x) => this.baseName(x.dir) + '-' + this.levelSuffix(x.level);
+    const dirs = [];
+    visible.forEach((x) => { if (dirs.indexOf(x.dir) < 0) dirs.push(x.dir); });
+    const shortOf = (handle) => { const p = handle.split('/'); return p.slice(-2).join('/'); };
+    const selSet = sets.find((x) => x.sid === s.storeSel) || null;
+    const pick = (sid) => () => this.setState({ storeSel: this.state.storeSel === sid ? null : sid, storeAll: this.state.storeAll || !!(sets.find((x) => x.sid === sid) || {}).consumed });
+    const openSheet = (sheet) => () => this.setState({ overlay: 'store', sheet: sheet });
+    const st = {
+      summary: sets.map((x) => x.dir).filter((d, i, a) => a.indexOf(d) === i).length + ' models, ' + sets.length + ' sets, in ~/.apogee/models',
+      hasUnreg: unreg.length > 0,
+      unregCount: String(unreg.length),
+      registerAll: () => this.setState({ confirm: { kind: 'registerAll' } }),
+      groups: dirs.map((d) => {
+        const mine = visible.filter((x) => x.dir === d);
+        const all = sets.filter((x) => x.dir === d);
+        const origin = (all.find((x) => x.origin) || {}).origin || '';
+        return {
+          dir: d,
+          origin: origin ? 'from ' + origin : '',
+          summary: all.length + (all.length === 1 ? ' set · ' : ' sets · ') + gb(all.reduce((a, x) => a + x.gb, 0)) + ' GB',
+          sets: mine.map((x) => {
+            const stt = stateOf(x);
+            return {
+              short: x.sid, hasFrom: !!x.from, fromText: x.from ? (x.how === 'quantized' ? 'quantized from ' : 'converted from ') + x.from : '',
+              format: fmtName[x.format], formatColor: x.format === 'safetensors' ? 'var(--text-secondary)' : 'var(--text-primary)', level: x.level, size: gb(x.gb) + ' GB',
+              state: stt[0], stateColor: stt[1], dot: stt[2], busy: !!busyOn[x.sid], idle: !busyOn[x.sid],
+              current: s.storeSel === x.sid, bg: s.storeSel === x.sid ? 'var(--surface-selection)' : '', select: pick(x.sid)
+            };
+          })
+        };
+      }),
+      hasFold: consumedN > 0,
+      foldText: s.storeAll ? consumedN + (consumedN === 1 ? ' SafeTensors set a conversion has used is shown.' : ' SafeTensors sets a conversion has used are shown.') : consumedN + (consumedN === 1 ? ' SafeTensors set a conversion has used is folded away, as models list folds it.' : ' SafeTensors sets a conversion has used are folded away, as models list folds them.'),
+      foldButton: s.storeAll ? 'Fold them' : 'Show them',
+      toggleAll: () => this.setState({ storeAll: !this.state.storeAll }),
+      hasSel: !!selSet,
+      closeSel: () => this.setState({ storeSel: null }),
+      sel: { actions: [], facts: [], parents: [], children: [], components: [], voices: [] }
+    };
+    if (selSet) {
+      const x = selSet;
+      const stt = stateOf(x);
+      const busy = !!busyOn[x.sid];
+      const acts = [];
+      const act = (label, cls, run, title) => acts.push({ label: label, cls: cls, run: run, title: title || '', disabled: busy });
+      const useIt = () => { this.pickModelFor(this.state.chatId, x.backendId); this.setState({ screen: 'chat' }); };
+      const check = () => { const st2 = this.state; this.setState({ jobs: [this.storeJob('repair', x, {}, st2.clock)].concat(st2.jobs), modelsTab: 'jobs' }); };
+      const finder = () => this.say('Revealed ~/.apogee/models/' + x.handle + ' in Finder (prototype)');
+      const del = () => this.setState({ confirm: { kind: 'storeDelete', sid: x.sid, andBackends: true } });
+      if (x.format === 'safetensors') {
+        act('Convert to GGUF…', 'btn-p', openSheet({ kind: 'convert', sid: x.sid, target: 'gguf', ptype: 'f16', levels: ['Q4_K_M'], register: true, base: this.baseName(x.dir), mtype: '' }), 'apogee models convert');
+        act('Convert to MLX…', 'btn', openSheet({ kind: 'convert', sid: x.sid, target: 'mlx', ptype: '4bit', levels: [], register: true, base: this.baseName(x.dir), mtype: '' }), 'apogee models convert --mlx');
+      } else if (unquantized(x)) {
+        act('Quantize…', 'btn-p', openSheet({ kind: 'quantize', sid: x.sid, level: 'Q4_K_M', register: true, name: this.baseName(x.dir) + '-Q4KM', named: false }), 'apogee models quantize');
+        if (x.backendKey) act('Use in the open session', 'btn', useIt);
+        else act('Register…', 'btn', openSheet({ kind: 'register', sid: x.sid, name: defaultName(x), ctx: '', cache: 'q8_0' }), 'apogee config add-backend');
+      } else if (runnable(x)) {
+        if (x.backendKey) act('Use in the open session', 'btn-p', useIt);
+        else act('Register…', 'btn-p', openSheet({ kind: 'register', sid: x.sid, name: defaultName(x), ctx: '', cache: 'q8_0' }), 'apogee config add-backend');
+      } else if (x.format === 'pipeline') {
+        act('New clip with it', 'btn-p', () => this.setState({ screen: 'video', mediaTab: 'clips', cf: this.freshClipForm(x.mediaId) }));
+        if (s.defaultVideo !== x.mediaId) act('Make it the default', 'btn', () => this.say(x.dir + ' is now the default for video · models.default_video', { defaultVideo: x.mediaId }), 'apogee config set-default-video');
+      } else if (x.format === 'voice') {
+        act('Open Voice', 'btn-p', () => this.setState({ screen: 'voice' }));
+      }
+      if (runnable(x) && x.backendKey) act('Remove the backend…', 'btn-g', () => this.setState({ confirm: { kind: 'unregister', id: x.backendId, key: x.backendKey } }), 'apogee config delete-backend');
+      act('Check the files', 'btn-g', check, 'apogee models repair');
+      act('Show in Finder', 'btn-g', finder);
+      act('Delete…', 'btn-g', del, 'apogee models delete');
+      const parent = x.from ? sets.find((y) => y.sid === x.from) : null;
+      const kids = sets.filter((y) => y.from === x.sid);
+      const dirSets = sets.filter((y) => y.dir === x.dir);
+      const dirBackends = dirSets.filter((y) => y.backendKey).map((y) => y.backendKey);
+      const winFact = runnable(x) ? '32,768 tokens here · trained ' + (x.arch.indexOf('Qwen3VL') === 0 ? '262,144' : '131,072') : x.format === 'safetensors' ? 'none until it is converted' : '—';
+      const facts = [
+        ['Handle', x.handle, 'var(--font-mono)'],
+        ['Path', '~/.apogee/models/' + x.handle + '/' + (x.file || ''), 'var(--font-mono)'],
+        ['Format', { safetensors: 'SafeTensors: full weights, trainable, not runnable', gguf: 'GGUF: runs on llama.cpp', mlx: 'MLX: runs on Apple silicon through mlx-lm', pipeline: 'a diffusers pipeline, for Video', voice: 'a Kokoro voice model, for Voice' }[x.format]],
+        ['Precision', x.level],
+        ['On disk', gb(x.gb) + ' GB' + (x.projector ? ', its 0.6 GB projector included' : '')],
+        ['Architecture', x.arch || 'read when it was made', x.arch ? 'var(--font-mono)' : 'inherit'],
+        ['Window', winFact],
+        ['Record', x.record || (x.file ? 'the GGUF and its record' + (x.projector ? ', its projector' : '') : '—')],
+        ['Came from', x.how === 'pulled' ? 'pulled from ' + x.origin + ' · ' + x.when : (x.how === 'quantized' ? 'quantized from ' : 'converted from ') + (x.from || 'a set no longer here') + ' · ' + x.when, 'inherit'],
+        ['Backend', runnable(x) ? (x.backendKey || 'not registered') : '—', x.backendKey ? 'var(--font-mono)' : 'inherit']
+      ];
+      let note = '';
+      if (x.format === 'safetensors' && x.consumed) note = 'A conversion has used these weights. They stay, so you can convert them again at another precision or to MLX; deleting them frees ' + gb(x.gb) + ' GB and keeps what was made.';
+      else if (x.format === 'safetensors') note = 'SafeTensors weights don’t run as they are. Convert them to GGUF for llama.cpp, or to MLX for Apple silicon; whether the converter takes ' + (x.arch || 'this architecture') + ' is known only by converting.';
+      else if (runnable(x) && !x.backendKey) note = 'Stored but not registered, so no session can use it yet. Registering writes one config entry; nothing is copied or loaded.';
+      else if (busy) note = 'A job is working on it; see Jobs.';
+      st.sel = {
+        kicker: fmtName[x.format].toUpperCase() + ' · ' + x.level,
+        handle: x.handle,
+        state: stt[0], stateColor: stt[1], dot: stt[2],
+        actions: acts,
+        hasNote: !!note, note: note,
+        facts: facts.map((f) => ({ label: f[0], value: f[1], font: f[2] || 'inherit' })),
+        hasComponents: x.format === 'pipeline',
+        components: x.format === 'pipeline' ? this.pipelineParts(x.mediaId).map((c) => ({ name: c[0], detail: c[1], size: c[2] })) : [],
+        hasVoices: x.format === 'voice',
+        voiceTotal: '54',
+        voices: x.format === 'voice' ? [['American English', 20, 'af_ am_'], ['British English', 8, 'bf_ bm_'], ['Japanese', 5, 'jf_ jm_'], ['Mandarin Chinese', 8, 'zf_ zm_'], ['Spanish', 3, 'ef_ em_'], ['French', 1, 'ff_'], ['Hindi', 4, 'hf_ hm_'], ['Italian', 2, 'if_ im_'], ['Brazilian Portuguese', 3, 'pf_ pm_']].map((v) => ({ lang: v[0], count: String(v[1]), prefix: v[2] })) : [],
+        hasParent: !!x.from,
+        parents: x.from ? [{ label: parent ? parent.handle : x.from, isLink: !!parent, notLink: !parent, how: parent ? (x.how === 'quantized' ? 'quantized from it · ' : 'converted from it · ') + fmtName[parent.format] + ' ' + parent.level : 'no longer in the store', go: () => this.setState({ storeSel: x.from, storeAll: true }) }] : [],
+        hasChildren: kids.length > 0,
+        children: kids.map((k) => ({ label: k.handle, how: (k.how === 'quantized' ? 'quantized to ' : 'converted to ') + fmtName[k.format] + ' ' + k.level + ' · ' + gb(k.gb) + ' GB' + (k.backendKey ? ' · backend ' + k.backendKey : ''), go: () => this.setState({ storeSel: k.sid }) })),
+        dir: x.dir,
+        dirSummary: dirSets.length + (dirSets.length === 1 ? ' set, ' : ' sets, ') + gb(dirSets.reduce((a, y) => a + y.gb, 0)) + ' GB' + (dirBackends.length ? '. Backends running from it: ' + dirBackends.join(', ') + '.' : '. No backend runs from it.'),
+        rename: openSheet({ kind: 'rename', dir: x.dir, dirRaw: x.dirRaw, name: x.dir }),
+        deleteDir: () => this.setState({ confirm: { kind: 'storeModelDelete', dir: x.dir, andBackends: true } }),
+        command: 'apogee models info ' + x.handle + ' --output-format json'
+      };
+    }
+
+    /* ---------- store sheets ---------- */
+    const sheet = s.sheet || {};
+    const shSet = sheet.sid ? sets.find((x) => x.sid === sheet.sid) : null;
+    const updSheet = (patch) => this.setState({ sheet: Object.assign({}, this.state.sheet, patch) });
+    const backendTaken = (name) => models.some((mm) => mm.id === name || mm.id === 'reg-' + name) || sets.some((x) => x.backendKey === name);
+    let sh = { title: '', source: '', intro: '', isConvert: false, isQuantize: false, isRegister: false, isRename: false, isMlx: false, isGguf: false, targets: [], ptype: '', ptypes: [], levels: [], levelsLabel: '', levelsNote: '', register: false, registerForced: false, base: '', names: '', mtype: '', level: '', qlevels: [], name: '', runsOn: '', ctx: '', ctxs: [], caches: [], hasProjector: false, renameWhat: '', hasSteps: false, steps: [], notes: [], hasErrors: false, errors: [], command: '', cantGo: true, goLabel: '', cancel: () => this.setState({ overlay: null, sheet: null }), go: () => {} };
+    if (sheet.kind === 'convert' && shSet) {
+      const mlx = sheet.target === 'mlx';
+      const allLevels = mlx ? ['3bit', '4bit', '6bit', '8bit', 'mxfp4'].filter((l) => l !== sheet.ptype) : ['Q2_K', 'Q3_K_M', 'Q4_K_M', 'Q5_K_M', 'Q6_K', 'Q8_0'];
+      const levels = sheet.levels.filter((l) => allLevels.indexOf(l) >= 0);
+      const reg = sheet.register || levels.length > 0;
+      const base = (sheet.base || '').trim();
+      const names = reg ? [base + '-' + this.levelSuffix(mlx ? sheet.ptype : sheet.ptype)].concat(levels.map((l) => base + '-' + this.levelSuffix(l))) : [];
+      const taken = names.filter((n) => backendTaken(n));
+      const cmd = 'apogee models convert ' + shSet.handle + (mlx ? ' --mlx' : '') + ((mlx ? sheet.ptype !== '4bit' : sheet.ptype !== 'f16') ? ' -t ' + sheet.ptype : '') + (levels.length ? ' --register-with ' + levels.join(',') : reg ? ' --register' : '') + (reg && base !== this.baseName(shSet.dir) ? ' --base-name ' + base : '') + (mlx && sheet.mtype.trim() ? ' --model-type ' + sheet.mtype.trim() : '');
+      const est = (l) => gb(this.estGb(shSet.gb, l)) + ' GB';
+      const errs = [];
+      if (reg && !base) errs.push('Name the backends: what each name begins with.');
+      if (taken.length) errs.push((taken.length === 1 ? 'A backend named ' : 'Backends named ') + taken.join(', ') + (taken.length === 1 ? ' exists' : ' exist') + ': choose another beginning.');
+      sh = Object.assign(sh, {
+        title: 'Convert ' + shSet.dir,
+        source: shSet.handle + ' · ' + gb(shSet.gb) + ' GB' + (shSet.arch ? ' · ' + shSet.arch : ''),
+        intro: mlx ? 'An MLX model, made by mlx-lm’s converter on this Mac and kept beside these weights in the model’s mlx/ folder.' : 'A GGUF, made by llama.cpp’s converter on this Mac and kept beside these weights in the model’s gguf/ folder. Quantized copies are made from it.',
+        isConvert: true, isMlx: mlx,
+        targets: [['gguf', 'GGUF · llama.cpp'], ['mlx', 'MLX · Apple silicon']].map((o) => seg(sheet.target, o[0], o[1], () => updSheet(o[0] === 'mlx' ? { target: 'mlx', ptype: '4bit', levels: [] } : { target: 'gguf', ptype: 'f16', levels: ['Q4_K_M'] }))),
+        ptype: sheet.ptype,
+        ptypes: (mlx ? [['4bit', '4bit, the default'], ['3bit', '3bit'], ['6bit', '6bit'], ['8bit', '8bit'], ['mxfp4', 'mxfp4']] : [['f16', 'f16, the default'], ['bf16', 'bf16'], ['f32', 'f32'], ['q8_0', 'q8_0'], ['auto', 'auto, as the weights are']]).map((o) => ({ value: o[0], label: o[1] })),
+        onPtype: (e) => updSheet({ ptype: e.target.value }),
+        levelsLabel: mlx ? 'Also make, one conversion each' : 'Then quantize to',
+        levels: allLevels.map((l) => { const on = levels.indexOf(l) >= 0; return { label: l, on: on, border: on ? 'var(--status-accent)' : 'var(--line-border)', bg: on ? 'var(--surface-selection)' : 'transparent', toggle: () => { const cur = this.state.sheet.levels; updSheet({ levels: cur.indexOf(l) >= 0 ? cur.filter((y) => y !== l) : cur.concat([l]) }); } }; }),
+        levelsNote: levels.length ? 'Each is its own set and its own backend, so choosing one registers what’s made.' : mlx ? 'Optional: further MLX builds at other precisions.' : 'Optional: smaller copies, made from the GGUF this makes.',
+        register: reg, registerForced: levels.length > 0,
+        toggleRegister: () => updSheet({ register: !this.state.sheet.register }),
+        base: sheet.base, onBase: (e) => updSheet({ base: e.target.value }),
+        names: names.length ? 'as ' + names.join(', ') : '',
+        mtype: sheet.mtype, onMtype: (e) => updSheet({ mtype: e.target.value }),
+        hasSteps: true,
+        steps: [{ label: 'Convert to ' + (mlx ? 'MLX ' + sheet.ptype : 'GGUF ' + sheet.ptype.toUpperCase()) + ', about ' + est(sheet.ptype) }].concat(levels.map((l) => ({ label: (mlx ? 'Convert to MLX ' : 'Quantize to ') + l + ', about ' + est(l) }))).concat(names.length ? [{ label: 'Register ' + names.join(', ') }] : []),
+        notes: [
+          { text: 'Sizes are estimated from bits per weight; 412 GB is free.', color: 'var(--text-tertiary)' },
+          { text: 'Whether the converter takes ' + (shSet.arch || 'this architecture') + ' is learned by converting. If it can’t, the job stops with the converter’s own reason.', color: 'var(--text-tertiary)' }
+        ],
+        hasErrors: errs.length > 0, errors: errs.map((t) => ({ text: t })),
+        command: cmd,
+        cantGo: errs.length > 0,
+        goLabel: 'Convert',
+        go: () => { const st2 = this.state; const job = this.storeJob('convert', shSet, { target: sheet.target, ptype: sheet.ptype, levels: levels, names: names, command: cmd }, st2.clock); this.setState({ jobs: [job].concat(st2.jobs), overlay: null, sheet: null, modelsTab: 'jobs' }); }
+      });
+    }
+    if (sheet.kind === 'quantize' && shSet) {
+      const name = (sheet.name || '').trim();
+      const errs = [];
+      if (sheet.register && !name) errs.push('Name the backend.');
+      if (sheet.register && name && backendTaken(name)) errs.push('A backend named ' + name + ' exists: choose another name.');
+      const cmd = 'apogee models quantize ' + shSet.handle + (sheet.level !== 'Q4_K_M' ? ' -t ' + sheet.level : '') + (sheet.register ? '\nthen  apogee config add-backend ' + (name || '…') + ' --type llamacpp --model-path <the new file>' : '');
+      sh = Object.assign(sh, {
+        title: 'Quantize ' + shSet.dir,
+        source: shSet.handle + ' · ' + shSet.level + ' · ' + gb(shSet.gb) + ' GB',
+        intro: 'A smaller copy beside it, made by llama.cpp. The ' + shSet.level + ' stays.',
+        isQuantize: true,
+        level: sheet.level,
+        qlevels: ['Q2_K', 'Q3_K_M', 'Q4_K_M', 'Q5_K_M', 'Q6_K', 'Q8_0'].map((l) => ({ value: l, label: l + (l === 'Q4_K_M' ? ', the default' : '') + ' · about ' + gb(this.estGb(shSet.gb, l)) + ' GB' })),
+        onLevel: (e) => { const v = e.target.value; updSheet(this.state.sheet.named ? { level: v } : { level: v, name: this.baseName(shSet.dir) + '-' + this.levelSuffix(v) }); },
+        register: !!sheet.register, toggleRegister: () => updSheet({ register: !this.state.sheet.register }),
+        name: sheet.name, onName: (e) => updSheet({ name: e.target.value, named: true }),
+        notes: [{ text: 'Sizes are estimated from bits per weight against ' + shSet.level + '’s 16; 412 GB is free.', color: 'var(--text-tertiary)' }],
+        hasErrors: errs.length > 0, errors: errs.map((t) => ({ text: t })),
+        command: cmd, cantGo: errs.length > 0, goLabel: 'Quantize',
+        go: () => { const st2 = this.state; const job = this.storeJob('quantize', shSet, { level: sheet.level, register: !!sheet.register, name: name }, st2.clock); this.setState({ jobs: [job].concat(st2.jobs), overlay: null, sheet: null, modelsTab: 'jobs' }); }
+      });
+    }
+    if (sheet.kind === 'register' && shSet) {
+      const name = (sheet.name || '').trim();
+      const mlx = shSet.format === 'mlx';
+      const errs = [];
+      if (!name) errs.push('Name the backend.');
+      else if (backendTaken(name)) errs.push('A backend named ' + name + ' exists: choose another name.');
+      const path = '~/.apogee/models/' + shSet.handle + (shSet.file ? '/' + shSet.file : '');
+      const cmd = 'apogee config add-backend ' + (name || '…') + ' --type ' + (mlx ? 'mlx' : 'llamacpp') + ' --model-path ' + path + (shSet.projector ? ' --mmproj-path ' + path.replace(/\.gguf$/, '-mmproj.gguf') : '') + (sheet.ctx ? ' --context-size ' + sheet.ctx : '') + (!mlx && sheet.cache !== 'q8_0' ? ' --cache-type ' + sheet.cache : '');
+      sh = Object.assign(sh, {
+        title: 'Register ' + shSet.dir + ' · ' + shSet.level,
+        source: shSet.handle + ' · ' + gb(shSet.gb) + ' GB',
+        intro: 'A backend is one config entry pointing at these weights, so sessions, suites and roles can use them. Nothing is copied or loaded.',
+        isRegister: true, isGguf: !mlx,
+        name: sheet.name, onName: (e) => updSheet({ name: e.target.value }),
+        runsOn: mlx ? 'MLX, in a Python child process' : 'llama.cpp, in the session’s own process',
+        ctx: sheet.ctx,
+        ctxs: [['', 'the model’s default, 32,768 here'], ['8192', '8,192'], ['16384', '16,384'], ['32768', '32,768'], ['65536', '65,536'], ['131072', '131,072']].map((o) => ({ value: o[0], label: o[1] })),
+        onCtx: (e) => updSheet({ ctx: e.target.value }),
+        caches: [['f16', 'f16'], ['q8_0', 'q8_0'], ['q4_0', 'q4_0']].map((o) => seg(sheet.cache, o[0], o[1], () => updSheet({ cache: o[0] }))),
+        hasProjector: !!shSet.projector,
+        notes: [{ text: mlx ? 'The window sizes its attention cache; a larger one needs more memory while it runs.' : 'q8_0 halves the attention cache’s memory against f16; q4_0 halves it again, at some cost to long answers.', color: 'var(--text-tertiary)' }],
+        hasErrors: errs.length > 0, errors: errs.map((t) => ({ text: t })),
+        command: cmd, cantGo: errs.length > 0, goLabel: 'Register',
+        go: () => { const st2 = this.state; this.say(name + ' is registered. It’s under Backends and in the model menu now.', { storeReg: Object.assign({}, st2.storeReg, { [shSet.sid]: name }), storeUnreg: Object.assign({}, st2.storeUnreg, { ['reg-' + name]: false }), overlay: null, sheet: null }); }
+      });
+    }
+    if (sheet.kind === 'rename') {
+      const name = (sheet.name || '').trim();
+      const inDir = sets.filter((x) => x.dir === sheet.dir);
+      const oldBase = this.baseName(sheet.dir);
+      const newBase = this.baseName(name || sheet.dir);
+      const follow = inDir.filter((x) => x.backendKey && x.backendKey.indexOf(oldBase + '-') === 0).map((x) => x.backendKey);
+      const errs = [];
+      if (!name) errs.push('Give it a name.');
+      else if (name !== sheet.dir && sets.some((x) => x.dir === name)) errs.push('A model named ' + name + ' is in the store already.');
+      else if (/[\/\s]/.test(name)) errs.push('A name has no spaces or slashes.');
+      sh = Object.assign(sh, {
+        title: 'Rename ' + sheet.dir,
+        source: '~/.apogee/models/' + sheet.dir + ' · ' + inDir.length + (inDir.length === 1 ? ' set' : ' sets'),
+        intro: 'Its folder moves, and every backend named after it, ' + oldBase + '-…, is renamed with it.',
+        isRename: true,
+        name: sheet.name, onName: (e) => updSheet({ name: e.target.value }),
+        renameWhat: follow.length ? 'Renamed with it: ' + follow.join(', ') + '. Roles, suites, saved sessions and the default video pipeline follow the new names.' : 'No backend is named after it, so only the folder and its handles change. Backends running from it keep their names and follow the new path.',
+        hasErrors: errs.length > 0, errors: errs.map((t) => ({ text: t })),
+        command: 'apogee models rename ' + sheet.dir + ' ' + (name || '…'),
+        cantGo: errs.length > 0 || name === sheet.dir, goLabel: 'Rename',
+        go: () => {
+          const st2 = this.state;
+          const ren = Object.assign({}, st2.storeRename);
+          Object.keys(ren).forEach((k) => { if (ren[k] === sheet.dir) ren[k] = name; });
+          ren[sheet.dirRaw] = name;
+          const reg = {};
+          const moved = {};
+          Object.keys(st2.storeReg).forEach((k) => { const v = st2.storeReg[k]; reg[k] = v.indexOf(oldBase + '-') === 0 ? newBase + v.slice(oldBase.length) : v; if (reg[k] !== v) moved['reg-' + v] = 'reg-' + reg[k]; });
+          const roles = Object.assign({}, st2.roles);
+          Object.keys(roles).forEach((r) => { if (moved[roles[r]]) roles[r] = moved[roles[r]]; });
+          this.say(sheet.dir + ' is now ' + name + (follow.length ? '; ' + follow.length + (follow.length === 1 ? ' backend' : ' backends') + ' renamed with it' : ''), { storeRename: ren, storeReg: reg, roles: roles, overlay: null, sheet: null });
+        }
+      });
+    }
+
     /* ---------- models screen ---------- */
     const roleOf = (id) => Object.keys(s.roles).filter((r) => s.roles[r] === id);
     const statusOf = (mm) => {
+      if (s.storeDangling[mm.id]) return ['weights deleted', 'var(--status-warning)', 'var(--status-warning)'];
       if (mm.media) return mm.media === 'pipeline' && s.vrun && !s.vrun.stopped && s.vrun.pipeline === mm.id ? ['generating', 'var(--status-accent)', 'var(--status-accent)'] : ['ready', 'var(--text-secondary)', 'var(--text-tertiary)'];
       if (mm.kind === 'local') return s.loaded[mm.id] ? ['loaded', 'var(--status-accent)', 'var(--status-accent)'] : ['ready', 'var(--text-secondary)', 'var(--text-tertiary)'];
-      if (mm.kind === 'snap') return [mm.snapStatus, 'var(--text-secondary)', mm.snapStatus === 'converted' ? 'var(--text-tertiary)' : 'var(--status-warning)'];
       if (mm.kind === 'api') return s.keys[mm.key] ? ['key set · billed', 'var(--model-api)', 'var(--model-api)'] : ['not configured', 'var(--text-tertiary)', 'var(--line-strong)'];
       return mm.missing ? ['not installed', 'var(--text-tertiary)', 'var(--line-strong)'] : ['signed in', 'var(--model-subscription)', 'var(--model-subscription)'];
     };
-    const tab = s.modelsTab;
-    const inTab = (mm) => tab === 'all' || (tab === 'local' && (mm.kind === 'local' || mm.kind === 'snap')) || (tab === 'cloud' && (mm.kind === 'api' || mm.kind === 'sub'));
-    const sections = [['ON THIS MAC', ['local'], false], ['VIDEO PIPELINES AND VOICE MODELS', ['local'], true], ['DOWNLOADED WEIGHTS, NOT A RUNNABLE FORMAT', ['snap'], false], ['CLOUD AND SUBSCRIPTIONS', ['api', 'sub'], false]];
+    const tab = { all: 'backends', local: 'backends', cloud: 'backends', downloads: 'jobs' }[s.modelsTab] || s.modelsTab;
+    const inTab = (mm) => !mm.media;
+    const sections = [['ON THIS MAC', ['local'], false], ['CLOUD AND SUBSCRIPTIONS', ['api', 'sub'], false]];
     const mRows = [];
     sections.forEach((sec) => {
       const list = models.filter((mm) => sec[1].indexOf(mm.kind) >= 0 && !!mm.media === sec[2] && inTab(mm));
@@ -3417,36 +3970,27 @@ class Component extends DCLogic {
       list.forEach((mm) => {
         const st = statusOf(mm);
         const roles = mm.id === s.defaultVideo ? ['default video'] : roleOf(mm.id);
-        mRows.push({ isHeader: false, isRow: true, name: mm.name, current: s.selModel === mm.id, bg: s.selModel === mm.id ? 'var(--surface-selection)' : '', isLocal: mm.kind === 'local', isSnap: mm.kind === 'snap', isApi: mm.kind === 'api', isSub: mm.kind === 'sub', hasRoles: roles.length > 0, roles: roles.join(' · '), format: mm.format, size: mm.size ? mm.size + ' GB' : '—', window: mm.kind === 'local' ? mm.win : mm.kind === 'snap' ? '—' : mm.win === 'not reported' ? '?' : mm.win, memory: mm.media ? '—' : mm.kind === 'local' ? gb(memOf(mm)) + ' GB' : mm.kind === 'snap' ? '—' : 'none', status: st[0], statusColor: st[1], dot: st[2], select: () => this.setState({ selModel: this.state.selModel === mm.id ? null : mm.id }) });
+        mRows.push({ isHeader: false, isRow: true, name: mm.name, current: s.selModel === mm.id, bg: s.selModel === mm.id ? 'var(--surface-selection)' : '', isLocal: mm.kind === 'local', isApi: mm.kind === 'api', isSub: mm.kind === 'sub', hasRoles: roles.length > 0, roles: roles.join(' · '), format: mm.format, size: mm.size ? mm.size + ' GB' : '—', window: mm.kind === 'local' ? mm.win : mm.win === 'not reported' ? '?' : mm.win, memory: mm.media ? '—' : mm.kind === 'local' ? gb(memOf(mm)) + ' GB' : 'none', status: st[0], statusColor: st[1], dot: st[2], select: () => this.setState({ selModel: this.state.selModel === mm.id ? null : mm.id }) });
       });
     });
-    const sm = models.find((mm) => mm.id === s.selModel);
+    const sm = models.find((mm) => mm.id === s.selModel && !mm.media);
     let sel = null;
     if (sm) {
       const st = statusOf(sm);
       const useIt = { label: 'Use in the open session', cls: 'btn-p', disabled: false, run: () => { this.pickModelFor(this.state.chatId === 'new' || this.state.chatId === 'private' ? this.state.chatId : this.state.chatId, sm.id); this.setState({ screen: 'chat' }); } };
       const actions = [];
-      if (sm.media === 'pipeline') {
-        actions.push({ label: 'New clip with it', cls: 'btn-p', run: () => this.setState({ screen: 'video', mediaTab: 'clips', cf: this.freshClipForm(sm.id) }) });
-        if (s.defaultVideo !== sm.id) actions.push({ label: 'Make it the default', cls: 'btn', run: () => this.say(sm.name + ' is now the default for video · models.default_video', { defaultVideo: sm.id }) });
-        actions.push({ label: 'Check', cls: 'btn-g', run: () => this.say(sm.name + ': model_index.json read, 5 of 5 components whole · ok') });
-        actions.push({ label: 'Show in Finder', cls: 'btn-g', run: () => this.say('Revealed ' + sm.path + ' in Finder (prototype)') });
-        actions.push({ label: 'Delete…', cls: 'btn-g', run: () => this.setState({ confirm: { kind: 'model', id: sm.id } }) });
-      } else if (sm.media === 'voice') {
-        actions.push({ label: 'Open Voice', cls: 'btn-p', run: () => this.setState({ screen: 'voice' }) });
-        actions.push({ label: 'Check', cls: 'btn-g', run: () => this.say(sm.name + ': the checkpoint is whole and all 54 voice packs are there · ok') });
-        actions.push({ label: 'Show in Finder', cls: 'btn-g', run: () => this.say('Revealed ' + sm.path + ' in Finder (prototype)') });
-        actions.push({ label: 'Delete…', cls: 'btn-g', run: () => this.setState({ confirm: { kind: 'model', id: sm.id } }) });
+      const smSet = sets.find((x) => x.backendId === sm.id);
+      const smKey = smSet ? smSet.backendKey : sm.id;
+      const unregister = { label: 'Remove the backend…', cls: 'btn-g', run: () => this.setState({ confirm: { kind: 'unregister', id: sm.id, key: smKey } }) };
+      if (s.storeDangling[sm.id]) {
+        actions.push(unregister);
       } else if (sm.kind === 'local') {
         if (sm.chat) actions.push(useIt);
         if (s.loaded[sm.id]) actions.push({ label: 'Unload', cls: 'btn', run: () => { const l = Object.assign({}, this.state.loaded); delete l[sm.id]; this.say('Unloaded ' + sm.name + ' · ' + gb(memOf(sm)) + ' GB freed. Its session loads it again with its next message.', { loaded: l }); } });
         actions.push({ label: 'Assign a role…', cls: 'btn-g', run: () => this.setState({ modelsTab: 'roles' }) });
-        actions.push({ label: 'Show in Finder', cls: 'btn-g', run: () => this.say('Revealed ' + sm.path + ' in Finder (prototype)') });
-        actions.push({ label: 'Delete…', cls: 'btn-g', run: () => this.setState({ confirm: { kind: 'model', id: sm.id } }) });
-      } else if (sm.kind === 'snap') {
-        actions.push({ label: 'Convert to GGUF…', cls: 'btn-p', run: () => this.setState({ overlay: 'download', dl: { repo: sm.name, format: 'gguf', quant: 'Q4_K_M' } }) });
-        actions.push({ label: 'Convert to MLX…', cls: 'btn', run: () => this.setState({ overlay: 'download', dl: { repo: sm.name, format: 'mlx', quant: '4-bit' } }) });
-        actions.push({ label: 'Delete…', cls: 'btn-g', run: () => this.setState({ confirm: { kind: 'model', id: sm.id } }) });
+        if (smSet) actions.push({ label: 'Show its weights', cls: 'btn-g', run: () => this.openStore(smSet.sid) });
+        actions.push(unregister);
+        actions.push({ label: 'Delete with its weights…', cls: 'btn-g', run: () => this.setState({ confirm: { kind: 'model', id: sm.id } }) });
       } else if (sm.kind === 'api') {
         if (s.keys[sm.key]) { actions.push(useIt); actions.push({ label: 'Manage key…', cls: 'btn-g', run: () => this.setState({ overlay: 'settings', settingsPane: 'backends' }) }); }
         else actions.push({ label: 'Add an API key…', cls: 'btn-p', run: () => this.setState({ overlay: 'settings', settingsPane: 'backends', keyEdit: sm.key, keyDraft: '' }) });
@@ -3456,48 +4000,43 @@ class Component extends DCLogic {
         actions.push(useIt);
       }
       let sfacts;
-      if (sm.media === 'pipeline') sfacts = [['Format', 'Pipeline · diffusers', 'var(--font-mono)'], ['Class', 'WanPipeline, from model_index.json'], ['On disk', sm.size + ' GB'], ['Components', '5 · transformer, vae, text encoder, tokenizer, scheduler'], ['Runs on', 'diffusers in a Python child process · mps · bfloat16'], ['Memory', 'not estimated before a run; the system monitor measures it during one'], ['Default', s.defaultVideo === sm.id ? 'yes · models.default_video' : 'no'], ['Path', sm.path, 'var(--font-mono)']];
-      else if (sm.media === 'voice') sfacts = [['Format', 'Voice · a PyTorch checkpoint and voice packs', 'var(--font-mono)'], ['On disk', sm.size + ' GB'], ['Voices', '54, in 9 languages'], ['Runs on', 'kokoro in a Python child process · cpu'], ['Speaks', '16-bit mono WAV at 24 kHz'], ['Chosen', 'the one voice model in the library; no setting needed'], ['Path', sm.path, 'var(--font-mono)']];
-      else if (sm.kind === 'local') sfacts = [['Format', sm.format, 'var(--font-mono)'], ['On disk', sm.size + ' GB'], ['Trained window', sm.trained + ' tokens'], ['Window here', sm.win + ' tokens, sized for this Mac'], ['Memory', 'weights ' + sm.weights + ' + cache ' + sm.cache + ' = ' + gb(memOf(sm)) + ' GB'], ['Runs on', sm.backend], ['Path', sm.path, 'var(--font-mono)']];
-      else if (sm.kind === 'snap') sfacts = [['Format', sm.format, 'var(--font-mono)'], ['On disk', sm.size + ' GB'], ['Trained window', sm.trained + ' tokens'], ['Path', sm.path, 'var(--font-mono)']];
+      if (sm.kind === 'local') sfacts = [['Backend', smKey, 'var(--font-mono)'], ['Format', sm.format, 'var(--font-mono)'], ['On disk', sm.size + ' GB'], ['Trained window', sm.trained + ' tokens'], ['Window here', sm.win + ' tokens, sized for this Mac'], ['Memory', 'weights ' + sm.weights + ' + cache ' + sm.cache + ' = ' + gb(memOf(sm)) + ' GB'], ['Runs on', sm.backend], ['Path', sm.path, 'var(--font-mono)']].concat(smSet ? [['Weights', smSet.handle, 'var(--font-mono)']] : []);
       else if (sm.kind === 'api') sfacts = [['Provider', sm.provider], ['Billing', 'per use, from your API key'], ['Key', s.keys[sm.key] ? 'set' : 'not set'], ['Window', sm.id === 'sonnet' ? '200,000 tokens' : 'depends on the model'], ['Data', 'sent to ' + sm.provider.replace(' API', '')]];
       else sfacts = [['Through', sm.provider + ' on this Mac'], ['Billing', 'your plan'], ['Usage', 'not reported by the app'], ['Window', 'not reported']];
-      const files = sm.kind === 'local' || sm.kind === 'snap' ? [{ path: sm.path, size: (sm.extraFile ? (Math.round((sm.size - 0.6) * 10) / 10) : sm.size) + ' GB' }].concat(sm.extraFile ? [{ path: sm.extraFile[0], size: sm.extraFile[1] }] : []) : [];
-      const lineage = (sm.lineage || []).map((l, i, arr) => ({ label: l[0], how: l[1], isLink: !!l[2] && models.some((x) => x.id === l[2]), notLink: !(l[2] && models.some((x) => x.id === l[2])), go: () => this.setState({ selModel: l[2] }), dot: i === 0 ? 'var(--status-accent)' : 'var(--text-tertiary)', fill: i === 0 ? 'var(--status-accent)' : 'transparent', line: i === arr.length - 1 ? 'transparent' : 'var(--line-strong)' }));
+      const files = sm.kind === 'local' ? [{ path: sm.path, size: (sm.extraFile ? (Math.round((sm.size - 0.6) * 10) / 10) : sm.size) + ' GB' }].concat(sm.extraFile ? [{ path: sm.extraFile[0], size: sm.extraFile[1] }] : []) : [];
+      const linked = (l) => !!l[2] && (l[2].indexOf('store:') === 0 ? sets.some((x) => x.sid === l[2].slice(6)) : models.some((x) => x.id === l[2]));
+      const lineage = (sm.lineage || []).map((l, i, arr) => ({ label: l[0], how: l[1], isLink: linked(l), notLink: !linked(l), go: () => (l[2].indexOf('store:') === 0 ? this.openStore(l[2].slice(6)) : this.setState({ selModel: l[2] })), dot: i === 0 ? 'var(--status-accent)' : 'var(--text-tertiary)', fill: i === 0 ? 'var(--status-accent)' : 'transparent', line: i === arr.length - 1 ? 'transparent' : 'var(--line-strong)' }));
       sel = {
         name: sm.name,
-        tag: mi(sm.id).tag.replace('local · this Mac', sm.kind === 'snap' ? 'weights · this Mac' : 'local · this Mac'),
-        tagColor: sm.kind === 'snap' ? 'var(--text-secondary)' : kindColor(sm.kind),
+        tag: mi(sm.id).tag,
+        tagColor: kindColor(sm.kind),
         status: st[0] + (sm.id === s.defaultVideo ? ' · default for video' : '') + (roleOf(sm.id).length ? ' · ' + roleOf(sm.id).join(', ') : ''),
         statusColor: st[1],
         dot: st[2],
         actions: actions,
-        hasNote: !!sm.note,
-        note: sm.note || '',
+        hasNote: !!sm.note || !!s.storeDangling[sm.id],
+        note: s.storeDangling[sm.id] ? 'Its weights were deleted, so it can’t load. Remove the backend, or point it at other weights with apogee config set-backend.' : sm.note || '',
         noteColor: 'var(--text-secondary)',
         facts: sfacts.map((f) => ({ label: f[0], value: f[1], font: f[2] || 'inherit', color: 'var(--text-primary)' })),
         hasLineage: lineage.length > 0,
         lineage: lineage,
         hasFiles: files.length > 0,
-        files: files,
-        hasComponents: sm.media === 'pipeline',
-        components: sm.media === 'pipeline' ? this.pipelineParts(sm.id).map((c) => ({ name: c[0], detail: c[1], size: c[2] })) : [],
-        hasVoices: sm.media === 'voice',
-        voiceTotal: '54',
-        voices: sm.media === 'voice' ? [['American English', 20, 'af_ am_'], ['British English', 8, 'bf_ bm_'], ['Japanese', 5, 'jf_ jm_'], ['Mandarin Chinese', 8, 'zf_ zm_'], ['Spanish', 3, 'ef_ em_'], ['French', 1, 'ff_'], ['Hindi', 4, 'hf_ hm_'], ['Italian', 2, 'if_ im_'], ['Brazilian Portuguese', 3, 'pf_ pm_']].map((v) => ({ lang: v[0], count: String(v[1]), prefix: v[2] })) : []
+        files: files
       };
     }
     const jobsView = s.jobs.slice().sort((a, b) => (a.state === 'static' ? 1 : 0) - (b.state === 'static' ? 1 : 0)).map((j) => {
       const v = this.jobView(j, s.clock);
       const steps = v.steps.map((st, i) => {
         let detail = '';
-        if (i === 0) detail = st.status === 'done' ? j.dl + ' GB' : st.status === 'pending' ? j.dl + ' GB to download' : gb(j.dl * st.pct / 100) + ' of ' + j.dl + ' GB';
+        if (j.kind) detail = st.status === 'done' ? j.steps[i][2] : st.status === 'stopped' ? 'stopped' + (j.stoppedBy === 'you' ? ' by you' : '') + ' · runs again from its start' : st.status === 'running' ? 'working · ' + Math.round(st.pct / 100 * st.dur * 0.4) + ' s' : st.status === 'paused' ? 'paused' : '';
+        else if (i === 0) detail = st.status === 'done' ? j.dl + ' GB' : st.status === 'pending' ? j.dl + ' GB to download' : gb(j.dl * st.pct / 100) + ' of ' + j.dl + ' GB';
         else if (st.label.indexOf('Add') === 0) detail = st.status === 'done' ? 'in the library' : '';
         else if (st.status === 'done' && (j.format === 'pipeline' || j.format === 'voice')) detail = 'every file matches';
         else if (st.status === 'done') detail = st.label.indexOf('Quantize') === 0 || j.format === 'mlx' ? j.quant + ' · ' + j.size + ' GB' : 'F16 · ' + j.mid + ' GB';
         else if (st.status === 'stopped') detail = 'stopped at ' + st.pct + '%' + (j.stoppedBy === 'you' ? ' by you' : ', when Apogee quit at 23:14 on Oct 8') + ' · runs again from its start';
         else if (st.status === 'running' || st.status === 'paused') detail = Math.round(st.pct) + '%' + (st.status === 'paused' ? ' · paused' : '');
-        return { n: String(i + 1), label: st.label, pct: Math.round(st.pct), barColor: st.status === 'stopped' || st.status === 'paused' ? 'var(--status-warning)' : st.status === 'done' ? 'var(--text-secondary)' : 'var(--status-accent)', labelColor: st.status === 'pending' ? 'var(--text-tertiary)' : 'var(--text-primary)', detail: detail, detailColor: st.status === 'stopped' ? 'var(--status-warning)' : 'var(--text-tertiary)' };
+        const open = j.kind && st.status !== 'done' && st.status !== 'pending';
+        return { n: String(i + 1), label: st.label, pct: open ? 100 : Math.round(st.pct), barClass: open && st.status === 'running' ? 'pulse' : '', barColor: st.status === 'stopped' || st.status === 'paused' ? 'var(--status-warning)' : st.status === 'done' ? 'var(--text-secondary)' : 'var(--status-accent)', labelColor: st.status === 'pending' ? 'var(--text-tertiary)' : 'var(--text-primary)', detail: detail, detailColor: st.status === 'stopped' ? 'var(--status-warning)' : 'var(--text-tertiary)' };
       });
       const done = j.state === 'static' || j.finished;
       const running = j.state === 'running' && !j.finished && j.pausedAt == null;
@@ -3505,7 +4044,8 @@ class Component extends DCLogic {
       const cur = v.current >= 0 ? v.steps[v.current].label.split(' ')[0].toLowerCase() : '';
       return {
         repo: j.repo,
-        target: j.name + ' · ' + j.quant,
+        target: j.kind ? j.target : j.name + ' · ' + j.quant,
+        openLabel: j.kind || j.format === 'pipeline' || j.format === 'voice' ? 'Show the weights' : 'Show the backend',
         running: running,
         isDone: done,
         canResume: stoppedLike,
@@ -3514,7 +4054,7 @@ class Component extends DCLogic {
         statusColor: done ? 'var(--text-secondary)' : running ? 'var(--status-accent)' : 'var(--status-warning)',
         steps: steps,
         logOpen: !!j.log,
-        log: j.id === 'j1' ? '2026-10-08 22:41 download  48.1 GB  ok\n2026-10-08 23:02 convert   F16 47.2 GB  ok\n2026-10-08 23:14 quantize  stopped at 38% — the app quit\n' + (j.state === 'running' ? this.nowTime() + ' quantize  started again from the kept F16' : '') : j.id === 'j0' ? '2026-10-02 18:03 download 24.1 GB ok\n2026-10-02 18:21 convert F16 24.0 GB ok\n2026-10-02 18:26 quantize Q4_K_M 7.3 GB ok\n2026-10-02 18:26 registered' : this.nowTime() + ' started · ' + j.repo,
+        log: j.kind ? j.started + '  ' + j.command + v.steps.filter((x) => x.status === 'done').map((x) => '\n' + (j.doneAt || this.nowTime()) + '  ' + x.label + ' · ok').join('') : j.id === 'j1' ? '2026-10-08 22:41 download  48.1 GB  ok\n2026-10-08 23:02 convert   F16 47.2 GB  ok\n2026-10-08 23:14 quantize  stopped at 38% — the app quit\n' + (j.state === 'running' ? this.nowTime() + ' quantize  started again from the kept F16' : '') : j.id === 'j0' ? '2026-10-02 18:03 download 24.1 GB ok\n2026-10-02 18:21 convert F16 24.0 GB ok\n2026-10-02 18:26 quantize Q4_K_M 7.3 GB ok\n2026-10-02 18:26 registered' : this.nowTime() + ' started · ' + j.repo,
         toggleLog: () => this.setState({ jobs: this.state.jobs.map((x) => (x.id === j.id ? Object.assign({}, x, { log: !x.log }) : x)) }),
         resume: () => this.setState({ jobs: this.state.jobs.map((x) => {
           if (x.id !== j.id) return x;
@@ -3522,7 +4062,7 @@ class Component extends DCLogic {
           return Object.assign({}, x, { pausedTotal: x.pausedTotal + (this.state.clock - x.pausedAt), pausedAt: null });
         }) }),
         pause: () => { const st = this.state; const cv = this.jobView(j, st.clock); this.setState({ jobs: st.jobs.map((x) => (x.id === j.id ? Object.assign({}, x, { state: 'interrupted', failStep: Math.max(0, cv.current), failPct: cv.current >= 0 ? Math.round(cv.steps[cv.current].pct) : 0, stoppedBy: 'you' }) : x)) }); },
-        openModel: () => this.setState({ modelsTab: 'all', selModel: j.state === 'static' ? 'gemma-q4' : 'dl-' + j.id })
+        openModel: () => (j.kind ? this.openStore(j.produces.length ? j.produces[0].sid : (sets.find((x) => x.handle === j.repo) || {}).sid) : j.format === 'pipeline' || j.format === 'voice' ? this.openStoreFor('dl-' + j.id) : this.setState({ modelsTab: 'backends', selModel: j.state === 'static' ? 'gemma-q4' : 'dl-' + j.id }))
       };
     });
     const chatOpts = models.filter((mm) => mm.chat && !mm.missing && !(mm.kind === 'api' && !s.keys[mm.key])).map((mm) => ({ value: mm.id, label: mm.name + (mm.kind === 'api' ? ' · API, billed' : mm.kind === 'sub' ? ' · subscription' : '') }));
@@ -3535,11 +4075,12 @@ class Component extends DCLogic {
       ['utility', 'Utility', 'Small chores: session titles, search rewrites, summaries, the auto-thinking call.', chatOpts, 'Not set: uses the chat model, ' + find(s.roles.chat).name + '.']
     ];
     const mdl = {
-      tabs: [['all', 'All', models.length], ['local', 'On this Mac', models.filter((mm) => mm.kind === 'local' || mm.kind === 'snap').length], ['cloud', 'Cloud & subscriptions', models.filter((mm) => mm.kind === 'api' || mm.kind === 'sub').length], ['downloads', 'Downloads', runningJobs], ['roles', 'Roles', 0]].map((t) => ({ label: t[1], current: tab === t[0], bg: tab === t[0] ? 'var(--surface-control)' : 'transparent', color: tab === t[0] ? 'var(--text-primary)' : 'var(--text-secondary)', weight: tab === t[0] ? 600 : 400, hasCount: t[2] > 0, count: t[0] === 'downloads' ? t[2] + ' running' : String(t[2]), countColor: t[0] === 'downloads' ? 'var(--status-accent)' : 'var(--text-tertiary)', pick: () => this.setState({ modelsTab: t[0] }) })),
+      tabs: [['backends', 'Backends', models.filter((mm) => !mm.media).length], ['store', 'Stored weights', sets.length], ['jobs', 'Jobs', runningJobs], ['roles', 'Roles', 0]].map((t) => ({ label: t[1], current: tab === t[0], bg: tab === t[0] ? 'var(--surface-control)' : 'transparent', color: tab === t[0] ? 'var(--text-primary)' : 'var(--text-secondary)', weight: tab === t[0] ? 600 : 400, hasCount: t[2] > 0, count: t[0] === 'jobs' ? t[2] + ' running' : String(t[2]), countColor: t[0] === 'jobs' ? 'var(--status-accent)' : 'var(--text-tertiary)', pick: () => this.setState({ modelsTab: t[0] }) })),
       storeLine: gb(storeGb) + ' GB on disk · 412 GB free',
       openDownload: () => this.setState({ overlay: 'download', dl: { repo: 'Qwen/Qwen3-8B', format: 'gguf', quant: 'Q4_K_M' } }),
-      isList: tab === 'all' || tab === 'local' || tab === 'cloud',
-      isDownloads: tab === 'downloads',
+      isList: tab === 'backends',
+      isStore: tab === 'store',
+      isJobs: tab === 'jobs',
       isRoles: tab === 'roles',
       rows: mRows,
       empty: mRows.length === 0,
@@ -3587,20 +4128,21 @@ class Component extends DCLogic {
         const inf = this.repoInfo(st.dl.repo) || { name: st.dl.repo.split('/')[1] || st.dl.repo, dl: 16, params: 8 };
         if (inf.kind) {
           const mj = { id: 'j' + st.clock, repo: st.dl.repo, name: inf.name, format: inf.kind, quant: inf.kind, size: inf.dl, dl: inf.dl, mid: 0, hash: 'e17a90c3', state: 'running', t0: st.clock, from: 0, fromPct: 0, pausedAt: null, pausedTotal: 0, finished: false, log: false };
-          this.setState({ jobs: [mj].concat(st.jobs), overlay: null, screen: 'models', modelsTab: 'downloads' });
+          this.setState({ jobs: [mj].concat(st.jobs), overlay: null, screen: 'models', modelsTab: 'jobs' });
           return;
         }
         const b2 = { Q4_K_M: 4.85, Q5_K_M: 5.7, Q8_0: 8.5, F16: 16, '4-bit': 4.5, '8-bit': 8.5 }[st.dl.quant] || 4.85;
         const job = { id: 'j' + st.clock, repo: st.dl.repo, name: inf.name, format: st.dl.format, quant: st.dl.quant, size: Math.round(inf.params * b2 / 8 * 10) / 10, dl: inf.dl, mid: Math.round(inf.params * 2 * 10) / 10, state: 'running', t0: st.clock, from: 0, fromPct: 0, pausedAt: null, pausedTotal: 0, finished: false, log: false };
-        this.setState({ jobs: [job].concat(st.jobs), overlay: null, screen: 'models', modelsTab: 'downloads' });
+        this.setState({ jobs: [job].concat(st.jobs), overlay: null, screen: 'models', modelsTab: 'jobs' });
       }
     };
 
     /* ---------- confirm ---------- */
-    let cf = { title: '', body: '', detail: '', hasDetail: false, confirmLabel: 'OK', run: () => {}, cancel: () => this.setState({ confirm: null }) };
+    let cf = { title: '', body: '', detail: '', hasDetail: false, hasCheck: false, check: false, checkLabel: '', checkNote: '', toggleCheck: () => this.setState({ confirm: Object.assign({}, this.state.confirm, { andBackends: !this.state.confirm.andBackends }) }), confirmLabel: 'OK', runBg: 'var(--status-error)', runColor: 'var(--surface-window)', run: () => {}, cancel: () => this.setState({ confirm: null }) };
     if (s.confirm && s.confirm.kind === 'model') {
       const dm = find(s.confirm.id);
-      cf = Object.assign(cf, { title: 'Delete ' + dm.name + '?', body: dm.media === 'pipeline' && s.defaultVideo === dm.id ? 'This removes it from disk and frees ' + dm.size + ' GB. It’s the default for video, so models.default_video is cleared too. Clips and their records stay.' : dm.media ? 'This removes it from disk and frees ' + dm.size + ' GB. What was made with it stays.' : 'This removes it from disk and frees ' + dm.size + ' GB. Models made from it stay.', detail: dm.path, hasDetail: true, confirmLabel: 'Delete', run: () => {
+      const dmSet = sets.find((x) => x.backendId === dm.id);
+      cf = Object.assign(cf, { title: 'Delete ' + dm.name + ' with its weights?', body: 'Its weights leave this Mac, freeing ' + dm.size + ' GB, and its backend goes with them. Models made from it stay.', detail: 'apogee models delete ' + (dmSet ? dmSet.backendKey : dm.id) + ' -y --and-backends', hasDetail: true, confirmLabel: 'Delete', run: () => {
         const st = this.state;
         const roles = Object.assign({}, st.roles);
         Object.keys(roles).forEach((r) => { if (roles[r] === dm.id && r !== 'chat') roles[r] = ''; });
@@ -3608,6 +4150,72 @@ class Component extends DCLogic {
         delete l[dm.id];
         this.say('Deleted ' + dm.name + ' · ' + dm.size + ' GB freed', { deleted: Object.assign({}, st.deleted, { [dm.id]: true }), confirm: null, selModel: null, roles: roles, loaded: l, defaultVideo: st.defaultVideo === dm.id ? null : st.defaultVideo });
       } });
+    }
+    if (s.confirm && s.confirm.kind === 'storeDelete') {
+      const x = sets.find((y) => y.sid === s.confirm.sid);
+      const ab = !!s.confirm.andBackends;
+      if (x) cf = Object.assign(cf, {
+        title: 'Delete ' + x.dir + ' · ' + fmtName[x.format] + (x.level === '—' ? '' : ' ' + x.level) + '?',
+        body: 'Its folder leaves this Mac, freeing ' + gb(x.gb) + ' GB.' + (sets.some((y) => y.from === x.sid) ? ' What was made from it stays.' : '') + (x.mediaId && s.defaultVideo === x.mediaId ? ' It’s the default for video, so models.default_video is cleared too. Clips and their records stay.' : ''),
+        detail: 'apogee models delete ' + x.handle + ' -y' + (x.backendKey && ab ? ' --and-backends' : ''), hasDetail: true,
+        hasCheck: !!x.backendKey, check: ab,
+        checkLabel: 'Remove its backend, ' + x.backendKey + ', too',
+        checkNote: ab ? 'Roles that used it are cleared.' : 'The backend stays, and can’t load until it points at other weights.',
+        confirmLabel: 'Delete',
+        run: () => this.dropSets([x], ab, 'Deleted ' + x.handle + ' · ' + gb(x.gb) + ' GB freed')
+      });
+    }
+    if (s.confirm && s.confirm.kind === 'storeModelDelete') {
+      const list = sets.filter((y) => y.dir === s.confirm.dir);
+      const keys = list.filter((y) => y.backendKey).map((y) => y.backendKey);
+      const ab = !!s.confirm.andBackends;
+      const total = list.reduce((a, y) => a + y.gb, 0);
+      cf = Object.assign(cf, {
+        title: 'Delete all of ' + s.confirm.dir + '?',
+        body: 'Its ' + list.length + (list.length === 1 ? ' set leaves' : ' sets leave') + ' this Mac, freeing ' + gb(total) + ' GB.',
+        detail: 'apogee models delete ' + s.confirm.dir + ' -y' + (keys.length && ab ? ' --and-backends' : ''), hasDetail: true,
+        hasCheck: keys.length > 0, check: ab,
+        checkLabel: 'Remove the backends that run from it too: ' + keys.join(', '),
+        checkNote: ab ? 'Roles that used them are cleared.' : 'They stay, and can’t load until they point at other weights.',
+        confirmLabel: 'Delete all of it',
+        run: () => this.dropSets(list, ab, 'Deleted ' + s.confirm.dir + ' · ' + gb(total) + ' GB freed')
+      });
+    }
+    if (s.confirm && s.confirm.kind === 'unregister') {
+      const id = s.confirm.id;
+      const key = s.confirm.key;
+      const usedBy = Object.keys(s.roles).filter((r) => s.roles[r] === id && r !== 'chat');
+      cf = Object.assign(cf, {
+        title: 'Remove the backend ' + key + '?',
+        body: s.storeDangling[id] ? 'Its config entry goes. Its weights are already gone.' : 'Its config entry goes. The weights stay under Stored weights, ready to register again.' + (usedBy.length ? ' The ' + usedBy.join(' and ') + (usedBy.length === 1 ? ' role is' : ' roles are') + ' cleared.' : ''),
+        detail: 'apogee config delete-backend ' + key, hasDetail: true,
+        confirmLabel: 'Remove',
+        run: () => {
+          const st2 = this.state;
+          const roles = Object.assign({}, st2.roles);
+          usedBy.forEach((r) => { roles[r] = ''; });
+          const loaded = Object.assign({}, st2.loaded);
+          delete loaded[id];
+          this.say('Removed the backend ' + key + (st2.storeDangling[id] ? '' : '; its weights stay'), { storeUnreg: Object.assign({}, st2.storeUnreg, { [id]: true }), storeDangling: Object.assign({}, st2.storeDangling, { [id]: false }), roles: roles, loaded: loaded, confirm: null, selModel: st2.selModel === id ? null : st2.selModel });
+        }
+      });
+    }
+    if (s.confirm && s.confirm.kind === 'registerAll') {
+      const list = unreg;
+      cf = Object.assign(cf, {
+        title: 'Register ' + list.length + ' stored ' + (list.length === 1 ? 'model' : 'models') + '?',
+        body: 'Each becomes a backend, named as config scan names it: the model’s name and its precision. Nothing is copied or loaded.',
+        detail: list.map((x) => x.handle).join('\n') + '\n\napogee config scan --register', hasDetail: true,
+        confirmLabel: 'Register',
+        runBg: '', runColor: '',
+        run: () => {
+          const st2 = this.state;
+          const reg = Object.assign({}, st2.storeReg);
+          const back = Object.assign({}, st2.storeUnreg);
+          list.forEach((x) => { reg[x.sid] = defaultName(x); back['reg-' + defaultName(x)] = false; });
+          this.say('Registered ' + list.map((x) => defaultName(x)).join(', '), { storeReg: reg, storeUnreg: back, confirm: null });
+        }
+      });
     }
     if (s.confirm && s.confirm.kind === 'forget') {
       cf = Object.assign(cf, { title: 'Forget all session summaries?', body: 'The ' + s.recallCount + ' summaries recall draws on are deleted from this Mac. Your sessions stay; only what later sessions can recall from them goes.', confirmLabel: 'Forget all', run: () => this.say('Forgot ' + this.state.recallCount + ' summaries', { recallCount: 0, confirm: null }) });
@@ -3719,7 +4327,7 @@ class Component extends DCLogic {
       lowColor: low ? 'var(--status-warning)' : 'var(--text-tertiary)',
       resetAll: () => { const all = Object.assign({}, this.state.overrides); all[editTheme] = {}; this.setState({ overrides: all, hexDrafts: {} }); },
       groups: colorGroups,
-      openLibrary: () => this.setState({ overlay: null, screen: 'models', modelsTab: 'all' }),
+      openLibrary: () => this.setState({ overlay: null, screen: 'models', modelsTab: 'backends' }),
       backends: [
         { isHeader: true, isRow: false, title: 'ON THIS MAC', actions: [] },
         backendRow({ isLocal: true, name: 'llama.cpp', status: 'ready', statusColor: 'var(--status-accent)', detail: 'Built in · Metal · runs GGUF models' }),
@@ -4177,7 +4785,7 @@ class Component extends DCLogic {
       isClips: s.mediaTab === 'clips',
       isCompose: s.mediaTab === 'compose',
       pipelineLine: s.defaultVideo && models.some((mm) => mm.id === s.defaultVideo) ? pipeName(s.defaultVideo) + ' · default' : 'no default pipeline',
-      openPipeline: () => this.setState({ screen: 'models', modelsTab: 'all', selModel: this.state.defaultVideo || 'wan22' }),
+      openPipeline: () => this.openStoreFor(this.state.defaultVideo || 'wan22'),
       newLabel: s.mediaTab === 'clips' ? 'New clip' : 'New composition',
       newPrimary: () => {
         const st = this.state;
@@ -4580,7 +5188,7 @@ class Component extends DCLogic {
     const vox = {
       runtimeLine: 'Kokoro-82M · cpu',
       runtimeDot: 'var(--model-local)',
-      openModel: () => this.setState({ screen: 'models', modelsTab: 'all', selModel: 'kokoro' }),
+      openModel: () => this.openStoreFor('kokoro'),
       newSpeech: () => this.setState({ vf: { text: '', voice: this.state.defaultVoice, speed: 1, out: null }, speechSel: null }),
       list: (vsayNow ? [{ file: vsayNow.out, text: vsayNow.text, meta: 'speaking · ' + vsayNow.voice, running: true, current: false, bg: '', pick: () => {} }] : []).concat(s.speeches.map((x) => {
         const last = x.sentences[x.sentences.length - 1];
@@ -4650,6 +5258,7 @@ class Component extends DCLogic {
       settingsOpen: s.overlay === 'settings',
       downloadOpen: s.overlay === 'download',
       newTaskOpen: s.overlay === 'newtask',
+      storeSheetOpen: s.overlay === 'store',
       confirmOpen: !!s.confirm,
       toastOn: !!s.toast,
       toastText: s.toast || '',
@@ -4659,7 +5268,7 @@ class Component extends DCLogic {
       openPdf: () => this.say('Opens the source in Preview at that page (prototype)')
     };
 
-    return { ui: ui, nav: nav, mon: mon, chat: chat, tg: tg, rt: rt, wal: wal, cr: cr, pr: pr, cmp: cmp, ins: ins, mdl: mdl, dlg: dlg, cf: cf, set: setv, sui: sui, tsk: tsk, nt: ntv, gr: gr, vid: vid, comp: comp, vox: vox, rtc: rtc };
+    return { ui: ui, nav: nav, mon: mon, chat: chat, tg: tg, rt: rt, wal: wal, cr: cr, pr: pr, cmp: cmp, ins: ins, mdl: mdl, st: st, sh: sh, dlg: dlg, cf: cf, set: setv, sui: sui, tsk: tsk, nt: ntv, gr: gr, vid: vid, comp: comp, vox: vox, rtc: rtc };
   }
 }
 </script>
