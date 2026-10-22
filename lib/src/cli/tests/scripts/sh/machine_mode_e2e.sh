@@ -257,6 +257,41 @@ child.close()
 print("turns: ids on every turn event, cancel mid-stream and mid-question, a failure an error - OK")
 PY
 
+# --- a default that could not start says why (M26) -----------------------------
+# The app's own launch, in the user's run (2026-10-22): a chat driven with no
+# -m, its default a claude-cli backend that could not start beside a local one
+# that did, under the PATH a Dock-launched app has. The turn ends in an `error`
+# carrying the words the command line prints -- configured, not started, the
+# doctor's reason and remedy, the backends that started -- and so does a
+# one-shot `complete`. A sandbox of its own through --custom, and a `binary`
+# naming a path that does not exist, so no host's own `claude` can answer.
+SKIP_DIR="$WORK_DIR/skipped-default"
+mkdir -p "$SKIP_DIR/config"
+printf '{"models":{"default":"claude"},"backends":{"claude":{"type":"claude-cli","binary":"%s"},"Local-Mock":{"type":"mock"}}}\n' \
+    "$SKIP_DIR/nonexistent/claude" >"$SKIP_DIR/config/config.json"
+printf '%s\n' '{"type":"user","text":"hi"}' \
+    | env -i HOME="$SKIP_DIR" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+        "$APOGEE_BIN" --custom "$SKIP_DIR/config/config.json" chat \
+        --output-format stream-json --input-format stream-json \
+        >"$SKIP_DIR/chat.jsonl" 2>"$SKIP_DIR/chat-err.txt" \
+    || fail "a driven chat over a default that could not start failed: $(cat "$SKIP_DIR/chat-err.txt")"
+env -i HOME="$SKIP_DIR" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+    "$APOGEE_BIN" --custom "$SKIP_DIR/config/config.json" complete --output-format stream-json "hi" \
+    </dev/null >"$SKIP_DIR/complete.jsonl" 2>"$SKIP_DIR/complete-err.txt" \
+    && fail "complete answered over a default that could not start"
+python3 - "$SKIP_DIR" <<'PY' || fail "a default that could not start: the error events are wrong"
+import json, os, sys
+root = sys.argv[1]
+expected = ("the default backend 'claude' is configured but could not be started: '"
+            + os.path.join(root, "nonexistent", "claude") + "' was not found on PATH. "
+            "Install the Claude CLI and log in, or set 'binary' on this backend to its full path "
+            "(started backends: Local-Mock)")
+for name in ("chat.jsonl", "complete.jsonl"):
+    events = [json.loads(line) for line in open(os.path.join(root, name)) if line.strip()]
+    assert [e["message"] for e in events if e["type"] == "error"] == [expected], (name, events)
+    assert not [e for e in events if e["type"] == "result"], (name, events)
+PY
+
 # --- the schema artifact (28g): every captured stream validates ----------------
 # The real streams this script captured -- complete, driven chats, handshakes
 # -- validated line by line against what this binary prints as its schema, with

@@ -23,17 +23,37 @@ public:
 ///
 /// Carries the requested name so the surface can name it back to the user
 /// alongside what IS configured -- "no backend for 'sonnet'" is only useful
-/// with the list of names that would have worked.
+/// with the list of names that would have worked. When the refusal is about a
+/// configured backend that could not be started (M26), it carries that
+/// backend and the factory's reason too, for a caller that wants them apart
+/// from the message.
 class NoAvailableBackendError : public HarnessError {
 public:
     explicit NoAvailableBackendError(std::string model, const std::string& message);
+    NoAvailableBackendError(std::string model, const std::string& message,
+                            std::string skipped_backend, std::string reason);
 
     [[nodiscard]] const std::string& model() const noexcept {
         return model_;
     }
 
+    /// The configured backend the refusal is about, when it could not be
+    /// started: the one asked for, or else the default the request fell to.
+    /// Empty when neither is one.
+    [[nodiscard]] const std::string& skipped_backend() const noexcept {
+        return skipped_backend_;
+    }
+
+    /// Why `skipped_backend()` could not be started, in the factory's words.
+    /// Empty with it.
+    [[nodiscard]] const std::string& reason() const noexcept {
+        return reason_;
+    }
+
 private:
     std::string model_;
+    std::string skipped_backend_;
+    std::string reason_;
 };
 
 /// A backend name was used that is not registered with the harness.

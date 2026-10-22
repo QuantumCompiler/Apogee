@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -16,9 +17,12 @@
 #include "backends/gemini_cli.h"
 #include "backends/mock.h"
 #include "backends/provider_cache.h"
+#include "backends/provider_status.h"
+#include "backends/provider_table.h"
 #include "contracts/config.h"
 #include "contracts/errors.h"
 #include "harness/harness.h"
+#include "platform/child_process.h"
 #include "platform/platform.h"
 #include "secrets/store.h"
 #include "support/env_guard.h"
@@ -498,4 +502,63 @@ TEST_CASE("a config outside an install's config directory records nothing anywhe
     for (const auto& [provider, record] : outside.verified) {
         CHECK(record.backend != name);
     }
+}
+
+TEST_CASE("the user's run: a vendor CLI default that could not start is refused with why",
+          "[backends][factory][skipped]") {
+    // M26, the fixture the item names: a claude-cli default not found, beside
+    // a local backend that started. The words were "no backend serves
+    // 'claude' (configured backends: Local-Mock)"; the backend is configured,
+    // and why it did not start was known to the factory all along.
+    const apogee::testing::TempDir root{"skipped-default-" +
+                                        std::to_string(std::random_device{}())};
+    const std::filesystem::path binary = root.path() / "bin" / "claude";
+    Harness harness{
+        config_from("models:\n  default: claude\nbackends:\n  claude:\n"
+                    "    type: claude-cli\n    binary: \"" +
+                    binary.generic_string() + "\"\n  Local-Mock:\n    type: mock\n")};
+    const auto built = build_providers(harness, no_env());
+    REQUIRE(built.constructed_count() == 1);  // still non-fatal
+    const auto skipped = std::ranges::find_if(
+        built.statuses, [](const apogee::backends::BackendStatus& s) { return !s.constructed; });
+    REQUIRE(skipped != built.statuses.end());
+    const std::string reason = skipped->reason.substr(std::string{"claude: "}.size());
+    REQUIRE(skipped->reason == "claude: " + reason);
+
+    // Asked for by name -- what `complete` and the app's sessions route,
+    // having resolved the default themselves -- and by default.
+    for (const std::string_view asked : {"claude", ""}) {
+        INFO("asked for '" << asked << "'");
+        try {
+            (void)harness.route(asked);
+            FAIL("expected NoAvailableBackendError");
+        } catch (const apogee::harness::NoAvailableBackendError& e) {
+            CHECK(std::string{e.what()} ==
+                  "the default backend 'claude' is configured but could not be started: " + reason +
+                      " (started backends: Local-Mock)");
+            CHECK(e.skipped_backend() == "claude");
+            CHECK(e.reason() == reason);
+            if (apogee::platform::supports_child_processes()) {
+                // The doctor's words (28c), never a second wording.
+                CHECK(reason ==
+                      apogee::backends::not_on_path(binary.generic_string()) + ". " +
+                          std::string{
+                              apogee::backends::provider_for_type(BackendType::ClaudeCli)->remedy});
+            }
+        }
+    }
+    CHECK(harness.route("Local-Mock").backend_name() == "Local-Mock");
+
+    if (!apogee::platform::supports_child_processes()) {
+        return;
+    }
+    // Installed since, and rebuilt (27d's path): it starts, routes, and no
+    // refusal names it any more. Construction only checks the path; nothing
+    // is spawned.
+    std::filesystem::create_directories(binary.parent_path());
+    std::ofstream{binary} << "#!/bin/sh\nexit 1\n";
+    REQUIRE(apogee::backends::rebuild_providers(harness, {"claude"}, no_env())
+                .statuses.front()
+                .constructed);
+    CHECK(harness.route("").backend_name() == "claude");
 }

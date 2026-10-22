@@ -153,6 +153,64 @@ expect_contains("${APOGEE_ERR}" "local" "the failing backend is named")
 expect_not_contains("${APOGEE_OUT}" "mock response" "it never falls through to another backend")
 apogee_run(0 config delete-backend local)
 
+# --- a default that could not start says why (M26) --------------------------
+# The user's run, 2026-10-22: a claude-cli default the process could not start
+# beside a local backend that did, under the PATH a Dock-launched app has. It
+# said "no backend serves 'claude' (configured backends: Local-Mock)" -- a list
+# that claimed to be the config, and no word of why. A sandbox of its own
+# through --custom, and a `binary` naming a path that does not exist, so no
+# host's own `claude` can ever answer.
+set(SKIP_ROOT "${APOGEE_WORK_DIR}/skipped-default")
+set(SKIP_BINARY "${SKIP_ROOT}/nonexistent/claude")
+file(MAKE_DIRECTORY "${SKIP_ROOT}/config")
+file(WRITE "${SKIP_ROOT}/config/config.json"
+    "{\"models\":{\"default\":\"claude\"},\"backends\":{\"claude\":{\"type\":\"claude-cli\","
+    "\"binary\":\"${SKIP_BINARY}\"},\"Local-Mock\":{\"type\":\"mock\"}}}\n")
+set(SKIP_ENV --unset=APOGEE_HOME "HOME=${SKIP_ROOT}")
+if(NOT CMAKE_HOST_WIN32)
+    list(APPEND SKIP_ENV "PATH=/usr/bin:/bin:/usr/sbin:/sbin")
+endif()
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env ${SKIP_ENV}
+        "${APOGEE_BIN}" --custom "${SKIP_ROOT}/config/config.json" complete "hi"
+    RESULT_VARIABLE skip_code
+    OUTPUT_VARIABLE skip_out
+    ERROR_VARIABLE skip_err
+    INPUT_FILE "${APOGEE_WORK_DIR}/.empty-stdin"
+)
+if(NOT skip_code EQUAL 1)
+    message(FATAL_ERROR "a default that could not start: expected exit 1, got ${skip_code}\n"
+        "  stdout: ${skip_out}\n  stderr: ${skip_err}")
+endif()
+expect_contains("${skip_err}"
+    "the default backend 'claude' is configured but could not be started: "
+    "the refusal says the default is configured but did not start")
+expect_contains("${skip_err}" "(started backends: Local-Mock)"
+    "the list is the backends that started")
+expect_not_contains("${skip_err}" "configured backends" "the list never claims to be the config")
+expect_not_contains("${skip_out}" "mock response" "it never answers from another backend")
+if(NOT CMAKE_HOST_WIN32)
+    # The doctor's sentence and remedy (28c), the words `check` prints.
+    expect_contains("${skip_err}"
+        "'${SKIP_BINARY}' was not found on PATH. Install the Claude CLI and log in, or set "
+        "the reason and its remedy are the doctor's")
+endif()
+# A name configured nowhere is refused as before.
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env ${SKIP_ENV}
+        "${APOGEE_BIN}" --custom "${SKIP_ROOT}/config/config.json" complete -m nope "hi"
+    RESULT_VARIABLE skip_code
+    OUTPUT_VARIABLE skip_out
+    ERROR_VARIABLE skip_err
+    INPUT_FILE "${APOGEE_WORK_DIR}/.empty-stdin"
+)
+if(NOT skip_code EQUAL 1)
+    message(FATAL_ERROR "a name configured nowhere: expected exit 1, got ${skip_code}\n"
+        "  stderr: ${skip_err}")
+endif()
+expect_contains("${skip_err}" "no backend named 'nope'" "a typo is refused as before")
+expect_not_contains("${skip_err}" "could not be started" "a typo is not a skipped backend")
+
 # --- --all-backends ---------------------------------------------------------
 apogee_run(0 config add-backend second --type mock --model mock-2)
 apogee_run(0 complete --all-backends "x")

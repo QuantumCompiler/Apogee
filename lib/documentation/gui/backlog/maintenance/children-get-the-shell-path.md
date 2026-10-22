@@ -20,7 +20,7 @@ Measured, not guessed (2026-10-22):
 - **Under the shell's `PATH`,** `check` says "credentials found".
 - **The vendor binaries' locations** were read with `which`.
 
-This is a recorded trade-off coming due. 1b's MILESTONES entry says: "launched from the Finder, the app's `PATH` is launchd's, so a tool the CLI looks for on a shell's `PATH` … may not be found by a session the app starts … Widening the child's `PATH` is a later, deliberate call." 2g's entry repeats it for `gh`. The user read the refusal as their backend rename not mapping. It was not the rename: the CLI's [M26](../../../cli/backlog/maintenance/skipped-backend-says-why.md) makes the refusal say why.
+This is a recorded trade-off coming due. 1b's MILESTONES entry says: "launched from the Finder, the app's `PATH` is launchd's, so a tool the CLI looks for on a shell's `PATH` … may not be found by a session the app starts … Widening the child's `PATH` is a later, deliberate call." 2g's entry repeats it for `gh`. The user read the refusal as their backend rename not mapping. It was not the rename: the CLI's [M26](../../../cli/assistant/MILESTONES.md#milestone-c--the-harness-core) makes the refusal say why (shipped 2026-10-22).
 
 **Core constraint(s).**
 - **The app stays a machine-mode client.** It never finds `claude`, `gh` or any vendor tool itself, and never decides which backend runs. It only gives the CLI the `PATH` the person's own terminal would, and the CLI's lookups do the rest, unchanged.

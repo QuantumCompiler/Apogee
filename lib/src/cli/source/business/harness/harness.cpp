@@ -112,6 +112,13 @@ void index_first_wins(std::map<std::string, LLMProvider*, std::less<>>& index,
     index.emplace(key, provider);
 }
 
+/// `reason` without the `<name>: ` a provider's error opens with: the refusal
+/// names the backend itself, so the factory's words follow it once.
+[[nodiscard]] std::string without_name(const std::string& reason, std::string_view name) {
+    const std::string prefix = std::string{name} + ": ";
+    return reason.starts_with(prefix) ? reason.substr(prefix.size()) : reason;
+}
+
 }  // namespace
 
 std::string normalize_route_key(std::string_view value) {
@@ -132,7 +139,8 @@ std::string normalize_route_key(std::string_view value) {
 // ---------------------------------------------------------------------------
 
 SimpleRouter::SimpleRouter(const Config& config,
-                           const std::map<std::string, std::shared_ptr<LLMProvider>>& providers)
+                           const std::map<std::string, std::shared_ptr<LLMProvider>>& providers,
+                           const SkippedBackends& skipped)
     : default_model_{config.models.default_backend} {
     for (const auto& [backend_name, backend_config] : config.backends) {
         const auto registered = providers.find(backend_name);
@@ -163,6 +171,48 @@ SimpleRouter::SimpleRouter(const Config& config,
 
     std::ranges::sort(known_names_);
     known_names_.erase(std::ranges::unique(known_names_).begin(), known_names_.end());
+
+    // The configured backends that did not start (M26), in config order.
+    for (const auto& [backend_name, backend_config] : config.backends) {
+        const auto reason = skipped.find(backend_name);
+        if (reason == skipped.end() || by_key_.contains(backend_name)) {
+            continue;
+        }
+        unstarted_.push_back({.name = backend_name,
+                              .model = backend_config.model,
+                              .reason = without_name(reason->second, backend_name)});
+    }
+}
+
+const SimpleRouter::Unstarted* SimpleRouter::unstarted(std::string_view key) const {
+    if (key.empty()) {
+        return nullptr;
+    }
+    const auto first = [this](const auto& names) -> const Unstarted* {
+        const auto found = std::ranges::find_if(unstarted_, names);
+        return found == unstarted_.end() ? nullptr : &*found;
+    };
+    const std::string normalized = normalize_route_key(key);
+    // `lookup`'s rungs, in its order: the key, then the entry's `model:`,
+    // each literal then normalized.
+    if (const Unstarted* found = first([key](const Unstarted& entry) { return entry.name == key; });
+        found != nullptr) {
+        return found;
+    }
+    if (const Unstarted* found = first([&normalized](const Unstarted& entry) {
+            return normalize_route_key(entry.name) == normalized;
+        });
+        found != nullptr) {
+        return found;
+    }
+    if (const Unstarted* found = first(
+            [key](const Unstarted& entry) { return !entry.model.empty() && entry.model == key; });
+        found != nullptr) {
+        return found;
+    }
+    return first([&normalized](const Unstarted& entry) {
+        return !entry.model.empty() && normalize_route_key(entry.model) == normalized;
+    });
 }
 
 LLMProvider* SimpleRouter::lookup(std::string_view key) const {
@@ -201,16 +251,43 @@ LLMProvider& SimpleRouter::route(std::string_view model) const {
     }
 
     const std::string requested{model.empty() ? std::string_view{"<default>"} : model};
-    std::string message = "no backend serves '" + requested + "'";
-    if (known_names_.empty()) {
-        message += " -- no backends are configured; add one with 'apogee config add-backend'";
+
+    // What the refusal is about (M26): the backend asked for, or else the
+    // default the request fell to, when it is configured but did not start.
+    // Only that one -- `check` is where every skipped entry is listed.
+    const Unstarted* fallen = unstarted(default_model_);
+    const Unstarted* asked = model.empty() ? fallen : unstarted(model);
+    const Unstarted* about = asked != nullptr ? asked : fallen;
+
+    std::string message;
+    if (about == nullptr) {
+        message = "no backend serves '" + requested + "'";
     } else {
-        message += " (configured backends: " + join_names(known_names_) + ")";
-        if (default_model_.empty()) {
+        if (about != asked) {
+            message = "no backend serves '" + requested + "', and ";
+        }
+        message += (about == fallen ? "the default backend '" : "backend '") + about->name + "'";
+        if (about == asked && !model.empty() && model != about->name) {
+            message += " (for '" + requested + "')";
+        }
+        message += " is configured but could not be started: " + about->reason;
+    }
+    if (!known_names_.empty()) {
+        // What started -- never called the configuration, which it is not
+        // while any entry was skipped.
+        message += " (started backends: " + join_names(known_names_) + ")";
+        if (about == nullptr && default_model_.empty()) {
             message += "; no models.default is set -- 'apogee config set-default <name>'";
         }
+    } else if (!unstarted_.empty()) {
+        message += " (no backend started; 'apogee check' says why)";
+    } else {
+        message += " -- no backends are configured; add one with 'apogee config add-backend'";
     }
-    throw NoAvailableBackendError(requested, message);
+    if (about == nullptr) {
+        throw NoAvailableBackendError(requested, message);
+    }
+    throw NoAvailableBackendError(requested, message, about->name, about->reason);
 }
 
 // ---------------------------------------------------------------------------
@@ -227,8 +304,19 @@ void Harness::register_provider(std::string name, std::shared_ptr<LLMProvider> p
     if (provider != nullptr) {
         // A rebuilt backend keeps the session's hold and its listener (27e).
         attach_residency(name, *provider);
+        // And one that did not start before has now (M26).
+        skipped_.erase(name);
     }
     providers_[std::move(name)] = std::move(provider);
+}
+
+void Harness::note_skipped(std::string name, std::string reason) {
+    if (const auto registered = providers_.find(name);
+        registered != providers_.end() && registered->second != nullptr) {
+        // A rebuild that failed keeps the provider it had: it still runs.
+        return;
+    }
+    skipped_.insert_or_assign(std::move(name), std::move(reason));
 }
 
 void Harness::attach_residency(const std::string& name, LLMProvider& provider) const {
@@ -249,7 +337,7 @@ void Harness::attach_residency(const std::string& name, LLMProvider& provider) c
 }
 
 void Harness::use_default_router() {
-    router_ = std::make_unique<SimpleRouter>(config_, providers_);
+    router_ = std::make_unique<SimpleRouter>(config_, providers_, skipped_);
 }
 
 void Harness::set_router(std::unique_ptr<ModelRouter> router) {

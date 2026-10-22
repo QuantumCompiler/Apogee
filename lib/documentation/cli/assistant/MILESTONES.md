@@ -343,6 +343,46 @@ The layering check needed a real guardrail rather than a convention. In Go the r
 
 `MockProvider` holds itself to the same cancellation contract real providers must honour — checking between chunks, not just at entry — because otherwise tests of cancellation prove nothing about the interface they are supposed to pin.
 
+### 2026-10-22 — `skipped-backend-says-why` (maintenance item M26): a backend that could not start says why
+
+**Why.** The user's run of the macOS app, 2026-10-22: `no backend serves 'claude' (configured backends: GPT-OSS-20B, … Qwen3.8-27B)`, though `claude` is configured and works in their terminal. Launched from the Dock, the app's child had launchd's `PATH`, so the `claude-cli` backend was skipped: `'claude' was not found on PATH`. The GUI's M6 owns that cause. The refusal hid it twice:
+- **The list.** It called the backends that *started* "configured backends", since the router collects names only from constructed providers.
+- **The reason.** The factory records why each backend was skipped, "so a caller can explain the gap when the model the user actually asked for is the one that was skipped" (`factory.h`), but every caller said it only when nothing was built.
+
+The user read it as a rename not mapping. It was not.
+
+- [x] **The skip reasons reach the router.** `build_providers` and `rebuild_providers` hand each backend they could not build, with its reason, to the harness through a new `ProviderRegistry::note_skipped`. The harness forgets the note once a provider registers under that name, and ignores it while one is running.
+- [x] **`SimpleRouter` matches a skipped entry as it matches a running one** (its key, its `model:`, normalized). `route`'s refusal names the skipped backend asked for, or the default it fell to, in the doctor's own words (28c). In the user's case:
+
+  `the default backend 'claude' is configured but could not be started: 'claude' was not found on PATH. Install the Claude CLI and log in, or set 'binary' on this backend to its full path (started backends: Local-Mock)`
+- [x] **Every list is the "started backends".** A name configured nowhere keeps its opening sentence and hints. With nothing started, the refusal says so and points to `apogee check`, rather than the untrue "no backends are configured".
+- [x] **`NoAvailableBackendError` carries `skipped_backend()` and `reason()`.** Machine mode's `error` event carries the same words in its existing `message`, with no new field: a driven `chat` with no `-m`, as the app launches it, and `complete --output-format stream-json`.
+
+**Decisions made while building** (2026-10-22, each recorded for veto):
+- **The open call's default, taken:** the refusal names only the skipped backend asked for, or the default it fell to. `check` stays the place that lists them all.
+- **The factory's own `<name>: ` prefix is dropped** from the reason in the refusal, which already names the backend. `BuildResult` and `skipped_summary()` are unchanged.
+- **The wording says which name was meant.** "the default backend '…'" when the skipped entry is the default, which tells an app user why `claude` ran at all. "(for 'opus')" when it was asked for by its `model:` or another spelling. And when an unknown name fell to a skipped default: "no backend serves 'nope', and the default backend 'claude' is …".
+- **Routing is unchanged.** A request naming a skipped backend still falls to a default that started. Only the refusal changed.
+- **`serve` keeps its own 503,** checked before routing. It never reaches this refusal, and vendor CLIs are not served over HTTP.
+
+**Verified.**
+- **9 new cases** (`[skipped]`), plus 2 real-binary checks:
+  - **the router:** a skipped default refused as configured with the factory's reason; a skipped backend asked for named even when the default did not start either; a name configured nowhere that fell to a skipped default; a name configured nowhere refused as before; nothing started; a backend registered after it was skipped routing and no longer said to be skipped.
+  - **the factory:** the reasons handed through, and the rebuild's, over a `claude-cli` entry whose `binary` does not exist, beside a mock.
+  - **the user's run end to end in process:** the exact words, then the binary made present and rebuilt, so the backend starts with nothing spawned.
+  - **`cli.complete_lifecycle`:** the user's reproduction under `--custom` with a stripped `PATH`.
+  - **`cli.machine_mode`:** the driven `chat` and the streamed `complete` each end in exactly one `error` with those words.
+- The neighbouring suites pass: `[harness]`, `[factory]`, `[router]`, `[backends]` and `[httpserver]`.
+- **ctest:** these 20 pass:
+  - `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`;
+  - `cli.machine_mode`, `cli.machine_schema_conformance`, `cli.complete_lifecycle`, `cli.serve_lifecycle`;
+  - `cli.config_lifecycle`, `cli.execute_lifecycle`, `cli.provider_surfacing`, `cli.providers_lifecycle`;
+  - `cli.suites_lifecycle`, `cli.reference_driver`, `cli.chat_typeahead_and_crash_safety`, `cli.tui_shell`;
+  - `cli.tui_doors`, `cli.http_api_conformance`, `cli.one_role_resolver`, and `cli.channel_probe_build`.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,848 tests and the macOS app's 383 cases passed, with no warning.
+
+**Not done:** seven caller-side checks still word the same fact their own way, "backend 'X' is configured but unavailable -- X: …", when a skipped backend is named explicitly: `complete.cpp:757`, `analyze.cpp:585`, `knowledge.cpp:474`, `review_cmd.cpp:265`, `video_cmd.cpp:205`, `chat_history.cpp:377` and `httpserver/handler.cpp:290`. They were outside this item's seam.
+
 ---
 
 ## Milestone D — The first real backend

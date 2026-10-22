@@ -48,6 +48,10 @@ public:
 /// one should not get "no such backend" because the file spells it another.
 [[nodiscard]] std::string normalize_route_key(std::string_view value);
 
+/// The configured backends this process could not start, each with the
+/// factory's reason, by entry name (M26).
+using SkippedBackends = std::map<std::string, std::string, std::less<>>;
+
 /// The three-rung router.
 ///
 ///   1. exact backend key         — `backends:` map key
@@ -64,18 +68,41 @@ public:
 /// in a way that stops working the moment a second backend is added, which is
 /// precisely when a user has the least idea why routing changed. A clear "set
 /// models.default" is the better failure.
+///
+/// The refusal is said here once, for every surface (M26). When what it is
+/// about -- the backend asked for, or else the default the request fell to --
+/// is a configured backend that could not be started, it names that one
+/// backend (`check` lists every skipped entry), says it is configured but
+/// could not be started, and gives the factory's reason and remedy. Its list
+/// is the backends that started, never the configuration.
 class SimpleRouter final : public ModelRouter {
 public:
     /// `providers` maps a backend key to its provider. Entries in `config`
-    /// with no registered provider are skipped: a config may name a backend
-    /// this process did not construct.
+    /// with no registered provider are not routed to: a config may name a
+    /// backend this process did not construct. `skipped` names the ones the
+    /// factory could not start, with why: never routed to either, but named,
+    /// with that reason, by the refusal that is about one.
     SimpleRouter(const Config& config,
-                 const std::map<std::string, std::shared_ptr<LLMProvider>>& providers);
+                 const std::map<std::string, std::shared_ptr<LLMProvider>>& providers,
+                 const SkippedBackends& skipped = {});
 
     [[nodiscard]] LLMProvider& route(std::string_view model) const override;
 
 private:
+    /// A configured backend that could not be started, as a refusal says it.
+    struct Unstarted {
+        std::string name{};
+        /// The entry's `model:`, so a name routed by it finds the entry.
+        std::string model{};
+        /// The factory's reason, without the entry's name it opens with.
+        std::string reason{};
+    };
+
     [[nodiscard]] LLMProvider* lookup(std::string_view key) const;
+
+    /// The unstarted entry `key` names, through the rungs `lookup` walks, or
+    /// nullptr.
+    [[nodiscard]] const Unstarted* unstarted(std::string_view key) const;
 
     /// Both indexes are built once at construction: routing happens per turn,
     /// and rebuilding a map per turn to save a few hundred bytes is the wrong
@@ -89,6 +116,8 @@ private:
     /// that does not say what WOULD have worked just sends the user to the
     /// config file to guess.
     std::vector<std::string> known_names_;
+    /// The configured backends that did not start, in config order (M26).
+    std::vector<Unstarted> unstarted_;
 };
 
 /// What a model may be asked to read besides text (26e).
@@ -133,9 +162,15 @@ public:
     /// a caller rebuilding one backend should not have to tear down the rest.
     void register_provider(std::string name, std::shared_ptr<LLMProvider> provider) override;
 
-    /// Builds a SimpleRouter over the currently registered providers.
-    /// Call after registering; re-call after registering more.
+    /// Builds a SimpleRouter over the currently registered providers and the
+    /// backends noted as skipped. Call after registering; re-call after
+    /// registering more.
     void use_default_router() override;
+
+    /// Keeps `name` as a configured backend that could not be started, with
+    /// why, for the next router's refusal (M26). Ignored while a provider is
+    /// registered under `name` -- it runs -- and forgotten when one is.
+    void note_skipped(std::string name, std::string reason) override;
 
     /// Installs the turn observer (28c): told the backend's name after each
     /// `chat`, `stream_chat` or `complete` that returns.
@@ -376,6 +411,8 @@ private:
     /// name. Never throws: a record is never worth a turn.
     void heard(const LLMProvider& provider) const noexcept;
     std::map<std::string, std::shared_ptr<LLMProvider>> providers_;
+    /// The configured backends the factory could not start, with why (M26).
+    SkippedBackends skipped_;
     std::unique_ptr<ModelRouter> router_;
     /// The backends a session holds (27e), as named to `hold_in_use`.
     std::set<std::string, std::less<>> held_;

@@ -273,6 +273,9 @@ BuildResult build_providers(harness::ProviderRegistry& harness, const BuildOptio
             make_provider(name, harness::backend_as_run(harness.config(), name), reason, options);
         if (provider == nullptr) {
             status.reason = reason.empty() ? "could not be constructed" : reason;
+            // Said to the router installed below (M26): a refusal of this
+            // backend says it is configured and why it did not start.
+            harness.note_skipped(name, status.reason);
             result.statuses.push_back(std::move(status));
             continue;
         }
@@ -304,7 +307,9 @@ BuildResult rebuild_providers(harness::ProviderRegistry& harness,
         if (provider == nullptr) {
             // The provider already registered stays: a backend that built a
             // moment ago and cannot now is said, never dropped mid-session.
+            // One that never built keeps being refused, now with this reason.
             status.reason = reason.empty() ? "could not be constructed" : reason;
+            harness.note_skipped(name, status.reason);
             result.statuses.push_back(std::move(status));
             continue;
         }
