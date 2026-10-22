@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -14,6 +15,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -23,6 +25,7 @@
 #include "contracts/layout.h"
 #include "support/env_guard.h"
 #include "support/fake_mlx_driver.h"
+#include "support/towered_configs.h"
 
 /// The mlx backend (27a) over a scripted driver, and its refusal ladder.
 ///
@@ -71,6 +74,7 @@ struct Fixture {
                     next.stderr_read = false;
                     next.stdin_closed = false;
                     next.terminated = false;
+                    next.heard.clear();
                     drivers.push_back(std::make_shared<DriverState>(std::move(next)));
                 }
                 drivers[commands.size() - 1]->vision_spawn =
@@ -1021,6 +1025,326 @@ TEST_CASE(
         REQUIRE(fixture.commands.size() == 1);
         CHECK_FALSE(asked_for_vision(fixture.commands[0]));
     }
+}
+
+// ---------------------------------------------------------------------------
+// Audio (53g)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A short WAV as Apogee's ffmpeg runner writes one: RIFF, a PCM format
+/// chunk at 16 kHz, mono, 16-bit, then `samples` bytes -- their value the
+/// count, so two recordings of different lengths differ in every byte.
+std::string wav(std::size_t samples = 32) {
+    const auto le = [](std::uint32_t value, int width) {
+        std::string out;
+        for (int at = 0; at < width; ++at) {
+            out.push_back(static_cast<char>((value >> (8U * static_cast<unsigned>(at))) & 0xFFU));
+        }
+        return out;
+    };
+    const auto size = static_cast<std::uint32_t>(samples);
+    return "RIFF" + le(36 + size, 4) + "WAVE" + "fmt " + le(16, 4) + le(1, 2) + le(1, 2) +
+           le(16000, 4) + le(32000, 4) + le(2, 2) + le(16, 2) + "data" + le(size, 4) +
+           std::string(samples, static_cast<char>(samples % 251));
+}
+
+/// Base64, as the IR carries a recording.
+std::string base64(std::string_view bytes) {
+    constexpr std::string_view kAlphabet =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    for (std::size_t at = 0; at < bytes.size(); at += 3) {
+        const auto byte = [&bytes](std::size_t index) -> std::uint32_t {
+            return index < bytes.size() ? static_cast<unsigned char>(bytes[index]) : 0U;
+        };
+        const std::uint32_t chunk = (byte(at) << 16U) | (byte(at + 1) << 8U) | byte(at + 2);
+        out.push_back(kAlphabet[(chunk >> 18U) & 0x3FU]);
+        out.push_back(kAlphabet[(chunk >> 12U) & 0x3FU]);
+        out.push_back(at + 1 < bytes.size() ? kAlphabet[(chunk >> 6U) & 0x3FU] : '=');
+        out.push_back(at + 2 < bytes.size() ? kAlphabet[chunk & 0x3FU] : '=');
+    }
+    return out;
+}
+
+/// A question about a recording, the recording after the words.
+ChatRequest listen(const std::string& recording, std::string format = "wav") {
+    ChatRequest request;
+    request.messages.push_back(ChatMessage{
+        .role = apogee::harness::Role::User,
+        .content = apogee::harness::MessageContent::from_parts(
+            {apogee::harness::ContentPart::from_text("what is said?"),
+             apogee::harness::ContentPart::from_audio(base64(recording), std::move(format))})});
+    return request;
+}
+
+/// An omni directory mlx-vlm built, hearing through it.
+MlxLocalProvider::Options hearing() {
+    MlxLocalProvider::Options options = seeing();
+    options.model = "gemma-4-E4B";
+    options.info.model_type = "gemma4";
+    options.info.kind = {.word = std::string{apogee::models::kMlxVision},
+                         .source = apogee::models::MlxKindSource::Recorded};
+    options.info.through_vlm = true;
+    options.audio = true;
+    return options;
+}
+
+DriverState hearing_driver(std::vector<std::string> replies) {
+    DriverState state;
+    state.vision_startup = std::string{apogee::testing::kHearingReady};
+    state.replies = std::move(replies);
+    return state;
+}
+
+}  // namespace
+
+TEST_CASE(
+    "a directory hears only as mlx-vlm's build of a set with an audio tower, with mlx-vlm and its "
+    "type's module installed: each rung refuses by name, from the files alone",
+    "[backends][mlx][audio]") {
+    using apogee::backends::MlxAudioRefusal;
+    Runtime runtime;
+    const std::filesystem::path model = runtime.dir.path() / "model";
+    const std::filesystem::path site = runtime.host.venv / "lib" / "python3.14" / "site-packages";
+    const std::filesystem::path vlm = site / "mlx_vlm";
+    const auto configure = [&model](const char* config) {
+        std::ofstream{model / "config.json"} << config;
+    };
+    const auto record = [&model](std::string_view kind) {
+        std::ofstream{model / "apogee-snapshot.json"}
+            << R"({"source": "convert", "transform": "mlx_vlm.convert 4bit", "files": [], )"
+            << R"("kind": ")" << kind << R"("})";
+    };
+    const auto audio = [&runtime, &model] {
+        return apogee::backends::probe_mlx_audio(apogee::backends::inspect_mlx_model(model),
+                                                 runtime.host);
+    };
+
+    // Gemma 4's E4B with its processor, but no record: its files make it a
+    // vision model, and nothing says mlx-vlm built it -- taken for mlx-lm's
+    // layout, which keeps no audio tower.
+    configure(apogee::testing::kGemma4Config);
+    std::ofstream{model / "processor_config.json"} << "{}";
+    CHECK(apogee::backends::inspect_mlx_model(model).towers ==
+          std::vector<std::string>{"vision_config", "audio_config"});
+    CHECK(audio().refusal == MlxAudioRefusal::NotMlxVlmBuild);
+    CHECK(audio().message().starts_with(
+        "not mlx-vlm's build: no record says mlx-vlm built it (kind vision, inferred from its "
+        "files), and only mlx-vlm's build of a set keeps an audio tower -- 'apogee models "
+        "convert <its SafeTensors set> --mlx' builds it through mlx-vlm, the towers kept"));
+
+    // mlx-lm's build of it: the towers left out.
+    record("chat");
+    CHECK(audio().refusal == MlxAudioRefusal::NotMlxVlmBuild);
+    CHECK(audio().reason.find("its record says it is mlx-lm's build of its language model alone "
+                              "(kind chat), its towers left out") != std::string::npos);
+    // Another kind altogether.
+    record("embedding");
+    CHECK(audio().refusal == MlxAudioRefusal::NotMlxVlmBuild);
+    CHECK(audio().reason.find("kind embedding") != std::string::npos);
+
+    // mlx-vlm's build of a set that only sees.
+    record("vision");
+    configure(apogee::testing::kQwen3VlConfig);
+    CHECK(audio().refusal == MlxAudioRefusal::NoAudioTower);
+    CHECK(audio().message() ==
+          "no audio tower: its config.json declares none -- no audio_config, nor an omni "
+          "model's thinker_config");
+
+    // mlx-vlm's build of Gemma 4, with no mlx-vlm to hear through.
+    configure(apogee::testing::kGemma4Config);
+    CHECK(audio().refusal == MlxAudioRefusal::NoMlxVlm);
+    CHECK(audio().reason.find(runtime.host.venv.string()) != std::string::npos);
+    CHECK(audio().remedy == "apogee train setup --with mlx-vlm");
+
+    // An mlx-vlm without the type's module -- a module file of the name is not
+    // the package its loader imports.
+    Runtime::touch(vlm / "__init__.py");
+    std::filesystem::create_directories(site / "mlx_vlm-0.6.0.dist-info");
+    Runtime::touch(vlm / "models" / "qwen3_vl" / "__init__.py");
+    Runtime::touch(vlm / "models" / "gemma4.py");
+    CHECK(audio().refusal == MlxAudioRefusal::NoTypeModule);
+    CHECK(audio().message() ==
+          "no mlx-vlm module for its type: the installed mlx-vlm 0.6.0 has no module for its "
+          "type, gemma4, so it cannot build the model to hear with -- apogee train setup --with "
+          "mlx-vlm");
+
+    // With it, it hears: asked of the files, before any turn, no driver started.
+    Runtime::touch(vlm / "models" / "gemma4" / "__init__.py");
+    CHECK(audio().hears());
+    CHECK(audio().message().empty());
+    CHECK(audio().vlm.version == "0.6.0");
+    const MlxLocalProvider::Options options =
+        MlxLocalProvider::options_from("local", runtime.entry, runtime.host);
+    CHECK(options.audio);
+    CHECK(options.audio_gap.empty());
+    Fixture fixture{DriverState{}, options};
+    CHECK(fixture.provider->accepts_audio());
+    // The contract's 16 kHz, which mlx-vlm converts to its own.
+    CHECK(fixture.provider->audio_sample_rate() == 0);
+    CHECK(fixture.provider->spawn_count() == 0);
+
+    // Qwen3-Omni: its audio tower nested in its thinker, no vision_config at
+    // the top -- its record alone makes it mlx-vlm's.
+    configure(apogee::testing::kQwen3OmniConfig);
+    CHECK(apogee::backends::inspect_mlx_model(model).towers ==
+          std::vector<std::string>{"thinker_config"});
+    CHECK(audio().refusal == MlxAudioRefusal::NoTypeModule);
+    CHECK(audio().reason.find("type, qwen3_omni_moe,") != std::string::npos);
+    // Built by another type's package, through mlx-vlm's remap table...
+    std::ofstream{vlm / "utils.py"}
+        << "MODEL_REMAPPING = {\n    \"llava-qwen2\": \"llava_bunny\",\n"
+        << "    'qwen3_omni_moe': 'qwen3_omni',\n}\n";
+    CHECK(audio().refusal == MlxAudioRefusal::NoTypeModule);
+    Runtime::touch(vlm / "models" / "qwen3_omni" / "__init__.py");
+    CHECK(audio().hears());
+    // ...or by its own.
+    std::filesystem::remove(vlm / "utils.py");
+    CHECK_FALSE(audio().hears());
+    Runtime::touch(vlm / "models" / "qwen3_omni_moe" / "__init__.py");
+    CHECK(audio().hears());
+    CHECK(apogee::backends::mlx_vlm_has_module(audio().vlm, "qwen3_omni_moe"));
+    CHECK_FALSE(apogee::backends::mlx_vlm_has_module(audio().vlm, ""));
+    CHECK_FALSE(apogee::backends::mlx_vlm_has_module({}, "qwen3_omni_moe"));
+
+    // An entry that cannot hear carries its rung into its options.
+    configure(apogee::testing::kQwen3VlConfig);
+    const MlxLocalProvider::Options deaf =
+        MlxLocalProvider::options_from("local", runtime.entry, runtime.host);
+    CHECK_FALSE(deaf.audio);
+    CHECK(deaf.audio_gap.starts_with("no audio tower: "));
+    CHECK(deaf.vision);
+}
+
+TEST_CASE(
+    "a recording reaches a driver that hears as a WAV file of the turn's own, where its part sat, "
+    "and is gone once the turn is over, however it ends",
+    "[backends][mlx][audio]") {
+    Fixture fixture{hearing_driver({numbered(text("It says hello.")) + done("stop", 300)}),
+                    hearing()};
+    const std::string recording = wav(64);
+    Streamed streamed;
+    (void)fixture.provider->stream_chat(listen(recording), streamed.options);
+    CHECK(streamed.tokens == "It says hello.");
+    REQUIRE(fixture.commands.size() == 1);
+    CHECK(asked_for_vision(fixture.commands[0]));
+
+    // The part where it sat, as the path of the file written for it...
+    const json sent = fixture.written(0, 0);
+    const json& content = sent["messages"][0]["content"];
+    REQUIRE(content.size() == 2);
+    CHECK(content[0] == json{{"type", "text"}, {"text", "what is said?"}});
+    CHECK(content[1]["type"] == "audio");
+    const std::filesystem::path path{content[1]["audio"].get<std::string>()};
+    CHECK(path.filename() == "audio-0.wav");
+    CHECK(path.parent_path().filename().string().starts_with("apogee-mlx-audio-"));
+    // ...the recording byte for byte while the driver read it, never its
+    // base64 on the line...
+    REQUIRE(fixture.drivers[0]->heard.size() == 1);
+    CHECK(fixture.drivers[0]->heard[0].path == path.string());
+    CHECK(fixture.drivers[0]->heard[0].bytes == recording);
+    CHECK(fixture.drivers[0]->writes[0].find(base64(recording)) == std::string::npos);
+    // ...and nothing of it outlives the turn.
+    CHECK_FALSE(std::filesystem::exists(path.parent_path()));
+
+    // Two recordings in two messages: each where it sat, in prompt order.
+    ChatRequest two = listen(wav(8));
+    two.messages.push_back(ChatMessage::assistant("It says hello."));
+    two.messages.push_back(
+        ChatMessage{.role = apogee::harness::Role::User,
+                    .content = apogee::harness::MessageContent::from_parts(
+                        {apogee::harness::ContentPart::from_audio(base64(wav(16)), "WAV"),
+                         apogee::harness::ContentPart::from_text("and this one?")})});
+    (void)fixture.provider->chat(two, {});
+    const json second = fixture.written(0, 1);
+    const std::filesystem::path first_path{
+        second["messages"][0]["content"][1]["audio"].get<std::string>()};
+    const std::filesystem::path second_path{
+        second["messages"][2]["content"][0]["audio"].get<std::string>()};
+    CHECK(first_path.filename() == "audio-0.wav");
+    CHECK(second_path.filename() == "audio-1.wav");
+    CHECK(first_path.parent_path() == second_path.parent_path());
+    CHECK(first_path.parent_path() != path.parent_path());
+    REQUIRE(fixture.drivers[0]->heard.size() == 3);
+    CHECK(fixture.drivers[0]->heard[1].bytes == wav(8));
+    CHECK(fixture.drivers[0]->heard[2].bytes == wav(16));
+    CHECK_FALSE(std::filesystem::exists(first_path.parent_path()));
+
+    // A text turn after it: the same driver, nothing to hear.
+    (void)fixture.provider->chat(ask("thanks"), {});
+    CHECK(fixture.provider->spawn_count() == 1);
+    CHECK(fixture.drivers[0]->heard.size() == 3);
+
+    // A turn the driver fails still leaves nothing behind.
+    Fixture failing{hearing_driver({numbered(R"({"type":"error","id":"{id}","kind":"request",)"
+                                             R"("message":"ValueError: the audio is too long"})"
+                                             "\n")}),
+                    hearing()};
+    CHECK_THROWS_AS(failing.provider->chat(listen(wav()), {}), apogee::harness::ProviderError);
+    REQUIRE(failing.drivers[0]->heard.size() == 1);
+    CHECK_FALSE(std::filesystem::exists(std::filesystem::path{failing.drivers[0]->heard[0].path}));
+}
+
+TEST_CASE(
+    "what cannot be heard is refused before anything starts, the rung said; a recording that is "
+    "not a WAV starts nothing either; a driver from before 53g is never sent one",
+    "[backends][mlx][audio]") {
+    // A directory that cannot hear: the rung and its reason, nothing spawned.
+    MlxLocalProvider::Options deaf = hearing();
+    deaf.audio = false;
+    deaf.audio_gap =
+        "no audio tower: its config.json declares none -- no audio_config, nor an omni model's "
+        "thinker_config";
+    Fixture blind{hearing_driver({numbered(text("never")) + done()}), deaf};
+    CHECK_FALSE(blind.provider->accepts_audio());
+    try {
+        (void)blind.provider->chat(listen(wav()), {});
+        FAIL("a model that hears nothing was sent a recording");
+    } catch (const apogee::harness::ProviderError& e) {
+        CHECK(std::string{e.what()}.find(
+                  "gemma-4-E4B cannot hear audio on the mlx backend -- no audio tower: its "
+                  "config.json declares none") != std::string::npos);
+    }
+    CHECK(blind.provider->spawn_count() == 0);
+
+    // One that hears, sent what is not a WAV: by its container, or its bytes.
+    Fixture fixture{hearing_driver({numbered(text("never")) + done()}), hearing()};
+    try {
+        (void)fixture.provider->chat(listen(wav(), "mp3"), {});
+        FAIL("an mp3 part was handed on");
+    } catch (const apogee::harness::ProviderError& e) {
+        CHECK(std::string{e.what()}.find("as a WAV file, and this one is mp3") !=
+              std::string::npos);
+    }
+    try {
+        (void)fixture.provider->chat(listen("ID3 an mp3 said to be a WAV"), {});
+        FAIL("bytes that are no WAV were handed on");
+    } catch (const apogee::harness::ProviderError& e) {
+        CHECK(std::string{e.what()}.find("as a WAV file, and this one is not one") !=
+              std::string::npos);
+    }
+    CHECK(fixture.provider->spawn_count() == 0);
+
+    // 53f's driver: it loads through mlx-vlm, and says nothing of audio.
+    DriverState older;
+    older.vision_startup = std::string{apogee::testing::kVisionReady};
+    older.replies = {numbered(text("hello")) + done()};
+    Fixture stale{std::move(older), hearing()};
+    try {
+        (void)stale.provider->chat(listen(wav()), {});
+        FAIL("an older driver must not be sent a recording");
+    } catch (const apogee::harness::ProviderError& e) {
+        const std::string message = e.what();
+        CHECK(message.find("does not hand recordings to the model") != std::string::npos);
+        CHECK(message.find("apogee check --fix") != std::string::npos);
+    }
+    CHECK(stale.drivers[0]->writes.empty());
+    // It answers text as it did: kept, not loaded again.
+    CHECK(stale.provider->has_live_child());
+    (void)stale.provider->chat(ask("hello"), {});
+    CHECK(stale.provider->spawn_count() == 1);
 }
 
 TEST_CASE("preload starts the driver and waits for its model", "[backends][mlx][session]") {

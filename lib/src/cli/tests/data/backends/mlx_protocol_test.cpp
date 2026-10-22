@@ -207,3 +207,70 @@ TEST_CASE(
                                {{"type", "image"}, {"image", "data:image/jpeg;base64,/9j/4AAQ"}}}));
     CHECK(messages[2]["content"] == "and this");
 }
+
+TEST_CASE(
+    "a recording crosses as the WAV file the provider wrote for it, where its part sat and in "
+    "prompt order; one with no file is not sent",
+    "[backends][mlx][protocol][audio]") {
+    // 53g: the content-part shape an omni model's template places audio by.
+    // The recording's bytes never cross the pipe: the provider decoded them
+    // to a file of the turn's own, and the path is what the driver hands on.
+    GenerateRequest request;
+    request.messages.push_back(apogee::harness::ChatMessage{
+        .role = apogee::harness::Role::User,
+        .content = apogee::harness::MessageContent::from_parts(
+            {apogee::harness::ContentPart::from_audio("UklGRg==", "wav"),
+             apogee::harness::ContentPart::from_text("What is said?")})});
+    request.messages.push_back(apogee::harness::ChatMessage::assistant("Hello."));
+    request.messages.push_back(apogee::harness::ChatMessage{
+        .role = apogee::harness::Role::User,
+        .content = apogee::harness::MessageContent::from_parts(
+            {apogee::harness::ContentPart::from_text("And here?"),
+             apogee::harness::ContentPart::from_image_url("data:image/png;base64,iVBORw0KGgo="),
+             apogee::harness::ContentPart::from_audio("UklGRg==", "wav")})});
+    request.audio_files = {"/tmp/turn/audio-0.wav", "/tmp/turn/audio-1.wav"};
+    const nlohmann::json line =
+        nlohmann::json::parse(apogee::backends::mlx::generate_line(request));
+    const nlohmann::json& messages = line["messages"];
+    CHECK(messages[0]["content"] ==
+          nlohmann::json::array({{{"type", "audio"}, {"audio", "/tmp/turn/audio-0.wav"}},
+                                 {{"type", "text"}, {"text", "What is said?"}}}));
+    CHECK(messages[1]["content"] == "Hello.");
+    CHECK(
+        messages[2]["content"] ==
+        nlohmann::json::array({{{"type", "text"}, {"text", "And here?"}},
+                               {{"type", "image"}, {"image", "data:image/png;base64,iVBORw0KGgo="}},
+                               {{"type", "audio"}, {"audio", "/tmp/turn/audio-1.wav"}}}));
+    // The base64 the IR carried is nowhere on the line.
+    CHECK(line.dump().find("UklGRg") == std::string::npos);
+
+    // A part the provider wrote no file for is left out, never sent bare.
+    request.audio_files = {"/tmp/turn/audio-0.wav"};
+    const nlohmann::json short_line =
+        nlohmann::json::parse(apogee::backends::mlx::generate_line(request));
+    CHECK(short_line["messages"][2]["content"] ==
+          nlohmann::json::array(
+              {{{"type", "text"}, {"text", "And here?"}},
+               {{"type", "image"}, {"image", "data:image/png;base64,iVBORw0KGgo="}}}));
+}
+
+TEST_CASE("a ready line says whether the driver hands recordings on; one before 53g never does",
+          "[backends][mlx][protocol][audio]") {
+    const auto hearing = apogee::backends::mlx::parse_event(
+        R"({"type":"ready","protocol":1,"model_type":"gemma4","chat_template":true,)"
+        R"("tool_parser":null,"thinking":false,"mlx_lm":"0.32.0","vision":true,)"
+        R"("mlx_vlm":"0.6.1","audio":true})");
+    REQUIRE(hearing.has_value());
+    CHECK(hearing->vision);
+    CHECK(hearing->audio);
+    // 53f's driver: vision, and not a word of audio.
+    const auto older = apogee::backends::mlx::parse_event(
+        R"({"type":"ready","protocol":1,"vision":true,"mlx_vlm":"0.6.1"})");
+    REQUIRE(older.has_value());
+    CHECK(older->vision);
+    CHECK_FALSE(older->audio);
+    const auto text = apogee::backends::mlx::parse_event(
+        R"({"type":"ready","protocol":1,"vision":false,"audio":false})");
+    REQUIRE(text.has_value());
+    CHECK_FALSE(text->audio);
+}

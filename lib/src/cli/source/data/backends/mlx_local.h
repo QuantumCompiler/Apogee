@@ -161,6 +161,11 @@ struct MlxModelInfo {
     /// vision files keeps 27c's way: text through mlx-lm, its cache kept, and
     /// mlx-vlm from the first picture on.
     bool through_vlm = false;
+    /// What its `config.json` declares beside its language model (53f's one
+    /// reader, `models::snapshot_towers`): `vision_config`, `audio_config`,
+    /// an omni model's `thinker_config`. An audio tower is either of the last
+    /// two -- the thinker nests the audio encoder beside the vision one.
+    std::vector<std::string> towers{};
 };
 
 [[nodiscard]] MlxModelInfo inspect_mlx_model(const std::filesystem::path& dir);
@@ -203,6 +208,56 @@ struct MlxVision {
 
 [[nodiscard]] MlxVision probe_mlx_vision(const MlxModelInfo& info, const MlxHost& host);
 
+/// Whether the installed mlx-vlm has a module for `model_type` (53g): the type
+/// as mlx-vlm's own loader resolves it -- through `utils.py`'s
+/// `MODEL_REMAPPING` when the table names it -- a package under its `models/`.
+/// Read from files, never imported. (The training track's `mlx_model_types`
+/// lists every type a converter builds; this layer cannot reach it, and asks
+/// the one type's question the loader asks.)
+[[nodiscard]] bool mlx_vlm_has_module(const MlxVlmPackage& vlm, std::string_view model_type);
+
+/// Which rung of the audio ladder refused (53g), in the order they are asked.
+enum class MlxAudioRefusal : std::uint8_t {
+    None,
+    /// Not a directory mlx-vlm built (its record does not say `vision`):
+    /// mlx-lm's build, and one with no record, keep no audio tower.
+    NotMlxVlmBuild,
+    /// Its `config.json` declares no audio tower.
+    NoAudioTower,
+    /// mlx-vlm is not installed in the environment.
+    NoMlxVlm,
+    /// The installed mlx-vlm has no module for its type.
+    NoTypeModule,
+};
+
+[[nodiscard]] std::string_view to_string(MlxAudioRefusal refusal) noexcept;
+
+/// Whether an MLX model hears a recording natively (53g), from file facts
+/// alone: a directory mlx-vlm built (recorded `vision`, 53f), whose
+/// `config.json` declares an audio tower, with mlx-vlm installed and holding
+/// its type's module. The provider's `accepts_audio` asks this; anything
+/// else has no native audio, and a recording reaches it as the
+/// transcription role's text (26e) -- or, sent to it anyway, is refused
+/// before anything starts, the rung said.
+struct MlxAudio {
+    MlxAudioRefusal refusal = MlxAudioRefusal::None;
+    MlxVlmPackage vlm{};
+    /// Why it does not hear, in a sentence; and the fix, when one command is
+    /// it. Both empty when it does.
+    std::string reason{};
+    std::string remedy{};
+
+    [[nodiscard]] bool hears() const noexcept {
+        return refusal == MlxAudioRefusal::None;
+    }
+
+    /// The rung, the reason and its fix, as one line: "no audio tower: its
+    /// config.json declares none ...". Empty when it hears.
+    [[nodiscard]] std::string message() const;
+};
+
+[[nodiscard]] MlxAudio probe_mlx_audio(const MlxModelInfo& info, const MlxHost& host);
+
 /// The family profile for a model directory: its `model_type` (and a
 /// vision-language model's text model's) in each spelling the profiles list
 /// architectures under -- `gpt_oss` is the GGUF's `gpt-oss` -- and then the
@@ -215,6 +270,7 @@ class MlxLocalProvider final : public harness::LLMProvider,
                                public harness::StatusReporting,
                                public harness::ContextWindowReporting,
                                public harness::VisionCapable,
+                               public harness::AudioCapable,
                                public harness::ResidencyHolding {
 public:
     /// Starts the driver. Injected so the provider is tested over a scripted
@@ -238,6 +294,12 @@ public:
         /// mlx-vlm (27c).
         bool vision = false;
         std::string vision_gap;
+        /// Whether it hears a recording natively, and why not
+        /// (`probe_mlx_audio`'s rung and reason): a turn carrying one is
+        /// answered by a driver loaded through mlx-vlm, each recording handed
+        /// to it as a WAV file of the turn's own (53g).
+        bool audio = false;
+        std::string audio_gap{};
         /// Cap on generated tokens when the request sets none.
         std::int64_t max_tokens = 2048;
         /// The window, when the entry sets one; 0 leaves it to the model.
@@ -356,6 +418,18 @@ public:
         return options_.vision;
     }
 
+    // --- AudioCapable (53g) ---------------------------------------------------
+
+    /// True for an omni directory mlx-vlm built, with mlx-vlm and its type's
+    /// module installed (`probe_mlx_audio`), from the files alone -- asked
+    /// before a turn, never at the cost of a load. Otherwise false, so every
+    /// surface has a recording transcribed by the transcription role instead.
+    /// The rate is left at the contract's default: a recording is decoded to
+    /// 16 kHz, and mlx-vlm converts it to its feature extractor's own.
+    [[nodiscard]] bool accepts_audio() const noexcept override {
+        return options_.audio;
+    }
+
     /// How many children this provider has started: "one per session" is a
     /// claim only if it can be counted.
     [[nodiscard]] int spawn_count() const noexcept;
@@ -385,7 +459,8 @@ private:
     void ensure_child(const harness::StreamOptions& options, bool vision = false);
 
     /// Refuses a request carrying what this model cannot read: an image
-    /// when it reads none, one that is not a data: URI, any audio.
+    /// when it reads none, one that is not a data: URI, a recording when it
+    /// hears none -- the rung said -- or one that is not a WAV.
     void check_media(const harness::ChatRequest& request) const;
 
     /// Reads the driver's startup: `ready`, or the error that ends it.

@@ -30,6 +30,12 @@
 /// vision model's template places images by -- and only to a driver whose
 /// `ready` said `vision`. A driver from before 27c never says it, so it is
 /// never sent one.
+///
+/// **So is audio** (53g): a recording crosses as `{"type": "audio", "audio":
+/// <path>}` where its part sits -- the WAV the provider wrote for the turn,
+/// decoded by Apogee's one ffmpeg before it ever reached the provider -- and
+/// only to a driver whose `ready` said `audio`. The driver hands the paths
+/// to mlx-vlm as they are; it decodes nothing.
 namespace apogee::backends::mlx {
 
 /// The protocol version this build speaks; the driver's `ready` names its.
@@ -52,6 +58,10 @@ struct GenerateRequest {
     /// False for a side request: answered on a cache of its own, so the
     /// conversation's is left exactly as it was.
     bool session = true;
+    /// The turn's recordings (53g): one WAV file per audio part, in the order
+    /// the parts appear in the messages, the n-th part crossing as the n-th
+    /// path. A part with no path left for it is not sent.
+    std::vector<std::string> audio_files{};
 };
 
 /// The request as one line, without its newline.
@@ -104,6 +114,10 @@ struct Event {
     /// and that package's version.
     bool vision = false;
     std::string mlx_vlm_version;
+    /// Ready: the driver hands a turn's recordings to the model (53g) --
+    /// mlx-vlm's own audio input, under `--vision`. A driver from before 53g
+    /// never says it, so it is never sent one.
+    bool audio = false;
     /// Ready: the adapter applied over the model (53a), empty for none. A
     /// driver from before 53a never names one, so a start that asked for one
     /// and hears none is refused rather than answered from the bare base.

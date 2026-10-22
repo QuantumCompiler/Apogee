@@ -2679,10 +2679,11 @@ std::span<const BundledScript> bundled_training_scripts() {
 }
 
 std::span<const std::string_view> bundled_scripts_retired() {
-    static constexpr std::array<std::string_view, 8> retired{{
+    static constexpr std::array<std::string_view, 9> retired{{
         "mlx_convert.py 26e95774b422a532805992082bf019fefd3ba305ba449eaf304a47ad1799ef41",
         "mlx_generate.py 22f439b2b3a35a23b1fe5ec124bdff2e903cf5f3654828e5b01010c85cc8f1fe",
         "mlx_generate.py 4676e348595cdbfdb4a23191f7b008e718c29b097da45b5f563c75091e8c2335",
+        "mlx_generate.py 6e83fb7e67b57502d07e9821ffc5289d5de1ebf31b6359c9a65e794f9d6987f6",
         "mlx_generate.py ada5bc9c0f5ec73fd8770b9a03d317075c76b95bff7b7428b3afe0fa770a1eeb",
         "prepare_dataset.py 868db898b9bb043399a4f57b2ee5f1ad4bf6e614022b0d0249f1b118ec0de41f",
         "train_mlx.py 7f5b206c455094c5d63b72dd804f9ba49a0647d84cf87b723be6192db4ddc478",

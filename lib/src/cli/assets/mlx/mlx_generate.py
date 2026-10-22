@@ -22,6 +22,10 @@ turn whole, with no cache kept between turns. Requires `mlx-vlm` too:
 The backend asks for it from the first turn on, text turns included, for a
 directory mlx-vlm built (53f: its record says `vision`), whose weights are
 laid out the way mlx-vlm loads them; for any other, from the first picture.
+Under `--vision` a turn may carry recordings too (53g): each a WAV file the
+backend wrote for the turn, decoded by Apogee's own ffmpeg, handed to mlx-vlm
+as its `audio=` -- an omni model's audio tower hears it. The driver decodes
+nothing, and never removes the backend's files.
 
 `--adapter` applies a LoRA adapter over the model at load, never fused into
 it (53a): the directory mlx-lm's training wrote (adapter_config.json beside
@@ -40,9 +44,10 @@ In, on stdin:
       tokenizers take. `session: false` is a side request: it is answered on
       a cache of its own and leaves the conversation's untouched. Under
       `--vision` a message's content may be a list of parts --
-      {"type": "text", "text": "..."} and {"type": "image", "image":
-      "data:image/png;base64,..."} -- an image always a data: URI, never
-      fetched from anywhere.
+      {"type": "text", "text": "..."}, {"type": "image", "image":
+      "data:image/png;base64,..."} and {"type": "audio", "audio":
+      "/path/to/audio-0.wav"} -- an image always a data: URI, a recording
+      always a WAV file the backend wrote, neither fetched from anywhere.
   {"type": "cancel", "id": N}
       Ends request N's generation; its `done` says "cancelled".
   Closing stdin ends the driver: a generation in flight stops (its `done`
@@ -51,11 +56,12 @@ In, on stdin:
 Out, on stdout:
   {"type": "ready", "protocol": 1, "model_type": "...", "chat_template": B,
    "tool_parser": "..."|null, "thinking": B, "mlx_lm": "...",
-   "vision": B, "mlx_vlm": "..."|null, "adapter": "..."}
+   "vision": B, "mlx_vlm": "..."|null, "audio": B, "adapter": "..."}
       Once, after the model loads. `tool_parser` names mlx_lm's parser for
       the model's call format, or null when it has none. `vision` says the
-      model was loaded through mlx-vlm and reads images. `adapter` names the
-      adapter applied over it, and is there only when one was (53a).
+      model was loaded through mlx-vlm and reads images. `audio` says a
+      turn's recordings are handed to it (53g). `adapter` names the adapter
+      applied over it, and is there only when one was (53a).
   {"type": "text", "id": N, "text": "..."}        answer text, as generated
   {"type": "reasoning", "id": N, "text": "..."}   the model's reasoning
   {"type": "tool_call", "id": N, "name": "...", "arguments": {...}}
@@ -406,8 +412,10 @@ class Reader:
 
 
 class Driver:
-    # Loaded through mlx-vlm, reading images: VisionDriver's.
+    # Loaded through mlx-vlm, reading images and hearing recordings:
+    # VisionDriver's.
     vision = False
+    hears = False
 
     def __init__(self, mx, model, tokenizer, api, model_type):
         self.mx = mx
@@ -442,6 +450,7 @@ class Driver:
             "mlx_lm": version,
             "vision": self.vision,
             "mlx_vlm": vlm_version,
+            "audio": self.hears,
         }
         # Said only when applied: the backend refuses a driver that was asked
         # for an adapter and never names one -- one older than adapters.
@@ -713,12 +722,33 @@ def image_file(uri, directory, index):
     return path
 
 
-def with_images(messages, directory):
-    """The messages with each image part pointing at its file, in the
-    content-part shape a vision model's template places images by, and the
-    files in prompt order."""
+def audio_file(path):
+    """A recording as the backend hands one over (53g): the WAV file it wrote
+    for this turn, decoded by Apogee's one ffmpeg -- checked, never fetched
+    from anywhere, never decoded here, and left for the backend to remove."""
+    if not isinstance(path, str) or not path:
+        raise ValueError("an audio part must name the WAV file the backend wrote for it")
+    if "://" in path:
+        raise ValueError("a recording must arrive as a WAV file the backend wrote -- a remote "
+                         "one is never fetched")
+    try:
+        with open(path, "rb") as f:
+            head = f.read(12)
+    except OSError as e:
+        raise ValueError(f"a recording's file cannot be read: {path} ({e.strerror})") from None
+    if len(head) < 12 or head[:4] != b"RIFF" or head[8:12] != b"WAVE":
+        raise ValueError(f"a recording's file is not a WAV: {path}")
+    return path
+
+
+def with_media(messages, directory):
+    """The messages with each image part pointing at its file and each audio
+    part at its recording, in the content-part shape a vision or omni model's
+    template places them by, and the files in prompt order: the pictures, and
+    the recordings."""
     out = []
     images = []
+    audio = []
     for message in messages:
         content = message.get("content")
         if not isinstance(content, list):
@@ -731,22 +761,27 @@ def with_images(messages, directory):
                 path = image_file(part.get("image"), directory, len(images))
                 images.append(path)
                 parts.append({"type": "image", "image": path})
+            elif kind == "audio":
+                path = audio_file(part.get("audio"))
+                audio.append(path)
+                parts.append({"type": "audio", "audio": path})
             elif kind == "text":
                 parts.append({"type": "text", "text": part.get("text") or ""})
             else:
                 raise ValueError(f"a content part of type {kind!r} cannot be read here")
         out.append(dict(message, content=parts))
-    return out, images
+    return out, images, audio
 
 
 class VisionDriver(Driver):
-    """A model loaded through mlx-vlm: its own processor reads the images,
-    and mlx_lm's tokenizer over the same directory supplies the format --
-    the template, the reasoning markers, the call parser -- so a reply is
-    read exactly as a text model's is. Every turn is answered whole: no cache
-    is kept between turns."""
+    """A model loaded through mlx-vlm: its own processor reads the images and
+    the recordings, and mlx_lm's tokenizer over the same directory supplies
+    the format -- the template, the reasoning markers, the call parser -- so
+    a reply is read exactly as a text model's is. Every turn is answered
+    whole: no cache is kept between turns."""
 
     vision = True
+    hears = True
 
     def __init__(self, mx, model, tokenizer, api, model_type, processor):
         super().__init__(mx, model, tokenizer, api, model_type)
@@ -781,7 +816,7 @@ class VisionDriver(Driver):
 
     def generate_in(self, request, rid, directory):
         try:
-            messages, images = with_images(request.get("messages") or [], directory)
+            messages, images, audio = with_media(request.get("messages") or [], directory)
         except ValueError as e:
             error("request", str(e), rid)
             return
@@ -797,9 +832,12 @@ class VisionDriver(Driver):
         text = self.tokenizer.apply_chat_template(messages, **kwargs)
         reader = self.reader(rendered, text, rid)
         max_tokens = int(request.get("max_tokens") or 2048)
+        # The recordings by mlx-vlm's own `audio=` (53g), only when there
+        # are any: a turn without one is asked exactly as before.
+        heard = {"audio": audio} if audio else {}
         results = self.api["vision"](self.model, self.processor, text,
                                      image=images or None, max_tokens=max_tokens,
-                                     **self.options(request))
+                                     **heard, **self.options(request))
         prompt_tokens = 0
         produced = 0
         finish = None

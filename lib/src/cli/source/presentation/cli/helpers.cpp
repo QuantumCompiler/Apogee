@@ -417,7 +417,8 @@ std::string media_refusal_message(const std::string& model, harness::Medium medi
         case harness::Medium::Audio:
             return "backend '" + model + "' cannot hear audio, " +
                    role("transcription", "set-default-transcription") +
-                   ", a local model whose mmproj has an audio encoder";
+                   ", a local model whose mmproj has an audio encoder, or an mlx backend over an "
+                   "omni model mlx-vlm built, with mlx-vlm installed";
         case harness::Medium::Video:
             return "backend '" + model + "' cannot read a video's frames or hear its sound, " +
                    role("vision", "set-default-vision") + local;

@@ -636,9 +636,11 @@ struct MlxMediaChat {
     apogee::logger::Session session;
     std::vector<std::string> said;
 
-    MlxMediaChat(bool vision, const std::string& roles) {
+    /// `hears`: an omni directory mlx-vlm built, hearing through it (53g).
+    MlxMediaChat(bool vision, const std::string& roles, bool hears = false) {
         std::filesystem::create_directories(work);
-        driver->vision_startup = std::string{apogee::testing::kVisionReady};
+        driver->vision_startup =
+            std::string{hears ? apogee::testing::kHearingReady : apogee::testing::kVisionReady};
         driver->replies = {R"({"type":"text","id":{id},"text":"A red sign that says STOP."})"
                            "\n"
                            R"({"type":"done","id":{id},"finish":"stop","prompt_tokens":9,)"
@@ -653,6 +655,12 @@ struct MlxMediaChat {
         options.info.vision = vision;
         options.vision = vision;
         options.vision_gap = vision ? "" : "it is not a vision model";
+        options.info.through_vlm = hears;
+        options.audio = hears;
+        options.audio_gap =
+            hears ? ""
+                  : "no audio tower: its config.json declares none -- no audio_config, nor "
+                    "an omni model's thinker_config";
         options.context_size = 8000;
         chat = std::make_shared<apogee::backends::MlxLocalProvider>(
             std::move(options),
@@ -753,6 +761,100 @@ TEST_CASE(
         CHECK_FALSE(attached.attach("stop.png", fixture.work));
         CHECK(fixture.heard("backend 'chat' cannot read images"));
         CHECK(fixture.heard("an mlx backend over a vision model with mlx-vlm installed"));
+        CHECK(fixture.commands.empty());
+    }
+}
+
+TEST_CASE(
+    "an mlx omni model hears a recording as it is on its turn and reads its transcript after; one "
+    "that cannot hear has it transcribed by the transcription role, and is never sent it",
+    "[commands][attachments][media][mlx][audio]") {
+    // 53g, through 26e's one media pipeline: the recording decoded by the
+    // one ffmpeg (a fake here), the capability asked of the harness.
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("no child processes on this platform");
+    }
+    const apogee::testing::FakeFfmpeg ffmpeg{"audio", "3"};
+    const auto transcript = [](const apogee::harness::ChatRequest&) {
+        return std::string{"hello from the recording"};
+    };
+
+    SECTION("an omni model: heard as it is, and transcribed by itself for the turns after") {
+        MlxMediaChat fixture{true, "", true};
+        fixture.driver->replies = {R"({"type":"text","id":{id},"text":"hello from the recording"})"
+                                   "\n"
+                                   R"({"type":"done","id":{id},"finish":"stop","prompt_tokens":9,)"
+                                   R"("cached_tokens":0,"completion_tokens":4})"
+                                   "\n"};
+        std::ofstream{fixture.work / "note.m4a", std::ios::binary} << "M4ABYTES";
+        CHECK(fixture.harness->can_read("chat", apogee::harness::Medium::Audio));
+        ChatAttachments attached{*fixture.harness, fixture.session,
+                                 ChatAttachments::index_for("chat-mlx-media"), fixture.hooks()};
+        REQUIRE(attached.attach("note.m4a", fixture.work));
+        attached.settle();
+        CHECK(fixture.heard("attached note.m4a: 1 file, 1 chunk, transcribed by chat"));
+        CHECK(fixture.heard("read as it is with your next message"));
+        // The transcript was the chat model's own, asked through mlx-vlm with
+        // the recording as ffmpeg decoded it -- a WAV written for that request
+        // alone, and gone after it.
+        REQUIRE(fixture.commands.size() == 1);
+        CHECK(std::ranges::find(fixture.commands[0].arguments, "--vision") !=
+              fixture.commands[0].arguments.end());
+        const nlohmann::json sent = nlohmann::json::parse(fixture.driver->writes.at(0));
+        CHECK(sent["session"] == false);
+        CHECK(sent["messages"][0]["content"][0]["type"] == "audio");
+        REQUIRE(fixture.driver->heard.size() == 1);
+        CHECK(fixture.driver->heard[0].bytes.starts_with("RIFF"));
+        CHECK(fixture.driver->heard[0].bytes.size() > 44);
+        CHECK_FALSE(std::filesystem::exists(fixture.driver->heard[0].path));
+        CHECK(fixture.eyes->requests().empty());
+
+        // The turn it is attached on: the recording, as it is.
+        const ChatAttachments::Turn first = attached.for_turn(
+            0, "what was said?",
+            apogee::agentloop::turn_budget(*fixture.harness, "chat", std::nullopt), 4, {});
+        REQUIRE(first.inlined.size() == 1);
+        CHECK(first.inlined.front().name == "note.m4a (as it is)");
+        REQUIRE(first.inlined.front().parts.size() == 1);
+        CHECK(first.inlined.front().parts.front().kind ==
+              apogee::harness::ContentPart::Kind::InputAudio);
+        CHECK(first.inlined.front().parts.front().audio_format == "wav");
+        // Every turn after: its transcript, on the message it came with.
+        const ChatAttachments::Turn second = attached.for_turn(
+            2, "and again?", apogee::agentloop::turn_budget(*fixture.harness, "chat", std::nullopt),
+            4, {});
+        REQUIRE(second.inlined.size() == 1);
+        CHECK(second.inlined.front().parts.empty());
+        CHECK(second.inlined.front().text.find("hello from the recording") != std::string::npos);
+    }
+    SECTION("a model that cannot hear: the transcription role reads it, and it never starts") {
+        MlxMediaChat fixture{true, "  default_transcription: eyes\n"};
+        fixture.eyes->hears = true;
+        fixture.eyes->reply = transcript;
+        std::ofstream{fixture.work / "note.m4a", std::ios::binary} << "M4ABYTES";
+        CHECK_FALSE(fixture.harness->can_read("chat", apogee::harness::Medium::Audio));
+        ChatAttachments attached{*fixture.harness, fixture.session,
+                                 ChatAttachments::index_for("chat-mlx-media"), fixture.hooks()};
+        REQUIRE(attached.attach("note.m4a", fixture.work));
+        attached.settle();
+        CHECK(fixture.heard("attached note.m4a: 1 file, 1 chunk, transcribed by eyes"));
+        CHECK_FALSE(fixture.heard("read as it is"));
+        const ChatAttachments::Turn turn = attached.for_turn(
+            0, "what was said?",
+            apogee::agentloop::turn_budget(*fixture.harness, "chat", std::nullopt), 4, {});
+        REQUIRE(turn.inlined.size() == 1);
+        CHECK(turn.inlined.front().parts.empty());
+        CHECK(turn.inlined.front().text.find("hello from the recording") != std::string::npos);
+        CHECK(fixture.commands.empty());
+    }
+    SECTION("a model that cannot hear and no transcription role: refused, nothing started") {
+        MlxMediaChat fixture{true, ""};
+        std::ofstream{fixture.work / "note.m4a", std::ios::binary} << "M4ABYTES";
+        ChatAttachments attached{*fixture.harness, fixture.session,
+                                 ChatAttachments::index_for("chat-mlx-media"), fixture.hooks()};
+        CHECK_FALSE(attached.attach("note.m4a", fixture.work));
+        CHECK(fixture.heard("backend 'chat' cannot hear audio, and no transcription model is set"));
+        CHECK(fixture.heard("or an mlx backend over an omni model mlx-vlm built"));
         CHECK(fixture.commands.empty());
     }
 }

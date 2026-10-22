@@ -114,33 +114,6 @@ constexpr std::int64_t kCheckpointTail = 4;
 constexpr std::string_view kFromSavedChat = "the saved chat";
 constexpr std::string_view kFromPromptCache = "the prompt cache on disk";
 
-/// Decodes base64, skipping whitespace; stops at padding.
-[[nodiscard]] std::string decode_base64(std::string_view encoded) {
-    static constexpr std::string_view alphabet =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string out;
-    out.reserve(encoded.size() / 4 * 3);
-
-    std::uint32_t accumulator = 0;
-    int bits = 0;
-    for (const char c : encoded) {
-        if (c == '=') {
-            break;
-        }
-        const std::size_t value = alphabet.find(c);
-        if (value == std::string_view::npos) {
-            continue;  // whitespace and newlines are legal in a data URI
-        }
-        accumulator = (accumulator << 6U) | static_cast<std::uint32_t>(value);
-        bits += 6;
-        if (bits >= 8) {
-            bits -= 8;
-            out.push_back(static_cast<char>((accumulator >> static_cast<unsigned>(bits)) & 0xFFU));
-        }
-    }
-    return out;
-}
-
 /// Decodes the base64 payload of a `data:` URI. Empty for anything else.
 ///
 /// The IR carries images as data URIs because that is what the cloud vendors

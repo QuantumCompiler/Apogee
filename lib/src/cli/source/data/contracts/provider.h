@@ -239,7 +239,8 @@ public:
 };
 
 /// Implemented by a provider that can take audio (26b): a local model whose
-/// projector has an audio encoder, read through mtmd.
+/// projector has an audio encoder, read through mtmd -- and, since 53g, an
+/// MLX omni model mlx-vlm built, heard through mlx-vlm.
 ///
 /// Unlike images, a provider that does not declare it is taken to have none:
 /// no cloud backend here is sent audio, so the only way to transcribe is a

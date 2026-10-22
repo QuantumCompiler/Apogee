@@ -2,6 +2,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstddef>
+
 namespace apogee::backends::mlx {
 namespace {
 
@@ -17,10 +19,18 @@ namespace {
     return parsed;
 }
 
-/// A message's content: its text, or -- once it carries a picture -- its
-/// parts in order, each image where it sits (27c). Audio is never sent: no
-/// MLX provider declares it.
-[[nodiscard]] nlohmann::json template_content(const harness::MessageContent& content) {
+/// The paths a request's recordings cross as, handed out in prompt order:
+/// `next` is the next audio part's.
+struct AudioPaths {
+    const std::vector<std::string>& files;
+    std::size_t next = 0;
+};
+
+/// A message's content: its text, or -- once it carries a picture or a
+/// recording -- its parts in order, each image where it sits (27c) and each
+/// recording as the WAV file written for it (53g).
+[[nodiscard]] nlohmann::json template_content(const harness::MessageContent& content,
+                                              AudioPaths& audio) {
     if (!content.is_rich()) {
         return content.plain_text();
     }
@@ -30,15 +40,19 @@ namespace {
             parts.push_back({{"type", "text"}, {"text", part.text}});
         } else if (part.kind == harness::ContentPart::Kind::ImageUrl) {
             parts.push_back({{"type", "image"}, {"image", part.image_url}});
+        } else if (part.kind == harness::ContentPart::Kind::InputAudio &&
+                   audio.next < audio.files.size()) {
+            parts.push_back({{"type", "audio"}, {"audio", audio.files[audio.next++]}});
         }
     }
     return parts;
 }
 
 /// One IR message in the shape a Hugging Face chat template takes.
-[[nodiscard]] nlohmann::json template_message(const harness::ChatMessage& message) {
+[[nodiscard]] nlohmann::json template_message(const harness::ChatMessage& message,
+                                              AudioPaths& audio) {
     nlohmann::json out{{"role", std::string{harness::to_string(message.role)}},
-                       {"content", template_content(message.content)}};
+                       {"content", template_content(message.content, audio)}};
     if (message.role == harness::Role::Assistant && !message.tool_calls.empty()) {
         nlohmann::json calls = nlohmann::json::array();
         for (const harness::ToolCall& call : message.tool_calls) {
@@ -82,8 +96,9 @@ namespace {
 
 std::string generate_line(const GenerateRequest& request) {
     nlohmann::json messages = nlohmann::json::array();
+    AudioPaths audio{.files = request.audio_files};
     for (const harness::ChatMessage& message : request.messages) {
-        messages.push_back(template_message(message));
+        messages.push_back(template_message(message, audio));
     }
     nlohmann::json tools = nlohmann::json::array();
     for (const harness::Tool& tool : request.tools) {
@@ -176,6 +191,7 @@ std::optional<Event> parse_event(std::string_view line) {
         event.chat_template = boolean("chat_template");
         event.thinking = boolean("thinking");
         event.vision = boolean("vision");
+        event.audio = boolean("audio");
         return event;
     }
     // An unknown type is a newer driver's, and carries nothing this side reads.

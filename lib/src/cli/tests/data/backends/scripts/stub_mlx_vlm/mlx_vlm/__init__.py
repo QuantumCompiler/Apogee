@@ -8,7 +8,9 @@ it, so the same runtime can be had with mlx-vlm and without.
 
 The reply is the scripted one `mlx_lm`'s stub hands out (STUB_MLX_REPLIES),
 with `{images}` replaced by what was seen: "2 images: 1234 bytes .png, 99
-bytes .jpg" -- so a test can tell the pictures reached the model.
+bytes .jpg" -- so a test can tell the pictures reached the model -- and,
+since 53g, `{audio}` by what was heard through `audio=`: "1 recording: 32044
+bytes .wav, a WAV". Each recording's path is recorded as `vlm audio <path>`.
 
 Since 53f it converts too (`convert.py`), and says which types it builds the
 way a real mlx-vlm does: a package under `models/` naming its `Model`, and

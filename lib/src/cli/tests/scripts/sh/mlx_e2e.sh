@@ -12,7 +12,11 @@
 # a suite's member held past its idle window between two turns (27e), a
 # vision model's picture read as it is through mlx-vlm -- and, without it,
 # the doctor saying so and the picture refused naming the way (27c) -- a
-# text model's picture described by the vision role instead, a run promoted
+# text model's picture described by the vision role instead, a recording
+# heard as it is by an omni model mlx-vlm built on the turn it is attached
+# and read as its transcript after, kept from one whose mlx-vlm has no
+# module for its type, and transcribed for a text model by the
+# transcription role (53g), a run promoted
 # with --target mlx registered as an mlx entry with no conversion and then
 # answered through the driver from the store (27c), and a runtime taken away
 # refused at construction with the fix named.
@@ -287,6 +291,114 @@ grep -q "From its description: a small picture." "$WORK_DIR/helper.txt" \
     || fail "the text model never answered: $(cat "$WORK_DIR/helper.txt")"
 grep -q "^vlm generate images=1 " "$STUB_MLX_RECORD" \
     || fail "the vision role was never shown the picture: $(cat "$STUB_MLX_RECORD")"
+no_driver_left
+
+# --- audio (53g): a recording heard as it is, or honestly not -----------------
+# The one decoder's seam faked as 26e's suites fake it: an ffprobe that finds
+# a three-second track, an ffmpeg that decodes it to 32000 bytes of silence.
+# Apogee's temporary directory is the sandbox's, so what it leaves is seen.
+mkdir -p "$WORK_DIR/bin" "$WORK_DIR/tmp"
+cat >"$WORK_DIR/bin/ffprobe" <<'EOF'
+#!/bin/sh
+printf '[STREAM]\ncodec_name=aac\ncodec_type=audio\nsample_rate=48000\nchannels=2\n'
+printf 'r_frame_rate=0/0\n[/STREAM]\n[FORMAT]\nduration=3\n[/FORMAT]\n'
+EOF
+cat >"$WORK_DIR/bin/ffmpeg" <<'EOF'
+#!/bin/sh
+out=''
+for a in "$@"; do out="$a"; done
+if [ "$out" = "-" ]; then head -c 32000 /dev/zero; fi
+exit 0
+EOF
+chmod +x "$WORK_DIR/bin/ffprobe" "$WORK_DIR/bin/ffmpeg"
+printf 'M4A' >"$WORK_DIR/work/note.m4a"
+# An omni model mlx-vlm built: Qwen3-Omni's shape, its audio tower in its
+# thinker, recorded `vision` as 53f's conversion records one.
+cp -R "$WORK_DIR/model" "$WORK_DIR/ears" || fail "could not copy the omni fixture"
+python3 - "$WORK_DIR/ears" <<'EOF' || fail "could not make the omni fixture"
+import json, os, sys
+config_path = os.path.join(sys.argv[1], "config.json")
+config = json.load(open(config_path))
+config["model_type"] = "qwen3_omni_moe"
+config["thinker_config"] = {"audio_config": {"d_model": 8}, "vision_config": {"depth": 2}}
+json.dump(config, open(config_path, "w"))
+json.dump({"source": "convert", "transform": "mlx_vlm.convert 4bit", "files": [],
+           "kind": "vision"}, open(os.path.join(sys.argv[1], "apogee-snapshot.json"), "w"))
+EOF
+"$APOGEE_BIN" config add-backend ears --type mlx --model-path "$WORK_DIR/ears" >/dev/null \
+    || fail "add-backend ears"
+cat >"$STUB_MLX_REPLIES" <<'EOF'
+{"rules": [["Transcribe this audio", "hello from the recording"],
+           ["<|audio|>", "I hear {audio}."],
+           ["again", "It said hello."],
+           ["hello from the recording", "From its transcript: hello."]],
+ "default": "A title"}
+EOF
+heard_lines() { grep -c '^vlm audio ' "$STUB_MLX_RECORD"; }
+
+# The installed mlx-vlm has no module for its type: it cannot hear, so the
+# recording is refused naming the ways that would, and never reaches it.
+: >"$STUB_MLX_RECORD"
+(cd "$WORK_DIR/work" && PATH="$WORK_DIR/bin:$PATH" TMPDIR="$WORK_DIR/tmp" \
+    "$APOGEE_BIN" complete -m ears --attach note.m4a "What was said?" \
+    >"$WORK_DIR/deaf.txt" 2>&1) || fail "complete on ears failed: $(cat "$WORK_DIR/deaf.txt")"
+grep -q "backend 'ears' cannot hear audio" "$WORK_DIR/deaf.txt" \
+    || fail "the recording was not refused: $(cat "$WORK_DIR/deaf.txt")"
+grep -q "or an mlx backend over an omni model mlx-vlm built" "$WORK_DIR/deaf.txt" \
+    || fail "the refusal did not name the mlx way to hear: $(cat "$WORK_DIR/deaf.txt")"
+[ "$(heard_lines)" -eq 0 ] || fail "a model that cannot hear was handed audio: $(cat "$STUB_MLX_RECORD")"
+no_driver_left
+
+# With its type's module, it hears: the chat model transcribes its own
+# recording, hears it as it is on the turn it is attached, and reads its
+# transcript after -- one driver, through mlx-vlm, mlx-lm's model never loaded.
+mkdir -p "$WORK_DIR/training/venv/lib/python3.99/site-packages/mlx_vlm/models/qwen3_omni_moe"
+printf 'class Model(object):\n    pass\n' \
+    >"$WORK_DIR/training/venv/lib/python3.99/site-packages/mlx_vlm/models/qwen3_omni_moe/__init__.py"
+: >"$STUB_MLX_RECORD"
+(cd "$WORK_DIR/work" && printf 'What was said?\nSay it again.\n/exit\n' \
+    | PATH="$WORK_DIR/bin:$PATH" TMPDIR="$WORK_DIR/tmp" \
+        "$APOGEE_BIN" chat -m ears --attach note.m4a >"$WORK_DIR/omni.txt" 2>&1) \
+    || fail "the omni chat failed: $(cat "$WORK_DIR/omni.txt")"
+grep -q "transcribed by ears" "$WORK_DIR/omni.txt" \
+    || fail "the omni model did not transcribe its recording: $(cat "$WORK_DIR/omni.txt")"
+grep -q "read as it is with your next message" "$WORK_DIR/omni.txt" \
+    || fail "the recording was not said to be heard as it is: $(cat "$WORK_DIR/omni.txt")"
+grep -q "I hear 1 recording: 32044 bytes .wav, a WAV." "$WORK_DIR/omni.txt" \
+    || fail "the recording did not reach the model as it is: $(cat "$WORK_DIR/omni.txt")"
+grep -q "It said hello." "$WORK_DIR/omni.txt" \
+    || fail "the turn after was not answered: $(cat "$WORK_DIR/omni.txt")"
+# Heard twice -- the transcription and the attaching turn -- never on the turn after.
+[ "$(heard_lines)" -eq 2 ] || fail "expected two hearings, got: $(cat "$STUB_MLX_RECORD")"
+[ "$(grep -c '^vlm load ' "$STUB_MLX_RECORD")" -eq 1 ] \
+    || fail "expected one load through mlx-vlm, got: $(grep 'load ' "$STUB_MLX_RECORD")"
+grep -q '^load ' "$STUB_MLX_RECORD" && fail "mlx-lm's model was loaded for an omni directory"
+grep '^vlm audio ' "$STUB_MLX_RECORD" | grep -qv "^vlm audio $WORK_DIR/tmp/apogee-mlx-audio-" \
+    && fail "a recording was handed over from elsewhere: $(grep '^vlm audio ' "$STUB_MLX_RECORD")"
+ls "$WORK_DIR/tmp" | grep -q '^apogee-mlx-audio-' \
+    && fail "a turn's recordings outlived it: $(ls "$WORK_DIR/tmp")"
+no_driver_left
+
+# A text model, the omni model its transcription role: the recording is
+# transcribed there, and the chat model reads only the transcript. A
+# recording of its own: one already read is copied from the index that holds
+# it (26d), never transcribed again.
+"$APOGEE_BIN" config set-default-transcription ears >/dev/null || fail "set-default-transcription"
+printf 'M4A, another' >"$WORK_DIR/work/memo.m4a"
+: >"$STUB_MLX_RECORD"
+(cd "$WORK_DIR/work" && printf 'What was said?\n/exit\n' \
+    | PATH="$WORK_DIR/bin:$PATH" TMPDIR="$WORK_DIR/tmp" \
+        "$APOGEE_BIN" chat -m mlx --attach memo.m4a >"$WORK_DIR/fallback.txt" 2>&1) \
+    || fail "the fallback chat failed: $(cat "$WORK_DIR/fallback.txt")"
+grep -q "transcribed by ears" "$WORK_DIR/fallback.txt" \
+    || fail "the transcription role did not transcribe: $(cat "$WORK_DIR/fallback.txt")"
+grep -q "read as it is" "$WORK_DIR/fallback.txt" \
+    && fail "a text model was said to hear the recording as it is"
+grep -q "From its transcript: hello." "$WORK_DIR/fallback.txt" \
+    || fail "the text model never read the transcript: $(cat "$WORK_DIR/fallback.txt")"
+[ "$(heard_lines)" -eq 1 ] || fail "expected the transcription alone to hear it: $(cat "$STUB_MLX_RECORD")"
+# The chat model's own driver is mlx-lm's text one: it was never handed audio.
+grep -q '^load model$' "$STUB_MLX_RECORD" || fail "the text model never answered through mlx-lm"
 no_driver_left
 unset STUB_MLX_RECORD
 

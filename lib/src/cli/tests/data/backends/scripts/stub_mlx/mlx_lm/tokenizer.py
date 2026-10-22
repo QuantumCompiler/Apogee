@@ -56,9 +56,11 @@ class Tokenizer:
             content = message.get("content") or ""
             if isinstance(content, list):
                 # A vision model's parts (27c): its image marker where each
-                # picture sits, as a real template places them.
-                content = "".join("<|image|>" if part.get("type") == "image"
-                                  else part.get("text", "") for part in content)
+                # picture sits, as a real template places them -- and an omni
+                # model's audio marker where each recording does (53g).
+                markers = {"image": "<|image|>", "audio": "<|audio|>"}
+                content = "".join(markers.get(part.get("type"), part.get("text", ""))
+                                  for part in content)
             line = f"<|{message['role']}|>{content}"
             if message.get("tool_calls"):
                 line += json.dumps(message["tool_calls"], sort_keys=True)

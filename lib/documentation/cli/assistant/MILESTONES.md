@@ -9560,3 +9560,57 @@ Mlx-lm converted 6 of them as text alone, and Qwen3-Omni-30B (`qwen3_omni_moe`) 
 **Not done:**
 - A real conversion, and W2's real-weights question (whether mlx-lm could load mlx-vlm's layout for text), are the user's run.
 - `check` does not compare an installed mlx-vlm's version against the floor.
+
+### 2026-10-21 — `mlx-audio-input` (backlog item 53g): an MLX omni model hears
+
+**Why.** The user's Qwen3-Omni-30B and five Gemma4 releases carry audio towers, which 53f now keeps on MLX. Apogee never handed the `mlx` backend sound. It did not implement `AudioCapable` (26e), and its driver passed no audio, though mlx-vlm takes `audio=` for omni models. So a recording reached such a model only as the transcription role's text. This was wall W3.
+
+- [x] **`AudioCapable` on the MLX provider,** discovered by the harness's existing probe and never cast. `accepts_audio()` comes from `probe_mlx_audio`, which reads files only and never spawns. Its rungs, each named in the refusal:
+  1. `not mlx-vlm's build`: the directory is not recorded `vision`.
+  2. `no audio tower`: `snapshot_towers` finds no `audio_config` or `thinker_config`.
+  3. `no mlx-vlm`.
+  4. `no mlx-vlm module for its type`: the installed mlx-vlm has no `models/<type>/` package once its `MODEL_REMAPPING` is applied. That is the one question its loader asks. It is read in the backend, since business's `mlx_model_types` is out of the backend's reach.
+- [x] **The wire.**
+  - Each audio part crosses the driver protocol as `{"type":"audio","audio":<path>}` where it sits in the message. The protocol version stays 1.
+  - The provider writes the WAV, already decoded by `platform/ffmpeg` upstream, into a private per-turn directory before any spawn. It removes the directory however the turn ends. Base64 never crosses the pipe.
+  - The driver checks each file is a local WAV and passes `audio=[...]` to mlx-vlm's `stream_generate` only on a turn with recordings.
+  - `ready` gains `audio`, so a driver from before 53g is never handed a recording: its turn is refused with `check --fix`'s advice, and its text turns still run. The earlier digest joined `retired-scripts.txt`.
+- [x] **26e's media rules hold.** A recording is heard natively on the turn it is attached and read as its transcript on every turn after.
+- [x] **The refusal hint names both ways.** The "cannot hear" hint named only a llama.cpp model whose mmproj has an audio encoder. It now also names an MLX omni model mlx-vlm built.
+- [x] **One decoder.** `decode_base64` moved from `llamacpp.cpp` into `local_prompt`, so the two local runtimes share one decoder.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The open call's default, taken:** audio is offered only when the config declares an audio tower and the installed mlx-vlm has its type's module, and otherwise 26e's fallback applies. It also needs the directory recorded `vision`. An unrecorded directory with vision files does not hear, since its weights are laid out for mlx-lm, which drops the towers.
+- **"Refuses before a spawn" and "the fallback stands," reconciled:**
+  - Surfaces ask first. For a backend that cannot hear, `can_read(Audio)` is false, so a recording goes to the transcription role exactly as before, and the chat model is never sent it.
+  - A request that carries audio anyway, such as a serve client's `input_audio`, is refused before any spawn with the rung and its reason. It is never dropped silently, and never transcribed on the caller's behalf.
+- **WAV only.** A part whose format is not `wav` or empty, or whose bytes are not RIFF/WAVE, is refused before a spawn. Apogee's own surfaces always decode to WAV through ffmpeg, so mlx-vlm never decodes on its own.
+- **The sample rate is left to mlx-vlm.** The WAV is decoded at 16 kHz and mlx-vlm resamples to its own rate.
+- **An older driver keeps running.** A 53f driver refuses the audio turn but still answers text, so it is not restarted.
+
+**Verified.**
+- 9 new cases (`[audio]`, 495 assertions):
+  - the protocol's audio paths in prompt order and the `ready` line's `audio`;
+  - each rung by name;
+  - the WAV round trip and its removal, a failed turn included;
+  - the refusals before any spawn;
+  - `audio=` reaching the stub mlx-vlm, with remote, missing and non-WAV files refused while the model stays loaded;
+  - a text driver saying no;
+  - over 26e's fake ffmpeg: heard natively and then as the transcript, the transcription role with nothing spawned, and a refusal with nothing spawned.
+- `cli.mlx_lifecycle` gained a phase on the real binary and driver:
+  - a stub mlx-vlm without the type's module refuses the recording, and it never reaches mlx-vlm;
+  - with the module, it is heard on the attaching turn and read as the transcript on the next, in one load through mlx-vlm, with nothing left in the sandbox's TMPDIR;
+  - with a text model whose transcription role is the omni model, only the transcription hears it.
+- Mutation check: dropping `audio=` in the driver, hard-coding `accepts_audio` to false, and dropping the paths from the request were each caught, then restored.
+- The neighbouring suites pass: `[mlx]`, `[media]`, `[attachments]`, `[llamacpp]`, `[assets]`, `[backends]`, `[commands]`, `[harness]` and `[check]`.
+- ctest:
+  - `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`;
+  - `cli.mlx_lifecycle`, `cli.mlx_models_lifecycle`;
+  - `cli.ffmpeg_stays_off_the_terminal`, `cli.video_lifecycle`, `cli.machine_schema_conformance`.
+
+  All pass.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,728 tests and the macOS app's 342 cases passed, with no warning.
+
+**Not done:**
+- The real pass on real weights is the user's run: an attached recording answered by an MLX omni model. Whether Gemma 4's and Qwen3-Omni's real chat templates place `{"type":"audio"}` parts is part of it.
+- `check` and `models info` do not yet say whether a backend hears, the way they say whether it sees.
