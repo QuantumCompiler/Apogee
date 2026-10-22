@@ -43,4 +43,4 @@ One exists. Blaizzy's mlx-video ports Wan to MLX: Wan2.1 1.3B and 14B text-to-vi
 - [ ] Otherwise the refusal says exactly what is missing, and `converts_to` has no `mlx`.
 - [ ] `lib/scripts/cicd.sh --test` is green.
 
-**Scope note.** v0.2.0, gated on [53e](mlx-records-say-their-kind.md) (the `video` kind) and [53j](wan-pulled-whole.md) (the set whole). Other video models (LTX-2, which mlx-video also ports) are out of scope until the user holds one.
+**Scope note.** v0.2.0, gated on [53j](wan-pulled-whole.md) (the set whole); its other gate, [53e](../../assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind) (the `video` kind), shipped 2026-10-21. Other video models (LTX-2, which mlx-video also ports) are out of scope until the user holds one.

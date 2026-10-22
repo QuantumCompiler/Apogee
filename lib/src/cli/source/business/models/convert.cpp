@@ -329,6 +329,9 @@ MlxConvertResult convert_snapshot_to_mlx(const std::filesystem::path& snapshot,
         return result;
     }
     result.ok = true;
+    // mlx-lm builds language models, whatever the snapshot also carried: its
+    // record says so, since its files need not (53e).
+    result.kind = std::string{kMlxChat};
     return result;
 }
 

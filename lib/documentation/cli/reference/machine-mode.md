@@ -969,7 +969,19 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   numbers no other row has: `components`, how many the pipeline's
   `model_index.json` names, and `bytes`, what it holds on disk. Since 50a a stored voice model is a row too (`format` and `group`
   `voice`, `state` `voice` or `cannot load`, `architecture` its checkpoint),
-  with its `bytes`.
+  with its `bytes`. Since 53e an MLX row — a stored MLX directory, or an `mlx`
+  backend over one — carries `kind`, what the directory is: `chat` (a language
+  model), `vision` (a vision model, its towers kept), `embedding`, `drafter`,
+  `video` or `voice`. It is the directory's own record's word, written by the
+  conversion that made it; else `vision` when its files say so (a
+  `vision_config` and an image processor beside it); else `chat` — so every
+  directory made before the record reads as it did. A word this build does not
+  know is carried as written. Only `chat` and `vision` are what an `mlx`
+  backend chats with: a row of any other kind has, in place of the backend's
+  summary, a `note` saying what it is and what uses it (an `mlx` backend's row
+  says first why its runtime cannot run, as before), and `config scan
+  --register` registers it as nothing. A backend whose directory is missing,
+  and every other row, has no `kind`.
 - **`models info`** and **`models status`**: their `label: value` record as
   `fields`, in order, each label as printed and a value's indented continuation
   joined to it with a newline. The values are the same words the human view
@@ -992,7 +1004,12 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   no model of the set's `model_type`, by its own modules; with none installed
   nothing is decided, and `mlx` stays. It is decided once, from the set's own
   files, by the same functions that make those refusals, and it is `null` on
-  the other formats, which are what conversions make. A backend's
+  the other formats, which are what conversions make. Since 53e an MLX set's
+  `data` also carries `kind` — the same word, from the same reader, as its
+  `models list` row's `kind` above — and the text gains a `kind:` line saying
+  the word, where it came from (`recorded`, `inferred from its files`, or `no
+  kind recorded`) and what runs it; `kind` is `null` on every other format. An
+  `mlx` backend's own record has the `kind:` line too. A backend's
   document has no `data`.
 - **`chats list`**: newest first, each conversation's `id`, `updated`, `turns`
   and `name`, and since 52a the `backend` it runs on and the roster `model` it

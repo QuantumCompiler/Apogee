@@ -48,4 +48,4 @@
 - [ ] Without mlx-embeddings, everything reads as M21 left it.
 - [ ] `lib/scripts/cicd.sh --test` is green.
 
-**Scope note.** v0.2.0, gated on [53e](mlx-records-say-their-kind.md), the `embedding` kind. Vision embeddings (`qwen3_vl` in mlx-embeddings) and rerankers are out of scope and unasked.
+**Scope note.** v0.2.0, its gate, [53e](../../assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind) (the `embedding` kind), shipped 2026-10-21. Vision embeddings (`qwen3_vl` in mlx-embeddings) and rerankers are out of scope and unasked.

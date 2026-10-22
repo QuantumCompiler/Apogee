@@ -385,6 +385,103 @@ bool is_mlx_model_dir(const std::filesystem::path& dir) {
     return read_mlx_info(dir).mlx_format;
 }
 
+namespace {
+
+/// Each kind's word, what it is, and what uses it -- the one wording.
+struct KindWording {
+    std::string_view word{};
+    std::string_view description{};
+    bool backend = false;
+};
+
+constexpr std::array<KindWording, 6> kKinds{{
+    {.word = kMlxChat,
+     .description = "a language model: an mlx backend chats with it",
+     .backend = true},
+    {.word = kMlxVision,
+     .description = "a vision model: an mlx backend chats with it, and shows it images through "
+                    "mlx-vlm",
+     .backend = true},
+    {.word = kMlxEmbedding,
+     .description = "an embedding model: the embedding role uses it, never a chat backend",
+     .backend = false},
+    {.word = kMlxDrafter,
+     .description = "a drafter: it runs beside its base model, never alone",
+     .backend = false},
+    {.word = kMlxVideo,
+     .description = "a video model: 'apogee video generate' runs it, never a chat backend",
+     .backend = false},
+    {.word = kMlxVoice,
+     .description = "a voice model: 'apogee voice say' speaks with it, never a chat backend",
+     .backend = false},
+}};
+
+[[nodiscard]] const KindWording* kind_wording(std::string_view word) noexcept {
+    const auto found = std::ranges::find(kKinds, word, &KindWording::word);
+    return found == kKinds.end() ? nullptr : &*found;
+}
+
+}  // namespace
+
+bool MlxKind::known() const noexcept {
+    return kind_wording(word) != nullptr;
+}
+
+bool MlxKind::backend() const noexcept {
+    const KindWording* wording = kind_wording(word);
+    return wording != nullptr && wording->backend;
+}
+
+bool mlx_vision_files(const std::filesystem::path& dir) {
+    const nlohmann::json config = read_json(dir / "config.json");
+    if (object_at(config, "vision_config") == nullptr) {
+        return false;
+    }
+    std::error_code code;
+    return std::filesystem::is_regular_file(dir / "preprocessor_config.json", code) ||
+           std::filesystem::is_regular_file(dir / "processor_config.json", code);
+}
+
+MlxKind read_mlx_kind(const std::filesystem::path& dir) {
+    MlxKind kind;
+    if (const std::optional<Snapshot> record = load_snapshot(dir);
+        record.has_value() && !record->kind.empty()) {
+        kind.word = record->kind;
+        kind.source = MlxKindSource::Recorded;
+        return kind;
+    }
+    // Inference covers only what came before the record: a vision model is
+    // the one kind an MLX directory's files said apart (27c).
+    if (mlx_vision_files(dir)) {
+        kind.word = std::string{kMlxVision};
+        kind.source = MlxKindSource::Files;
+    }
+    return kind;
+}
+
+std::string describe_mlx_kind(std::string_view word) {
+    if (const KindWording* wording = kind_wording(word)) {
+        return std::string{wording->description};
+    }
+    return "kind '" + std::string{word} + "', not one this apogee knows: nothing here runs it";
+}
+
+std::string describe(const MlxKind& kind) {
+    std::string source;
+    switch (kind.source) {
+        case MlxKindSource::Recorded:
+            source = "recorded";
+            break;
+        case MlxKindSource::Files:
+            source = "inferred from its files: a vision_config and an image processor";
+            break;
+        case MlxKindSource::Default:
+            source = "no kind recorded";
+            break;
+    }
+    return kind.word + " (" + source + ") -- " + describe_mlx_kind(kind.word);
+}
+
 MlxWindow mlx_window(const MlxInfo& info, const harness::BackendConfig& backend) {
     MlxWindow window;
     window.trained = info.context_length;

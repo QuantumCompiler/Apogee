@@ -1555,6 +1555,8 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
         (void)models::remove_weights(staging);
         fail(result.error);
     }
+    // What the converter made, beside how (53e).
+    record.kind = result.kind;
 
     // Its id is a digest over its shards' hashes: hashed now, said, and
     // stoppable like the conversion.

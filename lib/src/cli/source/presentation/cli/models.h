@@ -84,6 +84,11 @@ struct ModelRow {
     std::string format;
     std::string quant;
     std::string window;
+    /// For an MLX model (53e): what kind of directory it is -- `chat`,
+    /// `vision`, `embedding`, `drafter`, `video`, `voice`, or a word this
+    /// build does not know, as written -- from the store's one reader
+    /// (`read_mlx_kind`). Empty for every other row, and then not in the JSON.
+    std::string kind{};
     /// For a diffusion pipeline (49a): its components counted and its size
     /// on disk, in bytes -- what it costs the disk, said as a number. Zero
     /// for every other row, and then not in the JSON.

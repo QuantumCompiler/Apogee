@@ -329,11 +329,9 @@ MlxModelInfo inspect_mlx_model(const std::filesystem::path& dir) {
             info.text_model_type = text->value("model_type", std::string{});
         }
         // A vision tower in the configuration, and the processor that
-        // turns a picture into its input beside it (27c).
-        const auto tower = config.find("vision_config");
-        info.vision = tower != config.end() && tower->is_object() &&
-                      (std::filesystem::is_regular_file(dir / "preprocessor_config.json", code) ||
-                       std::filesystem::is_regular_file(dir / "processor_config.json", code));
+        // turns a picture into its input beside it (27c) -- the store's one
+        // reading of it, which an unrecorded directory's kind follows (53e).
+        info.vision = models::mlx_vision_files(dir);
     }
     if (std::filesystem::is_regular_file(dir / "chat_template.jinja", code) ||
         std::filesystem::is_regular_file(dir / "chat_template.json", code)) {

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "contracts/config.h"
@@ -115,6 +116,72 @@ struct MlxInfo {
 /// `config.json` and a shard, carrying `mlx-lm`'s marks (`mlx_format`). What
 /// `models migrate` sends to `mlx/` rather than `safetensors/`.
 [[nodiscard]] bool is_mlx_model_dir(const std::filesystem::path& dir);
+
+// --- what kind of MLX directory (53e) --------------------------------------------------
+
+/// **What an MLX directory is, decided once.** Every directory under a
+/// model's `mlx/` was taken for a language model, true while mlx-lm was the
+/// only converter writing there. Each converter now records what it made
+/// (`Snapshot::kind`), and one reader decides: the record's word, else what
+/// the files say, else `chat` -- so a directory made before the record reads
+/// exactly as it did. The listing, `models info` and `config scan` all ask
+/// it; a name is never the evidence (the draft-head and M20 rule).
+///
+/// The words: `chat` (mlx-lm's language model), `vision` (a vision model,
+/// its towers kept), `embedding`, `drafter`, `video`, `voice`. A word this
+/// build does not know is shown as written and registered as nothing.
+inline constexpr std::string_view kMlxChat = "chat";
+inline constexpr std::string_view kMlxVision = "vision";
+inline constexpr std::string_view kMlxEmbedding = "embedding";
+inline constexpr std::string_view kMlxDrafter = "drafter";
+inline constexpr std::string_view kMlxVideo = "video";
+inline constexpr std::string_view kMlxVoice = "voice";
+
+/// Where a directory's kind came from.
+enum class MlxKindSource {
+    /// Its record names it: the conversion that made it wrote it.
+    Recorded,
+    /// No record names one, and its files make it a vision model.
+    Files,
+    /// Nothing says otherwise: `chat`, as every MLX directory was before.
+    Default,
+};
+
+struct MlxKind {
+    /// The word, as the record wrote it.
+    std::string word{kMlxChat};
+    MlxKindSource source = MlxKindSource::Default;
+
+    /// One of the six words.
+    [[nodiscard]] bool known() const noexcept;
+
+    /// An mlx backend chats with it: `chat` or `vision`. What `config scan
+    /// --register` registers as an `mlx` backend; every other kind, and a
+    /// word this build does not know, never.
+    [[nodiscard]] bool backend() const noexcept;
+};
+
+/// The kind of the MLX directory `dir`: its record's `kind`, else `vision`
+/// when its files say so (`mlx_vision_files`), else `chat`. Never throws: an
+/// unreadable record is no record.
+[[nodiscard]] MlxKind read_mlx_kind(const std::filesystem::path& dir);
+
+/// Whether `dir`'s files make a vision model: `config.json` declares a
+/// `vision_config`, and the processor that turns a picture into its input is
+/// beside it (`preprocessor_config.json` or `processor_config.json`). The
+/// fact the mlx backend reads images by (27c), and the one an unrecorded
+/// directory's kind is inferred from.
+[[nodiscard]] bool mlx_vision_files(const std::filesystem::path& dir);
+
+/// What a kind is and what uses it, in the one wording every surface says:
+/// "an embedding model: the embedding role uses it, never a chat backend";
+/// for a word this build does not know, "kind '<word>', not one this apogee
+/// knows: nothing here runs it".
+[[nodiscard]] std::string describe_mlx_kind(std::string_view word);
+
+/// `models info`'s line: the word, where it came from, and what it is --
+/// "chat (no kind recorded) -- a language model: an mlx backend chats with it".
+[[nodiscard]] std::string describe(const MlxKind& kind);
 
 /// The window an `mlx` backend gets over a model (26a's chain): its
 /// `context_size` when set, else 26a's default -- 32,768, or the trained

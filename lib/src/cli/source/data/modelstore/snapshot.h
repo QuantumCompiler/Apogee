@@ -36,6 +36,11 @@ struct Snapshot {
     /// a download -- `mlx_lm.convert 4bit` for an MLX model `models convert
     /// --mlx` wrote (27b). Empty for a pull, and then not written.
     std::string transform;
+    /// What an MLX directory is (53e), written by the conversion that made it
+    /// beside its `transform` -- `chat` for mlx-lm's -- and read by
+    /// `read_mlx_kind` (`mlx_info.h`). Empty for a pull and for every set made
+    /// before it, and then not written: the files say, else `chat`.
+    std::string kind{};
     std::vector<SnapshotFile> files;
 };
 

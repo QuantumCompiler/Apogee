@@ -26,6 +26,7 @@
 #include "contracts/paths.h"
 #include "contracts/server_tools.h"
 #include "graph/code_languages.h"
+#include "modelstore/mlx_info.h"
 #include "modelstore/store.h"
 #include "operations/backend_fields.h"
 #include "operations/graph_sources.h"
@@ -611,7 +612,9 @@ struct StoreScanRow {
 /// exists). The standing rules: a backend already on the path says so; a
 /// default name the config holds for another path, or one two stored models
 /// share, is skipped and said, never guessed past (the fill's own refusal,
-/// M7, as a row).
+/// M7, as a row). An MLX directory of a kind no mlx backend chats with --
+/// an embedding model, a drafter, a video or voice model, a word this build
+/// does not know -- is skipped too, its kind and what uses it said (53e).
 [[nodiscard]] std::vector<StoreScanRow> scan_store_rows(const models::StoreRoots& roots,
                                                         const harness::Config* config) {
     std::vector<StoreScanRow> rows;
@@ -628,11 +631,17 @@ struct StoreScanRow {
         row.name = models::stored_mlx_name(stored);
         row.type = std::string{models::backend_type_for_format(models::kMlxFormat)};
         row.path = stored.dir.lexically_normal();
+        // Only a kind an mlx backend chats with registers as one (53e); any
+        // other is said apart with what uses it.
+        if (const models::MlxKind kind = models::read_mlx_kind(stored.dir); !kind.backend()) {
+            row.skip = models::describe_mlx_kind(kind.word);
+        }
         rows.push_back(std::move(row));
     }
+    // A default name is contested only by what would register under it.
     std::map<std::string, std::size_t> names;
     for (const StoreScanRow& row : rows) {
-        ++names[row.name];
+        names[row.name] += row.skip.empty() ? 1U : 0U;
     }
     for (StoreScanRow& row : rows) {
         if (config != nullptr) {
@@ -641,7 +650,7 @@ struct StoreScanRow {
                     row.registered_as += (row.registered_as.empty() ? "" : ", ") + name;
                 }
             }
-            if (!row.registered_as.empty()) {
+            if (!row.registered_as.empty() || !row.skip.empty()) {
                 continue;
             }
             if (config->backends.contains(row.name)) {
@@ -651,7 +660,7 @@ struct StoreScanRow {
                 continue;
             }
         }
-        if (names[row.name] > 1) {
+        if (row.skip.empty() && names[row.name] > 1) {
             row.skip = std::to_string(names[row.name]) +
                        " stored models share this default name -- 'apogee config add-backend' "
                        "registers each by hand";

@@ -51,4 +51,4 @@
 - [ ] A language model converts exactly as before. `--text-only` gives a towered set mlx-lm's build.
 - [ ] `lib/scripts/cicd.sh --test` is green.
 
-**Scope note.** v0.2.0, gated on [53e](mlx-records-say-their-kind.md), which records `vision` and runs it so. Audio into these models is [53g](mlx-audio-input.md). Drafters, which also go through mlx-vlm, are [53i](mlx-draft-heads.md). The GUI's [3a](../../../gui/backlog/v0.2.0/mlx-kinds-in-stored-weights.md) shows the route.
+**Scope note.** v0.2.0, its gate, [53e](../../assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind), shipped 2026-10-21: it records `vision`, and this item runs it so. Audio into these models is [53g](mlx-audio-input.md). Drafters, which also go through mlx-vlm, are [53i](mlx-draft-heads.md). The GUI's [3a](../../../gui/backlog/v0.2.0/mlx-kinds-in-stored-weights.md) shows the route.

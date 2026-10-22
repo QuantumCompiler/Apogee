@@ -58,6 +58,13 @@ struct MlxModelSpec {
     bool index = true;
     std::string format = "mlx";
     bool tokenizer = true;
+    /// A vision model by its files (27c): a `vision_config` in `config.json`
+    /// and an image processor (`preprocessor_config.json`) beside it.
+    bool vision = false;
+    /// The kind its record names (53e): an `apogee-snapshot.json` as a
+    /// conversion writes one, `kind` beside its `transform`. No record when
+    /// empty -- a directory made before the record, or placed by hand.
+    std::string kind{};
 };
 
 inline void write_fixture_file(const std::filesystem::path& path, const std::string& bytes) {
@@ -99,8 +106,17 @@ inline void write_mlx_model(const std::filesystem::path& dir, const MlxModelSpec
         scheme += "}";
         config += ", \"quantization\": " + scheme + ", \"quantization_config\": " + scheme;
     }
+    if (spec.vision) {
+        config += ", \"vision_config\": {\"depth\": 2}";
+        write_fixture_file(dir / "preprocessor_config.json", "{}\n");
+    }
     config += "}\n";
     write_fixture_file(dir / "config.json", config);
+    if (!spec.kind.empty()) {
+        write_fixture_file(dir / "apogee-snapshot.json",
+                           "{\"source\": \"convert\", \"transform\": \"" + spec.kind +
+                               "'s converter\", \"files\": [], \"kind\": \"" + spec.kind + "\"}\n");
+    }
     if (spec.tokenizer) {
         write_fixture_file(dir / "tokenizer.json", "{\"model\": {\"type\": \"BPE\"}}\n");
         write_fixture_file(dir / "tokenizer_config.json",

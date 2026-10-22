@@ -33,4 +33,4 @@
 - [ ] Without mlx-audio, everything reads as now, and `converts_to` has no `mlx` for a voice set.
 - [ ] `lib/scripts/cicd.sh --test` is green.
 
-**Scope note.** v0.2.0, gated on [53e](mlx-records-say-their-kind.md) (the `voice` kind). Other speech engines, and speech out of an omni model, are out of scope. The GUI's [3b](../../../gui/backlog/v0.2.0/mlx-engines-and-drafters.md) shows the engine.
+**Scope note.** v0.2.0, its gate, [53e](../../assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind) (the `voice` kind), shipped 2026-10-21. Other speech engines, and speech out of an omni model, are out of scope. The GUI's [3b](../../../gui/backlog/v0.2.0/mlx-engines-and-drafters.md) shows the engine.

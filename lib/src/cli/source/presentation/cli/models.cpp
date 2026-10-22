@@ -448,10 +448,21 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
                     row.quant = files.quantization.describe();
                 }
                 row.window = models::describe(models::mlx_window(files, backend));
+                // What the directory is (53e), when there is one: an entry
+                // over a kind no mlx backend chats with is said to be one.
+                std::error_code code;
+                const bool there = std::filesystem::is_directory(dir, code);
+                const models::MlxKind kind = there ? models::read_mlx_kind(dir) : models::MlxKind{};
+                if (there) {
+                    row.kind = kind.word;
+                }
                 if (readiness.ready() && !files.complete) {
                     row.state = "cannot load";
                     row.attention = true;
                     row.note = files.problem;
+                } else if (readiness.ready() && !kind.backend()) {
+                    row.attention = true;
+                    row.note = models::describe_mlx_kind(kind.word);
                 } else if (readiness.ready()) {
                     row.note = mlx_summary(files, backend);
                 }
@@ -656,6 +667,13 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
             row.window = models::describe(models::mlx_window(info, {}));
             row.attention = !info.complete;
             row.note = info.complete ? mlx_summary(info) : info.problem;
+            // Listed as its kind (53e): one no mlx backend chats with says
+            // what it is and what uses it in place of a backend's summary.
+            const models::MlxKind kind = models::read_mlx_kind(stored.dir);
+            row.kind = kind.word;
+            if (info.complete && !kind.backend()) {
+                row.note = models::describe_mlx_kind(kind.word);
+            }
             rows.push_back(std::move(row));
         }
 
@@ -987,7 +1005,8 @@ nlohmann::json model_row_json(const ModelRow& row) {
     for (const auto& [key, value] :
          {std::pair<const char*, const std::string&>{"format", row.format},
           std::pair<const char*, const std::string&>{"quant", row.quant},
-          std::pair<const char*, const std::string&>{"window", row.window}}) {
+          std::pair<const char*, const std::string&>{"window", row.window},
+          std::pair<const char*, const std::string&>{"kind", row.kind}}) {
         if (!value.empty()) {
             object[key] = value;
         }
@@ -1367,22 +1386,36 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     std::ostringstream out;
     out << "weights:      " << models::weights_handle(stored.model, models::kMlxFormat, stored.id)
         << "\n";
+    // What kind it is decides what runs it (53e): a backend's hint and
+    // template line only for a kind an mlx backend chats with.
+    const models::MlxKind kind = models::read_mlx_kind(stored.dir);
     const std::string backends = backends_on(config, stored.dir);
-    out << "backends:     "
-        << (backends.empty()
-                ? "none -- 'apogee config add-backend " + models::stored_mlx_name(stored) +
-                      " --type mlx --model-path <the path below>'"
-                : backends)
-        << "\n";
+    out << "backends:     ";
+    if (!backends.empty()) {
+        out << backends;
+    } else if (kind.backend()) {
+        out << "none -- 'apogee config add-backend " << models::stored_mlx_name(stored)
+            << " --type mlx --model-path <the path below>'";
+    } else {
+        out << "none -- no chat backend runs it; the kind line says what does";
+    }
+    out << "\n";
     out << "model_path:   " << stored.dir.string() << "\n";
-    out << "format:       MLX -- runs on an mlx backend (Apple silicon)\n";
+    out << "format:       "
+        << (kind.backend() ? "MLX -- runs on an mlx backend (Apple silicon)"
+                           : "MLX (Apple silicon)")
+        << "\n";
+    out << "kind:         " << models::describe(kind) << "\n";
     out << "lineage:      " << mlx_origin(models::load_snapshot(stored.dir), roots) << "\n";
     const models::MlxInfo info = models::read_mlx_info(stored.dir);
     out << "model_type:   " << (info.model_type.empty() ? "-" : info.model_type) << "\n";
-    const backends::MlxModelInfo facts = backends::inspect_mlx_model(stored.dir);
-    out << "template:     "
-        << (facts.chat_template ? "ships with the model" : "none -- a base model, offered no tools")
-        << "\n";
+    if (kind.backend()) {
+        const backends::MlxModelInfo facts = backends::inspect_mlx_model(stored.dir);
+        out << "template:     "
+            << (facts.chat_template ? "ships with the model"
+                                    : "none -- a base model, offered no tools")
+            << "\n";
+    }
     render_mlx_files(out, info, harness::BackendConfig{});
     if (!info.complete) {
         out << "repair:       apogee models repair "
@@ -1646,6 +1679,10 @@ std::string render_model_info(const harness::Config& config, std::string_view na
             }
             const backends::MlxModelInfo info = backends::inspect_mlx_model(dir);
             out << "model_type:   " << (info.model_type.empty() ? "-" : info.model_type) << "\n";
+            // What the directory is (53e), when there is one to say it.
+            if (std::error_code code; std::filesystem::is_directory(dir, code)) {
+                out << "kind:         " << models::describe(models::read_mlx_kind(dir)) << "\n";
+            }
             if (progress) {
                 progress("reading " + dir.filename().string(), 0, 0);
             }
@@ -1810,6 +1847,8 @@ namespace {
         {"lineage", nlohmann::json::array()}};
     // A SafeTensors set's conversions, below; null for what conversions make.
     data["converts_to"] = nullptr;
+    // An MLX directory's kind, below (53e); null for every other format.
+    data["kind"] = nullptr;
     if (target.format == models::kGgufFormat) {
         for (const models::StoredGguf& stored : models::list_store_ggufs(roots, target.model)) {
             if (stored.id != target.id) {
@@ -1847,6 +1886,7 @@ namespace {
             }
             const models::MlxWindow window = models::mlx_window(info, {});
             data["window"] = window_of(window.window, window.configured, window.trained);
+            data["kind"] = models::read_mlx_kind(stored.dir).word;
             // The record it was made by: a pull's ref, or the set a
             // conversion read.
             if (const std::optional<models::Snapshot> record = models::load_snapshot(stored.dir);

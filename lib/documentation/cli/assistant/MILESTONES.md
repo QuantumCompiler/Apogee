@@ -9444,3 +9444,56 @@ Decisions taken while building, for veto:
 - GCC 13 and `make lint` were not run.
 - The factory's process registry and the lock in the token count are exercised only with llama.cpp loading a real model.
 
+
+## Milestone AQ — MLX for every kind
+
+**Goal.** Every kind of stored model converts to MLX and runs there, or is refused saying why (53e–53m, opened 2026-10-21 from that day's spike, the user's call). The spike read the user's 18 stored SafeTensors sets: 11 convert to MLX today, 7 of them losing their vision or audio towers, and 7 cannot. The MLX libraries build every kind: mlx-vlm, mlx-embeddings, mlx-video and mlx-audio. The walls were Apogee's own: one converter; every MLX directory taken for a chat model; no audio, embedding or drafting on the MLX backend; video and voice on PyTorch alone; and a Wan set pulled without its encoder and VAE.
+
+### 2026-10-21 — `mlx-records-say-their-kind` (backlog item 53e): one reader says what an MLX directory is
+
+**Why.** Every directory under a model's `mlx/` was taken for a language model. It was listed as a chat backend's weights (`models.cpp`) and registered as an `mlx` chat backend by `config scan --register` (`config_cmd.cpp`). That held while mlx-lm was the only converter writing there. It stops holding the day anything else writes there (the spike's wall W9), so this item comes first.
+
+- [x] **The record says the kind.** The `Snapshot` record (`apogee-snapshot.json`) gains `kind` beside `transform`:
+  - It is written only when set. A pull's record and every record made before this are byte-identical.
+  - A `kind` that is not text reads as no kind, never as a broken record.
+  - `models convert --mlx` records `chat` (mlx-lm's), reported by `models/convert` and written by `models_pull` beside the transform.
+  - Detecting an already-converted directory still matches on source, ref and transform, so older conversions without a kind are recognised.
+- [x] **One reader decides** (`modelstore/mlx_info`, `read_mlx_kind`), in this order:
+  1. the record's word;
+  2. else `vision` when the files say so, meaning a `vision_config` with an image processor beside it;
+  3. else `chat`.
+
+  The words are `chat`, `vision`, `embedding`, `drafter`, `video` and `voice`. The reader also says where the kind came from (recorded, inferred from the files, or the default). `describe_mlx_kind` gives the one wording of what a kind is and what uses it. The vision rule (`mlx_vision_files`) is now the one place the mlx backend's image check reads as well (27c), so the two cannot drift.
+- [x] **Every surface follows it:**
+  - **The listing:** `models list` rows carry `kind`, MLX rows only, in the text and the JSON.
+  - **`models info`:** a `kind:` line saying the word, its source and what runs it, for a stored directory and for an `mlx` backend. The typed `data.kind` is `null` on every other format, as `converts_to` is.
+  - **Other kinds in `models info`:** the format line reads `MLX (Apple silicon)`, with no `config add-backend` hint and no `template:` line.
+  - **`config scan`:** rows carry the kind, and `--register` registers only `chat` and `vision` directories as `mlx` backends. Every other kind stays a row reading `not registered -- <what it is and what uses it>`, and those kinds no longer count toward default-name clashes.
+  - **A hand-registered `mlx` entry over another kind** is listed as needing attention, its runtime's problem said first.
+  - **An entry whose directory is gone** claims no kind.
+- [x] **`machine-mode.md`** documents `kind` on the list rows and in `models info`'s `data`, as added text only (ADR 0006).
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - The six kind words.
+  - A word this build does not know is shown as written and registered as nothing.
+  - `--register` adds only `chat` and `vision`, and says each other kind apart with what uses it: the embedding role, beside its base, `apogee video generate`, `apogee voice say`.
+- **Only `vision` is inferred from files.** Embedding, drafter, video and voice come only from a record, since only this item's siblings make them ("inference covers only what came before").
+- **Other kinds are scan rows, not a summary line** like draft heads get. A row keeps its path and shows a hand-registered backend if one exists.
+- **`train promote` records no kind** for the MLX directories it fuses. They read as `chat`, or as `vision` from their files, as before. That is outside this seam.
+- **Hand-typed `config add-backend <stored name>`** still fills from any stored MLX directory. It is the user's explicit act and outside this seam.
+
+**Verified.**
+- 8 new cases (`[kind]`, 285 assertions):
+  - the reader: no record; vision files; partial vision files; a pull's record; each recorded word over the files; an unknown word; a malformed `kind`;
+  - the record's round trip and the wording;
+  - a recorded kind surviving a real `models repair`;
+  - one directory of each kind plus an unknown word, listed, informed and scanned as itself, with `--register` adding only `chat` and `vision`;
+  - a hand-registered entry over a `video` directory;
+  - unrecorded directories reading and registering as before;
+  - `convert --mlx` recording `chat` even over vision files, the kind surviving `models repair` and `models rename`.
+- The neighbouring suites (`[mlx]`, `[models]`, `[scan]`, `[store]`, `[backends]`, `[commands]`, `[config]`) pass.
+- These ctest cases pass: `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`, `cli.mlx_lifecycle`, `cli.mlx_models_lifecycle`, `cli.machine_schema_conformance` and `cli.config_lifecycle`.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,709 tests and the macOS app's 342 cases passed, with no warning.
+
+**Not done:** the mlx backend still decides vision from the files when it runs a directory. Routing a turn by the recorded kind is 53f's.

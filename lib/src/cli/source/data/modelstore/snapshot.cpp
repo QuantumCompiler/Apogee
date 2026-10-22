@@ -32,6 +32,9 @@ bool write_snapshot(const std::filesystem::path& dir, const Snapshot& snapshot) 
     if (!snapshot.transform.empty()) {
         record["transform"] = snapshot.transform;
     }
+    if (!snapshot.kind.empty()) {
+        record["kind"] = snapshot.kind;
+    }
     std::filesystem::path temp = snapshot_record_path(dir);
     temp += ".tmp-" + std::to_string(std::random_device{}());
     {
@@ -65,6 +68,10 @@ std::optional<Snapshot> load_snapshot(const std::filesystem::path& dir) {
     snapshot.source = record.value("source", std::string{});
     snapshot.pulled_at = record.value("pulled_at", std::string{});
     snapshot.transform = record.value("transform", std::string{});
+    // A word, as written; anything else is no kind recorded (53e).
+    if (const auto kind = record.find("kind"); kind != record.end() && kind->is_string()) {
+        snapshot.kind = kind->get<std::string>();
+    }
     if (const auto files = record.find("files"); files != record.end() && files->is_array()) {
         for (const nlohmann::json& file : *files) {
             if (!file.is_object()) {

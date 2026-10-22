@@ -2,10 +2,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -1196,4 +1198,357 @@ TEST_CASE("each engine's levels are its own, refused by name before anything run
             0);
     CHECK(out.find("Q4_K_M") != std::string::npos);
     CHECK(out.find("4bit\n") == std::string::npos);
+}
+
+// ---- what kind of MLX directory (53e) --------------------------------------------------
+
+namespace {
+
+/// An MLX directory in a store, the kind its record names, and the default
+/// name `config scan` registers it under.
+struct KindDir {
+    std::string model{};
+    std::string kind{};
+    std::string name{};
+
+    [[nodiscard]] std::string handle() const {
+        return model + "/mlx/bbbbbbbbbbbb";
+    }
+
+    /// An mlx backend chats with it.
+    [[nodiscard]] bool backend() const {
+        return kind == "chat" || kind == "vision";
+    }
+};
+
+/// The line of `text` that `start` begins, followed by a space -- a scan's
+/// row by its name -- or empty.
+[[nodiscard]] std::string line_starting(const std::string& text, const std::string& start) {
+    std::istringstream lines{text};
+    for (std::string line; std::getline(lines, line);) {
+        if (line.starts_with(start + " ")) {
+            return line;
+        }
+    }
+    return {};
+}
+
+/// `models list --output-format json`'s rows, by the `key` each carries.
+[[nodiscard]] std::map<std::string, nlohmann::json> listed_by(const CliHome& home,
+                                                              const std::string& key) {
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"models", "list", "--output-format", "json"}, &out, &err) == 0);
+    const nlohmann::json document = nlohmann::json::parse(out);
+    std::map<std::string, nlohmann::json> rows;
+    for (const nlohmann::json& row : document.at("data")) {
+        rows[row.at(key).get<std::string>()] = row;
+    }
+    return rows;
+}
+
+}  // namespace
+
+TEST_CASE("an MLX directory recorded as each kind lists, informs and scans as that kind",
+          "[commands][models][mlx][kind]") {
+    // 53e: the record a conversion writes says what it made, and every
+    // surface follows it -- only what an mlx backend chats with registers as
+    // one; the rest are said apart with what uses them. A kind no build knows
+    // yet is shown as written and registered as nothing.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    const std::vector<KindDir> dirs{
+        {.model = "org--talk", .kind = "chat", .name = "talk-4bit"},
+        {.model = "org--see", .kind = "vision", .name = "see-4bit"},
+        {.model = "org--embed", .kind = "embedding", .name = "embed-4bit"},
+        {.model = "org--draft", .kind = "drafter", .name = "draft-4bit"},
+        {.model = "org--film", .kind = "video", .name = "film-4bit"},
+        {.model = "org--speak", .kind = "voice", .name = "speak-4bit"},
+        {.model = "org--future", .kind = "hologram", .name = "future-4bit"},
+    };
+    for (const KindDir& dir : dirs) {
+        write_mlx_model(home.models() / dir.model / "mlx" / "bbbbbbbbbbbb", {.kind = dir.kind});
+    }
+
+    // Listed: every row's kind in the JSON; in the table, one no mlx backend
+    // chats with says what it is in place of a backend's summary.
+    const std::map<std::string, nlohmann::json> rows = listed_by(home, "model");
+    for (const KindDir& dir : dirs) {
+        INFO(dir.kind);
+        REQUIRE(rows.contains(dir.handle()));
+        const nlohmann::json& row = rows.at(dir.handle());
+        CHECK(row.at("kind") == dir.kind);
+        CHECK(row.at("format") == "mlx");
+        CHECK(row.at("group") == "mlx");
+        CHECK(row.at("state") == "mlx");
+        const std::string note = row.at("note").get<std::string>();
+        if (dir.backend()) {
+            CHECK(note.starts_with("llama, 4-bit (affine, group 64), 32768-token window"));
+        } else {
+            CHECK(note == apogee::models::describe_mlx_kind(dir.kind));
+        }
+    }
+    std::string out;
+    REQUIRE(home.run({"models", "list", "--no-color"}, &out) == 0);
+    CHECK(out.find("    an embedding model: the embedding role uses it, never a chat backend\n") !=
+          std::string::npos);
+    CHECK(out.find("    a drafter: it runs beside its base model, never alone\n") !=
+          std::string::npos);
+    CHECK(out.find("    kind 'hologram', not one this apogee knows: nothing here runs it\n") !=
+          std::string::npos);
+
+    // Informed: the kind line, where it came from, and what runs it; its
+    // data says the word.
+    for (const KindDir& dir : dirs) {
+        INFO(dir.kind);
+        REQUIRE(home.run({"models", "info", dir.handle(), "-q"}, &out) == 0);
+        CHECK(out.find("kind:         " + dir.kind + " (recorded) -- " +
+                       apogee::models::describe_mlx_kind(dir.kind) + "\n") != std::string::npos);
+        if (dir.backend()) {
+            CHECK(out.find("format:       MLX -- runs on an mlx backend (Apple silicon)\n") !=
+                  std::string::npos);
+            CHECK(out.find("backends:     none -- 'apogee config add-backend " + dir.name +
+                           " --type mlx --model-path <the path below>'\n") != std::string::npos);
+            CHECK(out.find("template:     ships with the model\n") != std::string::npos);
+        } else {
+            CHECK(out.find("format:       MLX (Apple silicon)\n") != std::string::npos);
+            CHECK(out.find("backends:     none -- no chat backend runs it; the kind line says "
+                           "what does\n") != std::string::npos);
+            CHECK(out.find("template:") == std::string::npos);
+            CHECK(out.find("add-backend") == std::string::npos);
+        }
+        std::string err;
+        REQUIRE(home.run({"models", "info", dir.handle(), "--output-format", "json"}, &out, &err) ==
+                0);
+        CHECK(nlohmann::json::parse(out).at("data").at("kind") == dir.kind);
+    }
+
+    // Scanned: a row each, and only chat and vision registerable.
+    REQUIRE(home.run({"config", "scan"}, &out) == 0);
+    INFO(out);
+    for (const KindDir& dir : dirs) {
+        INFO(dir.kind);
+        const std::string line = line_starting(out, dir.name);
+        REQUIRE_FALSE(line.empty());
+        CHECK(line.ends_with(dir.backend() ? "  not registered"
+                                           : "  not registered -- " +
+                                                 apogee::models::describe_mlx_kind(dir.kind)));
+    }
+    REQUIRE(home.run({"config", "scan", "--register"}, &out) == 0);
+    CHECK(out.find("added backend 'talk-4bit'\n") != std::string::npos);
+    CHECK(out.find("added backend 'see-4bit'\n") != std::string::npos);
+    CHECK(out.find("registered 2 backend(s)") != std::string::npos);
+    const apogee::harness::Config config = apogee::harness::load_config(home.config_path());
+    for (const KindDir& dir : dirs) {
+        INFO(dir.kind);
+        CHECK(config.backends.contains(dir.name) == dir.backend());
+    }
+    CHECK(config.backends.at("talk-4bit").type == apogee::harness::BackendType::Mlx);
+    CHECK(config.backends.at("talk-4bit").model_path ==
+          (home.models() / "org--talk" / "mlx" / "bbbbbbbbbbbb").lexically_normal().string());
+
+    // Registered: the entries' rows and info carry their directory's kind;
+    // the others stay said apart, and nothing is left to register.
+    const std::map<std::string, nlohmann::json> backends = listed_by(home, "backend");
+    CHECK(backends.at("talk-4bit").at("kind") == "chat");
+    CHECK(backends.at("see-4bit").at("kind") == "vision");
+    REQUIRE(home.run({"models", "info", "see-4bit", "-q"}, &out) == 0);
+    CHECK(out.find("kind:         vision (recorded) -- a vision model: an mlx backend chats with "
+                   "it, and shows it images through mlx-vlm\n") != std::string::npos);
+    REQUIRE(home.run({"config", "scan", "--register"}, &out) == 0);
+    CHECK(line_starting(out, "talk-4bit").ends_with("  backend: talk-4bit"));
+    CHECK(line_starting(out, "embed-4bit")
+              .ends_with("  not registered -- " + apogee::models::describe_mlx_kind("embedding")));
+    CHECK(out.find("nothing to register") != std::string::npos);
+}
+
+TEST_CASE("an entry over a kind no mlx backend chats with is listed as needing attention",
+          "[commands][models][mlx][kind]") {
+    // Registered by hand (`config scan` never would): its row says what the
+    // directory is, so the entry's mistake is seen; a chat entry beside it
+    // reads as it always did.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    // The runtime's files, where the mlx backend runs: the ladder's answer is
+    // read from them, nothing started.
+    const bool apple = apogee::platform::host_target() == "macos-arm64";
+    if (apple) {
+        fake_mlx_runtime(home.home());
+    }
+    const std::filesystem::path film = home.models() / "org--film" / "mlx" / "bbbbbbbbbbbb";
+    write_mlx_model(film, {.kind = "video"});
+    const std::filesystem::path talk = home.models() / "org--talk" / "mlx" / "bbbbbbbbbbbb";
+    write_mlx_model(talk, {.kind = "chat"});
+    std::string out;
+    for (const auto& [name, dir] : {std::pair{"film", film}, std::pair{"talk", talk}}) {
+        REQUIRE(
+            home.run({"config", "add-backend", name, "--type", "mlx", "--model-path", dir.string()},
+                     &out) == 0);
+    }
+    const apogee::harness::Config config = apogee::harness::load_config(home.config_path());
+    const std::vector<apogee::commands::ModelRow> rows =
+        apogee::commands::build_model_rows(config, home.models());
+    const auto video = std::ranges::find(rows, "film", &apogee::commands::ModelRow::backend);
+    REQUIRE(video != rows.end());
+    CHECK(video->kind == "video");
+    CHECK(apogee::commands::model_row_json(*video).at("kind") == "video");
+    const auto chat = std::ranges::find(rows, "talk", &apogee::commands::ModelRow::backend);
+    REQUIRE(chat != rows.end());
+    CHECK(chat->kind == "chat");
+    CHECK_FALSE(chat->attention);
+    if (apple) {
+        REQUIRE(video->state == "ready");
+        CHECK(video->attention);
+        CHECK(video->note == apogee::models::describe_mlx_kind("video"));
+        REQUIRE(chat->state == "ready");
+        CHECK(chat->note.starts_with("llama, 4-bit (affine, group 64), 32768-token window"));
+    } else {
+        // Elsewhere the runtime's refusal is what needs fixing first.
+        CHECK(video->note == chat->note);
+    }
+    REQUIRE(home.run({"models", "info", "film", "-q"}, &out) == 0);
+    CHECK(out.find("kind:         video (recorded) -- a video model: 'apogee video generate' runs "
+                   "it, never a chat backend\n") != std::string::npos);
+    REQUIRE(home.run({"models", "info", "talk", "-q"}, &out) == 0);
+    CHECK(out.find("kind:         chat (recorded) -- a language model: an mlx backend chats with "
+                   "it\n") != std::string::npos);
+
+    // An entry whose directory is gone claims no kind for it.
+    apogee::harness::Config gone;
+    apogee::harness::BackendConfig missing;
+    missing.type = apogee::harness::BackendType::Mlx;
+    missing.model_path = (home.models() / "org--gone" / "mlx" / "bbbbbbbbbbbb").string();
+    gone.backends.emplace("gone", missing);
+    const std::vector<apogee::commands::ModelRow> lost_rows =
+        apogee::commands::build_model_rows(gone, home.models());
+    const auto lost = std::ranges::find(lost_rows, "gone", &apogee::commands::ModelRow::backend);
+    REQUIRE(lost != lost_rows.end());
+    CHECK(lost->kind.empty());
+    CHECK_FALSE(apogee::commands::model_row_json(*lost).contains("kind"));
+    CHECK(apogee::commands::render_model_info(gone, "gone").find("kind:") == std::string::npos);
+}
+
+TEST_CASE("an MLX directory with no kind recorded lists, informs and registers as it did",
+          "[commands][models][mlx][kind]") {
+    // Every directory made before the record, or pulled ready-made: a chat
+    // model unless its files say vision (27c's tower and processor).
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    const std::filesystem::path plain = home.models() / "org--plain" / "mlx" / "bbbbbbbbbbbb";
+    write_mlx_model(plain);
+    const std::filesystem::path eyes = home.models() / "org--eyes" / "mlx" / "bbbbbbbbbbbb";
+    write_mlx_model(eyes, {.vision = true});
+    // A pull's record says where it came from, never a kind.
+    const std::filesystem::path pulled = home.models() / "org--pulled" / "mlx" / "bbbbbbbbbbbb";
+    write_mlx_model(pulled);
+    apogee::models::Snapshot record;
+    record.ref = "mlx-community/pulled-4bit";
+    record.source = "huggingface";
+    REQUIRE(apogee::models::write_snapshot(pulled, record));
+
+    const std::map<std::string, nlohmann::json> rows = listed_by(home, "model");
+    CHECK(rows.at("org--plain/mlx/bbbbbbbbbbbb").at("kind") == "chat");
+    CHECK(rows.at("org--eyes/mlx/bbbbbbbbbbbb").at("kind") == "vision");
+    CHECK(rows.at("org--pulled/mlx/bbbbbbbbbbbb").at("kind") == "chat");
+    for (const auto& [handle, row] : rows) {
+        if (row.contains("kind")) {
+            INFO(handle);
+            CHECK(row.at("note").get<std::string>().starts_with("llama, 4-bit (affine, group 64)"));
+        }
+    }
+
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"models", "info", "org--plain/mlx/bbbbbbbbbbbb", "-q"}, &out) == 0);
+    CHECK(out.find("kind:         chat (no kind recorded) -- a language model: an mlx backend "
+                   "chats with it\n") != std::string::npos);
+    CHECK(out.find("format:       MLX -- runs on an mlx backend (Apple silicon)\n") !=
+          std::string::npos);
+    REQUIRE(home.run({"models", "info", "org--eyes/mlx/bbbbbbbbbbbb", "-q"}, &out) == 0);
+    CHECK(out.find("kind:         vision (inferred from its files: a vision_config and an image "
+                   "processor) -- a vision model") != std::string::npos);
+    REQUIRE(home.run({"models", "info", "org--pulled/mlx/bbbbbbbbbbbb", "--output-format", "json"},
+                     &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out).at("data").at("kind") == "chat");
+
+    // Every one registers, as M12's scan always did.
+    REQUIRE(home.run({"config", "scan", "--register"}, &out) == 0);
+    INFO(out);
+    CHECK(out.find("registered 3 backend(s)") != std::string::npos);
+    // And the backend reads images by the same file facts the kind was
+    // inferred from.
+    REQUIRE(home.run({"models", "info", "eyes-4bit", "-q"}, &out) == 0);
+    CHECK(out.find("vision:       no -- it is a vision model, but mlx-vlm is not installed") !=
+          std::string::npos);
+    REQUIRE(home.run({"models", "info", "plain-4bit", "-q"}, &out) == 0);
+    CHECK(out.find("vision:       no -- it is not a vision model") != std::string::npos);
+}
+
+TEST_CASE("convert --mlx records chat beside its transform, and a kind survives repair and rename",
+          "[commands][models][mlx][kind][convert]") {
+    Convert convert;
+    std::string out;
+    // mlx-lm's converter, its output carrying a vision tower and processor
+    // through: what it made is a language model all the same, and its record
+    // says so over its files.
+    const apogee::training::MlxConverter sighted =
+        [&convert](const std::filesystem::path&, const std::filesystem::path& output,
+                   const apogee::training::MessageSink&,
+                   const apogee::harness::CancellationToken&) {
+            ++convert.calls;
+            write_mlx_model(output, {.bits = 4, .vision = true});
+            return std::string{};
+        };
+    REQUIRE(convert.run("4bit", sighted, &out) == 0);
+    INFO(out);
+    std::vector<apogee::models::StoredMlx> stored =
+        apogee::models::list_store_mlx(convert.roots, "org--m");
+    REQUIRE(stored.size() == 1);
+    const std::optional<apogee::models::Snapshot> record =
+        apogee::models::load_snapshot(stored.front().dir);
+    REQUIRE(record.has_value());
+    CHECK(record->transform == "mlx_lm.convert 4bit");
+    CHECK(record->kind == "chat");
+    CHECK(apogee::models::mlx_vision_files(stored.front().dir));
+    const apogee::models::MlxKind converted = apogee::models::read_mlx_kind(stored.front().dir);
+    CHECK(converted.word == "chat");
+    CHECK(converted.source == apogee::models::MlxKindSource::Recorded);
+
+    // A recorded embedding model beside it, as its own converter will write
+    // one.
+    write_mlx_model(convert.home.models() / "org--embed" / "mlx" / "bbbbbbbbbbbb",
+                    {.kind = "embedding"});
+
+    // `models repair` re-verifies against the record and never rewrites it.
+    for (const std::string& handle :
+         {"org--m/mlx/" + stored.front().id, std::string{"org--embed/mlx/bbbbbbbbbbbb"}}) {
+        INFO(handle);
+        REQUIRE(convert.home.run({"models", "repair", handle}, &out) == 0);
+        CHECK(out.find("Nothing to repair.") != std::string::npos);
+    }
+    CHECK(apogee::models::read_mlx_kind(stored.front().dir).source ==
+          apogee::models::MlxKindSource::Recorded);
+    CHECK(
+        apogee::models::read_mlx_kind(convert.home.models() / "org--embed" / "mlx" / "bbbbbbbbbbbb")
+            .word == "embedding");
+
+    // `models rename` moves each directory whole, its record inside.
+    REQUIRE(convert.home.run({"models", "rename", "org--m", "org--renamed"}, &out) == 0);
+    REQUIRE(convert.home.run({"models", "rename", "org--embed", "org--embedder"}, &out) == 0);
+    stored = apogee::models::list_store_mlx(convert.roots, "org--renamed");
+    REQUIRE(stored.size() == 1);
+    const apogee::models::MlxKind renamed = apogee::models::read_mlx_kind(stored.front().dir);
+    CHECK(renamed.word == "chat");
+    CHECK(renamed.source == apogee::models::MlxKindSource::Recorded);
+    const std::vector<apogee::models::StoredMlx> embedder =
+        apogee::models::list_store_mlx(convert.roots, "org--embedder");
+    REQUIRE(embedder.size() == 1);
+    const apogee::models::MlxKind moved = apogee::models::read_mlx_kind(embedder.front().dir);
+    CHECK(moved.word == "embedding");
+    CHECK(moved.source == apogee::models::MlxKindSource::Recorded);
+    std::string err;
+    REQUIRE(convert.home.run(
+                {"models", "info", "org--embedder/mlx/bbbbbbbbbbbb", "--output-format", "json"},
+                &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out).at("data").at("kind") == "embedding");
 }

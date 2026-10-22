@@ -117,6 +117,10 @@ struct MlxConvertResult {
     /// What the finished directory says: its window, its quantization, its
     /// shards and size.
     MlxInfo info;
+    /// What kind of MLX directory the converter made (53e), for its record:
+    /// `chat`, since mlx-lm's converter builds a language model. Set when
+    /// `ok`.
+    std::string kind{};
 };
 
 /// Roughly what an MLX model of `elements` weighs at `bits` a weight -- a
