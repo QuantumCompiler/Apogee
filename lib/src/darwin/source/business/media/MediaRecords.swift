@@ -43,8 +43,17 @@ public struct ClipRecord: Sendable, Equatable, Identifiable {
     public let preset: String?
     public let loras: [LoRA]
     public let error: String?
+    /// The engine the record says it ran on (the CLI's 53l), `nil` in a
+    /// record from before there were two -- which ran on PyTorch (`engine`).
+    public let recordedEngine: MediaEngine?
+    /// The versions that ran, as the record names them (`torch`,
+    /// `diffusers`; `mlx`, `mlx_video`; `apogee`), each as written.
+    public let versions: [String: String]
 
     public var id: String { output }
+
+    /// What the clip ran on: the record's engine, else PyTorch.
+    public var engine: MediaEngine { MediaEngine.recorded(recordedEngine) }
 
     public init?(_ value: JSONValue) {
         guard value["object"]?.stringValue == "video.generation", let output = value["output"]?.stringValue else { return nil }
@@ -74,6 +83,8 @@ public struct ClipRecord: Sendable, Equatable, Identifiable {
             l["path"]?.stringValue.map { LoRA(path: $0, scale: number(l["scale"])) }
         }
         error = value["error"]?.stringValue
+        recordedEngine = value["engine"]?.stringValue.map(MediaEngine.init(word:))
+        versions = (value["versions"]?.objectValue ?? [:]).compactMapValues(\.stringValue)
     }
 
     public var name: String { (output as NSString).lastPathComponent }
@@ -101,8 +112,17 @@ public struct SpeechRecord: Sendable, Equatable, Identifiable {
     public let seconds: Double?
     public let createdAt: String?
     public let error: String?
+    /// The engine the record says it spoke on (the CLI's 53m), `nil` in a
+    /// record from before there were two -- which spoke on PyTorch (`engine`).
+    public let recordedEngine: MediaEngine?
+    /// The versions that ran, as the record names them (`torch`, `kokoro`;
+    /// `mlx`, `mlx_audio`; `apogee`), each as written.
+    public let versions: [String: String]
 
     public var id: String { output }
+
+    /// What the speech was spoken on: the record's engine, else PyTorch.
+    public var engine: MediaEngine { MediaEngine.recorded(recordedEngine) }
 
     public init?(_ value: JSONValue) {
         guard value["object"]?.stringValue == "voice.speech", let output = value["output"]?.stringValue else { return nil }
@@ -128,6 +148,8 @@ public struct SpeechRecord: Sendable, Equatable, Identifiable {
         seconds = number(value["seconds"])
         createdAt = value["created_at"]?.stringValue
         error = value["error"]?.stringValue
+        recordedEngine = value["engine"]?.stringValue.map(MediaEngine.init(word:))
+        versions = (value["versions"]?.objectValue ?? [:]).compactMapValues(\.stringValue)
     }
 
     public var name: String { (output as NSString).lastPathComponent }

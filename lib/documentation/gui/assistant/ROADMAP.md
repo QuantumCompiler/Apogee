@@ -55,7 +55,7 @@ Opened 2026-10-20 (the user's call, from the first hands-on run: the GUI does ev
 Opened 2026-10-21 from the CLI's MLX-for-every-kind spike (the user's call): the CLI's 53e–53m make MLX directories of six kinds and add MLX engines for video and voice, and drafters for Gemma 4. The app follows what the binary states.
 
 - [x] **MLX kinds in Stored weights** *(3a, shipped 2026-10-22 — [Milestone D](MILESTONES.md#milestone-d--mlx-kinds-in-the-app))* — each MLX set says its kind and offers only its kind's actions; the convert sheet says when towers are kept.
-- [ ] **MLX engines and drafters** *([3b](../backlog/v0.2.0/mlx-engines-and-drafters.md), its gates, 3a and the CLI's 53i, 53l and 53m, shipped)* — drafters paired with their bases, and the clip and say sheets naming their engine.
+- [x] **MLX engines and drafters** *(3b, shipped 2026-10-22 — [Milestone D](MILESTONES.md#milestone-d--mlx-kinds-in-the-app))* — drafters paired with their bases, and the clip and say sheets naming their engine.
 
 
 ---

@@ -136,6 +136,8 @@ final class AppViewModel {
             starter: jobs ?? JobStarter(), preferences: preferences, home: FileManager.default.homeDirectoryForCurrentUser)
         video.say = { [weak shell] text in shell?.say(text) }
         video.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
+        // The store's video models and the default, for the sheet's engine (3b).
+        video.reader = runner ?? ReadRunner()
         let compose = ComposeViewModel(starter: jobs ?? JobStarter())
         compose.say = { [weak shell] text in shell?.say(text) }
         compose.streams = { [weak sessions] in sessions?.streamsJobs ?? false }

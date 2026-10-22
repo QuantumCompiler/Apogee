@@ -168,6 +168,47 @@ public final class StoreViewModel {
         public static let caches = ["f16", "q8_0", "q4_0"]
     }
 
+    /// `config set-backend <base> --draft <drafter>`, as the pair sheet
+    /// builds it (the CLI's 53i): a drafter paired with the base of an `mlx`
+    /// backend, chosen among those the binary's own completion offers it --
+    /// the base's family and width, the one its record names. The app never
+    /// works the pairing out itself.
+    public struct PairForm: Equatable, Sendable {
+        /// A backend the drafter pairs with, and the set it runs.
+        public struct Base: Equatable, Sendable, Identifiable {
+            public let backend: String
+            /// The base's store handle, where Stored weights found it.
+            public let handle: String?
+            public var id: String { backend }
+        }
+
+        /// The drafter's store handle.
+        public let drafter: String
+        /// What `--draft` takes: the drafter's directory, as its `models
+        /// info` names it -- else its handle, which the CLI takes too.
+        public let draft: String
+        /// The CLI's own line for the drafter (`a drafter (…) for a
+        /// 2560-wide gemma4 model, its record naming Gemma4-E4B`).
+        public let said: String?
+        /// The bases the binary offers, in the list's order.
+        public let bases: [Base]
+        /// The one picked: the first offered, until the person picks.
+        public var base: String?
+
+        public init(drafter: String, draft: String, said: String?, bases: [Base]) {
+            self.drafter = drafter
+            self.draft = draft
+            self.said = said
+            self.bases = bases
+            base = bases.first?.backend
+        }
+
+        /// The command, as typed; `nil` while no base is offered.
+        public var arguments: [String]? {
+            base.map { ["config", "set-backend", $0, "--draft", draft] }
+        }
+    }
+
     /// A change waiting on the person's word.
     public enum Pending: Equatable, Sendable {
         /// `models delete <handle>`: one set.
@@ -198,6 +239,8 @@ public final class StoreViewModel {
     public var startQuantize: (@MainActor (QuantizeForm) -> Void)?
     public var startCheck: (@MainActor (String) -> Void)?
     public var pending: Pending?
+    /// The pair sheet, open (the GUI's 3b).
+    public var pairing: PairForm?
     /// Whether a delete takes the backends that run from it too: the
     /// person's choice, never implied.
     public var andBackends = false
@@ -210,6 +253,11 @@ public final class StoreViewModel {
     private var binary: URL?
     /// The registered sets' handles, by their backend.
     private var registered: [String: String] = [:]
+    /// The `mlx` backends, in the list's order: where a drafter can pair.
+    private var mlxBackends: [String] = []
+    /// Each `mlx` backend's drafter, by its directory, as the backend's
+    /// `models info` names it (`draft:`, the CLI's 53i).
+    private var drafts: [String: String] = [:]
 
     public init(runner: any CommandRunning) {
         self.runner = runner
@@ -237,6 +285,8 @@ public final class StoreViewModel {
                 backend: nil, consumed: consumed, note: row.note, kind: row.mlxKind)
         }
         registered = [:]
+        drafts = [:]
+        mlxBackends = rows.filter { !$0.isStored && $0.backendType == "mlx" }.map(\.backend)
         for row in rows where !row.isStored && (row.backendType == "llamacpp" || row.backendType == "mlx") {
             guard let handle = await handle(of: row.backend) else { continue }
             registered[row.backend] = handle
@@ -257,9 +307,10 @@ public final class StoreViewModel {
     /// the store.
     private func handle(of backend: String) async -> String? {
         guard let binary,
-            let info = await runner.read(binary: binary, ["models", "info", backend]).document.map(ModelInfo.init),
-            let path = info.field("model_path")
+            let info = await runner.read(binary: binary, ["models", "info", backend]).document.map(ModelInfo.init)
         else { return nil }
+        if let draft = BackendDraft(info) { drafts[backend] = draft.path }
+        guard let path = info.field("model_path") else { return nil }
         guard let document = await runner.read(binary: binary, ["models", "info", path]).document else { return nil }
         let set = ModelInfo(document: document)
         if let handle = set.data?.handle {
@@ -502,10 +553,12 @@ public final class StoreViewModel {
         case makeDefaultVideo
         /// The Voice place, which speaks with it.
         case openVoice
-        /// `config set-backend <its base's backend> --draft <it>`: the GUI's
-        /// 3b builds it. Offered here so a drafter shows where its pairing
-        /// goes, and drawn as not yet available (`pairingNote`).
+        /// `config set-backend <its base's backend> --draft <it>`, through
+        /// the pair sheet (the GUI's 3b, the CLI's 53i).
         case pairWithBase
+        /// `config set-backend <backend> --draft ""`: the backend this drafter
+        /// drafts for lets it go.
+        case unpair(backend: String)
         case checkFiles
         case showInFinder
         case delete
@@ -533,6 +586,7 @@ public final class StoreViewModel {
             if let backend = set.backend { out += [.useForEmbeddings(backend: backend), .removeBackend(backend)] }
         case .drafter?:
             out.append(.pairWithBase)
+            out += pairedWith(set).map { .unpair(backend: $0) }
         case .video?:
             out += [.newClip, .makeDefaultVideo]
         case .voice?:
@@ -549,11 +603,52 @@ public final class StoreViewModel {
         return out + [.checkFiles, .showInFinder, .delete]
     }
 
-    /// Why a drafter's pairing is not offered here yet, and the command that
-    /// pairs it today, as the CLI's `models info` says it.
+    /// What a drafter is for, and where it drafts now: beside the bases it
+    /// is paired with, or none yet.
     public func pairingNote(_ set: StoredSet) -> String {
-        let path = infos[set.handle]?.field("model_path") ?? "<its path>"
-        return "A drafter runs beside its base, as the draft of the mlx backend over it: apogee config set-backend <that backend> --draft \(path). Pairing it here comes with the app's next update; the console runs the command today."
+        let paired = pairedWith(set)
+        guard !paired.isEmpty else {
+            return "A drafter runs beside its base, as the draft of the mlx backend over it, and never alone. Pair with its base offers the backends the CLI pairs it with: its base's family and width, the one its record names."
+        }
+        return "The draft of \(paired.joined(separator: " and ")): every answer there is the base's own, drafted ahead by it through mlx-vlm's speculative path."
+    }
+
+    /// The backends a drafter drafts for: each whose `draft:` names its
+    /// directory, as the backends' `models info` read them back.
+    public func pairedWith(_ set: StoredSet) -> [String] {
+        guard set.mlxKind == .drafter, let path = infos[set.handle]?.field("model_path") else { return [] }
+        return mlxBackends.filter { drafts[$0] == path }
+    }
+
+    /// Opens the pair sheet: the `mlx` backends the binary's completion
+    /// offers this drafter (`__complete config set-backend <backend> --draft
+    /// ""`, the CLI's 53i), each with the set it runs. None offered, the
+    /// sheet says so in the CLI's words for the drafter.
+    public func askToPair(_ set: StoredSet) async {
+        guard let binary, set.mlxKind == .drafter else { return }
+        let path = infos[set.handle]?.field("model_path")
+        var bases: [PairForm.Base] = []
+        for backend in mlxBackends {
+            guard case .done(let offered) = await runner.command(binary: binary, ["__complete", "config", "set-backend", backend, "--draft", ""])
+            else { continue }
+            let words = offered.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+            if words.contains(set.handle) || path.map(words.contains) == true {
+                bases.append(PairForm.Base(backend: backend, handle: registered[backend]))
+            }
+        }
+        pairing = PairForm(drafter: set.handle, draft: path ?? set.handle, said: infos[set.handle]?.field("drafter"), bases: bases)
+    }
+
+    /// The person's yes: the pairing, read back.
+    public func pair() async {
+        guard let form = pairing, let arguments = form.arguments, let base = form.base else { return }
+        pairing = nil
+        await run(arguments, doing: "Pairing", done: "\(base) drafts with \(form.drafter)")
+    }
+
+    /// `config set-backend <backend> --draft ""`: the pairing undone, read back.
+    public func unpair(_ backend: String) async {
+        await run(["config", "set-backend", backend, "--draft", ""], doing: "Unpairing", done: "\(backend) drafts with nothing now")
     }
 
     /// `config set-default-embedding <backend>`: the embedding role pointed

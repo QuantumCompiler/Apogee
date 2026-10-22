@@ -92,6 +92,42 @@ enum VoicePreview {
         model.speak()
     }
 
+    // MARK: - Two voice models, two engines (the CLI's 53m)
+
+    static let voiceTorch = "Kokoro-82M/voice/5f3a2c91d0e4"
+    static let voiceMLX = "Kokoro-82M/mlx/6f708192a3b4"
+
+    /// The store recorded from the binary built with the CLI's 53l and 53m
+    /// (tests/business/reads/Fixtures/media-*): Kokoro as hexgrad publishes
+    /// it beside its MLX build, in one model folder, each with its voices.
+    static let engines = PreviewRunner(reads: [
+        (["models", "list"], VoiceDocuments.mediaList),
+        (["models", "info", voiceTorch], VoiceDocuments.voiceInfoTorch),
+        (["models", "info", voiceMLX], VoiceDocuments.voiceInfoMLX),
+    ])
+
+    /// The records the binary wrote on each engine (tests/business/media/
+    /// Fixtures/speech-<engine>.json), written into the preview home's
+    /// `Music/Apogee` as it left them there, beside stand-in WAVs.
+    static func spokenOnEach(_ name: String) -> VoiceViewModel {
+        let model = speeches(name, spoken: false, runner: engines)
+        let folder = model.outputFolder
+        for document in [VoiceDocuments.speechTorch, VoiceDocuments.speechMLX] {
+            let text = document.replacingOccurrences(of: "/Users/someone/Music/Apogee", with: folder.path)
+            guard let output = (try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])?["output"] as? String else {
+                continue
+            }
+            try? Data("RIFF".utf8).write(to: URL(fileURLWithPath: output))
+            try? text.write(toFile: output + ".json", atomically: true, encoding: .utf8)
+        }
+        return model
+    }
+
+    /// The speech with this file name, as the library read it.
+    static func speech(_ name: String, of model: VoiceViewModel) -> SpeechRecord? {
+        MediaLibrary.speeches(in: model.folders).records.first { $0.name == name }
+    }
+
     /// Waits, a few seconds at most, for what a run's end sets.
     static func until(_ condition: @MainActor () -> Bool) async {
         for _ in 0..<250 {

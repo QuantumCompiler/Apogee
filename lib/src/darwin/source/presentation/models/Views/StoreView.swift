@@ -31,6 +31,9 @@ struct StoreView: View {
         .sheet(isPresented: Binding(get: { store.quantizeForm != nil }, set: { if !$0 { store.quantizeForm = nil } })) {
             QuantizeSheet(store: store)
         }
+        .sheet(isPresented: Binding(get: { store.pairing != nil }, set: { if !$0 { store.pairing = nil } })) {
+            PairSheet(store: store)
+        }
         .sheet(item: Binding(get: { store.renaming.map(RenameID.init) }, set: { if $0 == nil { store.renaming = nil } })) { id in
             RenameStoredSheet(model: id.model) { name in Task { await store.rename(id.model, to: name) } }
         }
@@ -320,10 +323,11 @@ struct StoreDetails: View {
         case .openVoice:
             Button("Open Voice") { shell.go(.voice) }
         case .pairWithBase:
-            // The GUI's 3b pairs it; until then the button says where it goes.
-            Button("Pair with its base…") {}
-                .disabled(true)
-                .help("Comes with the app's next update: apogee config set-backend <its base's backend> --draft <its path>")
+            Button("Pair with its base…") { Task { await store.askToPair(set) } }
+                .help("apogee config set-backend <its base's backend> --draft \(store.path ?? set.handle)")
+        case .unpair(let backend):
+            Button("Unpair from \(backend)") { Task { await store.unpair(backend) } }
+                .help("apogee config set-backend \(backend) --draft \"\"")
         case .checkFiles:
             Button("Check the files") { store.check(set) }
                 .help("apogee models repair \(set.handle)")
@@ -403,6 +407,50 @@ struct RegisterSheet: View {
                     Button("Register") { Task { await store.registerIt() } }
                         .keyboardShortcut(.defaultAction)
                         .disabled(store.register?.arguments == nil)
+                }
+            }
+            .padding(Spacing.xl)
+            .frame(width: 560)
+        }
+    }
+}
+
+/// `config set-backend <base> --draft <drafter>`: a drafter paired with one
+/// of the bases the binary offers it, or -- none offered -- why, in the CLI's
+/// words for the drafter.
+struct PairSheet: View {
+    @Bindable var store: StoreViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        if let form = store.pairing {
+            VStack(alignment: .leading, spacing: Spacing.m) {
+                Text("Pair \(form.drafter) with its base").font(.apogeeHeading)
+                Text("A drafter proposes the next tokens and its base checks them, so every answer is still the base's own. It runs beside an mlx backend over its base, through mlx-vlm's speculative path.")
+                    .font(.apogeeSmall).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true)
+                if let said = form.said {
+                    Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).fixedSize(horizontal: false, vertical: true)
+                }
+                if form.bases.isEmpty {
+                    Text("No backend runs a base it pairs with. Register mlx-vlm's build of its base -- a vision set of its family and width, the one its record names -- then pair it.")
+                        .font(.apogeeSmall).foregroundStyle(Palette.warning).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Picker("Base", selection: Binding(get: { store.pairing?.base }, set: { store.pairing?.base = $0 })) {
+                        ForEach(form.bases) { base in
+                            Text(base.handle.map { "\(base.backend) · \($0)" } ?? base.backend).tag(String?.some(base.backend))
+                        }
+                    }
+                    .pickerStyle(.radioGroup)
+                }
+                if let arguments = store.pairing?.arguments {
+                    Text((["apogee"] + arguments).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+                }
+                HStack {
+                    Spacer()
+                    Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                    Button("Pair") { Task { await store.pair() } }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(store.pairing?.arguments == nil)
                 }
             }
             .padding(Spacing.xl)
@@ -802,7 +850,7 @@ struct StepsList: View {
         }
 }
 
-#Preview("A drafter: nothing runs it as chat; its pairing comes next") {
+#Preview("A drafter, no backend running a base: nothing runs it as chat") {
     let store = ModelsPreview.kindsStore()
     StoreDetails(store: store, shell: ModelsPreview.shell()) { _ in }
         .frame(width: 380, height: 720)
@@ -810,6 +858,48 @@ struct StepsList: View {
             await store.connect(binary: previewBinary)
             await store.refresh()
             await store.select(ModelsPreview.kindDrafter)
+        }
+}
+
+#Preview("A drafter, its base registered: Pair with its base") {
+    let store = StoreViewModel(runner: ModelsPreview.draftsRunner(paired: false))
+    StoreDetails(store: store, shell: ModelsPreview.shell()) { _ in }
+        .frame(width: 380, height: 720)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            await store.select(ModelsPreview.drafter)
+        }
+}
+
+#Preview("Pair a drafter: the one base the binary offers it") {
+    let store = StoreViewModel(runner: ModelsPreview.draftsRunner(paired: false))
+    PairSheet(store: store)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            if let set = store.sets.first(where: { $0.handle == ModelsPreview.drafter }) { await store.askToPair(set) }
+        }
+}
+
+#Preview("Pair a drafter: no backend runs its base") {
+    let store = ModelsPreview.kindsStore()
+    PairSheet(store: store)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            if let set = store.sets.first(where: { $0.handle == ModelsPreview.kindDrafter }) { await store.askToPair(set) }
+        }
+}
+
+#Preview("A paired drafter: the draft of Gemma4-E4B-4bit, Unpair") {
+    let store = StoreViewModel(runner: ModelsPreview.draftsRunner(paired: true))
+    StoreDetails(store: store, shell: ModelsPreview.shell()) { _ in }
+        .frame(width: 380, height: 720)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            await store.select(ModelsPreview.drafter)
         }
 }
 

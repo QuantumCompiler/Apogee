@@ -38,6 +38,11 @@ public struct ClipForm: Sendable, Equatable {
     public var loras: [String] = []
     /// No LoRAs: with `--from`, the record's cleared.
     public var noLoRAs = false
+    /// `--engine`: set only where the person chose the engine -- a model
+    /// folder holding a pipeline beside its MLX conversion (the GUI's 3b).
+    /// Anywhere else the model's directory decides, and nothing is passed:
+    /// the CLI's flag only names that engine or refuses another (its 53l).
+    public var engine: MediaEngine?
 
     public init() {}
 
@@ -59,6 +64,7 @@ public struct ClipForm: Sendable, Equatable {
         if let image { arguments += ["--image", image] }
         let model = model.trimmingCharacters(in: .whitespaces)
         if !model.isEmpty { arguments += ["-m", model] }
+        if let engine { arguments += ["--engine", engine.word] }
         if let seed { arguments += ["--seed", String(seed)] }
         if let duration { arguments += ["--duration", Self.number(duration)] }
         if let resolution, !resolution.isEmpty { arguments += ["--resolution", resolution] }

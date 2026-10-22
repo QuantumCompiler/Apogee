@@ -127,6 +127,13 @@ struct SpeechPage: View {
     static func length(_ speech: SpeechRecord) -> Double? {
         speech.seconds ?? speech.sentences.last.map { $0.offset + $0.seconds }
     }
+
+    /// What it was spoken on, where the record says (the CLI's 53m): `Spoken
+    /// on MLX · mlx 0.31.2, mlx-audio 0.6.1`. A record from before there were
+    /// two engines is drawn as it always was.
+    static func engine(_ speech: SpeechRecord) -> String? {
+        speech.recordedEngine.map { "Spoken on " + $0.said(versions: speech.versions) }
+    }
     @State private var player: AVAudioPlayer?
     @State private var playing = false
 
@@ -143,6 +150,9 @@ struct SpeechPage: View {
                     Text("\(speech.voice)\(speech.language.map { " · \($0)" } ?? "") · \(speech.model)")
                         .font(.apogeeMeta)
                         .foregroundStyle(Palette.textTertiary)
+                }
+                if let engine = Self.engine(speech) {
+                    Text(engine).font(.apogeeMeta).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
                 }
                 VStack(alignment: .leading, spacing: Spacing.s) {
                     ForEach(Array(speech.sentences.enumerated()), id: \.offset) { index, sentence in
@@ -210,6 +220,15 @@ struct SaySheet: View {
         VStack(alignment: .leading, spacing: Spacing.m) {
             Text("Say something").font(.apogeeHeading)
             TextField("What to say", text: $model.text, axis: .vertical).lineLimit(3...8)
+            if model.models.count > 1 {
+                // More than one voice model: the CLI asks which rather than
+                // guess (its 53m), so the sheet names the one picked.
+                Picker("Voice model", selection: Binding(get: { model.voiceModel ?? "" }, set: { handle in Task { await model.choose(model: handle) } })) {
+                    ForEach(model.models) { voiceModel in
+                        Text(model.label(voiceModel)).tag(voiceModel.handle)
+                    }
+                }
+            }
             if model.voices.isEmpty {
                 Text(model.voiceModel == nil
                     ? "No voice model is in the store yet: apogee models pull hexgrad/Kokoro-82M brings one."
@@ -230,6 +249,12 @@ struct SaySheet: View {
                 Text("Speed")
                 Slider(value: $model.speed, in: 0.5...2.0, step: 0.1)
                 Text(String(format: "%.1f×", model.speed)).font(.apogeeMeta.monospacedDigit())
+            }
+            if let line = model.engineLine {
+                Label(line, systemImage: "cpu")
+                    .font(.apogeeSmall)
+                    .foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Text("Written to \(model.plannedOutput.path) -- never over a file that is there.")
                 .font(.apogeeSmall)
@@ -316,6 +341,50 @@ struct SaySheet: View {
             model.text = "Hello there. How are you?"
             model.voice = "bf_emma"
         }
+}
+
+#Preview("Say something: Kokoro beside its MLX build, PyTorch first") {
+    let model = VoicePreview.speeches("sheet-two", spoken: false, runner: VoicePreview.engines)
+    SaySheet(model: model)
+        .task {
+            await model.connect(binary: previewBinary)
+            model.text = "Hello there. How are you?"
+        }
+}
+
+#Preview("Say something: its MLX build picked, --engine mlx") {
+    let model = VoicePreview.speeches("sheet-two-mlx", spoken: false, runner: VoicePreview.engines)
+    SaySheet(model: model)
+        .task {
+            await model.connect(binary: previewBinary)
+            await model.choose(model: VoicePreview.voiceMLX)
+            model.text = "Hello there. How are you?"
+            model.voice = "bf_emma"
+        }
+}
+
+#Preview("A speech spoken on MLX") {
+    let model = VoicePreview.spokenOnEach("page-mlx")
+    if let speech = VoicePreview.speech("hello-mlx.wav", of: model) {
+        SpeechPage(model: model, speech: speech)
+            .frame(width: 800, height: 420)
+            .task {
+                await model.connect(binary: previewBinary)
+                model.select(speech)
+            }
+    }
+}
+
+#Preview("A speech spoken on PyTorch, its engine recorded") {
+    let model = VoicePreview.spokenOnEach("page-torch")
+    if let speech = VoicePreview.speech("hello-pytorch.wav", of: model) {
+        SpeechPage(model: model, speech: speech)
+            .frame(width: 800, height: 420)
+            .task {
+                await model.connect(binary: previewBinary)
+                model.select(speech)
+            }
+    }
 }
 
 #Preview("Say something, no voice model in the store") {

@@ -56,6 +56,11 @@ public struct ModelsScreen<Downloads: View>: View {
                         .frame(width: 380)
                     }
                 }
+                // Read again on coming back from Stored weights, as it reads on
+                // coming into view: what was changed there -- a set registered,
+                // a drafter paired with its base -- is said here as the CLI
+                // now says it.
+                .task { await model.appeared() }
             }
         }
         .confirmationDialog(
@@ -209,8 +214,11 @@ struct ModelDetails: View {
                     if !model.typed.isEmpty {
                         section("Facts from its files", model.typed)
                     }
-                    if !model.facts.isEmpty {
-                        section("Record", model.facts)
+                    if let draft = model.draft {
+                        drafter(draft, row)
+                    }
+                    if !model.recordFacts.isEmpty {
+                        section("Record", model.recordFacts)
                     }
                     if !model.lineage.isEmpty {
                         VStack(alignment: .leading, spacing: Spacing.s) {
@@ -270,6 +278,28 @@ struct ModelDetails: View {
             .fixedSize()
         }
         .disabled(model.working != nil)
+    }
+
+    /// The drafter beside the backend's model (the CLI's 53i): where it is,
+    /// what the CLI says of it there, and Unpair.
+    private func drafter(_ draft: BackendDraft, _ row: ModelRow) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            label("Drafter")
+            Text(draft.path)
+                .font(.apogeeCode)
+                .foregroundStyle(Palette.textPrimary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            if !draft.said.isEmpty {
+                Text(draft.said).font(.apogeeSmall).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if let drafter = draft.drafter {
+                Text(drafter).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).fixedSize(horizontal: false, vertical: true)
+            }
+            Button("Unpair") { Task { await model.unpair(row) } }
+                .disabled(model.working != nil)
+                .help("apogee config set-backend \(row.backend) --draft \"\" -- the backend answers alone again; the drafter stays under Stored weights")
+        }
     }
 
     private func section(_ title: String, _ fields: [Field]) -> some View {
@@ -464,6 +494,16 @@ struct RenameModelSheet: View {
         .task {
             await models.connect(binary: previewBinary)
             if let row = models.rows.first(where: { $0.backend == "EmbeddingGemma-300M-bf16" }) { await models.select(row) }
+        }
+}
+
+#Preview("Details: an MLX backend with its drafter, Unpair") {
+    let models = ModelsPreview.models(over: ModelsPreview.draftsRunner(paired: true))
+    ModelDetails(model: models)
+        .frame(width: 380, height: 760)
+        .task {
+            await models.connect(binary: previewBinary)
+            if let row = models.rows.first(where: { $0.backend == "Gemma4-E4B-4bit" }) { await models.select(row) }
         }
 }
 

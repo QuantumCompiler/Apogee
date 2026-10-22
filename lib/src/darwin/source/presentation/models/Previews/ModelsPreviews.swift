@@ -196,6 +196,41 @@ enum ModelsPreview {
         StoreViewModel(runner: kindsRegisteredRunner)
     }
 
+    // MARK: - A drafter and its base (the CLI's 53i)
+
+    static let drafter = "Gemma4-E4B-Assistant/mlx/4d5e6f708192"
+    static let draftBase = "Gemma4-E4B/mlx/2b3c4d5e6f70"
+
+    /// A store recorded from the binary built with the CLI's 53i, over a
+    /// Python environment holding only the files the CLI reads to decide a
+    /// pairing (mlx-vlm's gemma4 module and its gemma4_assistant drafter):
+    /// mlx-vlm's build of Gemma 4 E4B (`Gemma4-E4B-4bit`), the drafter its
+    /// assistant converts to, a wider Gemma 4 (`Gemma4-12B-4bit`) and mlx-lm's
+    /// Qwen3 (`Qwen3-8B-4bit`) -- and each backend's completion of `--draft`,
+    /// which offers the drafter to its own base alone. When `paired`, the
+    /// documents read back after `config set-backend Gemma4-E4B-4bit --draft`.
+    static func draftsRunner(paired: Bool) -> PreviewRunner {
+        PreviewRunner(
+            reads: [
+                (["models", "list"], ModelsDocuments.draftsList),
+                (["models", "info", drafter], paired ? ModelsDocuments.draftsInfoDrafterPaired : ModelsDocuments.draftsInfoDrafter),
+                (["models", "info", "Gemma4-E4B-4bit"], paired ? ModelsDocuments.draftsBackendBasePaired : ModelsDocuments.draftsBackendBase),
+                (["models", "info", "Gemma4-12B-4bit"], ModelsDocuments.draftsBackendWider),
+                (["models", "info", "Qwen3-8B-4bit"], ModelsDocuments.draftsBackendChat),
+                (["models", "info", kindPath(draftBase)], ModelsDocuments.draftsPathBase),
+                (["models", "info", kindPath("Gemma4-12B/mlx/7a8b9c0d1e2f")], ModelsDocuments.draftsPathWider),
+                (["models", "info", kindPath("Qwen3-8B/mlx/1a2b3c4d5e6f")], ModelsDocuments.draftsPathChat),
+                (["models", "info", draftBase], ModelsDocuments.draftsSetBase),
+                (["models", "info", "Gemma4-12B/mlx/7a8b9c0d1e2f"], ModelsDocuments.draftsSetWider),
+                (["models", "info", "Qwen3-8B/mlx/1a2b3c4d5e6f"], ModelsDocuments.draftsSetChat),
+            ],
+            commands: [
+                (["__complete", "config", "set-backend", "Gemma4-E4B-4bit", "--draft"], ModelsDocuments.draftsCompleteBase),
+                (["__complete", "config", "set-backend", "Gemma4-12B-4bit", "--draft"], ModelsDocuments.draftsCompleteWider),
+                (["__complete", "config", "set-backend", "Qwen3-8B-4bit", "--draft"], ModelsDocuments.draftsCompleteChat),
+            ])
+    }
+
     // MARK: - What an MLX conversion runs (the CLI's 53f-53m)
 
     static let routeLM = "Llama3.2-1B-Instruct/safetensors/edaba290ce7f"

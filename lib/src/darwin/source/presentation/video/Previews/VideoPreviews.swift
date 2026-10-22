@@ -101,5 +101,66 @@ enum VideoPreview {
         said.forEach { progress.apply($0) }
         return progress
     }
+
+    // MARK: - The store's video models and their engines (the CLI's 53l)
+
+    static let mlxVideo = "Wan2.2-TI2V-5B/mlx/5e6f708192a3"
+    static let pipeline = "Wan2.2-TI2V-5B/pipeline/9b1e47c0a2f6"
+    static let smallPipeline = "Wan2.1-T2V-1.3B/pipeline/7c21e0d4b9a3"
+
+    /// The store recorded from the binary built with the CLI's 53l and 53m
+    /// (tests/business/reads/Fixtures/media-*): a model folder holding a
+    /// diffusers pipeline beside its MLX video model, a second pipeline, and
+    /// the MLX one made the default.
+    static let store = PreviewRunner(
+        reads: [(["models", "list"], VideoDocuments.mediaList)],
+        commands: [(["config", "get", "models.default_video"], VideoDocuments.defaultVideo)])
+
+    /// The same store before any model was made the default: `config get
+    /// models.default_video` printing nothing.
+    static let storeNoDefault = PreviewRunner(
+        reads: [(["models", "list"], VideoDocuments.mediaList)],
+        commands: [(["config", "get", "models.default_video"], VideoDocuments.defaultVideoUnset)])
+
+    /// The store's video models read into `model`, as coming into view does.
+    static func reading(_ model: VideoViewModel, over runner: PreviewRunner = store) async {
+        model.reader = runner
+        await model.readModels()
+    }
+
+    /// The sheet on a new clip of the module's tests' prompt, over the
+    /// store, `choice` picked as a person picks it.
+    static func newClip(_ model: VideoViewModel, choosing choice: VideoViewModel.ModelChoice, over runner: PreviewRunner = store) async {
+        await reading(model, over: runner)
+        model.newClip()
+        model.form.prompt = "A lighthouse at dusk"
+        model.choose(choice)
+    }
+
+    /// A record the binary wrote on each engine (tests/business/media/
+    /// Fixtures/clip-<engine>.json), written into `folder` as it left it --
+    /// its media folder this preview's -- beside a stand-in clip.
+    @discardableResult
+    static func recorded(_ document: String, in folder: URL) -> String {
+        let text = document.replacingOccurrences(of: "/Users/someone/Movies/Apogee", with: folder.path)
+        guard let output = (try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])?["output"] as? String else {
+            return ""
+        }
+        try? Data("mp4".utf8).write(to: URL(fileURLWithPath: output))
+        try? text.write(toFile: output + ".json", atomically: true, encoding: .utf8)
+        return output
+    }
+
+    /// The library holding the clips the binary made on PyTorch and on MLX,
+    /// with `selecting` picked.
+    static func engines(_ name: String, selecting: String? = nil) -> VideoViewModel {
+        let home = home(name)
+        let folder = home.appendingPathComponent("Movies/Apogee")
+        recorded(VideoDocuments.clipTorch, in: folder)
+        recorded(VideoDocuments.clipMLX, in: folder)
+        let model = connected(home, starter: PreviewJobs())
+        if let picked = selecting.flatMap({ clip($0, of: model) }) { model.select(picked) }
+        return model
+    }
 }
 #endif

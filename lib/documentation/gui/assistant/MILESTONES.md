@@ -1106,3 +1106,71 @@ Since the CLI's 53e, each set's record says its kind, and `models info` and `mod
 **Not done:**
 - Sessions, Suites, Settings and Training still list every backend whatever its kind, so an embedding entry can be offered there as a chat backend. The CLI refuses the chat.
 - The Backends table does not show the kind; the document scoped it to Stored weights.
+
+### 2026-10-22 — `mlx-engines-and-drafters` (backlog item 3b): engines and drafters in the app
+
+**Why.** Three of the CLI's items changed how something runs rather than what is stored:
+- a drafter pairs with its MLX base (53i);
+- `video generate` gains an MLX engine (53l);
+- `voice say` gains one too (53m).
+
+The app had no draft field on a backend. Its clip and say sheets built their commands with no engine, and its records read none. Since 53m, once the user's Kokoro is converted, a bare `voice say` is refused because two voice models stand, and the Voice page ran exactly that.
+
+- [x] **Drafters.**
+  - **Pair with its base…** works on a drafter in Stored weights. Its sheet offers only the backends the binary's own completion offers for it. It runs `config set-backend <base> --draft <drafter path>` and reads the result back. With no base registered, it says so and offers nothing.
+  - A paired drafter says whose draft it is and offers **Unpair from <backend>**.
+  - A backend's details have a Drafter section in the CLI's own words, with **Unpair** (`--draft ""`).
+  - The draft is read from the backend's `models info` `draft:` line (`BackendDraft`). The Backends tab re-reads when shown, so a pairing made in Stored weights appears there.
+- [x] **The clip sheet.**
+  - Its model field is a picker: the default, each stored video model, or another.
+  - A line says which engine the run uses, from the chosen model's kind.
+  - `-m` and `--engine` are passed only where one folder holds both a pipeline and its MLX conversion, since the binary refuses `-m <folder>` then.
+  - The default is read with `config get models.default_video`. With none set, the sheet says the CLI will refuse.
+- [x] **The say sheet.**
+  - When the store holds more than one voice model, a picker appears, PyTorch first. The command passes `-m <handle>`, and `--engine` where Kokoro sits beside its MLX build.
+  - With one voice model the command is the bare one, as before.
+- [x] **The pages.** A clip's and a speech's page say the record's engine and its MLX versions when the record states one. A record with no `engine` is PyTorch and reads exactly as before (`MediaEngine`, read additively by `ClipRecord` and `SpeechRecord`). An MLX clip's first fact is labelled "Model", not "Pipeline".
+- [x] **Recorded from the branch's binary, nothing hand-written,** over sandbox homes in scratch, the home written `/Users/someone/.apogee`:
+  - `drafts-*`: the list, the drafter's and the backend's infos before and after pairing, the three completions, and the pair and unpair output.
+  - `media-*`: the list, both voice models' infos, and the default video set and unset.
+  - Four real records (`clip-torch`, `clip-mlx`, `speech-torch`, `speech-mlx`), written by the binary over the CLI's own stub runtimes and a stub ffmpeg, as `cli.video_lifecycle` sets them up.
+  - `engine-command-verdicts.txt`: 21 commands, 13 taken and 8 refused as evidence. The refusals include the bare `voice say` naming both models, `-m <folder>` over two models, and the wrong `--engine`.
+  - `drafter-pairing-verdicts.txt`: 5 commands. Pairing by path, pairing by handle and the clear are taken. A 3840-wide base and an mlx-lm `chat` base are refused.
+  - The 163 store-command verdicts came back unchanged.
+- [x] **Previews.** 18 new previews, and 3a's drafter preview renamed. The embedded documents are byte-identical to the fixtures. `PresentationVideo` now depends on `BusinessReads` and `DataProtocol`, added to the project by hand with no re-sort. Its runner is a settable `reader`, as `DownloadsViewModel`'s is.
+
+**Decisions made while building** (2026-10-22, each recorded for veto):
+- **The open call's default, taken:** the engine is shown, not chosen, except where one folder holds both. Then the sheet offers the choice, PyTorch first, and names the set's handle with `-m`.
+- **The pairing passes the drafter's path,** as the CLI's own `models info` suggests. Completion only chooses which bases to offer, and both forms are recorded as taken.
+- **Unpair is offered from the drafter too,** beyond the document. It runs the same command, held to the same verdicts.
+- **The clip sheet's picker shows on older binaries too,** wherever the store lists a video model. The commands for the same picks are unchanged.
+
+**Verified.**
+- 24 new cases:
+
+  | Suite | Cases |
+  |---|---|
+  | `Engines` | 6 |
+  | `VideoEngines` | 8 |
+  | `VoiceEngines` | 4 |
+  | `DrafterPairing` | 6 |
+
+  3a's `drafterPairsLater` became `drafterPairs`.
+- The bundles touched all passed:
+
+  | Bundle | Passed |
+  |---|---|
+  | `BusinessMediaTests` | 15 of 15 |
+  | `PresentationModelsTests` | 57 of 57 |
+  | `PresentationVideoTests` | 13 of 13 |
+  | `PresentationVoiceTests` | 8 of 8 |
+  | `PresentationAppTests` | 3 of 3 |
+  | the layering check | 25 of 25 |
+
+- `check-previews` finds nothing in models, video, voice or app.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,839 tests and the macOS app's 383 cases passed, with no Swift warning.
+
+**Not done:**
+- `video compose`, and the engine on Run again, are untouched. The CLI replays a record's engine itself.
+- The Backends table does not mark a paired backend, and a drafter cannot yet be paired from the backend's side.
+- There is no preview of a pairing that can no longer draft, since no recording of that state exists.

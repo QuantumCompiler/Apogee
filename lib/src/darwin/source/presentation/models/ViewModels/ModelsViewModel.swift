@@ -227,6 +227,17 @@ public final class ModelsViewModel {
     /// The facts the details pane shows: the CLI's record, in its words.
     public var facts: [Field] { info?.fields ?? [] }
 
+    /// The record as the details draw it: its drafter's lines apart, where
+    /// it has one, since the drafter has its own place there (`draft`).
+    public var recordFacts: [Field] {
+        draft == nil ? facts : facts.filter { $0.label != "draft" && $0.label != "drafter" }
+    }
+
+    /// The backend's drafter, where its `models info` names one (the CLI's
+    /// 53i): an `mlx` backend paired with one. `nil` everywhere else, and on
+    /// every backend of a binary before 53i.
+    public var draft: BackendDraft? { info.flatMap(BackendDraft.init) }
+
     /// The typed facts, where the document carries them (the CLI's 52e): the
     /// memory a conversation holds, the window, the lineage. Before 52e, or
     /// for a backend's document, there are none and the record stands alone.
@@ -310,6 +321,12 @@ public final class ModelsViewModel {
         removing = nil
         await run(["config", "delete-backend", name], doing: "Removing \(name)", done: "Removed the backend \(name)")
         if selected == name { close() }
+    }
+
+    /// `config set-backend <backend> --draft ""`: the backend lets its
+    /// drafter go, and answers alone again (the CLI's 53i). Read back.
+    public func unpair(_ row: ModelRow) async {
+        await run(["config", "set-backend", row.backend, "--draft", ""], doing: "Unpairing", done: "\(row.backend) drafts with nothing now")
     }
 
     /// Whether the model a backend belongs to can be renamed whole: the
@@ -398,6 +415,33 @@ public final class ModelsViewModel {
     public func opensSessions(_ row: ModelRow) -> Bool {
         guard !row.isStored, row.mlxKind?.chats != false else { return false }
         return row.roles.contains("chat") || row.section == "cloud" || row.group == "gguf" || row.group == "mlx"
+    }
+}
+
+/// A backend's drafter, as its `models info` states it (the CLI's 53i): the
+/// `draft:` line -- the drafter's directory, as the config holds it, then what
+/// the CLI says of it beside the base, drafting or why it cannot -- and the
+/// `drafter:` line, what the drafter is. A backend with no drafter, and every
+/// backend of a binary before 53i, has none.
+public struct BackendDraft: Equatable, Sendable {
+    /// The drafter's directory: what `--draft` was given, written absolute.
+    public let path: String
+    /// The CLI's words after it: `drafts beside it through mlx-vlm's
+    /// speculative path (…)`, or `cannot draft beside it: …`.
+    public let said: String
+    /// The CLI's line for the drafter itself, where it reads one.
+    public let drafter: String?
+
+    public init?(_ info: ModelInfo) {
+        guard let line = info.field("draft"), !line.isEmpty else { return nil }
+        if let split = line.range(of: " -- ") {
+            path = String(line[..<split.lowerBound])
+            said = String(line[split.upperBound...])
+        } else {
+            path = line
+            said = ""
+        }
+        drafter = info.field("drafter")
     }
 }
 

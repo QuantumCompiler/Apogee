@@ -1,5 +1,6 @@
 import BusinessJobs
 import BusinessMedia
+import BusinessReads
 import DataPreferences
 import Foundation
 import Observation
@@ -20,6 +21,15 @@ public final class VideoViewModel {
 
         public var id: String { rawValue }
         public var title: String { self == .clips ? "Clips" : "Compositions" }
+    }
+
+    /// What the sheet's model picker holds: the default the CLI falls back
+    /// to (`models.default_video`), one of the store's video models, or
+    /// another the person names.
+    public enum ModelChoice: Hashable, Sendable {
+        case byDefault
+        case model(String)
+        case another
     }
 
     /// The install the CLI said a run needs, waiting on the person's yes.
@@ -44,6 +54,17 @@ public final class VideoViewModel {
     public var say: (@MainActor (String) -> Void)?
     /// Whether the build streams a run's steps (the CLI's 52b).
     public var streams: @MainActor () -> Bool = { false }
+    /// Reads the store's video models: the composition's runner.
+    public var reader: (any CommandRunning)?
+    /// The store's video models, as `models list` states them, in the order
+    /// the sheet offers them (the CLI's 53l): each pipeline on PyTorch, each
+    /// MLX video model on MLX. Empty before the read, and where the store
+    /// holds none -- then the sheet names a pipeline as typed, as before.
+    public private(set) var models: [MediaModel] = []
+    /// `models.default_video`, as `config get` prints it; `nil` when unset.
+    public private(set) var defaultModel: String?
+    /// The sheet's model, as picked.
+    public private(set) var choice: ModelChoice = .byDefault
 
     private let starter: any JobStarting
     private let preferences: Preferences
@@ -61,6 +82,7 @@ public final class VideoViewModel {
     public func connect(binary: URL?) {
         self.binary = binary
         refresh()
+        Task { await readModels() }
     }
 
     // MARK: - The library
@@ -73,6 +95,26 @@ public final class VideoViewModel {
 
     public func appeared() {
         refresh()
+        Task { await readModels() }
+    }
+
+    /// The store's video models (`models list`) and the default
+    /// (`config get models.default_video`): what the sheet offers, and the
+    /// engine each runs on.
+    public func readModels() async {
+        guard let reader, let binary else { return }
+        if let list = await reader.read(binary: binary, ["models", "list"]).document {
+            models = MediaModel.offered(
+                ModelRow.list(from: list).filter(\.isStored).compactMap { row in
+                    MediaEngine.video(format: row.format, kind: row.mlxKind?.word).map { MediaModel(handle: row.model, engine: $0) }
+                })
+        }
+        if case .done(let text) = await reader.command(binary: binary, ["config", "get", "models.default_video"]) {
+            let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            defaultModel = value.isEmpty ? nil : value
+        }
+        // A model picked that the store no longer holds goes back to the default.
+        if case .model(let handle) = choice, !models.contains(where: { $0.handle == handle }) { choose(.byDefault) }
     }
 
     /// The records, read again from the folders.
@@ -111,7 +153,77 @@ public final class VideoViewModel {
     /// The sheet, fresh, or from a clip: run again or continue it.
     public func newClip(from clip: ClipRecord? = nil, extend: Bool = false) {
         form = clip.map { ClipForm.from($0, extend: extend) } ?? ClipForm()
+        choice = .byDefault
         sheetOpen = true
+    }
+
+    /// Picks the sheet's model: the default (nothing passed), one of the
+    /// store's by its handle, or another typed by the person. Where the
+    /// picked model's folder holds a pipeline beside its MLX conversion, the
+    /// engine is the person's choice and passed as `--engine`; anywhere else
+    /// the directory decides and the sheet only says it.
+    public func choose(_ choice: ModelChoice) {
+        self.choice = choice
+        form.engine = nil
+        switch choice {
+        case .byDefault, .another:
+            form.model = ""
+        case .model(let handle):
+            form.model = handle
+            if let model = models.first(where: { $0.handle == handle }), MediaModel.choosesEngine(model, among: models) {
+                form.engine = model.engine
+            }
+        }
+    }
+
+    /// How the picker names a model among the store's.
+    public func label(_ model: MediaModel) -> String { model.label(among: models) }
+
+    /// The sheet's engine line: what the clip will run on, as the model's
+    /// directory says -- the CLI decides, the sheet says it. `nil` where
+    /// nothing is known to say: no video model read, or a record run again
+    /// that states no engine.
+    public var engineLine: String? {
+        switch form.start {
+        case .again(let record), .extend(let record):
+            guard let ran = clips.first(where: { $0.output == record || ($0.sidecar ?? $0.output + ".json") == record }),
+                let engine = ran.recordedEngine
+            else { return nil }
+            return "Runs on \(engine.name), as its record did: its own model, \(ran.model)."
+        case .new:
+            break
+        }
+        switch choice {
+        case .byDefault:
+            guard let name = defaultModel else {
+                return models.isEmpty
+                    ? nil
+                    : "No default video model is set, so the CLI refuses a clip that names none: pick one."
+            }
+            guard let model = MediaModel.named(name, in: models) else {
+                return "The default, \(name), runs on what its directory is."
+            }
+            return "The default, \(model.handle), runs on " + Self.runsOn(model.engine) + "."
+        case .model(let handle):
+            guard let model = models.first(where: { $0.handle == handle }) else { return nil }
+            var line = "Runs on " + Self.runsOn(model.engine) + "."
+            if let engine = form.engine {
+                line += " \(model.folder) holds a pipeline and its MLX conversion, so the engine is yours: --engine \(engine.word)."
+            }
+            return line
+        case .another:
+            return "Runs on what its directory is: PyTorch for a diffusers pipeline, MLX for an MLX video model."
+        }
+    }
+
+    /// An engine and what runs it on there, in the CLI's words (`on MLX
+    /// (mlx-video)`).
+    static func runsOn(_ engine: MediaEngine) -> String {
+        switch engine {
+        case .torch: "PyTorch, through diffusers: a diffusers pipeline"
+        case .mlx: "MLX, through mlx-video: an MLX video model"
+        case .other(let word): word
+        }
     }
 
     /// Where the sheet's clip will be written: a free name in `~/Movies/Apogee`.

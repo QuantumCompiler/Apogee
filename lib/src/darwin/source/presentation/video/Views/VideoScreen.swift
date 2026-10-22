@@ -223,7 +223,11 @@ struct ClipPage: View {
     }
 
     static func facts(_ clip: ClipRecord) -> [(String, String)] {
-        var facts: [(String, String)] = [("Pipeline", clip.model), ("Mode", clip.mode == "i2v" ? "from an image" : "from text")]
+        // An MLX video model is no pipeline: its fact is named for what it is.
+        var facts: [(String, String)] = [(clip.engine == .mlx ? "Model" : "Pipeline", clip.model), ("Mode", clip.mode == "i2v" ? "from an image" : "from text")]
+        // What it ran on, where the record says (the CLI's 53l); a record
+        // from before there were two engines is drawn as it always was.
+        if let engine = clip.recordedEngine { facts.insert(("Engine", engine.said(versions: clip.versions)), at: 1) }
         if let width = clip.width, let height = clip.height { facts.append(("Size", "\(width) × \(height)")) }
         if let duration = clip.duration, let fps = clip.fps { facts.append(("Length", "\(ClipFormWords.number(duration)) s at \(fps) fps")) }
         if let steps = clip.steps { facts.append(("Steps", String(steps) + (clip.preset.map { " (\($0))" } ?? ""))) }
@@ -261,7 +265,20 @@ struct ClipSheet: View {
                             }
                         }
                     }
-                    TextField("Pipeline", text: $model.form.model, prompt: Text("the default video pipeline"))
+                    if model.models.isEmpty {
+                        TextField("Pipeline", text: $model.form.model, prompt: Text("the default video pipeline"))
+                    } else {
+                        Picker("Model", selection: Binding(get: { model.choice }, set: { model.choose($0) })) {
+                            Text(model.defaultModel.map { "The default (\($0))" } ?? "The default").tag(VideoViewModel.ModelChoice.byDefault)
+                            ForEach(model.models) { video in
+                                Text(model.label(video)).tag(VideoViewModel.ModelChoice.model(video.handle))
+                            }
+                            Text("Another…").tag(VideoViewModel.ModelChoice.another)
+                        }
+                        if model.choice == .another {
+                            TextField("Model", text: $model.form.model, prompt: Text("a store handle, id or model, or a path"))
+                        }
+                    }
                 }
                 Picker("Quality", selection: $model.form.preset) {
                     Text("As set").tag(ClipForm.Preset.none)
@@ -277,6 +294,12 @@ struct ClipSheet: View {
                     .lineLimit(1...4)
                     .disabled(model.form.noLoRAs)
                 Toggle("No LoRAs", isOn: $model.form.noLoRAs)
+            }
+            if let line = model.engineLine {
+                Label(line, systemImage: "cpu")
+                    .font(.apogeeSmall)
+                    .foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Text("Written to \(model.plannedOutput.path) -- never over a file that is there.")
                 .font(.apogeeSmall)
@@ -443,6 +466,66 @@ struct ConsentSheet: View {
         .task {
             if let clip = VideoPreview.clip("lighthouse.mp4", of: model) { model.newClip(from: clip, extend: true) }
         }
+}
+
+#Preview("New clip: the default, an MLX video model") {
+    let model = VideoPreview.library("sheet-default")
+    ClipSheet(model: model)
+        .task { await VideoPreview.newClip(model, choosing: .byDefault) }
+}
+
+#Preview("New clip: no default set, so a model is to be picked") {
+    let model = VideoPreview.library("sheet-no-default")
+    ClipSheet(model: model)
+        .task { await VideoPreview.newClip(model, choosing: .byDefault, over: VideoPreview.storeNoDefault) }
+}
+
+#Preview("New clip: a pipeline beside its MLX conversion, MLX picked: --engine mlx") {
+    let model = VideoPreview.library("sheet-both")
+    ClipSheet(model: model)
+        .task { await VideoPreview.newClip(model, choosing: .model(VideoPreview.mlxVideo)) }
+}
+
+#Preview("New clip: the same folder's pipeline picked: --engine torch") {
+    let model = VideoPreview.library("sheet-both-torch")
+    ClipSheet(model: model)
+        .task { await VideoPreview.newClip(model, choosing: .model(VideoPreview.pipeline)) }
+}
+
+#Preview("New clip: a pipeline of its own, its engine said") {
+    let model = VideoPreview.library("sheet-pipeline")
+    ClipSheet(model: model)
+        .task { await VideoPreview.newClip(model, choosing: .model(VideoPreview.smallPipeline)) }
+}
+
+#Preview("New clip: another model, named as typed") {
+    let model = VideoPreview.library("sheet-another")
+    ClipSheet(model: model)
+        .task { await VideoPreview.newClip(model, choosing: .another) }
+}
+
+#Preview("Run again, from a clip made on MLX") {
+    let model = VideoPreview.engines("sheet-again-mlx")
+    ClipSheet(model: model)
+        .task {
+            if let clip = VideoPreview.clip("lighthouse-mlx.mp4", of: model) { model.newClip(from: clip) }
+        }
+}
+
+#Preview("A clip made on MLX") {
+    let model = VideoPreview.engines("page-mlx")
+    if let clip = VideoPreview.clip("lighthouse-mlx.mp4", of: model) {
+        ClipPage(model: model, clip: clip)
+            .frame(width: 800, height: 760)
+    }
+}
+
+#Preview("A clip made on PyTorch, its engine recorded") {
+    let model = VideoPreview.engines("page-torch")
+    if let clip = VideoPreview.clip("lighthouse-pytorch.mp4", of: model) {
+        ClipPage(model: model, clip: clip)
+            .frame(width: 800, height: 760)
+    }
 }
 
 #Preview("Install what video needs") {

@@ -1,0 +1,21 @@
+taken	video generate A lighthouse at dusk -o OUT.mp4
+taken	video generate A lighthouse at dusk -o OUT.mp4 -m Wan2.1-T2V-1.3B/pipeline/7c21e0d4b9a3
+taken	video generate A lighthouse at dusk -o OUT.mp4 -m Wan2.2-TI2V-5B/pipeline/9b1e47c0a2f6 --engine torch
+taken	video generate A lighthouse at dusk -o OUT.mp4 -m Wan2.2-TI2V-5B/mlx/5e6f708192a3 --engine mlx
+taken	video generate A lighthouse at dusk -o OUT.mp4 -m Wan2.2-TI2V-5B/mlx/5e6f708192a3
+taken	video generate A lighthouse at dusk -o OUT.mp4 -m Wan2.2-TI2V-5B/pipeline/9b1e47c0a2f6
+refused: apogee video: --engine torch: 'Wan2.2-TI2V-5B/mlx/5e6f708192a3' is an MLX video model, which runs on MLX (mlx-video), not PyTorch -- PyTorch runs a diffusers pipeline: 'apogee models pull <owner>/<repo>' stores one (Wan-AI's are its repositories ending -Diffusers), and 'apogee train setup --with video' installs what runs it	video generate A lighthouse at dusk -o OUT.mp4 -m Wan2.2-TI2V-5B/mlx/5e6f708192a3 --engine torch
+refused: apogee video: --engine mlx: 'Wan2.2-TI2V-5B/pipeline/9b1e47c0a2f6' is a diffusers pipeline, which runs on PyTorch, not MLX -- MLX runs an MLX video model: Wan's original layout converted with 'apogee models convert <set> --mlx', after 'apogee train setup --with mlx-video'	video generate A lighthouse at dusk -o OUT.mp4 -m Wan2.2-TI2V-5B/pipeline/9b1e47c0a2f6 --engine mlx
+refused: apogee video: 'Wan2.2-TI2V-5B' holds 2 video models -- name one:	video generate A lighthouse at dusk -o OUT.mp4 -m Wan2.2-TI2V-5B
+refused: apogee video: 'Wan2.2-TI2V-5B' holds 2 video models -- name one:	video generate A lighthouse at dusk -o OUT.mp4 -m Wan2.2-TI2V-5B --engine mlx
+refused: apogee voice: the store holds 2 voice models -- name one with --model:	voice say Hello there. How are you? -o OUT.wav
+taken	voice say Hello there. How are you? -o OUT.wav -m Kokoro-82M/voice/5f3a2c91d0e4 --engine torch
+taken	voice say Hello there. How are you? -o OUT.wav -m Kokoro-82M/voice/5f3a2c91d0e4
+taken	voice say Hello there. How are you? -o OUT.wav -m Kokoro-82M/mlx/6f708192a3b4
+taken	voice say Hello there. How are you? -o OUT.wav -m Kokoro-82M/mlx/6f708192a3b4 --engine mlx
+taken	voice say Hello there. How are you? -o OUT.wav -m Kokoro-82M/voice/5f3a2c91d0e4 --engine torch --voice bf_emma --speed 1.2
+taken	voice say Hello there. How are you? -o OUT.wav -m Kokoro-82M/mlx/6f708192a3b4 --engine mlx --voice bf_emma --speed 1.2
+refused: apogee voice: --engine torch: 'Kokoro-82M/mlx/6f708192a3b4' is an MLX voice model, which speaks on MLX (mlx-audio), not PyTorch -- PyTorch speaks with a voice model as Kokoro publishes it: 'apogee models pull hexgrad/Kokoro-82M' stores one, and 'apogee train setup --with voice' installs what runs it	voice say Hello there. How are you? -o OUT.wav -m Kokoro-82M/mlx/6f708192a3b4 --engine torch
+refused: apogee voice: 'Kokoro-82M' holds 2 voice models -- name one:	voice say Hello there. How are you? -o OUT.wav -m Kokoro-82M
+refused: apogee voice: 'Kokoro-82M' holds 2 voice models -- name one:	voice say Hello there. How are you? -o OUT.wav -m Kokoro-82M --engine mlx
+taken	voice say Hello there. How are you? -o OUT.wav (one voice model in the store)

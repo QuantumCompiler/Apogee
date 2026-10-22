@@ -26,7 +26,12 @@ public final class VoiceViewModel {
     public private(set) var speeches: [SpeechRecord] = []
     public private(set) var skipped: [MediaLibrary.Skipped] = []
     public private(set) var selected: String?
-    /// The voice model the store holds (its backend's name), and its voices.
+    /// The store's voice models, as `models list` states them, in the order
+    /// the sheet offers them (the CLI's 53m): Kokoro as hexgrad publishes it
+    /// on PyTorch, its MLX build on MLX -- PyTorch first.
+    public private(set) var models: [MediaModel] = []
+    /// The voice model the sheet speaks with, by its store handle -- the
+    /// store's one, or the one picked when it holds more -- and its voices.
     public private(set) var voiceModel: String?
     public private(set) var voices: [VoiceGroup] = []
     public var sheetOpen = false
@@ -81,16 +86,71 @@ public final class VoiceViewModel {
         await readVoices()
     }
 
-    /// The store's voice model (`models list`'s voice row) and its voices
-    /// (`models info <it>`'s `voices` field, one language a line).
+    /// The store's voice models (`models list`'s voice rows, and since the
+    /// CLI's 53m its MLX voice models) and the picked one's voices.
     private func readVoices() async {
         guard let binary, let list = await runner.read(binary: binary, ["models", "list"]).document else { return }
-        voiceModel = ModelRow.list(from: list).first { $0.format == "voice" }?.name
-        guard let voiceModel, let info = await runner.read(binary: binary, ["models", "info", voiceModel]).document else {
+        models = MediaModel.offered(
+            ModelRow.list(from: list).filter(\.isStored).compactMap { row in
+                MediaEngine.voice(format: row.format, kind: row.mlxKind?.word).map { MediaModel(handle: row.model, engine: $0) }
+            })
+        if voiceModel == nil || !models.contains(where: { $0.handle == voiceModel }) { voiceModel = models.first?.handle }
+        await readVoices(of: voiceModel)
+    }
+
+    /// A voice model's voices: `models info <it>`'s `voices` field, one
+    /// language a line -- an MLX build's own presets as the CLI lists them.
+    private func readVoices(of handle: String?) async {
+        guard let binary, let handle, let info = await runner.read(binary: binary, ["models", "info", handle]).document else {
             voices = []
             return
         }
+        guard handle == voiceModel else { return }
         voices = Self.voices(in: ModelInfo(document: info).field("voices") ?? "")
+        if !voice.isEmpty && !voices.contains(where: { $0.voices.contains(voice) }) { voice = "" }
+    }
+
+    /// Picks the voice model the sheet speaks with, and reads its voices: a
+    /// voice the new one does not carry goes back to the default.
+    public func choose(model handle: String) async {
+        guard models.contains(where: { $0.handle == handle }), handle != voiceModel else { return }
+        voiceModel = handle
+        await readVoices(of: handle)
+    }
+
+    /// The picked model, as the store lists it.
+    public var chosen: MediaModel? { voiceModel.flatMap { handle in models.first { $0.handle == handle } } }
+
+    /// How the picker names a model among the store's.
+    public func label(_ model: MediaModel) -> String { model.label(among: models) }
+
+    /// `--engine`, where the person chose it: the picked model's folder holds
+    /// Kokoro beside its MLX build. Anywhere else the directory decides and
+    /// nothing is passed (the CLI's flag only names that engine, its 53m).
+    public var chosenEngine: MediaEngine? {
+        guard models.count > 1, let chosen, MediaModel.choosesEngine(chosen, among: models) else { return nil }
+        return chosen.engine
+    }
+
+    /// The sheet's engine line: what the speech will be spoken on, as the
+    /// model's directory says; `nil` with no voice model.
+    public var engineLine: String? {
+        guard let chosen else { return nil }
+        var line = "Speaks on " + Self.speaksOn(chosen.engine) + "."
+        if let engine = chosenEngine {
+            line += " \(chosen.folder) holds it and its MLX build, so the engine is yours: --engine \(engine.word)."
+        }
+        return line
+    }
+
+    /// An engine and what speaks on it there, in the CLI's words (`on MLX
+    /// (mlx-audio)`).
+    static func speaksOn(_ engine: MediaEngine) -> String {
+        switch engine {
+        case .torch: "PyTorch, through Kokoro: the voice model as Kokoro publishes it"
+        case .mlx: "MLX, through mlx-audio: an MLX voice model"
+        case .other(let word): word
+        }
     }
 
     /// `American English: af_heart, af_bella` lines, as the model lists them.
@@ -133,11 +193,18 @@ public final class VoiceViewModel {
         return MediaLibrary.freePath(in: outputFolder, base: stem.isEmpty ? "speech" : stem, ext: "wav")
     }
 
-    /// `voice say <text> -o <wav>`, with the voice and speed when chosen.
+    /// `voice say <text> -o <wav>`, with the voice and speed when chosen --
+    /// and where the store holds more than one voice model, the one picked
+    /// (`-m`, by its handle), which the CLI asks for rather than guess (its
+    /// 53m); with one, nothing is named, as before.
     public var plannedArguments: [String]? {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
         var arguments = ["voice", "say", text, "-o", plannedOutput.path]
+        if models.count > 1, let voiceModel {
+            arguments += ["-m", voiceModel]
+            if let engine = chosenEngine { arguments += ["--engine", engine.word] }
+        }
         if !voice.isEmpty { arguments += ["--voice", voice] }
         if speed != 1 { arguments += ["--speed", String(format: "%g", speed)] }
         return arguments

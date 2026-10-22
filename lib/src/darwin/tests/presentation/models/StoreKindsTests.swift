@@ -154,18 +154,18 @@ struct StoreKindsTests {
         #expect(try set(registered, Self.vision).mlxKind == .vision)
     }
 
-    @Test("a drafter offers nothing that runs it as chat: Pair with its base is the next item's, said with the command that pairs it today")
-    func drafterPairsLater() async throws {
+    @Test("a drafter offers nothing that runs it as chat: Pair with its base, said as the draft of the mlx backend over its base")
+    func drafterPairs() async throws {
         let (store, _) = await kinds()
         let set = try set(store, Self.drafter)
         let actions = store.actions(set)
-        #expect(actions.contains(.pairWithBase))
+        #expect(actions == [.pairWithBase, .checkFiles, .showInFinder, .delete], "not paired with any backend here")
         #expect(!actions.contains(.register) && !actions.contains { if case .useInSession = $0 { true } else { false } })
         let note = store.pairingNote(set)
-        #expect(note.contains("apogee config set-backend <that backend> --draft \(Self.path(Self.drafter))"))
+        #expect(note.hasPrefix("A drafter runs beside its base, as the draft of the mlx backend over it"))
         #expect(store.advice(set) == note)
         #expect(store.infos[Self.drafter]?.field("backends")?.contains("'apogee config set-backend <that backend> --draft <the path below>'") == true,
-                "the CLI's own models info names the same command")
+                "the CLI's own models info names the command the sheet runs")
     }
 
     @Test("a video model makes clips and can be the default, as a pipeline does; a voice model opens Voice")
