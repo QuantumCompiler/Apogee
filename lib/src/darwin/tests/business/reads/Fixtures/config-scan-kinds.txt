@@ -1,0 +1,16 @@
+EmbeddingGemma-300M-bf16   not registered
+                           /Users/someone/.apogee/models/EmbeddingGemma-300M/mlx/3c4d5e6f7081
+Gemma4-E4B-4bit            not registered
+                           /Users/someone/.apogee/models/Gemma4-E4B/mlx/2b3c4d5e6f70
+Gemma4-E4B-Assistant-bf16  not registered -- a drafter: it runs beside its base model, never alone
+                           /Users/someone/.apogee/models/Gemma4-E4B-Assistant/mlx/4d5e6f708192
+Kokoro-82M                 not registered -- a voice model: 'apogee voice say' speaks with it, never a chat backend
+                           /Users/someone/.apogee/models/Kokoro-82M/mlx/6f708192a3b4
+MusicGen-Small-4bit        not registered -- kind 'music', not one this apogee knows: nothing here runs it
+                           /Users/someone/.apogee/models/MusicGen-Small/mlx/708192a3b4c5
+Qwen3-8B-4bit              not registered
+                           /Users/someone/.apogee/models/Qwen3-8B/mlx/1a2b3c4d5e6f
+Wan2.2-TI2V-5B-4bit        not registered -- a video model: 'apogee video generate' runs it, never a chat backend
+                           /Users/someone/.apogee/models/Wan2.2-TI2V-5B/mlx/5e6f708192a3
+
+register the unregistered ones as backends: apogee config scan --register

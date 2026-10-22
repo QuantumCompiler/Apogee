@@ -230,4 +230,32 @@ struct ModelsViewModelTests {
         #expect(runner.calls.contains("run models rename Qwen3-VL-8B-Instruct qwen-vl"))
         #expect(!runner.calls.contains { $0.contains(ModelRow.unconfigured) })
     }
+
+    @Test("Roles offers an mlx entry over an embedding model to the embedding role, as the CLI's role verbs take any backend; no session opens on it")
+    func embeddingEntryForTheRole() async throws {
+        // Recorded from the binary built with the CLI's 53e-53m, once `config
+        // scan --register` registered a chat, a vision and an embedding set.
+        let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../business/reads/Fixtures")
+        func kinds(_ name: String) -> String {
+            (try? String(contentsOf: fixtures.appendingPathComponent("\(name).json"), encoding: .utf8)) ?? ""
+        }
+        let runner = ScriptedRunner()
+        runner.reading(["models", "list"], kinds("store-list-kinds-registered"))
+        runner.reading(["models", "status"], kinds("models-status-kinds-registered"))
+        let model = ModelsViewModel(runner: runner)
+        await model.connect(binary: Self.binary)
+        #expect(model.backends.sorted() == ["EmbeddingGemma-300M-bf16", "Gemma4-E4B-4bit", "Qwen3-8B-4bit"])
+        let role = try #require(model.roles.first { $0.role == "embedding" })
+        await model.assign(role, to: "EmbeddingGemma-300M-bf16")
+        #expect(runner.calls.contains("run config set-default-embedding EmbeddingGemma-300M-bf16"))
+
+        let embedding = try #require(model.rows.first { $0.backend == "EmbeddingGemma-300M-bf16" })
+        #expect(!model.opensSessions(embedding), "an embedding model answers no chat")
+        #expect(model.opensSessions(try #require(model.rows.first { $0.backend == "Gemma4-E4B-4bit" })))
+        #expect(model.opensSessions(try #require(model.rows.first { $0.backend == "Qwen3-8B-4bit" })))
+        #expect(!model.rows.filter(\.isStored).contains { model.opensSessions($0) }, "stored weights open none")
+        // A binary before 53e: every MLX backend opens a session, as before.
+        let older = await connected(ScriptedRunner())
+        #expect(older.rows.filter { $0.group == "mlx" }.allSatisfy { older.opensSessions($0) && $0.mlxKind == nil })
+    }
 }

@@ -241,7 +241,7 @@ struct ModelDetails: View {
 
     private func actions(_ row: ModelRow) -> some View {
         HStack(spacing: Spacing.s) {
-            if !row.isStored && (row.roles.contains("chat") || row.section == "cloud" || row.group == "gguf" || row.group == "mlx") {
+            if model.opensSessions(row) {
                 Button("Use in a new session") { model.useInSession?(row.backend) }
             }
             if row.group == "gguf" || row.group == "mlx" {
@@ -448,6 +448,23 @@ struct RenameModelSheet: View {
     RolesView(model: models)
         .frame(width: 960, height: 420)
         .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Roles: an MLX embedding entry offered to the embedding role") {
+    let models = ModelsPreview.models(over: ModelsPreview.kindsRegisteredRunner)
+    RolesView(model: models)
+        .frame(width: 960, height: 480)
+        .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Details: an MLX embedding entry, which opens no session") {
+    let models = ModelsPreview.models(over: ModelsPreview.kindsRegisteredRunner)
+    ModelDetails(model: models)
+        .frame(width: 380, height: 720)
+        .task {
+            await models.connect(binary: previewBinary)
+            if let row = models.rows.first(where: { $0.backend == "EmbeddingGemma-300M-bf16" }) { await models.select(row) }
+        }
 }
 
 #Preview("Each backend's kind, as marked") {

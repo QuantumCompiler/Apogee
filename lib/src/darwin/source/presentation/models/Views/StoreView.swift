@@ -115,7 +115,7 @@ struct StoreTable: View {
                 .padding(.vertical, Spacing.s)
                 HStack(spacing: Spacing.m) {
                     Text("SET").frame(maxWidth: .infinity, alignment: .leading)
-                    Text("FORMAT").frame(width: 96, alignment: .leading)
+                    Text("FORMAT").frame(width: 128, alignment: .leading)
                     Text("PRECISION").frame(width: 120, alignment: .leading)
                     Text("SIZE").frame(width: 72, alignment: .trailing)
                     Text("STATE").frame(width: 200, alignment: .leading)
@@ -146,7 +146,7 @@ struct StoreTable: View {
                     Button("Fold the snapshots conversions consumed") { store.showingAll = false }
                         .buttonStyle(.link).font(.apogeeSmall).padding(.horizontal, Spacing.l).padding(.top, Spacing.m)
                 }
-                Text("Every set in the model store, read with models list and models info. SafeTensors weights don't run as they are: convert them, and register what the conversion makes.")
+                Text("Every set in the model store, read with models list and models info. SafeTensors weights don't run as they are: convert them, and register what the conversion makes. An MLX set says what kind it is beside its format, and offers what runs that kind.")
                     .font(.apogeeSmall)
                     .foregroundStyle(Palette.textTertiary)
                     .padding(Spacing.l)
@@ -166,7 +166,7 @@ struct StoreTable: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Text(set.formatName).font(.apogeeMeta).frame(width: 96, alignment: .leading)
+                Text(set.formatLabel).font(.apogeeMeta).lineLimit(1).frame(width: 128, alignment: .leading)
                 Text(set.precision ?? "—").font(.apogeeMeta).foregroundStyle(Palette.textSecondary).lineLimit(1).frame(width: 120, alignment: .leading)
                 Text(store.bytes(set).map(Self.size) ?? "—").font(.apogeeMeta.monospacedDigit()).foregroundStyle(Palette.textSecondary).frame(width: 72, alignment: .trailing)
                 Text(set.state).font(.apogeeSmall).foregroundStyle(stateColor(set)).lineLimit(1).frame(width: 200, alignment: .leading)
@@ -189,7 +189,7 @@ struct StoreTable: View {
 }
 
 /// One set's details: its facts, where it came from and what came of it,
-/// its actions by format, the model it belongs to, and its command.
+/// its actions by format and kind, the model it belongs to, and its command.
 struct StoreDetails: View {
     @Bindable var store: StoreViewModel
     let shell: ShellViewModel
@@ -201,9 +201,12 @@ struct StoreDetails: View {
                 VStack(alignment: .leading, spacing: Spacing.m) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(([set.formatName.uppercased()] + (set.precision.map { [$0] } ?? [])).joined(separator: " · ")).font(.system(size: TypeScale.label, weight: .medium, design: .monospaced)).foregroundStyle(Palette.textTertiary)
+                            Text(header(set)).font(.system(size: TypeScale.label, weight: .medium, design: .monospaced)).foregroundStyle(Palette.textTertiary)
                             Text(set.handle).font(.apogeeCode.weight(.semibold)).textSelection(.enabled)
                             Text(set.state).font(.apogeeSmall).foregroundStyle(Palette.textSecondary)
+                            if set.mlxKind == .vision {
+                                Label("Reads images, through mlx-vlm", systemImage: "photo").font(.apogeeSmall).foregroundStyle(Palette.textSecondary)
+                            }
                         }
                         Spacer()
                         Button { store.close() } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
@@ -253,6 +256,15 @@ struct StoreDetails: View {
         }
     }
 
+    /// The format, an MLX set's kind as the CLI wrote it, and the precision:
+    /// `MLX · vision · 4-bit (affine, group 64)`.
+    private func header(_ set: StoredSet) -> String {
+        var parts = [set.formatName.uppercased()]
+        if set.format == "mlx", let kind = set.kind { parts.append(kind.word) }
+        if let precision = set.precision { parts.append(precision) }
+        return parts.joined(separator: " · ")
+    }
+
     /// The typed facts where the CLI states them, then its record's lines.
     private var facts: [Field] {
         guard let info = store.currentInfo else { return [] }
@@ -266,36 +278,60 @@ struct StoreDetails: View {
         return out + info.fields.filter { !skip.contains($0.label) && !(info.data != nil && ["size", "window", "cache"].contains($0.label)) }
     }
 
+    /// The set's own actions on one line, its files' on the next: only what
+    /// the view-model offers for its format and kind.
     @ViewBuilder private func actions(_ set: StoredSet) -> some View {
+        let offered = store.actions(set)
+        let files: [StoreViewModel.Action] = [.checkFiles, .showInFinder, .delete]
         HStack(spacing: Spacing.s) {
-            if store.converts(set, mlx: false) {
-                Button("Convert to GGUF…") { store.askToConvert(set, mlx: false) }
+            ForEach(Array(offered.filter { !files.contains($0) }.enumerated()), id: \.offset) { _, action in
+                button(action, set)
             }
-            if store.converts(set, mlx: true) {
-                Button("Convert to MLX…") { store.askToConvert(set, mlx: true) }
-            }
-            if store.isUnquantized(set) {
-                Button("Quantize…") { store.askToQuantize(set) }
-            }
-            if set.isRunnable && set.backend == nil && !set.consumed {
-                Button("Register…") { Task { await store.askToRegister(set) } }
-            }
-            if let backend = set.backend {
-                Button("Use in a new session") { useInSession(backend) }
-                Button("Remove the backend…") { store.askToRemoveBackend(backend) }
-            }
-            if set.format == "pipeline" {
-                Button("New clip with it") { shell.go(.video) }
-                Button("Make it the default") { Task { await store.makeDefaultVideo(set) } }
-            }
-            if set.format == "voice" { Button("Open Voice") { shell.go(.voice) } }
         }
         HStack(spacing: Spacing.s) {
+            ForEach(Array(offered.filter { files.contains($0) }.enumerated()), id: \.offset) { _, action in
+                button(action, set)
+            }
+        }
+    }
+
+    @ViewBuilder private func button(_ action: StoreViewModel.Action, _ set: StoredSet) -> some View {
+        switch action {
+        case .convertToGGUF:
+            Button("Convert to GGUF…") { store.askToConvert(set, mlx: false) }
+        case .convertToMLX:
+            Button("Convert to MLX…") { store.askToConvert(set, mlx: true) }
+        case .quantize:
+            Button("Quantize…") { store.askToQuantize(set) }
+        case .register:
+            Button("Register…") { Task { await store.askToRegister(set) } }
+        case .useInSession(let backend):
+            Button("Use in a new session") { useInSession(backend) }
+        case .useForEmbeddings(let backend):
+            Button("Use for embeddings") { Task { await store.useForEmbeddings(backend) } }
+                .help("apogee config set-default-embedding \(backend)")
+        case .removeBackend(let backend):
+            Button("Remove the backend…") { store.askToRemoveBackend(backend) }
+        case .newClip:
+            Button("New clip with it") { shell.go(.video) }
+        case .makeDefaultVideo:
+            Button("Make it the default") { Task { await store.makeDefaultVideo(set) } }
+                .help("apogee config set-default-video \(set.handle)")
+        case .openVoice:
+            Button("Open Voice") { shell.go(.voice) }
+        case .pairWithBase:
+            // The GUI's 3b pairs it; until then the button says where it goes.
+            Button("Pair with its base…") {}
+                .disabled(true)
+                .help("Comes with the app's next update: apogee config set-backend <its base's backend> --draft <its path>")
+        case .checkFiles:
             Button("Check the files") { store.check(set) }
                 .help("apogee models repair \(set.handle)")
+        case .showInFinder:
             if let path = store.path {
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
             }
+        case .delete:
             Button("Delete…") { store.askToDelete(set) }
         }
     }
@@ -343,8 +379,8 @@ struct RegisterSheet: View {
         if let form = store.register {
             VStack(alignment: .leading, spacing: Spacing.m) {
                 Text("Register \(form.handle)").font(.apogeeHeading)
-                Text("A backend sessions, suites and roles can use, running these weights on \(form.type == "mlx" ? "MLX" : "llama.cpp").")
-                    .font(.apogeeSmall).foregroundStyle(Palette.textSecondary)
+                Text(form.about)
+                    .font(.apogeeSmall).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true)
                 Form {
                     TextField("Name", text: Binding(get: { store.register?.name ?? "" }, set: { store.register?.name = $0 }))
                     TextField("Window", text: Binding(get: { store.register?.window ?? "" }, set: { store.register?.window = $0 }), prompt: Text("the model's own"))
@@ -406,7 +442,8 @@ struct RenameStoredSheet: View {
 
 /// The convert sheet: `models convert`, one command -- the precision, further
 /// levels, registering what is made -- with the steps it takes, each sized
-/// as an estimate.
+/// as an estimate; and for MLX, which converter runs: a towered set's towers
+/// kept through mlx-vlm, or Text only.
 struct ConvertSheet: View {
     @Bindable var store: StoreViewModel
     @Environment(\.dismiss) private var dismiss
@@ -416,18 +453,23 @@ struct ConvertSheet: View {
             VStack(alignment: .leading, spacing: Spacing.m) {
                 Text(form.mlx ? "Convert to MLX" : "Convert to GGUF").font(.apogeeHeading)
                 Text(form.handle).font(.apogeeCode).foregroundStyle(Palette.textTertiary)
-                Text(form.mlx
-                    ? "An MLX model, made by mlx-lm's converter on this Mac and kept beside these weights in the model's mlx/ folder."
-                    : "A GGUF, made by llama.cpp's converter on this Mac and kept beside these weights in the model's gguf/ folder. Quantized copies are made from it.")
+                Text(form.converterNote)
                     .font(.apogeeSmall).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true)
                 Form {
+                    if form.textOnlyOffered {
+                        Toggle("Text only: its language model alone, built by mlx-lm", isOn: Binding(get: { store.convertForm?.textOnly ?? false }, set: { store.convertForm?.textOnly = $0 }))
+                            .disabled(form.textOnlyOnly)
+                        if let said = form.towersSaid {
+                            Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                     Picker("Precision", selection: Binding(get: { store.convertForm?.precision }, set: { store.convertForm?.precision = $0 })) {
-                        Text("\(form.mlx ? "4bit" : "f16"), the default").tag(String?.none)
+                        Text("\(form.defaultPrecision), the default").tag(String?.none)
                         ForEach(form.precisions.dropFirst(), id: \.self) { Text($0 == "auto" ? "auto, as the weights are" : $0).tag(String?.some($0)) }
                     }
                     if let note = form.aloneNote {
                         Text(note).font(.apogeeSmall).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true)
-                    } else {
+                    } else if !form.levelChoices.isEmpty {
                         LabeledContent(form.mlx ? "Also make, one conversion each" : "Then quantize to") {
                             HStack(spacing: Spacing.xs) {
                                 ForEach(form.levelChoices, id: \.self) { level in
@@ -442,11 +484,13 @@ struct ConvertSheet: View {
                             .font(.apogeeMeta.monospaced())
                         }
                     }
-                    Toggle("Register what's made", isOn: Binding(get: { store.convertForm?.register ?? false }, set: { store.convertForm?.register = $0 }))
-                        .disabled(!form.levels.isEmpty)
-                    TextField("Names begin with", text: Binding(get: { store.convertForm?.baseName ?? "" }, set: { store.convertForm?.baseName = $0 }), prompt: Text(modelBaseName(form.handle.split(separator: "/").first.map(String.init) ?? "")))
-                    if form.mlx {
-                        TextField("Model type", text: Binding(get: { store.convertForm?.modelType ?? "" }, set: { store.convertForm?.modelType = $0 }), prompt: Text("as its config says"))
+                    if form.registers {
+                        Toggle("Register what's made", isOn: Binding(get: { store.convertForm?.register ?? false }, set: { store.convertForm?.register = $0 }))
+                            .disabled(!form.levels.isEmpty)
+                        TextField("Names begin with", text: Binding(get: { store.convertForm?.baseName ?? "" }, set: { store.convertForm?.baseName = $0 }), prompt: Text(modelBaseName(form.handle.split(separator: "/").first.map(String.init) ?? "")))
+                        if form.mlx {
+                            TextField("Model type", text: Binding(get: { store.convertForm?.modelType ?? "" }, set: { store.convertForm?.modelType = $0 }), prompt: Text("as its config says"))
+                        }
                     }
                 }
                 StepsList(steps: form.steps)
@@ -682,5 +726,188 @@ struct StepsList: View {
             await store.refresh()
             await store.select(ModelsPreview.snapshot)
         }
+}
+#Preview("Stored weights: every MLX kind, said beside its format") {
+    let store = ModelsPreview.kindsStore()
+    StoreTable(store: store)
+        .frame(width: 960, height: 560)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+        }
+}
+
+#Preview("Stored weights: the kinds config scan --register registered") {
+    let store = ModelsPreview.kindsRegisteredStore()
+    StoreTable(store: store)
+        .frame(width: 960, height: 560)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+        }
+}
+
+#Preview("A chat set: MLX · chat, registered as before") {
+    let store = ModelsPreview.kindsStore()
+    StoreDetails(store: store, shell: ModelsPreview.shell()) { _ in }
+        .frame(width: 380, height: 720)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            await store.select(ModelsPreview.kindChat)
+        }
+}
+
+#Preview("A vision set: it reads images, and registers as a chat model does") {
+    let store = ModelsPreview.kindsStore()
+    StoreDetails(store: store, shell: ModelsPreview.shell()) { _ in }
+        .frame(width: 380, height: 720)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            await store.select(ModelsPreview.kindVision)
+        }
+}
+
+#Preview("An embedding set: registered for the embedding role") {
+    let store = ModelsPreview.kindsStore()
+    StoreDetails(store: store, shell: ModelsPreview.shell()) { _ in }
+        .frame(width: 380, height: 720)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            await store.select(ModelsPreview.kindEmbedding)
+        }
+}
+
+#Preview("A registered embedding set: Use for embeddings, no session") {
+    let store = ModelsPreview.kindsRegisteredStore()
+    StoreDetails(store: store, shell: ModelsPreview.shell()) { _ in }
+        .frame(width: 380, height: 720)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            await store.select(ModelsPreview.kindEmbedding)
+        }
+}
+
+#Preview("A registered vision set: a session, and it reads images") {
+    let store = ModelsPreview.kindsRegisteredStore()
+    StoreDetails(store: store, shell: ModelsPreview.shell()) { _ in }
+        .frame(width: 380, height: 720)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            await store.select(ModelsPreview.kindVision)
+        }
+}
+
+#Preview("A drafter: nothing runs it as chat; its pairing comes next") {
+    let store = ModelsPreview.kindsStore()
+    StoreDetails(store: store, shell: ModelsPreview.shell()) { _ in }
+        .frame(width: 380, height: 720)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            await store.select(ModelsPreview.kindDrafter)
+        }
+}
+
+#Preview("A video model: New clip with it, Make it the default") {
+    let store = ModelsPreview.kindsStore()
+    StoreDetails(store: store, shell: ModelsPreview.shell()) { _ in }
+        .frame(width: 380, height: 720)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            await store.select(ModelsPreview.kindVideo)
+        }
+}
+
+#Preview("A voice model: Open Voice") {
+    let store = ModelsPreview.kindsStore()
+    StoreDetails(store: store, shell: ModelsPreview.shell()) { _ in }
+        .frame(width: 380, height: 720)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            await store.select(ModelsPreview.kindVoice)
+        }
+}
+
+#Preview("A kind this app does not know: shown as written, only its delete") {
+    let store = ModelsPreview.kindsStore()
+    StoreDetails(store: store, shell: ModelsPreview.shell()) { _ in }
+        .frame(width: 380, height: 720)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            await store.select(ModelsPreview.kindUnknown)
+        }
+}
+
+#Preview("Register an embedding set: an entry the embedding role can name") {
+    let store = ModelsPreview.kindsStore()
+    RegisterSheet(store: store)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            if let set = store.sets.first(where: { $0.handle == ModelsPreview.kindEmbedding }) { await store.askToRegister(set) }
+        }
+}
+
+#Preview("Register a vision set: it reads images") {
+    let store = ModelsPreview.kindsStore()
+    RegisterSheet(store: store)
+        .task {
+            await store.connect(binary: previewBinary)
+            await store.refresh()
+            if let set = store.sets.first(where: { $0.handle == ModelsPreview.kindVision }) { await store.askToRegister(set) }
+        }
+}
+
+#Preview("Convert a towered set to MLX: its towers kept through mlx-vlm, Text only offered") {
+    let store = ModelsPreview.routesStore()
+    ConvertSheet(store: store)
+        .task { await ModelsPreview.openConversion(store, ModelsPreview.routeVLM) }
+}
+
+#Preview("Convert a towered set to MLX, Text only chosen: --text-only") {
+    let store = ModelsPreview.routesStore()
+    ConvertSheet(store: store)
+        .task {
+            await ModelsPreview.openConversion(store, ModelsPreview.routeVLM)
+            store.convertForm?.textOnly = true
+        }
+}
+
+#Preview("Convert where only mlx-lm's text-only build is offered: --text-only always") {
+    let store = ModelsPreview.routesStore()
+    ConvertSheet(store: store)
+        .task { await ModelsPreview.openConversion(store, ModelsPreview.routeTextOnly) }
+}
+
+#Preview("Convert a draft head: a drafter, bf16 the default, nothing registered") {
+    let store = ModelsPreview.routesStore()
+    ConvertSheet(store: store)
+        .task { await ModelsPreview.openConversion(store, ModelsPreview.routeDrafter) }
+}
+
+#Preview("Convert Wan through mlx-video: 4bit or 8bit, nothing registered") {
+    let store = ModelsPreview.routesStore()
+    ConvertSheet(store: store)
+        .task { await ModelsPreview.openConversion(store, ModelsPreview.routeVideo) }
+}
+
+#Preview("Convert a voice model through mlx-audio: nothing registered") {
+    let store = ModelsPreview.routesStore()
+    ConvertSheet(store: store)
+        .task { await ModelsPreview.openConversion(store, ModelsPreview.routeVoice) }
+}
+
+#Preview("Convert an embedding model through mlx-embeddings: registered for the embedding role") {
+    let store = ModelsPreview.routesStore()
+    ConvertSheet(store: store)
+        .task { await ModelsPreview.openConversion(store, ModelsPreview.routeEmbeddings) }
 }
 #endif

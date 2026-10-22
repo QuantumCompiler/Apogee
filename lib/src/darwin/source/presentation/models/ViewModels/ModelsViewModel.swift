@@ -384,8 +384,21 @@ public final class ModelsViewModel {
         }
     }
 
-    /// The backends a role can point at: configured ones, never stored weights.
+    /// The backends a role can point at: configured ones, never stored
+    /// weights -- every one for every role, as the CLI's `config
+    /// set-default…` verbs take any backend, so an `mlx` entry over an
+    /// embedding model is offered to the embedding role (the CLI's 53h).
     public var backends: [String] { rows.filter { !$0.isStored }.map(\.backend) }
+
+    /// Whether a new session can be opened on a backend: a chat backend, a
+    /// cloud one, or a local GGUF or MLX one -- but not an `mlx` entry over a
+    /// kind it does not chat with (an embedding model, a drafter, a video or
+    /// voice model, a kind this app does not know), which the CLI refuses a
+    /// chat (its 53e).
+    public func opensSessions(_ row: ModelRow) -> Bool {
+        guard !row.isStored, row.mlxKind?.chats != false else { return false }
+        return row.roles.contains("chat") || row.section == "cloud" || row.group == "gguf" || row.group == "mlx"
+    }
 }
 
 /// A group of the library, as the CLI groups `models list`: by what a local

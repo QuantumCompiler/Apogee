@@ -25,6 +25,12 @@ public struct ModelRow: Sendable, Equatable, Identifiable {
     /// A pipeline's components; a pipeline's or voice model's bytes on disk.
     public let components: Int?
     public let bytes: Int?
+    /// What an MLX directory is, as the row's `kind` states it (the CLI's
+    /// 53e): stored MLX weights and an `mlx` backend over them carry it,
+    /// every other row none -- and so does every row of a binary before 53e,
+    /// whose MLX sets read as chat models' (`MLXKind.reading`). Named apart
+    /// from `kind`, which is where a backend runs.
+    public let mlxKind: MLXKind?
 
     /// The backend `models list` writes for stored weights no backend points
     /// at -- its table's placeholder, with `-` as their type.
@@ -65,7 +71,8 @@ public struct ModelRow: Sendable, Equatable, Identifiable {
                 source: text("source"), architecture: text("architecture"), state: text("state"),
                 verified: text("verified"), section: optional("section") ?? "local", group: optional("group") ?? "other",
                 note: optional("note"), format: optional("format"), quant: optional("quant"), window: optional("window"),
-                components: entry["components"]?.intValue, bytes: entry["bytes"]?.intValue)
+                components: entry["components"]?.intValue, bytes: entry["bytes"]?.intValue,
+                mlxKind: optional("kind").map(MLXKind.init(word:)))
             return row.name.isEmpty ? nil : row
         }
     }
@@ -83,6 +90,69 @@ public struct ModelRow: Sendable, Equatable, Identifiable {
         }
         return backend
     }
+}
+
+/// What an MLX directory is: the word the CLI's one reader decides (its 53e)
+/// -- the directory's own record, else its files -- and states as `models
+/// list`'s `kind` and `models info`'s `data.kind`. The six words the CLI
+/// makes today, and any other carried exactly as written: a later CLI's kind
+/// is shown, never guessed at (the protocol grows additively, ADR 0006).
+public enum MLXKind: Sendable, Equatable, Hashable {
+    /// A language model: an `mlx` backend chats with it (mlx-lm's build).
+    case chat
+    /// A vision model, its towers kept (mlx-vlm's build): it chats, and reads
+    /// images.
+    case vision
+    /// An embedding model (mlx-embeddings' build): an `mlx` entry the
+    /// embedding role names embeds with it, and answers no chat (53h).
+    case embedding
+    /// A drafter: it runs beside its base model as that backend's draft,
+    /// never alone (53i).
+    case drafter
+    /// A video model: `video generate` runs it (53k, 53l).
+    case video
+    /// A voice model: `voice say` speaks with it (53m).
+    case voice
+    /// A word this app does not know, as the CLI wrote it.
+    case other(String)
+
+    public init(word: String) {
+        switch word {
+        case "chat": self = .chat
+        case "vision": self = .vision
+        case "embedding": self = .embedding
+        case "drafter": self = .drafter
+        case "video": self = .video
+        case "voice": self = .voice
+        default: self = .other(word)
+        }
+    }
+
+    /// The word, as the CLI writes it.
+    public var word: String {
+        switch self {
+        case .chat: "chat"
+        case .vision: "vision"
+        case .embedding: "embedding"
+        case .drafter: "drafter"
+        case .video: "video"
+        case .voice: "voice"
+        case .other(let word): word
+        }
+    }
+
+    /// Whether an `mlx` backend chats with it: only `chat` and `vision`
+    /// (the CLI's 53e).
+    public var chats: Bool { self == .chat || self == .vision }
+
+    /// Whether an `mlx` backend entry runs it at all -- chats with it, or
+    /// embeds with it: what `config scan --register` registers (53e, 53h).
+    public var registers: Bool { chats || self == .embedding }
+
+    /// The kind an MLX set reads as: the one stated, else -- a binary before
+    /// the CLI's 53e, which states none -- a chat model's, as every MLX set
+    /// was before kinds existed.
+    public static func reading(_ stated: MLXKind?) -> MLXKind { stated ?? .chat }
 }
 
 /// `models info <name> --output-format json`: its `label: value` record, and
@@ -112,6 +182,27 @@ public struct ModelInfo: Sendable, Equatable {
         public let missing: Bool
     }
 
+    /// What an MLX conversion of a set runs, as `data.mlx_conversion` states
+    /// it (the CLI's 53f, with the converters 53h, 53k and 53m added).
+    public struct MLXConversion: Sendable, Equatable {
+        /// The towers its `config.json` declares (`vision_config`,
+        /// `audio_config` ...): `[]` for a language model.
+        public let towers: [String]
+        /// What a plain `--mlx` runs -- `mlx-lm`, `mlx-vlm`, `mlx-embeddings`,
+        /// `mlx-video`, `mlx-audio`, or a word a later CLI adds -- or `nil`
+        /// where only `--text-only` can build it.
+        public let converter: String?
+        /// Whether `--mlx --text-only` -- mlx-lm's build of its language
+        /// model alone, the towers left out -- is offered.
+        public let textOnly: Bool
+
+        public init(towers: [String], converter: String?, textOnly: Bool) {
+            self.towers = towers
+            self.converter = converter
+            self.textOnly = textOnly
+        }
+    }
+
     /// The typed facts: each `nil` where the format's own reader states nothing.
     public struct Facts: Sendable, Equatable {
         public let format: String?
@@ -126,6 +217,15 @@ public struct ModelInfo: Sendable, Equatable {
         /// `nil` where the document does not say -- another format, or a
         /// binary before M20.
         public let convertsTo: [String]?
+        /// What its MLX conversion runs, where one is offered (the CLI's
+        /// 53f); `nil` where none is, on what conversions make, and before 53f.
+        public let mlxConversion: MLXConversion?
+        /// An MLX set's kind (the CLI's 53e); `nil` on every other format, and
+        /// before 53e.
+        public let kind: MLXKind?
+        /// How wide an MLX embedding model's vectors are, as its files state
+        /// it (the CLI's 53h); `nil` for every other set, and before 53h.
+        public let vectorWidth: Int?
     }
 
     public let name: String
@@ -151,10 +251,18 @@ public struct ModelInfo: Sendable, Equatable {
                     kind: kind, from: step["from"]?.stringValue, detail: step["detail"]?.stringValue,
                     inferred: step["inferred"]?.boolValue ?? false, missing: step["missing"]?.boolValue ?? false)
             }
+            let conversion = value["mlx_conversion"].flatMap { c -> MLXConversion? in
+                guard c.objectValue != nil else { return nil }
+                return MLXConversion(
+                    towers: (c["towers"]?.arrayValue ?? []).compactMap(\.stringValue), converter: c["converter"]?.stringValue,
+                    textOnly: c["text_only"]?.boolValue ?? false)
+            }
             return Facts(
                 format: value["format"]?.stringValue, handle: value["handle"]?.stringValue, bytes: value["bytes"]?.intValue,
                 architecture: value["architecture"]?.stringValue, window: window, cache: cache, lineage: lineage,
-                convertsTo: value["converts_to"]?.arrayValue.map { $0.compactMap(\.stringValue) })
+                convertsTo: value["converts_to"]?.arrayValue.map { $0.compactMap(\.stringValue) },
+                mlxConversion: conversion, kind: value["kind"]?.stringValue.map(MLXKind.init(word:)),
+                vectorWidth: value["vector_width"]?.intValue)
         }
     }
 

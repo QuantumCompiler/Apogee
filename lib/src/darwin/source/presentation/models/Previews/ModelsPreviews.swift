@@ -135,6 +135,106 @@ enum ModelsPreview {
         return form
     }
 
+    // MARK: - MLX kinds (the CLI's 53e-53m)
+
+    static let kindChat = "Qwen3-8B/mlx/1a2b3c4d5e6f"
+    static let kindVision = "Gemma4-E4B/mlx/2b3c4d5e6f70"
+    static let kindEmbedding = "EmbeddingGemma-300M/mlx/3c4d5e6f7081"
+    static let kindDrafter = "Gemma4-E4B-Assistant/mlx/4d5e6f708192"
+    static let kindVideo = "Wan2.2-TI2V-5B/mlx/5e6f708192a3"
+    static let kindVoice = "Kokoro-82M/mlx/6f708192a3b4"
+    static let kindUnknown = "MusicGen-Small/mlx/708192a3b4c5"
+
+    /// Each kind's `models info`, by handle.
+    static let kindInfos: [([String], String)] = [
+        (["models", "info", kindChat], ModelsDocuments.kindInfoChat),
+        (["models", "info", kindVision], ModelsDocuments.kindInfoVision),
+        (["models", "info", kindEmbedding], ModelsDocuments.kindInfoEmbedding),
+        (["models", "info", kindDrafter], ModelsDocuments.kindInfoDrafter),
+        (["models", "info", kindVideo], ModelsDocuments.kindInfoVideo),
+        (["models", "info", kindVoice], ModelsDocuments.kindInfoVoice),
+        (["models", "info", kindUnknown], ModelsDocuments.kindInfoUnknown),
+    ]
+
+    /// A store recorded from the binary built with the CLI's 53e-53m: one MLX
+    /// directory of each kind -- chat, vision, embedding, drafter, video,
+    /// voice -- and one whose record names a word this build does not know
+    /// (`music`), none registered. Nothing is folded, so the binary's
+    /// `models list --all` is byte for byte its `models list`.
+    static let kindsRunner = PreviewRunner(
+        reads: [(["models", "list"], ModelsDocuments.kindsList)] + kindInfos,
+        commands: [(["config", "scan"], ModelsDocuments.kindsConfigScan)])
+
+    /// Stored weights over the kinds; not connected.
+    static func kindsStore() -> StoreViewModel {
+        StoreViewModel(runner: kindsRunner)
+    }
+
+    static func kindPath(_ handle: String) -> String { "/Users/someone/.apogee/models/" + handle }
+
+    /// The same store once `config scan --register` registered what it
+    /// registers -- the chat, vision and embedding sets, each an `mlx` entry
+    /// -- each found through its backend's `models info` and its path's.
+    static let kindsRegisteredRunner = PreviewRunner(
+        reads: [
+            (["models", "list"], ModelsDocuments.kindsRegisteredList),
+            (["models", "status"], ModelsDocuments.kindsRegisteredStatus),
+            (["models", "info", "Qwen3-8B-4bit"], ModelsDocuments.kindsBackendChat),
+            (["models", "info", "Gemma4-E4B-4bit"], ModelsDocuments.kindsBackendVision),
+            (["models", "info", "EmbeddingGemma-300M-bf16"], ModelsDocuments.kindsBackendEmbedding),
+            (["models", "info", kindPath(kindChat)], ModelsDocuments.kindsPathChat),
+            (["models", "info", kindPath(kindVision)], ModelsDocuments.kindsPathVision),
+            (["models", "info", kindPath(kindEmbedding)], ModelsDocuments.kindsPathEmbedding),
+        ] + kindInfos.filter { ![kindChat, kindVision, kindEmbedding].contains($0.0[2]) } + [
+            (["models", "info", kindChat], ModelsDocuments.kindsPathChat),
+            (["models", "info", kindVision], ModelsDocuments.kindsPathVision),
+            (["models", "info", kindEmbedding], ModelsDocuments.kindsPathEmbedding),
+        ])
+
+    /// Stored weights over the registered kinds; not connected.
+    static func kindsRegisteredStore() -> StoreViewModel {
+        StoreViewModel(runner: kindsRegisteredRunner)
+    }
+
+    // MARK: - What an MLX conversion runs (the CLI's 53f-53m)
+
+    static let routeLM = "Llama3.2-1B-Instruct/safetensors/edaba290ce7f"
+    static let routeVLM = "Gemma4-E4B/safetensors/9e1f2a3b4c5d"
+    static let routeTextOnly = "Qwen3-VL-8B-Instruct/safetensors/63f2634a2019"
+    static let routeDrafter = "Gemma4-E4B-Assistant/safetensors/b1c2d3e4f5a6"
+    static let routeEmbeddings = "EmbeddingGemma-300M/safetensors/af0e1d2c3b4a"
+    static let routeVideo = "Wan-AI--Wan2.2-TI2V-5B/safetensors/6ef9b00b8b83"
+    static let routeVoice = "Kokoro-82M/voice/5f3a2c91d0e4"
+
+    /// A store recorded over a Python environment holding only the files the
+    /// CLI reads to decide each route -- nothing in it runs: a language model
+    /// (mlx-lm), a towered set mlx-vlm keeps whole with Text only beside it, a
+    /// towered set only mlx-lm's text-only build takes, a draft head mlx-vlm
+    /// drafts, an embedding model mlx-embeddings builds, Wan's original layout
+    /// whole (mlx-video) and a voice model (mlx-audio).
+    static let routesRunner = PreviewRunner(reads: [
+        (["models", "list"], ModelsDocuments.routesList),
+        (["models", "info", routeLM], ModelsDocuments.routeInfoLM),
+        (["models", "info", routeVLM], ModelsDocuments.routeInfoVLM),
+        (["models", "info", routeTextOnly], ModelsDocuments.routeInfoTextOnly),
+        (["models", "info", routeDrafter], ModelsDocuments.routeInfoDrafter),
+        (["models", "info", routeEmbeddings], ModelsDocuments.routeInfoEmbeddings),
+        (["models", "info", routeVideo], ModelsDocuments.routeInfoVideo),
+        (["models", "info", routeVoice], ModelsDocuments.routeInfoAudio),
+    ])
+
+    /// Stored weights over the routes; not connected.
+    static func routesStore() -> StoreViewModel {
+        StoreViewModel(runner: routesRunner)
+    }
+
+    /// Reads `store`, then opens `handle`'s MLX conversion, as a person does.
+    static func openConversion(_ store: StoreViewModel, _ handle: String) async {
+        await store.connect(binary: previewBinary)
+        await store.refresh()
+        if let set = store.sets.first(where: { $0.handle == handle }) { store.askToConvert(set, mlx: true) }
+    }
+
     // MARK: - The jobs
 
     /// The Jobs tab, each job it starts saying `said` (and ending there when

@@ -1039,3 +1039,70 @@ The convert sheet wrote `-t 8bit --register-with 4bit`, where since the CLI's M1
 - Bare `lib/scripts/cicd.sh --test`: green. The CLI's 3,614 tests passed, and the app's 342 cases, with no Swift warning.
 
 **For the user:** the installed `apogee` predates M20, so until it is reinstalled (`make install`) the app offers both conversions as before, and the CLI's own refusal answers.
+
+## Milestone D — MLX kinds in the app
+
+**Goal.** The app follows the CLI's MLX-for-every-kind track (its 53e–53m, from the 2026-10-21 spike the user asked for). That track makes MLX directories of six kinds (`chat`, `vision`, `embedding`, `drafter`, `video`, `voice`), and adds an MLX engine for clips and voice, and drafters for Gemma 4. The app shows what each set is and offers only what runs it, and its sheets say which engine and converter a run uses. ADR 0003's parity holds: what the CLI does, the app does.
+
+### 2026-10-22 — `mlx-kinds-in-stored-weights` (backlog item 3a): each MLX set says its kind
+
+**Why.** Stored weights read every MLX set as a chat model's weights:
+- **Register…** opened the same `config add-backend --type mlx` form for any of them.
+- **Use in a new session** was offered on any MLX backend.
+- The convert sheet said nothing of which converter would run.
+
+Since the CLI's 53e, each set's record says its kind, and `models info` and `models list` state it.
+
+- [x] **The reads.**
+  - `ModelRow.mlxKind` and `ModelInfo.Facts.kind` carry the kind through the business `MLXKind` type: the six words, and any other word kept as written. `ModelRow.kind` already names where a backend runs, hence `mlxKind`.
+  - `ModelInfo.Facts` also gains `mlxConversion` (`towers`, `converter`, `text_only`) and `vectorWidth`.
+  - A document with no kind, from a binary before the CLI's 53e, reads as before: every MLX set is a chat model's.
+- [x] **The kind is said beside the format** (`MLX · vision`) in the table and the details' header. `StoreViewModel.actions(_:)` lists what each set offers:
+  - `chat` and `vision` register as before, and a vision set says it reads images;
+  - `embedding` registers as an `mlx` entry (`config add-backend --type mlx`, as `config scan --register` does), and the registered set offers **Use for embeddings** (`config set-default-embedding`);
+  - `drafter` draws **Pair with its base…** disabled, with a tooltip and an advice line giving the CLI's `config set-backend <base> --draft <path>`. Pairing is 3b's (`Action.pairWithBase`);
+  - `video` offers **New clip with it** and **Make it the default** (53l takes an MLX video model as the default);
+  - `voice` offers **Open Voice**;
+  - an unknown kind offers only **Delete…**, plus **Remove the backend…** if one was registered by hand.
+
+  Register all counts only chat, vision and embedding, as the binary does. The Backends tab offers **Use in a new session** only on an entry that chats.
+- [x] **The convert sheet follows the converter the CLI names** (`mlx_conversion.converter`).
+  - A towered set says its towers are kept through mlx-vlm and offers **Text only** (`--text-only`), which it passes whenever `text_only` says only mlx-lm's build is offered.
+  - Draft heads, Wan sets, voice models and any converter word the app does not know get none of `--register`, `--register-with`, `--text-only` or `--model-type`, all of which the CLI refuses there.
+  - Defaults follow the CLI's: bf16 for a drafter or a voice model, 4-bit otherwise. Wan offers only 4-bit and 8-bit.
+  - A voice-format set is offered **Convert to MLX…** where `converts_to` says `mlx`. M3 had kept conversions to SafeTensors sets.
+- [x] **Recorded from the binary that ships the CLI's 53e–53m**, over three sandbox homes in scratch (the home written `/Users/someone/.apogee`; nothing read `~/.apogee`):
+  - one MLX directory of each kind, plus one recorded `music`, before and after `config scan --register`;
+  - a Python environment holding only the files the CLI reads to choose a converter.
+
+  That gave 26 documents in `tests/business/reads/Fixtures/` (`store-list-kinds*`, `store-info-kind-*`, `store-info-kinds-*`, `store-list-routes`, `store-info-route-*`, `config-scan-kinds*`, `models-status-kinds-registered`).
+  - `store-route-verdicts.txt` holds the binary's refusals of the four flags on a draft head, a Wan set and a voice model.
+  - `store-command-verdicts.txt` gains 71 commands, all taken. Its 92 earlier verdicts came back unchanged.
+- [x] **Previews:** 22 new previews (20 in Stored weights, 2 in Backends) over those documents, 25 of them embedded byte for byte (ADR 0004). The layer cards name `MLXKind`.
+
+**Decisions made while building** (2026-10-22, each recorded for veto):
+- **The open call's default, taken:** the kind is a word beside the format, `MLX · chat` included when the binary says so. Nothing the CLI lists is hidden.
+- **Registering an embedding set does not also point the embedding role.** **Use for embeddings** is its own act, since chaining them would silently move an existing role and drop collections built with the old one back to text-only search.
+- **Roles needed no change.** The role verbs take any backend, and Roles already lists every backend for every role.
+- **A drafter's pairing is drawn but disabled** until 3b, saying the CLI's command, rather than hidden.
+- **An unknown kind is read strictly:** only its details and its delete, with no "Check the files" or "Show in Finder".
+- **`wan_layout` is not parsed.** The CLI's own `diffusion:` line in the facts already says it.
+
+**Verified.**
+- 17 new cases: `rowsCarryTheirKind`, `kindsAndWhatRunsThem` and `factsOfTheKinds`, then:
+
+  | Suite | Cases |
+  |---|---|
+  | `StoreKinds` | `eachKindSaid`, `eachKindsActions`, `embeddingRegistersForTheRole`, `visionReadsImages`, `drafterPairsLater`, `videoAndVoice`, `olderBinaryReadsAsToday` |
+  | `ConvertRoutes` | `toweredKeepsItsTowers`, `onlyTextOnly`, `registeringRoutes`, `noRegistrationWhereNoBackendRuns`, `voiceConvertsToMLX` |
+  | `StoreCommands` | `routesNoBackendRuns` |
+  | `ModelsViewModel` | `embeddingEntryForTheRole` |
+
+  `convertCommandsTaken` now covers every converter and Text only.
+- The `PresentationModels` scheme passed 51 of 51, and `BusinessReadsTests` 34 of 34.
+- `check-previews` finds nothing. The layering check's 25 cases pass.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,839 tests and the macOS app's 359 cases passed, with no Swift warning.
+
+**Not done:**
+- Sessions, Suites, Settings and Training still list every backend whatever its kind, so an embedding entry can be offered there as a chat backend. The CLI refuses the chat.
+- The Backends table does not show the kind; the document scoped it to Stored weights.

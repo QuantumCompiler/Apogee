@@ -19,6 +19,9 @@ public struct StoredSet: Equatable, Identifiable, Sendable {
     public let consumed: Bool
     /// Its row's note, as the CLI wrote it.
     public let note: String?
+    /// An MLX set's kind, as its row states it (the CLI's 53e); `nil` on
+    /// every other format, and on every row of a binary before 53e.
+    public let kind: MLXKind?
     public var id: String { handle }
 
     /// The model folder: the handle's first part, what `models rename` and a
@@ -30,6 +33,18 @@ public struct StoredSet: Equatable, Identifiable, Sendable {
         ["safetensors": "SafeTensors", "gguf": "GGUF", "mlx": "MLX", "pipeline": "Pipeline", "voice": "Voice"][format] ?? format
     }
 
+    /// The format with an MLX set's kind beside it, as the CLI wrote the
+    /// word: `MLX · vision`. Where no kind is stated -- a binary before the
+    /// CLI's 53e -- the format alone, as before.
+    public var formatLabel: String {
+        guard format == "mlx", let kind else { return formatName }
+        return formatName + " · " + kind.word
+    }
+
+    /// What an MLX set is for the app's offers: its stated kind, else a chat
+    /// model's (`MLXKind.reading`); `nil` on every other format.
+    public var mlxKind: MLXKind? { format == "mlx" ? MLXKind.reading(kind) : nil }
+
     /// What the design says of a set beside its facts: why it doesn't run
     /// yet, or what registering does.
     public var advice: String? {
@@ -39,14 +54,21 @@ public struct StoredSet: Equatable, Identifiable, Sendable {
         if format == "safetensors" {
             return "SafeTensors weights don't run as they are. Convert them to GGUF for llama.cpp, or to MLX for Apple silicon."
         }
+        if isRunnable && backend == nil && mlxKind == .embedding {
+            return "Stored but not registered, so the embedding role can't name it yet. Registering writes one config entry; nothing is copied or loaded."
+        }
         if isRunnable && backend == nil {
             return "Stored but not registered, so no session can use it yet. Registering writes one config entry; nothing is copied or loaded."
         }
         return nil
     }
 
-    /// Whether it runs once a backend points at it.
-    public var isRunnable: Bool { format == "gguf" || format == "mlx" }
+    /// Whether it runs once a backend points at it: a GGUF, or an MLX set of
+    /// a kind an `mlx` backend runs -- chat or vision, or embedding -- as
+    /// `config scan --register` decides it (the CLI's 53e and 53h). A
+    /// drafter, a video or voice model, or a kind this app does not know, no
+    /// backend entry runs.
+    public var isRunnable: Bool { format == "gguf" || mlxKind?.registers == true }
 
     /// The state the table shows, in words: the CLI's own wherever it has
     /// one beyond its format's name.
@@ -55,7 +77,16 @@ public struct StoredSet: Equatable, Identifiable, Sendable {
         if let backend { return "backend \(backend)" }
         switch cliState {
         case "safetensors": return "weights only · convert to run"
-        case "ok", "mlx": return isRunnable ? "not registered" : cliState
+        case "ok", "mlx":
+            // What uses a set no backend entry runs, by its kind (the CLI's
+            // `config scan` says the same beside each).
+            switch mlxKind {
+            case .drafter: return "drafts beside its base"
+            case .video: return "for video generate"
+            case .voice: return "for voice say"
+            case .other: return "nothing here runs it"
+            default: return isRunnable ? "not registered" : cliState
+            }
         case "pipeline": return "pipeline"
         case "voice": return "voice model"
         default: return cliState
@@ -89,13 +120,38 @@ public final class StoreViewModel {
         public var cache: String?
         /// `--mmproj-path`, carried when the set has a projector.
         public let projector: String?
+        /// An MLX set's kind (the CLI's 53e), `nil` for a GGUF: what the entry
+        /// is for -- a chat model's, a vision model's, or one the embedding
+        /// role names.
+        public let kind: MLXKind?
+        /// An embedding model's vector width, as its `models info` states it.
+        public let vectorWidth: Int?
 
-        public init(handle: String, type: String, path: String, name: String, projector: String?) {
+        public init(handle: String, type: String, path: String, name: String, projector: String?, kind: MLXKind?, vectorWidth: Int?) {
             self.handle = handle
             self.type = type
             self.path = path
             self.name = name
             self.projector = projector
+            self.kind = kind
+            self.vectorWidth = vectorWidth
+        }
+
+        /// What registering makes, as the sheet says it: an entry sessions
+        /// use, one that also reads images, or one only the embedding role
+        /// names -- an `mlx` entry over an embedding model embeds and answers
+        /// no chat (the CLI's 53h).
+        public var about: String {
+            let runtime = type == "mlx" ? "MLX" : "llama.cpp"
+            switch kind {
+            case .embedding?:
+                let width = vectorWidth.map { " Its vectors are \($0) wide." } ?? ""
+                return "An entry the embedding role can name, embedding with these weights on \(runtime). It answers no chat, so no session uses it." + width
+            case .vision?:
+                return "A backend sessions, suites and roles can use, running these weights on \(runtime). It reads images: mlx-vlm built it with its towers."
+            default:
+                return "A backend sessions, suites and roles can use, running these weights on \(runtime)."
+            }
         }
 
         public var arguments: [String]? {
@@ -178,7 +234,7 @@ public final class StoreViewModel {
             if consumed && !showingAll { return nil }
             return StoredSet(
                 handle: row.model, format: row.format ?? row.group, precision: row.quant, cliState: row.state,
-                backend: nil, consumed: consumed, note: row.note)
+                backend: nil, consumed: consumed, note: row.note, kind: row.mlxKind)
         }
         registered = [:]
         for row in rows where !row.isStored && (row.backendType == "llamacpp" || row.backendType == "mlx") {
@@ -187,7 +243,7 @@ public final class StoreViewModel {
             found.append(
                 StoredSet(
                     handle: handle, format: row.format ?? (row.backendType == "mlx" ? "mlx" : "gguf"), precision: row.quant,
-                    cliState: row.state, backend: row.backend, consumed: false, note: row.note))
+                    cliState: row.state, backend: row.backend, consumed: false, note: row.note, kind: row.mlxKind))
         }
         sets = found.sorted { ($0.model, $0.format, $0.handle) < ($1.model, $1.format, $1.handle) }
         if let selected, !sets.contains(where: { $0.handle == selected }) { self.selected = nil }
@@ -282,17 +338,24 @@ public final class StoreViewModel {
     /// Whether a SafeTensors set converts to GGUF, or with `mlx` to MLX, as
     /// its `models info` states it (`data.converts_to`, the CLI's M20). Where
     /// the document does not say -- a binary before M20 -- it is offered, and
-    /// the CLI's refusal is the answer (M3).
+    /// the CLI's refusal is the answer (M3). A voice model converts to MLX
+    /// only where its document says so (the CLI's 53m, with mlx-audio
+    /// installed): before then no voice model converted at all.
     public func converts(_ set: StoredSet, mlx: Bool) -> Bool {
+        if set.format == "voice" {
+            return infos[set.handle]?.data?.convertsTo?.contains(mlx ? "mlx" : "gguf") == true
+        }
         guard set.format == "safetensors" else { return false }
         guard let formats = infos[set.handle]?.data?.convertsTo else { return true }
         return formats.contains(mlx ? "mlx" : "gguf")
     }
 
     /// What the design says beside a set's facts -- none for SafeTensors that
-    /// take no conversion, whose facts say why in the CLI's own words.
+    /// take no conversion, whose facts say why in the CLI's own words; for a
+    /// drafter, where its pairing goes.
     public func advice(_ set: StoredSet) -> String? {
         if set.format == "safetensors", infos[set.handle]?.data?.convertsTo?.isEmpty == true { return nil }
+        if set.mlxKind == .drafter { return pairingNote(set) }
         return set.advice
     }
 
@@ -341,7 +404,8 @@ public final class StoreViewModel {
         }
         register = RegisterForm(
             handle: set.handle, type: set.format == "mlx" ? "mlx" : "llamacpp", path: path, name: name,
-            projector: infos[set.handle]?.field("projector"))
+            projector: infos[set.handle]?.field("projector"), kind: set.mlxKind,
+            vectorWidth: infos[set.handle]?.data?.vectorWidth)
     }
 
     /// The name `config scan` lists a stored model's path under: each entry is
@@ -388,7 +452,10 @@ public final class StoreViewModel {
     /// Opens the convert sheet: a GGUF for llama.cpp, or an MLX model.
     public func askToConvert(_ set: StoredSet, mlx: Bool) {
         guard converts(set, mlx: mlx) else { return }
-        convertForm = ConvertForm(handle: set.handle, mlx: mlx, bytes: bytes(set))
+        let info = infos[set.handle]
+        convertForm = ConvertForm(
+            handle: set.handle, mlx: mlx, bytes: bytes(set), conversion: info?.data?.mlxConversion,
+            towersSaid: info?.field("towers"))
     }
 
     public func convert() {
@@ -412,6 +479,87 @@ public final class StoreViewModel {
     /// Check the files: `models repair <handle>`, as a job.
     public func check(_ set: StoredSet) {
         startCheck?(set.handle)
+    }
+
+    // MARK: - What a set offers
+
+    /// One thing Stored weights offers on a set.
+    public enum Action: Equatable, Sendable {
+        case convertToGGUF
+        case convertToMLX
+        case quantize
+        /// `config add-backend`, through the register sheet.
+        case register
+        /// A new session on the backend that runs it.
+        case useInSession(backend: String)
+        /// `config set-default-embedding <backend>`: the embedding role
+        /// pointed at the entry (the CLI's 53h).
+        case useForEmbeddings(backend: String)
+        case removeBackend(String)
+        /// The Video place, where a clip is made with it.
+        case newClip
+        /// `config set-default-video <handle>`.
+        case makeDefaultVideo
+        /// The Voice place, which speaks with it.
+        case openVoice
+        /// `config set-backend <its base's backend> --draft <it>`: the GUI's
+        /// 3b builds it. Offered here so a drafter shows where its pairing
+        /// goes, and drawn as not yet available (`pairingNote`).
+        case pairWithBase
+        case checkFiles
+        case showInFinder
+        case delete
+    }
+
+    /// What Stored weights offers on `set`, in the order the details draw
+    /// them: its conversions; then what its format and kind run on -- a chat
+    /// or vision model registers and opens a session, an embedding model
+    /// registers for the embedding role, a drafter pairs with its base, a
+    /// video model makes clips and a voice model speaks -- each kind only its
+    /// own (the CLI's 53e); then its files. A kind this app does not know
+    /// offers its delete alone, and the removal of an entry that points at it.
+    public func actions(_ set: StoredSet) -> [Action] {
+        var out: [Action] = []
+        if converts(set, mlx: false) { out.append(.convertToGGUF) }
+        if converts(set, mlx: true) { out.append(.convertToMLX) }
+        if isUnquantized(set) { out.append(.quantize) }
+        let unregistered = set.backend == nil && !set.consumed
+        switch set.format == "gguf" ? MLXKind.chat : set.mlxKind {
+        case .chat?, .vision?:
+            if unregistered { out.append(.register) }
+            if let backend = set.backend { out += [.useInSession(backend: backend), .removeBackend(backend)] }
+        case .embedding?:
+            if unregistered { out.append(.register) }
+            if let backend = set.backend { out += [.useForEmbeddings(backend: backend), .removeBackend(backend)] }
+        case .drafter?:
+            out.append(.pairWithBase)
+        case .video?:
+            out += [.newClip, .makeDefaultVideo]
+        case .voice?:
+            out.append(.openVoice)
+        case .other?:
+            return (set.backend.map { [Action.removeBackend($0)] } ?? []) + [.delete]
+        case nil:
+            if set.format == "pipeline" { out += [.newClip, .makeDefaultVideo] }
+            if set.format == "voice" { out.append(.openVoice) }
+        }
+        // An entry over a kind no backend runs -- written by hand -- goes
+        // the way any entry does.
+        if let backend = set.backend, set.mlxKind?.registers == false { out.append(.removeBackend(backend)) }
+        return out + [.checkFiles, .showInFinder, .delete]
+    }
+
+    /// Why a drafter's pairing is not offered here yet, and the command that
+    /// pairs it today, as the CLI's `models info` says it.
+    public func pairingNote(_ set: StoredSet) -> String {
+        let path = infos[set.handle]?.field("model_path") ?? "<its path>"
+        return "A drafter runs beside its base, as the draft of the mlx backend over it: apogee config set-backend <that backend> --draft \(path). Pairing it here comes with the app's next update; the console runs the command today."
+    }
+
+    /// `config set-default-embedding <backend>`: the embedding role pointed
+    /// at an `mlx` entry over an embedding model, read back (the CLI's 53h).
+    public func useForEmbeddings(_ backend: String) async {
+        await run(["config", "set-default-embedding", backend], doing: "Setting", done: "Embeddings use \(backend)")
     }
 
     // MARK: - Removing

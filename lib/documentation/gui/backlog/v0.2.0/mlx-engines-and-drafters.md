@@ -15,7 +15,7 @@ Today the app has no draft field on a backend, and its clip and say sheets (`lib
 
 **Seam + files.**
 - **`lib/src/darwin/source/presentation/models/`:**
-  - Stored weights' **Pair with its base…** on a `drafter` set (the GUI's [3a](mlx-kinds-in-stored-weights.md) offers it), as `config set-backend <base> --draft <drafter>`, read back;
+  - Stored weights' **Pair with its base…** on a `drafter` set (the GUI's [3a](../../assistant/MILESTONES.md#milestone-d--mlx-kinds-in-the-app) offers it), as `config set-backend <base> --draft <drafter>`, read back;
   - the backend's details say its drafter, with **Unpair**.
 - **`lib/src/darwin/source/presentation/video/`:** the clip sheet's engine line (from the chosen model's kind), and the record's engine in a clip's page.
 - **`lib/src/darwin/source/presentation/voice/`:** the say sheet's engine line, and the record's engine on a speech's page.
@@ -23,6 +23,7 @@ Today the app has no draft field on a backend, and its clip and say sheets (`lib
 - **Fixtures:** recorded from the binaries that ship 53i, 53l and 53m.
 
 **Decisions made** (dated):
+- 2026-10-22 — **What 3a leaves for this item** (recorded when 3a shipped): `StoreViewModel`'s `Action.pairWithBase` is drawn disabled on a `drafter` set, with a tooltip and an advice line giving the CLI's command. This item enables it. `ModelRow.mlxKind` and `ModelInfo.Facts.kind` say a set's kind, and `mlxConversion.converter` its converter.
 - 2026-10-22 — **What the CLI's 53m gives this item** (recorded when 53m shipped).
   - A voice record carries `engine`, and an MLX one adds `versions.mlx` and `versions.mlx_audio`. `voice say --engine auto|torch|mlx` names the engine or refuses it, and the engine follows the voice model's directory.
   - MLX voice models count among the store's voice models. Once the user converts their Kokoro, a bare `voice say` with no `--model` is refused, naming both models; it never guesses.
@@ -45,4 +46,4 @@ Today the app has no draft field on a backend, and its clip and say sheets (`lib
 - [ ] Against older binaries, nothing changes.
 - [ ] Previews, `check-previews`, the layering check and `lib/scripts/cicd.sh --test` pass, with no Swift warning.
 
-**Scope note.** GUI v0.2.0, track 3, gated on [3a](mlx-kinds-in-stored-weights.md). Its gates on the CLI's [53i](../../../cli/assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind) and [53l](../../../cli/assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind) shipped 2026-10-21, and [53m](../../../cli/assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind) 2026-10-22.
+**Scope note.** GUI v0.2.0, track 3. Its gate, [3a](../../assistant/MILESTONES.md#milestone-d--mlx-kinds-in-the-app), shipped 2026-10-22. Its gates on the CLI's [53i](../../../cli/assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind) and [53l](../../../cli/assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind) shipped 2026-10-21, and [53m](../../../cli/assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind) 2026-10-22.
