@@ -8,11 +8,13 @@
 #include <optional>
 #include <random>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "contracts/config.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
+#include "support/draft_head_configs.h"
 #include "support/env_guard.h"
 #include "support/mlx_model.h"
 
@@ -522,4 +524,188 @@ TEST_CASE("an MLX embedding model's width is its last Dense's out_features, else
         CHECK(apogee::models::describe(width).starts_with("width unknown"));
         CHECK_FALSE(read_mlx_embedding_width(dir.root.path() / "nothing-here").known());
     }
+}
+
+// ---------------------------------------------------------------------------
+// A drafter beside its base (53i)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// An MLX directory at `dir` whose `config.json` is `config`, recorded as
+/// `kind` -- with `bases` when given, as a drafter's conversion records them
+/// -- or with no record at all when `kind` is empty: what a pull brings.
+void mlx_dir(const std::filesystem::path& dir, const char* config, const std::string& kind,
+             const std::vector<std::string>& bases = {}) {
+    write_mlx_model(dir, MlxModelSpec{.bits = 0});
+    write_fixture_file(dir / "config.json", config);
+    if (kind.empty()) {
+        return;
+    }
+    apogee::models::Snapshot record;
+    record.ref = dir.filename().string();
+    record.source = "convert";
+    record.transform = "mlx_vlm.convert bf16";
+    record.kind = kind;
+    record.bases = bases;
+    REQUIRE(apogee::models::write_snapshot(dir, record));
+}
+
+/// The store's MLX directory for `model`.
+[[nodiscard]] std::filesystem::path mlx_of(const std::filesystem::path& models,
+                                           const std::string& model) {
+    return models / model / "mlx" / "aaaaaaaaaaaa";
+}
+
+}  // namespace
+
+TEST_CASE("a drafter's kind is its record's, else its config's draft head -- never a chat model",
+          "[models][mlx][kind][drafter]") {
+    // A drafter pulled whole, as the MLX community publishes one, has no
+    // record: its config.json declaring a draft head says what it is, so it
+    // is never registered or run as a chat model.
+    const Dir dir;
+    using apogee::models::MlxKindSource;
+    mlx_dir(dir.model, apogee::testing::kGemma4AssistantE4BConfig, "");
+    const apogee::models::MlxKind pulled = apogee::models::read_mlx_kind(dir.model);
+    CHECK(pulled.word == "drafter");
+    CHECK(pulled.source == MlxKindSource::Files);
+    CHECK_FALSE(pulled.backend());
+    CHECK_FALSE(pulled.registers());
+    CHECK(apogee::models::describe(pulled) ==
+          "drafter (inferred from its files: its config.json declares a draft head) -- a "
+          "drafter: it runs beside its base model, never alone");
+    const std::optional<apogee::models::MlxDrafter> drafter =
+        apogee::models::read_mlx_drafter(dir.model);
+    REQUIRE(drafter.has_value());
+    CHECK(drafter->head.backbone_hidden_size == 2560);
+    CHECK(drafter->head.model_type == "gemma4_assistant");
+    CHECK(drafter->bases.empty());
+    CHECK(apogee::models::describe(*drafter) ==
+          "a drafter (Gemma4AssistantForCausalLM) for a 2560-wide gemma4 model, its record "
+          "naming no base");
+
+    // Recorded, with its bases.
+    const std::filesystem::path recorded = dir.root.path() / "recorded";
+    mlx_dir(recorded, apogee::testing::kGemma4Assistant12BConfig, "drafter",
+            {"Gemma4-12B-Instruct"});
+    CHECK(apogee::models::read_mlx_kind(recorded).source == MlxKindSource::Recorded);
+    CHECK(apogee::models::describe(*apogee::models::read_mlx_drafter(recorded)) ==
+          "a drafter (Gemma4UnifiedAssistantForCausalLM) for a 3840-wide gemma4 model, its "
+          "record naming Gemma4-12B-Instruct");
+
+    // Anything else is no drafter: a record's other word wins, and a model
+    // of its own is none.
+    const std::filesystem::path chat = dir.root.path() / "chat";
+    mlx_dir(chat, apogee::testing::kGemma4BaseE4BConfig, "vision");
+    CHECK_FALSE(apogee::models::read_mlx_drafter(chat).has_value());
+    const std::filesystem::path relabelled = dir.root.path() / "relabelled";
+    mlx_dir(relabelled, apogee::testing::kGemma4AssistantE4BConfig, "chat");
+    CHECK_FALSE(apogee::models::read_mlx_drafter(relabelled).has_value());
+}
+
+TEST_CASE(
+    "a drafter pairs only beside a base mlx-vlm built, of its family and width, the one its "
+    "record names",
+    "[models][mlx][drafter]") {
+    const Dir dir;
+    const std::filesystem::path models = dir.root.path() / "models";
+    // The user's four, each head converted beside its base, each base
+    // mlx-vlm's build (recorded vision).
+    for (const apogee::testing::DraftHeadPair& pair : apogee::testing::kUserDraftHeads) {
+        mlx_dir(mlx_of(models, pair.base_model), pair.base_config, "vision");
+        mlx_dir(mlx_of(models, pair.head_model), pair.head_config, "drafter", {pair.base_model});
+    }
+    using apogee::models::mlx_drafter_refusal;
+    for (const apogee::testing::DraftHeadPair& pair : apogee::testing::kUserDraftHeads) {
+        INFO(pair.head_model);
+        const std::filesystem::path head = mlx_of(models, pair.head_model);
+        // Beside its own base: it pairs.
+        CHECK(mlx_drafter_refusal(mlx_of(models, pair.base_model), head, models).empty());
+        // Beside every other: another width, refused saying both.
+        for (const apogee::testing::DraftHeadPair& other : apogee::testing::kUserDraftHeads) {
+            if (std::string_view{other.base_model} == pair.base_model) {
+                continue;
+            }
+            const std::string refused =
+                mlx_drafter_refusal(mlx_of(models, other.base_model), head, models);
+            CHECK(refused.find(" drafts for a " + std::to_string(pair.width) +
+                               "-wide gemma4 model, reading its hidden states, and ") !=
+                  std::string::npos);
+            CHECK(
+                refused.ends_with(" -- a drafter runs only beside a base of its family and width"));
+        }
+    }
+    const std::filesystem::path e4b_head = mlx_of(models, "Gemma4-E4B-Assistant");
+    const std::filesystem::path e4b_base = mlx_of(models, "Gemma4-E4B-Instruct");
+
+    // Another family, as wide: refused.
+    const std::filesystem::path qwen = mlx_of(models, "Qwen-Wide");
+    mlx_dir(qwen,
+            R"({"model_type": "qwen3_vl", "text_config": {"hidden_size": 2560},
+                "vision_config": {"hidden_size": 1152}})",
+            "vision");
+    CHECK(mlx_drafter_refusal(qwen, e4b_head, models)
+              .find("and " + qwen.string() +
+                    " is a 2560-wide qwen3 model -- a drafter runs only "
+                    "beside a base of its family and width") != std::string::npos);
+
+    // The same family and width, but not the base its record names: refused.
+    const std::filesystem::path custom = mlx_of(models, "Gemma4-E4B-Custom");
+    mlx_dir(custom, apogee::testing::kGemma4BaseE4BConfig, "vision");
+    CHECK(mlx_drafter_refusal(custom, e4b_head, models) ==
+          e4b_head.string() + "'s record names Gemma4-E4B-Instruct as its base, and " +
+              custom.string() +
+              " is a build of Gemma4-E4B-Custom -- a drafter runs only beside the base its "
+              "record names");
+    // Outside the store, no base its record names can be told: refused.
+    const std::filesystem::path outside = dir.root.path() / "elsewhere" / "e4b";
+    mlx_dir(outside, apogee::testing::kGemma4BaseE4BConfig, "vision");
+    CHECK(mlx_drafter_refusal(outside, e4b_head, models).find(" is no stored model -- ") !=
+          std::string::npos);
+    // A drafter whose record names none -- a pull -- pairs by family and
+    // width alone, wherever the base is.
+    const std::filesystem::path pulled = mlx_of(models, "mlx-community--gemma-4-E4B-it-assistant");
+    mlx_dir(pulled, apogee::testing::kGemma4AssistantE4BConfig, "");
+    CHECK(mlx_drafter_refusal(custom, pulled, models).empty());
+    CHECK(mlx_drafter_refusal(outside, pulled, models).empty());
+    CHECK_FALSE(mlx_drafter_refusal(mlx_of(models, "Gemma4-12B-Instruct"), pulled, models).empty());
+
+    // mlx-lm's build of the base: refused, conservatively, saying why.
+    const std::filesystem::path text = models / "Gemma4-E4B-Instruct" / "mlx" / "bbbbbbbbbbbb";
+    mlx_dir(text, apogee::testing::kGemma4BaseE4BConfig, "chat");
+    CHECK(mlx_drafter_refusal(text, e4b_head, models) ==
+          text.string() +
+              " is mlx-lm's build (kind chat, recorded), laid out for mlx-lm, and drafting runs "
+              "through mlx-vlm's speculative path, which loads the base through mlx-vlm -- "
+              "'apogee models convert <its SafeTensors set> --mlx' builds it through mlx-vlm, "
+              "and the drafter runs beside that");
+    // A base with no record and no vision files reads chat too: refused.
+    const std::filesystem::path unrecorded =
+        models / "Gemma4-E4B-Instruct" / "mlx" / "cccccccccccc";
+    mlx_dir(unrecorded, apogee::testing::kGemma4BaseE4BConfig, "");
+    CHECK(mlx_drafter_refusal(unrecorded, e4b_head, models).find("(kind chat, none recorded)") !=
+          std::string::npos);
+    // One with vision files and no record reads vision: it pairs.
+    write_fixture_file(unrecorded / "preprocessor_config.json", "{}");
+    CHECK(mlx_drafter_refusal(unrecorded, e4b_head, models).empty());
+
+    // What is no drafter, or no base: each said.
+    CHECK(mlx_drafter_refusal(e4b_base, models / "gone", models)
+              .starts_with("there is no drafter at "));
+    CHECK(mlx_drafter_refusal(e4b_base, custom, models)
+              .starts_with(custom.string() + " is not a drafter: it is vision (recorded)"));
+    CHECK(mlx_drafter_refusal(e4b_head, e4b_head, models) ==
+          e4b_head.string() + " is itself a drafter: a drafter runs beside a base, never alone");
+    const std::filesystem::path embedder = mlx_of(models, "Embedder");
+    mlx_dir(embedder, R"({"model_type": "gemma3_text", "hidden_size": 2560})", "embedding");
+    CHECK(mlx_drafter_refusal(embedder, pulled, models)
+              .ends_with(" -- a drafter runs beside a model an mlx backend chats with"));
+    // A drafter that does not say how wide a model it reads measures nothing.
+    const std::filesystem::path unsized = mlx_of(models, "Unsized-Assistant");
+    mlx_dir(unsized, R"({"architectures": ["Gemma4AssistantForCausalLM"],
+                         "model_type": "gemma4_assistant"})",
+            "drafter");
+    CHECK(mlx_drafter_refusal(e4b_base, unsized, models)
+              .find("does not say how wide a model it reads") != std::string::npos);
 }

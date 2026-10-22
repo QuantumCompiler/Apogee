@@ -250,7 +250,27 @@ struct BackendConfig {
     /// on any other type, a path named twice, and a scale outside (0, 2] --
     /// on an mlx entry, more than one adapter or a scale other than 1.
     std::vector<AdapterConfig> adapters{};
+
+    /// The drafter an mlx entry runs beside `model_path` (53i): an MLX
+    /// directory mlx-vlm built from a draft head -- Gemma 4's assistants --
+    /// whose proposed tokens the base verifies, through mlx-vlm's speculative
+    /// path, so only how fast the answer comes changes. Read as `model_path`
+    /// is, a variable in it expanded. Empty, the default, drafts with
+    /// nothing. The loader refuses it on any other type; whether the drafter
+    /// runs beside this base -- its family, its width, the base its record
+    /// names -- is asked by the editor and the backend's ladder.
+    std::string draft{};
+    /// The tokens one drafting round proposes, plus one -- mlx-vlm's
+    /// `draft_block_size`, from 2 to 16 (53i). Unset takes the drafter's own,
+    /// as its `config.json` states it, else mlx-vlm's default. An mlx entry's
+    /// alone; it means nothing without `draft`.
+    std::optional<std::int64_t> draft_block_size;
 };
+
+/// The tokens a drafting round may propose, plus one (53i): mlx-vlm drafts
+/// `draft_block_size - 1` a round, so 1 would propose none.
+inline constexpr std::int64_t kMinDraftBlockSize = 2;
+inline constexpr std::int64_t kMaxDraftBlockSize = 16;
 
 /// The `models:` role pointers.
 ///

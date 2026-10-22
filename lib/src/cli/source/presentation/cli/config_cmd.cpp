@@ -1122,7 +1122,14 @@ void bind_set_backend(CLI::App& parent, const RootContext& context) {
         {"adapters", kPathValue,
          "LoRA adapters applied over model_path, never merged into it: <path>[:<scale>], "
          "comma-separated, scale 1 unless given -- GGUF LoRA files on llamacpp, one adapter "
-         "directory on mlx -- each pinned to the base's weights as they are now"}};
+         "directory on mlx -- each pinned to the base's weights as they are now"},
+        // 53i: a drafter beside an mlx entry's model, paired before written.
+        {"draft", kDrafterValue,
+         "A drafter run beside an mlx entry's model through mlx-vlm's speculative path -- its "
+         "MLX directory or stored handle, made by 'models convert <a draft head> --mlx'; it "
+         "pairs only with a base of its family and width, the one its record names"},
+        {"draft_block_size", "INT",
+         "Tokens a drafting round proposes, plus one (2-16; unset: the drafter's own)"}};
     for (const FieldFlag& flag : flags) {
         std::string spelling = "--" + std::string{flag.field};
         std::ranges::replace(spelling, '_', '-');

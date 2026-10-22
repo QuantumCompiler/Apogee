@@ -37,6 +37,11 @@
 /// only to a driver whose `ready` said `audio`. The driver hands the paths
 /// to mlx-vlm as they are; it decodes nothing.
 ///
+/// **So is a drafter** (53i): a driver started with `--draft` loads it beside
+/// the model through mlx-vlm's `load_drafter` and says so in its `ready`
+/// (`draft`, `draft_kind`, `draft_block_size`); every turn then runs through
+/// mlx-vlm's speculative path. Nothing a request carries changes.
+///
 /// **So are vectors** (53h), spoken by a second driver over the same framing:
 /// `mlx_embed.py`, one process per embedding provider holding a model
 /// mlx-embeddings built. In, `{"type": "embed", "id": N, "texts": [...]}`;
@@ -142,6 +147,14 @@ struct Event {
     /// driver from before 53a never names one, so a start that asked for one
     /// and hears none is refused rather than answered from the bare base.
     std::string adapter{};
+    /// Ready: the drafter loaded beside the model (53i), the kind mlx-vlm
+    /// resolved it as (`mtp`) and the block size it drafts with -- 0 for the
+    /// drafter's own. A driver from before 53i never names one, so a start
+    /// that asked for one and hears none is refused rather than answered
+    /// from the base alone as if drafting.
+    std::string draft{};
+    std::string draft_kind{};
+    std::int64_t draft_block_size = 0;
     /// Ready: the embedding driver loaded its model through mlx-embeddings
     /// (53h), and that package's version. The generation driver never says
     /// it, so a provider that started the wrong one is told so.

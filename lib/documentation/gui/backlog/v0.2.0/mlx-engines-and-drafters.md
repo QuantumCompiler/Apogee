@@ -23,6 +23,7 @@ Today the app has no draft field on a backend, and its clip and say sheets (`lib
 - **Fixtures:** recorded from the binaries that ship 53i, 53l and 53m.
 
 **Decisions made** (dated):
+- 2026-10-21 — **What the CLI's 53i gives this item** (recorded when 53i shipped). The pairing is `config set-backend <base> --draft <path>`, written through the one editor, `""` clearing it. Its completion offers only drafters that pair with that base, by family and width, and by the `bases` the drafter's record names. Pairing a drafter with mlx-lm's build of a base (`chat`) is refused, naming the `--mlx` conversion that keeps the towers. The admin backend view carries `draft` and `draft_block_size`.
 - 2026-10-21 — **Opened with 3a from the CLI's spike**, one item for the three runtime changes, so the app's sheets change once.
 
 **Open calls:**
@@ -39,4 +40,4 @@ Today the app has no draft field on a backend, and its clip and say sheets (`lib
 - [ ] Against older binaries, nothing changes.
 - [ ] Previews, `check-previews`, the layering check and `lib/scripts/cicd.sh --test` pass, with no Swift warning.
 
-**Scope note.** GUI v0.2.0, track 3, gated on [3a](mlx-kinds-in-stored-weights.md) and the CLI's [53i](../../../cli/backlog/v0.2.0/mlx-draft-heads.md), [53l](../../../cli/backlog/v0.2.0/mlx-video-generate.md) and [53m](../../../cli/backlog/v0.2.0/mlx-voice.md).
+**Scope note.** GUI v0.2.0, track 3, gated on [3a](mlx-kinds-in-stored-weights.md) and the CLI's [53l](../../../cli/backlog/v0.2.0/mlx-video-generate.md) and [53m](../../../cli/backlog/v0.2.0/mlx-voice.md). Its gate on the CLI's [53i](../../../cli/assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind) shipped 2026-10-21.

@@ -32,15 +32,32 @@ endif()
 set(offenders "")
 set(scanned 0)
 foreach(source IN LISTS sources)
-    file(STRINGS "${source}" lines REGEX "TEST_CASE\\(\"")
+    # Every line, since clang-format wraps a long name onto the line after a
+    # bare `TEST_CASE(` -- 272 names were laid out that way, and a scan of
+    # `TEST_CASE("` alone never saw them (a `--draft ...` name got through,
+    # 53i). Such a name's first fragment is its start, which is where a dash
+    # does its harm.
+    file(STRINGS "${source}" lines)
+    set(wrapped FALSE)
     foreach(line IN LISTS lines)
-        if(line MATCHES "TEST_CASE\\(\"([^\"]*)\"")
-            math(EXPR scanned "${scanned} + 1")
-            # Saved FIRST: every if(... MATCHES ...) below resets CMAKE_MATCH_1,
-            # so testing it twice in a row silently tests an empty string the
-            # second time. That footgun is what let the quote case through on
-            # this check's own first draft.
+        # Saved FIRST, in the branch that matched: every if(... MATCHES ...)
+        # after it resets CMAKE_MATCH_1, so testing it twice in a row silently
+        # tests an empty string the second time. That footgun is what let the
+        # quote case through on this check's own first draft.
+        set(case_found FALSE)
+        if(wrapped AND line MATCHES "^[ \t]*\"([^\"]*)\"")
             set(case_name "${CMAKE_MATCH_1}")
+            set(case_found TRUE)
+        elseif(line MATCHES "TEST_CASE\\(\"([^\"]*)\"")
+            set(case_name "${CMAKE_MATCH_1}")
+            set(case_found TRUE)
+        endif()
+        set(wrapped FALSE)
+        if(line MATCHES "TEST_CASE\\([ \t]*$")
+            set(wrapped TRUE)
+        endif()
+        if(case_found)
+            math(EXPR scanned "${scanned} + 1")
 
             if(case_name MATCHES "^-")
                 get_filename_component(name "${source}" NAME)

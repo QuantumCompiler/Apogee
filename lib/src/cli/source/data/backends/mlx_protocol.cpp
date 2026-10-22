@@ -233,6 +233,9 @@ std::optional<Event> parse_event(std::string_view line) {
         event.mlx_lm_version = string_field(object, "mlx_lm");
         event.mlx_vlm_version = string_field(object, "mlx_vlm");
         event.adapter = string_field(object, "adapter");
+        event.draft = string_field(object, "draft");
+        event.draft_kind = string_field(object, "draft_kind");
+        event.draft_block_size = count_field(object, "draft_block_size");
         event.mlx_embeddings_version = string_field(object, "mlx_embeddings");
         const auto boolean = [&object](const char* key) {
             const auto it = object.find(key);

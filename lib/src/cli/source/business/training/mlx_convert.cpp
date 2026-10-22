@@ -75,7 +75,13 @@ constexpr std::string_view kUnknownChoice = "argument --with: invalid choice";
 
 }  // namespace
 
-MlxConverterKind choose_mlx_converter(bool towers, bool text_only, bool embedding) noexcept {
+MlxConverterKind choose_mlx_converter(bool towers, bool text_only, bool embedding,
+                                      bool drafter) noexcept {
+    if (drafter) {
+        // A draft head is built as the drafter mlx-vlm's speculative path
+        // runs (53i): mlx-lm has no network for one, whatever is asked.
+        return MlxConverterKind::MlxVlm;
+    }
     if (embedding) {
         // An embedding model is built whole by mlx-embeddings, or not at all
         // (53h): mlx-lm builds no embedding model, and --text-only leaves

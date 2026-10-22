@@ -109,6 +109,9 @@ inline constexpr const char* kVoiceModelValue = "VOICE_MODEL";
 inline constexpr const char* kVoiceValue = "VOICE";
 /// A model type the installed mlx-lm converts (M15): `convert --mlx --model-type`.
 inline constexpr const char* kMlxModelTypeValue = "MLX_MODEL_TYPE";
+/// A stored MLX drafter (53i) -- `config set-backend <name> --draft`: the
+/// store's drafters that pair with that entry's model, by handle, or a path.
+inline constexpr const char* kDrafterValue = "DRAFTER";
 /// `convert --register-with`'s levels (M16): the MLX precisions after `--mlx`,
 /// the GGUF quantization levels otherwise.
 inline constexpr const char* kRegisterLevelValue = "REGISTER_LEVEL";
@@ -163,7 +166,7 @@ inline constexpr const char* kAllowedHostValue = "ALLOWED_HOST";
 
 /// Every name kind above, for the protocol to recognise and a test to hold
 /// each to a source.
-inline constexpr std::array<std::string_view, 49> kNameValues{kCollectionValue,
+inline constexpr std::array<std::string_view, 50> kNameValues{kCollectionValue,
                                                               kCollectionListValue,
                                                               kGraphValue,
                                                               kNamedGraphValue,
@@ -211,7 +214,8 @@ inline constexpr std::array<std::string_view, 49> kNameValues{kCollectionValue,
                                                               kVoiceModelValue,
                                                               kVoiceValue,
                                                               kMlxModelTypeValue,
-                                                              kRegisterLevelValue};
+                                                              kRegisterLevelValue,
+                                                              kDrafterValue};
 
 /// `{a,b}`: a set of words, as a type name spells it.
 template <typename Words>

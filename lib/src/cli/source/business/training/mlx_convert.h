@@ -33,14 +33,17 @@ namespace apogee::training {
 /// mlx-embeddings`).
 enum class MlxConverterKind : std::uint8_t { MlxLm, MlxVlm, MlxEmbeddings };
 
-/// The converter a set's MLX conversion runs: mlx-embeddings for an
-/// embedding model (`embedding`, sentence-transformers' by its own
-/// `modules.json`, 53h); mlx-vlm for a set whose own files declare towers --
-/// kept by default (2026-10-21) -- unless the person asked for mlx-lm's build
-/// of its language model alone (`--text-only`); mlx-lm for every other.
-/// Never chosen by a name.
+/// The converter a set's MLX conversion runs: mlx-vlm for a draft head
+/// (`drafter`, by its own `config.json`, 53i), built as the drafter its
+/// speculative path runs beside a base; mlx-embeddings for an embedding model
+/// (`embedding`, sentence-transformers' by its own `modules.json`, 53h);
+/// mlx-vlm for a set whose own files declare towers -- kept by default
+/// (2026-10-21) -- unless the person asked for mlx-lm's build of its language
+/// model alone (`--text-only`); mlx-lm for every other. Never chosen by a
+/// name.
 [[nodiscard]] MlxConverterKind choose_mlx_converter(bool towers, bool text_only,
-                                                    bool embedding = false) noexcept;
+                                                    bool embedding = false,
+                                                    bool drafter = false) noexcept;
 
 /// Its name as a person says it: `mlx-lm`, `mlx-vlm`, `mlx-embeddings`.
 [[nodiscard]] std::string_view to_string(MlxConverterKind converter) noexcept;

@@ -131,12 +131,17 @@ struct SnapshotChoice {
 /// directory). Something only the old layout has is refused with the
 /// migration named, and so is a draft head -- weights that run beside their
 /// base model and never alone, the stored base named (2026-10-21): every verb
-/// that chooses here converts, and nothing converted from one is a backend.
+/// that chooses here converts, and nothing converted from one is a backend --
+/// unless `drafters`, which `models convert --mlx` alone passes: a draft
+/// head's MLX build is a drafter, run beside its base (53i).
 [[nodiscard]] SnapshotChoice choose_snapshot(const models::StoreRoots& roots,
-                                             std::string_view given, std::string_view from_id = {});
+                                             std::string_view given, std::string_view from_id = {},
+                                             bool drafters = false);
 
 /// Which converter `models convert --mlx` runs for a set (53f), from its own
-/// files: mlx-embeddings for an embedding model (53h, by its `modules.json`,
+/// files: mlx-vlm for a draft head (53i, `models::snapshot_draft_head`),
+/// built as the drafter its speculative path runs beside a base;
+/// mlx-embeddings for an embedding model (53h, by its `modules.json`,
 /// `models::snapshot_embedding_model`); mlx-vlm, its towers kept, for a set
 /// whose `config.json` declares one (`models::snapshot_towers`) -- unless
 /// `--text-only` asks for mlx-lm's build of its language model alone -- and
@@ -147,9 +152,12 @@ struct MlxRoute {
     std::vector<std::string> towers{};
     /// The set is an embedding model sentence-transformers publishes (53h).
     bool embedding = false;
+    /// The set is a draft head (53i): its MLX build is a drafter.
+    bool drafter = false;
 
-    /// What its build records (53e): `embedding` for mlx-embeddings',
-    /// `vision` for mlx-vlm's, `chat` for mlx-lm's.
+    /// What its build records (53e): `drafter` for mlx-vlm's build of a draft
+    /// head, `embedding` for mlx-embeddings', `vision` for mlx-vlm's, `chat`
+    /// for mlx-lm's.
     [[nodiscard]] std::string_view kind() const noexcept;
 };
 
@@ -176,9 +184,17 @@ struct MlxRoute {
 /// exactly where it would convert. Answers false when it is not installed.
 [[nodiscard]] models::EmbeddingBuilds installed_mlx_embedding_builds();
 
+/// Whether the mlx-vlm in Apogee's Python environment drafts with a model
+/// type (53i), read from its own `speculative/drafters/` (`backends::
+/// mlx_vlm_drafts`): what `models::snapshot_conversions` is handed, so a draft
+/// head is offered MLX exactly where it would convert. Answers false when it
+/// is not installed.
+[[nodiscard]] models::DrafterBuilds installed_mlx_drafter_builds();
+
 /// The MLX conversion a set is offered (53f), by the converters installed:
 /// a language model's is mlx-lm's, as M21 decided it; an embedding model's
-/// mlx-embeddings', where it builds its type (53h). A set with towers is
+/// mlx-embeddings', where it builds its type (53h); a draft head's mlx-vlm's
+/// drafter, where it drafts its type (53i). A set with towers is
 /// offered mlx-vlm's build, its towers kept, where the mlx-vlm installed
 /// builds its type; otherwise mlx-lm's build of its language model alone,
 /// where the mlx-lm installed builds that, and said so; otherwise none. With

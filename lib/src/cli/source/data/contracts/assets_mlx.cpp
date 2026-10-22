@@ -541,7 +541,7 @@ const std::string& mlx_mlx_embed_py() {
     return text;
 }
 
-constexpr std::array<std::string_view, 3> kMlxMlxGeneratePy{{
+constexpr std::array<std::string_view, 4> kMlxMlxGeneratePy{{
     R"PY(#!/usr/bin/env python3
 """MLX inference driver for Apogee's `mlx` backend (Apple silicon).
 
@@ -556,6 +556,7 @@ Runs under the Python environment Apogee owns, never the system Python.
 Requires `mlx-lm` there:  apogee train setup --with mlx
 
     mlx_generate.py --model <model directory> [--vision] [--adapter <directory>]
+                    [--draft <drafter directory> [--draft-block-size N]]
 
 `--vision` loads the model through `mlx-vlm` instead, so a request may carry
 images (27c): a vision model's own processor reads them, and the reply is
@@ -575,6 +576,18 @@ nothing, and never removes the backend's files.
 it (53a): the directory mlx-lm's training wrote (adapter_config.json beside
 its weights), handed to the loader as its own `adapter_path`. The backend has
 checked it is pinned to these weights before starting the driver.
+
+`--draft` loads a drafter beside the model and answers every turn through
+mlx-vlm's speculative path (53i): an MLX directory mlx-vlm built from a draft
+head -- Gemma 4's assistants -- loaded by mlx-vlm's own `load_drafter(...,
+kind="mtp")`, checked against the model by its own compatibility check when
+it has one, and handed to `stream_generate` as `draft_model`, `draft_kind`
+and -- with `--draft-block-size` -- `draft_block_size`; without it the
+drafter's own block size applies. The model loads through mlx-vlm, as under
+`--vision`, which `--draft` implies. The drafter only proposes tokens the
+model verifies: the answer is the model's own, at temperature 0 the same
+text. The backend has paired the two -- the family, the width, the base the
+drafter's record names -- before starting the driver.
 
 The protocol, one JSON object per line.
 
@@ -600,12 +613,16 @@ In, on stdin:
 Out, on stdout:
   {"type": "ready", "protocol": 1, "model_type": "...", "chat_template": B,
    "tool_parser": "..."|null, "thinking": B, "mlx_lm": "...",
-   "vision": B, "mlx_vlm": "..."|null, "audio": B, "adapter": "..."}
+   "vision": B, "mlx_vlm": "..."|null, "audio": B, "adapter": "...",
+   "draft": "...", "draft_kind": "mtp", "draft_block_size": N|null}
       Once, after the model loads. `tool_parser` names mlx_lm's parser for
       the model's call format, or null when it has none. `vision` says the
       model was loaded through mlx-vlm and reads images. `audio` says a
       turn's recordings are handed to it (53g). `adapter` names the adapter
-      applied over it, and is there only when one was (53a).
+      applied over it, and is there only when one was (53a). `draft` names
+      the drafter every turn runs beside, the kind mlx-vlm resolved it as and
+      the block size asked for (null: the drafter's own), and is there only
+      when one was loaded (53i).
   {"type": "text", "id": N, "text": "..."}        answer text, as generated
   {"type": "reasoning", "id": N, "text": "..."}   the model's reasoning
   {"type": "tool_call", "id": N, "name": "...", "arguments": {...}}
@@ -878,7 +895,8 @@ class Reader:
         if self.holding_json:
             self.lead_text += piece
             return False
-        if self.lead:
+)PY",
+    R"PY(        if self.lead:
             self.lead_text += piece
             stripped = self.lead_text.lstrip()
             if not stripped or PYTHON_TAG.startswith(stripped):
@@ -906,8 +924,7 @@ class Reader:
             self._route(self.pending[:at])
             self.pending = self.pending[at + len(marker):]
             if target is None:
-)PY",
-    R"PY(                self.stopped = True
+                self.stopped = True
                 self.pending = ""
                 return True
             if self.state == "tool" and target == "normal":
@@ -978,7 +995,7 @@ class Driver:
         self.checkpoint = None
         self.input = Input()
 
-    def ready(self, version, vlm_version=None, adapter=None):
+    def ready(self, version, vlm_version=None, adapter=None, draft=None):
         tokenizer = self.tokenizer
         tool_parser = None
         if getattr(tokenizer, "has_tool_calling", False):
@@ -1001,6 +1018,9 @@ class Driver:
         # for an adapter and never names one -- one older than adapters.
         if adapter:
             line["adapter"] = adapter
+        # The same for a drafter (53i): named only when one was loaded.
+        if draft:
+            line.update(draft)
         emit(line)
 
     def has_template(self):
@@ -1224,7 +1244,8 @@ class Driver:
             request = parse_json_line(line)
             if request is None:
                 continue
-            kind = request.get("type")
+)PY",
+    R"PY(            kind = request.get("type")
             if kind == "generate":
                 try:
                     self.generate(request)
@@ -1248,8 +1269,7 @@ IMAGE_SUFFIXES = {"image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg"
 
 def image_file(uri, directory, index):
     """A data: URI's bytes, written into `directory` for the processor to
-)PY",
-    R"PY(    open. Anything else is refused: an image is never fetched from anywhere."""
+    open. Anything else is refused: an image is never fetched from anywhere."""
     if not isinstance(uri, str) or not uri.startswith("data:"):
         raise ValueError("an image must arrive as a data: URI -- a remote image is never fetched")
     header, sep, payload = uri.partition(",")
@@ -1329,9 +1349,13 @@ class VisionDriver(Driver):
     vision = True
     hears = True
 
-    def __init__(self, mx, model, tokenizer, api, model_type, processor):
+    def __init__(self, mx, model, tokenizer, api, model_type, processor, drafting=None):
         super().__init__(mx, model, tokenizer, api, model_type)
         self.processor = processor
+        # mlx-vlm's speculative arguments, handed to every turn when a
+        # drafter runs beside the model (53i): draft_model, draft_kind and,
+        # when asked for, draft_block_size.
+        self.drafting = drafting or {}
 
     def options(self, request):
         """The sampling, in the form this mlx-vlm takes it: mlx_lm's sampler
@@ -1383,7 +1407,7 @@ class VisionDriver(Driver):
         heard = {"audio": audio} if audio else {}
         results = self.api["vision"](self.model, self.processor, text,
                                      image=images or None, max_tokens=max_tokens,
-                                     **heard, **self.options(request))
+                                     **heard, **self.options(request), **self.drafting)
         prompt_tokens = 0
         produced = 0
         finish = None
@@ -1432,7 +1456,17 @@ def model_type_of(model_dir):
     return config.get("model_type") if isinstance(config, dict) else None
 
 
-USAGE = "usage: mlx_generate.py --model <model directory> [--vision] [--adapter <directory>]"
+USAGE = ("usage: mlx_generate.py --model <model directory> [--vision] [--adapter <directory>] "
+         "[--draft <drafter directory> [--draft-block-size N]]")
+
+
+def option_value(options, name):
+    """The value after `name` among the options: None when it is absent,
+    "" when it is given nothing."""
+    if name not in options:
+        return None
+    at = options.index(name)
+    return options[at + 1] if at + 1 < len(options) else ""
 
 
 def main(argv):
@@ -1444,13 +1478,15 @@ def main(argv):
         return 2
     options = argv[3:]
     vision = "--vision" in options
-    adapter = None
-    if "--adapter" in options:
-        at = options.index("--adapter")
-        if at + 1 >= len(options) or not options[at + 1]:
-            error("protocol", USAGE)
-            return 2
-        adapter = options[at + 1]
+    adapter = option_value(options, "--adapter")
+    draft = option_value(options, "--draft")
+    block = option_value(options, "--draft-block-size")
+    if adapter == "" or draft == "" or (block is not None and (draft is None or not block.isdigit()
+                                                               or int(block) < 2)):
+        error("protocol", USAGE)
+        return 2
+    # mlx-vlm's speculative path loads the model through mlx-vlm (53i).
+    vision = vision or draft is not None
 
     try:
         import mlx.core as mx
@@ -1472,6 +1508,9 @@ def main(argv):
         error("load", f"{adapter} is not an mlx-lm adapter directory: it has no "
               "adapter_config.json")
         return 4
+    if draft and not os.path.isfile(os.path.join(draft, "config.json")):
+        error("load", f"{draft} is not a drafter directory: it has no config.json")
+        return 4
     model_type = model_type_of(model_dir)
     api = {
         "generate_step": generate_step,
@@ -1480,7 +1519,8 @@ def main(argv):
     }
     version = getattr(mlx_lm, "__version__", "unknown")
     if vision:
-        return serve_vision(mx, api, model_dir, model_type, version, adapter)
+        return serve_vision(mx, api, model_dir, model_type, version, adapter,
+                            draft, int(block) if block else None)
     try:
         # The loader's own adapter_path: applied over the weights, never fused.
         model, tokenizer = load(model_dir, adapter_path=adapter) if adapter else load(model_dir)
@@ -1499,8 +1539,9 @@ def with_adapter(adapter):
     return f" with the adapter {adapter}" if adapter else ""
 
 
-def serve_vision(mx, api, model_dir, model_type, version, adapter=None):
-    """The model through mlx-vlm, so its turns may carry images (27c)."""
+def serve_vision(mx, api, model_dir, model_type, version, adapter=None, draft=None, block=None):
+    """The model through mlx-vlm, so its turns may carry images (27c) -- and,
+    with a drafter, every turn through its speculative path (53i)."""
     try:
         import mlx_vlm
         from mlx_lm.utils import load_tokenizer
@@ -1524,10 +1565,57 @@ def serve_vision(mx, api, model_dir, model_type, version, adapter=None):
         error("load", f"could not load {model_dir}{with_adapter(adapter)} through mlx-vlm: "
               f"{type(e).__name__}: {e}")
         return 4
+    drafting = None
+    said = None
+    if draft:
+        loaded = load_drafter_beside(model, draft, block, vlm_version_of(mlx_vlm))
+        if isinstance(loaded, int):
+            return loaded
+        drafting, said = loaded
     api = dict(api, vision=stream_generate, vision_parameters=vision_parameters())
-    driver = VisionDriver(mx, model, tokenizer, api, model_type, processor)
-    driver.ready(version, vlm_version_of(mlx_vlm), adapter)
+    driver = VisionDriver(mx, model, tokenizer, api, model_type, processor, drafting)
+    driver.ready(version, vlm_version_of(mlx_vlm), adapter, said)
     return driver.serve()
+
+
+def load_drafter_beside(model, draft, block, vlm_version):
+)PY",
+    R"PY(    """The drafter at `draft`, loaded by mlx-vlm's own `load_drafter` as an
+    MTP drafter (53i) and checked against `model` by its own compatibility
+    check where this mlx-vlm has one: the speculative arguments every turn is
+    handed, and what `ready` says -- or, on failure, the exit code after
+    saying why. A drafter that does not fit is a failed load, never a quiet
+    run without it."""
+    try:
+        from mlx_vlm.speculative.drafters import load_drafter
+    except ImportError as e:
+        error("missing_dependency",
+              f"this mlx-vlm ({vlm_version}) cannot draft: it has no speculative drafters "
+              f"({e}). Run: apogee train setup --with mlx-vlm")
+        return 3
+    try:
+        loaded = load_drafter(draft, kind="mtp")
+    except Exception as e:  # noqa: BLE001 -- the reason is the message
+        error("load", f"could not load the drafter {draft} through mlx-vlm: "
+              f"{type(e).__name__}: {e}")
+        return 4
+    # mlx-vlm hands back the drafter and the kind it resolved; an earlier one
+    # the drafter alone.
+    drafter, kind = (loaded[0], loaded[1] or "mtp") if isinstance(loaded, tuple) else (loaded, "mtp")
+    try:
+        from mlx_vlm.speculative.drafters import validate_drafter_compatibility
+    except ImportError:
+        validate_drafter_compatibility = None
+    if validate_drafter_compatibility is not None:
+        try:
+            validate_drafter_compatibility(model, drafter, kind)
+        except ValueError as e:
+            error("load", f"the drafter {draft} does not fit the model: {e}")
+            return 4
+    drafting = {"draft_model": drafter, "draft_kind": kind}
+    if block:
+        drafting["draft_block_size"] = block
+    return drafting, {"draft": draft, "draft_kind": kind, "draft_block_size": block}
 
 
 def vlm_version_of(module):

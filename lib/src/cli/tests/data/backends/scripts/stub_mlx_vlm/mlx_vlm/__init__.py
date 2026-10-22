@@ -16,6 +16,11 @@ Since 53f it converts too (`convert.py`), and says which types it builds the
 way a real mlx-vlm does: a package under `models/` naming its `Model`, and
 `utils.py`'s remap table -- `gemma4`, `gemma4_unified`, `qwen3_5` and
 `qwen3_vl`, never `qwen3_omni_moe`, which a test adds to its own copy.
+
+Since 53i it drafts (`speculative/drafters`): `load_drafter` loads Gemma 4's
+assistant, `gemma4_assistant`, and `stream_generate` records the pairing and
+answers through the speculative path with the model's own text. The unified
+12B's `gemma4_unified_assistant` is not here; a test adds it to its copy.
 """
 
 import os

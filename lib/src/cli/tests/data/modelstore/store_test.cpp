@@ -6,16 +6,19 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <random>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "contracts/sha256.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
 #include "platform/platform.h"
+#include "support/draft_head_configs.h"
 #include "support/env_guard.h"
 #include "support/file_time.h"
 #include "support/mlx_model.h"
@@ -905,12 +908,9 @@ TEST_CASE("a voice model lands under its model's voice/ by the digest over its w
 namespace {
 
 /// The user's Gemma4-12B-Assistant, as its own config.json says it (2026-10-21):
-/// four layers 1024 wide, reading a 3840-wide base through a projection.
-constexpr const char* kAssistantConfig =
-    R"({"architectures": ["Gemma4UnifiedAssistantForCausalLM"],
-        "model_type": "gemma4_unified_assistant", "backbone_hidden_size": 3840,
-        "text_config": {"model_type": "gemma4_unified_text", "hidden_size": 1024,
-                        "num_hidden_layers": 4}})";
+/// four layers 1024 wide, reading a 3840-wide base through a projection --
+/// with the other three, the user's four (53i, `draft_head_configs.h`).
+constexpr const char* kAssistantConfig = apogee::testing::kGemma4Assistant12BConfig;
 
 /// A SafeTensors set whose config.json is `config`.
 void place_snapshot_with(const std::filesystem::path& dir, const std::string& config) {
@@ -1084,6 +1084,105 @@ TEST_CASE(
     CHECK(apogee::models::snapshot_conversions(wan).empty());
     CHECK(apogee::models::snapshot_conversions(head).empty());
     CHECK(apogee::models::snapshot_conversions(llama) == std::vector<std::string>{"gguf", "mlx"});
+}
+
+TEST_CASE(
+    "each of the user's four assistants converts to an MLX drafter alone, exactly where the "
+    "installed mlx-vlm drafts its type -- the unified 12B's only where it drafts that",
+    "[models][store][draft_head][drafter]") {
+    // 53i: M21's rule carried to drafters, as 53f carried it to towers.
+    const Store store;
+    using Formats = std::vector<std::string>;
+    // What mlx-vlm drafts as the test says it: Gemma 4's assistant, and the
+    // unified one only when asked.
+    bool unified = false;
+    const apogee::models::DrafterBuilds drafts = [&unified](std::string_view type) {
+        return type == "gemma4_assistant" || (unified && type == "gemma4_unified_assistant");
+    };
+    for (const apogee::testing::DraftHeadPair& pair : apogee::testing::kUserDraftHeads) {
+        INFO(pair.head_model);
+        const std::filesystem::path head = store.root.path() / pair.head_model;
+        place_snapshot_with(head, pair.head_config);
+        const std::optional<apogee::models::DraftHead> read =
+            apogee::models::snapshot_draft_head(head);
+        REQUIRE(read.has_value());
+        CHECK(read->model_type == pair.drafter_type);
+        CHECK(read->backbone_hidden_size == pair.width);
+        CHECK(read->family == "gemma4");
+        // No mlx-vlm to ask: the draft-heads change's answer stands.
+        CHECK(apogee::models::snapshot_conversions(head).empty());
+        CHECK(apogee::models::snapshot_conversions(head, {}, [](std::string_view) {
+                  return false;
+              }).empty());
+        // Never a GGUF: its one conversion is the drafter.
+        unified = false;
+        const bool twelve = std::string_view{pair.drafter_type} == "gemma4_unified_assistant";
+        CHECK(apogee::models::snapshot_conversions(head, {}, drafts) ==
+              (twelve ? Formats{} : Formats{"mlx"}));
+        unified = true;
+        CHECK(apogee::models::snapshot_conversions(head, {}, drafts) == Formats{"mlx"});
+    }
+    // A drafter's closure decides nothing for anything else.
+    const std::filesystem::path llama = store.root.path() / "llama";
+    place_snapshot_with(llama, apogee::testing::kLlamaConfig);
+    CHECK(apogee::models::snapshot_conversions(llama, {}, drafts) == Formats{"gguf", "mlx"});
+}
+
+TEST_CASE("each assistant's base is the one stored model of its family as wide as it reads",
+          "[models][store][draft_head][drafter]") {
+    // 53i's guardrail on the draft-heads change's finder: the user's four
+    // heads and their four bases in one store, each head finding its own.
+    const Store store;
+    for (const apogee::testing::DraftHeadPair& pair : apogee::testing::kUserDraftHeads) {
+        place_snapshot_with(store.roots.models / pair.head_model / "safetensors" / "aaaaaaaaaaaa",
+                            pair.head_config);
+        place_snapshot_with(store.roots.models / pair.base_model / "safetensors" / "bbbbbbbbbbbb",
+                            pair.base_config);
+    }
+    for (const apogee::testing::DraftHeadPair& pair : apogee::testing::kUserDraftHeads) {
+        INFO(pair.head_model);
+        const std::optional<apogee::models::DraftHead> head = apogee::models::snapshot_draft_head(
+            store.roots.models / pair.head_model / "safetensors" / "aaaaaaaaaaaa");
+        REQUIRE(head.has_value());
+        CHECK(apogee::models::draft_head_bases(store.roots, *head) ==
+              std::vector<std::string>{pair.base_model});
+    }
+}
+
+TEST_CASE("a drafter's record names its bases, written only when there are any, read as text",
+          "[models][store][drafter]") {
+    const Store store;
+    const std::filesystem::path dir = store.root.path() / "drafter";
+    std::filesystem::create_directories(dir);
+    apogee::models::Snapshot record;
+    record.ref = "Gemma4-E4B-Assistant/safetensors/aaaaaaaaaaaa";
+    record.source = "convert";
+    record.transform = "mlx_vlm.convert bf16";
+    record.kind = "drafter";
+    record.bases = {"Gemma4-E4B-Instruct"};
+    REQUIRE(apogee::models::write_snapshot(dir, record));
+    const std::optional<apogee::models::Snapshot> read = apogee::models::load_snapshot(dir);
+    REQUIRE(read.has_value());
+    CHECK(read->kind == "drafter");
+    CHECK(read->bases == std::vector<std::string>{"Gemma4-E4B-Instruct"});
+
+    // None: no key at all, as every record before 53i.
+    record.bases.clear();
+    REQUIRE(apogee::models::write_snapshot(dir, record));
+    std::ifstream in{apogee::models::snapshot_record_path(dir)};
+    const std::string text{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    CHECK(text.find("bases") == std::string::npos);
+    CHECK(apogee::models::load_snapshot(dir)->bases.empty());
+
+    // What is not a name is no base: read as no record of one.
+    write_file(apogee::models::snapshot_record_path(dir),
+               R"({"ref": "x", "source": "convert", "kind": "drafter",
+                   "bases": ["Gemma4-E4B-Instruct", 7, "", "Gemma4-E4B-Instruct", "Other"]})");
+    CHECK(apogee::models::load_snapshot(dir)->bases ==
+          std::vector<std::string>{"Gemma4-E4B-Instruct", "Other"});
+    write_file(apogee::models::snapshot_record_path(dir),
+               R"({"ref": "x", "source": "convert", "kind": "drafter", "bases": "Gemma"})");
+    CHECK(apogee::models::load_snapshot(dir)->bases.empty());
 }
 
 TEST_CASE(

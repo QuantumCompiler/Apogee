@@ -73,4 +73,4 @@ The design grew first: canvas version 33, with the tabs Backends · Stored weigh
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
 | 3a | MLX kinds in Stored weights — `data.kind` said beside the format, each kind's own actions (an embedding set for the embedding role, a drafter's pairing, video and voice sets opening their places), the convert sheet saying when towers are kept | v0.2.0 | [`mlx-kinds-in-stored-weights.md`](v0.2.0/mlx-kinds-in-stored-weights.md) | 🟢 |
-| 3b | MLX engines and drafters in the app — a drafter paired with its base from Stored weights, the clip and say sheets and pages saying the engine a model runs on, its records' `engine` read | v0.2.0 | [`mlx-engines-and-drafters.md`](v0.2.0/mlx-engines-and-drafters.md) | 🔒 3a, CLI 53i, CLI 53l, CLI 53m |
+| 3b | MLX engines and drafters in the app — a drafter paired with its base from Stored weights, the clip and say sheets and pages saying the engine a model runs on, its records' `engine` read | v0.2.0 | [`mlx-engines-and-drafters.md`](v0.2.0/mlx-engines-and-drafters.md) | 🔒 3a, CLI 53l, CLI 53m |

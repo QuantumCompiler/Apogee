@@ -1845,7 +1845,9 @@ std::vector<std::string_view> backend_editable_fields() {
             "host",
             "idle_unload_seconds",
             "server_tools",
-            "adapters"};
+            "adapters",
+            "draft",
+            "draft_block_size"};
 }
 
 /// `value`, a comma-separated list of names (`web_search,code_execution`),
@@ -1909,6 +1911,14 @@ std::string set_backend_field(std::string_view content, std::string_view name,
         // The list as given, pinned to nothing: `config set-backend` records
         // each pin through `set_backend_adapters` itself (53a).
         return yaml_text::set_backend_adapters(content, name, parse_adapter_list(value));
+    }
+    // A drafter beside the model it drafts for (53i), its block size beside
+    // it, where a reader looks for them.
+    if (field == "draft") {
+        return set_backend_path_field(content, name, field, "model_path", value);
+    }
+    if (field == "draft_block_size") {
+        return set_backend_path_field(content, name, field, "draft", value);
     }
     return set_backend_path_field(content, name, field, "", value);
 }

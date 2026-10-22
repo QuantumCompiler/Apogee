@@ -36,6 +36,14 @@ struct BackendFieldsOutcome {
 /// file facts asked, and the sha256 of the weights at `model_path` -- as this
 /// same edit leaves it -- recorded beside every one (`backends::pin_adapters`),
 /// written through `set_backend_adapters`.
+///
+/// `draft` (53i) takes a drafter's MLX directory, its stored handle
+/// (`<model>/mlx/<id>`) or a model storing one drafter, written as the
+/// drafter's absolute directory -- after it is paired with the model the
+/// same edit leaves the entry over, by the backend ladder's own question
+/// (`backends::probe_mlx_draft`): refused for a drafter that cannot run
+/// beside it. An edit moving the model, or its type, under a drafter the
+/// entry keeps is asked the same.
 [[nodiscard]] BackendFieldsOutcome set_backend_fields(const std::filesystem::path& path,
                                                       std::string_view name,
                                                       const std::vector<BackendFieldEdit>& edits);

@@ -178,6 +178,13 @@ nlohmann::json backend_view(std::string_view name, const harness::BackendConfig&
         }
         out["adapters"] = std::move(adapters);
     }
+    // The drafter beside the model, and its block (53i).
+    if (!backend.draft.empty()) {
+        out["draft"] = backend.draft;
+    }
+    if (backend.draft_block_size.has_value()) {
+        out["draft_block_size"] = *backend.draft_block_size;
+    }
     return out;
 }
 

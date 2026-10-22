@@ -2,11 +2,13 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "contracts/config.h"
+#include "modelstore/snapshot.h"
 
 /// What an MLX model directory is, read from its files alone (27b): the
 /// window `config.json` declares, how its weights are stored, every shard
@@ -141,7 +143,8 @@ inline constexpr std::string_view kMlxVoice = "voice";
 enum class MlxKindSource {
     /// Its record names it: the conversion that made it wrote it.
     Recorded,
-    /// No record names one, and its files make it a vision model.
+    /// No record names one, and its files make it a vision model -- or, since
+    /// 53i, a drafter: its `config.json` declares a draft head.
     Files,
     /// Nothing says otherwise: `chat`, as every MLX directory was before.
     Default,
@@ -170,9 +173,12 @@ struct MlxKind {
     [[nodiscard]] bool registers() const noexcept;
 };
 
-/// The kind of the MLX directory `dir`: its record's `kind`, else `vision`
-/// when its files say so (`mlx_vision_files`), else `chat`. Never throws: an
-/// unreadable record is no record.
+/// The kind of the MLX directory `dir`: its record's `kind`, else `drafter`
+/// when its `config.json` declares a draft head (`snapshot_draft_head`, 53i --
+/// a drafter pulled whole, as the MLX community publishes one, is never taken
+/// for a chat model), else `vision` when its files say so
+/// (`mlx_vision_files`), else `chat`. Never throws: an unreadable record is no
+/// record.
 [[nodiscard]] MlxKind read_mlx_kind(const std::filesystem::path& dir);
 
 /// Whether `dir`'s files make a vision model: `config.json` declares a
@@ -191,6 +197,46 @@ struct MlxKind {
 /// `models info`'s line: the word, where it came from, and what it is --
 /// "chat (no kind recorded) -- a language model: an mlx backend chats with it".
 [[nodiscard]] std::string describe(const MlxKind& kind);
+
+// --- a drafter beside its base (53i) ---------------------------------------------------
+
+/// A **drafter** as its directory says it (53i): a draft head mlx-vlm built --
+/// Gemma 4's assistants, a few layers proposing tokens for their base to
+/// verify -- which an mlx entry runs beside its base through mlx-vlm's
+/// speculative path (`draft:`), never alone and never as a backend of its own.
+struct MlxDrafter {
+    /// The draft head its `config.json` declares: the architecture, the
+    /// family and width of the base it reads, its `model_type`.
+    DraftHead head{};
+    /// The bases its record names (`Snapshot::bases`): the stored models
+    /// `draft_head_bases` measured when it was converted. Empty when it names
+    /// none -- a pull, or a conversion with no base stored -- and then it pairs
+    /// by family and width alone.
+    std::vector<std::string> bases{};
+};
+
+/// The drafter at `dir`, or nullopt when it is none: its kind is not
+/// `drafter` (`read_mlx_kind`), or its `config.json` declares no draft head.
+[[nodiscard]] std::optional<MlxDrafter> read_mlx_drafter(const std::filesystem::path& dir);
+
+/// What a drafter is, in one phrase: "a drafter (Gemma4AssistantForCausalLM)
+/// for a 2560-wide gemma4 model, its record naming Gemma4-E4B-Instruct".
+[[nodiscard]] std::string describe(const MlxDrafter& drafter);
+
+/// Why the drafter at `drafter` cannot run beside the MLX model at `base`, in
+/// one sentence naming the way out -- or empty when it can. File facts alone,
+/// asked in order: a drafter is there (`read_mlx_drafter`) and says how wide
+/// a model it reads; the base is a model mlx-vlm loads to chat with -- kind
+/// `vision`, never mlx-lm's build (`chat`): mlx-vlm's speculative path loads
+/// the base through mlx-vlm, and mlx-lm's build is laid out for mlx-lm with
+/// its towers left out -- of the drafter's family and as wide as it reads
+/// (`config_width`); and, where its record names bases, `base` is a stored
+/// MLX model of one of them -- under `models_root`, the store's MLX root.
+/// Whether the installed mlx-vlm drafts its type is the backend's question
+/// (`backends::probe_mlx_draft`), asked after this.
+[[nodiscard]] std::string mlx_drafter_refusal(const std::filesystem::path& base,
+                                              const std::filesystem::path& drafter,
+                                              const std::filesystem::path& models_root);
 
 /// How wide an MLX embedding model's vectors are (53h), from the directory's
 /// own files: the last sentence-transformers `Dense` module its

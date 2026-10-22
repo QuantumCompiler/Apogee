@@ -9685,3 +9685,66 @@ Mlx-lm converted 6 of them as text alone, and Qwen3-Omni-30B (`qwen3_omni_moe`) 
 - Real vectors from the user's set are the user's run.
 - `check` does not compare an installed mlx-embeddings' version against its floor.
 - `train setup --with`'s help text, already stale, is unchanged.
+
+### 2026-10-21 — `mlx-draft-heads` (backlog item 53i): Gemma 4's assistants draft for their bases on MLX
+
+**Why.** The user stores four Gemma 4 assistants. The draft-heads change refused every conversion of them, which was right for chat but closed off the reason they exist: making their base faster. mlx-vlm converts them and runs them beside their base (`--draft-kind mtp`). This was wall W5. It was built now and is to be measured afterwards, the user's call at the run's start. Google claims "up to 3×". Apogee's one comparable measurement (26k, Qwen's MTP head on llama.cpp) found 1.14×.
+
+- [x] **`models convert <draft head> --mlx`** lifts the draft-head refusal for `--mlx` alone and routes through mlx-vlm (53f's route).
+  - The record's kind is **`drafter`**. A new record field, `bases`, lists the stored model folders that `draft_head_bases` finds by family and width. It is empty when no base is stored, and then the drafter pairs by family and width alone.
+  - A drafter converts at bf16 unless `--type` is given, since the MLX community publishes its drafters that way.
+  - `--register`, `--register-with`, `--text-only` and `--model-type` are refused on a head, with new wording, and completion stops offering them there. The GGUF refusal's wording is unchanged.
+  - `converts_to` gains `mlx` for a head exactly where the installed mlx-vlm drafts its type.
+- [x] **One reader of what mlx-vlm drafts** (`backends::mlx_vlm_drafts`): the installed mlx-vlm's `speculative/drafters/<model_type>/` naming a `Model`. The offer, the convert door, the editor, completion and the ladder all ask it.
+- [x] **`draft:` and `draft_block_size` (2–16) on an `mlx` entry,** parsed only there and written only through the one editor.
+  - The command is `config set-backend <name> --draft <path>`, and `""` clears. It takes a path, a stored handle, or a model folder holding exactly one drafter, written as an absolute path.
+  - Its completion offers only drafters that pair with that entry, and the admin plane's view carries both fields.
+  - The pairing is re-checked when an edit changes `model_path` or `type` under a drafter the entry keeps.
+- [x] **The pairing rule, from files alone** (`read_mlx_drafter`, `mlx_drafter_refusal`). A drafter is refused:
+  - beside a base of another width or another family;
+  - beside a base its record does not name;
+  - beside a base outside the store;
+  - beside mlx-lm's build of the base (`chat`).
+
+  A drafter is never registered as a chat backend and never offered a role.
+- [x] **Drafting on MLX.** An entry with a drafter loads through mlx-vlm and generates on its speculative path.
+  - The driver calls `load_drafter(path, kind="mtp")`.
+  - It runs `validate_drafter_compatibility` and fails the load on a mismatch, where mlx-vlm's own command line silently falls back.
+  - The block size is the entry's `draft_block_size`, else the drafter's own `config.json` `block_size`, else mlx-vlm's default.
+  - Two new readiness rungs, `Drafter` and `Draft`, say why a pairing cannot run. The `ready` line names `draft`, `draft_kind` and `draft_block_size`, so an older driver is refused, never left answering from the base alone. Its earlier digest joined `retired-scripts.txt`.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The open call's default, taken as a general rule:** a head pairs only where the installed mlx-vlm has a drafter module for its `model_type`. For the 12B unified assistant that is `gemma4_unified_assistant`. Without it, the 12B is offered no conversion, refused at convert and at `--draft`, and its entry's ladder says why.
+- **No llama.cpp field to mirror:** 26k built none, so the field is `draft`, as the document named it.
+- **An unrecorded directory whose config declares a draft head reads as `drafter`.** This keeps a pulled MLX-community drafter from being registered as a chat model. It extends 53e's rule, which inferred only `vision` from files.
+- **Drafting applies to a `vision` base only,** recorded or by its files, never to mlx-lm's `chat` build. mlx-vlm's speculative path loads the base through mlx-vlm, and mlx-lm's build is laid out for mlx-lm with its towers left out. The refusal names the `--mlx` conversion that keeps them.
+- **The block size "from the record" is read from the drafter's own files.** The conversion has no block size of its own to record.
+
+**Verified.**
+- 19 new cases (`[drafter]`, 735 assertions):
+  - the four assistants' conversions, with the 12B only where mlx-vlm drafts it;
+  - each head finding its own base, and the record's `bases` round trip;
+  - the drafter kind from the record or the files;
+  - the pairing's refusals;
+  - the convert ladder lifted for the drafter route alone, GGUF still refused, and a head always routed to mlx-vlm;
+  - the `ready` line's fields and the pinned arguments;
+  - an older driver refused, and both new rungs;
+  - at temperature 0, the drafted answers equal the base's alone over three turns, one carrying a picture;
+  - a misfit, an unknown type, or no speculative path failing the load;
+  - the config's parse and refusals;
+  - `--draft` completion offering only pairing drafters;
+  - all four assistants converted and paired, with a real in-process `complete` giving the same bytes with and without the drafter;
+  - the chat and GGUF refusals.
+- The fixtures are the user's four assistants and their bases, written inline (`tests/support/draft_head_configs.h`), and a stub `mlx_vlm.speculative` with a Gemma 4 drafter.
+- `cli.mlx_models_lifecycle` gained an E4B phase on the real binary.
+- Mutation check: dropping the drafting arguments in the driver (2 cases) and disabling the family and width check (3 cases) were each caught, then restored.
+- The first full gate failed one case: a completion test named `--draft offers …`, which Catch2 read as an option under ctest. It was renamed `set-backend --draft offers …`.
+  - `cli.test_names` should have refused it. The check read only names on the same line as `TEST_CASE("`, and clang-format had wrapped this one, and 272 others, onto the next line.
+  - The check now reads wrapped names too: 3,323 scanned. Put back with the dash, the name is refused.
+- ctest: `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`, `cli.mlx_lifecycle`, `cli.mlx_models_lifecycle`, `cli.config_lifecycle`, `cli.machine_schema_conformance`, `cli.complete_lifecycle` and `cli.shell_completion` pass.
+- `lib/scripts/cicd.sh --test`, rerun with nothing else after the rename: green. The CLI's 3,768 tests and the macOS app's 342 cases passed, with no warning.
+
+**Not done:**
+- The speed with and without the drafter, measured on the user's Mac, is their run, recorded once made.
+- `models rename` of a drafter's or base's folder does not update a `draft:` path or the drafter's recorded `bases`. The ladder then refuses, naming the stale base, and converting again fixes it.
+- 27e's footprint does not count a drafter's weights.

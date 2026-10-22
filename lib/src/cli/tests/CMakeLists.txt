@@ -43,6 +43,7 @@ add_library(apogee_tests_infrastructure OBJECT
     support/terminal_model.cpp
     support/embedding_fixtures.h
     support/towered_configs.h
+    support/draft_head_configs.h
     support/text_edits.h
     support/hermetic_stdin.cpp
     support/hermetic_home.cpp

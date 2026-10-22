@@ -212,9 +212,17 @@ std::string mlx_conversion_refusal(const std::filesystem::path& snapshot,
                ") -- an mlx backend runs it as it is; convert the full-weight release instead";
     }
     // mlx-lm has no network for a draft head, whatever `--model-type` says
-    // (2026-10-21).
-    if (const std::optional<DraftHead> head = snapshot_draft_head(snapshot)) {
+    // (2026-10-21) -- unless the route is mlx-vlm's drafter, which its
+    // speculative path runs beside the base (53i).
+    if (const std::optional<DraftHead> head = snapshot_draft_head(snapshot);
+        head.has_value() && kind != kMlxDrafter) {
         return draft_head_refusal(snapshot.string(), *head, {});
+    }
+    // And a drafter's route takes a draft head alone.
+    if (kind == kMlxDrafter && !snapshot_draft_head(snapshot).has_value()) {
+        return snapshot.string() +
+               " is no draft head: only a draft head converts to a drafter (its config.json "
+               "declaring backbone_hidden_size, or a draft head's architecture)";
     }
     // Nor for a diffusion model's: it builds language models (M20).
     if (const std::optional<DiffusionModel> diffusion = snapshot_diffusion_model(snapshot)) {

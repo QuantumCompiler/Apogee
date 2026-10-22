@@ -61,6 +61,10 @@ struct MlxHost {
     /// The seeded embedding driver (53h):
     /// `<home>/training/scripts/mlx_embed.py`.
     std::filesystem::path embedder{};
+    /// The model store's root (53i): `<home>/models`, where the bases a
+    /// drafter's record names are stored. Empty: the layout's, from
+    /// `apogee_home()`.
+    std::filesystem::path models{};
 
     /// The running build against `home`.
     [[nodiscard]] static MlxHost at(const std::filesystem::path& home);
@@ -99,6 +103,14 @@ enum class MlxRefusal : std::uint8_t {
     /// says `embedding` (53h) -- and the environment has no `mlx_embeddings`
     /// package to embed with it through.
     NoMlxEmbeddings,
+    /// The directory is a drafter (53i): it runs beside its base model, never
+    /// alone -- an entry's `draft:`, never its `model_path`.
+    Drafter,
+    /// The entry's `draft:` cannot run beside its model (53i): no drafter
+    /// there, a base of another family or width, one its record does not
+    /// name, mlx-lm's build of the base, or an mlx-vlm that drafts no model
+    /// of its type (`probe_mlx_draft`).
+    Draft,
     /// The seeded driver is not there.
     NoDriver,
 };
@@ -133,12 +145,14 @@ struct MlxReadiness {
 [[nodiscard]] MlxReadiness probe_mlx_runtime(const MlxHost& host);
 
 /// The whole ladder for one entry `name`: the platform, the environment and
-/// `mlx-lm`, then its `model_path`, then mlx-vlm for a directory that loads
-/// through it alone (53f), then the driver. An embedding directory (53h)
-/// asks for mlx-embeddings in mlx-vlm's place and for the embedding driver
-/// in the generation driver's -- mlx-lm stays a rung, as mlx-embeddings'
-/// own dependency through mlx-vlm. Construction and `check` both ask this,
-/// so they cannot disagree about whether an entry can run.
+/// `mlx-lm`, then its `model_path` -- a drafter there refused, since it runs
+/// beside a base and never alone (53i) -- then mlx-vlm for a directory that
+/// loads through it alone (53f), then its `draft:` beside it, when it names
+/// one (53i, `probe_mlx_draft`), then the driver. An embedding directory
+/// (53h) asks for mlx-embeddings in mlx-vlm's place and for the embedding
+/// driver in the generation driver's -- mlx-lm stays a rung, as
+/// mlx-embeddings' own dependency through mlx-vlm. Construction and `check`
+/// both ask this, so they cannot disagree about whether an entry can run.
 [[nodiscard]] MlxReadiness probe_mlx_backend(std::string_view name,
                                              const harness::BackendConfig& config,
                                              const MlxHost& host);
@@ -245,6 +259,50 @@ struct MlxVision {
 /// the one type's question the loader asks.)
 [[nodiscard]] bool mlx_vlm_has_module(const MlxVlmPackage& vlm, std::string_view model_type);
 
+/// Whether the installed mlx-vlm drafts with a model of `model_type` (53i):
+/// its speculative path holds a drafter package of that type,
+/// `speculative/drafters/<type>/`, whose `__init__.py` names the `Model` its
+/// loader builds -- where mlx-vlm's `load_drafter` finds it, and its
+/// converter too. Read from files, never imported.
+[[nodiscard]] bool mlx_vlm_drafts(const MlxVlmPackage& vlm, std::string_view model_type);
+
+/// The block size mlx-vlm drafts with when an entry sets none (53i): the
+/// drafter's own `block_size`, as its `config.json` states it -- mlx-vlm's
+/// drafter configuration reads it there -- or 0 when it states none, and
+/// mlx-vlm's own default for its kind applies.
+[[nodiscard]] std::int64_t drafter_block_size(const std::filesystem::path& drafter);
+
+/// Whether an entry's drafter runs beside its model (53i), and why not: the
+/// pairing's file facts (`models::mlx_drafter_refusal` -- a drafter there, a
+/// base mlx-vlm loads to chat with, of its family and width, the one its
+/// record names), then mlx-vlm installed and drafting the drafter's type.
+/// The default the user's open call took: Gemma 4's unified 12B assistant
+/// (`gemma4_unified_assistant`) pairs only where the installed mlx-vlm drafts
+/// that type, and is refused saying so otherwise -- as every drafter is.
+/// The editor (`config set-backend --draft`), the ladder and `check` ask
+/// this, so none pairs what another refuses.
+struct MlxDraft {
+    /// The drafter's directory, `~` and `${VAR}` expanded.
+    std::filesystem::path dir{};
+    /// Why it cannot run, in a sentence, and the fix when one command is it.
+    /// Both empty when it can.
+    std::string reason{};
+    std::string remedy{};
+    /// What was read: the drafter, when one is there.
+    std::optional<models::MlxDrafter> drafter{};
+    MlxVlmPackage vlm{};
+
+    [[nodiscard]] bool pairs() const noexcept {
+        return reason.empty();
+    }
+
+    /// The reason with its fix, as one line; empty when it pairs.
+    [[nodiscard]] std::string message() const;
+};
+
+[[nodiscard]] MlxDraft probe_mlx_draft(const std::filesystem::path& base, std::string_view draft,
+                                       const MlxHost& host);
+
 /// Which rung of the audio ladder refused (53g), in the order they are asked.
 enum class MlxAudioRefusal : std::uint8_t {
     None,
@@ -340,6 +398,15 @@ public:
         /// The config's rung of the sampling ladder, and its seed (26h).
         SamplingRung sampling;
         std::optional<std::uint32_t> seed;
+        /// The drafter the driver runs beside the model (53i): mlx-vlm's
+        /// speculative path, `draft_kind="mtp"`, every turn through mlx-vlm --
+        /// which loads the base -- and its answer the base's own. Empty, the
+        /// default, starts the driver exactly as before.
+        std::filesystem::path draft{};
+        /// The tokens a drafting round proposes, plus one (mlx-vlm's
+        /// `draft_block_size`): the entry's `draft_block_size`; 0 leaves it to
+        /// the drafter's own (`drafter_block_size`), then mlx-vlm's default.
+        std::int64_t draft_block_size = 0;
         /// The adapter the driver loads over the model (53a): at most one --
         /// mlx-lm's `adapter_path`, a directory its training wrote -- with
         /// the pin to the base it was registered against. Empty, the
@@ -468,6 +535,11 @@ public:
 
     /// Whether the running driver loaded the model through mlx-vlm (27c).
     [[nodiscard]] bool has_vision_child() const noexcept;
+
+    /// Whether every turn drafts beside the drafter its entry names (53i).
+    [[nodiscard]] bool drafting() const noexcept {
+        return !options_.draft.empty();
+    }
 
     /// What the driver said when it was ready, once it has.
     [[nodiscard]] const std::optional<mlx::Event>& driver_ready() const noexcept {

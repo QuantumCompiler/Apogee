@@ -119,8 +119,9 @@ struct MlxConvertResult {
     MlxInfo info;
     /// What kind of MLX directory the converter made (53e), for its record:
     /// `chat` for mlx-lm's language model, `vision` for mlx-vlm's build with
-    /// its towers kept (53f), `embedding` for mlx-embeddings' (53h) -- the
-    /// route's, as the caller names it. Set when `ok`.
+    /// its towers kept (53f), `embedding` for mlx-embeddings' (53h),
+    /// `drafter` for mlx-vlm's build of a draft head (53i) -- the route's, as
+    /// the caller names it. Set when `ok`.
     std::string kind{};
 };
 
@@ -135,7 +136,9 @@ struct MlxConvertResult {
 /// embedding model (M21), or something already at `out`. `kind` is what the
 /// route's converter builds (53f): `embedding` -- the caller has found the
 /// installed mlx-embeddings builds the set's type (53h) -- lifts M21's
-/// refusal; any other keeps it, worded as it was.
+/// refusal; `drafter` -- the caller has found the installed mlx-vlm drafts
+/// the head's type (53i) -- lifts the draft-heads change's, and takes a draft
+/// head alone; any other keeps both, worded as they were.
 [[nodiscard]] std::string mlx_conversion_refusal(const std::filesystem::path& snapshot,
                                                  const std::filesystem::path& out,
                                                  std::string_view kind = {});
@@ -152,7 +155,8 @@ struct MlxConvertResult {
 /// it under its id is the store's (`commit_mlx`). `kind` is what the route's
 /// converter builds (53f): `chat` for mlx-lm's, `vision` for mlx-vlm's,
 /// `embedding` for mlx-embeddings' (53h), which rung 1 lets an embedding
-/// model through for.
+/// model through for, `drafter` for mlx-vlm's build of a draft head (53i),
+/// which it lets a draft head through for.
 /// The `model_type` a snapshot's `config.json` declares, or empty.
 [[nodiscard]] std::string snapshot_model_type(const std::filesystem::path& snapshot);
 

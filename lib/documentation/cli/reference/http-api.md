@@ -320,11 +320,17 @@ stored through the credential routes alone. `adapters` takes what
 mlx entry -- and records beside each adapter the sha256 of the weights at
 the entry's `model_path` as they are now, the pin every load checks; the
 entry's view then lists them, each with its `path`, `scale` and
-`base_sha256`. The config it leaves is byte
-for byte the CLI's. `200 {edited, said, restart_required}`; `404` when
-unknown; `400` naming why for a field no backend has, a value its field
-cannot hold, an adapter that is not there or a base that cannot be read,
-or a key.
+`base_sha256`. `draft` takes what `--draft` takes (53i) -- a drafter's MLX
+directory, its stored handle, or a model storing one drafter, on an mlx
+entry -- and pairs it with the entry's model before it is written: a base of
+the drafter's family and width, mlx-vlm's build, the one its record names,
+with an mlx-vlm that drafts its type; it is written as the drafter's
+absolute directory, and the view lists `draft` and `draft_block_size`. The
+config it leaves is byte for byte the CLI's. `200 {edited, said,
+restart_required}`; `404` when unknown; `400` naming why for a field no
+backend has, a value its field cannot hold, an adapter that is not there or
+a base that cannot be read, a drafter that cannot run beside the entry's
+model, or a key.
 
 ### `POST /v1/admin/backends/{id}/rename`
 

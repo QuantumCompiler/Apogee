@@ -1100,3 +1100,201 @@ TEST_CASE("a text driver says it hands no recording on", "[backends][mlx][driver
     CHECK(ready["audio"] == false);
     CHECK(driver.close() == 0);
 }
+
+// ---------------------------------------------------------------------------
+// A drafter beside the model (53i)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A drafter directory as mlx-vlm's conversion of the user's E4B assistant
+/// leaves one: its config.json, `block_size` stated when given.
+std::filesystem::path drafter(const std::filesystem::path& root, int block = 0) {
+    const std::filesystem::path dir = root / "Gemma4-E4B-Assistant-bf16";
+    std::filesystem::create_directories(dir);
+    json config{{"architectures", json::array({"Gemma4AssistantForCausalLM"})},
+                {"model_type", "gemma4_assistant"},
+                {"backbone_hidden_size", 2560}};
+    if (block > 0) {
+        config["block_size"] = block;
+    }
+    std::ofstream{dir / "config.json"} << config.dump();
+    return dir;
+}
+
+/// The texts of a whole conversation's turns, the same requests each time.
+std::vector<std::string> conversation(Driver& driver) {
+    std::vector<std::string> texts;
+    driver.send(generate(1, json::array({user("Explain speculative decoding.")})));
+    texts.push_back(joined(driver.until_done(1), "text"));
+    driver.send(generate(
+        2,
+        json::array({seeing(json::array({picture("image/png", "QUJDREVGR0g="),
+                                         {{"type", "text"}, {"text", "And this picture?"}}}))})));
+    texts.push_back(joined(driver.until_done(2), "text"));
+    driver.send(generate(3, json::array({user("Go on")}), json::array(), {{"max_tokens", 7}}));
+    const std::vector<json> capped = driver.until_done(3);
+    texts.push_back(joined(capped, "text") + " | " + capped.back()["finish"].get<std::string>());
+    return texts;
+}
+
+}  // namespace
+
+TEST_CASE(
+    "under --draft the driver loads the drafter by mlx-vlm's load_drafter as mtp, every turn "
+    "runs its speculative path, and the temperature-0 answer is the model's own",
+    "[backends][mlx][driver][drafter]") {
+    REQUIRE_PYTHON();
+    const apogee::testing::TempDir dir{"mlx-driver"};
+    const std::vector<std::string> replies{
+        "Drafts are proposed, then the model verifies them in one pass.", "I see {images}.",
+        "A long answer that the cap will cut."};
+    // The model alone: the answer, turn by turn.
+    std::vector<std::string> alone;
+    {
+        Driver driver{dir, {}, replies, kModel, std::string{kWithVlm}, {"--vision"}};
+        const json ready = driver.next();
+        CHECK_FALSE(ready.contains("draft"));
+        alone = conversation(driver);
+        CHECK(driver.close() == 0);
+        CHECK(count(driver.record(), "vlm draft") == 0);
+    }
+    REQUIRE(alone.size() == 3);
+    CHECK(alone[0] == replies[0]);
+    CHECK(alone[2] == "A long  | length");
+
+    // Beside its drafter, a block of 3 asked: the same text, every turn.
+    std::filesystem::remove(dir.path() / "record.txt");
+    const std::filesystem::path draft = drafter(dir.path());
+    Driver driver{dir,
+                  {},
+                  replies,
+                  kModel,
+                  std::string{kWithVlm},
+                  {"--draft", draft.string(), "--draft-block-size", "3"}};
+    const json ready = driver.next();
+    // --draft implies mlx-vlm's load: the speculative path loads the base.
+    CHECK(ready["vision"] == true);
+    CHECK(ready["draft"] == draft.string());
+    CHECK(ready["draft_kind"] == "mtp");
+    CHECK(ready["draft_block_size"] == 3);
+    CHECK(conversation(driver) == alone);
+    CHECK(driver.close() == 0);
+
+    const std::vector<std::string> record = driver.record();
+    // Loaded once, as an MTP drafter of its own type, and checked against
+    // the model by mlx-vlm's own compatibility check.
+    CHECK(count(record, "vlm drafter Gemma4-E4B-Assistant-bf16 kind=mtp type=gemma4_assistant") ==
+          1);
+    CHECK(count(record, "vlm drafter check kind=mtp") == 1);
+    CHECK(count(record, "vlm load model") == 1);
+    // Every turn through the speculative path, the picture's included, with
+    // the pairing as asked.
+    CHECK(count(record, "vlm draft Gemma4-E4B-Assistant-bf16 kind=mtp block=3") == 3);
+    CHECK(count(record,
+                "vlm generate images=0 options=draft_block_size,draft_kind,draft_model,"
+                "logits_processors,max_tokens,sampler") == 2);
+    CHECK(count(record,
+                "vlm generate images=1 options=draft_block_size,draft_kind,draft_model,"
+                "logits_processors,max_tokens,sampler") == 1);
+    // mlx-lm lends its format only.
+    CHECK(count(record, "load ") == 0);
+}
+
+TEST_CASE("without --draft-block-size the drafter's own block applies, and ready says null",
+          "[backends][mlx][driver][drafter]") {
+    REQUIRE_PYTHON();
+    const apogee::testing::TempDir dir{"mlx-driver"};
+    const std::filesystem::path draft = drafter(dir.path(), 6);
+    Driver driver{dir,
+                  {},
+                  {"Same words."},
+                  kModel,
+                  std::string{kWithVlm},
+                  {"--vision", "--draft", draft.string()}};
+    const json ready = driver.next();
+    CHECK(ready["draft"] == draft.string());
+    CHECK(ready["draft_block_size"].is_null());
+    driver.send(generate(1, json::array({user("hi")})));
+    CHECK(joined(driver.until_done(1), "text") == "Same words.");
+    CHECK(driver.close() == 0);
+    const std::vector<std::string> record = driver.record();
+    CHECK(count(record, "vlm draft Gemma4-E4B-Assistant-bf16 kind=mtp block=drafter:6") == 1);
+    CHECK(count(record,
+                "vlm generate images=0 options=draft_kind,draft_model,logits_processors,"
+                "max_tokens,sampler") == 1);
+}
+
+TEST_CASE(
+    "a drafter that does not fit, one mlx-vlm has no type for, or an mlx-vlm with no speculative "
+    "path fails the load -- never a quiet run without it",
+    "[backends][mlx][driver][drafter][errors]") {
+    REQUIRE_PYTHON();
+    const apogee::testing::TempDir dir{"mlx-driver"};
+    const std::filesystem::path draft = drafter(dir.path());
+    {
+        Driver driver{dir,
+                      {{"STUB_MLX_VLM_DRAFT_MISMATCH", "hidden sizes differ: 2560 and 3840"}},
+                      {"x"},
+                      kModel,
+                      std::string{kWithVlm},
+                      {"--draft", draft.string()}};
+        const json error = driver.next();
+        CHECK(error["kind"] == "load");
+        CHECK(error["message"].get<std::string>().find("does not fit the model: hidden sizes "
+                                                       "differ: 2560 and 3840") !=
+              std::string::npos);
+        CHECK(driver.close() == 4);
+    }
+    {
+        // The unified 12B's assistant: no drafter of its type in this mlx-vlm.
+        const std::filesystem::path unified = dir.path() / "unified";
+        std::filesystem::create_directories(unified);
+        std::ofstream{unified / "config.json"}
+            << R"({"model_type": "gemma4_unified_assistant", "backbone_hidden_size": 3840})";
+        Driver driver{dir, {}, {"x"}, kModel, std::string{kWithVlm}, {"--draft", unified.string()}};
+        const json error = driver.next();
+        CHECK(error["kind"] == "load");
+        CHECK(error["message"].get<std::string>().find(
+                  "gemma4_unified_assistant not supported as a drafter") != std::string::npos);
+        CHECK(driver.close() == 4);
+    }
+    {
+        // An mlx-vlm from before speculative drafting.
+        const std::filesystem::path older = dir.path() / "older-vlm";
+        std::filesystem::copy(kStubs / "stub_mlx_vlm", older,
+                              std::filesystem::copy_options::recursive);
+        std::filesystem::remove_all(older / "mlx_vlm" / "speculative");
+        Driver driver{
+            dir, {}, {"x"}, kModel, "stub_mlx:" + older.string(), {"--draft", draft.string()}};
+        const json error = driver.next();
+        CHECK(error["kind"] == "missing_dependency");
+        CHECK(error["message"].get<std::string>().find("cannot draft") != std::string::npos);
+        CHECK(error["message"].get<std::string>().find("apogee train setup --with mlx-vlm") !=
+              std::string::npos);
+        CHECK(driver.close() == 3);
+    }
+    {
+        // A drafter directory with no config, and a block with no drafter.
+        Driver gone{dir,
+                    {},
+                    {"x"},
+                    kModel,
+                    std::string{kWithVlm},
+                    {"--draft", (dir.path() / "nothing").string()}};
+        CHECK(gone.next()["kind"] == "load");
+        CHECK(gone.close() == 4);
+        Driver orphan{
+            dir, {}, {"x"}, kModel, std::string{kWithVlm}, {"--vision", "--draft-block-size", "3"}};
+        CHECK(orphan.next()["kind"] == "protocol");
+        CHECK(orphan.close() == 2);
+        Driver tiny{dir,
+                    {},
+                    {"x"},
+                    kModel,
+                    std::string{kWithVlm},
+                    {"--draft", draft.string(), "--draft-block-size", "1"}};
+        CHECK(tiny.next()["kind"] == "protocol");
+        CHECK(tiny.close() == 2);
+    }
+}

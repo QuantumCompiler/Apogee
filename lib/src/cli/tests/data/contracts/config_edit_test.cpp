@@ -1906,10 +1906,14 @@ TEST_CASE("the editable fields are the loader's, and every one add-backend write
                                                           {"host", "h"},
                                                           {"idle_unload_seconds", "30"},
                                                           {"server_tools", "web_search"},
-                                                          {"adapters", "/a.gguf"}};
+                                                          {"adapters", "/a.gguf"},
+                                                          {"draft", "/drafter"},
+                                                          {"draft_block_size", "4"}};
     // Only a vendor API runs server-side tools (47a): that field is set on an
     // anthropic entry, alone, since the chain below turns its entry local.
     constexpr std::string_view kVendorBase = "backends:\n  all:\n    type: anthropic\n";
+    // Only an mlx entry drafts (53i): its two fields set on one.
+    constexpr std::string_view kMlxBase = "backends:\n  all:\n    type: mlx\n";
     const std::string base_json = [&]() {
         const apogee::harness::Config base = apogee::harness::parse_config(kBase, "base");
         return apogee::harness::append_backend("", "all", *base.find_backend("all"), false);
@@ -1924,6 +1928,15 @@ TEST_CASE("the editable fields are the loader's, and every one add-backend write
                 "edited");
             CHECK(config.find_backend("all")->server_tools ==
                   std::vector<std::string>{"web_search"});
+            continue;
+        }
+        if (field == "draft" || field == "draft_block_size") {
+            const apogee::harness::Config config = apogee::harness::parse_config(
+                apogee::harness::set_backend_field(kMlxBase, "all", field, samples.at(field)),
+                "edited");
+            CHECK((config.find_backend("all")->draft == "/drafter" ||
+                   config.find_backend("all")->draft_block_size == 4));
+            all = apogee::harness::set_backend_field(all, "all", field, samples.at(field));
             continue;
         }
         const std::string edited =
@@ -1954,8 +1967,8 @@ TEST_CASE("the editable fields are the loader's, and every one add-backend write
             ++seen;
         }
     }
-    CHECK(seen == 18);  // the writer's fields: all but the five written by hand
-    // The five the writer never writes are read by the loader all the same.
+    CHECK(seen == 18);  // the writer's fields: all but the seven written by hand
+    // The seven the writer never writes are read by the loader all the same.
     const apogee::harness::BackendConfig& entry = *config.find_backend("all");
     CHECK(entry.binary == "/bin/x");
     CHECK(entry.mode == "m");
@@ -1963,6 +1976,8 @@ TEST_CASE("the editable fields are the loader's, and every one add-backend write
     CHECK(entry.idle_unload_seconds == 30);
     CHECK(entry.adapters ==
           std::vector<apogee::harness::AdapterConfig>{{.path = "/a.gguf", .scale = 1.0}});
+    CHECK(entry.draft == "/drafter");
+    CHECK(entry.draft_block_size == 4);
 }
 
 TEST_CASE("config set moves each allow-listed scalar in place, comments kept, as its kind reads",

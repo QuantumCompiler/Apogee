@@ -17,7 +17,11 @@
 # `config scan`, and named as the embedding role: a collection ingested and a
 # retrieval turn answered on vectors from the real seeded `mlx_embed.py`, a
 # chat on it refused, and another embedder's space demoting the collection to
-# lexical.
+# lexical. Since 53i the user's E4B assistant, a draft head: refused as GGUF
+# and as a backend, converted through the stub `mlx_vlm.convert` to a drafter
+# recorded beside its base, named as that base's entry's draft, and a turn
+# answered through mlx-vlm's speculative path with the base's own answer --
+# the same bytes as the turn without it.
 #
 # Apple silicon only: the mlx runtime runs nowhere else (the in-process
 # suite, `models_mlx_test`, covers the rest on every platform).
@@ -321,6 +325,96 @@ grep -q "re-run" "$WORK_DIR/demoted.txt" \
     || fail "the lexical fallback carried no re-ingest hint: $(cat "$WORK_DIR/demoted.txt")"
 if pgrep -f "$WORK_DIR/training/scripts/mlx_embed.py" >/dev/null 2>&1; then
     fail "an embedding driver outlived its apogee: $(pgrep -fl "$WORK_DIR/training/scripts/mlx_embed.py")"
+fi
+
+# --- a draft head (53i): a drafter beside its base, the answer the base's ---------
+# The user's Gemma4-E4B-Instruct and its assistant, as their configs lay them
+# out: the assistant reads a 2560-wide gemma4 model's hidden states.
+python3 - "$WORK_DIR/models" <<'EOF' || fail "could not write the E4B sets"
+import json, os, struct, sys
+models = sys.argv[1]
+sets = {
+    "Gemma4-E4B-Instruct/safetensors/cccccccccccc": {
+        "architectures": ["Gemma4ForConditionalGeneration"], "model_type": "gemma4",
+        "audio_config": {"model_type": "gemma4_audio", "hidden_size": 1536},
+        "vision_config": {"model_type": "gemma4_vision", "hidden_size": 768},
+        "text_config": {"model_type": "gemma4_text", "hidden_size": 2560,
+                        "max_position_embeddings": 131072}},
+    "Gemma4-E4B-Assistant/safetensors/dddddddddddd": {
+        "architectures": ["Gemma4AssistantForCausalLM"], "model_type": "gemma4_assistant",
+        "backbone_hidden_size": 2560, "use_ordered_embeddings": True,
+        "text_config": {"model_type": "gemma4_text", "hidden_size": 256,
+                        "num_hidden_layers": 4}},
+}
+header = json.dumps({"__metadata__": {"format": "pt"},
+                     "w": {"dtype": "F16", "shape": [64], "data_offsets": [0, 128]}}).encode()
+for relative, config in sets.items():
+    d = os.path.join(models, relative)
+    os.makedirs(d)
+    json.dump(config, open(os.path.join(d, "config.json"), "w"))
+    json.dump({"model": {"type": "BPE"}}, open(os.path.join(d, "tokenizer.json"), "w"))
+    json.dump({"chat_template": "{{ messages }}"},
+              open(os.path.join(d, "tokenizer_config.json"), "w"))
+    if "vision_config" in config:
+        json.dump({}, open(os.path.join(d, "preprocessor_config.json"), "w"))
+    with open(os.path.join(d, "model.safetensors"), "wb") as out:
+        out.write(struct.pack("<Q", len(header)) + header + b"\0" * 128)
+EOF
+# Refused as before: a GGUF of it, and a backend of it.
+if "$APOGEE_BIN" models convert Gemma4-E4B-Assistant >"$WORK_DIR/head.txt" 2>&1; then
+    fail "a GGUF of the draft head was made: $(cat "$WORK_DIR/head.txt")"
+fi
+grep -q "is a draft head (Gemma4AssistantForCausalLM)" "$WORK_DIR/head.txt" \
+    || fail "the GGUF refusal did not say what it is: $(cat "$WORK_DIR/head.txt")"
+if "$APOGEE_BIN" models convert Gemma4-E4B-Assistant --mlx --register >"$WORK_DIR/head.txt" 2>&1; then
+    fail "the draft head was registered as a backend: $(cat "$WORK_DIR/head.txt")"
+fi
+grep -q "which no backend runs" "$WORK_DIR/head.txt" \
+    || fail "the registration refusal did not say why: $(cat "$WORK_DIR/head.txt")"
+[ ! -d "$WORK_DIR/models/Gemma4-E4B-Assistant/mlx" ] || fail "a refused conversion staged something"
+
+# Its base, mlx-vlm's build, registered; the drafter converted beside it.
+"$APOGEE_BIN" models convert Gemma4-E4B-Instruct --mlx --register --base-name e4b \
+    >"$WORK_DIR/e4b.txt" 2>&1 || fail "convert --mlx --register of the E4B: $(cat "$WORK_DIR/e4b.txt")"
+"$APOGEE_BIN" models convert Gemma4-E4B-Assistant --mlx >"$WORK_DIR/drafter.txt" 2>&1 \
+    || fail "convert --mlx of the draft head failed: $(cat "$WORK_DIR/drafter.txt")"
+grep -q "kind: drafter (recorded)" "$WORK_DIR/drafter.txt" \
+    || fail "the conversion did not say it made a drafter: $(cat "$WORK_DIR/drafter.txt")"
+DRAFTERS=("$WORK_DIR"/models/Gemma4-E4B-Assistant/mlx/*/)
+[ "${#DRAFTERS[@]}" -eq 1 ] || fail "expected one drafter, found: ${DRAFTERS[*]}"
+DRAFTER="${DRAFTERS[0]%/}"
+grep -q '"kind": "drafter"' "$DRAFTER/apogee-snapshot.json" \
+    || fail "the record does not say drafter: $(cat "$DRAFTER/apogee-snapshot.json")"
+grep -q '"Gemma4-E4B-Instruct"' "$DRAFTER/apogee-snapshot.json" \
+    || fail "the record does not name its base: $(cat "$DRAFTER/apogee-snapshot.json")"
+"$APOGEE_BIN" config scan --register >"$WORK_DIR/drafter-scan.txt" 2>&1 || fail "config scan"
+if grep -q "added backend 'Gemma4-E4B-Assistant" "$WORK_DIR/drafter-scan.txt"; then
+    fail "the scan registered the drafter: $(cat "$WORK_DIR/drafter-scan.txt")"
+fi
+no_driver_left
+
+# A turn on the base alone, then beside its drafter: the same answer.
+: >"$STUB_MLX_RECORD"
+"$APOGEE_BIN" complete -m e4b-4bit "Explain speculative decoding." >"$WORK_DIR/alone.txt" \
+    2>"$WORK_DIR/alone.err" || fail "a turn on the E4B failed: $(cat "$WORK_DIR/alone.err")"
+if grep -q '^vlm draft' "$STUB_MLX_RECORD"; then
+    fail "a turn with no drafter drafted: $(cat "$STUB_MLX_RECORD")"
+fi
+"$APOGEE_BIN" config set-backend e4b-4bit --draft Gemma4-E4B-Assistant >"$WORK_DIR/pair.txt" 2>&1 \
+    || fail "set-backend --draft did not pair them: $(cat "$WORK_DIR/pair.txt")"
+grep -qF "set draft; drafter $DRAFTER beside " "$WORK_DIR/pair.txt" \
+    || fail "the pairing was not said: $(cat "$WORK_DIR/pair.txt")"
+: >"$STUB_MLX_RECORD"
+"$APOGEE_BIN" complete -m e4b-4bit "Explain speculative decoding." >"$WORK_DIR/drafted.txt" \
+    2>"$WORK_DIR/drafted.err" || fail "a drafted turn failed: $(cat "$WORK_DIR/drafted.err")"
+cmp -s "$WORK_DIR/alone.txt" "$WORK_DIR/drafted.txt" \
+    || fail "the drafted answer differs from the base's: $(cat "$WORK_DIR/alone.txt") / $(cat "$WORK_DIR/drafted.txt")"
+grep -q "^vlm drafter $(basename "$DRAFTER") kind=mtp type=gemma4_assistant" "$STUB_MLX_RECORD" \
+    || fail "the drafter was not loaded as mtp: $(cat "$STUB_MLX_RECORD")"
+grep -q "^vlm draft $(basename "$DRAFTER") kind=mtp " "$STUB_MLX_RECORD" \
+    || fail "the turn did not run the speculative path: $(cat "$STUB_MLX_RECORD")"
+if pgrep -f "$WORK_DIR/training/scripts/mlx_generate.py" >/dev/null 2>&1; then
+    fail "a driver outlived its apogee: $(pgrep -fl "$WORK_DIR/training/scripts/mlx_generate.py")"
 fi
 
 echo "mlx_models_e2e: ok"

@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "backends/mlx_local.h"
 #include "cli/config_cmd.h"
 #include "cli/embed.h"
 #include "cli/graph.h"
@@ -26,6 +27,8 @@
 #include "models/quantize.h"
 #include "models/source_ollama.h"
 #include "modelstore/kv_cache.h"
+#include "modelstore/mlx_info.h"
+#include "modelstore/snapshot.h"
 #include "modelstore/store.h"
 #include "modelstore/voice_info.h"
 #include "operations/knowledge_core.h"
@@ -281,6 +284,17 @@ void note_store(const models::StoreRoots& roots, NameList& list) {
     return out;
 }
 
+/// Whether the set the command's first positional names is a draft head
+/// (53i): what `models convert` takes to MLX alone, as a drafter.
+[[nodiscard]] bool draft_head_on_line(const CompletionContext& context) {
+    if (context.positionals.empty() || context.config == nullptr) {
+        return false;
+    }
+    const SnapshotChoice set =
+        choose_snapshot(store_roots(*context.config), context.positionals.front(), {}, true);
+    return !set.path.empty() && models::snapshot_draft_head(set.path).has_value();
+}
+
 [[nodiscard]] std::vector<std::string> kit_names() {
     std::vector<std::string> out;
     for (const harness::BundledKit& kit : harness::bundled_kits()) {
@@ -521,7 +535,12 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         list.as_listed = true;
         note_store(store_roots(config), list);
     } else if (kind == kRegisterLevelValue) {
-        // Each engine's own (M16): what `--mlx`, earlier on the line, chose.
+        // Each engine's own (M16): what `--mlx`, earlier on the line, chose --
+        // and none for a draft head, which registers as nothing (53i).
+        if (draft_head_on_line(context)) {
+            list.none = "a draft head's MLX build is a drafter, which no backend runs";
+            return list;
+        }
         list.names = context.flags.contains("--mlx") ? training::mlx_precision_names()
                                                      : models::quant_type_names();
     } else if (kind == kMlxModelTypeValue) {
@@ -530,6 +549,14 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         // --text-only came earlier on the line (53f); mlx-lm's otherwise.
         training::MlxConverterKind converter = training::MlxConverterKind::MlxLm;
         if (!context.positionals.empty() && context.config != nullptr) {
+            if (draft_head_on_line(context)) {
+                // A draft head converts as the drafter its config names (53i):
+                // the flag is refused on one, so nothing is offered.
+                list.none =
+                    "a draft head converts as the drafter its config.json names -- "
+                    "--model-type does not apply";
+                return list;
+            }
             const SnapshotChoice set =
                 choose_snapshot(store_roots(*context.config), context.positionals.front());
             if (!set.path.empty()) {
@@ -541,6 +568,37 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         list.none = "no " + std::string{training::to_string(converter)} +
                     " in Apogee's Python environment -- 'apogee train setup --with " +
                     std::string{training::to_string(training::mlx_converter_set(converter))} + "'";
+    } else if (kind == kDrafterValue) {
+        // 53i: the store's drafters the entry on the line pairs with -- its
+        // model, or the one `--model-path` gives it on the same line -- asked
+        // as the editor asks (`probe_mlx_draft`), so none offered is refused.
+        list.paths = true;
+        list.as_listed = true;
+        const harness::BackendConfig* entry =
+            context.positionals.empty() ? nullptr
+                                        : config.find_backend(context.positionals.front());
+        const auto moved = context.flags.find("--model-path");
+        const std::string base = moved != context.flags.end() ? moved->second
+                                 : entry != nullptr           ? entry->model_path
+                                                              : std::string{};
+        if (base.empty()) {
+            list.none = "name an mlx backend over a model first -- its drafter runs beside it";
+            return list;
+        }
+        const std::filesystem::path base_dir{harness::expand_env_and_home(base)};
+        const backends::MlxHost host = backends::MlxHost::current();
+        const models::StoreRoots roots = store_roots(config);
+        for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
+            if (models::read_mlx_drafter(stored.dir).has_value() &&
+                backends::probe_mlx_draft(base_dir, stored.dir.string(), host).pairs()) {
+                const std::string handle =
+                    models::weights_handle(stored.model, models::kMlxFormat, stored.id);
+                list.names.push_back(handle);
+                list.notes[handle] = {.group = "MLX", .description = "a drafter"};
+            }
+        }
+        list.none = "no stored drafter pairs with " + base_dir.filename().string() +
+                    " -- 'apogee models convert <its draft head> --mlx' makes one";
     } else if (kind == kVoiceValue) {
         // Every voice the store's voice models carry, each with its language.
         for (const models::StoredVoice& stored : models::list_store_voices(store_roots(config))) {
@@ -562,7 +620,8 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
     } else if (kind == kConvertPrecisionValue) {
         // `--mlx` after `--type` cannot be seen: the line is read up to the
         // cursor.
-        if (context.flags.contains("--mlx")) {
+        // A draft head converts with --mlx alone (53i): its precisions only.
+        if (context.flags.contains("--mlx") || draft_head_on_line(context)) {
             list.names = training::mlx_precision_names();
         } else {
             list.names = training::converter_out_types();

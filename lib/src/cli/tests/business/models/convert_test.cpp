@@ -9,10 +9,12 @@
 #include <iterator>
 #include <random>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include "modelstore/snapshot.h"
+#include "support/draft_head_configs.h"
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
 #include "support/mlx_model.h"
@@ -450,6 +452,39 @@ TEST_CASE("a draft head is refused by both ladders, whatever type it is converte
     REQUIRE(
         apogee::models::stage_model_type_overlay(work.snapshot, overlay, "gemma4_unified").empty());
     CHECK(apogee::models::mlx_conversion_refusal(overlay, work.out).find("is a draft head") !=
+          std::string::npos);
+}
+
+TEST_CASE(
+    "a draft head converts to MLX on the drafter's route alone; GGUF and every other route "
+    "refuse it as before",
+    "[models][convert][mlx][draft_head][drafter]") {
+    // 53i: the draft-heads change's refusal lifted for mlx-vlm's drafter, the
+    // route the command takes only where the installed mlx-vlm drafts it.
+    for (const apogee::testing::DraftHeadPair& pair : apogee::testing::kUserDraftHeads) {
+        INFO(pair.head_model);
+        const MlxWork work;
+        write_file(work.snapshot / "config.json", pair.head_config);
+        const std::string kept = apogee::models::mlx_conversion_refusal(work.snapshot, work.out);
+        CHECK(kept.find("is a draft head") != std::string::npos);
+        for (const std::string_view other : {"chat", "vision", "embedding"}) {
+            CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out, other) == kept);
+        }
+        CHECK(apogee::models::conversion_refusal(work.snapshot, work.root.path() / "out.gguf") ==
+              kept);
+        CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out, "drafter").empty());
+        // Converted, it is recorded a drafter -- what the route names it.
+        const apogee::models::MlxConvertResult made = apogee::models::convert_snapshot_to_mlx(
+            work.snapshot, work.out, 0, writes({.bits = 0, .model_type = "gemma4_assistant"}), {},
+            "drafter");
+        INFO(made.error);
+        REQUIRE(made.ok);
+        CHECK(made.kind == "drafter");
+    }
+    // The drafter's route takes a draft head alone.
+    const MlxWork plain;
+    CHECK(apogee::models::mlx_conversion_refusal(plain.snapshot, plain.out, "drafter")
+              .find("is no draft head: only a draft head converts to a drafter") !=
           std::string::npos);
 }
 

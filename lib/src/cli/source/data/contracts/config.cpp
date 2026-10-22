@@ -316,6 +316,19 @@ BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
         fail(origin, where + ".server_tools: " + refusal);
     }
     backend.adapters = parse_adapters(node["adapters"], origin, where + ".adapters", backend.type);
+    // A drafter beside the model (53i): an mlx entry's alone, mlx-vlm's
+    // speculative path being the one Apogee runs.
+    backend.draft = scalar(node["draft"], origin, where + ".draft");
+    backend.draft_block_size =
+        integer_in(node["draft_block_size"], origin, where + ".draft_block_size",
+                   kMinDraftBlockSize, kMaxDraftBlockSize);
+    if ((!backend.draft.empty() || backend.draft_block_size.has_value()) &&
+        backend.type != BackendType::Mlx) {
+        fail(origin, where + (backend.draft.empty() ? ".draft_block_size" : ".draft") +
+                         ": a backend of type " + std::string{to_string(backend.type)} +
+                         " drafts with nothing -- a drafter runs beside an mlx entry's model, "
+                         "through mlx-vlm's speculative path");
+    }
 
     return backend;
 }

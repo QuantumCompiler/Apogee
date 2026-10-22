@@ -35,6 +35,9 @@ bool write_snapshot(const std::filesystem::path& dir, const Snapshot& snapshot) 
     if (!snapshot.kind.empty()) {
         record["kind"] = snapshot.kind;
     }
+    if (!snapshot.bases.empty()) {
+        record["bases"] = snapshot.bases;
+    }
     std::filesystem::path temp = snapshot_record_path(dir);
     temp += ".tmp-" + std::to_string(std::random_device{}());
     {
@@ -71,6 +74,17 @@ std::optional<Snapshot> load_snapshot(const std::filesystem::path& dir) {
     // A word, as written; anything else is no kind recorded (53e).
     if (const auto kind = record.find("kind"); kind != record.end() && kind->is_string()) {
         snapshot.kind = kind->get<std::string>();
+    }
+    // A drafter's bases (53i): the names that are text, each once; anything
+    // else names none.
+    if (const auto bases = record.find("bases"); bases != record.end() && bases->is_array()) {
+        for (const nlohmann::json& base : *bases) {
+            if (base.is_string() && !base.get<std::string>().empty() &&
+                std::ranges::find(snapshot.bases, base.get<std::string>()) ==
+                    snapshot.bases.end()) {
+                snapshot.bases.push_back(base.get<std::string>());
+            }
+        }
     }
     if (const auto files = record.find("files"); files != record.end() && files->is_array()) {
         for (const nlohmann::json& file : *files) {
@@ -193,6 +207,9 @@ std::optional<DraftHead> snapshot_draft_head(const std::filesystem::path& dir) {
     DraftHead head;
     head.backbone_hidden_size = positive_integer(config, "backbone_hidden_size");
     head.family = family_of(config);
+    if (const auto type = config.find("model_type"); type != config.end() && type->is_string()) {
+        head.model_type = type->get<std::string>();
+    }
     if (const auto architectures = config.find("architectures");
         architectures != config.end() && architectures->is_array() && !architectures->empty() &&
         architectures->front().is_string()) {
@@ -325,8 +342,17 @@ std::string describe_embedding_model_both(const EmbeddingModel& model) {
 }
 
 std::vector<std::string> snapshot_conversions(const std::filesystem::path& dir,
-                                              const EmbeddingBuilds& mlx_embeddings) {
-    if (snapshot_draft_head(dir).has_value() || snapshot_diffusion_model(dir).has_value()) {
+                                              const EmbeddingBuilds& mlx_embeddings,
+                                              const DrafterBuilds& mlx_drafters) {
+    if (const std::optional<DraftHead> head = snapshot_draft_head(dir)) {
+        // An MLX drafter where the installed mlx-vlm drafts its type (53i),
+        // never a GGUF: llama.cpp's would be no backend Apogee runs.
+        if (mlx_drafters && !head->model_type.empty() && mlx_drafters(head->model_type)) {
+            return {std::string{kMlxFormat}};
+        }
+        return {};
+    }
+    if (snapshot_diffusion_model(dir).has_value()) {
         return {};
     }
     if (snapshot_embedding_model(dir).has_value()) {

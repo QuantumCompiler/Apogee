@@ -975,7 +975,9 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   `video` or `voice`. It is the directory's own record's word, written by the
   conversion that made it; else `vision` when its files say so (a
   `vision_config` and an image processor beside it); else `chat` — so every
-  directory made before the record reads as it did. A word this build does not
+  directory made before the record reads as it did. Since 53i a directory with
+  no record whose `config.json` declares a draft head (a drafter pulled whole)
+  reads `drafter` from its files, before the vision rule. A word this build does not
   know is carried as written. Only `chat` and `vision` are what an `mlx`
   backend chats with: a row of any other kind has, in place of the backend's
   summary, a `note` saying what it is and what uses it (an `mlx` backend's row
@@ -1002,7 +1004,11 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   never guessed. Since M20, a SafeTensors set's `data` also carries
   `converts_to`, the formats `models convert` takes it to — `["gguf","mlx"]`
   for a language model's weights, `[]` for a draft head's or a diffusion
-  model's, which every conversion refuses. Since M21, an embedding model's
+  model's, which every conversion refuses. Since 53i a draft head's is
+  `["mlx"]` — an MLX drafter, never a GGUF — where the mlx-vlm installed in
+  Apogee's Python environment drafts its `model_type` (a package under its
+  own `speculative/drafters/`), its `mlx_conversion.converter` `mlx-vlm`; with
+  none installed, or one without that drafter, it stays `[]`. Since M21, an embedding model's
   (sentence-transformers', by its `modules.json`) is `["gguf"]` -- and since
   53h `["gguf","mlx"]` where the mlx-embeddings installed in Apogee's Python
   environment builds its `model_type`, read from its own `models/`; with none

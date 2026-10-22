@@ -558,3 +558,23 @@ TEST_CASE("the shipped driver converts an embedding model through mlx_embeddings
                          " is older than this build: 'apogee check --fix'") != std::string::npos);
     }
 }
+
+TEST_CASE("a draft head is mlx-vlm's to convert, as a drafter, whatever else is asked",
+          "[training][mlx][convert][drafter]") {
+    using apogee::training::choose_mlx_converter;
+    using apogee::training::MlxConverterKind;
+    // 53i: mlx-lm has no network for a draft head, so --text-only and the
+    // towers change nothing of one; its argv is mlx-vlm's route, unchanged.
+    for (const bool towers : {false, true}) {
+        for (const bool text_only : {false, true}) {
+            CHECK(choose_mlx_converter(towers, text_only, false, true) == MlxConverterKind::MlxVlm);
+        }
+    }
+    CHECK(choose_mlx_converter(false, false, false, false) == MlxConverterKind::MlxLm);
+    const apogee::training::MlxPrecision* bf16 = apogee::training::find_mlx_precision("bf16");
+    REQUIRE(bf16 != nullptr);
+    CHECK(
+        apogee::training::mlx_converter_arguments(*bf16, "/in", "/out", MlxConverterKind::MlxVlm) ==
+        std::vector<std::string>{"--with", "mlx-vlm", "--hf-path", "/in", "--mlx-path", "/out",
+                                 "--dtype", "bfloat16"});
+}

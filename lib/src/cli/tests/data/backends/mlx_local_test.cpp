@@ -23,6 +23,7 @@
 #include "backends/factory.h"
 #include "contracts/errors.h"
 #include "contracts/layout.h"
+#include "support/draft_head_configs.h"
 #include "support/env_guard.h"
 #include "support/fake_mlx_driver.h"
 #include "support/towered_configs.h"
@@ -1682,4 +1683,233 @@ TEST_CASE("an mlx entry's adapter maps onto the provider's options",
         MlxLocalProvider::options_from("local", runtime.entry, runtime.host);
     CHECK(options.adapters == runtime.entry.adapters);
     CHECK(options.weight_hashing.memo == apogee::harness::weight_hash_cache_path());
+}
+
+// ---------------------------------------------------------------------------
+// A drafter beside the model (53i)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A drafter's directory: the user's E4B assistant's config.json, as
+/// mlx-vlm's conversion keeps it, recorded a drafter -- naming `bases` when
+/// given -- or with no record at all, as a pull brings one.
+void drafter_dir(const std::filesystem::path& dir, const char* config,
+                 const std::vector<std::string>& bases = {}, bool recorded = true) {
+    std::filesystem::create_directories(dir);
+    std::ofstream{dir / "config.json"} << config;
+    if (recorded) {
+        json record{{"ref", "Gemma4-E4B-Assistant/safetensors/aaaaaaaaaaaa"},
+                    {"source", "convert"},
+                    {"transform", "mlx_vlm.convert bf16"},
+                    {"files", json::array()},
+                    {"kind", "drafter"}};
+        if (!bases.empty()) {
+            record["bases"] = bases;
+        }
+        std::ofstream{dir / "apogee-snapshot.json"} << record.dump();
+    }
+}
+
+/// A ready line from a driver that loaded `draft` beside the model through
+/// mlx-vlm, its block `block` (null for the drafter's own).
+std::string drafting_ready(const std::string& draft, const json& block) {
+    return json{{"type", "ready"},          {"protocol", 1},
+                {"model_type", "gemma4"},   {"chat_template", true},
+                {"tool_parser", nullptr},   {"thinking", false},
+                {"mlx_lm", "0.32.0"},       {"vision", true},
+                {"mlx_vlm", "0.6.1"},       {"audio", true},
+                {"draft", draft},           {"draft_kind", "mtp"},
+                {"draft_block_size", block}}
+               .dump() +
+           "\n";
+}
+
+}  // namespace
+
+TEST_CASE(
+    "a drafted entry answers every turn through mlx-vlm beside its drafter, the argv and the "
+    "ready line pinned",
+    "[backends][mlx][drafter]") {
+    MlxLocalProvider::Options options = Fixture::defaults();
+    options.draft = "/models/Gemma4-E4B-Assistant/mlx/aaaaaaaaaaaa";
+    options.draft_block_size = 4;
+    DriverState state;
+    state.vision_startup = drafting_ready(options.draft.string(), 4);
+    state.replies = {numbered(text("Drafted, the base's words.")) + done(),
+                     numbered(text("Again.")) + done()};
+    Fixture fixture{state, options};
+    CHECK(fixture.provider->drafting());
+    Streamed streamed;
+    // A text turn, no picture: through mlx-vlm all the same, which its
+    // speculative path loads the base through.
+    CHECK(fixture.provider->stream_chat(ask("hi"), streamed.options).message.content.plain_text() ==
+          "Drafted, the base's words.");
+    REQUIRE(fixture.commands.size() == 1);
+    CHECK(fixture.commands[0].arguments ==
+          std::vector<std::string>{"/home/training/scripts/mlx_generate.py", "--model",
+                                   "/models/llama", "--vision", "--draft",
+                                   "/models/Gemma4-E4B-Assistant/mlx/aaaaaaaaaaaa",
+                                   "--draft-block-size", "4"});
+    CHECK(fixture.provider->has_vision_child());
+    REQUIRE(streamed.status(apogee::harness::StatusEvent::Type::ModelLoading) != nullptr);
+    CHECK(streamed.status(apogee::harness::StatusEvent::Type::ModelLoading)->detail ==
+          "through mlx-vlm, drafting beside aaaaaaaaaaaa");
+    REQUIRE(streamed.status(apogee::harness::StatusEvent::Type::ModelReady) != nullptr);
+    CHECK(streamed.status(apogee::harness::StatusEvent::Type::ModelReady)->detail ==
+          "mlx-lm 0.32.0, gemma4, mlx-vlm 0.6.1, drafter aaaaaaaaaaaa (mtp, block 4)");
+    // The request is the same request: nothing a turn carries changes.
+    const json request = fixture.written(0, 0);
+    CHECK(request["type"] == "generate");
+    CHECK_FALSE(request.contains("draft"));
+    // One child for the conversation.
+    CHECK(fixture.provider->stream_chat(ask("again"), streamed.options)
+              .message.content.plain_text() == "Again.");
+    CHECK(fixture.provider->spawn_count() == 1);
+
+    // No block set: the drafter's own, and no flag for it.
+    MlxLocalProvider::Options own = Fixture::defaults();
+    own.draft = "/models/drafter";
+    DriverState own_state;
+    own_state.vision_startup = drafting_ready("/models/drafter", nullptr);
+    own_state.replies = {numbered(text("ok")) + done()};
+    Fixture fixture_own{own_state, own};
+    Streamed own_streamed;
+    (void)fixture_own.provider->stream_chat(ask("hi"), own_streamed.options);
+    CHECK(fixture_own.commands[0].arguments ==
+          std::vector<std::string>{"/home/training/scripts/mlx_generate.py", "--model",
+                                   "/models/llama", "--vision", "--draft", "/models/drafter"});
+    CHECK(own_streamed.status(apogee::harness::StatusEvent::Type::ModelReady)->detail ==
+          "mlx-lm 0.32.0, gemma4, mlx-vlm 0.6.1, drafter drafter (mtp)");
+    // And preload starts it the same way.
+    Fixture preloaded{own_state, own};
+    preloaded.provider->preload({});
+    CHECK(preloaded.commands[0].arguments.at(3) == "--vision");
+}
+
+TEST_CASE("a driver that never names the drafter it was handed is refused, the fix named",
+          "[backends][mlx][drafter]") {
+    // One older than 53i ignores --draft and answers from the base alone,
+    // which would read as drafting that never happened.
+    MlxLocalProvider::Options options = Fixture::defaults();
+    options.draft = "/models/drafter";
+    DriverState state;
+    state.vision_startup = std::string{apogee::testing::kHearingReady};
+    state.replies = {numbered(text("Bare.")) + done()};
+    Fixture fixture{state, options};
+    Streamed streamed;
+    CHECK_THROWS_WITH(fixture.provider->stream_chat(ask("hi"), streamed.options),
+                      Catch::Matchers::ContainsSubstring("does not draft") &&
+                          Catch::Matchers::ContainsSubstring("apogee check --fix"));
+    CHECK_FALSE(fixture.provider->has_live_child());
+}
+
+TEST_CASE(
+    "the ladder refuses a drafter as an entry's model, and a draft that cannot run beside it, "
+    "each by name from the files alone",
+    "[backends][mlx][ladder][drafter]") {
+    Runtime runtime;
+    const apogee::testing::EnvGuard home{"APOGEE_HOME", runtime.dir.path().string()};
+    const std::filesystem::path models = runtime.dir.path() / "models";
+    const std::filesystem::path site = runtime.host.venv / "lib" / "python3.14" / "site-packages";
+    const std::filesystem::path vlm = site / "mlx_vlm";
+
+    // A drafter as the model: it runs beside a base, never alone.
+    {
+        Runtime drafted;
+        drafter_dir(drafted.dir.path() / "model", apogee::testing::kGemma4AssistantE4BConfig);
+        const MlxReadiness readiness = drafted.probe();
+        CHECK(readiness.refusal == MlxRefusal::Drafter);
+        CHECK(readiness.reason ==
+              (drafted.dir.path() / "model").string() +
+                  " is a drafter: it runs beside its base model, never alone -- an mlx entry "
+                  "over its base names it as its draft");
+        CHECK(readiness.remedy == "apogee config set-backend <its base's mlx backend> --draft " +
+                                      (drafted.dir.path() / "model").string());
+        CHECK(apogee::backends::to_string(MlxRefusal::Drafter) == "a drafter");
+        // Pulled, with no record: its config says so all the same.
+        std::filesystem::remove(drafted.dir.path() / "model" / "apogee-snapshot.json");
+        CHECK(drafted.probe().refusal == MlxRefusal::Drafter);
+    }
+
+    // The E4B base, mlx-vlm's build, in the store; its drafter beside it.
+    const std::filesystem::path base = models / "Gemma4-E4B-Instruct" / "mlx" / "bbbbbbbbbbbb";
+    std::filesystem::create_directories(base);
+    std::ofstream{base / "config.json"} << apogee::testing::kGemma4BaseE4BConfig;
+    std::ofstream{base / "apogee-snapshot.json"}
+        << R"({"source": "convert", "transform": "mlx_vlm.convert 4bit", "files": [],)"
+           R"( "kind": "vision"})";
+    const std::filesystem::path draft = models / "Gemma4-E4B-Assistant" / "mlx" / "aaaaaaaaaaaa";
+    drafter_dir(draft, apogee::testing::kGemma4AssistantE4BConfig, {"Gemma4-E4B-Instruct"});
+    runtime.entry.model_path = base.string();
+    runtime.entry.draft = draft.string();
+
+    // No mlx-vlm to draft through: the base's own rung asks first.
+    MlxReadiness readiness = runtime.probe();
+    CHECK(readiness.refusal == MlxRefusal::NoMlxVlm);
+    // An mlx-vlm with no drafter of its type.
+    Runtime::touch(vlm / "__init__.py");
+    std::filesystem::create_directories(site / "mlx_vlm-0.6.1.dist-info");
+    readiness = runtime.probe();
+    CHECK(readiness.refusal == MlxRefusal::Draft);
+    CHECK(readiness.reason ==
+          "its draft cannot run beside it: the installed mlx-vlm 0.6.1 drafts no gemma4_assistant "
+          "model -- its speculative path holds no drafter of that type "
+          "(speculative/drafters/gemma4_assistant)");
+    CHECK(readiness.remedy == "apogee train setup --with mlx-vlm");
+    CHECK(apogee::backends::to_string(MlxRefusal::Draft) == "draft");
+    // A package of the name that names no Model is none.
+    Runtime::touch(vlm / "speculative" / "drafters" / "gemma4_assistant" / "__init__.py");
+    CHECK(runtime.probe().refusal == MlxRefusal::Draft);
+    std::ofstream{vlm / "speculative" / "drafters" / "gemma4_assistant" / "__init__.py"}
+        << "from .gemma4_assistant import Gemma4AssistantDraftModel as Model\n";
+    CHECK(runtime.probe().ready());
+
+    // Beside another width, another family, or a base its record does not
+    // name: refused by the pairing's own words.
+    const std::filesystem::path wide = models / "Gemma4-12B-Instruct" / "mlx" / "cccccccccccc";
+    std::filesystem::create_directories(wide);
+    std::ofstream{wide / "config.json"} << apogee::testing::kGemma4Base12BConfig;
+    std::ofstream{wide / "apogee-snapshot.json"}
+        << R"({"source": "convert", "files": [], "kind": "vision"})";
+    runtime.entry.model_path = wide.string();
+    readiness = runtime.probe();
+    CHECK(readiness.refusal == MlxRefusal::Draft);
+    CHECK(readiness.reason.find("drafts for a 2560-wide gemma4 model, reading its hidden states, "
+                                "and " +
+                                wide.string() + " is a 3840-wide gemma4 model") !=
+          std::string::npos);
+    CHECK(readiness.remedy == "apogee config set-backend local --draft \"\"");
+    const std::filesystem::path custom = models / "Gemma4-E4B-Custom" / "mlx" / "dddddddddddd";
+    std::filesystem::create_directories(custom);
+    std::ofstream{custom / "config.json"} << apogee::testing::kGemma4BaseE4BConfig;
+    std::ofstream{custom / "apogee-snapshot.json"}
+        << R"({"source": "convert", "files": [], "kind": "vision"})";
+    runtime.entry.model_path = custom.string();
+    CHECK(runtime.probe().reason.find("record names Gemma4-E4B-Instruct as its base") !=
+          std::string::npos);
+    // A drafter gone.
+    runtime.entry.model_path = base.string();
+    runtime.entry.draft = (models / "gone").string();
+    CHECK(runtime.probe().reason.find("there is no drafter at ") != std::string::npos);
+
+    // Paired: the entry's options carry it and its block, and the readers
+    // say what mlx-vlm drafts and the drafter's own block.
+    runtime.entry.draft = draft.string();
+    runtime.entry.draft_block_size = 6;
+    REQUIRE(runtime.probe().ready());
+    const MlxLocalProvider::Options options =
+        MlxLocalProvider::options_from("local", runtime.entry, runtime.host);
+    CHECK(options.draft == draft);
+    CHECK(options.draft_block_size == 6);
+    CHECK(MlxLocalProvider::options_from("local", Runtime{}.entry, runtime.host).draft.empty());
+    const apogee::backends::MlxVlmPackage installed = apogee::backends::find_mlx_vlm(runtime.host);
+    CHECK(apogee::backends::mlx_vlm_drafts(installed, "gemma4_assistant"));
+    CHECK_FALSE(apogee::backends::mlx_vlm_drafts(installed, "gemma4_unified_assistant"));
+    CHECK_FALSE(apogee::backends::mlx_vlm_drafts(installed, ""));
+    CHECK_FALSE(apogee::backends::mlx_vlm_drafts({}, "gemma4_assistant"));
+    CHECK(apogee::backends::drafter_block_size(draft) == 0);
+    std::ofstream{draft / "config.json"} << R"({"model_type": "gemma4_assistant",
+        "backbone_hidden_size": 2560, "block_size": 3})";
+    CHECK(apogee::backends::drafter_block_size(draft) == 3);
 }

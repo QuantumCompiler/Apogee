@@ -12,6 +12,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -30,6 +31,7 @@
 #include "platform/child_process.h"
 #include "platform/platform.h"
 #include "support/cli_home.h"
+#include "support/draft_head_configs.h"
 #include "support/env_guard.h"
 #include "support/mlx_model.h"
 #include "support/towered_configs.h"
@@ -939,14 +941,23 @@ TEST_CASE("a draft head is refused at every conversion door, its base named, not
         "converted from it could answer a chat; convert its base model instead";
 
     std::string out;
-    // The user's exact command, refused before its chain announces a step.
+    // The user's exact command, refused before its chain announces a step --
+    // since 53i saying why a registration does not apply: its MLX build is a
+    // drafter, which no backend runs.
     CHECK(home.run({"models", "convert", "Gemma4-12B-Assistant/safetensors/43b42c6289a0", "--mlx",
                     "--register", "--type", "4bit", "--base-name", "Gemma4-12B-Assistant"},
                    &out) != 0);
     INFO(out);
-    CHECK(out.find(refused) != std::string::npos);
+    CHECK(out.find(refused.substr(0, refused.find(" -- nothing converted"))) != std::string::npos);
+    CHECK(out.find("its MLX build is a drafter, which no backend runs, so --register and "
+                   "--register-with do not apply") != std::string::npos);
     CHECK(out.find("[1/2]") == std::string::npos);
     CHECK(out.find("--model-type") == std::string::npos);
+    // The GGUF door says it as it always did.
+    CHECK(home.run(
+              {"models", "convert", "Gemma4-12B-Assistant/safetensors/43b42c6289a0", "--register"},
+              &out) != 0);
+    CHECK(out.find(refused) != std::string::npos);
     // M15's override renames the type, never what the weights are; nor is a
     // GGUF of one a backend.
     CHECK(home.run({"models", "convert", "Gemma4-12B-Assistant", "--mlx", "--model-type",
@@ -1328,6 +1339,14 @@ TEST_CASE("an MLX directory recorded as each kind lists, informs and scans as th
                            dir.name + "'\n") != std::string::npos);
             CHECK(out.find("vectors:      width unknown") != std::string::npos);
             CHECK(out.find("template:") == std::string::npos);
+        } else if (dir.kind == "drafter") {
+            // A drafter runs as a backend's draft, never as one (53i).
+            CHECK(out.find("format:       MLX (Apple silicon)\n") != std::string::npos);
+            CHECK(out.find("backends:     none -- it runs as the draft of an mlx backend over its "
+                           "base: 'apogee config set-backend <that backend> --draft <the path "
+                           "below>'\n") != std::string::npos);
+            CHECK(out.find("template:") == std::string::npos);
+            CHECK(out.find("add-backend") == std::string::npos);
         } else {
             CHECK(out.find("format:       MLX (Apple silicon)\n") != std::string::npos);
             CHECK(out.find("backends:     none -- no chat backend runs it; the kind line says "
@@ -2095,4 +2114,361 @@ TEST_CASE(
     CHECK(chained.backends.at("Gemma-Embedding-300M-4bit").type ==
           apogee::harness::BackendType::Mlx);
     CHECK(converter_calls(calls_file).size() == 2);
+}
+
+// ---- draft heads as MLX drafters (53i) ------------------------------------------------
+
+namespace {
+
+/// The user's assistants and their bases as SafeTensors sets in `home`'s
+/// store: each head's set under `<head>/safetensors/aaaaaaaaaaaa`, each base's
+/// -- the processor beside it, as a release that sees ships one -- under
+/// `<base>/safetensors/bbbbbbbbbbbb`.
+void store_assistants(const CliHome& home) {
+    for (const apogee::testing::DraftHeadPair& pair : apogee::testing::kUserDraftHeads) {
+        const std::filesystem::path head =
+            home.models() / pair.head_model / "safetensors" / "aaaaaaaaaaaa";
+        write_mlx_model(head, {.bits = 0, .format = "pt"});
+        apogee::testing::write_fixture_file(head / "config.json", pair.head_config);
+        towered_snapshot(home.models() / pair.base_model / "safetensors" / "bbbbbbbbbbbb",
+                         pair.base_config);
+    }
+}
+
+/// The stub mlx-vlm in `home`'s environment made to draft the unified 12B's
+/// assistant too, as an mlx-vlm with its drafter does; or, with `drafts`
+/// false, not.
+void draft_unified(const CliHome& home, bool drafts) {
+    const std::filesystem::path package = home.home() / "training" / "venv" / "lib" / "python3.99" /
+                                          "site-packages" / "mlx_vlm" / "speculative" / "drafters" /
+                                          "gemma4_unified_assistant";
+    if (drafts) {
+        apogee::testing::write_fixture_file(package / "__init__.py",
+                                            "from ..gemma4_assistant import Model  # noqa\n");
+    } else {
+        std::filesystem::remove_all(package);
+    }
+}
+
+/// The one MLX build of `model`, its handle.
+[[nodiscard]] std::string mlx_handle(const StoreRoots& roots, const std::string& model) {
+    const std::vector<apogee::models::StoredMlx> stored =
+        apogee::models::list_store_mlx(roots, model);
+    REQUIRE(stored.size() == 1);
+    return model + "/mlx/" + stored.front().id;
+}
+
+}  // namespace
+
+TEST_CASE(
+    "each of the user's assistants converts --mlx to a drafter recorded beside its base, and "
+    "set-backend --draft pairs it with that base alone",
+    "[commands][models][mlx][convert][driver][drafter]") {
+    if (apogee::platform::host_target() != "macos-arm64" ||
+        apogee::platform::find_on_path("python3").empty()) {
+        SKIP("the mlx runtime is Apple silicon's, and the driver needs a python3");
+    }
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    fake_mlx_runtime(home.home());
+    (void)fake_mlx_vlm(home.home());
+    store_assistants(home);
+    const StoreRoots roots = StoreRoots::at(home.models());
+    const std::filesystem::path calls_file = home.home() / "calls.jsonl";
+    const apogee::testing::EnvGuard record{"STUB_MLX_CONVERT_RECORD", calls_file.string()};
+    std::string out;
+    std::string err;
+
+    // Offered exactly where the installed mlx-vlm drafts it: MLX alone.
+    const std::string e4b_head = "Gemma4-E4B-Assistant/safetensors/aaaaaaaaaaaa";
+    REQUIRE(home.run({"models", "info", e4b_head, "--output-format", "json"}, &out, &err) == 0);
+    const nlohmann::json info = nlohmann::json::parse(out).at("data");
+    CHECK(info.at("converts_to") == nlohmann::json::array({"mlx"}));
+    CHECK(info.at("mlx_conversion").at("converter") == "mlx-vlm");
+    REQUIRE(home.run({"models", "info", e4b_head, "-q"}, &out) == 0);
+    CHECK(out.find("format:       SafeTensors -- a draft head's weights, not runnable; --mlx "
+                   "converts it to a drafter") != std::string::npos);
+    CHECK(out.find("made from it: nothing yet -- 'apogee models convert " + e4b_head +
+                   " --mlx' makes an MLX drafter of it") != std::string::npos);
+
+    // The acceptance criterion: a drafter recorded beside Gemma4-E4B-Instruct.
+    REQUIRE(home.run({"models", "convert", e4b_head, "--mlx"}, &out) == 0);
+    INFO(out);
+    CHECK(out.find(" to MLX (bf16") != std::string::npos);  // a drafter's own precision
+    CHECK(out.find(") -- mlx-vlm's converter, a drafter to run beside Gemma4-E4B-Instruct, in "
+                   "Apogee's Python environment\n") != std::string::npos);
+    CHECK(out.find("kind: drafter (recorded) -- a drafter: it runs beside its base model, never "
+                   "alone\n") != std::string::npos);
+    CHECK(out.find("drafter: a drafter (Gemma4AssistantForCausalLM) for a 2560-wide gemma4 model, "
+                   "its record naming Gemma4-E4B-Instruct\n") != std::string::npos);
+    CHECK(out.find("apogee config set-backend <that backend> --draft ") != std::string::npos);
+    CHECK(out.find("add-backend") == std::string::npos);  // never a backend of its own
+    CHECK(out.find("[INFO]") == std::string::npos);
+    std::vector<nlohmann::json> calls = converter_calls(calls_file);
+    REQUIRE(calls.size() == 1);
+    CHECK(calls[0]["converter"] == "mlx_vlm");
+    CHECK(calls[0]["model_type"] == "gemma4_assistant");
+    CHECK(calls[0]["quantize"] == false);
+    CHECK(calls[0]["dtype"] == "bfloat16");
+    const std::filesystem::path e4b_drafter =
+        mlx_made_by(roots, "Gemma4-E4B-Assistant", "mlx_vlm.convert bf16");
+    REQUIRE_FALSE(e4b_drafter.empty());
+    const std::optional<apogee::models::Snapshot> made = apogee::models::load_snapshot(e4b_drafter);
+    REQUIRE(made.has_value());
+    CHECK(made->kind == "drafter");
+    CHECK(made->bases == std::vector<std::string>{"Gemma4-E4B-Instruct"});
+    CHECK(made->ref == e4b_head);
+    // Recognised before it runs, as every conversion is.
+    REQUIRE(home.run({"models", "convert", e4b_head, "--mlx"}, &out) == 0);
+    CHECK(out.find("already converted:") != std::string::npos);
+    CHECK(converter_calls(calls_file).size() == 1);
+
+    // Its base, mlx-vlm's build, registered; a turn on it alone, at
+    // temperature 0, then the drafter named as its draft.
+    REQUIRE(home.run({"models", "convert", "Gemma4-E4B-Instruct", "--mlx", "--register",
+                      "--base-name", "e4b"},
+                     &out) == 0);
+    REQUIRE(home.run({"config", "set-backend", "e4b-4bit", "--temperature", "0"}, &out) == 0);
+    const std::filesystem::path replies = home.home() / "replies.json";
+    apogee::testing::write_fixture_file(replies,
+                                        R"(["Speculative decoding: drafts, then one check."])");
+    const std::filesystem::path turns = home.home() / "turns.txt";
+    const apogee::testing::EnvGuard scripted{"STUB_MLX_REPLIES", replies.string()};
+    const apogee::testing::EnvGuard recorded{"STUB_MLX_RECORD", turns.string()};
+    std::string alone;
+    REQUIRE(home.run({"complete", "-m", "e4b-4bit", "Explain speculative decoding."}, &alone,
+                     &err) == 0);
+    CHECK(alone.find("Speculative decoding: drafts, then one check.") != std::string::npos);
+    CHECK(read_file(turns).find("vlm draft ") == std::string::npos);
+
+    const std::string handle = mlx_handle(roots, "Gemma4-E4B-Assistant");
+    REQUIRE(home.run({"config", "set-backend", "e4b-4bit", "--draft", handle}, &out) == 0);
+    CHECK(out.find("set draft; drafter " + e4b_drafter.string() + " beside ") != std::string::npos);
+    const apogee::harness::Config paired = apogee::harness::load_config(home.config_path());
+    CHECK(paired.backends.at("e4b-4bit").draft == e4b_drafter.string());
+    REQUIRE(home.run({"models", "info", "e4b-4bit", "-q"}, &out) == 0);
+    CHECK(out.find("draft:        " + e4b_drafter.string() +
+                   " -- drafts beside it through mlx-vlm's speculative path (mtp, mlx-vlm's "
+                   "default block); the answer is the base's") != std::string::npos);
+    CHECK(out.find("runtime:      ready") != std::string::npos);
+
+    // The temperature-0 answer, drafted: the base's own.
+    std::filesystem::remove(turns);
+    std::string drafted;
+    REQUIRE(home.run({"complete", "-m", "e4b-4bit", "Explain speculative decoding."}, &drafted,
+                     &err) == 0);
+    CHECK(drafted == alone);
+    const std::string pairing = read_file(turns);
+    INFO(pairing);
+    CHECK(pairing.find("vlm drafter " + e4b_drafter.filename().string() +
+                       " kind=mtp type=gemma4_assistant") != std::string::npos);
+    CHECK(pairing.find("vlm draft " + e4b_drafter.filename().string() +
+                       " kind=mtp block=drafter:4") != std::string::npos);
+    // A block of its own, on the line.
+    REQUIRE(home.run({"config", "set-backend", "e4b-4bit", "--draft-block-size", "6"}, &out) == 0);
+    std::filesystem::remove(turns);
+    REQUIRE(home.run({"complete", "-m", "e4b-4bit", "Explain speculative decoding."}, &drafted,
+                     &err) == 0);
+    CHECK(drafted == alone);
+    CHECK(read_file(turns).find("kind=mtp block=6") != std::string::npos);
+
+    // The 26B's and the E2B's: each beside its own base, refused beside any
+    // other -- the config untouched by the refusal.
+    for (const auto& [head, base, name] :
+         {std::tuple{"Gemma4-26B-Assistant", "Gemma4-26B-Instruct", "g26b"},
+          std::tuple{"Gemma4-E2B-Assistant", "Gemma4-E2B-Instruct", "e2b"}}) {
+        INFO(head);
+        REQUIRE(home.run({"models", "convert", head, "--mlx"}, &out) == 0);
+        const std::filesystem::path dir = mlx_made_by(roots, head, "mlx_vlm.convert bf16");
+        REQUIRE_FALSE(dir.empty());
+        CHECK(apogee::models::load_snapshot(dir)->bases == std::vector<std::string>{base});
+        REQUIRE(home.run({"models", "convert", base, "--mlx", "--register", "--base-name", name},
+                         &out) == 0);
+        const std::string before = home.config_text();
+        CHECK(home.run({"config", "set-backend", std::string{name} + "-4bit", "--draft", handle},
+                       &out) != 0);
+        CHECK(out.find("a drafter runs only beside a base of its family and width") !=
+              std::string::npos);
+        CHECK(home.config_text() == before);
+        REQUIRE(home.run({"config", "set-backend", std::string{name} + "-4bit", "--draft",
+                          mlx_handle(roots, head)},
+                         &out) == 0);
+    }
+
+    // Cleared, it drafts with nothing again.
+    REQUIRE(home.run({"config", "set-backend", "e4b-4bit", "--draft", ""}, &out) == 0);
+    CHECK(out.find("cleared draft") != std::string::npos);
+    CHECK(apogee::harness::load_config(home.config_path()).backends.at("e4b-4bit").draft.empty());
+}
+
+TEST_CASE(
+    "the unified 12B's assistant pairs only where the installed mlx-vlm drafts "
+    "gemma4_unified_assistant, and is refused saying so otherwise",
+    "[commands][models][mlx][convert][driver][drafter]") {
+    // The open call's default, taken: Google's drafters name the 31B, 26B,
+    // E2B and E4B; the 12B's drafts only where mlx-vlm holds its drafter.
+    if (apogee::platform::host_target() != "macos-arm64" ||
+        apogee::platform::find_on_path("python3").empty()) {
+        SKIP("the mlx runtime is Apple silicon's, and the driver needs a python3");
+    }
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    fake_mlx_runtime(home.home());
+    (void)fake_mlx_vlm(home.home());
+    store_assistants(home);
+    const StoreRoots roots = StoreRoots::at(home.models());
+    const std::filesystem::path calls_file = home.home() / "calls.jsonl";
+    const apogee::testing::EnvGuard record{"STUB_MLX_CONVERT_RECORD", calls_file.string()};
+    const std::string head = "Gemma4-12B-Assistant/safetensors/aaaaaaaaaaaa";
+    std::string out;
+    std::string err;
+
+    // This mlx-vlm drafts no gemma4_unified_assistant: offered nothing, and
+    // refused before anything is announced or staged.
+    REQUIRE(home.run({"models", "info", head, "--output-format", "json"}, &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out).at("data").at("converts_to") == nlohmann::json::array());
+    REQUIRE(home.run({"models", "info", head, "-q"}, &out) == 0);
+    CHECK(out.find("drafter:      no MLX drafter: the mlx-vlm in Apogee's Python environment "
+                   "drafts no gemma4_unified_assistant model") != std::string::npos);
+    CHECK(home.run({"models", "convert", head, "--mlx"}, &out) != 0);
+    CHECK(out.find("its MLX build is a drafter mlx-vlm makes, and the mlx-vlm in Apogee's Python "
+                   "environment (0.0-vlm-stub) drafts no gemma4_unified_assistant model -- its "
+                   "speculative path holds no drafter of that type") != std::string::npos);
+    CHECK(out.find("converting") == std::string::npos);
+    CHECK(converter_calls(calls_file).empty());
+    CHECK(apogee::models::list_store_mlx(roots, "Gemma4-12B-Assistant").empty());
+
+    // An mlx-vlm that drafts it: converted, and paired with its base.
+    draft_unified(home, true);
+    REQUIRE(home.run({"models", "info", head, "--output-format", "json"}, &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out).at("data").at("converts_to") ==
+          nlohmann::json::array({"mlx"}));
+    REQUIRE(home.run({"models", "convert", head, "--mlx"}, &out) == 0);
+    CHECK(out.find("a drafter to run beside Gemma4-12B-Instruct") != std::string::npos);
+    REQUIRE(home.run({"models", "convert", "Gemma4-12B-Instruct", "--mlx", "--register",
+                      "--base-name", "g12b"},
+                     &out) == 0);
+    const std::string drafter = mlx_handle(roots, "Gemma4-12B-Assistant");
+    REQUIRE(home.run({"config", "set-backend", "g12b-4bit", "--draft", drafter}, &out) == 0);
+    REQUIRE(home.run({"models", "info", "g12b-4bit", "-q"}, &out) == 0);
+    CHECK(out.find("runtime:      ready") != std::string::npos);
+
+    // That mlx-vlm gone again: the entry cannot run, saying why, and the
+    // drafter is refused anew.
+    draft_unified(home, false);
+    REQUIRE(home.run({"models", "info", "g12b-4bit", "-q"}, &out) == 0);
+    CHECK(out.find("runtime:      cannot run -- its draft cannot run beside it: the installed "
+                   "mlx-vlm") != std::string::npos);
+    CHECK(out.find("drafts no gemma4_unified_assistant model") != std::string::npos);
+    CHECK(home.run({"config", "set-backend", "g12b-4bit", "--draft", drafter}, &out) != 0);
+    CHECK(out.find("drafts no gemma4_unified_assistant model") != std::string::npos);
+}
+
+TEST_CASE(
+    "a draft head stays refused as chat and as GGUF; a drafter is never a backend's model, never "
+    "registered, and runs only beside the base its record names",
+    "[commands][models][mlx][convert][driver][drafter]") {
+    if (apogee::platform::host_target() != "macos-arm64" ||
+        apogee::platform::find_on_path("python3").empty()) {
+        SKIP("the mlx runtime is Apple silicon's, and the driver needs a python3");
+    }
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    fake_mlx_runtime(home.home());
+    (void)fake_mlx_vlm(home.home());
+    store_assistants(home);
+    const StoreRoots roots = StoreRoots::at(home.models());
+    const std::filesystem::path calls_file = home.home() / "calls.jsonl";
+    const apogee::testing::EnvGuard record{"STUB_MLX_CONVERT_RECORD", calls_file.string()};
+    const std::string head = "Gemma4-E4B-Assistant/safetensors/aaaaaaaaaaaa";
+    std::string out;
+
+    // GGUF, as before: a draft head's GGUF is no backend.
+    CHECK(home.run({"models", "convert", head}, &out) != 0);
+    CHECK(out.find("is a draft head (Gemma4AssistantForCausalLM)") != std::string::npos);
+    CHECK(home.run({"models", "convert", head, "--register"}, &out) != 0);
+    CHECK(out.find("is a draft head") != std::string::npos);
+    // Chat: no registration, no mlx-lm build, no type of the user's.
+    CHECK(home.run({"models", "convert", head, "--mlx", "--register"}, &out) != 0);
+    CHECK(out.find("its MLX build is a drafter, which no backend runs, so --register and "
+                   "--register-with do not apply") != std::string::npos);
+    CHECK(home.run({"models", "convert", head, "--mlx", "--register-with", "bf16,4bit"}, &out) !=
+          0);
+    CHECK(out.find("no backend runs") != std::string::npos);
+    CHECK(home.run({"models", "convert", head, "--mlx", "--text-only"}, &out) != 0);
+    CHECK(out.find("mlx-lm has no network for a draft head") != std::string::npos);
+    CHECK(home.run({"models", "convert", head, "--mlx", "--model-type", "gemma4"}, &out) != 0);
+    CHECK(out.find("--model-type does not apply: mlx-vlm builds it as the drafter its "
+                   "config.json names (gemma4_assistant)") != std::string::npos);
+    CHECK(converter_calls(calls_file).empty());
+    CHECK(apogee::models::list_store_mlx(roots, "Gemma4-E4B-Assistant").empty());
+    CHECK(apogee::harness::load_config(home.config_path()).backends.size() == 1);
+
+    // Converted, it is never registered by the scan...
+    REQUIRE(home.run({"models", "convert", head, "--mlx"}, &out) == 0);
+    const std::filesystem::path drafter =
+        mlx_made_by(roots, "Gemma4-E4B-Assistant", "mlx_vlm.convert bf16");
+    REQUIRE_FALSE(drafter.empty());
+    REQUIRE(home.run({"config", "scan", "--register"}, &out) == 0);
+    CHECK(out.find("a drafter: it runs beside its base model, never alone") != std::string::npos);
+    CHECK(apogee::harness::load_config(home.config_path()).backends.size() == 1);
+    // ...and an entry over it, typed by hand, cannot run, saying what it is.
+    REQUIRE(home.run({"config", "add-backend", "alone", "--type", "mlx", "--model-path",
+                      drafter.string()},
+                     &out) == 0);
+    REQUIRE(home.run({"models", "info", "alone", "-q"}, &out) == 0);
+    CHECK(out.find("runtime:      cannot run -- " + drafter.string() +
+                   " is a drafter: it runs beside its base model, never alone") !=
+          std::string::npos);
+    std::string err;
+    CHECK(home.run({"complete", "-m", "alone", "hello?"}, &out, &err) != 0);
+    CHECK((out + err).find("is a drafter") != std::string::npos);
+    REQUIRE(home.run({"models", "info", mlx_handle(roots, "Gemma4-E4B-Assistant"), "-q"}, &out) ==
+            0);
+    CHECK(out.find("kind:         drafter (recorded)") != std::string::npos);
+    CHECK(out.find("drafter:      a drafter (Gemma4AssistantForCausalLM) for a 2560-wide gemma4 "
+                   "model, its record naming Gemma4-E4B-Instruct") != std::string::npos);
+
+    // Its base's mlx-lm build: refused, conservatively, the way named.
+    REQUIRE(home.run({"models", "convert", "Gemma4-E4B-Instruct", "--mlx", "--text-only",
+                      "--register", "--base-name", "e4b-text"},
+                     &out) == 0);
+    CHECK(home.run({"config", "set-backend", "e4b-text-4bit", "--draft", drafter.string()}, &out) !=
+          0);
+    CHECK(out.find("is mlx-lm's build (kind chat, recorded), laid out for mlx-lm") !=
+          std::string::npos);
+    // A model of its family and width that its record does not name: refused.
+    towered_snapshot(home.models() / "Gemma4-E4B-Custom" / "safetensors" / "cccccccccccc",
+                     apogee::testing::kGemma4BaseE4BConfig);
+    REQUIRE(home.run({"models", "convert", "Gemma4-E4B-Custom", "--mlx", "--register",
+                      "--base-name", "custom"},
+                     &out) == 0);
+    CHECK(home.run({"config", "set-backend", "custom-4bit", "--draft", drafter.string()}, &out) !=
+          0);
+    CHECK(out.find("'s record names Gemma4-E4B-Instruct as its base, and ") != std::string::npos);
+    CHECK(out.find(" is a build of Gemma4-E4B-Custom -- a drafter runs only beside the base its "
+                   "record names") != std::string::npos);
+    // On a type that runs no drafter, the loader refuses it.
+    CHECK(home.run({"config", "set-backend", "m", "--draft", drafter.string()}, &out) != 0);
+    CHECK(out.find("a backend of type mock drafts with nothing") != std::string::npos);
+    // A model storing no drafter, or a name nothing stores, is said.
+    CHECK(home.run({"config", "set-backend", "custom-4bit", "--draft", "Gemma4-E4B-Custom"},
+                   &out) != 0);
+    CHECK(out.find("'Gemma4-E4B-Custom' stores no MLX drafter") != std::string::npos);
+    // By its model's name, its one drafter is taken -- beside its own base.
+    REQUIRE(home.run({"models", "convert", "Gemma4-E4B-Instruct", "--mlx", "--register",
+                      "--base-name", "e4b"},
+                     &out) == 0);
+    REQUIRE(home.run({"config", "set-backend", "e4b-4bit", "--draft", "Gemma4-E4B-Assistant"},
+                     &out) == 0);
+    CHECK(apogee::harness::load_config(home.config_path()).backends.at("e4b-4bit").draft ==
+          drafter.string());
+    // A drafter the entry keeps follows its model: moved to another base,
+    // the edit is refused.
+    CHECK(home.run({"config", "set-backend", "e4b-4bit", "--model-path",
+                    apogee::harness::load_config(home.config_path())
+                        .backends.at("custom-4bit")
+                        .model_path},
+                   &out) != 0);
+    CHECK(out.find("record names Gemma4-E4B-Instruct") != std::string::npos);
 }

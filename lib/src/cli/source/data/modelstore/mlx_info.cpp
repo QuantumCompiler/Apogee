@@ -12,6 +12,7 @@
 
 #include "modelstore/kv_cache.h"
 #include "modelstore/snapshot.h"
+#include "modelstore/store.h"
 
 namespace apogee::models {
 namespace {
@@ -458,8 +459,15 @@ MlxKind read_mlx_kind(const std::filesystem::path& dir) {
         kind.source = MlxKindSource::Recorded;
         return kind;
     }
-    // Inference covers only what came before the record: a vision model is
-    // the one kind an MLX directory's files said apart (27c).
+    // Inference covers what came before the record -- a vision model is the
+    // kind an MLX directory's files said apart (27c) -- and, since 53i, a
+    // draft head, which no MLX directory can be chatted with: a drafter a pull
+    // brought whole is never taken for a chat model.
+    if (snapshot_draft_head(dir).has_value()) {
+        kind.word = std::string{kMlxDrafter};
+        kind.source = MlxKindSource::Files;
+        return kind;
+    }
     if (mlx_vision_files(dir)) {
         kind.word = std::string{kMlxVision};
         kind.source = MlxKindSource::Files;
@@ -481,13 +489,126 @@ std::string describe(const MlxKind& kind) {
             source = "recorded";
             break;
         case MlxKindSource::Files:
-            source = "inferred from its files: a vision_config and an image processor";
+            source = kind.word == kMlxDrafter
+                         ? "inferred from its files: its config.json declares a draft head"
+                         : "inferred from its files: a vision_config and an image processor";
             break;
         case MlxKindSource::Default:
             source = "no kind recorded";
             break;
     }
     return kind.word + " (" + source + ") -- " + describe_mlx_kind(kind.word);
+}
+
+std::optional<MlxDrafter> read_mlx_drafter(const std::filesystem::path& dir) {
+    if (read_mlx_kind(dir).word != kMlxDrafter) {
+        return std::nullopt;
+    }
+    const std::optional<DraftHead> head = snapshot_draft_head(dir);
+    if (!head.has_value()) {
+        return std::nullopt;
+    }
+    MlxDrafter drafter{.head = *head};
+    if (const std::optional<Snapshot> record = load_snapshot(dir)) {
+        drafter.bases = record->bases;
+    }
+    return drafter;
+}
+
+namespace {
+
+/// "a 2560-wide gemma4 model", or as much of it as is known.
+[[nodiscard]] std::string model_of(std::int64_t width, const std::string& family) {
+    const std::string kind = family.empty() ? std::string{"model"} : family + " model";
+    return width > 0 ? "a " + std::to_string(width) + "-wide " + kind
+                     : "a " + kind + " whose config.json states no width";
+}
+
+[[nodiscard]] std::string joined_names(const std::vector<std::string>& names) {
+    std::string out;
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        out += (i == 0 ? "" : i + 1 == names.size() ? " or " : ", ") + names[i];
+    }
+    return out;
+}
+
+}  // namespace
+
+std::string describe(const MlxDrafter& drafter) {
+    return "a drafter (" + drafter.head.architecture + ") for " +
+           model_of(drafter.head.backbone_hidden_size, drafter.head.family) +
+           (drafter.bases.empty() ? std::string{", its record naming no base"}
+                                  : ", its record naming " + joined_names(drafter.bases));
+}
+
+std::string mlx_drafter_refusal(const std::filesystem::path& base,
+                                const std::filesystem::path& drafter,
+                                const std::filesystem::path& models_root) {
+    std::error_code code;
+    const std::string named = drafter.string();
+    if (!std::filesystem::is_directory(drafter, code)) {
+        return "there is no drafter at " + named + " -- 'apogee models convert <a draft head> " +
+               "--mlx' makes one";
+    }
+    if (!std::filesystem::is_regular_file(drafter / "config.json", code)) {
+        return named + " is not an MLX directory: it has no config.json";
+    }
+    const MlxKind kind = read_mlx_kind(drafter);
+    if (kind.word != kMlxDrafter) {
+        return named + " is not a drafter: it is " + describe(kind);
+    }
+    const std::optional<MlxDrafter> read = read_mlx_drafter(drafter);
+    if (!read.has_value()) {
+        return named +
+               " is recorded as a drafter, and its config.json declares no draft head -- "
+               "nothing says which base it reads";
+    }
+    const DraftHead& head = read->head;
+    if (head.backbone_hidden_size <= 0) {
+        return named +
+               "'s config.json does not say how wide a model it reads "
+               "(backbone_hidden_size), so no base can be measured against it";
+    }
+    // The base: a model mlx-vlm loads to chat with.
+    const MlxKind base_kind = read_mlx_kind(base);
+    if (base_kind.word == kMlxDrafter) {
+        return base.string() + " is itself a drafter: a drafter runs beside a base, never alone";
+    }
+    if (base_kind.word == kMlxChat) {
+        // mlx-vlm's speculative path loads the base through mlx-vlm; mlx-lm's
+        // build is laid out for mlx-lm, its towers left out (53f).
+        return base.string() + " is mlx-lm's build (kind " + base_kind.word +
+               (base_kind.source == MlxKindSource::Recorded ? ", recorded" : ", none recorded") +
+               "), laid out for mlx-lm, and drafting runs through mlx-vlm's speculative path, "
+               "which loads the base through mlx-vlm -- 'apogee models convert <its SafeTensors "
+               "set> --mlx' builds it through mlx-vlm, and the drafter runs beside that";
+    }
+    if (base_kind.word != kMlxVision) {
+        return base.string() + " is " + describe(base_kind) +
+               " -- a drafter runs beside a model an mlx backend chats with";
+    }
+    // Only the base it reads: the family and the width, measured.
+    const ConfigWidth width = config_width(base);
+    if (width.family != head.family || width.hidden_size != head.backbone_hidden_size) {
+        return named + " drafts for " + model_of(head.backbone_hidden_size, head.family) +
+               ", reading its hidden states, and " + base.string() + " is " +
+               model_of(width.hidden_size, width.family) +
+               " -- a drafter runs only beside a base of its family and width";
+    }
+    // And the one its record names, where it names any.
+    if (!read->bases.empty()) {
+        const std::optional<StoredMlx> stored =
+            stored_mlx_at(list_store_mlx(StoreRoots::at(models_root)), base);
+        if (!stored.has_value() ||
+            std::ranges::find(read->bases, stored->model) == read->bases.end()) {
+            return named + "'s record names " + joined_names(read->bases) + " as its base, and " +
+                   base.string() + " is " +
+                   (stored.has_value() ? "a build of " + stored->model
+                                       : std::string{"no stored model"}) +
+                   " -- a drafter runs only beside the base its record names";
+        }
+    }
+    return {};
 }
 
 MlxEmbeddingWidth read_mlx_embedding_width(const std::filesystem::path& dir) {

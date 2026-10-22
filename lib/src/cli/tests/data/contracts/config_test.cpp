@@ -1063,6 +1063,47 @@ TEST_CASE("a backend's thinking default and budget parse, and a bad one is refus
               ->thinking_budget == 0);
 }
 
+TEST_CASE("an mlx entry's draft and its block parse, kept as written; any other type is refused",
+          "[config][drafter]") {
+    // 53i: a drafter beside an mlx entry's model, read as model_path is --
+    // a variable in it expanded on read.
+    const Config config = load_text(
+        "backends:\n"
+        "  e4b:\n    type: mlx\n    model_path: /m/e4b\n"
+        "    draft: ${HOME}/models/Gemma4-E4B-Assistant/mlx/aaaaaaaaaaaa\n"
+        "    draft_block_size: 6\n"
+        "  plain:\n    type: mlx\n    model_path: /m/e4b\n");
+    CHECK(config.find_backend("e4b")->draft ==
+          apogee::harness::expand_env_and_home(
+              "${HOME}/models/Gemma4-E4B-Assistant/mlx/aaaaaaaaaaaa"));
+    CHECK(config.find_backend("e4b")->draft_block_size == 6);
+    // Unset: no drafter, and the drafter's own block where there is one.
+    CHECK(config.find_backend("plain")->draft.empty());
+    CHECK_FALSE(config.find_backend("plain")->draft_block_size.has_value());
+
+    const std::pair<const char*, const char*> refused[] = {
+        {"type: llamacpp\n    draft: /d",
+         "backends.x.draft: a backend of type llamacpp drafts with "
+         "nothing -- a drafter runs beside an mlx entry's model"},
+        {"type: anthropic\n    draft_block_size: 4",
+         "backends.x.draft_block_size: a backend of type anthropic drafts with nothing"},
+        {"type: mlx\n    draft: /d\n    draft_block_size: 1",
+         "backends.x.draft_block_size: must be between 2 and 16"},
+        {"type: mlx\n    draft: /d\n    draft_block_size: 17",
+         "backends.x.draft_block_size: must be between 2 and 16"},
+        {"type: mlx\n    draft: /d\n    draft_block_size: many", "backends.x.draft_block_size"},
+    };
+    for (const auto& [lines, said] : refused) {
+        INFO(lines);
+        try {
+            (void)load_text(std::string{"backends:\n  x:\n    "} + lines + "\n");
+            FAIL("expected a ConfigError");
+        } catch (const ConfigError& e) {
+            CHECK(std::string{e.what()}.find(said) != std::string::npos);
+        }
+    }
+}
+
 TEST_CASE("memory.recall is on unless the config turns it off", "[config][recall]") {
     // 26l: on in chat by default (the user's call).
     CHECK(load_text("backends:\n  x:\n    type: mock\n").memory.recall);

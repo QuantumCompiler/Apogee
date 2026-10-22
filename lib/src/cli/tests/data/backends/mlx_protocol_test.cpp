@@ -276,6 +276,31 @@ TEST_CASE("a ready line says whether the driver hands recordings on; one before 
     CHECK_FALSE(text->audio);
 }
 
+TEST_CASE("a ready line names the drafter it loaded beside the model; one before 53i never does",
+          "[backends][mlx][protocol][drafter]") {
+    const auto drafting = apogee::backends::mlx::parse_event(
+        R"({"type":"ready","protocol":1,"model_type":"gemma4","vision":true,"mlx_vlm":"0.6.1",)"
+        R"("audio":true,"draft":"/m/Gemma4-E4B-Assistant/mlx/aaaaaaaaaaaa","draft_kind":"mtp",)"
+        R"("draft_block_size":6})");
+    REQUIRE(drafting.has_value());
+    CHECK(drafting->draft == "/m/Gemma4-E4B-Assistant/mlx/aaaaaaaaaaaa");
+    CHECK(drafting->draft_kind == "mtp");
+    CHECK(drafting->draft_block_size == 6);
+    // The drafter's own block: null on the wire, 0 here.
+    const auto own = apogee::backends::mlx::parse_event(
+        R"({"type":"ready","protocol":1,"draft":"/d","draft_kind":"mtp","draft_block_size":null})");
+    REQUIRE(own.has_value());
+    CHECK(own->draft == "/d");
+    CHECK(own->draft_block_size == 0);
+    // 53h's driver: not a word of drafting.
+    const auto older = apogee::backends::mlx::parse_event(
+        R"({"type":"ready","protocol":1,"vision":true,"mlx_vlm":"0.6.1","audio":true})");
+    REQUIRE(older.has_value());
+    CHECK(older->draft.empty());
+    CHECK(older->draft_kind.empty());
+    CHECK(older->draft_block_size == 0);
+}
+
 TEST_CASE("an embed request is its texts in one line, any bytes said as text",
           "[backends][mlx][protocol][embedding]") {
     // 53h: the embedding driver's request, pinned byte for byte. A file's

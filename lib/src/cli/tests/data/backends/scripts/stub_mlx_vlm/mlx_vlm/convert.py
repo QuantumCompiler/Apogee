@@ -10,6 +10,9 @@ mlx-vlm's own (0.6.1 on). Steered by the environment, as the stub mlx-lm's is:
   STUB_MLX_CONVERT_ERROR   convert() raises ValueError with this message
   STUB_MLX_UNSUPPORTED     comma-separated model_types convert() refuses as the
                            real one refuses a type it has no package for
+
+A draft head (53i) -- a type `speculative/drafters/` holds -- is written as
+its few layers alone, its config kept: the drafter mlx-vlm builds.
 """
 
 import json
@@ -58,12 +61,18 @@ def convert(hf_path, mlx_path="mlx_model", quantize=False, q_group_size=64, q_bi
     elif dtype:
         config["torch_dtype"] = dtype
 
-    _shard(os.path.join(mlx_path, "model.safetensors"),
-           [("language_model.model.layers.0.weight", 64), ("vision_tower.blocks.0.weight", 32)])
+    # A drafter (53i) -- a type its speculative path holds, as the real one's
+    # loader falls back to -- is its few layers alone; anything else the
+    # whole model, its tower kept.
+    drafter = os.path.isfile(os.path.join(os.path.dirname(__file__), "speculative", "drafters",
+                                          str(model_type), "__init__.py"))
+    tensors = ([("model.layers.0.weight", 32), ("pre_projection.weight", 16)] if drafter else
+               [("language_model.model.layers.0.weight", 64),
+                ("vision_tower.blocks.0.weight", 32)])
+    _shard(os.path.join(mlx_path, "model.safetensors"), tensors)
     with open(os.path.join(mlx_path, "model.safetensors.index.json"), "w") as out:
-        json.dump({"metadata": {}, "weight_map": {
-            "language_model.model.layers.0.weight": "model.safetensors",
-            "vision_tower.blocks.0.weight": "model.safetensors"}}, out)
+        json.dump({"metadata": {}, "weight_map": {name: "model.safetensors"
+                                                  for name, _ in tensors}}, out)
     with open(os.path.join(mlx_path, "config.json"), "w") as out:
         json.dump(config, out, indent=4)
     for name in CARRIED:

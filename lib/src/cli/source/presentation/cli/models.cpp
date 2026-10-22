@@ -1265,6 +1265,20 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     return out;
 }
 
+/// The backends whose `draft:` is the drafter at `path` (53i), joined.
+[[nodiscard]] std::string backends_drafting_with(const harness::Config& config,
+                                                 const std::filesystem::path& path) {
+    std::string out;
+    for (const auto& [key, backend] : config.backends) {
+        if (!backend.draft.empty() &&
+            comparable(std::filesystem::path{harness::expand_env_and_home(backend.draft)}) ==
+                comparable(path)) {
+            out += (out.empty() ? "" : ", ") + key;
+        }
+    }
+    return out;
+}
+
 /// `info` on one stored GGUF, by its handle: the file, where it came from,
 /// and its header -- for a model no backend points at yet (M4).
 [[nodiscard]] std::string render_stored_gguf(const harness::Config& config,
@@ -1294,8 +1308,8 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
 /// a format it takes at all (M20, M21; an embedding model's where the
 /// installed mlx-embeddings builds it, 53h); nullopt where they do not.
 [[nodiscard]] std::optional<MlxOffer> set_mlx_offer(const std::filesystem::path& dir) {
-    const std::vector<std::string> formats =
-        models::snapshot_conversions(dir, installed_mlx_embedding_builds());
+    const std::vector<std::string> formats = models::snapshot_conversions(
+        dir, installed_mlx_embedding_builds(), installed_mlx_drafter_builds());
     if (std::ranges::find(formats, std::string{models::kMlxFormat}) == formats.end()) {
         return std::nullopt;
     }
@@ -1307,8 +1321,8 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
 /// offered where it cannot work (the user's call, 2026-10-21).
 [[nodiscard]] std::vector<std::string> set_conversions(const std::filesystem::path& dir,
                                                        const std::optional<MlxOffer>& offer) {
-    std::vector<std::string> conversions =
-        models::snapshot_conversions(dir, installed_mlx_embedding_builds());
+    std::vector<std::string> conversions = models::snapshot_conversions(
+        dir, installed_mlx_embedding_builds(), installed_mlx_drafter_builds());
     if (!offer.has_value() || !offer->offered()) {
         std::erase(conversions, std::string{models::kMlxFormat});
     }
@@ -1365,17 +1379,27 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     const std::optional<models::DraftHead> head = models::snapshot_draft_head(stored.dir);
     const std::optional<models::DiffusionModel> diffusion =
         models::snapshot_diffusion_model(stored.dir);
+    std::optional<MlxOffer> offer;
     if (head.has_value()) {
-        out << "format:       SafeTensors -- a draft head's weights, not runnable and not "
-               "convertible\n";
+        // An MLX drafter, where the installed mlx-vlm drafts its type (53i);
+        // where it does not, why.
+        offer = installed_mlx_offer(stored.dir);
+        const bool drafts = offer->offered();
+        out << "format:       SafeTensors -- a draft head's weights, not runnable"
+            << (drafts ? "; --mlx converts it to a drafter" : " and not convertible") << "\n";
         out << "draft head:   "
             << models::describe_draft_head(*head, models::draft_head_bases(roots, *head)) << "\n";
+        out << "drafter:      "
+            << (drafts ? std::string{"--mlx builds it through mlx-vlm, a drafter an mlx backend "
+                                     "over its base runs beside it (its draft)"}
+                       : "no MLX drafter: " + offer->gap +
+                             (offer->remedy.empty() ? "" : " -- '" + offer->remedy + "'"))
+            << "\n";
     } else if (diffusion.has_value()) {
         out << "format:       SafeTensors -- a diffusion model's weights, not runnable and not "
                "convertible\n";
         out << "diffusion:    " << models::describe_diffusion_model(*diffusion) << "\n";
     }
-    std::optional<MlxOffer> offer;
     if (!head.has_value() && !diffusion.has_value()) {
         offer = set_mlx_offer(stored.dir);
         out << "format:       SafeTensors -- full weights, trainable, not runnable\n";
@@ -1421,12 +1445,18 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
         const bool mlx =
             std::ranges::find(conversions, std::string{models::kMlxFormat}) != conversions.end();
         const bool text_only = mlx && offer.has_value() && !offer->converter.has_value();
-        out << "made from it: nothing yet -- 'apogee models convert " << handle
-            << "' makes a GGUF of it"
-            << (text_only ? " (--mlx --text-only an MLX model of its language model)"
-                : mlx     ? " (--mlx an MLX model)"
-                          : "")
-            << "\n";
+        if (head.has_value()) {
+            // Its one conversion: a drafter, never a GGUF (53i).
+            out << "made from it: nothing yet -- 'apogee models convert " << handle
+                << " --mlx' makes an MLX drafter of it\n";
+        } else {
+            out << "made from it: nothing yet -- 'apogee models convert " << handle
+                << "' makes a GGUF of it"
+                << (text_only ? " (--mlx --text-only an MLX model of its language model)"
+                    : mlx     ? " (--mlx an MLX model)"
+                              : "")
+                << "\n";
+        }
     } else {
         bool first = true;
         if (consumed.has_value()) {
@@ -1476,6 +1506,13 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
             << " --type mlx --model-path <the path below>', then 'apogee config "
                "set-default-embedding "
             << models::stored_mlx_name(stored) << "'";
+    } else if (kind.word == models::kMlxDrafter) {
+        // A drafter runs as a backend's draft, never as one (53i).
+        const std::string drafting = backends_drafting_with(config, stored.dir);
+        out << (drafting.empty() ? "none -- it runs as the draft of an mlx backend over its "
+                                   "base: 'apogee config set-backend <that backend> --draft "
+                                   "<the path below>'"
+                                 : "none of its own; the draft of " + drafting);
     } else {
         out << "none -- no chat backend runs it; the kind line says what does";
     }
@@ -1487,6 +1524,10 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
                             : "MLX (Apple silicon)")
         << "\n";
     out << "kind:         " << models::describe(kind) << "\n";
+    if (const std::optional<models::MlxDrafter> drafter = models::read_mlx_drafter(stored.dir)) {
+        // What it drafts for, and the bases its record names (53i).
+        out << "drafter:      " << models::describe(*drafter) << "\n";
+    }
     if (kind.embeds()) {
         // How wide its vectors are, from its own config (53h).
         out << "vectors:      " << models::describe(models::read_mlx_embedding_width(stored.dir))
@@ -1810,6 +1851,29 @@ std::string render_model_info(const harness::Config& config, std::string_view na
                         : "no -- " + vision.reason +
                               (vision.remedy.empty() ? std::string{} : " (" + vision.remedy + ")"))
                 << "\n";
+            if (!value.draft.empty()) {
+                // The drafter beside it (53i): what it is, the block it drafts
+                // in, and whether it pairs -- the ladder's own question.
+                const backends::MlxDraft draft =
+                    backends::probe_mlx_draft(dir, value.draft, backends::MlxHost::current());
+                const std::int64_t block =
+                    value.draft_block_size.value_or(backends::drafter_block_size(draft.dir));
+                out << "draft:        " << draft.dir.string() << " -- "
+                    << (draft.pairs()
+                            ? "drafts beside it through mlx-vlm's speculative path "
+                              "(mtp, " +
+                                  (block > 0 ? "block " + std::to_string(block)
+                                             : std::string{"mlx-vlm's default block"}) +
+                                  (value.draft_block_size.has_value() ? ", draft_block_size"
+                                   : block > 0                        ? ", the drafter's own"
+                                                                      : "") +
+                                  "); the answer is the base's"
+                            : "cannot draft beside it: " + draft.message())
+                    << "\n";
+                if (draft.drafter.has_value()) {
+                    out << "drafter:      " << models::describe(*draft.drafter) << "\n";
+                }
+            }
             const backends::ModelProfile* family =
                 backends::resolve_mlx_profile(info, value.model + " " + dir.string());
             out << "profile:      " << (family == nullptr ? "unprofiled" : family->name) << "\n";

@@ -41,6 +41,12 @@ struct Snapshot {
     /// `read_mlx_kind` (`mlx_info.h`). Empty for a pull and for every set made
     /// before it, and then not written: the files say, else `chat`.
     std::string kind{};
+    /// The stored models a drafter runs beside (53i), by the name they are
+    /// stored under -- each a model folder under the models root, as
+    /// `draft_head_bases` measured them when the drafter was converted. Empty
+    /// for everything else, and then not written; empty for a drafter too when
+    /// none was stored, which then pairs by family and width alone.
+    std::vector<std::string> bases{};
     std::vector<SnapshotFile> files;
 };
 
@@ -73,6 +79,9 @@ struct DraftHead {
     std::int64_t backbone_hidden_size = 0;
     /// `model_type` up to its first `_` -- the family a base shares.
     std::string family;
+    /// `model_type` as written (`gemma4_assistant`): the drafter type mlx-vlm
+    /// builds and drafts it as (53i). Empty when the config names none.
+    std::string model_type{};
 };
 
 /// The draft head `dir`'s `config.json` describes: one declaring
@@ -181,6 +190,12 @@ struct EmbeddingModel {
 /// nothing new.
 using EmbeddingBuilds = std::function<bool(std::string_view model_type)>;
 
+/// Whether the mlx-vlm installed there drafts with a model of `model_type`
+/// (53i): its speculative path holds a drafter of that type -- the caller's
+/// reading, handed down as `EmbeddingBuilds` is. Empty, or answering false,
+/// decides nothing new.
+using DrafterBuilds = std::function<bool(std::string_view model_type)>;
+
 /// The formats a SafeTensors set converts to, decided once from its own files
 /// (M20): `gguf` and `mlx` for a language model's weights, `gguf` alone for an
 /// embedding model's (M21), none for a draft head or a diffusion model's.
@@ -189,9 +204,13 @@ using EmbeddingBuilds = std::function<bool(std::string_view model_type)>;
 /// too (53f): which converter builds it is the route's, below. An embedding
 /// model gains `mlx` where `mlx_embeddings` says the installed mlx-embeddings
 /// builds its `config.json`'s `model_type` (53h); anywhere else -- that type
-/// unbuilt, or no mlx-embeddings to ask -- M21's answer stands.
+/// unbuilt, or no mlx-embeddings to ask -- M21's answer stands. A draft head
+/// gains `mlx` alone -- an MLX drafter, never a GGUF -- where `mlx_drafters`
+/// says the installed mlx-vlm drafts its `model_type` (53i); anywhere else
+/// the draft-heads change's answer stands: none.
 [[nodiscard]] std::vector<std::string> snapshot_conversions(
-    const std::filesystem::path& dir, const EmbeddingBuilds& mlx_embeddings = {});
+    const std::filesystem::path& dir, const EmbeddingBuilds& mlx_embeddings = {},
+    const DrafterBuilds& mlx_drafters = {});
 
 /// A set's **towers** (53f, 2026-10-21): what its `config.json` declares
 /// beside its language model -- a `vision_config`, an `audio_config`, or an

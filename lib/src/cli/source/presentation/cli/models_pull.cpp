@@ -789,12 +789,13 @@ SnapshotChoice locate_snapshot(const models::StoreRoots& roots, std::string_view
 }  // namespace
 
 SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view given,
-                               std::string_view from_id) {
+                               std::string_view from_id, bool drafters) {
     SnapshotChoice choice = locate_snapshot(roots, given, from_id);
     if (choice.path.empty()) {
         return choice;
     }
-    if (const std::optional<models::DraftHead> head = models::snapshot_draft_head(choice.path)) {
+    if (const std::optional<models::DraftHead> head = models::snapshot_draft_head(choice.path);
+        head.has_value() && !drafters) {
         choice.error = models::draft_head_refusal("'" + std::string{given} + "'", *head,
                                                   models::draft_head_bases(roots, *head));
         choice.path.clear();
@@ -808,6 +809,9 @@ SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view
 }
 
 std::string_view MlxRoute::kind() const noexcept {
+    if (drafter) {
+        return models::kMlxDrafter;
+    }
     switch (converter) {
         case training::MlxConverterKind::MlxVlm:
             return models::kMlxVision;
@@ -823,8 +827,9 @@ MlxRoute mlx_route(const std::filesystem::path& snapshot, bool text_only) {
     MlxRoute route;
     route.towers = models::snapshot_towers(snapshot);
     route.embedding = models::snapshot_embedding_model(snapshot).has_value();
-    route.converter =
-        training::choose_mlx_converter(!route.towers.empty(), text_only, route.embedding);
+    route.drafter = models::snapshot_draft_head(snapshot).has_value();
+    route.converter = training::choose_mlx_converter(!route.towers.empty(), text_only,
+                                                     route.embedding, route.drafter);
     return route;
 }
 
@@ -856,10 +861,36 @@ models::EmbeddingBuilds installed_mlx_embedding_builds() {
         };
 }
 
+models::DrafterBuilds installed_mlx_drafter_builds() {
+    return [vlm = std::optional<backends::MlxVlmPackage>{}](std::string_view model_type) mutable {
+        if (!vlm.has_value()) {
+            vlm = backends::find_mlx_vlm(backends::MlxHost::current());
+        }
+        return backends::mlx_vlm_drafts(*vlm, model_type);
+    };
+}
+
 MlxOffer installed_mlx_offer(const std::filesystem::path& snapshot) {
     MlxOffer offer;
     offer.towers = models::snapshot_towers(snapshot);
     offer.type = models::read_mlx_config(snapshot).model_type;
+    if (models::snapshot_draft_head(snapshot).has_value()) {
+        // mlx-vlm's drafter, where the one installed drafts its type (53i):
+        // with none installed to ask, the draft-heads change's answer stands
+        // -- nothing is offered.
+        const backends::MlxVlmPackage vlm = backends::find_mlx_vlm(backends::MlxHost::current());
+        if (backends::mlx_vlm_drafts(vlm, offer.type)) {
+            offer.converter = training::MlxConverterKind::MlxVlm;
+        } else if (vlm.installed()) {
+            offer.gap =
+                "the mlx-vlm in Apogee's Python environment drafts no " +
+                (offer.type.empty() ? std::string{"model of its type"} : offer.type + " model");
+        } else {
+            offer.gap = "mlx-vlm is not installed in Apogee's Python environment";
+            offer.remedy = std::string{backends::kMlxVisionRemedy};
+        }
+        return offer;
+    }
     if (models::snapshot_embedding_model(snapshot).has_value()) {
         // mlx-embeddings' build, where the one installed builds its type
         // (53h): with none installed to ask, M21's answer stands -- nothing
@@ -1057,6 +1088,36 @@ void print_mlx_backend_hint(const models::StoredMlx& stored) {
     std::cout << "\nUse it by adding a backend:\n"
               << "  apogee config add-backend " << models::stored_mlx_name(stored)
               << " --type mlx --model-path " << stored.dir.string() << "\n";
+    if (platform::host_target() != "macos-arm64") {
+        std::cout << "(the mlx backend runs on Apple silicon macOS only; this build is "
+                  << platform::host_target() << ")\n";
+    }
+}
+
+/// What a drafter runs beside, as its conversion says it (53i): the bases its
+/// record names, else the model it measures -- "a 2560-wide gemma4 model, none
+/// stored".
+[[nodiscard]] std::string drafts_beside(const std::optional<models::DraftHead>& head,
+                                        const std::vector<std::string>& bases) {
+    std::string out;
+    for (const std::string& base : bases) {
+        out += (out.empty() ? "" : ", ") + base;
+    }
+    if (!out.empty() || !head.has_value()) {
+        return out.empty() ? std::string{"its base model"} : out;
+    }
+    return "a " + std::to_string(head->backbone_hidden_size) + "-wide " +
+           (head->family.empty() ? std::string{"model"} : head->family + " model") +
+           ", none stored";
+}
+
+/// How a drafter is put to use (53i): named as its base's `mlx` entry's
+/// draft, never registered itself -- it runs beside that base and never alone.
+void print_mlx_drafter_hint(const models::StoredMlx& stored) {
+    std::cout << "\nDraft with it beside its base -- an mlx backend over its base's MLX build "
+                 "(converted with --mlx) -- by naming it as that backend's draft:\n"
+              << "  apogee config set-backend <that backend> --draft " << stored.dir.string()
+              << "\n";
     if (platform::host_target() != "macos-arm64") {
         std::cout << "(the mlx backend runs on Apple silicon macOS only; this build is "
                   << platform::host_target() << ")\n";
@@ -1545,7 +1606,9 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
                                   std::string_view from, const training::MlxPrecision& precision,
                                   const training::MlxConverter& converter,
                                   std::string_view model_type, bool chained, bool text_only) {
-    const SnapshotChoice source = choose_snapshot(roots, given, from);
+    // A draft head is chosen too (53i): its MLX build is a drafter, which
+    // the command's door has already asked mlx-vlm about.
+    const SnapshotChoice source = choose_snapshot(roots, given, from, /*drafters=*/true);
     if (!source.error.empty()) {
         fail(source.error);
     }
@@ -1582,6 +1645,13 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
     record.source = "convert";
     record.transform = std::string{training::mlx_converter_entry(route.converter)} + " " +
                        std::string{precision.name};
+    // A drafter names the bases it runs beside (53i): the stored models of
+    // its family as wide as it reads, measured now -- the draft-heads
+    // change's own finding, by the name each is stored under.
+    const std::optional<models::DraftHead> head = models::snapshot_draft_head(source.path);
+    if (route.drafter && head.has_value()) {
+        record.bases = models::draft_head_bases(roots, *head);
+    }
     // The user's word on the type (M15), recorded for good.
     std::string declared;
     if (!model_type.empty()) {
@@ -1609,7 +1679,9 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
             out.dir = stored.dir;
             out.existed = true;
             out.info = models::read_mlx_info(stored.dir);
-            if (!chained && route.embedding) {
+            if (!chained && route.drafter) {
+                print_mlx_drafter_hint(stored);
+            } else if (!chained && route.embedding) {
                 print_mlx_embedding_hint(stored);
             } else if (!chained) {
                 print_mlx_backend_hint(stored);
@@ -1624,9 +1696,12 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
     std::cout << "converting " << source.path.string() << " to MLX (" << precision.name
               << (estimate > 0 ? ", about " + format_progress_size(estimate) : std::string{})
               << ") -- "
-              << (route.embedding ? "mlx-embeddings' converter, an embedding model built whole (" +
-                                        embedding_modules(source.path) + ")"
-                  : vlm           ? "mlx-vlm's converter, its towers kept (" + towers + ")"
+              << (route.drafter ? "mlx-vlm's converter, a drafter to run beside " +
+                                      drafts_beside(head, record.bases)
+                  : route.embedding
+                      ? "mlx-embeddings' converter, an embedding model built whole (" +
+                            embedding_modules(source.path) + ")"
+                  : vlm ? "mlx-vlm's converter, its towers kept (" + towers + ")"
                   : route.towers.empty()
                       ? std::string{"mlx-lm's converter"}
                       : "mlx-lm's converter, its language model alone (--text-only: " + towers +
@@ -1734,12 +1809,21 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
         // What its record now says it is (53e), and so what runs it.
         std::cout << "kind: " << models::describe(models::read_mlx_kind(out.dir)) << "\n";
     }
+    if (const std::optional<models::MlxDrafter> drafter = models::read_mlx_drafter(out.dir);
+        route.drafter && drafter.has_value()) {
+        // What it drafts for, and the bases its record names (53i).
+        std::cout << "drafter: " << models::describe(*drafter) << "\n";
+    }
     if (route.embedding) {
         // How wide its vectors are, as its own config says (53h).
         std::cout << "vectors: " << models::describe(models::read_mlx_embedding_width(out.dir))
                   << "\n";
     }
     if (!chained) {
+        if (route.drafter) {
+            print_mlx_drafter_hint(stored_at(roots, out.model, out.dir));
+            return out;
+        }
         if (route.embedding) {
             print_mlx_embedding_hint(stored_at(roots, out.model, out.dir));
             return out;
@@ -2547,6 +2631,36 @@ void run_mlx_register_chain(const MlxRegisterRequest& request,
 
 namespace {
 
+/// What a draft head's MLX conversion does not take (53i), each refused
+/// before anything is announced: a registration -- a drafter is no backend;
+/// it runs beside its base, named as that backend's draft -- mlx-lm's build
+/// (`--text-only`), which has no network for one, and a type named over its
+/// own (`--model-type`): mlx-vlm builds it as the drafter its config names.
+void refuse_drafter_misuse(const models::StoreRoots& roots, const std::string& subject,
+                           const models::DraftHead& head, bool registers, bool text_only,
+                           const std::string& model_type) {
+    const std::string what =
+        subject + " is " + models::describe_draft_head(head, models::draft_head_bases(roots, head));
+    if (registers) {
+        fail(what +
+             " -- its MLX build is a drafter, which no backend runs, so --register and "
+             "--register-with do not apply: convert it with --mlx alone, then name it as its "
+             "base's mlx backend's draft: apogee config set-backend <that backend> --draft "
+             "<the drafter>");
+    }
+    if (text_only) {
+        fail(what +
+             " -- --text-only asks for mlx-lm's build, and mlx-lm has no network for a draft "
+             "head: its MLX build is mlx-vlm's drafter, made by --mlx alone");
+    }
+    if (!model_type.empty()) {
+        fail(what +
+             " -- --model-type does not apply: mlx-vlm builds it as the drafter its "
+             "config.json names" +
+             (head.model_type.empty() ? std::string{} : " (" + head.model_type + ")"));
+    }
+}
+
 /// `models convert <model> --mlx [--type <precision>]` (27b): the
 /// precision, the runtime -- the backend's own ladder, file facts only --
 /// and the seeded driver asked before anything is announced, then the core.
@@ -2554,11 +2668,10 @@ namespace {
 /// unless `text_only`; each refused before Python starts where it cannot
 /// build the set.
 void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& given,
-                            const std::string& from, const std::string& type,
+                            const std::string& from, std::string type,
                             const std::string& model_type, const MlxRegisterRequest* registers,
                             bool text_only) {
-    const training::MlxPrecision* precision = training::find_mlx_precision(type);
-    if (precision == nullptr) {
+    if (!type.empty() && training::find_mlx_precision(type) == nullptr) {
         std::string names;
         for (const std::string& name : training::mlx_precision_names()) {
             names += (names.empty() ? "" : ", ") + name;
@@ -2566,15 +2679,33 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
         fail("--mlx writes " + names + "; '" + type + "' is a GGUF precision");
     }
     // What the weights are before what this machine has, as the GGUF path
-    // orders it: a draft head is no conversion's input anywhere (2026-10-21).
+    // orders it: a draft head is no conversion's input but this one, whose
+    // MLX build is a drafter (53i).
     const std::string& name = registers != nullptr ? registers->snapshot : given;
     const SnapshotChoice source =
-        registers != nullptr ? choose_snapshot(roots, registers->snapshot, registers->snapshot_from)
-                             : choose_snapshot(roots, given, from);
+        registers != nullptr
+            ? choose_snapshot(roots, registers->snapshot, registers->snapshot_from, true)
+            : choose_snapshot(roots, given, from, true);
     if (!source.error.empty()) {
         fail(source.error);
     }
     const std::string& as = registers != nullptr ? registers->model_type : model_type;
+    const std::optional<models::DraftHead> head = models::snapshot_draft_head(source.path);
+    if (head.has_value()) {
+        refuse_drafter_misuse(roots, "'" + name + "'", *head, registers != nullptr, text_only, as);
+        // The precision the MLX community publishes its drafters at, unless
+        // one is named: a drafter is small, and what it proposes is checked.
+        if (type.empty()) {
+            type = "bf16";
+        }
+    }
+    if (type.empty()) {
+        type = "4bit";
+    }
+    const training::MlxPrecision* precision = training::find_mlx_precision(type);
+    if (precision == nullptr) {
+        fail("--mlx writes no '" + type + "'");
+    }
     // Nor is an embedding model an MLX conversion's (M21) -- unless the
     // mlx-embeddings installed builds its type (53h). Everywhere else, that
     // type unbuilt or no mlx-embeddings to ask, it is refused as M21 refused
@@ -2586,14 +2717,41 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
     }
     // Which converter, by the set's own files (53f): its towers kept through
     // mlx-vlm unless --text-only asks for mlx-lm's build; an embedding model
-    // built whole through mlx-embeddings (53h).
+    // built whole through mlx-embeddings (53h); a draft head built as
+    // mlx-vlm's drafter (53i).
     const MlxRoute route = mlx_route(source.path, text_only);
     const bool vlm = route.converter == training::MlxConverterKind::MlxVlm;
     const std::string towers = models::describe_towers(route.towers);
     const std::string_view converter_name = training::to_string(route.converter);
     const backends::MlxHost host = backends::MlxHost::current();
+    if (head.has_value()) {
+        // mlx-vlm drafts its type, or nothing converted from it could run:
+        // asked of its own files before anything is announced (M21's rule).
+        const backends::MlxVlmPackage installed = backends::find_mlx_vlm(host);
+        const std::string what =
+            "'" + name + "' is " +
+            models::describe_draft_head(*head, models::draft_head_bases(roots, *head)) +
+            " -- its MLX build is a drafter mlx-vlm makes, and ";
+        if (!installed.installed()) {
+            fail(what + "mlx-vlm is not installed in Apogee's Python environment -- " +
+                 std::string{backends::kMlxVisionRemedy});
+        }
+        if (!backends::mlx_vlm_drafts(installed, head->model_type)) {
+            fail(what + "the mlx-vlm in Apogee's Python environment" +
+                 (installed.version.empty() ? std::string{} : " (" + installed.version + ")") +
+                 " drafts no " +
+                 (head->model_type.empty() ? std::string{"model of its type"}
+                                           : head->model_type + " model") +
+                 " -- its speculative path holds no drafter of that type");
+        }
+    }
     const backends::MlxReadiness runtime = backends::probe_mlx_runtime(host);
     if (!runtime.ready() && runtime.refusal != backends::MlxRefusal::NoDriver) {
+        if (route.drafter) {
+            // mlx-vlm's set brings mlx-lm with it.
+            fail("--mlx builds '" + name + "' through mlx-vlm, as a drafter: " + runtime.reason +
+                 " -- apogee train setup --with mlx-vlm");
+        }
         if (route.embedding) {
             // mlx-embeddings' set brings mlx-lm with it, through mlx-vlm.
             fail("--mlx builds '" + name + "' through mlx-embeddings, an embedding model built " +
@@ -2638,8 +2796,10 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
     }
     // A type this converter builds no model for is refused here, by its own
     // files, rather than in it once Python has started (M21, the user's
-    // call); M15's door -- naming the type it is -- stays open.
-    if (const std::vector<std::string> types = training::mlx_model_types(package); !types.empty()) {
+    // call); M15's door -- naming the type it is -- stays open. A drafter's
+    // type is its speculative path's, asked above (53i).
+    if (const std::vector<std::string> types = training::mlx_model_types(package);
+        !types.empty() && !route.drafter) {
         const std::string wanted =
             as.empty() ? models::read_mlx_config(source.path).model_type : as;
         if (!wanted.empty() && std::ranges::find(types, wanted) == types.end()) {
@@ -3164,13 +3324,15 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         convert
             ->add_option("-t,--type", *convert_type,
                          "Precision to write: a GGUF's (default f16; make it smaller with "
-                         "'models quantize'), or with --mlx an MLX model's (default 4bit)")
+                         "'models quantize'), or with --mlx an MLX model's (default 4bit; bf16 "
+                         "for a draft head's drafter)")
             ->type_name(kConvertPrecisionValue)
             ->check(CLI::IsMember(convert_types));
     convert->add_flag("--mlx", *convert_mlx,
                       "Make an MLX model (Apple silicon), quantized to --type, into the model's "
                       "mlx/: mlx-lm's converter, or for weights with a vision or audio tower "
-                      "mlx-vlm's, the towers kept");
+                      "mlx-vlm's, the towers kept -- and for a draft head mlx-vlm's drafter, run "
+                      "beside its base");
     auto convert_text_only = std::make_shared<bool>(false);
     convert->add_flag("--text-only", *convert_text_only,
                       "With --mlx: build only the language model of weights with a vision or "
@@ -3213,8 +3375,12 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
             const std::string type = convert_type_option->count() > 0 ? *convert_type : "4bit";
             check_base_name(*convert_base_name, convert_base_name_option->count() > 0, registers);
             if (!registers) {
-                convert_to_mlx_command(roots, *convert_in, *convert_from, type, *convert_model_type,
-                                       nullptr, *convert_text_only);
+                // Unnamed, the precision is the set's own default: 4bit, or
+                // bf16 for a drafter (53i).
+                convert_to_mlx_command(
+                    roots, *convert_in, *convert_from,
+                    convert_type_option->count() > 0 ? *convert_type : std::string{},
+                    *convert_model_type, nullptr, *convert_text_only);
                 return;
             }
             // M16: with --mlx the chain converts once a precision.
