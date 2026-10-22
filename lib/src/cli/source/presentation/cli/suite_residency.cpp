@@ -21,18 +21,31 @@ constexpr std::string_view kSuiteShape = "/suite <name|off> [--force] [--warm]";
     return (bytes + (kMiB / 2)) / kMiB;
 }
 
-/// A member's MiB as shown: its weights and its cache each rounded, so the
-/// parts on a member's line add up to its figure, and the figures to the sum.
+/// A member's MiB as shown: its weights -- unless another member's base
+/// holds them (53d) -- its cache and its adapters each rounded, so the parts
+/// on a member's line add up to its figure, and the figures to the sum.
 [[nodiscard]] std::optional<std::int64_t> shown_mib(const models::MemberFootprint& member) {
     if (!member.local) {
         return 0;
     }
     // `bytes()`'s rule, read part by part.
-    if (!member.weights.has_value() || !member.window.has_value() ||
-        !member.window->cache_bytes.has_value()) {
+    const bool own = member.shares.empty();
+    if ((own && !member.weights.has_value()) || !member.window.has_value() ||
+        !member.window->cache_bytes.has_value() || !member.adapter_bytes.has_value()) {
         return std::nullopt;
     }
-    return whole_mib(*member.weights) + whole_mib(*member.window->cache_bytes);
+    return (own ? whole_mib(*member.weights) : 0) + whole_mib(*member.window->cache_bytes) +
+           whole_mib(*member.adapter_bytes);
+}
+
+/// What a member on another's base says beside its figure (53d): whose
+/// weights it runs on, and what sharing them saves when that is known.
+[[nodiscard]] std::string shared_note(const models::MemberFootprint& member) {
+    std::string note = " (shares " + member.shares + "'s weights";
+    if (member.weights.has_value()) {
+        note += ", " + std::to_string(whole_mib(*member.weights)) + " MiB saved";
+    }
+    return note + ")";
 }
 
 /// The backend's key as the config spells it -- what its provider is
@@ -71,6 +84,9 @@ std::string admission_line(const models::SuiteFootprint& footprint, bool forced)
         parts += parts.empty() ? "" : " + ";
         if (const std::optional<std::int64_t> mib = shown_mib(member); mib.has_value()) {
             parts += member.backend + " " + std::to_string(*mib);
+            if (!member.shares.empty()) {
+                parts += shared_note(member);
+            }
             sum += *mib;
         } else {
             parts += member.backend + " unknown (" + member.unknown + ")";
@@ -125,13 +141,25 @@ std::vector<std::string> footprint_lines(const models::SuiteFootprint& footprint
             continue;
         }
         if (const std::optional<std::int64_t> mib = shown_mib(member); mib.has_value()) {
-            // `shown_mib`'s parts, each said: known, since it is.
+            // `shown_mib`'s parts, each said: known, since it is. Weights on
+            // another member's base are that member's, said and not added.
             const models::LocalWindow window = member.window.value_or(models::LocalWindow{});
-            line += std::to_string(*mib) + " MiB -- " +
-                    std::to_string(whole_mib(member.weights.value_or(0))) + " MiB of weights, " +
-                    std::to_string(whole_mib(window.cache_bytes.value_or(0))) + " MiB of " +
+            line += std::to_string(*mib) + " MiB -- ";
+            if (member.shares.empty()) {
+                line += std::to_string(whole_mib(member.weights.value_or(0))) + " MiB of weights, ";
+            } else if (member.weights.has_value()) {
+                line += "shares " + member.shares + "'s " +
+                        std::to_string(whole_mib(*member.weights)) + " MiB of weights, ";
+            } else {
+                line += "shares " + member.shares + "'s weights, ";
+            }
+            line += std::to_string(whole_mib(window.cache_bytes.value_or(0))) + " MiB of " +
                     std::string{harness::to_string(window.cache_type)} + " cache at " +
                     std::to_string(window.window) + " tokens";
+            if (member.adapters > 0) {
+                line += ", " + std::to_string(whole_mib(member.adapter_bytes.value_or(0))) +
+                        " MiB of adapters";
+            }
         } else {
             line += "unknown -- " + member.unknown;
         }

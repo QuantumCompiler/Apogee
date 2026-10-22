@@ -9399,3 +9399,48 @@ Decisions taken while building, for veto:
 
 **Not done:** the real adapter-on-Q4 eval is the user's run. With a judge, the candidate and its baseline load the base twice. Merged `--quantize` promotes, the regime and the cycle are unchanged.
 
+### 2026-10-21 — `one-base-many-roles` (backlog item 53d): a suite shares the model and differs by adapter
+
+**Why.** `llama_set_adapters_lora` is per context (`llama.h:718-726`), so one loaded model can serve several roles, each through its own adapter set. Yet each llamacpp provider owned its own `llama_model`, so two suite members on one base loaded the weights twice.
+
+- [x] **`backends/llama_bases`:** a registry mapping a base's key to a `weak_ptr` of its loaded model. Each provider holds a `shared_ptr`, and the last to let go frees it.
+  - **One registry per process,** in the factory's composition, handed to every llamacpp provider at startup and when `/suite` rebuilds one. A provider built without a registry gets a private one and shares nothing.
+  - **A load runs without the lock**, so one base never blocks another. Of two loads racing for the same base, the first is kept.
+- [x] **The key** is the base's file identity (path, size, modification time), plus what changes the loaded model: the projector, the cache type, and the GPU layers. The window and the adapters are not in it. It is defined once in `modelstore/footprint.h`.
+- [x] **Adapters load over the model, per entry**, and are freed before it. A set is re-asserted on every new context, on the conversation's context each turn, and on the embedding context each batch. A freed set is cleared off the shared embedding context. A set loaded over another model is refused, since llama.cpp compares adapter sets by address and a reused address could serve a stale graph.
+- [x] **One thread uses a model at a time:** each shared base holds a mutex for every use (a turn, an embedding, a token count, saving the conversation, loading or freeing adapters), since llama.cpp's header does not promise more. Two sharers' turns therefore serialize.
+- [x] **The footprint counts the shared weights once**, the first member in role order paying them, and prices adapters by their files' size. The admission line says it: `helper 71 (shares root's weights, 1926 MiB saved)`. With no adapters and no sharing, every line is byte-identical to before.
+- [x] **Residency needed no harness change:** each provider holding its share keeps the base while any sharer holds it.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The registry is a weak-held map in the factory's composition,** the last sharer releasing, the item's default.
+- **The key includes the projector, the cache type and the GPU layers,** since each changes the loaded model.
+- **A joining entry measures its own default window** (`LlamaRuntime::fit_window`), as a second load does today, since each entry's cache is its own.
+- **Uses of one base serialize,** a conservative reading of llama.cpp's contract.
+- **Side effect on 53c:** its serving gate's candidate and judge baseline are built through the factory, so they now share one base. Not measured.
+
+**Verified.**
+- 15 new cases (`[shared-base]`, 574 assertions):
+  - the registry's rules and its race;
+  - the key;
+  - two entries loading the base once, each with its own adapters per context;
+  - the no-bleed matrix: three entries interleaving 16 operations, every context's set and decode pinned to its own entry;
+  - the last sharer freeing the base;
+  - distinct bases sharing nothing;
+  - a rewritten base being another;
+  - the joining entry's window fit;
+  - one entry's adapter failure staying its own;
+  - three threads never overlapping;
+  - the footprint counting the weights once;
+  - the admission lines;
+  - a shared base under `/suite` moves.
+- **Mutation:** 30 of 30 mutants killed.
+- **Builds:** llama-on and llama-off builds both green. The full Catch2 suite passes in both: 1 skip llama-on, 5 llama-off. Zero warnings from AppleClang, clang 22 and MinGW GCC 16.
+- **ctest:** 15 cases pass, `cli.suites_lifecycle` and the listening-socket checks among them.
+- Bare `lib/scripts/cicd.sh --test`: green. The CLI's 3701 tests and the macOS app's 342 cases passed, with no warning.
+
+**Not done:**
+- The real RAM measurement (one base serving two roles against two loads) is the user's.
+- GCC 13 and `make lint` were not run.
+- The factory's process registry and the lock in the token count are exercised only with llama.cpp loading a real model.
+

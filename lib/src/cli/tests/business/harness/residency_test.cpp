@@ -2,19 +2,24 @@
 
 #include <chrono>
 #include <cstddef>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <optional>
+#include <random>
 #include <string>
 #include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include "backends/llama_bases.h"
 #include "backends/llamacpp.h"
 #include "backends/mock.h"
 #include "contracts/config.h"
 #include "contracts/provider.h"
 #include "harness/harness.h"
+#include "support/env_guard.h"
 #include "support/fake_llama.h"
 
 /// A suite's residency in a session (27e): the in-use hold over each
@@ -33,22 +38,26 @@ using apogee::harness::StatusEvent;
 using apogee::testing::FakeLlamaRuntime;
 using Clock = std::chrono::steady_clock;
 
-/// A llamacpp provider over a scripted runtime, on a clock the test moves.
+/// A llamacpp provider over a scripted runtime, on a clock the test moves --
+/// on a base of its own, or on `model` shared through `bases` (53d).
 struct Local {
     FakeLlamaRuntime* runtime = nullptr;
     std::shared_ptr<LlamaCppProvider> provider;
 
     Local(const std::string& name, Clock::time_point& now,
-          std::chrono::seconds idle = std::chrono::seconds{60}) {
+          std::chrono::seconds idle = std::chrono::seconds{60},
+          const std::filesystem::path& model = {},
+          std::shared_ptr<apogee::backends::LlamaBases> bases = nullptr) {
         auto owned = std::make_unique<FakeLlamaRuntime>();
         runtime = owned.get();
         LlamaCppProvider::Options options;
         options.backend_name = name;
         options.model = name + "-model";
-        options.model_path = "/models/" + name + ".gguf";
+        options.model_path = model.empty() ? "/models/" + name + ".gguf" : model.string();
         options.idle_unload = idle;
         options.clock = [&now] { return now; };
-        provider = std::make_shared<LlamaCppProvider>(std::move(options), std::move(owned));
+        provider = std::make_shared<LlamaCppProvider>(std::move(options), std::move(owned),
+                                                      std::move(bases));
     }
 };
 
@@ -327,4 +336,108 @@ TEST_CASE("every load is heard with its backend's name, whichever request made i
     CHECK(heard[5].first == "broken");
     CHECK(heard[5].second.phase == StatusEvent::Phase::Error);
     CHECK(heard[5].second.detail == "no such file");
+}
+
+TEST_CASE("a base two members share is held while either holds it, and the hold follows /suite",
+          "[harness][residency][shared-base]") {
+    const apogee::testing::TempDir dir{"residency-shared-" +
+                                       std::to_string(std::random_device{}())};
+    const std::filesystem::path base = dir.path() / "base.gguf";
+    std::ofstream{base, std::ios::binary} << "base weights";
+    const auto bases = std::make_shared<apogee::backends::LlamaBases>();
+    Clock::time_point now = Clock::now();
+    const std::chrono::seconds idle{60};
+    Harness harness{apogee::harness::parse_config(R"(models:
+  default: root
+  default_suite: research
+backends:
+  root:
+    type: llamacpp
+    model_path: )" + base.string() + R"(
+    idle_unload_seconds: 60
+  helper:
+    type: llamacpp
+    model_path: )" + base.string() + R"(
+    idle_unload_seconds: 60
+suites:
+  research:
+    members:
+      chat: root
+      utility: helper
+  fast:
+    members:
+      chat: root
+  chores:
+    members:
+      utility: helper
+)",
+                                                  "residency_test")};
+    const Local root{"root", now, idle, base, bases};
+    const Local helper{"helper", now, idle, base, bases};
+    harness.register_provider("root", root.provider);
+    harness.register_provider("helper", helper.provider);
+    harness.use_default_router();
+    const std::shared_ptr<int> freed = root.runtime->freed;
+
+    {
+        const SessionHold hold{harness};
+        (void)harness.chat(ask("root"));
+        (void)harness.chat(ask("helper"));
+        REQUIRE(root.runtime->loads == 1);
+        REQUIRE(helper.runtime->loads == 0);
+        FakeLlamaRuntime& loader = *root.runtime;
+        const auto joins = [&loader] { return loader.model->adapter_sets.size(); };
+        REQUIRE(joins() == 2);
+
+        // Both members held: turns further apart than either's idle window
+        // keep the one base, neither letting go.
+        now += std::chrono::seconds{120};
+        (void)harness.chat(ask("helper"));
+        (void)harness.chat(ask("root"));
+        CHECK(joins() == 2);
+        CHECK(*freed == 0);
+
+        // `/suite fast`: the hold re-keys to root alone. helper's clock rules
+        // again -- it idles out and lets go of its share, and root's hold
+        // keeps the base, so it joins it again with nothing loaded.
+        harness.set_active_suite("fast");
+        CHECK(harness.held() == std::vector<std::string>{"root"});
+        now += std::chrono::seconds{120};
+        (void)harness.chat(ask("helper"));
+        CHECK(joins() == 3);
+        CHECK(*freed == 0);
+        CHECK(helper.runtime->loads == 0);
+        CHECK(root.runtime->loads == 1);
+
+        // `/suite chores`: the hold moves to helper alone, and root, idle, is
+        // the one to let go and come back -- the base held throughout.
+        harness.set_active_suite("chores");
+        CHECK(harness.held() == std::vector<std::string>{"helper"});
+        now += std::chrono::seconds{120};
+        (void)harness.chat(ask("root"));
+        CHECK(joins() == 4);
+        CHECK(*freed == 0);
+        CHECK(root.runtime->loads == 1);
+
+        // A member rebuilt at a new window keeps the hold and joins the base
+        // its sharer holds.
+        const Local rebuilt{"helper", now, idle, base, bases};
+        harness.register_provider("helper", rebuilt.provider);
+        harness.use_default_router();
+        CHECK(rebuilt.provider->held_resident());
+        (void)harness.chat(ask("helper"));
+        CHECK(rebuilt.runtime->loads == 0);
+        CHECK(joins() == 5);
+        harness.register_provider("helper", helper.provider);
+        harness.use_default_router();
+    }
+
+    // The session is over: nothing is held, and the base goes with the last
+    // of its sharers to let go -- not the first.
+    CHECK(harness.held().empty());
+    helper.provider->unload();
+    CHECK(*freed == 0);
+    root.provider->unload();
+    CHECK(*freed == 1);
+    CHECK(bases->resident() == 0);
 }

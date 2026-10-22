@@ -36,7 +36,10 @@ using MachineBudgetSource = std::function<models::MachineBudget()>;
 /// `suite research needs 10600 MiB of this machine's 98304 MiB: root 7468 +
 /// helper 2108 + 1024 margin -- fits`. A member whose size is unknown is
 /// named as unknown and the sum reads "at least"; a budget that is not known
-/// is said so; `forced` marks a suite run over its budget anyway.
+/// is said so; `forced` marks a suite run over its budget anyway. A member on
+/// another's base adds its cache and adapters alone, and says whose weights
+/// it shares and what that saves: `helper 241 (shares root's weights, 1926
+/// MiB saved)` (53d).
 [[nodiscard]] std::string admission_line(const models::SuiteFootprint& footprint,
                                          bool forced = false);
 
@@ -50,7 +53,8 @@ using MachineBudgetSource = std::function<models::MachineBudget()>;
 using ResidencyProbe = std::function<std::optional<bool>(std::string_view backend)>;
 
 /// The footprint block: a line per backend the suite puts to use -- its
-/// roles, its bytes as weights and cache at its window, or why unknown, and,
+/// roles, its bytes as weights (or whose it shares, 53d), cache at its window
+/// and adapters, or why unknown, and,
 /// when `resident` can say, whether its model is in memory now -- then the
 /// set's total as the admission line states it. `resident` is a session's
 /// (`/suite`); `models status`, which loads nothing, passes none.

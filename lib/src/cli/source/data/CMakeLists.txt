@@ -212,6 +212,8 @@ apogee_add_module(backends
     backends/llamacpp_embed.cpp
     backends/local_prompt.h
     backends/local_prompt.cpp
+    backends/llama_bases.h
+    backends/llama_bases.cpp
     backends/llamacpp.h
     backends/llamacpp.cpp
     backends/mlx_protocol.h

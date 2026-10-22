@@ -12,6 +12,7 @@
 #include "backends/codex_cli.h"
 #include "backends/gemini_cli.h"
 #include "backends/google.h"
+#include "backends/llama_bases.h"
 #include "backends/llamacpp.h"
 #include "backends/mlx_local.h"
 #include "backends/mock.h"
@@ -72,6 +73,16 @@ namespace {
         return std::nullopt;
     }
     return resolution.key;
+}
+
+/// The process's shared-base registry (53d): every llamacpp provider the
+/// factory builds -- at the start, or rebuilt when a suite re-pins it --
+/// shares its base through this one, so entries on one base file serve from
+/// one loaded model. Weak-held: it keeps nothing loaded, and the last
+/// provider to let go of a base frees it.
+[[nodiscard]] const std::shared_ptr<LlamaBases>& llama_bases() {
+    static const std::shared_ptr<LlamaBases> bases = std::make_shared<LlamaBases>();
+    return bases;
 }
 
 }  // namespace
@@ -186,7 +197,7 @@ std::shared_ptr<harness::LLMProvider> make_provider(const std::string& name,
         }
         case harness::BackendType::LlamaCpp: {
             try {
-                return LlamaCppProvider::from_config(name, config);
+                return LlamaCppProvider::from_config(name, config, llama_bases());
             } catch (const harness::ProviderError& e) {
                 reason = e.what();
                 return nullptr;

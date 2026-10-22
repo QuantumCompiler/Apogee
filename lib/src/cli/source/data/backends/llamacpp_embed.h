@@ -21,10 +21,11 @@ namespace apogee::backends {
 /// decode.
 inline constexpr std::size_t kTextsPerLlamaBatch = 64;
 
-/// Embeds `inputs` through `model`, one vector each, in order.
+/// Embeds `inputs` through `model` under `adapters` -- the caller's entry's
+/// set (53d) -- one vector each, in order.
 /// Throws std::runtime_error with the runtime's message when it cannot.
 [[nodiscard]] std::vector<std::vector<float>> embed_with_llama(
-    LlamaModel& model, const std::vector<std::string>& inputs,
+    LlamaModel& model, const LlamaAdapters& adapters, const std::vector<std::string>& inputs,
     const harness::CancellationToken& cancellation);
 
 }  // namespace apogee::backends

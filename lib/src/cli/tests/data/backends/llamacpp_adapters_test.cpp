@@ -22,10 +22,12 @@
 #include "support/fake_llama.h"
 
 /// Adapters at the llamacpp runtime (53a), over the scripted runtime: the
-/// entry's set reaching the load in order with its scales, each adapter
-/// loaded once, every context the model makes applying it -- and, before
-/// any of that, the refusal table a load asks, then the prompt cache telling
-/// one set from another. Without adapters, everything exactly as before.
+/// entry's set loaded over its model in order with its scales, each adapter
+/// loaded once, every context it uses applying it -- and, before any of that,
+/// the refusal table a load asks, then the prompt cache telling one set from
+/// another. Without adapters, everything exactly as before. Since 53d the set
+/// is the entry's, loaded over the base after it (`llama_bases_test.cpp`
+/// shares one base between entries).
 namespace {
 
 namespace fs = std::filesystem;
@@ -137,7 +139,7 @@ struct Process {
 
 }  // namespace
 
-TEST_CASE("an entry's adapters reach the load in order with their scales, each loaded once",
+TEST_CASE("an entry's adapters load over its model in order with their scales, each once",
           "[backends][llamacpp][adapters]") {
     const Bench bench;
     Process process{bench, {bench.pinned(bench.style, 0.5), bench.pinned(bench.tone)}};
@@ -149,11 +151,12 @@ TEST_CASE("an entry's adapters reach the load in order with their scales, each l
 
     CHECK(process.runtime->loads == 1);
     // Once each, however many turns and contexts follow.
-    CHECK(process.runtime->adapter_loads ==
+    REQUIRE(process.runtime->model != nullptr);
+    CHECK(process.runtime->model->adapter_loads ==
           std::vector<std::string>{bench.style.string(), bench.tone.string()});
-    CHECK(process.runtime->last_load.adapters ==
-          std::vector<AdapterLoad>{{.path = bench.style.string(), .scale = 0.5},
-                                   {.path = bench.tone.string(), .scale = 1.0}});
+    CHECK(process.runtime->model->adapter_sets ==
+          std::vector<std::vector<AdapterLoad>>{{{.path = bench.style.string(), .scale = 0.5},
+                                                 {.path = bench.tone.string(), .scale = 1.0}}});
     // The base was read once for the pins, then remembered.
     CHECK(fs::exists(bench.memo));
 }
@@ -188,8 +191,8 @@ TEST_CASE("a reload loads the set again, once, over the new model",
     process.provider->unload();
     (void)process.ask(question("hello again"));
     CHECK(process.runtime->loads == 2);
-    CHECK(process.runtime->adapter_loads ==
-          std::vector<std::string>{bench.style.string(), bench.style.string()});
+    CHECK(*process.runtime->freed == 1);
+    CHECK(process.runtime->model->adapter_loads == std::vector<std::string>{bench.style.string()});
     CHECK(process.runtime->model->contexts.front()->adapters ==
           std::vector<AdapterLoad>{{.path = bench.style.string(), .scale = 1.0}});
 }
@@ -199,8 +202,8 @@ TEST_CASE("without adapters the load and every context are what they were",
     const Bench bench;
     Process process{bench, {}, true};
     (void)process.ask(opening(600, "hello"));
-    CHECK(process.runtime->last_load.adapters.empty());
-    CHECK(process.runtime->adapter_loads.empty());
+    CHECK(process.runtime->model->adapter_sets == std::vector<std::vector<AdapterLoad>>{{}});
+    CHECK(process.runtime->model->adapter_loads.empty());
     CHECK(process.runtime->model->contexts.front()->adapters.empty());
     // Nothing was pinned, so no weights were read for it.
     CHECK_FALSE(fs::exists(bench.memo));
@@ -227,7 +230,7 @@ TEST_CASE("the refusal table: file facts before any load, each named with its fi
         } catch (const apogee::harness::ProviderError& e) {
             // Nothing was read into memory, and the load said why it failed.
             CHECK(process.runtime->loads == 0);
-            CHECK(process.runtime->adapter_loads.empty());
+            CHECK(process.runtime->model == nullptr);
             const auto failed =
                 std::ranges::find_if(process.statuses, [](const StatusEvent& event) {
                     return event.type == StatusEvent::Type::ModelLoading &&

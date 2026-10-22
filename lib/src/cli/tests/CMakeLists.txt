@@ -85,6 +85,7 @@ add_library(apogee_tests_data OBJECT
     data/backends/llamacpp_test.cpp
     data/backends/llamacpp_prompt_cache_test.cpp
     data/backends/llamacpp_adapters_test.cpp
+    data/backends/llama_bases_test.cpp
     data/backends/adapters_test.cpp
     data/backends/prompt_cache_test.cpp
     data/backends/sampling_test.cpp

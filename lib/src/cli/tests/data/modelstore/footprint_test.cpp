@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -300,4 +301,181 @@ suites:
           4096);
     // No such suite: nothing to price.
     CHECK(apogee::models::suite_footprint(config, "nope", {}).members.empty());
+}
+
+namespace {
+
+/// Writes `bytes` bytes at `path`: an adapter file of a known size.
+void sized(const std::filesystem::path& path, std::int64_t bytes) {
+    std::ofstream{path, std::ios::binary} << std::string(static_cast<std::size_t>(bytes), 'w');
+}
+
+}  // namespace
+
+TEST_CASE("a base is the model file, its projector and its cache type, however it is spelled",
+          "[models][footprint][shared-base]") {
+    using apogee::harness::KvCacheType;
+    using apogee::models::base_key;
+    const apogee::models::BaseKey plain = base_key("/m/base.gguf", "", KvCacheType::Q8_0, false);
+    CHECK(base_key("/m/./x/../base.gguf", "", KvCacheType::Q8_0, false) == plain);
+    CHECK(base_key("/m/other.gguf", "", KvCacheType::Q8_0, false) != plain);
+    CHECK(base_key("/m/base.gguf", "/m/mmproj.gguf", KvCacheType::Q8_0, false) != plain);
+    CHECK(base_key("/m/base.gguf", "", KvCacheType::F16, false) != plain);
+    CHECK(base_key("/m/base.gguf", "", KvCacheType::Q8_0, true) != plain);
+    // As the factory reads an entry: the default cache type unless named,
+    // and its window and adapters no part of it.
+    BackendConfig entry;
+    entry.type = apogee::harness::BackendType::LlamaCpp;
+    entry.model_path = "/m/base.gguf";
+    CHECK(base_key(entry) == plain);
+    entry.context_size = 4096;
+    entry.adapters = {{.path = "/m/style.gguf"}};
+    CHECK(base_key(entry) == plain);
+    entry.cache_type = KvCacheType::Q8_0;
+    CHECK(base_key(entry) == base_key("/m/base.gguf", "", KvCacheType::Q8_0, true));
+}
+
+TEST_CASE("one base, many roles: its weights counted once, each member its own cache and adapters",
+          "[models][footprint][shared-base]") {
+    const Store store;
+    const std::string base = store.model("base", llama_3b(), 1926 * kMiB);
+    const std::string other = store.model("other", llama_1b(), 770 * kMiB);
+    const std::string unrecorded = store.model("unrecorded", llama_1b(), std::nullopt);
+    const std::filesystem::path style = store.dir.path() / "style.gguf";
+    const std::filesystem::path tone = store.dir.path() / "tone.gguf";
+    sized(style, 3 * kMiB);
+    sized(tone, kMiB);
+    const std::string respelled = (store.dir.path() / "." / "base.gguf").string();
+    const Config config = parse(R"(models:
+  default: root
+backends:
+  root:
+    type: llamacpp
+    model_path: )" + base + R"(
+  helper:
+    type: llamacpp
+    model_path: )" + base + R"(
+    adapters: [{path: )" + style.string() +
+                                R"(}]
+  scribe:
+    type: llamacpp
+    model_path: )" + respelled + R"(
+    adapters: [{path: )" + tone.string() +
+                                R"(, scale: 0.5}]
+  wide:
+    type: llamacpp
+    model_path: )" + base + R"(
+    cache_type: f16
+  apart:
+    type: llamacpp
+    model_path: )" + other + R"(
+  broken:
+    type: llamacpp
+    model_path: )" + base + R"(
+    adapters: [{path: )" + (store.dir.path() / "gone.gguf").string() +
+                                R"(}]
+  first:
+    type: llamacpp
+    model_path: )" + unrecorded +
+                                R"(
+  second:
+    type: llamacpp
+    model_path: )" + unrecorded +
+                                R"(
+suites:
+  roles:
+    members:
+      chat: root
+      utility:
+        backend: helper
+        context_size: 4096
+      extraction:
+        backend: scribe
+        context_size: 4096
+  loaded-apart:
+    members:
+      chat: root
+      utility: wide
+      extraction: apart
+  tuned-first:
+    members:
+      chat: helper
+      utility: root
+  unread:
+    members:
+      chat: root
+      utility:
+        backend: broken
+        context_size: 4096
+  unrecorded:
+    members:
+      chat: first
+      utility:
+        backend: second
+        context_size: 4096
+)");
+
+    SECTION("the first member on the base counts it; the others their own cache and adapters") {
+        const SuiteFootprint footprint =
+            apogee::models::suite_footprint(config, "roles", MachineBudget{.bytes = 96 * kGiB});
+        CHECK(member(footprint, "root").shares.empty());
+        CHECK(member(footprint, "root").adapters == 0);
+        CHECK(member(footprint, "root").bytes() == (1926 + 1904) * kMiB);
+        // Its weights stated, not counted; its cache at its pin; its adapter.
+        CHECK(member(footprint, "helper").shares == "root");
+        CHECK(member(footprint, "helper").weights == 1926 * kMiB);
+        CHECK(member(footprint, "helper").adapters == 1);
+        CHECK(member(footprint, "helper").adapter_bytes == 3 * kMiB);
+        CHECK(member(footprint, "helper").bytes() == (238 + 3) * kMiB);
+        CHECK(member(footprint, "helper").unknown.empty());
+        // The same file spelled another way is the same base.
+        CHECK(member(footprint, "scribe").shares == "root");
+        CHECK(member(footprint, "scribe").bytes() == (238 + 1) * kMiB);
+
+        const std::int64_t known = (1926 + 1904 + 238 + 3 + 238 + 1) * kMiB;
+        CHECK(footprint.known_bytes() == known);
+        CHECK(footprint.saved_bytes() == 2 * 1926 * kMiB);
+        // Admitted where the base counted once fits, and only there.
+        const std::int64_t needed = known + apogee::models::kFitMargin;
+        CHECK(apogee::models::suite_footprint(config, "roles", MachineBudget{.bytes = needed})
+                  .admission() == Admission::Fits);
+        CHECK(apogee::models::suite_footprint(config, "roles", MachineBudget{.bytes = needed - 1})
+                  .admission() == Admission::OverBudget);
+    }
+    SECTION("a base loaded otherwise, or another file, is counted for itself") {
+        const SuiteFootprint footprint = apogee::models::suite_footprint(
+            config, "loaded-apart", MachineBudget{.bytes = 96 * kGiB});
+        CHECK(member(footprint, "wide").shares.empty());
+        CHECK(member(footprint, "apart").shares.empty());
+        CHECK(footprint.saved_bytes() == 0);
+        CHECK(member(footprint, "wide").bytes() ==
+              1926 * kMiB + *member(footprint, "wide").window->cache_bytes);
+    }
+    SECTION("whichever member comes first in the suite counts the base") {
+        const SuiteFootprint footprint =
+            apogee::models::suite_footprint(config, "tuned-first", MachineBudget{});
+        CHECK(member(footprint, "helper").shares.empty());
+        CHECK(member(footprint, "helper").bytes() == (1926 + 1904 + 3) * kMiB);
+        CHECK(member(footprint, "root").shares == "helper");
+        CHECK(member(footprint, "root").bytes() == 1904 * kMiB);
+    }
+    SECTION("an adapter that cannot be read is unknown, never guessed") {
+        const SuiteFootprint footprint =
+            apogee::models::suite_footprint(config, "unread", MachineBudget{.bytes = 96 * kGiB});
+        CHECK(member(footprint, "broken").shares == "root");
+        CHECK(member(footprint, "broken").adapters == 1);
+        CHECK_FALSE(member(footprint, "broken").adapter_bytes.has_value());
+        CHECK_FALSE(member(footprint, "broken").bytes().has_value());
+        CHECK(member(footprint, "broken").unknown == "an adapter's file could not be read");
+        CHECK(footprint.admission() == Admission::FitsAsFarAsKnown);
+    }
+    SECTION("an unrecorded base is unknown once, where it is counted") {
+        const SuiteFootprint footprint = apogee::models::suite_footprint(
+            config, "unrecorded", MachineBudget{.bytes = 96 * kGiB});
+        CHECK(member(footprint, "first").unknown == "no recorded size");
+        CHECK(member(footprint, "second").shares == "first");
+        CHECK(member(footprint, "second").unknown.empty());
+        CHECK(member(footprint, "second").bytes() == 68 * kMiB);
+        CHECK(footprint.saved_bytes() == 0);
+    }
 }

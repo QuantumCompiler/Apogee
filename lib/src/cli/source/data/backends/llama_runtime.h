@@ -229,6 +229,61 @@ void forget_checkpoints_after(std::vector<Checkpoint>& held, std::int64_t positi
     return oldest == 0 || oldest < position - window;
 }
 
+/// One LoRA adapter a model's contexts apply (53a): the GGUF adapter file,
+/// and the strength every context applies it at.
+struct AdapterLoad {
+    std::string path{};
+    double scale = 1.0;
+
+    bool operator==(const AdapterLoad&) const = default;
+};
+
+/// One entry's adapters, loaded over a model (53d): what that entry's
+/// contexts apply, in order, each at its scale.
+///
+/// **The set is the entry's, never the model's.** One loaded model can serve
+/// several entries -- one base, many roles -- because llama.cpp sets adapters
+/// per context (`llama_set_adapters_lora`), so each entry loads its own set
+/// over the shared model, sets it on every context it uses, and frees it when
+/// it lets go, always before the model it was loaded over. An empty set is the
+/// bare base.
+class LlamaAdapters {
+public:
+    /// What the runtime that loaded the set holds of it: llama.cpp's handles
+    /// in the real one; nothing in a scripted one, nor for the bare base.
+    struct Native;
+
+    /// The bare base: no adapters.
+    LlamaAdapters();
+    /// A set no runtime holds handles for: a scripted runtime's.
+    explicit LlamaAdapters(std::vector<AdapterLoad> loads);
+    LlamaAdapters(std::vector<AdapterLoad> loads, std::unique_ptr<Native> native);
+    ~LlamaAdapters();
+    LlamaAdapters(const LlamaAdapters&) = delete;
+    LlamaAdapters& operator=(const LlamaAdapters&) = delete;
+    LlamaAdapters(LlamaAdapters&&) = delete;
+    LlamaAdapters& operator=(LlamaAdapters&&) = delete;
+
+    /// The adapters, in the order they apply, with their scales.
+    [[nodiscard]] const std::vector<AdapterLoad>& loads() const noexcept {
+        return loads_;
+    }
+
+    [[nodiscard]] bool empty() const noexcept {
+        return loads_.empty();
+    }
+
+    /// The runtime's own handles, for the runtime that loaded them; null
+    /// for the bare base and in a scripted runtime.
+    [[nodiscard]] const Native* native() const noexcept {
+        return native_.get();
+    }
+
+private:
+    std::vector<AdapterLoad> loads_{};
+    std::unique_ptr<Native> native_{};
+};
+
 /// One KV cache -- llama.cpp's `llama_context`.
 ///
 /// A context IS the conversation's warm state. Keeping one alive across turns
@@ -265,6 +320,22 @@ public:
             return true;
         }
         error = "this context cannot apply a grammar";
+        return false;
+    }
+
+    /// Applies exactly `adapters` from now on, each at its scale, and nothing
+    /// left of another set (53d). A context starts with none; its entry sets
+    /// its own on it before every use, which llama.cpp makes cheap -- it
+    /// changes a context only when the set differs. The set must have been
+    /// loaded over this context's model. False with `error` when it cannot.
+    ///
+    /// The default accepts only the bare base: a runtime that cannot apply
+    /// adapters must say so rather than answer as the base.
+    [[nodiscard]] virtual bool set_adapters(const LlamaAdapters& adapters, std::string& error) {
+        if (adapters.empty()) {
+            return true;
+        }
+        error = "this context cannot apply adapters";
         return false;
     }
 
@@ -413,7 +484,14 @@ public:
 
 /// A loaded model -- llama.cpp's `llama_model`. Contexts are made from it, and
 /// several contexts can share one model without reloading the weights, which is
-/// what makes an isolated side-request context cheap.
+/// what makes an isolated side-request context cheap -- and what lets several
+/// entries on one base share it, each through its own adapters (53d).
+///
+/// One thread drives a model at a time, as it always has: the entries sharing
+/// one take turns on its lock (`SharedBase::use`, `backends/llama_bases.h`),
+/// so nothing here -- the lazily made embedding context and templates, the
+/// adapters llama.cpp registers on the model -- is ever reached from two
+/// threads at once.
 class LlamaModel {
 public:
     LlamaModel() = default;
@@ -487,13 +565,31 @@ public:
     /// The most positions free memory held when this model was loaded, where
     /// the load was asked to find out (`ModelLoad::fit_window`) and the
     /// default window would not fit; 0 when it fits, or nobody asked (26a).
+    /// The loading entry's measure: one joining later takes its own (53d).
     [[nodiscard]] virtual std::int64_t fitted_window() const noexcept {
         return 0;
     }
 
     /// A fresh context of `context_size` positions over this model, with its
-    /// own empty KV cache, kept in the model's cache type.
+    /// own empty KV cache, kept in the model's cache type, and no adapters:
+    /// its entry sets its own (`LlamaContext::set_adapters`, 53d).
     [[nodiscard]] virtual std::unique_ptr<LlamaContext> make_context(std::int64_t context_size) = 0;
+
+    /// Loads `adapters` over this model, each once and in order, for one
+    /// entry's contexts to apply (53d): never merged into the weights, and
+    /// never applied to another entry's contexts. Nullptr with `error` naming
+    /// the file when one will not load -- llama.cpp refuses a LoRA made for
+    /// another architecture. An empty list loads nothing: the bare base.
+    ///
+    /// The default loads only the bare base.
+    [[nodiscard]] virtual std::unique_ptr<LlamaAdapters> load_adapters(
+        const std::vector<AdapterLoad>& adapters, std::string& error) {
+        if (adapters.empty()) {
+            return std::make_unique<LlamaAdapters>();
+        }
+        error = "this runtime cannot load adapters";
+        return nullptr;
+    }
 
     /// Whether a multimodal projector was loaded alongside this model AND it
     /// actually supports images.
@@ -538,17 +634,14 @@ public:
     /// chunk sizes far below that line, so this is the defence against a
     /// pathological input rather than a policy. Returns an empty vector and
     /// fills `error` when the model cannot embed at all.
+    ///
+    /// The model embeds as its caller's entry answers: through `adapters`
+    /// (53a), set on the embedding context before the batch is read (53d) --
+    /// one context every entry sharing this model embeds through, so each
+    /// call says whose set it runs under, and none is left over from the last.
     [[nodiscard]] virtual std::vector<std::vector<float>> embed_batch(
-        const std::vector<std::string>& texts, std::string& error) = 0;
-};
-
-/// One LoRA adapter a model's contexts apply (53a): the GGUF adapter file,
-/// and the strength every context applies it at.
-struct AdapterLoad {
-    std::string path{};
-    double scale = 1.0;
-
-    bool operator==(const AdapterLoad&) const = default;
+        const std::vector<std::string>& texts, const LlamaAdapters& adapters,
+        std::string& error) = 0;
 };
 
 /// What a model is loaded from and with.
@@ -569,14 +662,9 @@ struct ModelLoad {
     /// Whether to find what free memory holds, for a backend whose window is
     /// the default: `LlamaModel::fitted_window` reports it.
     bool fit_window = false;
-    /// The entry's adapters, in order (53a): each loaded ONCE, right after
-    /// the model, and set on every context made from it -- the conversation's,
-    /// a side request's, the embedding context -- at its scale, never merged
-    /// into the weights. Per context is llama.cpp's own design
-    /// (`llama_set_adapters_lora`), and what one model serving several sets
-    /// will stand on. An adapter that will not load fails the load, naming
-    /// it. Empty, the default, loads the bare base exactly as before.
-    std::vector<AdapterLoad> adapters{};
+    // No adapters: a load is the bare base, which several entries may share,
+    // and each entry's own set is loaded over it (`LlamaModel::load_adapters`,
+    // 53d).
 };
 
 /// Loads models. One per process in practice.
@@ -600,6 +688,18 @@ public:
     /// at their picture is worse than saying why.
     [[nodiscard]] virtual std::unique_ptr<LlamaModel> load(const ModelLoad& request,
                                                            std::string& error) = 0;
+
+    /// What free memory holds for `request`'s default window, measured as
+    /// `load` measures it with `fit_window` set: 0 when the default fits.
+    /// Asked by an entry joining a base another entry already loaded (53d),
+    /// whose cache is its own: the measure its own load would have taken,
+    /// with every byte already resident counted as taken -- the base's
+    /// weights among them, and counted again, so it never finds more room
+    /// than a load of its own would have. The default finds the default fits.
+    [[nodiscard]] virtual std::int64_t fit_window(const ModelLoad& request) {
+        (void)request;
+        return 0;
+    }
 };
 
 /// The runtime this build has, or nullptr when llama.cpp was not compiled in.

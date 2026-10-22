@@ -306,7 +306,9 @@ public:
     // Policy over what each backend already does: a provider owns its model's
     // residency and its idle clock; the harness only says which of them a
     // session is using, warms a set on request, and lets a surface hear the
-    // loads. No second eviction engine, nothing in the background.
+    // loads. No second eviction engine, nothing in the background. A base
+    // several local backends share (53d) is each one's share: held while any
+    // of them is held, or has not idled out, and freed when the last lets go.
 
     /// Holds the models of `backends` against their idle-unload clocks, and
     /// lets go of every other: the held set is REPLACED, not added to. A

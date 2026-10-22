@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <cstdint>
@@ -86,6 +87,26 @@ public:
     }
 };
 
+/// How many of one model's decodes and embedding batches are in flight at
+/// once (53d): a model shared by several providers is driven by one thread at
+/// a time, so it is never more than one. `hold` keeps each in flight that
+/// long, wide enough for two threads to collide if nothing kept them apart.
+struct DecodeOverlap {
+    std::atomic<int> now{0};
+    std::atomic<int> most{0};
+    std::chrono::milliseconds hold{0};
+
+    /// One decode or batch passing through, counted while it holds.
+    void pass() {
+        const int at = ++now;
+        int seen = most.load();
+        while (at > seen && !most.compare_exchange_weak(seen, at)) {
+        }
+        std::this_thread::sleep_for(hold);
+        --now;
+    }
+};
+
 /// A scripted llama.cpp — the seam that makes the local backend testable on a
 /// build with no llama.cpp in it.
 ///
@@ -134,7 +155,11 @@ public:
         // And never past the cache's end: a position skipped is a token the
         // model is told it has seen and never did.
         REQUIRE(position <= resident);
+        if (overlap != nullptr) {
+            overlap->pass();
+        }
         decodes.push_back({position, static_cast<std::int64_t>(tokens.size())});
+        decode_adapters.push_back(adapters);
         resident = position + static_cast<std::int64_t>(tokens.size());
         if (sliding_window > 0) {
             oldest = std::max(oldest, resident - sliding_keep);
@@ -158,9 +183,27 @@ public:
                samplings.back().reasoning_budget.has_value() && sampled >= *budget_spent_after;
     }
 
-    /// The adapters set on this context at its creation, in order with their
-    /// scales (53a) -- what the real one sets through `llama_set_adapters_lora`.
+    /// The adapters this context applies now, in order with their scales
+    /// (53a) -- what the real one sets through `llama_set_adapters_lora`. None
+    /// until its entry sets its own, as a real context starts (53d).
     std::vector<backends::AdapterLoad> adapters;
+    /// Every set asked for, in order, and the set each decode ran under,
+    /// beside `decodes` (53d).
+    std::vector<std::vector<backends::AdapterLoad>> asserted;
+    std::vector<std::vector<backends::AdapterLoad>> decode_adapters;
+    /// The model's overlap watch, shared by every context it makes.
+    std::shared_ptr<DecodeOverlap> overlap;
+    /// How many providers' handles on this context are alive: a model must
+    /// outlive every one (53d), as llama.cpp's must outlive its contexts.
+    int handles = 0;
+
+    [[nodiscard]] bool set_adapters(const backends::LlamaAdapters& set,
+                                    std::string& error) override {
+        (void)error;
+        adapters = set.loads();
+        asserted.push_back(set.loads());
+        return true;
+    }
 
     /// Every state saved and every load asked for, by path (26j); a load
     /// refused while `refuse_load` is set, as llama.cpp refuses a file of
@@ -254,6 +297,7 @@ public:
         const std::int64_t count =
             words + kMediaPositions * static_cast<std::int64_t>(media.size());
         decodes.push_back({position, count});
+        decode_adapters.push_back(adapters);
         resident = position + count;
         evaluated_ += count;
         return resident;
@@ -404,7 +448,18 @@ private:
 /// Forwards to a context the model keeps alive. See make_context.
 class FakeLlamaHandle final : public backends::LlamaContext {
 public:
-    explicit FakeLlamaHandle(std::shared_ptr<FakeLlamaContext> state) : state_{std::move(state)} {}
+    explicit FakeLlamaHandle(std::shared_ptr<FakeLlamaContext> state) : state_{std::move(state)} {
+        ++state_->handles;
+    }
+
+    ~FakeLlamaHandle() override {
+        --state_->handles;
+    }
+
+    FakeLlamaHandle(const FakeLlamaHandle&) = delete;
+    FakeLlamaHandle& operator=(const FakeLlamaHandle&) = delete;
+    FakeLlamaHandle(FakeLlamaHandle&&) = delete;
+    FakeLlamaHandle& operator=(FakeLlamaHandle&&) = delete;
 
     void decode(const std::vector<std::int32_t>& tokens, std::int64_t position) override {
         state_->decode(tokens, position);
@@ -428,6 +483,11 @@ public:
                                     const backends::SamplingSettings& settings,
                                     std::string& error) override {
         return state_->set_sampling(grammar, settings, error);
+    }
+
+    [[nodiscard]] bool set_adapters(const backends::LlamaAdapters& set,
+                                    std::string& error) override {
+        return state_->set_adapters(set, error);
     }
 
     [[nodiscard]] std::int64_t trim_to(std::int64_t position) override {
@@ -560,11 +620,59 @@ public:
     /// The window each context was asked for, in creation order.
     std::vector<std::int64_t> context_sizes;
 
-    /// The adapters loaded over this model, once each, in order (53a): every
-    /// context made from it -- and the embedding context -- applies them.
-    std::vector<backends::AdapterLoad> adapters;
-    /// The set the embedding context applied, at the last `embed_batch`.
+    /// Every set loaded over this model, in order (53d) -- one per entry
+    /// that took it, the bare base's empty -- and every adapter file loaded,
+    /// by path: "loaded once" is a count of these.
+    std::vector<std::vector<backends::AdapterLoad>> adapter_sets;
+    std::vector<std::string> adapter_loads;
+    /// When set, the adapter at this path will not load -- llama.cpp's word
+    /// on a LoRA made for another architecture.
+    std::string adapter_error_path;
+    /// The set the embedding context applied at the last `embed_batch`, and
+    /// at every one, in order.
     std::vector<backends::AdapterLoad> embedding_adapters;
+    std::vector<std::vector<backends::AdapterLoad>> embedding_sets;
+    /// Watches how many of this model's contexts decode at once (53d).
+    std::shared_ptr<DecodeOverlap> overlap = std::make_shared<DecodeOverlap>();
+    /// Counted up when this model is freed: shared with the runtime that
+    /// loaded it, which outlives nothing it hands out.
+    std::shared_ptr<int> freed;
+
+    FakeLlamaModel() = default;
+
+    ~FakeLlamaModel() override {
+        // Freed under a live context is a use-after-free the real runtime
+        // would not survive: whoever holds the model lets its contexts go
+        // first (53d).
+        for (const std::shared_ptr<FakeLlamaContext>& context : contexts) {
+            CHECK(context->handles == 0);
+        }
+        if (freed != nullptr) {
+            ++*freed;
+        }
+    }
+
+    FakeLlamaModel(const FakeLlamaModel&) = delete;
+    FakeLlamaModel& operator=(const FakeLlamaModel&) = delete;
+    FakeLlamaModel(FakeLlamaModel&&) = delete;
+    FakeLlamaModel& operator=(FakeLlamaModel&&) = delete;
+
+    [[nodiscard]] std::unique_ptr<backends::LlamaAdapters> load_adapters(
+        const std::vector<backends::AdapterLoad>& set, std::string& error) override {
+        for (const backends::AdapterLoad& adapter : set) {
+            if (adapter.path == adapter_error_path) {
+                error = "could not load the adapter at '" + adapter.path +
+                        "' -- check that it is a GGUF LoRA made for this model's architecture";
+                return nullptr;
+            }
+        }
+        // Each adapter once, over this model, as the real runtime loads them.
+        for (const backends::AdapterLoad& adapter : set) {
+            adapter_loads.push_back(adapter.path);
+        }
+        adapter_sets.push_back(set);
+        return std::make_unique<backends::LlamaAdapters>(set);
+    }
 
     [[nodiscard]] std::vector<std::int32_t> tokenize(std::string_view text,
                                                      bool add_special) const override {
@@ -766,9 +874,14 @@ public:
     }
 
     [[nodiscard]] std::vector<std::vector<float>> embed_batch(const std::vector<std::string>& texts,
+                                                              const backends::LlamaAdapters& set,
                                                               std::string& error) override {
+        if (overlap != nullptr) {
+            overlap->pass();
+        }
         embed_batches.push_back(texts.size());
-        embedding_adapters = adapters;
+        embedding_adapters = set.loads();
+        embedding_sets.push_back(set.loads());
         if (!embed_error.empty()) {
             error = embed_error;
             return {};
@@ -807,7 +920,7 @@ public:
         state->refuse_load = refuse_load;
         state->refuse_save = refuse_save;
         state->multimodal = decodes_media;
-        state->adapters = adapters;
+        state->overlap = overlap;
         contexts.push_back(state);
         // The provider owns its contexts and destroys a side request's the
         // moment the call returns -- so the model keeps them ALIVE and hands
@@ -841,12 +954,14 @@ public:
 
     /// How many times a model was loaded — the idle-unload assertion.
     int loads = 0;
+    /// How many of the models it loaded have been freed (53d): a model
+    /// outlives the provider that loaded it while another shares it.
+    std::shared_ptr<int> freed = std::make_shared<int>(0);
+    /// How many times a provider joining a base already loaded measured its
+    /// own window here (53d).
+    int fits = 0;
 
-    /// Every adapter loaded, by path, across every model load, in order
-    /// (53a): "loaded once" is a count of these.
-    std::vector<std::string> adapter_loads;
-    /// When set, the adapter at this path will not load -- llama.cpp's word
-    /// on a LoRA made for another architecture -- and fails the load.
+    /// Given to every model it loads: see FakeLlamaModel.
     std::string adapter_error_path;
 
     /// How long a load takes: a load slow enough for a busy line to paint
@@ -906,18 +1021,10 @@ public:
             error = load_error;
             return nullptr;
         }
-        // Each adapter once, over the model, as the real runtime loads them.
-        for (const backends::AdapterLoad& adapter : request.adapters) {
-            if (adapter.path == adapter_error_path) {
-                error = "could not load the adapter at '" + adapter.path +
-                        "' -- check that it is a GGUF LoRA made for this model's architecture";
-                return nullptr;
-            }
-            adapter_loads.push_back(adapter.path);
-        }
         ++loads;
         auto loaded = std::make_unique<FakeLlamaModel>();
-        loaded->adapters = request.adapters;
+        loaded->freed = freed;
+        loaded->adapter_error_path = adapter_error_path;
         loaded->batch_limit = batch_limit;
         loaded->rewindable = rewindable;
         loaded->sliding_window = sliding_window;
@@ -971,6 +1078,13 @@ public:
     /// The projector the provider asked for, so a test can assert the config
     /// field reaches the runtime rather than being dropped on the way.
     std::string last_mmproj_path;
+
+    /// What a joining provider's own measure finds: `fitted` (53d).
+    [[nodiscard]] std::int64_t fit_window(const backends::ModelLoad& request) override {
+        (void)request;
+        ++fits;
+        return fitted;
+    }
 };
 
 }  // namespace apogee::testing

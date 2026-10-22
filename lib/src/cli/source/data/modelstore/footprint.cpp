@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <map>
+#include <system_error>
 #include <utility>
 
 namespace apogee::models {
@@ -14,6 +16,32 @@ namespace {
         return std::nullopt;
     }
     return record->file_size;
+}
+
+/// `path` absolute and normalized, as the prompt cache's fingerprint names a
+/// model file (26j); as given when it cannot be made absolute.
+[[nodiscard]] std::string normalized(const std::string& path) {
+    if (path.empty()) {
+        return {};
+    }
+    std::error_code code;
+    const std::filesystem::path absolute = std::filesystem::absolute(path, code);
+    return code ? path : absolute.lexically_normal().string();
+}
+
+/// Each adapter's file's size, in order: what llama.cpp reads it into memory
+/// as. Nullopt for a file that cannot be read.
+[[nodiscard]] std::vector<std::optional<std::int64_t>> adapter_sizes(
+    const std::vector<harness::AdapterConfig>& adapters) {
+    std::vector<std::optional<std::int64_t>> sizes;
+    sizes.reserve(adapters.size());
+    for (const harness::AdapterConfig& adapter : adapters) {
+        std::error_code code;
+        const std::uintmax_t size = std::filesystem::file_size(adapter.path, code);
+        sizes.push_back(code ? std::nullopt
+                             : std::optional<std::int64_t>{static_cast<std::int64_t>(size)});
+    }
+    return sizes;
 }
 
 /// A member whose memory is not in this process and is not on the machine
@@ -30,14 +58,32 @@ namespace {
 
 }  // namespace
 
+BaseKey base_key(const std::string& model_path, const std::string& projector_path,
+                 harness::KvCacheType cache_type, bool cache_type_named) {
+    return BaseKey{.model = normalized(model_path),
+                   .projector = normalized(projector_path),
+                   .cache_type = cache_type,
+                   .cache_type_named = cache_type_named};
+}
+
+BaseKey base_key(const harness::BackendConfig& as_run) {
+    // As `LlamaCppProvider::options_from` reads the entry: a cache type the
+    // config names, else the default.
+    return base_key(harness::expand_env(as_run.model_path), harness::expand_env(as_run.mmproj_path),
+                    as_run.cache_type.value_or(kDefaultCacheType), as_run.cache_type.has_value());
+}
+
 std::optional<std::int64_t> MemberFootprint::bytes() const {
     if (!local) {
         return 0;
     }
-    if (!weights.has_value() || !window.has_value() || !window->cache_bytes.has_value()) {
+    // A member on another's base adds no weights of its own (53d).
+    const bool own = shares.empty();
+    if ((own && !weights.has_value()) || !window.has_value() || !window->cache_bytes.has_value() ||
+        !adapter_bytes.has_value()) {
         return std::nullopt;
     }
-    return *weights + *window->cache_bytes;
+    return (own ? *weights : 0) + *window->cache_bytes + *adapter_bytes;
 }
 
 std::int64_t SuiteFootprint::known_bytes() const {
@@ -46,6 +92,16 @@ std::int64_t SuiteFootprint::known_bytes() const {
         total += member.bytes().value_or(0);
     }
     return total;
+}
+
+std::int64_t SuiteFootprint::saved_bytes() const {
+    std::int64_t saved = 0;
+    for (const MemberFootprint& member : members) {
+        if (member.local && !member.shares.empty()) {
+            saved += member.weights.value_or(0);
+        }
+    }
+    return saved;
 }
 
 bool SuiteFootprint::holds_local() const {
@@ -79,11 +135,12 @@ MemberFootprint gguf_member_footprint(const harness::SuiteBackend& member,
                                       const harness::BackendConfig& as_run,
                                       const std::optional<Sidecar>& record,
                                       const std::optional<Sidecar>& projector_record,
-                                      const GgufInfo& header) {
+                                      const GgufInfo& header, const MemberExtras& extras) {
     MemberFootprint out;
     out.backend = member.backend;
     out.roles = member.roles;
     out.local = true;
+    out.shares = extras.shares;
 
     // The weights the store recorded: the model file, and its projector when
     // the entry loads one -- 26a's check counts both.
@@ -100,14 +157,34 @@ MemberFootprint gguf_member_footprint(const harness::SuiteBackend& member,
         out.window = local_window(header, as_run);
     }
 
-    if (!model.has_value()) {
+    // Its adapters, each read into memory over the base as its file is
+    // (53a): unknown when one cannot be read, never left out.
+    out.adapters = extras.adapters.size();
+    std::int64_t adapters = 0;
+    for (const std::optional<std::int64_t>& size : extras.adapters) {
+        if (!size.has_value()) {
+            out.adapter_bytes = std::nullopt;
+            break;
+        }
+        adapters += *size;
+    }
+    if (out.adapter_bytes.has_value()) {
+        out.adapter_bytes = adapters;
+    }
+
+    // The weights are the sharing member's own to be unknown about only when
+    // it loads them: on another's base they are counted, or said, there.
+    const bool own = extras.shares.empty();
+    if (own && !model.has_value()) {
         out.unknown = "no recorded size";
-    } else if (!projector.has_value()) {
+    } else if (own && !projector.has_value()) {
         out.unknown = "its projector has no recorded size";
     } else if (!header.parsed) {
         out.unknown = "its header could not be read";
     } else if (!out.window->cache_bytes.has_value()) {
         out.unknown = "its cache size is not known for this architecture";
+    } else if (!out.adapter_bytes.has_value()) {
+        out.unknown = "an adapter's file could not be read";
     }
     return out;
 }
@@ -128,6 +205,9 @@ SuiteFootprint suite_footprint(const harness::Config& config, std::string_view s
     // member's pins.
     harness::Config under = config;
     under.models.default_suite = entry->first;
+
+    // The first member on each base, which counts its weights (53d).
+    std::map<BaseKey, std::string> owners;
 
     for (harness::SuiteBackend member : harness::suite_backends(entry->second)) {
         const auto backend = config.backends.find(member.backend);
@@ -150,11 +230,19 @@ SuiteFootprint suite_footprint(const harness::Config& config, std::string_view s
                 }
                 const std::filesystem::path file{path};
                 const std::string projector = harness::expand_env(as_run.mmproj_path);
+                // One loaded model serves every member on its base, as the
+                // factory shares it, whatever adapters each applies (53d).
+                MemberExtras extras{.adapters = adapter_sizes(as_run.adapters)};
+                if (const auto [owner, first] =
+                        owners.try_emplace(base_key(as_run), member.backend);
+                    !first) {
+                    extras.shares = owner->second;
+                }
                 out.members.push_back(gguf_member_footprint(
                     member, as_run, load_sidecar(file),
                     projector.empty() ? std::nullopt
                                       : load_sidecar(std::filesystem::path{projector}),
-                    inspect_gguf(file)));
+                    inspect_gguf(file), extras));
                 break;
             }
             case harness::BackendType::Mlx:

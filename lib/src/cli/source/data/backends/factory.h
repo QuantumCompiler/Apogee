@@ -83,6 +83,9 @@ struct BuildOptions {
                                             const BuildOptions& options = {});
 
 /// Constructs one provider from a single entry, or nullptr with `reason` set.
+/// Every llamacpp provider built here shares its base through one registry
+/// (`backends/llama_bases.h`, 53d): entries on the same base serve from one
+/// loaded model, each through its own adapters.
 ///
 /// Adding a backend type is a case here plus a row in `kBackendTypeNames`
 /// (`harness/config.cpp`). Nothing else changes.

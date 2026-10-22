@@ -173,6 +173,71 @@ TEST_CASE("the footprint block: each member, resident or not, and the set's tota
           "  root (chat): 3830 MiB -- 1926 MiB of weights, 1904 MiB of q8_0 cache at 32768 tokens");
 }
 
+TEST_CASE("a base two members share is said once, and what sharing it saves",
+          "[commands][suites][residency][shared-base]") {
+    using apogee::commands::admission_line;
+    using apogee::commands::admission_refusal;
+    // research, its helper on root's base with an adapter of its own, and a
+    // scribe on it with none (53d).
+    SuiteFootprint footprint = research(96 * kGiB);
+    MemberFootprint& helper = footprint.members[1];
+    helper.weights = 1926 * kMiB;
+    helper.shares = "root";
+    helper.adapters = 1;
+    helper.adapter_bytes = 3 * kMiB;
+    MemberFootprint scribe = local("scribe", {"extraction"}, 1926, 238, 4096);
+    scribe.shares = "root";
+    footprint.members.push_back(scribe);
+    REQUIRE(footprint.known_bytes() == (1926 + 1904 + 68 + 3 + 238) * kMiB);
+
+    CHECK(admission_line(footprint) ==
+          "suite research needs 5163 MiB of this machine's 98304 MiB: root 3830 + helper 71 "
+          "(shares root's weights, 1926 MiB saved) + scribe 238 (shares root's weights, 1926 MiB "
+          "saved) + 1024 margin -- fits");
+    footprint.machine.bytes = 4 * kGiB;
+    CHECK(admission_refusal(footprint, "--force") ==
+          "suite research needs 5163 MiB of this machine's 4096 MiB: root 3830 + helper 71 "
+          "(shares root's weights, 1926 MiB saved) + scribe 238 (shares root's weights, 1926 MiB "
+          "saved) + 1024 margin -- it does not fit; --force runs it anyway");
+    footprint.machine.bytes = 96 * kGiB;
+
+    const std::vector<std::string> lines = apogee::commands::footprint_lines(footprint);
+    REQUIRE(lines.size() == 6);
+    CHECK(lines[1] ==
+          "  root (chat): 3830 MiB -- 1926 MiB of weights, 1904 MiB of q8_0 cache at 32768 tokens");
+    CHECK(lines[2] ==
+          "  helper (embedding, utility): 71 MiB -- shares root's 1926 MiB of weights, 68 MiB of "
+          "q8_0 cache at 4096 tokens, 3 MiB of adapters");
+    CHECK(lines[4] ==
+          "  scribe (extraction): 238 MiB -- shares root's 1926 MiB of weights, 238 MiB of q8_0 "
+          "cache at 4096 tokens");
+
+    // A base with no record: the sharer still adds up, says whose weights it
+    // runs on, and claims no saving it cannot state.
+    footprint.members[0].weights.reset();
+    footprint.members[0].unknown = "no recorded size";
+    footprint.members[1].weights.reset();
+    footprint.members.pop_back();
+    CHECK(admission_line(footprint) ==
+          "suite research needs at least 1095 MiB of this machine's 98304 MiB: root unknown (no "
+          "recorded size) + helper 71 (shares root's weights) + 1024 margin -- fits as far as "
+          "known");
+    CHECK(apogee::commands::footprint_lines(footprint)[2] ==
+          "  helper (embedding, utility): 71 MiB -- shares root's weights, 68 MiB of q8_0 cache "
+          "at 4096 tokens, 3 MiB of adapters");
+
+    // An entry on its own base with adapters adds them to its own line.
+    SuiteFootprint tuned = research(96 * kGiB);
+    tuned.members[0].adapters = 2;
+    tuned.members[0].adapter_bytes = 2 * kMiB;
+    CHECK(admission_line(tuned) ==
+          "suite research needs 5694 MiB of this machine's 98304 MiB: root 3832 + helper 838 + "
+          "1024 margin -- fits");
+    CHECK(apogee::commands::footprint_lines(tuned)[1] ==
+          "  root (chat): 3832 MiB -- 1926 MiB of weights, 1904 MiB of q8_0 cache at 32768 "
+          "tokens, 2 MiB of adapters");
+}
+
 TEST_CASE("/suite's argument: a suite, then --force and --warm", "[commands][suites][residency]") {
     using apogee::commands::parse_suite_argument;
     const apogee::commands::SuiteArgument plain = parse_suite_argument("research");
