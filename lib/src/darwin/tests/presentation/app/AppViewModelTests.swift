@@ -21,6 +21,15 @@ struct AppViewModelTests {
         #expect(AppViewModel(info: ["CFBundleShortVersionString": ""], preferences: preferences).versionLine == "Development build")
     }
 
+    @Test("Settings is handed the app's PATH resolver, and composing the app never asks the login shell")
+    func childPathWired() async {
+        let model = AppViewModel(info: nil, preferences: Preferences(store: MemoryStore()))
+        await model.settings.readChildPath()
+        #expect(!model.settings.childPathFromShell)
+        #expect(model.settings.childPathOrigin?.contains("hasn't answered yet") == true, "the fallback, the shell never asked")
+        #expect(model.settings.childPathDirectories.contains("/opt/homebrew/bin"))
+    }
+
     @Test("the window opens where the app's preferences left it")
     func composesTheShell() {
         let store = MemoryStore(["route": "voice"])

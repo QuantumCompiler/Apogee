@@ -2,6 +2,7 @@ import BusinessJobs
 import BusinessReads
 import DataPreferences
 import Foundation
+import InfrastructureProcess
 import Observation
 
 /// Settings: General, Appearance, Backends & keys, Video & voice,
@@ -123,6 +124,42 @@ public final class SettingsViewModel {
     public func setBinaryOverride(_ url: URL?) {
         preferences.binaryOverride = url
         say?(url == nil ? "The app looks for apogee where it is installed, from its next launch" : "The app uses \(url!.path) from its next launch")
+    }
+
+    // MARK: - General: the children's PATH (M6)
+
+    /// The `PATH` the app's sessions -- and every other child it starts -- run
+    /// with, and where it came from: the person's login shell, or the
+    /// fallback. Read only; `nil` until it is known.
+    public private(set) var childPath: ShellPath.Resolution?
+
+    /// Where it is learned: the composition hands in the app's resolver,
+    /// whose answer waits at most for the shell's deadline.
+    public var childPathSource: @MainActor () async -> ShellPath.Resolution? = { nil }
+
+    /// Learns it -- at once once the shell has answered, else when it does.
+    /// Apart from `refresh`, so no read of the binary waits on the shell.
+    public func readChildPath() async {
+        childPath = await childPathSource()
+    }
+
+    /// Its directories, in order; none until it is known.
+    public var childPathDirectories: [String] { childPath?.directories ?? [] }
+
+    /// Whether the person's login shell gave it.
+    public var childPathFromShell: Bool { childPath?.source == .shell }
+
+    /// Where it came from, in a sentence; `nil` until it is known.
+    public var childPathOrigin: String? {
+        guard let childPath else { return nil }
+        switch childPath.source {
+        case .shell:
+            return "From your login shell, \(childPath.shell), as your terminal has it."
+        case .fallback:
+            let wellKnown = ShellPath.wellKnownDirectories
+            let added = wellKnown.dropLast().joined(separator: ", ") + " and " + (wellKnown.last ?? "")
+            return "Your login shell, \(childPath.shell), \(childPath.reason ?? "didn't answer"), so this is \(added), then the PATH the app started with."
+        }
     }
 
     // MARK: - Reading

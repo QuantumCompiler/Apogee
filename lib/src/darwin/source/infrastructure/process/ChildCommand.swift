@@ -37,4 +37,14 @@ public struct ChildCommand: Sendable, Equatable {
     public func environment(over parent: [String: String]) -> [String: String] {
         parent.merging(environment) { _, mine in mine }
     }
+
+    /// The child's whole environment with `path` laid under this command's
+    /// variables: the parent's, its `PATH` replaced by `path` (the person's
+    /// login shell's, `ShellPath`), and this command's variables over both --
+    /// so a command that sets its own `PATH` keeps it.
+    public func environment(over parent: [String: String], path: String) -> [String: String] {
+        var under = parent
+        under["PATH"] = path
+        return environment(over: under)
+    }
 }

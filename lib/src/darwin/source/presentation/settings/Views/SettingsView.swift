@@ -57,6 +57,7 @@ public struct SettingsView: View {
         }
         .frame(minWidth: 860, minHeight: 600)
         .task { await model.refresh() }
+        .task { await model.readChildPath() }
     }
 }
 
@@ -99,6 +100,21 @@ struct GeneralPane: View {
         }
         .fileImporter(isPresented: $locating, allowedContentTypes: [.unixExecutable, .item]) { result in
             if case .success(let url) = result { model.setBinaryOverride(url) }
+        }
+        SettingRow(label: "Sessions' PATH") {
+            if let origin = model.childPathOrigin {
+                Text(model.childPathDirectories.joined(separator: "\n")).font(.apogeeCode).textSelection(.enabled)
+                Text(origin)
+                    .font(.apogeeMeta)
+                    .foregroundStyle(model.childPathFromShell ? Palette.textSecondary : Palette.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Asking your login shell…").font(.apogeeSmall).foregroundStyle(Palette.textTertiary)
+            }
+            Text("Where the app's sessions, and every apogee command it runs, look for the tools their backends use. Read from your login shell once, when the app opens.")
+                .font(.apogeeMeta)
+                .foregroundStyle(Palette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         SettingRow(label: "Keyboard") {
             Grid(alignment: .leading, horizontalSpacing: Spacing.l, verticalSpacing: Spacing.xs) {
@@ -376,6 +392,22 @@ struct PermissionsPane: View {
     VStack(alignment: .leading, spacing: Spacing.xl) { GeneralPane(model: SettingsPreview.settings()) }
         .padding(Spacing.xl)
         .frame(width: 680)
+}
+
+#Preview("General: the PATH from the login shell") {
+    let model = SettingsPreview.settings(childPath: SettingsPreview.shellPath)
+    VStack(alignment: .leading, spacing: Spacing.xl) { GeneralPane(model: model) }
+        .padding(Spacing.xl)
+        .frame(width: 680)
+        .task { await SettingsPreview.read(model) }
+}
+
+#Preview("General: the PATH's fallback, the shell past its deadline") {
+    let model = SettingsPreview.settings(childPath: SettingsPreview.fallbackPath)
+    VStack(alignment: .leading, spacing: Spacing.xl) { GeneralPane(model: model) }
+        .padding(Spacing.xl)
+        .frame(width: 680)
+        .task { await SettingsPreview.read(model) }
 }
 
 #Preview("Appearance: following the system") {

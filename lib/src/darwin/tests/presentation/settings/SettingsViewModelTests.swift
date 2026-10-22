@@ -175,4 +175,36 @@ struct SettingsViewModelTests {
         #expect(SettingsViewModel.keyProviders.map(SettingsViewModel.providerName) == ["Anthropic", "OpenAI", "Google"])
         #expect(SettingsViewModel.providerName("mistral") == "mistral")
     }
+
+    @Test("General says the PATH the children run with came from the login shell, read only and apart from the reads")
+    func childPathFromTheShell() async {
+        let runner = runner()
+        let model = SettingsViewModel(runner: runner, starter: NoJobs(), preferences: Preferences(store: MemoryStore()))
+        #expect(model.childPathOrigin == nil && model.childPathDirectories.isEmpty, "nothing said until it is known")
+        model.childPathSource = {
+            ShellPath.Resolution(
+                path: "/Users/someone/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", source: .shell, shell: "/bin/zsh")
+        }
+        await model.readChildPath()
+        #expect(model.childPathDirectories == ["/Users/someone/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"])
+        #expect(model.childPathFromShell)
+        #expect(model.childPathOrigin == "From your login shell, /bin/zsh, as your terminal has it.")
+        #expect(runner.calls.isEmpty, "learning the PATH runs nothing of the binary's")
+    }
+
+    @Test("General says when the PATH is the fallback, and why")
+    func childPathFallback() async {
+        let model = SettingsViewModel(runner: runner(), starter: NoJobs(), preferences: Preferences(store: MemoryStore()))
+        model.childPathSource = {
+            ShellPath.Resolution(
+                path: "/Users/someone/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+                source: .fallback, shell: "/bin/zsh", reason: "didn't answer within 5 seconds")
+        }
+        await model.readChildPath()
+        #expect(!model.childPathFromShell)
+        #expect(model.childPathDirectories.first == "/Users/someone/.local/bin")
+        #expect(
+            model.childPathOrigin
+                == "Your login shell, /bin/zsh, didn't answer within 5 seconds, so this is ~/.local/bin, /opt/homebrew/bin and /usr/local/bin, then the PATH the app started with.")
+    }
 }

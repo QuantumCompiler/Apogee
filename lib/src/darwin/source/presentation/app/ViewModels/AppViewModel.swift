@@ -3,6 +3,7 @@ import BusinessReads
 import BusinessSession
 import DataPreferences
 import Foundation
+import InfrastructureProcess
 import Observation
 import PresentationCompose
 import PresentationGraph
@@ -151,6 +152,9 @@ final class AppViewModel {
         let settings = SettingsViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter(), preferences: preferences)
         settings.say = { [weak shell] text in shell?.say(text) }
         settings.hasTrack52 = { [weak sessions] in sessions?.hasTrack52 ?? false }
+        // General says which PATH the app's children run with (M6): the app's
+        // resolver's answer, waited for at most until the shell's deadline.
+        settings.childPathSource = { await ShellPath.app.answer() }
         sessions.say = { [weak shell] text in shell?.say(text) }
         models.say = { [weak shell] text in shell?.say(text) }
         store.say = { [weak shell] text in shell?.say(text) }
@@ -211,7 +215,13 @@ final class AppViewModel {
         self.settings = settings
     }
 
+    /// The application's own composition. The person's login shell is asked
+    /// for its PATH first, before any child: the ask runs off the main actor
+    /// and nothing waits on it, so a child spawned before it answers gets the
+    /// fallback (M6). The tests compose through `init(info:preferences:)`,
+    /// which never asks.
     convenience init(bundle: Bundle) {
+        ShellPath.app.begin()
         self.init(info: bundle.infoDictionary, preferences: .standard())
     }
 

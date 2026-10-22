@@ -220,6 +220,58 @@ Decisions taken while building, for veto:
 - `scripts/build.sh test`: 336 cases (331 before, plus five layering tests), no Swift warning. `thisProjectHoldsTheLaw` holds the real project to every new rule.
 - Bare `lib/scripts/cicd.sh --test`: exit 0, the CLI's 3,597 tests and the app's 336 cases passing.
 
+### 2026-10-22 — `children-get-the-shell-path` (maintenance item M6): the app's children get the person's shell PATH
+
+**Why.** The user's run, 2026-10-22: a session refused `no backend serves 'claude' (configured backends: GPT-OSS-20B, … Qwen3.8-27B)`, though `claude` worked in their terminal. Launched from the Dock, the app handed every `apogee` child launchd's `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`). Every vendor CLI their cloud backends run was out of reach:
+- `claude` and `codex` in `~/.local/bin`;
+- `gemini` in `/opt/homebrew/bin`;
+- `ollama` in `/usr/local/bin`.
+
+That was the cost 1b recorded and deferred: "Widening the child's `PATH` is a later, deliberate call." The user read the refusal as a backend rename not mapping. It wasn't; the CLI's M26, shipped the same day, now says why.
+
+- [x] **`ShellPath`, in `InfrastructureProcess`, asks the person's login shell once per launch.**
+  - The command is `$SHELL -ilc '/usr/bin/printenv APOGEE_PATH_MARKER; /usr/bin/printenv PATH; /usr/bin/printenv APOGEE_PATH_MARKER'`, with `/bin/zsh` when `$SHELL` is unset. It runs through `LoginShell`, by `posix_spawn` in a session and process group of its own, in `HOME`, its input and errors on `/dev/null`.
+  - The marker's value is only in the environment, never in the command text, so a profile that echoes commands can't print it early. Only `PATH` is read, between the marker's first two printings.
+  - An answer needs both markers, a non-empty `PATH` and exit status 0. Output is capped at 1 MiB.
+  - It has a 5-second deadline. Past it, the shell's whole process group is killed.
+- [x] **The fallback** is `~/.local/bin:/opt/homebrew/bin:/usr/local/bin` ahead of the `PATH` the app inherited, `~` expanded and each directory once, in order. It is used for a shell that hangs, fails, isn't there or prints no `PATH`, and before the answer arrives. The reason is said: "didn't answer within 5 seconds", "exited with status 1", "isn't there", "didn't print its PATH", "hasn't answered yet".
+- [x] **Every child gets it.** `ProcessSpawner` lays the current `PATH` under each child's own variables (`ChildCommand.environment(over:path:)`) without waiting, so a command's own `PATH` still wins. `capture` goes through `spawn`, and it is the source's only `Process()`.
+  - The app's composition (`AppViewModel`) starts the ask before any child. The composition the tests use never starts it.
+  - `PresentationApp` now depends on `InfrastructureProcess`, a downward edge, added by hand with no re-sort.
+- [x] **Settings' General pane says which `PATH` the app's sessions use,** read only: one directory per line, then whether it came from the shell or the fallback and why. Two new previews (from the shell; the fallback past its deadline). The existing "not read yet" preview covers "Asking your login shell…". Its read runs on its own `.task`, so the deadline never delays the pane's other reads.
+
+**Decisions made while building** (2026-10-22, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - the interactive login shell (`-ilc`), as editors such as VS Code resolve it, so `.zprofile` and `.zshrc` are both read, with a 5-second deadline;
+  - the read-only Settings row.
+- **The fallback's directories go ahead of the inherited `PATH`,** in a terminal's order (Homebrew and `~/.local/bin` before `/usr/bin`). Its base is the inherited `PATH`, launchd's from the Dock and the terminal's when started from one.
+- **`posix_spawn`, not `Process`.** `Process` can't give the shell a session and process group of its own. A new session also keeps an interactive shell from taking the terminal of an app started from one. Signals are reset, and no file descriptor of the app's leaks in.
+- **A successful ask leaves the profile's background jobs alone;** only a shell past its deadline has its group killed. The run counts as finished once the shell has exited and its output closed or both markers arrived, so a background job holding the output open doesn't stall it.
+- **The road not taken stays recorded:** the CLI searching well-known directories itself would guess, and miss nvm's or a version manager's directories.
+
+**Verified.**
+- **17 new cases:**
+  - `ShellPathTests` (13):
+    - the user's case, a profile printing around the markers with a decoy marker-like string;
+    - a child through the real `ProcessSpawner` carrying the answer under its own variables;
+    - a command's own `PATH` winning;
+    - a shell that never answers cut at the deadline, it and its background child gone, children given the fallback;
+    - a shell that exits non-zero, no shell at all, and one that exits 0 printing nothing;
+    - input closed;
+    - a child before the answer given the fallback, and one after the answer;
+    - asked once, and never begun meaning never asked;
+    - the fallback's shape, and the defaults.
+  - `ChildCommandTests` +1, `SettingsViewModelTests` +2 (the shell and fallback wording), `AppViewModelTests` +1 (Settings given the resolver; building the view-models never starts the shell).
+- **Live check,** under `env -i HOME=$HOME PATH=/usr/bin:/bin:/usr/sbin:/sbin`: the real `/bin/zsh` answered in 0.83 s with 17 directories. Under launchd's `PATH`, `command -v` found none of `claude`, `codex`, `gemini` or `ollama`. Through `ProcessSpawner()` it found all four. Nothing was run but the lookups.
+- **Runs:** `InfrastructureProcessTests` passed 34 of 34, six runs. The `PresentationSettings` and `PresentationApp` schemes passed 10 of 10 and 4 of 4. `build.sh test` passed 400 of 400, three runs. One early flake, the never-answers test missing a 0.5-second deadline under load, was fixed by a 2-second test deadline, with its pid written first.
+- `check-previews` finds nothing.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,848 tests and the macOS app's 400 cases passed, with no Swift warning.
+
+**Not done:**
+- **csh and tcsh** refuse `-ilc` (their `-l` must stand alone), so those users get the fallback.
+- **The design canvas** (`lib/design/spec`) doesn't yet show General's new row.
+- **The app run from the Dock against the real binary** (`check` finding all four CLIs) is the user's run: it needs the real `apogee` against `~/.apogee`. The live harness check stands in for it.
+
 ---
 
 ## Milestone B — The design's screens

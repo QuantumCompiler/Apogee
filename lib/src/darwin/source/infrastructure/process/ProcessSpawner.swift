@@ -2,17 +2,27 @@ import Foundation
 import Synchronization
 
 /// Starts children with Foundation's `Process`: three pipes, the stdout
-/// framed into lines, the stderr kept as a bounded tail.
+/// framed into lines, the stderr kept as a bounded tail, and the person's
+/// shell's `PATH` under the command's own variables.
+///
+/// Every child the app starts comes through here -- a session, a read, a
+/// command, a job, a version probe -- so every one gets that `PATH` (GUI M6).
 public struct ProcessSpawner: ChildSpawner {
     /// How many bytes of stderr each child keeps.
     public let stderrLimit: Int
 
-    public init(stderrLimit: Int = 8 * 1024) {
+    /// Where each child's `PATH` comes from: the app's resolver unless given
+    /// another -- the login shell's once it has answered, the fallback until
+    /// then, read at each spawn and never waited for.
+    public let path: ShellPath
+
+    public init(stderrLimit: Int = 8 * 1024, path: ShellPath = .app) {
         self.stderrLimit = stderrLimit
+        self.path = path
     }
 
     public func spawn(_ command: ChildCommand) throws -> any RunningChild {
-        try FoundationChild(command, stderrLimit: stderrLimit)
+        try FoundationChild(command, path: path.current.path, stderrLimit: stderrLimit)
     }
 }
 
@@ -42,14 +52,14 @@ final class FoundationChild: RunningChild, @unchecked Sendable {
 
     private let state: Mutex<State>
 
-    init(_ command: ChildCommand, stderrLimit: Int) throws {
+    init(_ command: ChildCommand, path: String, stderrLimit: Int) throws {
         state = Mutex(State(tail: BoundedTail(limit: stderrLimit)))
         let (lines, continuation) = AsyncStream.makeStream(of: String.self)
         self.lines = lines
 
         process.executableURL = command.executable
         process.arguments = command.arguments
-        process.environment = command.environment(over: ProcessInfo.processInfo.environment)
+        process.environment = command.environment(over: ProcessInfo.processInfo.environment, path: path)
         if let directory = command.workingDirectory {
             process.currentDirectoryURL = directory
         }
