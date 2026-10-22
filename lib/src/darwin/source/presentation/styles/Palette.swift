@@ -67,12 +67,17 @@ public struct ColorToken: Sendable, Equatable {
 
     /// The token as a SwiftUI color that follows the theme and the window's appearance.
     public var color: Color {
+        Color(nsColor: nsColor)
+    }
+
+    /// The token as an AppKit color that follows the theme and the window's
+    /// appearance: resolved each time it is drawn.
+    var nsColor: NSColor {
         let token = self
-        return Color(
-            nsColor: NSColor(name: NSColor.Name(name)) { appearance in
-                let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-                return NSColor(rgb: token.value(darkAppearance: isDark))
-            })
+        return NSColor(name: NSColor.Name(name)) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            return NSColor(rgb: token.value(darkAppearance: isDark))
+        }
     }
 }
 
@@ -106,12 +111,18 @@ public enum Palette {
     public static let localToken = ColorToken("model.local", light: 0x0B7A68, dark: 0x7FD4C1, contrast: 0x5EF0D2)
     public static let apiToken = ColorToken("model.api", light: 0x9F5600, dark: 0xE9A23B, contrast: 0xFFC04D)
     public static let subscriptionToken = ColorToken("model.subscription", light: 0x4450C4, dark: 0xA7B1F8, contrast: 0xB9C2FF)
+    public static let codeKeywordToken = ColorToken("code.keyword", light: 0x7A3FC0, dark: 0xC3A6F0, contrast: 0xD8B9FF)
+    public static let codeStringToken = ColorToken("code.string", light: 0x2F7A1F, dark: 0xA5D68E, contrast: 0xB8F0A0)
+    public static let codeCommentToken = ColorToken("code.comment", light: 0x67686A, dark: 0x8C887F, contrast: 0xB5B5B5)
+    public static let codeNumberToken = ColorToken("code.number", light: 0x8F5A00, dark: 0xE5B567, contrast: 0xFFC04D)
+    public static let codeFunctionToken = ColorToken("code.function", light: 0x1F5FA8, dark: 0x8EC3F0, contrast: 0x9ED4FF)
 
     /// Every token above, for the tests that pin them.
     public static let tokens: [ColorToken] = [
         windowToken, sidebarToken, inspectorToken, cardToken, controlToken, selectionToken, codeToken,
         borderToken, strongToken, textPrimaryToken, textSecondaryToken, textTertiaryToken,
         accentToken, warningToken, errorToken, localToken, apiToken, subscriptionToken,
+        codeKeywordToken, codeStringToken, codeCommentToken, codeNumberToken, codeFunctionToken,
     ]
 
     public static var window: Color { windowToken.color }
@@ -135,4 +146,14 @@ public enum Palette {
     public static var api: Color { apiToken.color }
     /// A model used through a vendor's subscription.
     public static var subscription: Color { subscriptionToken.color }
+    /// Code's keywords: `def`, `async`, `return`.
+    public static var codeKeyword: Color { codeKeywordToken.color }
+    /// Code's quoted text.
+    public static var codeString: Color { codeStringToken.color }
+    /// Code's comments: notes after `#` or `//`.
+    public static var codeComment: Color { codeCommentToken.color }
+    /// Code's numbers: `10`, `0.5`, `0x1F`.
+    public static var codeNumber: Color { codeNumberToken.color }
+    /// The names code calls and defines: `run_batch`, `create_task`.
+    public static var codeFunction: Color { codeFunctionToken.color }
 }

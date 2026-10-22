@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import SwiftUI
 
 /// The answers `MarkdownText`'s previews draw, read from the binary's own
 /// recorded streams (ADR 0004): each the `answer_delta` texts joined, as the
@@ -49,5 +50,31 @@ enum StylesPreview {
     /// A plain answer, no markdown in it: the resumed chat's live turn
     /// (tests/data/protocol/Fixtures/resumed-chat.jsonl).
     static let plainAnswer = deltas(StylesDocuments.resumedChat).joined()
+
+    /// The scripted mock's answer with fences in Python, Swift, TypeScript,
+    /// Rust, shell and JSON, a diff, an unnamed fence and an Elixir one
+    /// (tests/data/protocol/Fixtures/code-answer.jsonl).
+    static let codeAnswer = deltas(StylesDocuments.codeAnswer).joined()
+
+    /// That answer's fence opening with `opening`, fences and all.
+    static func fence(_ opening: String) -> String {
+        guard let start = codeAnswer.range(of: opening),
+            let end = codeAnswer.range(of: "\n```", range: start.upperBound..<codeAnswer.endIndex)
+        else { return codeAnswer }
+        return String(codeAnswer[start.lowerBound..<end.upperBound])
+    }
+
+    /// The code answer as it stood mid-stream: its TypeScript fence open, the
+    /// stream's edge inside a template literal.
+    static let openString = prefix(StylesDocuments.codeAnswer, through: "`attempt ${attempt} failed: $")
+}
+
+extension View {
+    /// Drawn in `theme` on the window's ground, as the app draws in the
+    /// person's Appearance setting.
+    func previewTheme(_ theme: Appearance.Theme) -> some View {
+        Appearance.apply(theme: theme, scale: 1)
+        return background(Palette.window).preferredColorScheme(Appearance.colorScheme)
+    }
 }
 #endif

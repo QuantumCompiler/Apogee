@@ -372,6 +372,92 @@ That was the cost 1b recorded and deferred: "Widening the child's `PATH` is a la
 - Syntax colouring: the design's `code.*` tokens are not in `Palette`.
 - Markdown in Review, Knowledge and Tasks, which can reuse the component.
 
+### 2026-10-22 — `code-syntax-colouring` (maintenance item M9): code blocks coloured by syntax
+
+**Why.** M8 drew a chat answer's fenced code in one colour (`MarkdownText`'s `Text(verbatim: code.text)`), leaving out the design's five code colours by its own open call. The design colours code with `code.keyword`, `code.string`, `code.comment`, `code.number` and `code.function` (`json/tokens.json`; the prototype's `.k .s .c .n .f`, `main.html:18`). It colours a diff's added lines `status.accent` and its context `text-tertiary` (`main.html:414–424`). The app's `Palette` carried none of the five. Every pair clears 4.5:1 on `surface.code` in each theme; the lowest is `code.string` in light, at 4.81:1.
+
+- [x] **The five code colours join `Palette`** as `ColorToken`s with the design's light, dark and contrast values, in `Palette.tokens`, pinned to the design. `ColorToken` gained an internal `nsColor` for the code block's build.
+- [x] **`CodeLexer`** (`styles/Components/CodeLexer.swift`, Foundation only) is one left-to-right pass over the code's UTF-8 bytes, producing spans (kind and range). Each language is one row of a table: keywords, line and block comment markers (nesting in Swift, Rust and Kotlin), string forms, definition words, and whether a call names a function. It finds:
+  - **keywords,** with the literals (`None`, `true`, `nil`). A word after `.` is a member and never a keyword (`promise.catch(`), except Rust's `.await` and Swift's `.self`, `.init` and `.Type`.
+  - **comments.** In shell and YAML, `#` starts one only where a word could start, so `$#` and `a#b` are not comments.
+  - **strings:**
+    - escapes and triple quotes;
+    - raw strings (Swift `#"…"#`, Rust `r#"…"#`, C++ `R"x(…)x"`, Go backticks, C# `@""`);
+    - JavaScript/TypeScript templates, tagged ones too, their interpolations read to the matching bracket;
+    - characters, so a Rust lifetime `'a` is no string;
+    - here-documents in shell and Ruby, and SQL/YAML doubled quotes;
+    - prefixes (`rb''`, `u8""`).
+  - **numbers:** ints, floats, hex, octal and binary, exponents, underscores, suffixes, and versions like `1.2.3`. Never inside a word, and a shell `$1` is no number.
+  - **function names:** the word after `def`, `func`, `fn`, `function`, `fun` (SQL's `function`, `procedure`) on its line, past qualifiers such as `def self.name`; a word directly before `(`; Rust's `name!(` macros.
+- [x] **Languages:**
+  - python (`py`, `python3`, `py3`), swift;
+  - javascript (`js`, `jsx`, `mjs`, `cjs`), typescript (`ts`, `tsx`, `mts`, `cts`);
+  - c (`h`), cpp (`c++`, `cc`, `cxx`, `hpp`, `hxx`, `hh`), objc (`objective-c`, `obj-c`, `objc++`, `mm`, …);
+  - rust (`rs`), go (`golang`), java, kotlin (`kt`, `kts`), csharp (`cs`, `c#`), ruby (`rb`);
+  - shell (`sh`, `bash`, `zsh`), sql, json, yaml (`yml`), toml;
+  - diff (`patch`).
+
+  The language is the info string's first word, in any case (`python:src/x.py` too). Any other, or none, is uncoloured as before.
+- [x] **A diff colours by line:**
+  - `+` `Palette.accent`, `-` `Palette.error`;
+  - `@@`, `+++`, `---` and the tool's lines (`diff --git`, `index`, `\ No newline`) `textTertiary`;
+  - context `textTertiary`, as the design draws it.
+- [x] **Drawn once per change.** The code `Text` sits in a private child redrawn only when the code changes, so hover and copy never re-lex. Each span's colour is set over its range in one `NSAttributedString`, five times faster than appending styled runs (6.8 ms against 34 ms at 48 KB). Copy still takes `code.text` alone. Selection's plain-text flavour equals the code.
+- [x] **Streaming:** the lexer runs where M8's parse runs, and only the growing block re-lexes. A token is decided only from what precedes it and the rest of its own line, so a finished line never changes colour, and an open string or block comment colours to the edge.
+
+**Decisions made while building** (2026-10-22, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - the languages, plus the aliases above;
+  - no language guessed;
+  - a diff coloured by line;
+  - inline code uncoloured.
+- **A diff's context is `textTertiary`,** as the design's figure draws it. The permission card's diff uses `textSecondary`; switching is one line in `MarkdownText.token(for:)`.
+- **`+++` and `---` are known by prefix,** as the permission card knows them, so a removed line whose own text starts with `--` reads as a header.
+- **The lexer follows the design's lead:**
+  - **Swift argument labels:** a keyword used as one (`sleep(for: …)`, `default: 0`) stays plain. The recording showed `for:` coloured as a keyword without the rule.
+  - **Built-in types** that are not reserved words (`str`, `Int`, `i32`, Go's `int`) stay plain, as the design leaves `str` plain. In C, Java and C# they are keywords.
+  - **Quotes:** one opens a string only where a word could start, so the apostrophe in `don't` opens nothing, and a one-line string stops at its line's end.
+- **Selection's rich-text flavour now carries the colours.** The plain-text flavour equals the code. Stripping colour from the rich text would mean taking over AppKit's copy; it is left as is.
+
+**Verified.**
+- **Measured** (optimised build):
+
+  | Block | Lexing | Building the coloured text |
+  |---|---|---|
+  | 12 KB | 0.19 ms | 1.7 ms |
+  | 48 KB | 0.62 ms | 6.8 ms |
+  | 200 KB | 2.5 ms | 28 ms |
+
+  A 48 KB block arriving in 8-byte pieces lexes in 0.31 ms on average, 0.67 ms at worst, per redraw. The recorded answer's 2,977 bytes add 0.014 ms to its 0.358 ms parse.
+- **Recorded** as M8's was, from the branch's binary over a sandbox home, driven as the app launches a chat, against the scripted mock:
+  - `code-answer.jsonl`, 373 deltas: fences in Python, Swift, TypeScript, Rust, bash and JSON, the design's patch as a diff, an unnamed fence of program output, and an Elixir fence for one the lexer does not know;
+  - its `chats show` (`chats-show-code.json`).
+
+  The previews embed them byte for byte.
+- **20 new cases:**
+  - `CodeLexerTests` (17), among them:
+    - `designsAnswer`: M8's recorded Python coloured exactly as `main.html` marks it;
+    - `everyCut`: every sample cut at every character;
+    - `streamedInPieces`: all 373 recorded prefixes;
+    - `drawnInItsColours`: each exact token colour found in rendered pixels;
+    - `copyTakesThePlainCode`.
+  - `StylesTests` +2:
+    - `codeTokensMatchTheDesign`;
+    - `codeContrast`: every code colour and the three diff colours at least 4.5:1 on `surface.code` in each theme, the WCAG ratio computed in the test.
+  - `TranscriptTests` +1: `codeLiveAndReadBack`.
+- **Mutation:** 8 of 8 mutants were caught.
+- **Runs:** the `PresentationStyles` scheme passed 35 of 35, `PresentationSession` 44 of 44, and `build.sh test` 449 of 449, the layering check's 25 among them. `check-previews` finds nothing.
+- **Previews:**
+  - code coloured by language, in Graphite Light, Graphite Dark and High Contrast;
+  - a diff;
+  - a fence open mid-stream with a string open at its edge;
+  - the session's code answer, live and read back.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,859 tests and the macOS app's 449 cases passed, with no Swift warning.
+
+**Not done:**
+- Selection's rich-text colours, recorded above for the user's call.
+- No live pass of the app against the installed binary. The renders were offscreen.
+
 ---
 
 ## Milestone B — The design's screens

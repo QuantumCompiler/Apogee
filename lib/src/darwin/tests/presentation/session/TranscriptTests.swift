@@ -264,6 +264,32 @@ struct TranscriptTests {
         #expect(shape(resumed) == ["user: \(turn)", "answer: \(result)", "divider: \(Transcript.earlierDivider)"])
     }
 
+    @Test("an answer with fenced code in several languages folds to one answer, its deltas exactly, streaming until its end; read back by chats show it is the same text, so its code colours alike live and resumed")
+    func codeLiveAndReadBack() throws {
+        let lines = recorded("data/protocol/Fixtures/code-answer.jsonl").split(separator: "\n").map(String.init)
+        let turn = "Show me the retry everywhere it runs: the scraper, the app, the browser, the worker, the shell, the settings and the patch."
+        let result = try #require(lines.lazy.compactMap { JSONValue.parse($0) }.first { $0["type"]?.stringValue == "result" }?["text"]?.stringValue)
+        var live = Transcript()
+        var finished: [Bool] = []
+        for line in lines {
+            live.apply(decoded(line))
+            if JSONValue.parse(line)?["type"]?.stringValue == "session" { live.userSent(turn) }
+            if case .answer(let answer)? = live.items.last?.content { finished.append(answer.finished) }
+        }
+        #expect(shape(live) == ["user: \(turn)", "activity: |", "answer: \(result)"])
+        #expect(finished.filter { !$0 }.count == 374, "streaming from its start through all 373 deltas")
+        #expect(finished.last == true)
+        for fence in ["```python", "```swift", "```ts", "```rust", "```bash", "```json", "```diff", "```\nattempt 0", "```elixir"] {
+            #expect(result.contains(fence), "\(fence)")
+        }
+
+        let shown = try #require(ReadDocument(text: recorded("business/reads/Fixtures/chats-show-code.json")))
+        let chat = try #require(SavedChat(document: shown))
+        var resumed = Transcript()
+        resumed.earlier(chat)
+        #expect(shape(resumed) == ["user: \(turn)", "answer: \(result)", "divider: \(Transcript.earlierDivider)"])
+    }
+
     @Test("earlier turns go only into a transcript with no rows: one with its own keeps them; an empty read draws nothing")
     func earlierOnlyIntoAnEmptyTranscript() throws {
         var kept = Transcript()

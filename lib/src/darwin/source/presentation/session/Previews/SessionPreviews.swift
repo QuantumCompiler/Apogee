@@ -21,6 +21,9 @@ enum SessionPreview {
     static let resumedChat = lines(SessionDocuments.resumedChat)
     /// A turn the scripted mock answered in markdown, every shape the app draws.
     static let markdownAnswer = lines(SessionDocuments.markdownAnswer)
+    /// A turn the scripted mock answered with fenced code in several
+    /// languages, a diff, an unnamed fence and an Elixir one.
+    static let codeAnswer = lines(SessionDocuments.codeAnswer)
 
     /// What the person sends and answers in the mock-actor conversation, as
     /// the window's end-to-end test does (SessionViewModelTests'
@@ -45,6 +48,13 @@ enum SessionPreview {
 
     /// That conversation as `chats show` read it back.
     static var markdownChat: SavedChat { SavedChat(document: ReadDocument(text: SessionDocuments.chatsShowMarkdown)!)! }
+
+    /// What the code turn was sent as, recorded with it (TranscriptTests'
+    /// `codeLiveAndReadBack`).
+    static let codeTurn = "Show me the retry everywhere it runs: the scraper, the app, the browser, the worker, the shell, the settings and the patch."
+
+    /// That conversation as `chats show` read it back.
+    static var codeChat: SavedChat { SavedChat(document: ReadDocument(text: SessionDocuments.chatsShowCode)!)! }
 
     /// What each `execute` stream was sent as (PlayNarrationTests).
     static let playTurn = "/play echo2 hello"
@@ -265,6 +275,12 @@ enum SessionPreview {
 
     /// The markdown turn read back by `chats show`, as a reopened chat draws it.
     static var markdownResumed: Transcript { folded([], earlier: markdownChat) }
+
+    /// The code turn, streamed whole and answered.
+    static var codeLive: Transcript { folded(codeAnswer, typed: codeTurn) }
+
+    /// The code turn read back by `chats show`, as a reopened chat draws it.
+    static var codeResumed: Transcript { folded([], earlier: codeChat) }
 
     /// A turn that failed, in the CLI's words (TranscriptTests' `error`).
     static var failed: Transcript {

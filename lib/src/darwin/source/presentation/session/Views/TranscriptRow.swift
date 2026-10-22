@@ -357,6 +357,30 @@ struct EndedCard: View {
     .frame(height: 900)
 }
 
+#Preview("A code answer, live: each fence coloured by its language") {
+    let model = SessionPreview.session(SessionPreview.codeAnswer)
+    ScrollView {
+        VStack(alignment: .leading, spacing: Spacing.m) {
+            ForEach(SessionPreview.codeLive.items) { TranscriptRow(item: $0, model: model) }
+        }
+        .frame(width: 720)
+        .padding(Spacing.xl)
+    }
+    .frame(height: 900)
+}
+
+#Preview("A code answer, read back: coloured as it was live") {
+    let model = SessionPreview.session(SessionPreview.codeAnswer)
+    ScrollView {
+        VStack(alignment: .leading, spacing: Spacing.m) {
+            ForEach(SessionPreview.codeResumed.items) { TranscriptRow(item: $0, model: model) }
+        }
+        .frame(width: 720)
+        .padding(Spacing.xl)
+    }
+    .frame(height: 900)
+}
+
 #Preview("Resumed with no read: the turns kept, not shown") {
     let model = SessionPreview.session(SessionPreview.resumedChat)
     VStack(alignment: .leading, spacing: Spacing.m) {

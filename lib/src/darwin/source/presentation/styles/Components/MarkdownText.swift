@@ -6,8 +6,10 @@ import SwiftUI
 /// main.html, the chat's answer): prose with emphasis, strong, links and
 /// inline code in the mono face on `surface.control`, rounded; headings by
 /// the type scale; lists, nested; block quotes; code blocks as a bordered
-/// card on `surface.code` under their language's caption, with copy;
-/// thematic breaks; and tables as a grid.
+/// card on `surface.code` under their language's caption, with copy, the
+/// code coloured by the language its fence names (`CodeLexer`) in the
+/// design's five code colours, and a diff by line; thematic breaks; and
+/// tables as a grid.
 ///
 /// Parsed by `MarkdownDocument` -- Foundation's own markdown -- and laid out
 /// here. The text is parsed again only when it changes, so a streaming answer
@@ -186,7 +188,8 @@ private struct ListView: View {
 
 /// A code block as the design draws it: a bordered card on `surface.code`,
 /// its caption naming the language with copy beside it, the code in the mono
-/// face, scrolled sideways rather than wrapped.
+/// face and coloured by its language, scrolled sideways rather than wrapped.
+/// Copy takes the code as written, with no colour.
 private struct CodeBlockView: View {
     let code: MarkdownCode
     @State private var copied = false
@@ -219,11 +222,8 @@ private struct CodeBlockView: View {
             .padding(.vertical, Spacing.xs)
             Rectangle().fill(Palette.border).frame(height: 1)
             ScrollView(.horizontal) {
-                Text(verbatim: code.text)
-                    .font(.apogeeCode)
-                    .foregroundStyle(Palette.textPrimary)
-                    .textSelection(.enabled)
-                    .fixedSize()
+                CodeText(code: code)
+                    .equatable()
                     .padding(.vertical, Spacing.s)
                     .padding(.horizontal, Spacing.m)
             }
@@ -236,6 +236,79 @@ private struct CodeBlockView: View {
             guard copied else { return }
             try? await Task.sleep(for: .seconds(2))
             copied = false
+        }
+    }
+}
+
+/// The code itself, in the mono face and coloured by its language
+/// (`MarkdownText.codeText`), selectable. Compared by its code, so its spans
+/// are found again only when the code changes -- once per redraw while the
+/// block streams, as the answer's parse is, and never for a hover or a copy.
+private struct CodeText: View, Equatable {
+    let code: MarkdownCode
+
+    var body: some View {
+        MarkdownText.codeText(code)
+            .font(.apogeeCode)
+            .foregroundStyle(Palette.textPrimary)
+            .textSelection(.enabled)
+            .fixedSize()
+    }
+}
+
+extension MarkdownText {
+    /// A code block's text as one `Text`: each span of `CodeLexer` in its
+    /// colour over the code's own, `text.primary`. A fence naming no language
+    /// or one the lexer does not know -- or code with nothing to colour -- is
+    /// a plain `Text(verbatim:)`, exactly as before colouring. The colours
+    /// are attributes over the code's characters, never characters
+    /// themselves: what is selected and copied is the code as written.
+    ///
+    /// Built as one `NSAttributedString` with each span's colour over its
+    /// range -- a fifth of the time of appending an `AttributedString` piece
+    /// per run, which a long block streaming would pay on every redraw.
+    nonisolated static func codeText(_ code: MarkdownCode) -> Text {
+        let spans = CodeLexer.spans(code.text, language: code.language)
+        guard !spans.isEmpty else { return Text(verbatim: code.text) }
+        let colours = Dictionary(uniqueKeysWithValues: CodeKind.allCases.map { ($0, token(for: $0).nsColor) })
+        let coloured = NSMutableAttributedString(string: code.text)
+        // The spans count UTF-8 bytes; an NSString counts UTF-16 units.
+        let bytes = Array(code.text.utf8)
+        var byte = 0
+        var unit = 0
+        func advance(to target: Int) {
+            while byte < target {
+                let lead = bytes[byte]
+                let width = lead < 0x80 ? 1 : lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : 2
+                unit += width == 4 ? 2 : 1
+                byte += width
+            }
+        }
+        for span in spans {
+            advance(to: span.range.lowerBound)
+            let start = unit
+            advance(to: span.range.upperBound)
+            if let colour = colours[span.kind] {
+                coloured.addAttribute(.foregroundColor, value: colour, range: NSRange(location: start, length: unit - start))
+            }
+        }
+        return Text(AttributedString(coloured))
+    }
+
+    /// The token a span of `kind` draws in: the design's five code colours;
+    /// in a diff, coloured by line as the design draws a patch, an added line
+    /// in the accent, a removed one in the error colour, and its headers and
+    /// context in the tertiary text colour.
+    nonisolated static func token(for kind: CodeKind) -> ColorToken {
+        switch kind {
+        case .keyword: Palette.codeKeywordToken
+        case .string: Palette.codeStringToken
+        case .comment: Palette.codeCommentToken
+        case .number: Palette.codeNumberToken
+        case .function: Palette.codeFunctionToken
+        case .added: Palette.accentToken
+        case .removed: Palette.errorToken
+        case .header, .context: Palette.textTertiaryToken
         }
     }
 }
@@ -528,5 +601,50 @@ private struct LinkTarget: View {
     MarkdownText(StylesPreview.plainAnswer)
         .frame(width: 720)
         .padding(Spacing.xl)
+}
+
+#Preview("Code coloured by language: Graphite Light") {
+    ScrollView {
+        MarkdownText(StylesPreview.codeAnswer)
+            .frame(width: 720)
+            .padding(Spacing.xl)
+    }
+    .frame(height: 900)
+    .previewTheme(.light)
+}
+
+#Preview("Code coloured by language: Graphite Dark") {
+    ScrollView {
+        MarkdownText(StylesPreview.codeAnswer)
+            .frame(width: 720)
+            .padding(Spacing.xl)
+    }
+    .frame(height: 900)
+    .previewTheme(.dark)
+}
+
+#Preview("Code coloured by language: High Contrast") {
+    ScrollView {
+        MarkdownText(StylesPreview.codeAnswer)
+            .frame(width: 720)
+            .padding(Spacing.xl)
+    }
+    .frame(height: 900)
+    .previewTheme(.contrast)
+}
+
+#Preview("A diff, coloured by line") {
+    MarkdownText(StylesPreview.fence("```diff"))
+        .frame(width: 720)
+        .padding(Spacing.xl)
+}
+
+#Preview("Mid-stream: a fence open, a string open at the edge") {
+    ScrollView {
+        MarkdownText(StylesPreview.openString, streaming: true)
+            .frame(width: 720)
+            .padding(Spacing.xl)
+    }
+    .frame(height: 900)
 }
 #endif

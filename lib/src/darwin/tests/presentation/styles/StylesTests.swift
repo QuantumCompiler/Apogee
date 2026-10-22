@@ -26,6 +26,50 @@ struct StylesTests {
         #expect(Palette.apiToken == ColorToken("model.api", light: 0x9F5600, dark: 0xE9A23B, contrast: 0xFFC04D))
     }
 
+    @Test("the five code tokens are the design's, in light, dark and high contrast, and in the token list")
+    func codeTokensMatchTheDesign() {
+        let code = [
+            ColorToken("code.keyword", light: 0x7A3FC0, dark: 0xC3A6F0, contrast: 0xD8B9FF),
+            ColorToken("code.string", light: 0x2F7A1F, dark: 0xA5D68E, contrast: 0xB8F0A0),
+            ColorToken("code.comment", light: 0x67686A, dark: 0x8C887F, contrast: 0xB5B5B5),
+            ColorToken("code.number", light: 0x8F5A00, dark: 0xE5B567, contrast: 0xFFC04D),
+            ColorToken("code.function", light: 0x1F5FA8, dark: 0x8EC3F0, contrast: 0x9ED4FF),
+        ]
+        #expect([Palette.codeKeywordToken, Palette.codeStringToken, Palette.codeCommentToken, Palette.codeNumberToken, Palette.codeFunctionToken] == code)
+        for token in code {
+            #expect(Palette.tokens.contains(token), "\(token.name)")
+        }
+    }
+
+    @Test("every code token, and each colour a diff draws, reads at 4.5:1 or more on surface.code in light, dark and high contrast (WCAG's ratio, computed)")
+    func codeContrast() {
+        /// WCAG 2's relative luminance of 0xRRGGBB.
+        func luminance(_ rgb: UInt32) -> Double {
+            func linear(_ channel: UInt32) -> Double {
+                let value = Double(channel) / 255
+                return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * linear(rgb >> 16 & 0xFF) + 0.7152 * linear(rgb >> 8 & 0xFF) + 0.0722 * linear(rgb & 0xFF)
+        }
+        func ratio(_ a: UInt32, _ b: UInt32) -> Double {
+            let (x, y) = (luminance(a), luminance(b))
+            return (max(x, y) + 0.05) / (min(x, y) + 0.05)
+        }
+        let ground = Palette.codeToken
+        let drawn = [
+            Palette.codeKeywordToken, Palette.codeStringToken, Palette.codeCommentToken, Palette.codeNumberToken, Palette.codeFunctionToken,
+            Palette.accentToken, Palette.errorToken, Palette.textTertiaryToken,
+        ]
+        for token in drawn {
+            #expect(ratio(token.light, ground.light) >= 4.5, "\(token.name) in light: \(ratio(token.light, ground.light))")
+            #expect(ratio(token.dark, ground.dark) >= 4.5, "\(token.name) in dark: \(ratio(token.dark, ground.dark))")
+            #expect(ratio(token.contrast, ground.contrast) >= 4.5, "\(token.name) in high contrast: \(ratio(token.contrast, ground.contrast))")
+        }
+        // The lowest, as the item measured it: code.string in light, 4.81:1.
+        #expect((ratio(Palette.codeStringToken.light, ground.light) * 100).rounded() == 481)
+        #expect(ratio(0xFFFFFF, 0x000000) == 21, "the formula's own end: white on black")
+    }
+
     @Test("the type scale descends, and the spacing steps ascend")
     func scalesAreOrdered() {
         #expect(TypeScale.steps == TypeScale.steps.sorted(by: >))
