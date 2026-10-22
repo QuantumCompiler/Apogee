@@ -432,6 +432,14 @@ bool MlxKind::backend() const noexcept {
     return wording != nullptr && wording->backend;
 }
 
+bool MlxKind::embeds() const noexcept {
+    return word == kMlxEmbedding;
+}
+
+bool MlxKind::registers() const noexcept {
+    return backend() || embeds();
+}
+
 bool mlx_vision_files(const std::filesystem::path& dir) {
     const nlohmann::json config = read_json(dir / "config.json");
     if (object_at(config, "vision_config") == nullptr) {
@@ -480,6 +488,50 @@ std::string describe(const MlxKind& kind) {
             break;
     }
     return kind.word + " (" + source + ") -- " + describe_mlx_kind(kind.word);
+}
+
+MlxEmbeddingWidth read_mlx_embedding_width(const std::filesystem::path& dir) {
+    MlxEmbeddingWidth out;
+    // The pipeline's own last word on it: the last Dense whose configuration
+    // is there and states its output.
+    if (const nlohmann::json modules = read_json(dir / "modules.json"); modules.is_array()) {
+        for (const nlohmann::json& module : modules) {
+            const std::string type = string_at(module, "type");
+            const std::string path = string_at(module, "path");
+            if (!type.ends_with(".Dense") || path.empty()) {
+                continue;
+            }
+            const nlohmann::json dense = read_json(dir / path / "config.json");
+            if (const int features = dense.is_object() ? int_at(dense, "out_features") : 0;
+                features > 0) {
+                out.width = features;
+                out.source = "the last Dense's out_features (" + path + ")";
+            }
+        }
+    }
+    if (out.known()) {
+        return out;
+    }
+    // Else the pooled vector's own width: the model's hidden size.
+    const nlohmann::json config = read_json(dir / "config.json");
+    if (const int hidden = config.is_object() ? int_at(config, "hidden_size") : 0; hidden > 0) {
+        out.width = hidden;
+        out.source = "its hidden_size";
+    } else if (const nlohmann::json* text = object_at(config, "text_config")) {
+        if (const int nested = int_at(*text, "hidden_size"); nested > 0) {
+            out.width = nested;
+            out.source = "its text_config.hidden_size";
+        }
+    }
+    return out;
+}
+
+std::string describe(const MlxEmbeddingWidth& width) {
+    if (!width.known()) {
+        return "width unknown -- its config.json states no hidden_size, and no Dense module "
+               "states its out_features";
+    }
+    return std::to_string(width.width) + " wide (" + width.source + ")";
 }
 
 MlxWindow mlx_window(const MlxInfo& info, const harness::BackendConfig& backend) {

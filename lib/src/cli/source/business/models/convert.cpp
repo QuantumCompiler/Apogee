@@ -195,7 +195,7 @@ std::int64_t estimated_mlx_bytes(std::int64_t elements, int bits) {
 }
 
 std::string mlx_conversion_refusal(const std::filesystem::path& snapshot,
-                                   const std::filesystem::path& out) {
+                                   const std::filesystem::path& out, std::string_view kind) {
     // --- rung 1: a snapshot, an intact one, of full weights ---------------------
     if (!is_snapshot_dir(snapshot)) {
         return snapshot.string() +
@@ -221,8 +221,11 @@ std::string mlx_conversion_refusal(const std::filesystem::path& snapshot,
         return diffusion_model_refusal(snapshot.string(), *diffusion);
     }
     // Nor an embedding model, which the mlx backend could not embed with
-    // anyway: its GGUF is the conversion (M21).
-    if (const std::optional<EmbeddingModel> embedding = snapshot_embedding_model(snapshot)) {
+    // anyway: its GGUF is the conversion (M21) -- unless the route is
+    // mlx-embeddings', which builds it whole and which the mlx backend
+    // embeds through (53h).
+    if (const std::optional<EmbeddingModel> embedding = snapshot_embedding_model(snapshot);
+        embedding.has_value() && kind != kMlxEmbedding) {
         return embedding_model_mlx_refusal(snapshot.string(), *embedding);
     }
     // --- rung 2: never replace ---------------------------------------------------
@@ -299,7 +302,7 @@ MlxConvertResult convert_snapshot_to_mlx(const std::filesystem::path& snapshot,
                                          const harness::CancellationToken& cancellation,
                                          std::string_view kind) {
     MlxConvertResult result;
-    result.error = mlx_conversion_refusal(snapshot, out);
+    result.error = mlx_conversion_refusal(snapshot, out, kind);
     if (!result.error.empty()) {
         return result;
     }

@@ -14,6 +14,7 @@
 #include "modelstore/mlx_info.h"
 #include "modelstore/pipeline_info.h"
 #include "modelstore/sidecar.h"
+#include "modelstore/snapshot.h"
 #include "modelstore/store.h"
 #include "modelstore/voice_info.h"
 #include "training/mlx_convert.h"
@@ -135,17 +136,20 @@ struct SnapshotChoice {
                                              std::string_view given, std::string_view from_id = {});
 
 /// Which converter `models convert --mlx` runs for a set (53f), from its own
-/// files: mlx-vlm, its towers kept, for a set whose `config.json` declares
-/// one (`models::snapshot_towers`) -- unless `--text-only` asks for mlx-lm's
-/// build of its language model alone -- and mlx-lm for every other. Never a
-/// name.
+/// files: mlx-embeddings for an embedding model (53h, by its `modules.json`,
+/// `models::snapshot_embedding_model`); mlx-vlm, its towers kept, for a set
+/// whose `config.json` declares one (`models::snapshot_towers`) -- unless
+/// `--text-only` asks for mlx-lm's build of its language model alone -- and
+/// mlx-lm for every other. Never a name.
 struct MlxRoute {
     training::MlxConverterKind converter = training::MlxConverterKind::MlxLm;
     /// The towers the set declares; empty for a language model's weights.
     std::vector<std::string> towers{};
+    /// The set is an embedding model sentence-transformers publishes (53h).
+    bool embedding = false;
 
-    /// What its build records (53e): `vision` for mlx-vlm's, `chat` for
-    /// mlx-lm's.
+    /// What its build records (53e): `embedding` for mlx-embeddings',
+    /// `vision` for mlx-vlm's, `chat` for mlx-lm's.
     [[nodiscard]] std::string_view kind() const noexcept;
 };
 
@@ -166,8 +170,15 @@ struct MlxRoute {
                                                        std::string_view as = {},
                                                        bool text_only = false);
 
+/// Whether the mlx-embeddings in Apogee's Python environment builds a model
+/// type (53h), read from its own `models/` once: what `models::
+/// snapshot_conversions` is handed, so an embedding model is offered MLX
+/// exactly where it would convert. Answers false when it is not installed.
+[[nodiscard]] models::EmbeddingBuilds installed_mlx_embedding_builds();
+
 /// The MLX conversion a set is offered (53f), by the converters installed:
-/// a language model's is mlx-lm's, as M21 decided it. A set with towers is
+/// a language model's is mlx-lm's, as M21 decided it; an embedding model's
+/// mlx-embeddings', where it builds its type (53h). A set with towers is
 /// offered mlx-vlm's build, its towers kept, where the mlx-vlm installed
 /// builds its type; otherwise mlx-lm's build of its language model alone,
 /// where the mlx-lm installed builds that, and said so; otherwise none. With

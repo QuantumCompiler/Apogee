@@ -169,13 +169,29 @@ struct EmbeddingModel {
 [[nodiscard]] std::string embedding_model_mlx_refusal(std::string_view subject,
                                                       const EmbeddingModel& model);
 
+/// What an embedding model is where the installed mlx-embeddings builds it
+/// (53h): "an embedding model (sentence-transformers: ...): it converts to a
+/// GGUF a llamacpp backend embeds with, and through mlx-embeddings to an MLX
+/// model an mlx backend embeds with".
+[[nodiscard]] std::string describe_embedding_model_both(const EmbeddingModel& model);
+
+/// Whether the mlx-embeddings installed in Apogee's Python environment builds
+/// a model of `model_type` (53h) -- the caller's reading of that environment,
+/// handed down: this floor reads none. Empty, or answering false, decides
+/// nothing new.
+using EmbeddingBuilds = std::function<bool(std::string_view model_type)>;
+
 /// The formats a SafeTensors set converts to, decided once from its own files
 /// (M20): `gguf` and `mlx` for a language model's weights, `gguf` alone for an
 /// embedding model's (M21), none for a draft head or a diffusion model's.
 /// What both conversion ladders refuse, what `models info` offers, and its
 /// `data.converts_to`, all read this. A set with towers converts to `mlx`
-/// too (53f): which converter builds it is the route's, below.
-[[nodiscard]] std::vector<std::string> snapshot_conversions(const std::filesystem::path& dir);
+/// too (53f): which converter builds it is the route's, below. An embedding
+/// model gains `mlx` where `mlx_embeddings` says the installed mlx-embeddings
+/// builds its `config.json`'s `model_type` (53h); anywhere else -- that type
+/// unbuilt, or no mlx-embeddings to ask -- M21's answer stands.
+[[nodiscard]] std::vector<std::string> snapshot_conversions(
+    const std::filesystem::path& dir, const EmbeddingBuilds& mlx_embeddings = {});
 
 /// A set's **towers** (53f, 2026-10-21): what its `config.json` declares
 /// beside its language model -- a `vision_config`, an `audio_config`, or an

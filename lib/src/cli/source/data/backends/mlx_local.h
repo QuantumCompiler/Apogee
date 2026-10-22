@@ -58,6 +58,9 @@ struct MlxHost {
     std::filesystem::path venv;
     /// The seeded driver: `<home>/training/scripts/mlx_generate.py`.
     std::filesystem::path driver;
+    /// The seeded embedding driver (53h):
+    /// `<home>/training/scripts/mlx_embed.py`.
+    std::filesystem::path embedder{};
 
     /// The running build against `home`.
     [[nodiscard]] static MlxHost at(const std::filesystem::path& home);
@@ -70,6 +73,9 @@ inline constexpr std::string_view kMlxTarget = "macos-arm64";
 
 /// The driver's name under `training/scripts/`.
 inline constexpr std::string_view kMlxDriverName = "mlx_generate.py";
+
+/// The embedding driver's name there (53h).
+inline constexpr std::string_view kMlxEmbedderName = "mlx_embed.py";
 
 /// Which rung of the ladder refused, in the order they are asked.
 enum class MlxRefusal : std::uint8_t {
@@ -89,6 +95,10 @@ enum class MlxRefusal : std::uint8_t {
     /// The directory loads through mlx-vlm alone -- its record says mlx-vlm
     /// built it (53f) -- and the environment has no `mlx_vlm` package.
     NoMlxVlm,
+    /// The directory is an embedding model mlx-embeddings built -- its record
+    /// says `embedding` (53h) -- and the environment has no `mlx_embeddings`
+    /// package to embed with it through.
+    NoMlxEmbeddings,
     /// The seeded driver is not there.
     NoDriver,
 };
@@ -124,8 +134,11 @@ struct MlxReadiness {
 
 /// The whole ladder for one entry `name`: the platform, the environment and
 /// `mlx-lm`, then its `model_path`, then mlx-vlm for a directory that loads
-/// through it alone (53f), then the driver. Construction and `check` both ask
-/// this, so they cannot disagree about whether an entry can run.
+/// through it alone (53f), then the driver. An embedding directory (53h)
+/// asks for mlx-embeddings in mlx-vlm's place and for the embedding driver
+/// in the generation driver's -- mlx-lm stays a rung, as mlx-embeddings'
+/// own dependency through mlx-vlm. Construction and `check` both ask this,
+/// so they cannot disagree about whether an entry can run.
 [[nodiscard]] MlxReadiness probe_mlx_backend(std::string_view name,
                                              const harness::BackendConfig& config,
                                              const MlxHost& host);
@@ -186,6 +199,22 @@ struct MlxVlmPackage {
 };
 
 [[nodiscard]] MlxVlmPackage find_mlx_vlm(const MlxHost& host);
+
+/// The fix that installs the embedding dependency (53h).
+inline constexpr std::string_view kMlxEmbeddingsRemedy = "apogee train setup --with mlx-embeddings";
+
+/// mlx-embeddings as installed in the environment (53h): its package
+/// directory and version, read from files as mlx-vlm's are, never imported.
+struct MlxEmbeddingsPackage {
+    std::filesystem::path dir{};
+    std::string version{};
+
+    [[nodiscard]] bool installed() const noexcept {
+        return !dir.empty();
+    }
+};
+
+[[nodiscard]] MlxEmbeddingsPackage find_mlx_embeddings(const MlxHost& host);
 
 /// Whether an MLX model reads images natively (27c), from file facts alone:
 /// the directory is a vision model (`MlxModelInfo::vision`, by its kind

@@ -15,7 +15,8 @@
 /// `mlx_convert.py`, run under Apogee's own Python environment: a
 /// full-weight SafeTensors snapshot in, an MLX model directory out, through
 /// `mlx_lm`'s own `convert` (27b) -- or, for a set that sees or hears,
-/// `mlx_vlm`'s, its towers kept (53f).
+/// `mlx_vlm`'s, its towers kept (53f), and for an embedding model,
+/// `mlx_embeddings`' (53h).
 ///
 /// **A child, never a link** -- the GGUF converter's discipline, a different
 /// engine: the driver is seeded beside the trainers, run by the environment's
@@ -26,27 +27,33 @@
 namespace apogee::training {
 
 /// Which converter an MLX conversion runs (53f): mlx-lm's, which builds a
-/// language model, or mlx-vlm's, which builds a model that sees or hears
-/// with its towers kept. One driver runs either (`--with mlx-vlm`).
-enum class MlxConverterKind : std::uint8_t { MlxLm, MlxVlm };
+/// language model, mlx-vlm's, which builds a model that sees or hears with
+/// its towers kept, or -- since 53h -- mlx-embeddings', which builds an
+/// embedding model whole. One driver runs each (`--with mlx-vlm`, `--with
+/// mlx-embeddings`).
+enum class MlxConverterKind : std::uint8_t { MlxLm, MlxVlm, MlxEmbeddings };
 
-/// The converter a set's MLX conversion runs: mlx-vlm for a set whose own
-/// files declare towers -- kept by default (2026-10-21) -- unless the person
-/// asked for mlx-lm's build of its language model alone (`--text-only`);
-/// mlx-lm for every other. Never chosen by a name.
-[[nodiscard]] MlxConverterKind choose_mlx_converter(bool towers, bool text_only) noexcept;
+/// The converter a set's MLX conversion runs: mlx-embeddings for an
+/// embedding model (`embedding`, sentence-transformers' by its own
+/// `modules.json`, 53h); mlx-vlm for a set whose own files declare towers --
+/// kept by default (2026-10-21) -- unless the person asked for mlx-lm's build
+/// of its language model alone (`--text-only`); mlx-lm for every other.
+/// Never chosen by a name.
+[[nodiscard]] MlxConverterKind choose_mlx_converter(bool towers, bool text_only,
+                                                    bool embedding = false) noexcept;
 
-/// Its name as a person says it: `mlx-lm`, `mlx-vlm`.
+/// Its name as a person says it: `mlx-lm`, `mlx-vlm`, `mlx-embeddings`.
 [[nodiscard]] std::string_view to_string(MlxConverterKind converter) noexcept;
 
-/// Its Python package, where its types are read from: `mlx_lm`, `mlx_vlm`.
+/// Its Python package, where its types are read from: `mlx_lm`, `mlx_vlm`,
+/// `mlx_embeddings`.
 [[nodiscard]] std::string_view mlx_converter_package(MlxConverterKind converter) noexcept;
 
 /// Its own entry, as a record's transform names it: `mlx_lm.convert`,
-/// `mlx_vlm.convert`.
+/// `mlx_vlm.convert`, `mlx_embeddings.convert`.
 [[nodiscard]] std::string_view mlx_converter_entry(MlxConverterKind converter) noexcept;
 
-/// The requirement set that installs it: `mlx`, `mlx-vlm`.
+/// The requirement set that installs it: `mlx`, `mlx-vlm`, `mlx-embeddings`.
 [[nodiscard]] RequirementSet mlx_converter_set(MlxConverterKind converter) noexcept;
 
 /// One precision `models convert --mlx` writes, spelled the way a community
@@ -79,9 +86,10 @@ struct MlxPrecision {
 
 /// The driver's arguments: `--hf-path <input> --mlx-path <output>`, then
 /// `--q-bits`, `--q-group-size` and `--q-mode` for a quantized precision, or
-/// `--dtype` for one that is not -- the one table mapped for both converters.
-/// mlx-vlm's route leads with `--with mlx-vlm`; mlx-lm's is exactly what it
-/// was before there were two.
+/// `--dtype` for one that is not -- the one table mapped for every converter.
+/// mlx-vlm's route leads with `--with mlx-vlm`, mlx-embeddings' with `--with
+/// mlx-embeddings` (53h); mlx-lm's is exactly what it was before there were
+/// two.
 [[nodiscard]] std::vector<std::string> mlx_converter_arguments(
     const MlxPrecision& precision, const std::filesystem::path& input,
     const std::filesystem::path& output, MlxConverterKind converter = MlxConverterKind::MlxLm);
@@ -101,18 +109,18 @@ using MlxConverter = std::function<std::string(
 /// `model_type`, its own lists of the types it does are read from there to
 /// name the way out (`fold_model_type_failure`). Empty: the door alone.
 /// `converter` picks the route (53f); a seeded driver older than the
-/// mlx-vlm route is said as such, with `apogee check --fix` named.
+/// route asked for is said as such, with `apogee check --fix` named.
 [[nodiscard]] MlxConverter script_mlx_converter(
     std::filesystem::path interpreter, std::filesystem::path script, const MlxPrecision& precision,
     std::filesystem::path package = {}, MlxConverterKind converter = MlxConverterKind::MlxLm);
 
 /// The model types an installed converter builds (M15), read from its files,
-/// never imported: mlx-lm's modules under `models/` that define a `Model`,
-/// mlx-vlm's packages there whose `__init__.py` names one (53f: its loader
-/// takes `models.<type>.Model`), and every key of `utils.py`'s
-/// `MODEL_REMAPPING`, which both keep. Sorted, each once; empty when there is
-/// no such directory. Apogee keeps no table of its own: it would rot with
-/// every release and every vendor's variant.
+/// never imported: mlx-lm's modules under `models/` that define a `Model`
+/// (mlx-embeddings' are the same, 53h), mlx-vlm's packages there whose
+/// `__init__.py` names one (53f: its loader takes `models.<type>.Model`), and
+/// every key of `utils.py`'s `MODEL_REMAPPING`, which all three keep. Sorted, each once; empty when
+/// there is no such directory. Apogee keeps no table of its own: it would rot with every release
+/// and every vendor's variant.
 [[nodiscard]] std::vector<std::string> mlx_model_types(const std::filesystem::path& package);
 
 /// The type in an mlx-lm failure saying `Model type <type> not supported`, or

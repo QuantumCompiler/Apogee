@@ -314,11 +314,32 @@ std::string embedding_model_mlx_refusal(std::string_view subject, const Embeddin
            " -- convert it without --mlx";
 }
 
-std::vector<std::string> snapshot_conversions(const std::filesystem::path& dir) {
+std::string describe_embedding_model_both(const EmbeddingModel& model) {
+    std::string modules;
+    for (const std::string& word : model.modules) {
+        modules += (modules.empty() ? "" : ", ") + word;
+    }
+    return "an embedding model (sentence-transformers: " + modules +
+           "): it converts to a GGUF a llamacpp backend embeds with, and through mlx-embeddings "
+           "to an MLX model an mlx backend embeds with";
+}
+
+std::vector<std::string> snapshot_conversions(const std::filesystem::path& dir,
+                                              const EmbeddingBuilds& mlx_embeddings) {
     if (snapshot_draft_head(dir).has_value() || snapshot_diffusion_model(dir).has_value()) {
         return {};
     }
     if (snapshot_embedding_model(dir).has_value()) {
+        // M21's answer, unless the installed mlx-embeddings builds its type
+        // (53h): then MLX joins the GGUF, offered second.
+        const nlohmann::json config = read_model_config(dir);
+        const std::string type =
+            config.is_object() && config.contains("model_type") && config["model_type"].is_string()
+                ? config["model_type"].get<std::string>()
+                : std::string{};
+        if (mlx_embeddings && !type.empty() && mlx_embeddings(type)) {
+            return {std::string{kGgufFormat}, std::string{kMlxFormat}};
+        }
         return {std::string{kGgufFormat}};
     }
     return {std::string{kGgufFormat}, std::string{kMlxFormat}};

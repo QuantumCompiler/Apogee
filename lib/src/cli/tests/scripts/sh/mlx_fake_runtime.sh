@@ -36,6 +36,15 @@ mlx_fake_vlm() {
     cp -R "$stubs/stub_mlx_vlm/." "$home/training/venv/lib/python3.99/site-packages/"
 }
 
+# mlx_fake_embeddings <apogee-home> <stub-scripts-dir>: lays the stub
+# `mlx_embeddings` (53h) beside the stub `mlx_lm` -- what `train setup --with
+# mlx-embeddings` would install -- so an embedding model converts and embeds
+# through it.
+mlx_fake_embeddings() {
+    local home="$1" stubs="$2"
+    cp -R "$stubs/stub_mlx_embeddings/." "$home/training/venv/lib/python3.99/site-packages/"
+}
+
 # mlx_descendants <pid>: every process below <pid>, one per line.
 mlx_descendants() {
     local child

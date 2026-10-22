@@ -452,3 +452,74 @@ TEST_CASE("a recorded kind survives a repair of the directory's files",
     CHECK(kind.word == "embedding");
     CHECK(kind.source == apogee::models::MlxKindSource::Recorded);
 }
+
+TEST_CASE("an mlx backend runs a chat, a vision and an embedding model, and no other kind",
+          "[models][mlx][kind][embedding]") {
+    // 53h: what `config scan --register` registers as an mlx entry -- one it
+    // chats with, or one it embeds with -- and what it never does.
+    using apogee::models::MlxKind;
+    for (const char* word : {"chat", "vision"}) {
+        INFO(word);
+        const MlxKind kind{.word = word, .source = apogee::models::MlxKindSource::Recorded};
+        CHECK(kind.backend());
+        CHECK_FALSE(kind.embeds());
+        CHECK(kind.registers());
+    }
+    const MlxKind embedding{.word = "embedding", .source = apogee::models::MlxKindSource::Recorded};
+    CHECK_FALSE(embedding.backend());
+    CHECK(embedding.embeds());
+    CHECK(embedding.registers());
+    for (const char* word : {"drafter", "video", "voice", "hologram"}) {
+        INFO(word);
+        const MlxKind kind{.word = word, .source = apogee::models::MlxKindSource::Recorded};
+        CHECK_FALSE(kind.embeds());
+        CHECK_FALSE(kind.registers());
+    }
+}
+
+TEST_CASE("an MLX embedding model's width is its last Dense's out_features, else its hidden size",
+          "[models][mlx][embedding][width]") {
+    const Dir dir;
+    using apogee::models::read_mlx_embedding_width;
+    SECTION("what mlx-embeddings' converter writes: the top level's files, the hidden size") {
+        write_mlx_model(dir.model, MlxModelSpec{.model_type = "gemma3_text", .kind = "embedding"});
+        write_fixture_file(dir.model / "config.json",
+                           R"({"model_type": "gemma3_text", "hidden_size": 768})");
+        // Its modules.json names Dense directories the converter never copied.
+        write_fixture_file(dir.model / "modules.json", R"([
+            {"idx": 0, "path": "", "type": "sentence_transformers.models.Transformer"},
+            {"idx": 1, "path": "1_Pooling", "type": "sentence_transformers.models.Pooling"},
+            {"idx": 2, "path": "2_Dense", "type": "sentence_transformers.models.Dense"},
+            {"idx": 3, "path": "3_Dense", "type": "sentence_transformers.models.Dense"},
+            {"idx": 4, "path": "4_Normalize", "type": "sentence_transformers.models.Normalize"}])");
+        const apogee::models::MlxEmbeddingWidth width = read_mlx_embedding_width(dir.model);
+        CHECK(width.width == 768);
+        CHECK(width.source == "its hidden_size");
+        CHECK(apogee::models::describe(width) == "768 wide (its hidden_size)");
+
+        // With the Dense configurations there, the last one's output decides.
+        write_fixture_file(dir.model / "2_Dense" / "config.json",
+                           R"({"in_features": 768, "out_features": 3072})");
+        write_fixture_file(dir.model / "3_Dense" / "config.json",
+                           R"({"in_features": 3072, "out_features": 512})");
+        const apogee::models::MlxEmbeddingWidth dense = read_mlx_embedding_width(dir.model);
+        CHECK(dense.width == 512);
+        CHECK(apogee::models::describe(dense) ==
+              "512 wide (the last Dense's out_features (3_Dense))");
+    }
+    SECTION("a composite's text model states it") {
+        write_fixture_file(dir.model / "config.json",
+                           R"({"model_type": "qwen3_vl", "text_config": {"hidden_size": 2048}})");
+        const apogee::models::MlxEmbeddingWidth width = read_mlx_embedding_width(dir.model);
+        CHECK(width.width == 2048);
+        CHECK(width.source == "its text_config.hidden_size");
+    }
+    SECTION("nothing states it: unknown, never guessed") {
+        write_fixture_file(dir.model / "config.json", R"({"model_type": "gemma3_text"})");
+        const apogee::models::MlxEmbeddingWidth width = read_mlx_embedding_width(dir.model);
+        CHECK_FALSE(width.known());
+        CHECK(width.source.empty());
+        CHECK(apogee::models::describe(width).starts_with("width unknown"));
+        CHECK_FALSE(read_mlx_embedding_width(dir.root.path() / "nothing-here").known());
+    }
+}

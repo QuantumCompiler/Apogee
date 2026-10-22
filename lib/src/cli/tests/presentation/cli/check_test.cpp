@@ -3446,3 +3446,80 @@ TEST_CASE("every door an adapter row names runs as printed, and the row then pas
         }
     }
 }
+
+TEST_CASE("an MLX embedding entry is checked as one: its width, mlx-embeddings, its own driver",
+          "[commands][check][mlx][embedding]") {
+    // 53h: the doctor asks the same ladder construction does -- for an
+    // embedding directory, mlx-embeddings and the embedding driver -- and
+    // says what the entry is for. mlx-embeddings is reported from its files,
+    // as mlx-vlm is, and a warning only where an entry needs it.
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    install.write("mlx-model/config.json", R"({"model_type": "gemma3_text", "hidden_size": 768})");
+    install.write("mlx-model/apogee-snapshot.json",
+                  R"({"source": "convert", "transform": "mlx_embeddings.convert 4bit", )"
+                  R"("files": [], "kind": "embedding"})");
+    CheckInputs inputs = inputs_for(install);
+    inputs.host_target = "macos-arm64";
+    {
+        // Nothing needs it yet: skipped, its fix named.
+        const CheckReport report = run_checks(inputs);
+        const apogee::commands::CheckRow* embeddings = row_in(report, "MLX", "embeddings");
+        REQUIRE(embeddings != nullptr);
+        CHECK(embeddings->status == Status::Skipped);
+        CHECK(embeddings->remedy == "apogee train setup --with mlx-embeddings");
+    }
+    install.write("config/config.yaml", mlx_entry(install));
+    load_into(inputs);
+    {
+        // An entry that needs it, without it: the entry and the row warn.
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->status == Status::Warn);
+        CHECK(entry->detail.find("is an embedding model mlx-embeddings built") !=
+              std::string::npos);
+        CHECK(entry->remedy == "apogee train setup --with mlx-embeddings");
+        const apogee::commands::CheckRow* embeddings = row_in(report, "MLX", "embeddings");
+        REQUIRE(embeddings != nullptr);
+        CHECK(embeddings->status == Status::Warn);
+        CHECK(embeddings->detail.find("so local cannot embed") != std::string::npos);
+    }
+    install.write("training/venv/lib/python3.14/site-packages/mlx_embeddings/__init__.py", "");
+    install.write(
+        "training/venv/lib/python3.14/site-packages/mlx_embeddings-0.1.0.dist-info/RECORD", "");
+    {
+        // Installed: the entry says what it is and how wide, and the seeded
+        // embedding driver is held to the shipped copy.
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->status == Status::Ok);
+        CHECK(entry->detail.find("an embedding model directory (gemma3_text)") !=
+              std::string::npos);
+        CHECK(entry->detail.find("vectors 768 wide (its hidden_size)") != std::string::npos);
+        CHECK(entry->detail.find("answers no chat") != std::string::npos);
+        const apogee::commands::CheckRow* embeddings = row_in(report, "MLX", "embeddings");
+        REQUIRE(embeddings != nullptr);
+        CHECK(embeddings->status == Status::Ok);
+        CHECK(embeddings->detail.find("mlx-embeddings 0.1.0 is present") != std::string::npos);
+        const apogee::commands::CheckRow* driver = row_in(report, "MLX", "embedding driver");
+        REQUIRE(driver != nullptr);
+        CHECK(driver->status == Status::Ok);
+        CHECK(driver->detail == "mlx_embed.py matches the shipped copy");
+    }
+    std::filesystem::remove(install.root / "training" / "scripts" / "mlx_embed.py");
+    {
+        // Its own driver gone: the entry's rung names it, never the chat one's.
+        const CheckReport report = run_checks(inputs);
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->status == Status::Warn);
+        CHECK(entry->detail.find("mlx_embed.py") != std::string::npos);
+        CHECK(entry->remedy == "apogee check --fix");
+    }
+}

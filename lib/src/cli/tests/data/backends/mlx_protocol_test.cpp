@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -273,4 +274,63 @@ TEST_CASE("a ready line says whether the driver hands recordings on; one before 
         R"({"type":"ready","protocol":1,"vision":false,"audio":false})");
     REQUIRE(text.has_value());
     CHECK_FALSE(text->audio);
+}
+
+TEST_CASE("an embed request is its texts in one line, any bytes said as text",
+          "[backends][mlx][protocol][embedding]") {
+    // 53h: the embedding driver's request, pinned byte for byte. A file's
+    // bytes need not be UTF-8: a Latin-1 é crosses as U+FFFD rather than
+    // ending the batch at the dump.
+    CHECK(apogee::backends::mlx::embed_line({.id = 3, .texts = {"alpha", "beta"}}) ==
+          R"({"id":3,"texts":["alpha","beta"],"type":"embed"})");
+    CHECK(apogee::backends::mlx::embed_line({.id = 4, .texts = {}}) ==
+          R"({"id":4,"texts":[],"type":"embed"})");
+    CHECK(apogee::backends::mlx::embed_line({.id = 5, .texts = {"caf\xe9"}}) ==
+          "{\"id\":5,\"texts\":[\"caf\xef\xbf\xbd\"],\"type\":\"embed\"}");
+}
+
+TEST_CASE("an embedding driver's lines parse: its ready, its vectors, and a malformed answer said",
+          "[backends][mlx][protocol][embedding]") {
+    const std::optional<Event> ready = apogee::backends::mlx::parse_event(
+        R"({"type":"ready","protocol":1,"embedding":true,"model_type":"gemma3_text",)"
+        R"("mlx_embeddings":"0.1.0","max_length":2048})");
+    REQUIRE(ready.has_value());
+    CHECK(ready->kind == Event::Kind::Ready);
+    CHECK(ready->embedding);
+    CHECK(ready->mlx_embeddings_version == "0.1.0");
+    CHECK(ready->model_type == "gemma3_text");
+    // The generation driver's ready never says it.
+    const std::optional<Event> chat = apogee::backends::mlx::parse_event(
+        R"({"type":"ready","protocol":1,"model_type":"llama","mlx_lm":"0.32.0"})");
+    REQUIRE(chat.has_value());
+    CHECK_FALSE(chat->embedding);
+
+    const std::optional<Event> vectors = apogee::backends::mlx::parse_event(
+        R"({"type":"vectors","id":7,"vectors":[[0.5,-1,2e-3],[0,0,1]]})");
+    REQUIRE(vectors.has_value());
+    CHECK(vectors->kind == Event::Kind::Vectors);
+    CHECK(vectors->id == 7);
+    CHECK(vectors->vectors ==
+          std::vector<std::vector<float>>{{0.5F, -1.0F, 2e-3F}, {0.0F, 0.0F, 1.0F}});
+    CHECK(apogee::backends::mlx::describe(*vectors) == "#7 vectors 2x3");
+    const std::optional<Event> none =
+        apogee::backends::mlx::parse_event(R"({"type":"vectors","id":8,"vectors":[]})");
+    REQUIRE(none.has_value());
+    CHECK(none->kind == Event::Kind::Vectors);
+    CHECK(none->vectors.empty());
+
+    // Anything not a list of number lists is a protocol error for its id,
+    // never fewer vectors and never a dropped line a provider would wait on.
+    for (const char* line :
+         {R"({"type":"vectors","id":9})", R"({"type":"vectors","id":9,"vectors":[[1,"2"]]})",
+          R"({"type":"vectors","id":9,"vectors":[1,2]})",
+          R"({"type":"vectors","id":9,"vectors":{"0":[1]}})"}) {
+        INFO(line);
+        const std::optional<Event> bad = apogee::backends::mlx::parse_event(line);
+        REQUIRE(bad.has_value());
+        CHECK(bad->kind == Event::Kind::Error);
+        CHECK(bad->error_kind == "protocol");
+        CHECK(bad->id == 9);
+        CHECK(bad->vectors.empty());
+    }
 }

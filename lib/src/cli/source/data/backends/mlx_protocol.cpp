@@ -3,6 +3,8 @@
 #include <nlohmann/json.hpp>
 
 #include <cstddef>
+#include <utility>
+#include <vector>
 
 namespace apogee::backends::mlx {
 namespace {
@@ -92,6 +94,33 @@ struct AudioPaths {
     return it != object.end() && it->is_number_integer() ? it->get<std::int64_t>() : 0;
 }
 
+/// `vectors` as a list of number lists, into `out`; false for anything else
+/// -- a missing key, a row that is not a list, an element that is not a
+/// number -- so nothing half-read is ever handed on.
+[[nodiscard]] bool read_vectors(const nlohmann::json& object,
+                                std::vector<std::vector<float>>& out) {
+    const auto rows = object.find("vectors");
+    if (rows == object.end() || !rows->is_array()) {
+        return false;
+    }
+    out.reserve(rows->size());
+    for (const nlohmann::json& row : *rows) {
+        if (!row.is_array()) {
+            return false;
+        }
+        std::vector<float> vector;
+        vector.reserve(row.size());
+        for (const nlohmann::json& value : row) {
+            if (!value.is_number()) {
+                return false;
+            }
+            vector.push_back(value.get<float>());
+        }
+        out.push_back(std::move(vector));
+    }
+    return true;
+}
+
 }  // namespace
 
 std::string generate_line(const GenerateRequest& request) {
@@ -129,6 +158,13 @@ std::string generate_line(const GenerateRequest& request) {
 
 std::string cancel_line(std::int64_t id) {
     return nlohmann::json{{"type", "cancel"}, {"id", id}}.dump();
+}
+
+std::string embed_line(const EmbedRequest& request) {
+    // A text is a file's bytes, which need not be UTF-8: said as U+FFFD
+    // rather than ending the batch at the dump.
+    return nlohmann::json{{"type", "embed"}, {"id", request.id}, {"texts", request.texts}}.dump(
+        -1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 
 std::optional<Event> parse_event(std::string_view line) {
@@ -170,6 +206,19 @@ std::optional<Event> parse_event(std::string_view line) {
         event.completion_tokens = count_field(object, "completion_tokens");
         return event;
     }
+    if (type == "vectors") {
+        event.kind = Event::Kind::Vectors;
+        if (read_vectors(object, event.vectors)) {
+            return event;
+        }
+        // Said, never dropped: a provider waiting for this id would otherwise
+        // wait out its stall bound for an answer that came and was unread.
+        event.kind = Event::Kind::Error;
+        event.error_kind = "protocol";
+        event.text = "the MLX embedding driver's vectors are not a list of number lists";
+        event.vectors.clear();
+        return event;
+    }
     if (type == "error") {
         event.kind = Event::Kind::Error;
         event.error_kind = string_field(object, "kind");
@@ -184,6 +233,7 @@ std::optional<Event> parse_event(std::string_view line) {
         event.mlx_lm_version = string_field(object, "mlx_lm");
         event.mlx_vlm_version = string_field(object, "mlx_vlm");
         event.adapter = string_field(object, "adapter");
+        event.mlx_embeddings_version = string_field(object, "mlx_embeddings");
         const auto boolean = [&object](const char* key) {
             const auto it = object.find(key);
             return it != object.end() && it->is_boolean() && it->get<bool>();
@@ -192,6 +242,7 @@ std::optional<Event> parse_event(std::string_view line) {
         event.thinking = boolean("thinking");
         event.vision = boolean("vision");
         event.audio = boolean("audio");
+        event.embedding = boolean("embedding");
         return event;
     }
     // An unknown type is a newer driver's, and carries nothing this side reads.
@@ -215,6 +266,9 @@ std::string describe(const Event& event) {
                    std::to_string(event.completion_tokens);
         case Event::Kind::Error:
             return id + "error " + event.error_kind + ": " + event.text;
+        case Event::Kind::Vectors:
+            return id + "vectors " + std::to_string(event.vectors.size()) + "x" +
+                   std::to_string(event.vectors.empty() ? 0 : event.vectors.front().size());
     }
     return "?";
 }

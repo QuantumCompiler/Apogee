@@ -113,6 +113,9 @@ TEST_CASE("the bootstrap's plan is train setup's own table, the host deciding ea
     CHECK(step(apple, "mlx-vlm").words == Words{"train", "setup", "--with", "mlx-vlm"});
     CHECK(step(apple, "video").words == Words{"train", "setup", "--with", "video"});
     CHECK(step(apple, "voice").words == Words{"train", "setup", "--with", "voice"});
+    // 53h: the embedding route's set, Apple silicon's too.
+    CHECK(step(apple, "mlx-embeddings").words ==
+          Words{"train", "setup", "--with", "mlx-embeddings"});
     CHECK(step(apple, "peft").words.empty());
     CHECK(step(apple, "peft").status == "skipped");
     CHECK(step(apple, "peft").reason == "for an NVIDIA GPU, and nvidia-smi is not on PATH here");
@@ -122,6 +125,7 @@ TEST_CASE("the bootstrap's plan is train setup's own table, the host deciding ea
     CHECK(step(cuda, "peft").words == Words{"train", "setup", "--with", "peft"});
     CHECK(step(cuda, "mlx").reason == "for Apple silicon, which this host is not");
     CHECK(step(cuda, "convert").words == Words{"train", "setup", "--with", "convert"});
+    CHECK(step(cuda, "mlx-embeddings").reason == "for Apple silicon, which this host is not");
 }
 
 TEST_CASE("each step runs once, in order, said as it goes; one that fails is skipped",
@@ -144,6 +148,7 @@ TEST_CASE("each step runs once, in order, said as it goes; one that fails is ski
                                            {"train", "setup", "--with", "mlx-vlm"},
                                            {"train", "setup", "--with", "video"},
                                            {"train", "setup", "--with", "voice"},
+                                           {"train", "setup", "--with", "mlx-embeddings"},
                                            {"mcp", "create", "code", "--from", "code-exec"},
                                            {"providers", "scan", "--register"},
                                            {"config", "scan", "--register"}});
@@ -154,23 +159,23 @@ TEST_CASE("each step runs once, in order, said as it goes; one that fails is ski
     CHECK(script.said.front() ==
           "bootstrap: the runtimes this machine can run, then its "
           "providers and its model store, registered");
-    CHECK(said("[1/11] the 'prepare' set -- apogee train setup --with prepare"));
+    CHECK(said("[1/12] the 'prepare' set -- apogee train setup --with prepare"));
     CHECK(
-        said("[3/11] the 'peft' set -- skipped: for an NVIDIA GPU, and nvidia-smi is not on "
+        said("[3/12] the 'peft' set -- skipped: for an NVIDIA GPU, and nvidia-smi is not on "
              "PATH here"));
     CHECK(said("  environment already exists at /home/.apogee/training/venv"));
     CHECK(
         said("  skipped -- exit 1: ERROR: Could not find a version that satisfies the "
              "requirement torch>=2.6"));
-    CHECK(said("[8/11] the code-execution server -- apogee mcp create code --from code-exec"));
-    CHECK(said("[9/11] the providers -- apogee providers scan --register"));
+    CHECK(said("[9/12] the code-execution server -- apogee mcp create code --from code-exec"));
+    CHECK(said("[10/12] the providers -- apogee providers scan --register"));
     CHECK(said("  claude  credentials found  backend: claude"));
     CHECK(
-        said("[11/11] ffmpeg with captions -- skipped: Homebrew's ffmpeg-full is macOS's -- "
+        said("[12/12] ffmpeg with captions -- skipped: Homebrew's ffmpeg-full is macOS's -- "
              "'apogee check' names this host's way"));
     // The voice set still ran after video's failed; the last line is the door.
     CHECK(script.said.back() ==
-          "done: 8 of 11 steps, 3 skipped -- 'apogee bootstrap' runs it again any time");
+          "done: 9 of 12 steps, 3 skipped -- 'apogee bootstrap' runs it again any time");
     const auto& video = *std::ranges::find(result.steps, "the 'video' set", &BootstrapStep::name);
     CHECK(video.status == "skipped");
     const auto& store = *std::ranges::find(result.steps, "the model store", &BootstrapStep::name);
@@ -180,7 +185,7 @@ TEST_CASE("each step runs once, in order, said as it goes; one that fails is ski
     const nlohmann::json document = apogee::commands::bootstrap_document(result);
     CHECK(document["object"] == "apogee.bootstrap");
     CHECK(document["minimal"] == false);
-    REQUIRE(document["steps"].size() == 11);
+    REQUIRE(document["steps"].size() == 12);
     CHECK(document["steps"][2] == nlohmann::json{{"name", "the 'peft' set"},
                                                  {"command", nullptr},
                                                  {"status", "skipped"},
@@ -188,11 +193,11 @@ TEST_CASE("each step runs once, in order, said as it goes; one that fails is ski
                                                   "for an NVIDIA GPU, and nvidia-smi is "
                                                   "not on PATH here"}});
     CHECK(document["steps"][5]["command"] == "apogee train setup --with video");
-    CHECK(document["steps"][9] == nlohmann::json{{"name", "the model store"},
-                                                 {"command", "apogee config scan --register"},
-                                                 {"status", "done"},
-                                                 {"reason", nullptr}});
-    CHECK(document["steps"][10]["command"] == nullptr);
+    CHECK(document["steps"][10] == nlohmann::json{{"name", "the model store"},
+                                                  {"command", "apogee config scan --register"},
+                                                  {"status", "done"},
+                                                  {"reason", nullptr}});
+    CHECK(document["steps"][11]["command"] == nullptr);
 }
 
 TEST_CASE("a step that cannot start is skipped, saying why", "[cli][bootstrap]") {
@@ -261,10 +266,10 @@ TEST_CASE("ffmpeg with captions: check's remedy run on a Mac with Homebrew, in i
         // link still runs; the step is done.
         CHECK(result.steps.back().status == "done");
         CHECK(std::ranges::find(script.said,
-                                "[11/11] ffmpeg with captions -- brew install "
+                                "[12/12] ffmpeg with captions -- brew install "
                                 "ffmpeg-full && brew unlink ffmpeg; brew link "
                                 "--force ffmpeg-full") != script.said.end());
-        CHECK(apogee::commands::bootstrap_document(result)["steps"][10]["command"] ==
+        CHECK(apogee::commands::bootstrap_document(result)["steps"][11]["command"] ==
               "brew install ffmpeg-full && brew unlink ffmpeg; brew link --force ffmpeg-full");
     }
     // An install that fails ends the step there, never fatal, saying which.

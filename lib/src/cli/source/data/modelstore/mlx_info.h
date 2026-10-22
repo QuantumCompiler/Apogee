@@ -155,10 +155,19 @@ struct MlxKind {
     /// One of the six words.
     [[nodiscard]] bool known() const noexcept;
 
-    /// An mlx backend chats with it: `chat` or `vision`. What `config scan
-    /// --register` registers as an `mlx` backend; every other kind, and a
-    /// word this build does not know, never.
+    /// An mlx backend chats with it: `chat` or `vision`. Every other kind,
+    /// and a word this build does not know, is no chat backend.
     [[nodiscard]] bool backend() const noexcept;
+
+    /// An mlx backend embeds with it (53h): `embedding`, which mlx-embeddings
+    /// built -- the embedding role's to name, never a chat's.
+    [[nodiscard]] bool embeds() const noexcept;
+
+    /// An mlx backend runs it at all: it chats with it (`backend`) or embeds
+    /// with it (`embeds`). What `config scan --register` registers as an
+    /// `mlx` entry; a drafter, a video or voice model, and a word this build
+    /// does not know, never.
+    [[nodiscard]] bool registers() const noexcept;
 };
 
 /// The kind of the MLX directory `dir`: its record's `kind`, else `vision`
@@ -182,6 +191,31 @@ struct MlxKind {
 /// `models info`'s line: the word, where it came from, and what it is --
 /// "chat (no kind recorded) -- a language model: an mlx backend chats with it".
 [[nodiscard]] std::string describe(const MlxKind& kind);
+
+/// How wide an MLX embedding model's vectors are (53h), from the directory's
+/// own files: the last sentence-transformers `Dense` module its
+/// `modules.json` names whose `config.json` states `out_features` -- what
+/// the pipeline ends in -- else `config.json`'s `hidden_size` (a composite's
+/// `text_config.hidden_size`), what the pooled vector is when no Dense
+/// reshapes it. mlx-embeddings' converter copies only the top level's files,
+/// so a directory it wrote states the hidden size, which Gemma 3's two dense
+/// layers map back to. Read, never guessed: 0 when nothing states it.
+struct MlxEmbeddingWidth {
+    std::int64_t width = 0;
+    /// Where it was read: `the last Dense's out_features (3_Dense)`, `its
+    /// hidden_size`, `its text_config.hidden_size`. Empty when unknown.
+    std::string source{};
+
+    [[nodiscard]] bool known() const noexcept {
+        return width > 0;
+    }
+};
+
+[[nodiscard]] MlxEmbeddingWidth read_mlx_embedding_width(const std::filesystem::path& dir);
+
+/// One phrase: "768 wide (its hidden_size)", or "width unknown -- its
+/// config.json states no hidden_size" -- what `models info` says.
+[[nodiscard]] std::string describe(const MlxEmbeddingWidth& width);
 
 /// The window an `mlx` backend gets over a model (26a's chain): its
 /// `context_size` when set, else 26a's default -- 32,768, or the trained

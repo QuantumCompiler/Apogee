@@ -460,6 +460,11 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
                     row.state = "cannot load";
                     row.attention = true;
                     row.note = files.problem;
+                } else if (readiness.ready() && kind.embeds()) {
+                    // An embedding entry (53h): the embedding role's, said
+                    // as such, its vectors' width beside it.
+                    row.note = models::describe_mlx_kind(kind.word) + "; vectors " +
+                               models::describe(models::read_mlx_embedding_width(dir));
                 } else if (readiness.ready() && !kind.backend()) {
                     row.attention = true;
                     row.note = models::describe_mlx_kind(kind.word);
@@ -1286,9 +1291,11 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
 
 /// The MLX conversion a SafeTensors set is offered (53f) -- which converter,
 /// its towers kept or its language model alone -- where its files make `mlx`
-/// a format it takes at all (M20, M21); nullopt where they do not.
+/// a format it takes at all (M20, M21; an embedding model's where the
+/// installed mlx-embeddings builds it, 53h); nullopt where they do not.
 [[nodiscard]] std::optional<MlxOffer> set_mlx_offer(const std::filesystem::path& dir) {
-    const std::vector<std::string> formats = models::snapshot_conversions(dir);
+    const std::vector<std::string> formats =
+        models::snapshot_conversions(dir, installed_mlx_embedding_builds());
     if (std::ranges::find(formats, std::string{models::kMlxFormat}) == formats.end()) {
         return std::nullopt;
     }
@@ -1300,7 +1307,8 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
 /// offered where it cannot work (the user's call, 2026-10-21).
 [[nodiscard]] std::vector<std::string> set_conversions(const std::filesystem::path& dir,
                                                        const std::optional<MlxOffer>& offer) {
-    std::vector<std::string> conversions = models::snapshot_conversions(dir);
+    std::vector<std::string> conversions =
+        models::snapshot_conversions(dir, installed_mlx_embedding_builds());
     if (!offer.has_value() || !offer->offered()) {
         std::erase(conversions, std::string{models::kMlxFormat});
     }
@@ -1373,7 +1381,12 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
         out << "format:       SafeTensors -- full weights, trainable, not runnable\n";
         if (const std::optional<models::EmbeddingModel> embedding =
                 models::snapshot_embedding_model(stored.dir)) {
-            out << "embedding:    " << models::describe_embedding_model(*embedding) << "\n";
+            // M21's words, unless the installed mlx-embeddings builds it (53h).
+            const bool mlx = offer.has_value() && offer->offered();
+            out << "embedding:    "
+                << (mlx ? models::describe_embedding_model_both(*embedding)
+                        : models::describe_embedding_model(*embedding))
+                << "\n";
         }
         // What sees or hears beside the language model, and which MLX
         // conversion keeps it (53f).
@@ -1457,16 +1470,28 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     } else if (kind.backend()) {
         out << "none -- 'apogee config add-backend " << models::stored_mlx_name(stored)
             << " --type mlx --model-path <the path below>'";
+    } else if (kind.embeds()) {
+        // An mlx entry the embedding role names (53h).
+        out << "none -- 'apogee config add-backend " << models::stored_mlx_name(stored)
+            << " --type mlx --model-path <the path below>', then 'apogee config "
+               "set-default-embedding "
+            << models::stored_mlx_name(stored) << "'";
     } else {
         out << "none -- no chat backend runs it; the kind line says what does";
     }
     out << "\n";
     out << "model_path:   " << stored.dir.string() << "\n";
     out << "format:       "
-        << (kind.backend() ? "MLX -- runs on an mlx backend (Apple silicon)"
-                           : "MLX (Apple silicon)")
+        << (kind.backend()  ? "MLX -- runs on an mlx backend (Apple silicon)"
+            : kind.embeds() ? "MLX -- an mlx backend embeds with it (Apple silicon)"
+                            : "MLX (Apple silicon)")
         << "\n";
     out << "kind:         " << models::describe(kind) << "\n";
+    if (kind.embeds()) {
+        // How wide its vectors are, from its own config (53h).
+        out << "vectors:      " << models::describe(models::read_mlx_embedding_width(stored.dir))
+            << "\n";
+    }
     out << "lineage:      " << mlx_origin(models::load_snapshot(stored.dir), roots) << "\n";
     const models::MlxInfo info = models::read_mlx_info(stored.dir);
     out << "model_type:   " << (info.model_type.empty() ? "-" : info.model_type) << "\n";
@@ -1741,13 +1766,34 @@ std::string render_model_info(const harness::Config& config, std::string_view na
             const backends::MlxModelInfo info = backends::inspect_mlx_model(dir);
             out << "model_type:   " << (info.model_type.empty() ? "-" : info.model_type) << "\n";
             // What the directory is (53e), when there is one to say it.
+            bool embeds = false;
             if (std::error_code code; std::filesystem::is_directory(dir, code)) {
-                out << "kind:         " << models::describe(models::read_mlx_kind(dir)) << "\n";
+                const models::MlxKind kind = models::read_mlx_kind(dir);
+                embeds = kind.embeds();
+                out << "kind:         " << models::describe(kind) << "\n";
             }
             if (progress) {
                 progress("reading " + dir.filename().string(), 0, 0);
             }
             render_mlx_files(out, models::read_mlx_info(dir), value);
+            if (embeds) {
+                // An embedding entry (53h): its vectors' width, what embeds
+                // through it, and no chat's template, sight or sampling.
+                const backends::MlxEmbeddingsPackage package =
+                    backends::find_mlx_embeddings(backends::MlxHost::current());
+                out << "vectors:      " << models::describe(models::read_mlx_embedding_width(dir))
+                    << "\n";
+                out << "embeds:       "
+                    << (package.installed()
+                            ? "through mlx-embeddings " +
+                                  (package.version.empty() ? std::string{"(version unstated)"}
+                                                           : package.version) +
+                                  " -- the embedding role names this backend; it answers no chat"
+                            : "no -- mlx-embeddings is not installed (" +
+                                  std::string{backends::kMlxEmbeddingsRemedy} + ")")
+                    << "\n";
+                return out.str();
+            }
             out << "template:     "
                 << (info.chat_template ? "ships with the model"
                                        : "none -- a base model, offered no tools")
@@ -1912,6 +1958,8 @@ namespace {
     data["mlx_conversion"] = nullptr;
     // An MLX directory's kind, below (53e); null for every other format.
     data["kind"] = nullptr;
+    // An MLX embedding model's vector width, below (53h); null otherwise.
+    data["vector_width"] = nullptr;
     if (target.format == models::kGgufFormat) {
         for (const models::StoredGguf& stored : models::list_store_ggufs(roots, target.model)) {
             if (stored.id != target.id) {
@@ -1949,7 +1997,13 @@ namespace {
             }
             const models::MlxWindow window = models::mlx_window(info, {});
             data["window"] = window_of(window.window, window.configured, window.trained);
-            data["kind"] = models::read_mlx_kind(stored.dir).word;
+            const models::MlxKind kind = models::read_mlx_kind(stored.dir);
+            data["kind"] = kind.word;
+            if (const models::MlxEmbeddingWidth width =
+                    models::read_mlx_embedding_width(stored.dir);
+                kind.embeds() && width.known()) {
+                data["vector_width"] = width.width;
+            }
             // The record it was made by: a pull's ref, or the set a
             // conversion read.
             if (const std::optional<models::Snapshot> record = models::load_snapshot(stored.dir);

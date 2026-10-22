@@ -220,6 +220,8 @@ apogee_add_module(backends
     backends/mlx_protocol.cpp
     backends/mlx_local.h
     backends/mlx_local.cpp
+    backends/mlx_embed.h
+    backends/mlx_embed.cpp
     backends/factory.h
     backends/factory.cpp
     backends/provider_table.h

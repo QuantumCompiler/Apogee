@@ -489,6 +489,36 @@ TEST_CASE("an embedding model is refused by the MLX ladder alone; its GGUF is th
     CHECK(apogee::models::conversion_refusal(work.snapshot, work.root.path() / "out.gguf").empty());
 }
 
+TEST_CASE("the MLX ladder lets an embedding model through for mlx-embeddings' route alone",
+          "[models][convert][mlx][embedding]") {
+    // 53h: the caller has found the installed mlx-embeddings builds the
+    // set's type, and its route's kind is `embedding`; every other route
+    // keeps M21's refusal, worded as it was.
+    const MlxWork work;
+    write_file(work.snapshot / "config.json",
+               R"({"architectures": ["Gemma3TextModel"], "model_type": "gemma3_text"})");
+    write_file(work.snapshot / "modules.json",
+               R"([{"idx": 0, "path": "", "type": "sentence_transformers.models.Transformer"},
+                   {"idx": 1, "path": "1_Pooling",
+                    "type": "sentence_transformers.models.Pooling"}])");
+    CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out, "embedding").empty());
+    for (const char* kind : {"chat", "vision", ""}) {
+        INFO(kind);
+        CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out, kind)
+                  .ends_with("and the mlx backend does not embed -- convert it without --mlx"));
+    }
+    // Converted through the route: committed as an embedding model.
+    const apogee::models::MlxConvertResult result = apogee::models::convert_snapshot_to_mlx(
+        work.snapshot, work.out, 8,
+        writes({.bits = 8, .model_type = "gemma3_text", .kind = "embedding"}), {}, "embedding");
+    INFO(result.error);
+    REQUIRE(result.ok);
+    CHECK(result.kind == "embedding");
+    // A language model is not the embedder's to let through: nothing to lift.
+    const MlxWork plain;
+    CHECK(apogee::models::mlx_conversion_refusal(plain.snapshot, plain.out, "embedding").empty());
+}
+
 TEST_CASE("the MLX size estimate follows the bits", "[models][convert][mlx]") {
     CHECK(apogee::models::estimated_mlx_bytes(1'000'000'000, 4) == 500'000'000 + 62'500'000);
     CHECK(apogee::models::estimated_mlx_bytes(1'000'000'000, 8) == 1'000'000'000 + 62'500'000);

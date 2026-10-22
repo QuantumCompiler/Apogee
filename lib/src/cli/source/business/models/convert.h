@@ -119,8 +119,8 @@ struct MlxConvertResult {
     MlxInfo info;
     /// What kind of MLX directory the converter made (53e), for its record:
     /// `chat` for mlx-lm's language model, `vision` for mlx-vlm's build with
-    /// its towers kept (53f) -- the route's, as the caller names it. Set when
-    /// `ok`.
+    /// its towers kept (53f), `embedding` for mlx-embeddings' (53h) -- the
+    /// route's, as the caller names it. Set when `ok`.
     std::string kind{};
 };
 
@@ -131,9 +131,14 @@ struct MlxConvertResult {
 
 /// Why the MLX ladder's first rungs refuse, or empty -- before anything is
 /// announced: not a snapshot, a damaged one, one already quantized by
-/// `mlx-lm` (an MLX model runs as it is), or something already at `out`.
+/// `mlx-lm` (an MLX model runs as it is), a draft head, a diffusion model, an
+/// embedding model (M21), or something already at `out`. `kind` is what the
+/// route's converter builds (53f): `embedding` -- the caller has found the
+/// installed mlx-embeddings builds the set's type (53h) -- lifts M21's
+/// refusal; any other keeps it, worded as it was.
 [[nodiscard]] std::string mlx_conversion_refusal(const std::filesystem::path& snapshot,
-                                                 const std::filesystem::path& out);
+                                                 const std::filesystem::path& out,
+                                                 std::string_view kind = {});
 
 /// The ladder, in order:
 ///   1. `snapshot` is one, intact, and not already quantized by `mlx-lm`
@@ -145,7 +150,9 @@ struct MlxConvertResult {
 ///      the converter did not quantize as asked, is never committed
 /// A failure at any rung, cancellation included, removes `out`. Committing
 /// it under its id is the store's (`commit_mlx`). `kind` is what the route's
-/// converter builds (53f): `chat` for mlx-lm's, `vision` for mlx-vlm's.
+/// converter builds (53f): `chat` for mlx-lm's, `vision` for mlx-vlm's,
+/// `embedding` for mlx-embeddings' (53h), which rung 1 lets an embedding
+/// model through for.
 /// The `model_type` a snapshot's `config.json` declares, or empty.
 [[nodiscard]] std::string snapshot_model_type(const std::filesystem::path& snapshot);
 

@@ -9614,3 +9614,74 @@ Mlx-lm converted 6 of them as text alone, and Qwen3-Omni-30B (`qwen3_omni_moe`) 
 **Not done:**
 - The real pass on real weights is the user's run: an attached recording answered by an MLX omni model. Whether Gemma 4's and Qwen3-Omni's real chat templates place `{"type":"audio"}` parts is part of it.
 - `check` and `models info` do not yet say whether a backend hears, the way they say whether it sees.
+
+### 2026-10-21 — `mlx-embeddings` (backlog item 53h): an embedding model on MLX
+
+**Why.** Since M21 an embedding model (sentence-transformers, by its `modules.json`) converted to GGUF alone, and MLX was refused. Mlx-lm builds language models, and the `mlx` backend did not embed. Mlx-embeddings builds the user's Gemma-Embedding-300M whole: its `gemma3_text` carries the two dense layers and the `model.` prefix mlx-lm's strict load refused, and it pools first. It runs only as a library, so Apogee needed a driver. This was wall W4.
+
+- [x] **An `mlx-embeddings` requirement set** (`train setup --with mlx-embeddings`, with its completion):
+  - Its floor is `>=0.1.0` (released 2026-03-24), with Python `>=3.10`, reviewed 2026-10-21.
+  - It was checked through PyPI's JSON API, the GitHub tags API, and `models/` read at v0.0.3–v0.1.0.
+  - `gemma3_text.py` ships from 0.0.4. 0.1.0 is the first to turn the padding mask (`mx.where`) and pool before the dense layers, which a padded batch needs.
+  - It joins the bootstrap on Apple silicon (SPEC's 2026-10-19 install amendment: said and skippable).
+- [x] **The `mlx_embeddings.convert` route** in the seeded `mlx_convert.py`, chosen for an embedding model by M21's reader. Its record's kind is **`embedding`**. The core convert path asks again whether the installed mlx-embeddings builds the type, so nothing reaches the conversion without the door's check.
+- [x] **M21's decision gains `mlx`** for an embedding model whose type the installed mlx-embeddings' own `models/` has, and the refusal is lifted for such a set. Without mlx-embeddings, or for a type it lacks, everything reads byte for byte as M21 left it: `["gguf"]` and the same refusal.
+- [x] **A new seeded driver, `assets/mlx/mlx_embed.py`.**
+  - One child holds the model (`load(path)`, `model(input_ids).text_embeds`, pooled and normalized). It reads JSONL batches of texts and writes their vectors.
+  - Its descriptor 1 is on stderr before importing.
+  - Its length cap is `sentence_bert_config.json`'s `max_seq_length`, else 512.
+  - Texts that are not valid UTF-8 cross with U+FFFD in place of the bad bytes.
+- [x] **`EmbeddingCapable` on an `mlx` entry over an `embedding` directory** (`backends/mlx_embed`), discovered by the harness and never cast.
+  - It is its own class, so no chat entry claims to embed.
+  - Its chat, stream and complete refuse before a spawn, naming the embedding role.
+  - It is unmetered, so a collection is vectorized on auto as llama.cpp's is.
+- [x] **The one-retriever rule, unchanged.** The entry names its vectors `mlx:<model>`. A collection it builds stays bound to it, and the same set's GGUF build is another model, so the collection demotes to lexical with the re-ingest hint.
+- [x] **`config scan --register`** adds an `embedding` directory as an `mlx` entry the embedding role can name (`config set-default-embedding`). 53e's kind rule now registers chat, vision and embedding.
+- [x] **The vector width** comes from the directory's own config: the last Dense's `out_features`, else `hidden_size`, else `text_config.hidden_size`.
+  - Mlx-embeddings' converter copies only top-level files, so the user's build reads 768 from `hidden_size`.
+  - After its first call the provider reports the width it saw.
+  - `models info` says it as a `vectors:` line and a new `data.vector_width`, both additive.
+- [x] **`check`** gains an MLX "embeddings" row, an "embedding driver" row and a Config row for embedding entries. `training.md` and `machine-mode.md` gain the set and the fields.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - The driver batches 64 texts per request, the embedding seam's slice.
+  - The width comes from the directory's config.
+  - The binding is held apart by the vector name, not a store schema change.
+- **The floor is 0.1.0, above the first release that ships the module (0.0.4).** Through 0.0.5 the module ran the dense layers before pooling and passed its padding mask raw, which a batched driver would get wrong.
+- **The embedder is its own provider class, not part of `mlx_local`**, since the harness finds capabilities by type. About 100 lines of child plumbing are duplicated rather than refactoring 27a's provider.
+- **The mlx-lm rung stays in the embedding entry's ladder.** Mlx-embeddings pulls mlx-lm in through mlx-vlm.
+- **The set joins the bootstrap on Apple silicon**, as every set the host can install does since the 2026-10-19 amendment.
+- **EmbeddingGemma's task prompts are not applied**, the same as the llamacpp embedder today.
+
+**Verified.**
+- 21 new cases across these suites:
+
+  | Suite | New | What they cover |
+  |---|---|---|
+  | `mlx_embed_test` | 5 | slicing in 64s, chat refused, driver failures, cancel paths, the ladder |
+  | `mlx_embed_driver_test` | 3 | the real driver under the stub `mlx_embeddings` |
+  | `mlx_protocol_test` | 2 | the embed line, vectors parsing |
+  | `mlx_info_test` | 2 | which kinds register, the width reader |
+  | `store_test` | 1 | M21's decision with installed types |
+  | `models/convert_test` | 1 | the ladder lifted for the embedding route only |
+  | `mlx_convert_test` | 2 | the route |
+  | `retrieval_test` | 1 | the binding, and demotion under another embedder |
+  | `factory_harness_test` | 1 | `EmbeddingCapable` found on built providers |
+  | `models_mlx_test` | 2 | M21's cases kept; the user's set converted, registered, ingested and queried |
+  | `check_test` | 1 | the embedding entry's rows |
+- `cli.mlx_models_lifecycle` gained a real-binary phase: convert, `scan --register`, `embed ingest`, a `--rag --retriever vector` turn, chat refused, the driver's noise kept off apogee's streams, and lexical under another embedder.
+- The neighbouring suites pass: `[mlx]`, `[models]`, `[kind]`, `[towers]`, `[training]`, `[bootstrap]`, `[assets]`, `[check]`, `[retrieval]`, `[factory]`, `[harness]`, `[scan]`, `[config]` and `[completion]`.
+- ctest:
+  - `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`;
+  - `cli.mlx_lifecycle`, `cli.mlx_models_lifecycle`, `cli.machine_schema_conformance`, `cli.train_lifecycle`, `cli.config_lifecycle`;
+  - `cli.auto_rag`, `cli.knowledge_lifecycle`, `cli.one_role_resolver`, `cli.install_is_ours_only`;
+  - the completion and no-socket checks.
+
+  All pass.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,749 tests and the macOS app's 342 cases passed, with no warning.
+
+**Not done:**
+- Real vectors from the user's set are the user's run.
+- `check` does not compare an installed mlx-embeddings' version against its floor.
+- `train setup --with`'s help text, already stale, is unchanged.

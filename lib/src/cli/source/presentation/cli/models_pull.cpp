@@ -808,13 +808,23 @@ SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view
 }
 
 std::string_view MlxRoute::kind() const noexcept {
-    return converter == training::MlxConverterKind::MlxVlm ? models::kMlxVision : models::kMlxChat;
+    switch (converter) {
+        case training::MlxConverterKind::MlxVlm:
+            return models::kMlxVision;
+        case training::MlxConverterKind::MlxEmbeddings:
+            return models::kMlxEmbedding;
+        case training::MlxConverterKind::MlxLm:
+            break;
+    }
+    return models::kMlxChat;
 }
 
 MlxRoute mlx_route(const std::filesystem::path& snapshot, bool text_only) {
     MlxRoute route;
     route.towers = models::snapshot_towers(snapshot);
-    route.converter = training::choose_mlx_converter(!route.towers.empty(), text_only);
+    route.embedding = models::snapshot_embedding_model(snapshot).has_value();
+    route.converter =
+        training::choose_mlx_converter(!route.towers.empty(), text_only, route.embedding);
     return route;
 }
 
@@ -836,10 +846,33 @@ std::optional<bool> installed_mlx_builds(const std::filesystem::path& snapshot, 
     return std::ranges::find(types, type) != types.end();
 }
 
+models::EmbeddingBuilds installed_mlx_embedding_builds() {
+    return
+        [types = std::optional<std::vector<std::string>>{}](std::string_view model_type) mutable {
+            if (!types.has_value()) {
+                types = installed_mlx_model_types(training::MlxConverterKind::MlxEmbeddings);
+            }
+            return std::ranges::find(*types, model_type) != types->end();
+        };
+}
+
 MlxOffer installed_mlx_offer(const std::filesystem::path& snapshot) {
     MlxOffer offer;
     offer.towers = models::snapshot_towers(snapshot);
     offer.type = models::read_mlx_config(snapshot).model_type;
+    if (models::snapshot_embedding_model(snapshot).has_value()) {
+        // mlx-embeddings' build, where the one installed builds its type
+        // (53h): with none installed to ask, M21's answer stands -- nothing
+        // is offered, and the GGUF is the conversion.
+        if (installed_mlx_builds(snapshot) == true) {
+            offer.converter = training::MlxConverterKind::MlxEmbeddings;
+        } else {
+            offer.gap =
+                "mlx-embeddings in Apogee's Python environment builds no " +
+                (offer.type.empty() ? std::string{"model of its type"} : offer.type + " model");
+        }
+        return offer;
+    }
     // mlx-lm's answer: the whole route of a language model, the text-only
     // one of a set with towers.
     const std::optional<bool> lm = installed_mlx_builds(snapshot, {}, /*text_only=*/true);
@@ -1028,6 +1061,41 @@ void print_mlx_backend_hint(const models::StoredMlx& stored) {
         std::cout << "(the mlx backend runs on Apple silicon macOS only; this build is "
                   << platform::host_target() << ")\n";
     }
+}
+
+/// What an `mlx` entry over an embedding model is for (53h): the role that
+/// names it, in the one wording the standalone verb and the chain share.
+[[nodiscard]] std::string embedding_role_note(const std::string& name) {
+    return "note: an embedding model -- the backend embeds and answers no chat; point the "
+           "embedding role at it: apogee config set-default-embedding " +
+           name;
+}
+
+/// The two commands that put an MLX embedding model to use (53h): an `mlx`
+/// entry over it, and the embedding role pointed at that entry.
+void print_mlx_embedding_hint(const models::StoredMlx& stored) {
+    const std::string name = models::stored_mlx_name(stored);
+    std::cout << "\nUse it as the embedding role by adding a backend:\n"
+              << "  apogee config add-backend " << name << " --type mlx --model-path "
+              << stored.dir.string() << "\n"
+              << "  apogee config set-default-embedding " << name << "\n";
+    if (platform::host_target() != "macos-arm64") {
+        std::cout << "(the mlx backend runs on Apple silicon macOS only; this build is "
+                  << platform::host_target() << ")\n";
+    }
+}
+
+/// An embedding model's modules, as its `modules.json` names them (M21):
+/// "Transformer, Pooling, Dense, Dense, Normalize".
+[[nodiscard]] std::string embedding_modules(const std::filesystem::path& snapshot) {
+    std::string out;
+    if (const std::optional<models::EmbeddingModel> model =
+            models::snapshot_embedding_model(snapshot)) {
+        for (const std::string& word : model->modules) {
+            out += (out.empty() ? "" : ", ") + word;
+        }
+    }
+    return out;
 }
 
 [[nodiscard]] models::StoredMlx stored_at(const models::StoreRoots& roots, std::string_view model,
@@ -1486,16 +1554,21 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
         fail(damaged + " -- or repair it in place with 'apogee models repair " + source.model +
              "'");
     }
-    if (const std::string refused = models::mlx_conversion_refusal(source.path, {});
+    // Which converter builds it, from its own files (53f): mlx-vlm keeps a
+    // set's towers, and mlx-lm builds a language model -- or, asked, a
+    // towered set's language model alone; mlx-embeddings an embedding model
+    // whole (53h), which the ladder lets through for it alone.
+    const MlxRoute route = mlx_route(source.path, text_only);
+    const bool vlm = route.converter == training::MlxConverterKind::MlxVlm;
+    // The ladder lifts M21's refusal for the embedding route only where the
+    // mlx-embeddings installed builds the set's type -- the door's own
+    // question, asked again here so no other way in skips it.
+    const bool embeds = route.embedding && installed_mlx_builds(source.path, model_type) == true;
+    if (const std::string refused = models::mlx_conversion_refusal(
+            source.path, {}, route.embedding && !embeds ? std::string_view{} : route.kind());
         !refused.empty()) {
         fail(refused);
     }
-
-    // Which converter builds it, from its own files (53f): mlx-vlm keeps a
-    // set's towers, and mlx-lm builds a language model -- or, asked, a
-    // towered set's language model alone.
-    const MlxRoute route = mlx_route(source.path, text_only);
-    const bool vlm = route.converter == training::MlxConverterKind::MlxVlm;
     if (text_only && route.towers.empty()) {
         std::cout << "the snapshot declares no vision or audio tower -- --text-only changes "
                      "nothing; converting it as it is\n";
@@ -1536,7 +1609,9 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
             out.dir = stored.dir;
             out.existed = true;
             out.info = models::read_mlx_info(stored.dir);
-            if (!chained) {
+            if (!chained && route.embedding) {
+                print_mlx_embedding_hint(stored);
+            } else if (!chained) {
                 print_mlx_backend_hint(stored);
             }
             return out;
@@ -1549,7 +1624,9 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
     std::cout << "converting " << source.path.string() << " to MLX (" << precision.name
               << (estimate > 0 ? ", about " + format_progress_size(estimate) : std::string{})
               << ") -- "
-              << (vlm ? "mlx-vlm's converter, its towers kept (" + towers + ")"
+              << (route.embedding ? "mlx-embeddings' converter, an embedding model built whole (" +
+                                        embedding_modules(source.path) + ")"
+                  : vlm           ? "mlx-vlm's converter, its towers kept (" + towers + ")"
                   : route.towers.empty()
                       ? std::string{"mlx-lm's converter"}
                       : "mlx-lm's converter, its language model alone (--text-only: " + towers +
@@ -1653,11 +1730,20 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
               << "verified: config.json, a tokenizer and " << out.info.shards.size()
               << " shard header(s) read whole\n"
               << "mlx model: " << mlx_summary(out.info) << "\n";
-    if (vlm) {
+    if (vlm || route.embedding) {
         // What its record now says it is (53e), and so what runs it.
         std::cout << "kind: " << models::describe(models::read_mlx_kind(out.dir)) << "\n";
     }
+    if (route.embedding) {
+        // How wide its vectors are, as its own config says (53h).
+        std::cout << "vectors: " << models::describe(models::read_mlx_embedding_width(out.dir))
+                  << "\n";
+    }
     if (!chained) {
+        if (route.embedding) {
+            print_mlx_embedding_hint(stored_at(roots, out.model, out.dir));
+            return out;
+        }
         if (!models::snapshot_has_chat_template(source.path)) {
             std::cout << base_model_note() << "\n";
         }
@@ -2420,6 +2506,8 @@ void run_mlx_register_chain(const MlxRegisterRequest& request,
         joined += (joined.empty() ? "" : ",") + precision;
     }
     check_registrations(roots, request.config_path, source.model, names, models::kMlxFormat);
+    // An embedding model's entries embed, and chat with nothing (53h).
+    const bool embedding = models::snapshot_embedding_model(source.path).has_value();
 
     ChainLog log;
     log.resume =
@@ -2440,7 +2528,10 @@ void run_mlx_register_chain(const MlxRegisterRequest& request,
                  made[index] = convert_model_to_mlx(roots, snapshot, snapshot_from, precision,
                                                     converter_for(precision), request.model_type,
                                                     /*chained=*/true, request.text_only);
-                 if (!models::snapshot_has_chat_template(source.path)) {
+                 if (embedding) {
+                     // What the entry is for (53h): the embedding role.
+                     chain.note(embedding_role_note(names[index]));
+                 } else if (!models::snapshot_has_chat_template(source.path)) {
                      chain.note(base_model_note());
                  }
              }});
@@ -2483,14 +2574,19 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
     if (!source.error.empty()) {
         fail(source.error);
     }
-    // Nor is an embedding model an MLX conversion's: refused before the
-    // chain announces a step (M21).
+    const std::string& as = registers != nullptr ? registers->model_type : model_type;
+    // Nor is an embedding model an MLX conversion's (M21) -- unless the
+    // mlx-embeddings installed builds its type (53h). Everywhere else, that
+    // type unbuilt or no mlx-embeddings to ask, it is refused as M21 refused
+    // it, before the chain announces a step.
     if (const std::optional<models::EmbeddingModel> embedding =
-            models::snapshot_embedding_model(source.path)) {
+            models::snapshot_embedding_model(source.path);
+        embedding.has_value() && installed_mlx_builds(source.path, as) != true) {
         fail(models::embedding_model_mlx_refusal("'" + name + "'", *embedding));
     }
     // Which converter, by the set's own files (53f): its towers kept through
-    // mlx-vlm unless --text-only asks for mlx-lm's build.
+    // mlx-vlm unless --text-only asks for mlx-lm's build; an embedding model
+    // built whole through mlx-embeddings (53h).
     const MlxRoute route = mlx_route(source.path, text_only);
     const bool vlm = route.converter == training::MlxConverterKind::MlxVlm;
     const std::string towers = models::describe_towers(route.towers);
@@ -2498,6 +2594,11 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
     const backends::MlxHost host = backends::MlxHost::current();
     const backends::MlxReadiness runtime = backends::probe_mlx_runtime(host);
     if (!runtime.ready() && runtime.refusal != backends::MlxRefusal::NoDriver) {
+        if (route.embedding) {
+            // mlx-embeddings' set brings mlx-lm with it, through mlx-vlm.
+            fail("--mlx builds '" + name + "' through mlx-embeddings, an embedding model built " +
+                 "whole: " + runtime.reason + " -- " + std::string{backends::kMlxEmbeddingsRemedy});
+        }
         if (vlm) {
             // mlx-vlm's set brings mlx-lm with it.
             fail("--mlx builds '" + name + "' through mlx-vlm, its towers kept (" + towers +
@@ -2511,7 +2612,6 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
         fail("the MLX converter is missing: " + script.string() +
              " -- run 'apogee check --fix' to seed it");
     }
-    const std::string& as = registers != nullptr ? registers->model_type : model_type;
     const std::filesystem::path package =
         training::find_site_package(host.venv, training::mlx_converter_package(route.converter));
     // The other route's answer, said beside a refusal where it would work:

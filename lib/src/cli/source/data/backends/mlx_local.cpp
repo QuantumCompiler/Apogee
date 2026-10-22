@@ -157,11 +157,11 @@ constexpr std::string_view kSetupRemedy = "apogee train setup --with mlx";
     return readiness;
 }
 
-void refuse_driver(MlxReadiness& readiness, const MlxHost& host) {
+void refuse_driver(MlxReadiness& readiness, const std::filesystem::path& driver) {
     std::error_code code;
-    if (!std::filesystem::is_regular_file(host.driver, code)) {
+    if (!std::filesystem::is_regular_file(driver, code)) {
         readiness.refusal = MlxRefusal::NoDriver;
-        readiness.reason = "the MLX driver is missing: " + host.driver.string();
+        readiness.reason = "the MLX driver is missing: " + driver.string();
         readiness.remedy = "apogee check --fix";
     }
 }
@@ -375,6 +375,7 @@ MlxHost MlxHost::at(const std::filesystem::path& home) {
     host.target = platform::host_target();
     host.venv = home / "training" / "venv";
     host.driver = home / harness::bundled_mlx_driver_relative_path();
+    host.embedder = home / harness::bundled_mlx_embedder_relative_path();
     return host;
 }
 
@@ -400,6 +401,8 @@ std::string_view to_string(MlxRefusal refusal) noexcept {
             return "not a model directory";
         case MlxRefusal::NoMlxVlm:
             return "no mlx-vlm";
+        case MlxRefusal::NoMlxEmbeddings:
+            return "no mlx-embeddings";
         case MlxRefusal::NoDriver:
             return "no driver";
     }
@@ -440,7 +443,7 @@ std::string MlxAudio::message() const {
 MlxReadiness probe_mlx_runtime(const MlxHost& host) {
     MlxReadiness readiness = probe_environment(host);
     if (readiness.ready()) {
-        refuse_driver(readiness, host);
+        refuse_driver(readiness, host.driver);
     }
     return readiness;
 }
@@ -484,10 +487,26 @@ MlxReadiness probe_mlx_backend(std::string_view name, const harness::BackendConf
         readiness.remedy = fix;
         return readiness;
     }
+    const models::MlxKind kind = models::read_mlx_kind(readiness.model_dir);
+    // An embedding model mlx-embeddings built is embedded with through it
+    // alone, by its own driver (53h).
+    if (kind.embeds()) {
+        if (!find_mlx_embeddings(host).installed()) {
+            readiness.refusal = MlxRefusal::NoMlxEmbeddings;
+            readiness.reason = readiness.model_dir.string() +
+                               " is an embedding model mlx-embeddings built (its record says "
+                               "embedding), and mlx-embeddings is not installed in the Python "
+                               "environment at " +
+                               host.venv.string();
+            readiness.remedy = std::string{kMlxEmbeddingsRemedy};
+            return readiness;
+        }
+        refuse_driver(readiness, host.embedder);
+        return readiness;
+    }
     // A directory mlx-vlm built loads through it alone (53f): without it not
     // even a text turn can be answered.
-    if (loads_through_vlm(models::read_mlx_kind(readiness.model_dir)) &&
-        !find_mlx_vlm(host).installed()) {
+    if (loads_through_vlm(kind) && !find_mlx_vlm(host).installed()) {
         readiness.refusal = MlxRefusal::NoMlxVlm;
         readiness.reason = readiness.model_dir.string() +
                            " was built by mlx-vlm (its record says vision), which loads it for "
@@ -497,7 +516,7 @@ MlxReadiness probe_mlx_backend(std::string_view name, const harness::BackendConf
         readiness.remedy = std::string{kMlxVisionRemedy};
         return readiness;
     }
-    refuse_driver(readiness, host);
+    refuse_driver(readiness, host.driver);
     return readiness;
 }
 
@@ -563,6 +582,15 @@ MlxModelInfo inspect_mlx_model(const std::filesystem::path& dir) {
 MlxVlmPackage find_mlx_vlm(const MlxHost& host) {
     MlxVlmPackage found;
     found.dir = find_package(host.venv, "mlx_vlm");
+    if (found.installed()) {
+        found.version = installed_version(found.dir);
+    }
+    return found;
+}
+
+MlxEmbeddingsPackage find_mlx_embeddings(const MlxHost& host) {
+    MlxEmbeddingsPackage found;
+    found.dir = find_package(host.venv, "mlx_embeddings");
     if (found.installed()) {
         found.version = installed_version(found.dir);
     }

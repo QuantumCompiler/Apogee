@@ -12,7 +12,12 @@
 # directory whole. Since 53f a set that sees, converted through the stub
 # `mlx_vlm.convert` with its tower kept and recorded `vision`, then a backend
 # over it answering a text turn and a picture through mlx-vlm, mlx-lm's
-# loader never asked.
+# loader never asked. Since 53h the user's embedding set, converted through
+# the stub `mlx_embeddings.convert` and recorded `embedding`, registered by
+# `config scan`, and named as the embedding role: a collection ingested and a
+# retrieval turn answered on vectors from the real seeded `mlx_embed.py`, a
+# chat on it refused, and another embedder's space demoting the collection to
+# lexical.
 #
 # Apple silicon only: the mlx runtime runs nowhere else (the in-process
 # suite, `models_mlx_test`, covers the rest on every platform).
@@ -218,6 +223,104 @@ grep -q '^vlm generate images=1 ' "$STUB_MLX_RECORD" \
     || fail "no turn carried the picture: $(cat "$STUB_MLX_RECORD")"
 if pgrep -f "$WORK_DIR/training/scripts/mlx_generate.py" >/dev/null 2>&1; then
     fail "a driver outlived its apogee: $(pgrep -fl "$WORK_DIR/training/scripts/mlx_generate.py")"
+fi
+
+# --- an embedding model (53h): built whole through mlx-embeddings, then the role on it ---
+# M21's fixture of the user's Gemma-Embedding-300M: a bare Gemma3TextModel,
+# then Pooling, two Dense layers and Normalize, by its own modules.json.
+mlx_fake_embeddings "$WORK_DIR" "$MLX_STUBS"
+EMB="$WORK_DIR/models/Gemma-Embedding-300M/safetensors/b6845e67fafb"
+python3 - "$EMB" <<'EOF' || fail "could not write the embedding snapshot"
+import json, os, struct, sys
+d = sys.argv[1]
+os.makedirs(os.path.join(d, "2_Dense"))
+json.dump({"architectures": ["Gemma3TextModel"], "model_type": "gemma3_text",
+           "hidden_size": 768}, open(os.path.join(d, "config.json"), "w"))
+json.dump([{"idx": 0, "path": "", "type": "sentence_transformers.models.Transformer"},
+           {"idx": 1, "path": "1_Pooling", "type": "sentence_transformers.models.Pooling"},
+           {"idx": 2, "path": "2_Dense", "type": "sentence_transformers.models.Dense"},
+           {"idx": 3, "path": "3_Dense", "type": "sentence_transformers.models.Dense"},
+           {"idx": 4, "path": "4_Normalize", "type": "sentence_transformers.models.Normalize"}],
+          open(os.path.join(d, "modules.json"), "w"))
+json.dump({"model": {"type": "BPE"}}, open(os.path.join(d, "tokenizer.json"), "w"))
+header = json.dumps({"__metadata__": {"format": "pt"},
+                     "w": {"dtype": "F16", "shape": [64], "data_offsets": [0, 128]}}).encode()
+for shard in ("model.safetensors", os.path.join("2_Dense", "model.safetensors")):
+    with open(os.path.join(d, shard), "wb") as out:
+        out.write(struct.pack("<Q", len(header)) + header + b"\0" * 128)
+EOF
+"$APOGEE_BIN" models info Gemma-Embedding-300M/safetensors/b6845e67fafb --output-format json \
+    >"$WORK_DIR/emb-info.json" 2>&1 || fail "models info of the embedding set"
+grep -q '"converts_to":\["gguf","mlx"\]' "$WORK_DIR/emb-info.json" \
+    || fail "the embedding set was not offered MLX through mlx-embeddings: $(cat "$WORK_DIR/emb-info.json")"
+"$APOGEE_BIN" models convert Gemma-Embedding-300M --mlx --type 8bit >"$WORK_DIR/emb.txt" \
+    2>"$WORK_DIR/emb.err" || fail "convert --mlx of the embedding set failed: $(cat "$WORK_DIR/emb.err")"
+grep -q "mlx-embeddings' converter, an embedding model built whole" "$WORK_DIR/emb.txt" \
+    || fail "the conversion did not say mlx-embeddings built it: $(cat "$WORK_DIR/emb.txt")"
+if grep -q "\[INFO\]" "$WORK_DIR/emb.txt" "$WORK_DIR/emb.err"; then
+    fail "mlx-embeddings' own print reached a terminal stream"
+fi
+EMB_SETS=("$WORK_DIR"/models/Gemma-Embedding-300M/mlx/*/)
+[ "${#EMB_SETS[@]}" -eq 1 ] || fail "expected one MLX build of the embedding set, found: ${EMB_SETS[*]}"
+grep -q '"transform": "mlx_embeddings.convert 8bit"' "${EMB_SETS[0]}apogee-snapshot.json" \
+    || fail "the record does not say mlx-embeddings made it: $(cat "${EMB_SETS[0]}apogee-snapshot.json")"
+grep -q '"kind": "embedding"' "${EMB_SETS[0]}apogee-snapshot.json" \
+    || fail "the record does not say embedding: $(cat "${EMB_SETS[0]}apogee-snapshot.json")"
+no_driver_left
+
+# Registered by the scan as an mlx entry, and named as the embedding role.
+"$APOGEE_BIN" config scan --register >"$WORK_DIR/emb-scan.txt" 2>&1 || fail "config scan --register"
+grep -q "added backend 'Gemma-Embedding-300M-8bit' -- an embedding model" "$WORK_DIR/emb-scan.txt" \
+    || fail "the scan did not register the embedding model: $(cat "$WORK_DIR/emb-scan.txt")"
+"$APOGEE_BIN" config set-default-embedding Gemma-Embedding-300M-8bit >/dev/null \
+    || fail "set-default-embedding"
+"$APOGEE_BIN" config add-backend mock --type mock >/dev/null || fail "add-backend mock"
+mkdir -p "$WORK_DIR/corpus"
+printf 'the zarquon widget sits on the warm mat\n' >"$WORK_DIR/corpus/widgets.txt"
+printf 'dogs bark at the moon at night\n' >"$WORK_DIR/corpus/dogs.txt"
+: >"$STUB_MLX_RECORD"
+# A library that narrates its load: none of it may reach apogee's streams.
+STUB_MLX_NOISE="embedder narrating its load" \
+    "$APOGEE_BIN" embed ingest notes "$WORK_DIR/corpus" >"$WORK_DIR/ingest.txt" 2>"$WORK_DIR/ingest.err" \
+    || fail "embed ingest on the MLX embedder failed: $(cat "$WORK_DIR/ingest.err")"
+grep -q '^embeddings noise' "$STUB_MLX_RECORD" || fail "the stub never narrated its load"
+if grep -q "embedder narrating its load" "$WORK_DIR/ingest.txt" "$WORK_DIR/ingest.err"; then
+    fail "the embedding driver's stderr reached a terminal stream"
+fi
+grep -qF "vector(s) [mlx:${EMB_SETS[0]%/}]" "$WORK_DIR/ingest.txt" \
+    || fail "the collection was not vectorised by the MLX embedder: $(cat "$WORK_DIR/ingest.txt")"
+[ "$(grep -c '^embeddings load ' "$STUB_MLX_RECORD")" -eq 1 ] \
+    || fail "expected one load through mlx-embeddings: $(cat "$STUB_MLX_RECORD")"
+if grep -q '^load \|^vlm load ' "$STUB_MLX_RECORD"; then
+    fail "a chat runtime loaded the embedding model: $(cat "$STUB_MLX_RECORD")"
+fi
+
+# A retrieval turn on it: the question embedded by the same backend.
+"$APOGEE_BIN" complete -m mock -v --rag notes --retriever vector "what sits on the zarquon mat?" \
+    >"$WORK_DIR/rag.txt" 2>&1 || fail "a retrieval turn on the MLX embedder failed: $(cat "$WORK_DIR/rag.txt")"
+grep -q "\[vector\]" "$WORK_DIR/rag.txt" \
+    || fail "the turn did not search by vector: $(cat "$WORK_DIR/rag.txt")"
+
+# A chat on the embedding entry is refused, saying what it is.
+if "$APOGEE_BIN" complete -m Gemma-Embedding-300M-8bit "hello?" >"$WORK_DIR/chat.txt" 2>&1; then
+    fail "a chat on the embedding entry was answered: $(cat "$WORK_DIR/chat.txt")"
+fi
+grep -q "answers no chat or completion" "$WORK_DIR/chat.txt" \
+    || fail "the refusal did not say what the entry is: $(cat "$WORK_DIR/chat.txt")"
+
+# Another embedder's space: the collection is another model's to it, demoted
+# to lexical with the re-ingest hint -- never queried across the two.
+"$APOGEE_BIN" config add-backend other-embed --type mock --embedding-model Gemma-Embedding-300M-8bit \
+    >/dev/null || fail "add-backend other-embed"
+"$APOGEE_BIN" config set-default-embedding other-embed >/dev/null || fail "set-default-embedding other"
+"$APOGEE_BIN" embed query notes "zarquon mat" >"$WORK_DIR/demoted.txt" 2>&1 \
+    || fail "embed query under another embedder failed: $(cat "$WORK_DIR/demoted.txt")"
+grep -q "\[lexical\]" "$WORK_DIR/demoted.txt" \
+    || fail "another space did not fall to lexical: $(cat "$WORK_DIR/demoted.txt")"
+grep -q "re-run" "$WORK_DIR/demoted.txt" \
+    || fail "the lexical fallback carried no re-ingest hint: $(cat "$WORK_DIR/demoted.txt")"
+if pgrep -f "$WORK_DIR/training/scripts/mlx_embed.py" >/dev/null 2>&1; then
+    fail "an embedding driver outlived its apogee: $(pgrep -fl "$WORK_DIR/training/scripts/mlx_embed.py")"
 fi
 
 echo "mlx_models_e2e: ok"

@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <random>
@@ -18,6 +19,7 @@
 #include "contracts/config.h"
 #include "contracts/errors.h"
 #include "harness/harness.h"
+#include "platform/platform.h"
 #include "secrets/store.h"
 #include "support/env_guard.h"
 #include "support/fake_child.h"
@@ -139,6 +141,70 @@ TEST_CASE("embedding is a per-entry capability the harness discovers, and Anthro
     CHECK(harness.generation_is_metered("gpt"));
     CHECK(harness.generation_is_metered("gemini"));
     CHECK_FALSE(harness.generation_is_metered("mock"));
+}
+
+TEST_CASE(
+    "an mlx entry over an embedding model embeds, discovered by the harness, and chats with "
+    "nothing",
+    "[backends][factory][embed][capability][mlx]") {
+    // 53h: the factory builds the embedding provider for an entry whose
+    // directory mlx-embeddings built; the Harness discovers EmbeddingCapable
+    // on the object, never a type. A chat entry beside it is no embedder.
+    // Construction asks files only -- nothing is spawned here.
+    if (apogee::platform::host_target() != "macos-arm64") {
+        SKIP("the mlx backend's ladder refuses every host but Apple silicon");
+    }
+    const apogee::testing::TempDir home{"factory-mlx-embed-" +
+                                        std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard root{"APOGEE_HOME", home.path().string()};
+    const std::filesystem::path site =
+        home.path() / "training" / "venv" / "lib" / "python3.99" / "site-packages";
+    const auto touch = [](const std::filesystem::path& path, const std::string& text) {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream{path, std::ios::binary} << text;
+    };
+    touch(home.path() / "training" / "venv" / "bin" / "python", "#!/bin/sh\n");
+    touch(site / "mlx_lm" / "__init__.py", "");
+    touch(site / "mlx_embeddings" / "__init__.py", "");
+    touch(home.path() / "training" / "scripts" / "mlx_generate.py", "#\n");
+    touch(home.path() / "training" / "scripts" / "mlx_embed.py", "#\n");
+    const std::filesystem::path embed = home.path() / "models" / "embed";
+    touch(embed / "config.json", R"({"model_type": "gemma3_text", "hidden_size": 768})");
+    touch(embed / "apogee-snapshot.json",
+          R"({"source": "convert", "transform": "mlx_embeddings.convert 8bit", "files": [],)"
+          R"( "kind": "embedding"})");
+    const std::filesystem::path talk = home.path() / "models" / "talk";
+    touch(talk / "config.json", R"({"model_type": "llama"})");
+
+    apogee::harness::Config config;
+    apogee::harness::BackendConfig entry;
+    entry.type = apogee::harness::BackendType::Mlx;
+    entry.model_path = embed.string();
+    config.backends.emplace("embed", entry);
+    entry.model_path = talk.string();
+    config.backends.emplace("talk", entry);
+    apogee::harness::Harness harness{config};
+    const auto built = apogee::backends::build_providers(harness, {});
+    INFO(built.skipped_summary());
+    REQUIRE(built.constructed_count() == 2);
+
+    CHECK(harness.can_embed("embed"));
+    CHECK_FALSE(harness.can_embed("talk"));
+    apogee::harness::EmbeddingCapable* embedder = harness.embedder_for("embed");
+    REQUIRE(embedder != nullptr);
+    CHECK(embedder->embedding_model_name() == "mlx:" + embed.string());
+    CHECK(embedder->embedding_dimensions() == 768);
+    CHECK_FALSE(embedder->embedding_is_metered());
+    CHECK_FALSE(harness.generation_is_metered("embed"));
+
+    // Without mlx-embeddings the entry is skipped with its rung and its fix.
+    std::filesystem::remove_all(site / "mlx_embeddings");
+    apogee::harness::Harness bare{config};
+    const auto skipped = apogee::backends::build_providers(bare, {});
+    CHECK(skipped.constructed_count() == 1);
+    CHECK(skipped.skipped_summary().find("apogee train setup --with mlx-embeddings") !=
+          std::string::npos);
+    CHECK_FALSE(bare.can_embed("embed"));
 }
 
 TEST_CASE("a suite switch rebuilds exactly the backends it re-pins",

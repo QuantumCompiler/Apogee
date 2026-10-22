@@ -45,6 +45,10 @@ constexpr std::array<MlxPrecision, 7> kPrecisions{{
 /// not know: argparse's own words.
 constexpr std::string_view kUnknownRoute = "unrecognized arguments: --with";
 
+/// What a seeded driver from before the mlx-embeddings route says when
+/// handed it (53h): argparse refusing the choice.
+constexpr std::string_view kUnknownChoice = "argument --with: invalid choice";
+
 /// Whether `source` names `Model` as a word of its own -- an import or a
 /// definition, never a longer name that ends in it (`LanguageModel`).
 [[nodiscard]] bool names_model(const std::string& source) {
@@ -71,24 +75,62 @@ constexpr std::string_view kUnknownRoute = "unrecognized arguments: --with";
 
 }  // namespace
 
-MlxConverterKind choose_mlx_converter(bool towers, bool text_only) noexcept {
+MlxConverterKind choose_mlx_converter(bool towers, bool text_only, bool embedding) noexcept {
+    if (embedding) {
+        // An embedding model is built whole by mlx-embeddings, or not at all
+        // (53h): mlx-lm builds no embedding model, and --text-only leaves
+        // nothing out of one.
+        return MlxConverterKind::MlxEmbeddings;
+    }
     return towers && !text_only ? MlxConverterKind::MlxVlm : MlxConverterKind::MlxLm;
 }
 
 std::string_view to_string(MlxConverterKind converter) noexcept {
-    return converter == MlxConverterKind::MlxVlm ? "mlx-vlm" : "mlx-lm";
+    switch (converter) {
+        case MlxConverterKind::MlxLm:
+            return "mlx-lm";
+        case MlxConverterKind::MlxVlm:
+            return "mlx-vlm";
+        case MlxConverterKind::MlxEmbeddings:
+            return "mlx-embeddings";
+    }
+    return "mlx-lm";
 }
 
 std::string_view mlx_converter_package(MlxConverterKind converter) noexcept {
-    return converter == MlxConverterKind::MlxVlm ? "mlx_vlm" : "mlx_lm";
+    switch (converter) {
+        case MlxConverterKind::MlxLm:
+            return "mlx_lm";
+        case MlxConverterKind::MlxVlm:
+            return "mlx_vlm";
+        case MlxConverterKind::MlxEmbeddings:
+            return "mlx_embeddings";
+    }
+    return "mlx_lm";
 }
 
 std::string_view mlx_converter_entry(MlxConverterKind converter) noexcept {
-    return converter == MlxConverterKind::MlxVlm ? "mlx_vlm.convert" : "mlx_lm.convert";
+    switch (converter) {
+        case MlxConverterKind::MlxLm:
+            return "mlx_lm.convert";
+        case MlxConverterKind::MlxVlm:
+            return "mlx_vlm.convert";
+        case MlxConverterKind::MlxEmbeddings:
+            return "mlx_embeddings.convert";
+    }
+    return "mlx_lm.convert";
 }
 
 RequirementSet mlx_converter_set(MlxConverterKind converter) noexcept {
-    return converter == MlxConverterKind::MlxVlm ? RequirementSet::MlxVlm : RequirementSet::Mlx;
+    switch (converter) {
+        case MlxConverterKind::MlxLm:
+            return RequirementSet::Mlx;
+        case MlxConverterKind::MlxVlm:
+            return RequirementSet::MlxVlm;
+        case MlxConverterKind::MlxEmbeddings:
+            return RequirementSet::MlxEmbeddings;
+    }
+    return RequirementSet::Mlx;
 }
 
 std::span<const MlxPrecision> mlx_precisions() noexcept {
@@ -122,7 +164,7 @@ std::vector<std::string> mlx_converter_arguments(const MlxPrecision& precision,
                                                  const std::filesystem::path& output,
                                                  MlxConverterKind converter) {
     std::vector<std::string> arguments;
-    if (converter == MlxConverterKind::MlxVlm) {
+    if (converter != MlxConverterKind::MlxLm) {
         arguments = {"--with", std::string{to_string(converter)}};
     }
     arguments.insert(arguments.end(), {"--hf-path", input.string(), "--mlx-path", output.string()});
@@ -167,9 +209,11 @@ MlxConverter script_mlx_converter(std::filesystem::path interpreter, std::filesy
         // A type the converter knows no model for: its own lists read now,
         // at failure time, to name the way out (M15).
         const std::string error = fold_name_list(outcome.describe());
-        if (converter == MlxConverterKind::MlxVlm &&
-            error.find(kUnknownRoute) != std::string::npos) {
-            // A seeded driver from before the mlx-vlm route (53f).
+        if (converter != MlxConverterKind::MlxLm &&
+            (error.find(kUnknownRoute) != std::string::npos ||
+             error.find(kUnknownChoice) != std::string::npos)) {
+            // A seeded driver from before the route asked for: 27b's knows
+            // no `--with` (53f), 53f's no mlx-embeddings (53h).
             return error + " -- the seeded converter at " + script.string() +
                    " is older than this build: 'apogee check --fix' brings an earlier Apogee's "
                    "up to this build's, and an edited one is kept, so delete it first";

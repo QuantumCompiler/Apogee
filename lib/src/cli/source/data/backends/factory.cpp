@@ -14,6 +14,7 @@
 #include "backends/google.h"
 #include "backends/llama_bases.h"
 #include "backends/llamacpp.h"
+#include "backends/mlx_embed.h"
 #include "backends/mlx_local.h"
 #include "backends/mock.h"
 #include "backends/ollama_cli.h"
@@ -205,8 +206,13 @@ std::shared_ptr<harness::LLMProvider> make_provider(const std::string& name,
         }
         case harness::BackendType::Mlx: {
             // Opt-in and loud (27a): the whole refusal ladder runs here, so an
-            // entry that cannot run is skipped with its rung and its fix.
+            // entry that cannot run is skipped with its rung and its fix. An
+            // entry over an embedding model mlx-embeddings built embeds, and
+            // chats with nothing (53h).
             try {
+                if (mlx_entry_embeds(config)) {
+                    return MlxEmbedProvider::from_config(name, config);
+                }
                 return MlxLocalProvider::from_config(name, config);
             } catch (const harness::ProviderError& e) {
                 reason = e.what();

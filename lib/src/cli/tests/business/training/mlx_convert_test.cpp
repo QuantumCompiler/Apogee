@@ -409,3 +409,152 @@ TEST_CASE("mlx-lm refusing a model_type is folded with its door and the nearest 
     CHECK(apogee::training::fold_model_type_failure("ValueError: out of memory", {"llama"}) ==
           "ValueError: out of memory");
 }
+
+namespace {
+
+/// The driver on the mlx-embeddings route (53h), mlx-embeddings laid beside
+/// mlx-lm -- or, with `stubs` naming another set, missing -- over an
+/// embedding model's snapshot.
+[[nodiscard]] std::string convert_embeddings(
+    const Work& work, const MlxPrecision& precision, std::vector<std::string>* messages = nullptr,
+    const std::string& stubs = "stub_mlx:stub_mlx_embeddings",
+    const std::filesystem::path& script = kDriver) {
+    std::string path;
+    for (std::size_t start = 0; start <= stubs.size();) {
+        const std::size_t end = std::min(stubs.find(':', start), stubs.size());
+        path += (path.empty() ? "" : ":") + (kStubs / stubs.substr(start, end - start)).string();
+        start = end + 1;
+    }
+    const apogee::testing::EnvGuard python_path{"PYTHONPATH", path};
+    const apogee::testing::EnvGuard record{"STUB_MLX_CONVERT_RECORD", work.record.string()};
+    const apogee::training::MlxConverter converter = apogee::training::script_mlx_converter(
+        python3(), script, precision, kStubs / "stub_mlx_embeddings" / "mlx_embeddings",
+        apogee::training::MlxConverterKind::MlxEmbeddings);
+    return converter(work.snapshot, work.out,
+                     [messages](std::string_view message) {
+                         if (messages != nullptr) {
+                             messages->emplace_back(message);
+                         }
+                     },
+                     {});
+}
+
+/// The user's Gemma-Embedding-300M as M21's fixture has it: a bare
+/// `Gemma3TextModel` and its sentence-transformers pipeline.
+void as_embedding_model(const Work& work) {
+    apogee::testing::write_fixture_file(
+        work.snapshot / "config.json",
+        R"({"architectures": ["Gemma3TextModel"], "model_type": "gemma3_text", "hidden_size": 768})");
+    apogee::testing::write_fixture_file(work.snapshot / "modules.json", R"([
+        {"idx": 0, "path": "", "type": "sentence_transformers.models.Transformer"},
+        {"idx": 1, "path": "1_Pooling", "type": "sentence_transformers.models.Pooling"},
+        {"idx": 2, "path": "2_Dense", "type": "sentence_transformers.models.Dense"},
+        {"idx": 3, "path": "3_Dense", "type": "sentence_transformers.models.Dense"},
+        {"idx": 4, "path": "4_Normalize", "type": "sentence_transformers.models.Normalize"}])");
+    apogee::testing::write_fixture_file(work.snapshot / "2_Dense" / "model.safetensors", "x");
+}
+
+}  // namespace
+
+TEST_CASE("an embedding model is mlx-embeddings' to convert, its argv the one table's",
+          "[training][mlx][convert][embedding]") {
+    using apogee::training::choose_mlx_converter;
+    using apogee::training::MlxConverterKind;
+    // 53h: an embedding model goes to mlx-embeddings whatever else is asked
+    // -- towers or --text-only change nothing of one -- and nothing else does.
+    CHECK(choose_mlx_converter(false, false, true) == MlxConverterKind::MlxEmbeddings);
+    CHECK(choose_mlx_converter(true, false, true) == MlxConverterKind::MlxEmbeddings);
+    CHECK(choose_mlx_converter(false, true, true) == MlxConverterKind::MlxEmbeddings);
+    CHECK(choose_mlx_converter(true, false, false) == MlxConverterKind::MlxVlm);
+    CHECK(choose_mlx_converter(false, false, false) == MlxConverterKind::MlxLm);
+    CHECK(apogee::training::to_string(MlxConverterKind::MlxEmbeddings) == "mlx-embeddings");
+    CHECK(apogee::training::mlx_converter_package(MlxConverterKind::MlxEmbeddings) ==
+          "mlx_embeddings");
+    CHECK(apogee::training::mlx_converter_entry(MlxConverterKind::MlxEmbeddings) ==
+          "mlx_embeddings.convert");
+    CHECK(apogee::training::mlx_converter_set(MlxConverterKind::MlxEmbeddings) ==
+          apogee::training::RequirementSet::MlxEmbeddings);
+    for (const MlxPrecision& precision : apogee::training::mlx_precisions()) {
+        INFO(precision.name);
+        const std::vector<std::string> lm = mlx_converter_arguments(precision, "/snap", "/out");
+        std::vector<std::string> embeddings{"--with", "mlx-embeddings"};
+        embeddings.insert(embeddings.end(), lm.begin(), lm.end());
+        CHECK(mlx_converter_arguments(precision, "/snap", "/out",
+                                      MlxConverterKind::MlxEmbeddings) == embeddings);
+    }
+    // Its types, read from its own modules as mlx-lm's are: a module defining
+    // its Model, never a helper.
+    CHECK(apogee::training::mlx_model_types(kStubs / "stub_mlx_embeddings" / "mlx_embeddings") ==
+          std::vector<std::string>{"bert", "gemma3_text"});
+}
+
+TEST_CASE("the shipped driver converts an embedding model through mlx_embeddings.convert",
+          "[training][mlx][convert][embedding][driver]") {
+    REQUIRE_PYTHON();
+    const Work work;
+    as_embedding_model(work);
+    SECTION("each precision as its own flags take it, the library's print kept off") {
+        std::vector<std::string> messages;
+        REQUIRE(convert_embeddings(work, *find_mlx_precision("8bit"), &messages).empty());
+        const std::vector<nlohmann::json> calls = work.calls();
+        REQUIRE(calls.size() == 1);
+        CHECK(calls[0]["converter"] == "mlx_embeddings");
+        CHECK(calls[0]["hf_path"] == work.snapshot.string());
+        CHECK(calls[0]["mlx_path"] == work.out.string());
+        CHECK(calls[0]["quantize"] == true);
+        CHECK(calls[0]["q_bits"] == 8);
+        CHECK(calls[0]["q_group_size"] == 64);
+        CHECK(calls[0]["model_type"] == "gemma3_text");
+        CHECK(messages == std::vector<std::string>{"loading mlx-embeddings", "quantizing"});
+        // The top level's files carried over, its pipeline among them.
+        CHECK(std::filesystem::exists(work.out / "modules.json"));
+        CHECK(std::filesystem::exists(work.out / "model.safetensors"));
+    }
+    SECTION("mxfp4's group left to the mode, a float type unquantized") {
+        REQUIRE(convert_embeddings(work, *find_mlx_precision("mxfp4")).empty());
+        std::filesystem::remove_all(work.out);
+        REQUIRE(convert_embeddings(work, *find_mlx_precision("bf16")).empty());
+        const std::vector<nlohmann::json> calls = work.calls();
+        REQUIRE(calls.size() == 2);
+        CHECK(calls[0]["q_mode"] == "mxfp4");
+        CHECK(calls[0]["q_group_size"].is_null());
+        CHECK(calls[1]["quantize"] == false);
+        CHECK(calls[1]["dtype"] == "bfloat16");
+    }
+    SECTION("no mlx-embeddings: its fix named, nothing converted") {
+        const std::string error =
+            convert_embeddings(work, *find_mlx_precision("4bit"), nullptr, "stub_mlx");
+        CHECK(error.find("mlx-embeddings is not installed in Apogee's Python environment") !=
+              std::string::npos);
+        CHECK(error.find("apogee train setup --with mlx-embeddings") != std::string::npos);
+        CHECK(work.calls().empty());
+    }
+    SECTION("a type it has no module for: its own words, and its door with its own types") {
+        apogee::testing::write_fixture_file(
+            work.snapshot / "config.json",
+            R"({"architectures": ["Qwen3Model"], "model_type": "qwen3"})");
+        const apogee::testing::EnvGuard unsupported{"STUB_MLX_UNSUPPORTED", "qwen3"};
+        const std::string error = convert_embeddings(work, *find_mlx_precision("4bit"));
+        CHECK(error.find("ValueError: Model type qwen3 not supported.") != std::string::npos);
+        CHECK(error.find("if these weights are a type this mlx-embeddings knows") !=
+              std::string::npos);
+    }
+    SECTION("a seeded driver from before the route") {
+        // 53f's converter knows `--with`, and mlx-vlm alone beside mlx-lm.
+        const std::filesystem::path older = work.root.path() / "mlx_convert.py";
+        apogee::testing::write_fixture_file(
+            older,
+            "import argparse\n"
+            "parser = argparse.ArgumentParser()\n"
+            "parser.add_argument('--with', choices=['mlx-lm', 'mlx-vlm'])\n"
+            "for flag in ('--hf-path', '--mlx-path', '--q-bits', '--q-group-size', '--q-mode',\n"
+            "             '--dtype'):\n"
+            "    parser.add_argument(flag)\n"
+            "parser.parse_args()\n");
+        const std::string error = convert_embeddings(work, *find_mlx_precision("4bit"), nullptr,
+                                                     "stub_mlx:stub_mlx_embeddings", older);
+        CHECK(error.find("argument --with: invalid choice") != std::string::npos);
+        CHECK(error.find("the seeded converter at " + older.string() +
+                         " is older than this build: 'apogee check --fix'") != std::string::npos);
+    }
+}

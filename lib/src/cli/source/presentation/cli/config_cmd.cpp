@@ -594,6 +594,7 @@ struct StoreScanRow {
     std::filesystem::path projector;  ///< beside a gguf, when one is
     std::string registered_as;        ///< backends already on this path
     std::string skip;                 ///< why --register leaves it alone
+    bool embeds = false;              ///< an embedding model's directory (53h)
 };
 
 [[nodiscard]] bool scan_registerable(const StoreScanRow& row) {
@@ -612,9 +613,11 @@ struct StoreScanRow {
 /// exists). The standing rules: a backend already on the path says so; a
 /// default name the config holds for another path, or one two stored models
 /// share, is skipped and said, never guessed past (the fill's own refusal,
-/// M7, as a row). An MLX directory of a kind no mlx backend chats with --
-/// an embedding model, a drafter, a video or voice model, a word this build
-/// does not know -- is skipped too, its kind and what uses it said (53e).
+/// M7, as a row). An MLX directory of a kind no mlx backend runs -- a
+/// drafter, a video or voice model, a word this build does not know -- is
+/// skipped too, its kind and what uses it said (53e). An embedding model
+/// mlx-embeddings built registers as an `mlx` entry the embedding role can
+/// name (53h): it embeds, and chats with nothing.
 [[nodiscard]] std::vector<StoreScanRow> scan_store_rows(const models::StoreRoots& roots,
                                                         const harness::Config* config) {
     std::vector<StoreScanRow> rows;
@@ -631,10 +634,13 @@ struct StoreScanRow {
         row.name = models::stored_mlx_name(stored);
         row.type = std::string{models::backend_type_for_format(models::kMlxFormat)};
         row.path = stored.dir.lexically_normal();
-        // Only a kind an mlx backend chats with registers as one (53e); any
-        // other is said apart with what uses it.
-        if (const models::MlxKind kind = models::read_mlx_kind(stored.dir); !kind.backend()) {
+        // Only a kind an mlx backend runs registers as one -- one it chats
+        // with (53e), or embeds with (53h); any other is said apart with
+        // what uses it.
+        if (const models::MlxKind kind = models::read_mlx_kind(stored.dir); !kind.registers()) {
             row.skip = models::describe_mlx_kind(kind.word);
+        } else {
+            row.embeds = kind.embeds();
         }
         rows.push_back(std::move(row));
     }
@@ -794,7 +800,12 @@ void bind_scan(CLI::App& parent, const RootContext& context) {
             apply_edit(path, [&row, &backend](std::string_view content) {
                 return harness::append_backend(content, row.name, backend, /*force=*/false);
             });
-            std::cout << "added backend '" << row.name << "'\n";
+            std::cout << "added backend '" << row.name << "'"
+                      << (row.embeds ? " -- an embedding model, which answers no chat: 'apogee "
+                                       "config set-default-embedding " +
+                                           row.name + "' points the embedding role at it"
+                                     : std::string{})
+                      << "\n";
         }
         std::cout << "registered " << registerable << " backend(s) in " << path.string() << "\n";
     });

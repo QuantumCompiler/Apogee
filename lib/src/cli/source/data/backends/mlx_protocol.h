@@ -36,6 +36,14 @@
 /// decoded by Apogee's one ffmpeg before it ever reached the provider -- and
 /// only to a driver whose `ready` said `audio`. The driver hands the paths
 /// to mlx-vlm as they are; it decodes nothing.
+///
+/// **So are vectors** (53h), spoken by a second driver over the same framing:
+/// `mlx_embed.py`, one process per embedding provider holding a model
+/// mlx-embeddings built. In, `{"type": "embed", "id": N, "texts": [...]}`;
+/// out, its `ready` saying `embedding` and then one `{"type": "vectors",
+/// "id": N, "vectors": [[...], ...]}` per request, a vector per text in the
+/// order sent -- the pooled, normalized `text_embeds` -- or the request's
+/// `error`. Neither driver is ever sent the other's request.
 namespace apogee::backends::mlx {
 
 /// The protocol version this build speaks; the driver's `ready` names its.
@@ -70,6 +78,16 @@ struct GenerateRequest {
 /// Asks the driver to end request `id`'s generation.
 [[nodiscard]] std::string cancel_line(std::int64_t id);
 
+/// One `embed` request (53h): a batch of texts, each to become one vector.
+struct EmbedRequest {
+    /// Increasing per provider, as a `generate`'s is.
+    std::int64_t id = 0;
+    std::vector<std::string> texts{};
+};
+
+/// The request as one line, without its newline.
+[[nodiscard]] std::string embed_line(const EmbedRequest& request);
+
 /// One line from the driver.
 struct Event {
     enum class Kind : std::uint8_t {
@@ -85,6 +103,8 @@ struct Event {
         Done,
         /// `error_kind` and `text` are set; `id` when a request caused it.
         Error,
+        /// An `embed` request's answer (53h): `vectors` is set.
+        Vectors,
     };
 
     Kind kind = Kind::Text;
@@ -122,6 +142,15 @@ struct Event {
     /// driver from before 53a never names one, so a start that asked for one
     /// and hears none is refused rather than answered from the bare base.
     std::string adapter{};
+    /// Ready: the embedding driver loaded its model through mlx-embeddings
+    /// (53h), and that package's version. The generation driver never says
+    /// it, so a provider that started the wrong one is told so.
+    bool embedding = false;
+    std::string mlx_embeddings_version{};
+    /// Vectors: one per text of the request, in its order. A line whose
+    /// `vectors` is not a list of number lists parses as a `protocol` error,
+    /// never as fewer vectors.
+    std::vector<std::vector<float>> vectors{};
 };
 
 /// Parses one line, or nullopt for one that is not a protocol object -- a

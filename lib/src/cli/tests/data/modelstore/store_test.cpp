@@ -1197,3 +1197,40 @@ TEST_CASE("an embedding model is read from its modules.json: its pipeline, and i
               .ends_with("does not embed -- convert it without --mlx"));
     CHECK(apogee::models::snapshot_conversions(embed) == std::vector<std::string>{"gguf"});
 }
+
+TEST_CASE("an embedding model gains MLX exactly where the installed mlx-embeddings builds its type",
+          "[models][store][embedding][mlx]") {
+    // 53h: the one decision, handed what the environment's mlx-embeddings
+    // builds -- MLX joins the GGUF, offered second, where it builds the set's
+    // own model_type; anywhere else M21's answer stands.
+    const Store store;
+    const std::filesystem::path embed = store.root.path() / "embed";
+    place_embedding_model(embed, true);
+    const auto builds = [](std::vector<std::string> types) -> apogee::models::EmbeddingBuilds {
+        return [types = std::move(types)](std::string_view type) {
+            return std::ranges::find(types, type) != types.end();
+        };
+    };
+    CHECK(apogee::models::snapshot_conversions(embed, builds({"bert", "gemma3_text"})) ==
+          std::vector<std::string>{"gguf", "mlx"});
+    // Its type unbuilt, or nothing installed to ask: as M21 left it.
+    CHECK(apogee::models::snapshot_conversions(embed, builds({"bert", "qwen3"})) ==
+          std::vector<std::string>{"gguf"});
+    CHECK(apogee::models::snapshot_conversions(embed, builds({})) ==
+          std::vector<std::string>{"gguf"});
+    CHECK(apogee::models::snapshot_conversions(embed, {}) == std::vector<std::string>{"gguf"});
+    // A language model's answer is not the embedder's to change.
+    const std::filesystem::path llama = store.root.path() / "llama";
+    place_snapshot_with(llama, R"({"architectures": ["LlamaForCausalLM"], "model_type": "llama"})");
+    CHECK(apogee::models::snapshot_conversions(llama, builds({})) ==
+          std::vector<std::string>{"gguf", "mlx"});
+
+    // Said both ways where it builds.
+    const std::optional<apogee::models::EmbeddingModel> read =
+        apogee::models::snapshot_embedding_model(embed);
+    REQUIRE(read.has_value());
+    CHECK(apogee::models::describe_embedding_model_both(*read) ==
+          "an embedding model (sentence-transformers: Transformer, Pooling, Dense, Dense, "
+          "Normalize): it converts to a GGUF a llamacpp backend embeds with, and through "
+          "mlx-embeddings to an MLX model an mlx backend embeds with");
+}

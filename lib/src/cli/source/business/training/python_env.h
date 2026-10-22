@@ -59,6 +59,11 @@ enum class RequirementSet : std::uint8_t {
     /// `kokoro` and what it speaks through (50a): what `voice_say.py` runs a
     /// voice model on. Installed on demand, as the video set is.
     Voice,
+    /// `mlx-embeddings` (53h): `models convert --mlx` builds an embedding
+    /// model through it, and an `mlx` backend over what it built embeds
+    /// through it, its seeded driver `mlx_embed.py`. Installed on demand, or
+    /// by the bootstrap on Apple silicon; brings mlx-vlm and mlx-lm with it.
+    MlxEmbeddings,
 };
 
 [[nodiscard]] std::string_view to_string(RequirementSet set) noexcept;
@@ -70,9 +75,9 @@ enum class RequirementSet : std::uint8_t {
 [[nodiscard]] std::span<const std::string_view> packages_for(RequirementSet set) noexcept;
 
 /// Why `set` is not for a host with these facts (51) -- the table's own
-/// column, so a set added to it says there where it runs: `mlx` and
-/// `mlx-vlm` are Apple silicon's, `peft` an NVIDIA GPU's, every other set
-/// any host's. Empty when it is for this one.
+/// column, so a set added to it says there where it runs: `mlx`, `mlx-vlm`
+/// and `mlx-embeddings` are Apple silicon's, `peft` an NVIDIA GPU's, every
+/// other set any host's. Empty when it is for this one.
 [[nodiscard]] std::string set_unfit_reason(RequirementSet set, bool apple_silicon, bool nvidia_smi);
 
 /// A Python's version, as `sys.version_info` states it (M19).
@@ -116,6 +121,10 @@ struct PythonRange {
 /// When mlx-vlm's floor was last read against its releases (53f): the
 /// first whose `models/` builds every towered set the store holds.
 [[nodiscard]] std::string_view mlx_vlm_floor_reviewed() noexcept;
+/// When mlx-embeddings' floor was last read against its releases (53h): the
+/// first whose `models/gemma3_text.py` pools before its dense layers and
+/// converts its padding mask -- the module the embedding route is built on.
+[[nodiscard]] std::string_view mlx_embeddings_floor_reviewed() noexcept;
 
 /// What the environment holds, read from `apogee.json` and the filesystem.
 struct PythonEnvStatus {

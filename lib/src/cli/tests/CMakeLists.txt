@@ -98,6 +98,8 @@ add_library(apogee_tests_data OBJECT
     data/backends/mlx_protocol_test.cpp
     data/backends/mlx_local_test.cpp
     data/backends/mlx_driver_test.cpp
+    data/backends/mlx_embed_test.cpp
+    data/backends/mlx_embed_driver_test.cpp
     data/modelstore/gguf_inspect_test.cpp
     data/modelstore/kv_cache_test.cpp
     data/modelstore/footprint_test.cpp

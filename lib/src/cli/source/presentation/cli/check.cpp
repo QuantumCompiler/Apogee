@@ -25,6 +25,7 @@
 #include "agentloop/structured.h"
 #include "ansi/ansi.h"
 #include "backends/adapters.h"
+#include "backends/mlx_embed.h"
 #include "backends/mlx_local.h"
 #include "backends/prompt_cache.h"
 #include "backends/provider_cache.h"
@@ -531,6 +532,19 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
                                                  models::weights_handle(
                                                      stored->model, models::kMlxFormat, stored->id)
                                            : std::string{});
+                    continue;
+                }
+                if (backends::mlx_entry_embeds(backend)) {
+                    // An embedding entry (53h): what it embeds, and how wide.
+                    add(report, Status::Ok, "Config", label,
+                        std::string{type} + " -- an embedding model directory (" +
+                            (info.model_type.empty() ? std::string{"its type unstated"}
+                                                     : info.model_type) +
+                            "), " + files.quantization.describe() + "; vectors " +
+                            models::describe(
+                                models::read_mlx_embedding_width(readiness.model_dir)) +
+                            "; it embeds through mlx-embeddings and answers no chat; its "
+                            "runtime is present");
                     continue;
                 }
                 // Whether its pictures are read as they are (27c), never claimed
@@ -1990,6 +2004,7 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
         case backends::MlxRefusal::ModelMissing:
         case backends::MlxRefusal::NotAModelDirectory:
         case backends::MlxRefusal::NoMlxVlm:
+        case backends::MlxRefusal::NoMlxEmbeddings:
             break;  // the runtime's rungs never answer these
     }
 
@@ -2027,11 +2042,45 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
             std::string{backends::kMlxVisionRemedy});
     }
 
-    // The two seeded drivers: the backend's, and `convert --mlx`'s (27b).
+    // The embedding dependency (53h): mlx-embeddings, which only an MLX
+    // embedding model needs -- reported from its files, as mlx-vlm is, and an
+    // embedding entry without it said to embed nothing.
+    const backends::MlxEmbeddingsPackage embeddings = backends::find_mlx_embeddings(host);
+    std::string embedders;
+    if (wanted) {
+        for (const auto& [name, backend] : inputs.config.backends) {
+            if (backends::mlx_entry_embeds(backend)) {
+                embedders += (embedders.empty() ? "" : ", ") + name;
+            }
+        }
+    }
+    if (embeddings.installed()) {
+        add(report, Status::Ok, "MLX", "embeddings",
+            "mlx-embeddings " +
+                (embeddings.version.empty() ? std::string{"(version unstated)"}
+                                            : embeddings.version) +
+                " is present in " + host.venv.string() +
+                " (its files, not imported by check) -- an MLX embedding model embeds through it");
+    } else if (!embedders.empty()) {
+        add(report, Status::Warn, "MLX", "embeddings",
+            "mlx-embeddings is not installed in " + host.venv.string() + ", so " + embedders +
+                " cannot embed",
+            std::string{backends::kMlxEmbeddingsRemedy});
+    } else {
+        add(report, Status::Skipped, "MLX", "embeddings",
+            "not set up -- only an MLX embedding model needs it (mlx-embeddings is not installed "
+            "in " +
+                host.venv.string() + ")",
+            std::string{backends::kMlxEmbeddingsRemedy});
+    }
+
+    // The seeded drivers: the backend's, `convert --mlx`'s (27b), and the
+    // embedding backend's (53h).
     for (const auto& [label, file] :
          {std::pair<std::string, std::filesystem::path>{"driver", host.driver},
           std::pair<std::string, std::filesystem::path>{
-              "conversion driver", inputs.home / harness::bundled_mlx_converter_relative_path()}}) {
+              "conversion driver", inputs.home / harness::bundled_mlx_converter_relative_path()},
+          std::pair<std::string, std::filesystem::path>{"embedding driver", host.embedder}}) {
         const std::string script = file.filename().string();
         switch (harness::inspect_seeded_script(inputs.home, script, inputs.retired_scripts)) {
             case harness::SeededScript::Missing:

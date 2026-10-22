@@ -354,6 +354,10 @@ std::string bundled_mlx_converter_relative_path() {
     return bundled_script_relative_path("mlx_convert.py");
 }
 
+std::string bundled_mlx_embedder_relative_path() {
+    return bundled_script_relative_path("mlx_embed.py");
+}
+
 std::string bundled_code_exec_server_relative_path() {
     return bundled_script_relative_path("code_exec_server.py");
 }

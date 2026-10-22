@@ -980,8 +980,12 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   backend chats with: a row of any other kind has, in place of the backend's
   summary, a `note` saying what it is and what uses it (an `mlx` backend's row
   says first why its runtime cannot run, as before), and `config scan
-  --register` registers it as nothing. A backend whose directory is missing,
-  and every other row, has no `kind`.
+  --register` registers it as nothing. Since 53h an `embedding` directory is
+  the one exception: an `mlx` backend embeds with it, so `config scan
+  --register` registers it as an `mlx` entry for the `embedding` role, and
+  such a backend's row is not marked for attention -- its `note` says what it
+  is and how wide its vectors are. A backend whose directory is missing, and
+  every other row, has no `kind`.
 - **`models info`** and **`models status`**: their `label: value` record as
   `fields`, in order, each label as printed and a value's indented continuation
   joined to it with a newline. The values are the same words the human view
@@ -999,7 +1003,10 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   `converts_to`, the formats `models convert` takes it to — `["gguf","mlx"]`
   for a language model's weights, `[]` for a draft head's or a diffusion
   model's, which every conversion refuses. Since M21, an embedding model's
-  (sentence-transformers', by its `modules.json`) is `["gguf"]`. And `mlx` is
+  (sentence-transformers', by its `modules.json`) is `["gguf"]` -- and since
+  53h `["gguf","mlx"]` where the mlx-embeddings installed in Apogee's Python
+  environment builds its `model_type`, read from its own `models/`; with none
+  installed, or one without that type, it stays `["gguf"]`. And `mlx` is
   left out wherever the mlx-lm installed in Apogee's Python environment builds
   no model of the set's `model_type`, by its own modules; with none installed
   nothing is decided, and `mlx` stays. It is decided once, from the set's own
@@ -1013,15 +1020,23 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   `data` also carries `mlx_conversion`, what an MLX conversion runs: `towers`
   (the keys, as `config.json` names them, `[]` for a language model),
   `converter` (`mlx-vlm` or `mlx-lm`, what a plain `--mlx` runs, or `null`
-  where only `--text-only` can) and `text_only` (whether `--mlx --text-only`
-  is offered: never for a language model, which has no tower to leave out).
+  where only `--text-only` can; since 53h `mlx-embeddings` for an embedding
+  model it builds) and `text_only` (whether `--mlx --text-only` is offered:
+  never for a language model, which has no tower to leave out, nor an
+  embedding model).
   It is `null` where `mlx` is not offered, and on every other format; the
   text says the same for a set with towers in a `towers:` line. Since 53e an MLX set's
   `data` also carries `kind` — the same word, from the same reader, as its
   `models list` row's `kind` above — and the text gains a `kind:` line saying
   the word, where it came from (`recorded`, `inferred from its files`, or `no
   kind recorded`) and what runs it; `kind` is `null` on every other format. An
-  `mlx` backend's own record has the `kind:` line too. A backend's
+  `mlx` backend's own record has the `kind:` line too. Since 53h an MLX set's
+  `data` also carries `vector_width`: for an `embedding` directory, how wide
+  its vectors are as its own files state it (the last sentence-transformers
+  Dense module's `out_features`, else `config.json`'s `hidden_size`), a number;
+  `null` for every other kind, every other format, and an embedding directory
+  whose files state no width. The text says it in a `vectors:` line -- on the
+  set, and on an `mlx` backend over one, beside an `embeds:` line. A backend's
   document has no `data`.
 - **`chats list`**: newest first, each conversation's `id`, `updated`, `turns`
   and `name`, and since 52a the `backend` it runs on and the roster `model` it

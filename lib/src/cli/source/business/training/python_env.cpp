@@ -15,23 +15,24 @@
 namespace apogee::training {
 namespace {
 
-constexpr std::array<std::string_view, 7> kSetNames{"prepare", "mlx",   "peft", "convert",
-                                                    "mlx-vlm", "video", "voice"};
+constexpr std::array<std::string_view, 8> kSetNames{"prepare", "mlx",   "peft",  "convert",
+                                                    "mlx-vlm", "video", "voice", "mlx-embeddings"};
 
 /// Where each set runs, in the names' order (51): what `apogee bootstrap`
 /// installs on a host is the table's own word.
 enum class SetHost : std::uint8_t { Any, AppleSilicon, NvidiaGpu };
 constexpr std::array<SetHost, kSetNames.size()> kSetHosts{
     SetHost::Any,          SetHost::AppleSilicon, SetHost::NvidiaGpu, SetHost::Any,
-    SetHost::AppleSilicon, SetHost::Any,          SetHost::Any};
+    SetHost::AppleSilicon, SetHost::Any,          SetHost::Any,       SetHost::AppleSilicon};
 
 /// The Pythons each set runs on, in the names' order (M19): the tightest of
 /// its packages' `requires_python` as PyPI publishes them for the current
 /// releases, read on the date below. Only voice is bounded above -- `kokoro`
 /// 0.9.4 and `misaki` 0.9.4 say `<3.13` -- and mlx's floor is `mlx-lm`
 /// 0.32.2's `>=3.11`; torch, transformers, diffusers, datasets, mlx-vlm,
-/// peft, bitsandbytes, accelerate and gguf all say `>=3.10`. A stale range
-/// fails as before, in pip's words; the date says when to read them again.
+/// peft, bitsandbytes, accelerate and gguf all say `>=3.10`, and so does
+/// mlx-embeddings 0.1.0 (53h). A stale range fails as before, in pip's
+/// words; the date says when to read them again.
 constexpr std::string_view kRangesReviewed = "2026-10-21";
 constexpr std::array<PythonRange, kSetNames.size()> kSetRanges{
     PythonRange{.at_least = 10},
@@ -40,7 +41,8 @@ constexpr std::array<PythonRange, kSetNames.size()> kSetRanges{
     PythonRange{.at_least = 10},
     PythonRange{.at_least = 10},
     PythonRange{.at_least = 10},
-    PythonRange{.at_least = 10, .below = 13}};
+    PythonRange{.at_least = 10, .below = 13},
+    PythonRange{.at_least = 10}};
 
 constexpr std::array<std::string_view, 1> kPrepare{"datasets>=3.0"};
 constexpr std::array<std::string_view, 1> kMlx{"mlx-lm>=0.21"};
@@ -85,6 +87,24 @@ constexpr std::array<std::string_view, 7> kVideo{
 // phoneme layer -- with the English extra its English voices read through.
 constexpr std::array<std::string_view, 3> kVoice{"torch>=2.6", "kokoro>=0.9.4",
                                                  "misaki[en]>=0.9.4"};
+
+// The embedding route (53h): `models convert --mlx` of a sentence-transformers
+// embedding model, and the mlx backend's `mlx_embed.py`, which runs what it
+// built. Its `models/gemma3_text.py` first shipped in 0.0.4 (2025-09-08), but
+// through 0.0.5 that module ran the dense layers before pooling and handed the
+// model its 0/1 padding mask as it came; 0.1.0 (2026-03-24) is the first whose
+// module converts that mask (`mx.where`) and pools first ("matches
+// SentenceTransformers pipeline") -- the module the 2026-10-21 spike read, and
+// the one a padded batch of texts is embedded through. Read on the date below
+// from PyPI's release history (its JSON API: 0.0.1 to 0.1.0, 0.1.0 requiring
+// Python >=3.10, mlx>=0.31.1, mlx-vlm>=0.4.0, transformers>=5.0.0) and the
+// project's tags (`mlx_embeddings/models/` at v0.0.3, without
+// `gemma3_text.py`, and at v0.0.4, v0.0.5 and v0.1.0, and that module at each
+// of the last three). An environment already holding an older one keeps it
+// until this set is installed again (M19's rule); what is offered meanwhile
+// reads the installed one's `models/`, never this floor.
+constexpr std::string_view kMlxEmbeddingsFloorReviewed = "2026-10-21";
+constexpr std::array<std::string_view, 1> kMlxEmbeddings{"mlx-embeddings>=0.1.0"};
 
 std::string now_rfc3339() {
     const std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
@@ -245,6 +265,10 @@ std::string_view mlx_vlm_floor_reviewed() noexcept {
     return kMlxVlmFloorReviewed;
 }
 
+std::string_view mlx_embeddings_floor_reviewed() noexcept {
+    return kMlxEmbeddingsFloorReviewed;
+}
+
 std::string_view to_string(RequirementSet set) noexcept {
     return kSetNames.at(static_cast<std::size_t>(set));
 }
@@ -291,6 +315,8 @@ std::span<const std::string_view> packages_for(RequirementSet set) noexcept {
             return kVideo;
         case RequirementSet::Voice:
             return kVoice;
+        case RequirementSet::MlxEmbeddings:
+            return kMlxEmbeddings;
     }
     return {};
 }

@@ -111,14 +111,15 @@ struct ScriptedPath {
 };
 
 /// Every set an Apple-silicon host can install, in the table's order.
-const std::vector<RequirementSet> kAppleSets{RequirementSet::Prepare, RequirementSet::Mlx,
-                                             RequirementSet::Convert, RequirementSet::MlxVlm,
-                                             RequirementSet::Video,   RequirementSet::Voice};
+const std::vector<RequirementSet> kAppleSets{RequirementSet::Prepare,      RequirementSet::Mlx,
+                                             RequirementSet::Convert,      RequirementSet::MlxVlm,
+                                             RequirementSet::Video,        RequirementSet::Voice,
+                                             RequirementSet::MlxEmbeddings};
 
 }  // namespace
 
 TEST_CASE("requirement sets are named and carry packages", "[training][python]") {
-    CHECK(requirement_set_names().size() == 7);
+    CHECK(requirement_set_names().size() == 8);
     // The speech driver's stack (50a).
     CHECK(requirement_set_from_string("voice") == RequirementSet::Voice);
     CHECK(packages_for(RequirementSet::Voice)[1] == "kokoro>=0.9.4");
@@ -130,6 +131,17 @@ TEST_CASE("requirement sets are named and carry packages", "[training][python]")
     // 53f: the first release whose models/ builds every towered set the
     // store holds, read on a recorded date.
     CHECK(apogee::training::mlx_vlm_floor_reviewed() == "2026-10-21");
+    // 53h: the embedding route's, on demand -- its floor the first release
+    // whose gemma3_text pools first and converts its padding mask, read on a
+    // recorded date, and Apple silicon's alone.
+    CHECK(requirement_set_from_string("mlx-embeddings") == RequirementSet::MlxEmbeddings);
+    CHECK(to_string(RequirementSet::MlxEmbeddings) == "mlx-embeddings");
+    CHECK(packages_for(RequirementSet::MlxEmbeddings).size() == 1);
+    CHECK(packages_for(RequirementSet::MlxEmbeddings)[0] == "mlx-embeddings>=0.1.0");
+    CHECK(apogee::training::mlx_embeddings_floor_reviewed() == "2026-10-21");
+    CHECK(apogee::training::set_unfit_reason(RequirementSet::MlxEmbeddings, true, false).empty());
+    CHECK(apogee::training::set_unfit_reason(RequirementSet::MlxEmbeddings, false, true) ==
+          "for Apple silicon, which this host is not");
     // The video driver's stack (49b), never installed with anything else.
     CHECK(requirement_set_from_string("video") == RequirementSet::Video);
     CHECK(to_string(RequirementSet::Video) == "video");
@@ -267,7 +279,7 @@ TEST_CASE("each set's Python range is carried in the sets' table, with the date 
     CHECK(python_range(RequirementSet::Mlx).describe() == ">=3.11");
     for (const RequirementSet set :
          {RequirementSet::Prepare, RequirementSet::Peft, RequirementSet::Convert,
-          RequirementSet::MlxVlm, RequirementSet::Video}) {
+          RequirementSet::MlxVlm, RequirementSet::Video, RequirementSet::MlxEmbeddings}) {
         CHECK(python_range(set).describe() == ">=3.10");
     }
     // An Apple-silicon host's sets fit 3.11 and 3.12 alone.

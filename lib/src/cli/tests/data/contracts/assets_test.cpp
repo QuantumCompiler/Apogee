@@ -84,11 +84,11 @@ TEST_CASE("seeding writes absent files only: an edit survives a re-seed",
     REQUIRE(first.ok());
     // Fourteen agent files (40a), eight kits (42b), three training regimes
     // (42a, 42b), seven symphony starters (27q, 40b), three task recipes
-    // (40c), three training drivers, the two mlx drivers, the code-execution
-    // server (47b), the video and voice drivers (49b, 50a), seven review
-    // skills (48b), the vendored converter.
+    // (40c), three training drivers, the three mlx drivers (27a, 27b, 53h),
+    // the code-execution server (47b), the video and voice drivers (49b,
+    // 50a), seven review skills (48b), the vendored converter.
     CHECK(first.created.size() == apogee::harness::bundled_files().size());
-    CHECK(first.created.size() == 14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + 2 + 7 + 1 +
+    CHECK(first.created.size() == 14 + 8 + 3 + 7 + 3 + 3 + 3 + 1 + 2 + 7 + 1 +
                                       apogee::harness::bundled_converter_files().size());
     for (const apogee::harness::BundledSymphony& starter : apogee::harness::bundled_symphonies()) {
         CHECK(read(root.path() / "symphonies" / (std::string{starter.name} + ".yaml")) ==
@@ -339,23 +339,27 @@ TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
     CHECK(apogee::harness::bundled_script_relative_path(script.name) ==
           "training/scripts/prepare_dataset.py");
     CHECK(apogee::harness::bundled_files().size() ==
-          14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + 2 + 7 + 1 +
+          14 + 8 + 3 + 7 + 3 + 3 + 3 + 1 + 2 + 7 + 1 +
               apogee::harness::bundled_converter_files().size());
 }
 
 TEST_CASE("the compiled-in mlx drivers byte-match the shipped files and seed beside the trainers",
           "[harness][assets][mlx]") {
-    // The mlx backend's driver (27a) and the converter's (27b), held to the
-    // training drivers' rule: the file is the source of truth, and the
-    // literal never drifts from it.
+    // The mlx backend's driver (27a), the converter's (27b) and the embedding
+    // backend's (53h), held to the training drivers' rule: the file is the
+    // source of truth, and the literal never drifts from it.
     const std::filesystem::path assets{APOGEE_ASSETS_DIR};
-    REQUIRE(apogee::harness::bundled_mlx_scripts().size() == 2);
+    REQUIRE(apogee::harness::bundled_mlx_scripts().size() == 3);
     const apogee::harness::BundledScript& converter = apogee::harness::bundled_mlx_scripts()[0];
     CHECK(converter.name == "mlx_convert.py");
     CHECK(read(assets / "mlx" / "mlx_convert.py") == converter.text);
     CHECK(apogee::harness::bundled_mlx_converter_relative_path() ==
           "training/scripts/mlx_convert.py");
-    const apogee::harness::BundledScript& driver = apogee::harness::bundled_mlx_scripts()[1];
+    const apogee::harness::BundledScript& embedder = apogee::harness::bundled_mlx_scripts()[1];
+    CHECK(embedder.name == "mlx_embed.py");
+    CHECK(read(assets / "mlx" / "mlx_embed.py") == embedder.text);
+    CHECK(apogee::harness::bundled_mlx_embedder_relative_path() == "training/scripts/mlx_embed.py");
+    const apogee::harness::BundledScript& driver = apogee::harness::bundled_mlx_scripts()[2];
     CHECK(driver.name == "mlx_generate.py");
     CHECK(read(assets / "mlx" / "mlx_generate.py") == driver.text);
     CHECK(apogee::harness::bundled_mlx_driver_relative_path() ==

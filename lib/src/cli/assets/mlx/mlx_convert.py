@@ -11,7 +11,7 @@ there, and commits it by the store's own rule.
 Runs under the Python environment Apogee owns, never the system Python.
 Requires `mlx-lm` there:  apogee train setup --with mlx
 
-    mlx_convert.py [--with mlx-vlm] --hf-path <snapshot> --mlx-path <out>
+    mlx_convert.py [--with mlx-vlm|mlx-embeddings] --hf-path <snapshot> --mlx-path <out>
                    [--q-bits N [--q-group-size N] [--q-mode M] | --dtype T]
 
 `--with mlx-vlm` converts with `mlx_vlm`'s own `convert` instead (53f): a
@@ -20,6 +20,13 @@ tower -- built whole, its towers kept, where mlx-lm would build its language
 model alone. The same precisions, mapped onto mlx-vlm's own flags as its
 command line passes them, and remote code never trusted, as its command line
 defaults. Requires `mlx-vlm` too:  apogee train setup --with mlx-vlm
+
+`--with mlx-embeddings` converts with `mlx_embeddings`' own `convert` (53h):
+an embedding model sentence-transformers publishes (its `modules.json`
+naming a Pooling module) built whole -- its encoder, and the dense layers
+the pooled vector passes through -- where mlx-lm builds language models
+alone. The same precisions, mapped onto its own flags. Requires
+`mlx-embeddings`:  apogee train setup --with mlx-embeddings
 
 `--q-bits` quantizes (the converter's own scheme: N bits a weight in groups, a
 scale and bias each); without it the weights are written at `--dtype`
@@ -30,7 +37,8 @@ The training drivers' protocol, one JSON object per line on stdout:
   {"message": "..."}                       as it goes
   {"error": "..."}                         fatal; a non-zero exit follows
   {"converted": "<out>", "quantized": B, "mlx_lm": "..."}   at the end
-      -- with `--with mlx-vlm`, "mlx_vlm": "..." in place of "mlx_lm"
+      -- with `--with mlx-vlm`, "mlx_vlm": "..." in place of "mlx_lm"; with
+      `--with mlx-embeddings`, "mlx_embeddings": "..."
 
 Everything a library prints goes to stderr, which Apogee captures: the
 protocol's stdout is a duplicate of the original descriptor, and descriptor 1
@@ -75,8 +83,8 @@ def fail(message, code=1):
 
 def arguments(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--with", dest="converter", choices=["mlx-lm", "mlx-vlm"],
-                        default="mlx-lm")
+    parser.add_argument("--with", dest="converter",
+                        choices=["mlx-lm", "mlx-vlm", "mlx-embeddings"], default="mlx-lm")
     parser.add_argument("--hf-path", required=True)
     parser.add_argument("--mlx-path", required=True)
     parser.add_argument("--q-bits", type=int, default=0)
@@ -94,6 +102,8 @@ def main(argv):
         return fail(f"{args.mlx_path} already exists -- a conversion never writes over one", 2)
     if args.converter == "mlx-vlm":
         return convert_with_vlm(args)
+    if args.converter == "mlx-embeddings":
+        return convert_with_embeddings(args)
 
     emit({"message": "loading mlx-lm"})
     try:
@@ -186,6 +196,58 @@ def convert_with_vlm(args):
 
     emit({"converted": args.mlx_path, "quantized": args.q_bits > 0, "mlx_vlm": version})
     return 0
+
+
+def convert_with_embeddings(args):
+    """An embedding model built whole through mlx-embeddings' own `convert`
+    (53h): the precision as its command line hands it over."""
+    emit({"message": "loading mlx-embeddings"})
+    try:
+        import mlx_embeddings
+        from mlx_embeddings.convert import convert
+    except ImportError as exc:
+        return fail(
+            f"mlx-embeddings is not installed in Apogee's Python environment ({exc}) -- "
+            "apogee train setup --with mlx-embeddings",
+            3,
+        )
+    version = embeddings_version(mlx_embeddings)
+
+    options = {"hf_path": args.hf_path, "mlx_path": args.mlx_path}
+    if args.q_bits > 0:
+        options["quantize"] = True
+        options["q_bits"] = args.q_bits
+        # Unnamed, the group is the mode's own: its quantizer takes a missing
+        # group as the mode's default (32 for mxfp4), where its function's
+        # default 64 would not fit.
+        options["q_group_size"] = args.q_group_size if args.q_group_size > 0 else None
+        if args.q_mode and args.q_mode != "affine":
+            options["q_mode"] = args.q_mode
+    elif args.dtype:
+        options["dtype"] = args.dtype
+
+    emit({"message": "quantizing" if args.q_bits > 0 else "converting"})
+    try:
+        convert(**options)
+    except TypeError as exc:
+        if "q_mode" in str(exc) or "dtype" in str(exc):
+            return fail(f"this mlx-embeddings ({version}) cannot write that precision: {exc}")
+        return fail(f"TypeError: {exc}")
+    except Exception as exc:  # the converter's own words, whatever they are
+        return fail(f"{type(exc).__name__}: {exc}")
+
+    emit({"converted": args.mlx_path, "quantized": args.q_bits > 0, "mlx_embeddings": version})
+    return 0
+
+
+def embeddings_version(module):
+    version = getattr(module, "__version__", None)
+    if version is None:
+        try:
+            from mlx_embeddings.version import __version__ as version
+        except ImportError:
+            version = ""
+    return str(version)
 
 
 def vlm_version(module):
