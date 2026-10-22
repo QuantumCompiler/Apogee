@@ -5,6 +5,7 @@
 
 #include "agentloop/budget.h"
 #include "contracts/errors.h"
+#include "logger/session.h"
 
 namespace apogee::agentloop {
 namespace {
@@ -15,11 +16,6 @@ constexpr std::string_view kSummaryPrompt =
     "Please provide a concise but complete summary of our conversation so far. Capture all "
     "key facts, decisions, and context that would be needed to continue this conversation "
     "meaningfully. Be thorough but succinct.";
-
-constexpr std::string_view kSummaryPreamble =
-    "The following is a summary of the conversation so far. Earlier messages have been "
-    "compacted to preserve context window space. Use this summary as the authoritative "
-    "record of what has been discussed:\n\n";
 
 }  // namespace
 
@@ -144,8 +140,11 @@ std::vector<harness::ChatMessage> compact_history(const harness::Harness& harnes
         return history;
     }
 
+    // Opened by the preamble a read of the saved history knows a compaction
+    // by (M27): `chats show` puts the summary where it happened.
     std::vector<harness::ChatMessage> compacted = std::move(system_messages);
-    compacted.push_back(harness::ChatMessage::system(std::string{kSummaryPreamble} + summary));
+    compacted.push_back(
+        harness::ChatMessage::system(std::string{logger::kCompactionPreamble} + summary));
 
     // Keep the most recent assistant message so the model has at least one
     // prior turn to reference, rather than a confusing "no prior context".

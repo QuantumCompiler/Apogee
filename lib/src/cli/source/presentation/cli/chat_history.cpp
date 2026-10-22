@@ -12,6 +12,7 @@
 #include "backends/factory.h"
 #include "cli/chat_attachments.h"
 #include "cli/chat_recall.h"
+#include "cli/datasets.h"
 #include "cli/helpers.h"
 #include "cli/task_cmd.h"
 #include "contracts/config.h"
@@ -52,6 +53,49 @@ namespace {
         text.remove_suffix(1);
     }
     return text;
+}
+
+/// An attachment as a saved chat's document names it: never its bytes.
+[[nodiscard]] nlohmann::json attachment_view(const logger::SavedAttachment& attachment) {
+    return nlohmann::json{
+        {"name", attachment.name},
+        {"files", attachment.files},
+        {"bytes", attachment.bytes.has_value() ? nlohmann::json(*attachment.bytes) : nullptr}};
+}
+
+[[nodiscard]] nlohmann::json attachments_view(
+    const std::vector<logger::SavedAttachment>& attachments) {
+    nlohmann::json out = nlohmann::json::array();
+    for (const logger::SavedAttachment& attachment : attachments) {
+        out.push_back(attachment_view(attachment));
+    }
+    return out;
+}
+
+/// The model's words in a turn: each message's, a blank line between.
+[[nodiscard]] std::string answer_text(const logger::SavedTurn& turn) {
+    std::string out;
+    for (const std::string& part : turn.answer) {
+        out += out.empty() ? "" : "\n\n";
+        out += part;
+    }
+    return out;
+}
+
+/// `report.pdf (1 file, 9 KiB)`, each named as attached.
+[[nodiscard]] std::string attachments_line(
+    const std::vector<logger::SavedAttachment>& attachments) {
+    std::string out;
+    for (const logger::SavedAttachment& attachment : attachments) {
+        out += out.empty() ? "" : ", ";
+        out += attachment.name + " (" + std::to_string(attachment.files) +
+               (attachment.files == 1 ? " file" : " files");
+        if (attachment.bytes.has_value()) {
+            out += ", " + human_size(static_cast<std::int64_t>(*attachment.bytes));
+        }
+        out += ")";
+    }
+    return out;
 }
 
 }  // namespace
@@ -96,6 +140,90 @@ std::string format_session_info(const logger::Session& session) {
     }
     if (session.schema_version == 0) {
         out << "schema:    legacy (pre-versioning)\n";
+    }
+    return out.str();
+}
+
+nlohmann::json saved_chat_view(const logger::Session& session) {
+    nlohmann::json turns = nlohmann::json::array();
+    for (const logger::SavedTurn& turn : logger::saved_turns(session)) {
+        nlohmann::json tools = nlohmann::json::array();
+        for (const logger::SavedTool& tool : turn.tools) {
+            // Its result's size, never the result: null when none was kept.
+            tools.push_back(nlohmann::json{
+                {"name", tool.name},
+                {"summary", tool.summary},
+                {"result_bytes",
+                 tool.result_bytes.has_value() ? nlohmann::json(*tool.result_bytes) : nullptr}});
+        }
+        nlohmann::json entry{
+            {"turn", turn.turn},
+            {"user", nlohmann::json{{"text", turn.user},
+                                    {"attachments", attachments_view(turn.attachments)}}},
+            {"answer", nlohmann::json{{"text", answer_text(turn)}, {"tools", std::move(tools)}}},
+            {"answered", turn.answered}};
+        if (turn.compacted.has_value()) {
+            entry["compacted"] = nlohmann::json{{"summary", *turn.compacted}};
+        }
+        turns.push_back(std::move(entry));
+    }
+    // The chat's facts as `chats list`'s row says them (52a), then every
+    // attachment the chat holds -- a retrieved one rides no turn -- and the
+    // turns.
+    return nlohmann::json{{"object", "chat"},
+                          {"id", session.chat_id},
+                          {"name", session.display_name()},
+                          {"title", session.title},
+                          {"backend", session.backend},
+                          {"model", session.model},
+                          {"attachments", attachments_view(logger::saved_attachments(session))},
+                          {"turns", std::move(turns)}};
+}
+
+std::string format_saved_chat(const logger::Session& session) {
+    std::ostringstream out;
+    out << session.display_name() << " -- " << session.chat_id << ", on "
+        << (session.backend.empty() ? "(default)" : session.backend)
+        << (session.model.empty() ? "" : " (" + session.model + ")") << "\n";
+    if (const std::vector<logger::SavedAttachment> attached = logger::saved_attachments(session);
+        !attached.empty()) {
+        out << "attached to the chat: " << attachments_line(attached) << "\n";
+    }
+    const std::vector<logger::SavedTurn> turns = logger::saved_turns(session);
+    if (turns.empty()) {
+        out << "\nno turns yet\n";
+        return out.str();
+    }
+    for (const logger::SavedTurn& turn : turns) {
+        out << "\nturn " << turn.turn;
+        if (turn.compacted.has_value()) {
+            // Where the chat said `history compacted`: the summary in place
+            // of what it folded, indented, and the answer it kept after it.
+            out << " -- history compacted; what came before is this summary:\n";
+            std::istringstream summary{*turn.compacted};
+            for (std::string line; std::getline(summary, line);) {
+                out << (line.empty() ? "" : "  ") << line << "\n";
+            }
+        } else {
+            out << "\nYou: " << turn.user << "\n";
+        }
+        if (!turn.attachments.empty()) {
+            out << "attached: " << attachments_line(turn.attachments) << "\n";
+        }
+        for (const logger::SavedTool& tool : turn.tools) {
+            out << "[tool] " << tool.name << (tool.summary.empty() ? "" : " " + tool.summary)
+                << " -- "
+                << (tool.result_bytes.has_value()
+                        ? "returned " + human_size(static_cast<std::int64_t>(*tool.result_bytes))
+                        : std::string{"no result kept"})
+                << "\n";
+        }
+        if (const std::string answer = answer_text(turn); !answer.empty()) {
+            out << answer << "\n";
+        }
+        if (!turn.answered && !turn.compacted.has_value()) {
+            out << "(no answer kept: the turn was cancelled or failed)\n";
+        }
     }
     return out.str();
 }
@@ -220,6 +348,34 @@ void ChatsCommand::bind(CLI::App& root, const RootContext& context) {
         } catch (const std::exception& e) {
             fail(e.what());
         }
+    });
+
+    // `chats show` (M27): a saved chat's turns, read through the loader a
+    // resume reads it with -- the whole conversation, never resumed.
+    auto show_name = std::make_shared<std::string>();
+    auto show_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    CLI::App* show = cmd->add_subcommand(
+        "show", "Show a saved conversation's turns: what was asked, the tools called, the answers");
+    show->add_option("name", *show_name, "Chat id or name")->type_name(kChatValue)->required();
+    add_read_format(show, show_format);
+    show->callback([show_name, show_format]() {
+        logger::LoadedSession loaded;
+        try {
+            loaded = logger::load(*show_name, {});
+        } catch (const std::exception& e) {
+            fail(e.what());
+        }
+        // A message the loader could not read is a gap in what follows: said.
+        for (const logger::ResumeWarning& warning : loaded.warnings) {
+            if (warning.kind == logger::WarningKind::FieldDropped) {
+                std::cerr << "apogee chats: " << warning.message << "\n";
+            }
+        }
+        if (*show_format == ReadFormat::Json) {
+            write_document(std::cout, saved_chat_view(loaded.session));
+            return;
+        }
+        std::cout << format_saved_chat(loaded.session);
     });
 
     auto title_name = std::make_shared<std::string>();

@@ -27,6 +27,17 @@ namespace apogee::commands {
 /// The body of `apogee chats info <name>`.
 [[nodiscard]] std::string format_session_info(const logger::Session& session);
 
+/// A saved conversation as `chats show --output-format json` carries it
+/// (M27): `{object: "chat", id, name, title, backend, model, attachments,
+/// turns}` -- `id`, `name`, `backend` and `model` as `chats list`'s row says
+/// them -- each entry of `turns` one of `logger::saved_turns`, numbered as a
+/// resumed session numbers on from it. Attachments named, never their bytes.
+[[nodiscard]] nlohmann::json saved_chat_view(const logger::Session& session);
+
+/// The body of `apogee chats show <name>`: the same turns, each as the chat
+/// drew it, plainly -- the user's words, the tools called, the answer.
+[[nodiscard]] std::string format_saved_chat(const logger::Session& session);
+
 /// Deletes the conversation `name` names (its id or its name) -- its file, its
 /// attachments' index, its recall summary -- what `chats delete` runs, and
 /// the full-screen shell's (32d). Refused while a live task writes it.

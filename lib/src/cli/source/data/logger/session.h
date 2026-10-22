@@ -295,6 +295,78 @@ struct SessionSweep {
 /// the knowledge clerk, above all: `User: ...` and `Assistant: ...` turns
 /// separated by blank lines, system messages, tool results and empty turns
 /// left out. Only the participants' words are the participants' words.
+/// Rendered from the same grouping `saved_turns` reads (M27).
 [[nodiscard]] std::string transcript_text(const std::vector<harness::ChatMessage>& messages);
+
+/// How a compaction's summary message opens: `agentloop::compact_history`
+/// writes it, and a read of a saved history knows a compaction by it (M27)
+/// -- one declaration for both, so the two cannot drift.
+inline constexpr std::string_view kCompactionPreamble =
+    "The following is a summary of the conversation so far. Earlier messages have been "
+    "compacted to preserve context window space. Use this summary as the authoritative "
+    "record of what has been discussed:\n\n";
+
+/// A tool call's arguments as one line: compact JSON (the text as written
+/// when it is not JSON, its line breaks made spaces), clipped on a character
+/// boundary. What a saved turn lists a call by, and what a stubbed tool
+/// result repeats of the call it answers.
+[[nodiscard]] std::string tool_call_summary(const harness::ToolCall& call);
+
+/// A tool the model called in a saved turn (M27): its name, its arguments in
+/// one line, and how much its result held -- never the result itself.
+struct SavedTool {
+    std::string name{};
+    std::string summary{};
+    /// The result's size in bytes; unset when the history keeps no result for
+    /// the call.
+    std::optional<std::size_t> result_bytes{};
+};
+
+/// Something attached, named -- never its bytes (M27).
+struct SavedAttachment {
+    /// As the user named it (`report.pdf`, `src`, `docs/*.md`); for media a
+    /// message carries itself, its media type (`image/png`) or its URL.
+    std::string name{};
+    std::size_t files = 0;
+    /// Its size in bytes; unset where the history does not say (an image
+    /// named by URL).
+    std::optional<std::uint64_t> bytes{};
+};
+
+/// One entry of a saved conversation (M27): a turn -- a user message and
+/// everything after it up to the next -- or a compaction, where it happened,
+/// with what the history kept after it up to the next user message.
+struct SavedTurn {
+    /// The conversation's turn count once the entry ended: the count a
+    /// resumed session numbers on from (`next_turn` is the last entry's plus
+    /// one), so an answered turn carries the number a machine session gave
+    /// it. A turn left unanswered and a compaction add nothing: each carries
+    /// the count before it.
+    std::int64_t turn = 0;
+    /// The user's words, trimmed; empty for a compaction.
+    std::string user{};
+    /// What rode the user's message: the media it carries itself, then what
+    /// the chat attached on it, in the order attached.
+    std::vector<SavedAttachment> attachments{};
+    /// The model's words, a part per message in order -- what it said before
+    /// a tool call too -- trimmed, empty ones left out.
+    std::vector<std::string> answer{};
+    /// The tools it called, in order.
+    std::vector<SavedTool> tools{};
+    /// Whether the history holds the model's answer: false for a turn
+    /// cancelled at a terminal or failed, and for a compaction that kept no
+    /// answer.
+    bool answered = false;
+    /// The summary, without its preamble, when the entry is a compaction.
+    std::optional<std::string> compacted{};
+};
+
+/// `session`'s conversation as entries, in order (M27): what `chats show`
+/// prints. Its system prompt is a setting, not a turn, and is left out; the
+/// history holds no thinking and no injected context to leave out.
+[[nodiscard]] std::vector<SavedTurn> saved_turns(const Session& session);
+
+/// Every attachment `session` holds, named, in the order attached (M27).
+[[nodiscard]] std::vector<SavedAttachment> saved_attachments(const Session& session);
 
 }  // namespace apogee::logger

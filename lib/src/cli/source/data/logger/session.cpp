@@ -49,6 +49,163 @@ std::string string_field(const nlohmann::json& object, std::string_view key,
     return it->get<std::string>();
 }
 
+/// The most of a call's arguments its summary repeats.
+constexpr std::size_t kToolSummaryBytes = 120;
+
+[[nodiscard]] std::string trimmed(std::string_view text) {
+    std::size_t begin = 0;
+    while (begin < text.size() && std::isspace(static_cast<unsigned char>(text[begin])) != 0) {
+        ++begin;
+    }
+    std::size_t end = text.size();
+    while (end > begin && std::isspace(static_cast<unsigned char>(text[end - 1])) != 0) {
+        --end;
+    }
+    return std::string{text.substr(begin, end - begin)};
+}
+
+/// How many bytes base64 `data` decodes to.
+[[nodiscard]] std::uint64_t decoded_bytes(std::string_view data) {
+    std::uint64_t padding = 0;
+    for (std::size_t at = data.size(); at > 0 && padding < 2 && data[at - 1] == '='; --at) {
+        ++padding;
+    }
+    const std::uint64_t whole = (data.size() / 4) * 3;
+    return whole > padding ? whole - padding : 0;
+}
+
+/// A medium a message carries itself -- a served client's image, a file
+/// written before attachments were the chat's (26d) -- named by its media
+/// type, or its URL, and sized; never its bytes.
+[[nodiscard]] std::optional<SavedAttachment> carried(const harness::ContentPart& part) {
+    if (part.kind == harness::ContentPart::Kind::InputAudio) {
+        return SavedAttachment{.name = "audio/" + (part.audio_format.empty() ? std::string{"audio"}
+                                                                             : part.audio_format),
+                               .files = 1,
+                               .bytes = decoded_bytes(part.audio_data)};
+    }
+    if (part.kind != harness::ContentPart::Kind::ImageUrl) {
+        return std::nullopt;
+    }
+    const std::string_view url = part.image_url;
+    if (!url.starts_with("data:")) {
+        return SavedAttachment{.name = std::string{url}, .files = 1, .bytes = {}};
+    }
+    const std::size_t comma = url.find(',');
+    const std::string_view head = url.substr(0, comma);  // data:image/png;base64
+    const std::string_view payload =
+        comma == std::string_view::npos ? std::string_view{} : url.substr(comma + 1);
+    std::string_view type = head.substr(std::string_view{"data:"}.size());
+    if (const std::size_t semicolon = type.find(';'); semicolon != std::string_view::npos) {
+        type = type.substr(0, semicolon);
+    }
+    if (type.empty()) {
+        type = "image";
+    }
+    return SavedAttachment{.name = std::string{type},
+                           .files = 1,
+                           .bytes = head.ends_with(";base64")
+                                        ? decoded_bytes(payload)
+                                        : static_cast<std::uint64_t>(payload.size())};
+}
+
+/// An attachment of the chat's, named: never its text or its paths.
+[[nodiscard]] SavedAttachment named(const Attachment& attachment) {
+    std::uint64_t bytes = 0;
+    for (const AttachedFile& file : attachment.files) {
+        bytes += file.bytes;
+    }
+    return SavedAttachment{
+        .name = attachment.name, .files = attachment.files.size(), .bytes = bytes};
+}
+
+/// An entry as grouped, before it is numbered.
+struct Grouped {
+    SavedTurn turn{};
+    /// The index of the message that opened it.
+    std::size_t first = 0;
+    /// Opened by a user message: one of the turns the session counts.
+    bool opened_by_user = false;
+    /// Each listed tool's call id, beside `turn.tools`.
+    std::vector<std::string> call_ids{};
+};
+
+/// `messages` as entries: each user message opens one, and so does a
+/// compaction's summary; everything after it up to the next belongs to it.
+/// The model's words before either -- a history that starts mid-turn -- open
+/// one of their own. Any other system message is a setting, and no entry's.
+[[nodiscard]] std::vector<Grouped> group_turns(const std::vector<harness::ChatMessage>& messages) {
+    std::vector<Grouped> out;
+    for (std::size_t index = 0; index < messages.size(); ++index) {
+        const harness::ChatMessage& message = messages[index];
+        if (message.role == harness::Role::User) {
+            Grouped entry{.turn = {}, .first = index, .opened_by_user = true};
+            entry.turn.user = trimmed(message.content.plain_text());
+            for (const harness::ContentPart& part : message.content.parts()) {
+                if (std::optional<SavedAttachment> medium = carried(part); medium.has_value()) {
+                    entry.turn.attachments.push_back(std::move(*medium));
+                }
+            }
+            out.push_back(std::move(entry));
+            continue;
+        }
+        if (message.role == harness::Role::System) {
+            const std::string text = message.content.plain_text();
+            if (text.starts_with(kCompactionPreamble)) {
+                Grouped entry{.turn = {}, .first = index, .opened_by_user = false};
+                entry.turn.compacted =
+                    trimmed(std::string_view{text}.substr(kCompactionPreamble.size()));
+                out.push_back(std::move(entry));
+            }
+            continue;
+        }
+        if (out.empty()) {
+            out.push_back(Grouped{.turn = {}, .first = index, .opened_by_user = false});
+        }
+        Grouped& entry = out.back();
+        SavedTurn& turn = entry.turn;
+        if (message.role == harness::Role::Assistant) {
+            if (std::string text = trimmed(message.content.plain_text()); !text.empty()) {
+                turn.answer.push_back(std::move(text));
+            }
+            for (const harness::ToolCall& call : message.tool_calls) {
+                turn.tools.push_back(SavedTool{
+                    .name = call.name, .summary = tool_call_summary(call), .result_bytes = {}});
+                entry.call_ids.push_back(call.id);
+            }
+            // The loop ends a turn with a message that calls nothing: the
+            // answer. A turn cut short keeps none.
+            turn.answered = turn.answered || message.tool_calls.empty();
+            continue;
+        }
+        // A tool's result, sized against the call it answers -- by its id,
+        // else the first call still waiting -- and never kept.
+        const std::size_t bytes = message.content.plain_text().size();
+        std::optional<std::size_t> answers;
+        for (std::size_t at = 0; at < turn.tools.size(); ++at) {
+            if (turn.tools[at].result_bytes.has_value()) {
+                continue;
+            }
+            if (!message.tool_call_id.empty() && entry.call_ids[at] == message.tool_call_id) {
+                answers = at;
+                break;
+            }
+            if (!answers.has_value()) {
+                answers = at;
+            }
+        }
+        if (answers.has_value()) {
+            turn.tools[*answers].result_bytes = bytes;
+        } else {
+            // A result whose call the history no longer holds.
+            turn.tools.push_back(
+                SavedTool{.name = message.name, .summary = {}, .result_bytes = bytes});
+            entry.call_ids.push_back(message.tool_call_id);
+        }
+    }
+    return out;
+}
+
 }  // namespace
 
 std::string_view to_string(WarningKind kind) noexcept {
@@ -530,30 +687,93 @@ std::optional<Session> most_recent() {
 
 std::string transcript_text(const std::vector<harness::ChatMessage>& messages) {
     std::string out;
-    for (const harness::ChatMessage& message : messages) {
-        std::string_view label;
-        if (message.role == harness::Role::User) {
-            label = "User: ";
-        } else if (message.role == harness::Role::Assistant) {
-            label = "Assistant: ";
-        } else {
-            continue;
-        }
-        const std::string text = message.content.plain_text();
-        std::size_t begin = 0;
-        while (begin < text.size() && std::isspace(static_cast<unsigned char>(text[begin])) != 0) {
-            ++begin;
-        }
-        std::size_t end = text.size();
-        while (end > begin && std::isspace(static_cast<unsigned char>(text[end - 1])) != 0) {
-            --end;
-        }
-        if (begin == end) {
-            continue;  // an assistant turn that only called tools
-        }
+    const auto said = [&out](std::string_view label, const std::string& text) {
         out += out.empty() ? "" : "\n\n";
         out += label;
-        out += text.substr(begin, end - begin);
+        out += text;
+    };
+    for (const Grouped& entry : group_turns(messages)) {
+        if (!entry.turn.user.empty()) {
+            said("User: ", entry.turn.user);
+        }
+        // An assistant message that only called tools has no part.
+        for (const std::string& part : entry.turn.answer) {
+            said("Assistant: ", part);
+        }
+    }
+    return out;
+}
+
+std::string tool_call_summary(const harness::ToolCall& call) {
+    const nlohmann::json parsed = nlohmann::json::parse(call.arguments, nullptr, false);
+    std::string arguments = parsed.is_discarded() ? call.arguments : parsed.dump();
+    // A compact dump escapes its line breaks; text that is not JSON has its
+    // own made spaces, so the summary is one line whatever the model wrote.
+    std::ranges::replace_if(
+        arguments, [](char c) { return c == '\n' || c == '\r' || c == '\t'; }, ' ');
+    if (arguments.size() > kToolSummaryBytes) {
+        std::size_t cut = kToolSummaryBytes;
+        while (cut > 0 && (static_cast<unsigned char>(arguments[cut]) & 0xC0U) == 0x80U) {
+            --cut;  // never inside a character
+        }
+        arguments = arguments.substr(0, cut) + "...";
+    }
+    return arguments;
+}
+
+std::vector<SavedTurn> saved_turns(const Session& session) {
+    std::vector<Grouped> grouped = group_turns(session.messages);
+
+    // What the chat attached rides the user message at its anchor (26d,
+    // 26q): named on the entry that holds that message. An attachment
+    // retrieved rather than inlined has no anchor, and a compaction clears
+    // them all; `saved_attachments` names every one regardless.
+    for (const Attachment& attachment : session.attachments) {
+        std::optional<std::size_t> holder;
+        for (const std::optional<std::size_t> at : {attachment.inline_at, attachment.map_at}) {
+            if (!at.has_value() || *at >= session.messages.size() || holder.has_value()) {
+                continue;
+            }
+            for (std::size_t index = grouped.size(); index > 0; --index) {
+                if (grouped[index - 1].first <= *at) {
+                    holder = index - 1;
+                    break;
+                }
+            }
+        }
+        if (holder.has_value()) {
+            grouped[*holder].turn.attachments.push_back(named(attachment));
+        }
+    }
+
+    // Numbered by the count the session keeps, backward from it: the last
+    // answered turn is `session.turns`, so a resumed session's `next_turn`
+    // follows the last entry. Turns a compaction folded are in that count
+    // and not in the history; a count short of the history's own answers --
+    // a file older than the count, a served client's several messages at
+    // once -- numbers from 1.
+    const auto counted = [](const Grouped& entry) {
+        return entry.opened_by_user && entry.turn.answered;
+    };
+    const auto answered = static_cast<std::int64_t>(std::ranges::count_if(grouped, counted));
+    std::int64_t count = std::max<std::int64_t>(0, std::int64_t{session.turns} - answered);
+    std::vector<SavedTurn> out;
+    out.reserve(grouped.size());
+    for (Grouped& entry : grouped) {
+        if (counted(entry)) {
+            ++count;
+        }
+        entry.turn.turn = count;
+        out.push_back(std::move(entry.turn));
+    }
+    return out;
+}
+
+std::vector<SavedAttachment> saved_attachments(const Session& session) {
+    std::vector<SavedAttachment> out;
+    out.reserve(session.attachments.size());
+    for (const Attachment& attachment : session.attachments) {
+        out.push_back(named(attachment));
     }
     return out;
 }

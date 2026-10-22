@@ -1,7 +1,5 @@
 #include "agentloop/budget.h"
 
-#include <nlohmann/json.hpp>
-
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -9,14 +7,12 @@
 
 #include "agentloop/question.h"
 #include "harness/roles.h"
+#include "logger/session.h"
 
 namespace apogee::agentloop {
 namespace {
 
 constexpr std::size_t kCharactersPerToken = 4;
-
-/// The most of a call's arguments a stub repeats.
-constexpr std::size_t kStubArgumentBytes = 120;
 
 /// Why a finished turn's result is a stub, and why an overflowing turn's is.
 constexpr std::string_view kFinishedWhy = "not kept after its turn -- call it again if you need it";
@@ -31,18 +27,10 @@ constexpr std::string_view kOverflowWhy =
     return std::to_string((bytes + 1023) / 1024) + " KB";
 }
 
-/// `call` as the model wrote it, its arguments compact and clipped.
+/// `call` as the model wrote it, its arguments compact and clipped -- the
+/// one-line summary a saved turn lists the call by too (M27).
 [[nodiscard]] std::string render_call(const harness::ToolCall& call) {
-    const nlohmann::json parsed = nlohmann::json::parse(call.arguments, nullptr, false);
-    std::string arguments = parsed.is_discarded() ? call.arguments : parsed.dump();
-    if (arguments.size() > kStubArgumentBytes) {
-        std::size_t cut = kStubArgumentBytes;
-        while (cut > 0 && (static_cast<unsigned char>(arguments[cut]) & 0xC0U) == 0x80U) {
-            --cut;  // never inside a character
-        }
-        arguments = arguments.substr(0, cut) + "...";
-    }
-    return call.name + "(" + arguments + ")";
+    return call.name + "(" + logger::tool_call_summary(call) + ")";
 }
 
 /// Every call in `messages`, by id, so a result can name the call it answers.

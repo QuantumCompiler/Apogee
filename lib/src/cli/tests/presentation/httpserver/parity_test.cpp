@@ -287,6 +287,9 @@ const std::map<std::string, Classification>& table() {
         {"models status", read_only()},
         {"chats list", read_only()},
         {"chats info", read_only()},
+        // A saved chat's turns (M27), beside `chats info`; a live served
+        // session's messages are `GET /v1/sessions/{id}`'s.
+        {"chats show", read_only()},
         {"knowledge query", read_only()},
         {"knowledge list", read_only()},
         {"knowledge info", read_only()},

@@ -18,7 +18,10 @@ using enum ShellSurfaceKind;
 constexpr std::array kSurfaces{
     // --- views: drawn on the shell today --------------------------------------
     ShellSurface{"chat", View, "Session", ShellDoor{.view = "Session", .seen = "New chat"}},
-    ShellSurface{"chats", View, "Chats", ShellDoor{.view = "Chats"}},
+    // `chats show` (M27) runs on the exec line beside the view, as `title`
+    // and `recall` do; the view's i is `chats info`'s.
+    ShellSurface{"chats", View, "Chats (show's turns run on the exec line)",
+                 ShellDoor{.view = "Chats"}},
     ShellSurface{"models", View, "Models", ShellDoor{.view = "Models"}},
     ShellSurface{"config", View, "Config (and Suites)", ShellDoor{.view = "Config"}},
     ShellSurface{"version", View, "Home", ShellDoor{.view = "Home"}},

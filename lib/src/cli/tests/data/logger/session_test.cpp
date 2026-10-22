@@ -629,3 +629,232 @@ TEST_CASE("a session's todo is saved and read back, and one without writes no ke
     const auto degraded = deserialize(edited.dump(), {});
     CHECK(degraded.session.todo == original.todo);
 }
+
+// ---------------------------------------------------------------------------
+// A saved conversation's turns (M27)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+[[nodiscard]] ChatMessage calling(std::vector<ToolCall> calls, std::string text = {}) {
+    ChatMessage message = ChatMessage::assistant(std::move(text));
+    message.tool_calls = std::move(calls);
+    return message;
+}
+
+[[nodiscard]] ChatMessage compaction(const std::string& summary) {
+    return ChatMessage::system(std::string{apogee::logger::kCompactionPreamble} + summary);
+}
+
+[[nodiscard]] std::vector<std::int64_t> numbers(
+    const std::vector<apogee::logger::SavedTurn>& turns) {
+    std::vector<std::int64_t> out;
+    for (const apogee::logger::SavedTurn& turn : turns) {
+        out.push_back(turn.turn);
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("a saved history reads as turns, each user message and what followed it",
+          "[logger][session][turns]") {
+    Session session = sample();
+    session.turns = 2;
+    session.messages = {
+        ChatMessage::system("You are terse."),
+        ChatMessage::user("  hello  "),
+        ChatMessage::assistant("hi there"),
+        ChatMessage::user("what is in notes.md?"),
+        calling({ToolCall{"c1", "read_file", R"({"path": "notes.md"})"}}, "Let me look."),
+        ChatMessage::from_tool_result(ToolResult{"c1", "read_file", "line one\nline two\n", false}),
+        ChatMessage::assistant("It holds two lines."),
+    };
+    const std::vector<apogee::logger::SavedTurn> turns = apogee::logger::saved_turns(session);
+    REQUIRE(turns.size() == 2);
+    // The system prompt is a setting, not a turn.
+    CHECK(turns[0].user == "hello");
+    CHECK(turns[0].answer == std::vector<std::string>{"hi there"});
+    CHECK(turns[0].tools.empty());
+    CHECK(turns[0].answered);
+    CHECK_FALSE(turns[0].compacted.has_value());
+    // What the model said before calling is the answer's too, in order; the
+    // call is named with its arguments in one line, its result only sized.
+    CHECK(turns[1].user == "what is in notes.md?");
+    CHECK(turns[1].answer == std::vector<std::string>{"Let me look.", "It holds two lines."});
+    REQUIRE(turns[1].tools.size() == 1);
+    CHECK(turns[1].tools[0].name == "read_file");
+    CHECK(turns[1].tools[0].summary == R"({"path":"notes.md"})");
+    CHECK(turns[1].tools[0].result_bytes == std::optional<std::size_t>{18});
+    // Numbered as the session counts them: the last is `turns`.
+    CHECK(numbers(turns) == std::vector<std::int64_t>{1, 2});
+    // transcript_text renders the same grouping.
+    CHECK(apogee::logger::transcript_text(session.messages) ==
+          "User: hello\n\nAssistant: hi there\n\nUser: what is in notes.md?\n\nAssistant: Let "
+          "me look.\n\nAssistant: It holds two lines.");
+}
+
+TEST_CASE("a compaction is an entry of its own where it happened, with the answer it kept",
+          "[logger][session][turns][compaction]") {
+    Session session = sample();
+    // Five turns: the first four folded, twice -- a second compaction keeps
+    // the first's summary beside its own -- then the fifth.
+    session.turns = 5;
+    session.messages = {
+        ChatMessage::system("You are terse."),
+        compaction("They met."),
+        compaction("They chose Postgres.\nOn port 5432."),
+        ChatMessage::assistant("Postgres it is."),
+        ChatMessage::user("and the backups?"),
+        ChatMessage::assistant("Nightly."),
+    };
+    const std::vector<apogee::logger::SavedTurn> turns = apogee::logger::saved_turns(session);
+    REQUIRE(turns.size() == 3);
+    CHECK(turns[0].compacted == std::optional<std::string>{"They met."});
+    CHECK(turns[0].answer.empty());
+    CHECK_FALSE(turns[0].answered);
+    CHECK(turns[1].compacted == std::optional<std::string>{"They chose Postgres.\nOn port 5432."});
+    CHECK(turns[1].user.empty());
+    CHECK(turns[1].answer == std::vector<std::string>{"Postgres it is."});
+    CHECK(turns[1].answered);
+    CHECK(turns[2].user == "and the backups?");
+    // A compaction adds nothing to the count: it carries the turns it folded.
+    CHECK(numbers(turns) == std::vector<std::int64_t>{4, 4, 5});
+    // The summaries are not the participants' words; the answer kept is.
+    CHECK(apogee::logger::transcript_text(session.messages) ==
+          "Assistant: Postgres it is.\n\nUser: and the backups?\n\nAssistant: Nightly.");
+}
+
+TEST_CASE("a turn left unanswered adds nothing to the count, so the last entry stays the count",
+          "[logger][session][turns]") {
+    Session session = sample();
+    // A failed turn keeps its user message and no answer; a cancelled one at
+    // a terminal keeps the tool phase it finished, and no answer.
+    session.turns = 2;
+    session.messages = {
+        ChatMessage::user("first"),
+        ChatMessage::assistant("one"),
+        ChatMessage::user("this one failed"),
+        ChatMessage::user("second"),
+        calling({ToolCall{"c1", "run_command", R"({"command":"ls"})"}}),
+        ChatMessage::from_tool_result(ToolResult{"c1", "run_command", "a b", false}),
+        ChatMessage::assistant("two"),
+        ChatMessage::user("third, cancelled"),
+        calling({ToolCall{"c2", "read_file", R"({"path":"x"})"},
+                 ToolCall{"c3", "read_file", R"({"path":"y"})"}}),
+        ChatMessage::from_tool_result(ToolResult{"c3", "read_file", "yy", false}),
+    };
+    const std::vector<apogee::logger::SavedTurn> turns = apogee::logger::saved_turns(session);
+    REQUIRE(turns.size() == 4);
+    CHECK(numbers(turns) == std::vector<std::int64_t>{1, 1, 2, 2});
+    CHECK_FALSE(turns[1].answered);
+    CHECK(turns[2].answered);
+    CHECK_FALSE(turns[3].answered);
+    // A result is sized against its own call; one never answered says so.
+    REQUIRE(turns[3].tools.size() == 2);
+    CHECK_FALSE(turns[3].tools[0].result_bytes.has_value());
+    CHECK(turns[3].tools[1].result_bytes == std::optional<std::size_t>{2});
+
+    // A count short of the history's own answers -- a file older than the
+    // count -- numbers from 1, never below.
+    session.turns = 0;
+    CHECK(numbers(apogee::logger::saved_turns(session)) == std::vector<std::int64_t>{1, 1, 2, 2});
+    // Nothing said yet: no entries.
+    CHECK(apogee::logger::saved_turns(Session{}).empty());
+}
+
+TEST_CASE("a saved turn names what rode its message, and never carries its bytes",
+          "[logger][session][turns][attachments]") {
+    const std::string image = "iVBORw0KGgoAAAANSUhEUg==";
+    Session session = sample();
+    session.turns = 2;
+    session.messages = {
+        ChatMessage::user("read the report"),
+        ChatMessage::assistant("It covers Q3."),
+        ChatMessage::user(apogee::harness::MessageContent::from_parts(
+            {apogee::harness::ContentPart::from_text("and this chart?"),
+             apogee::harness::ContentPart::from_image_url("data:image/png;base64," + image),
+             apogee::harness::ContentPart::from_image_url("https://example.com/c.png")})),
+        ChatMessage::assistant("A rising line."),
+    };
+    session.attachments = {
+        apogee::logger::Attachment{.name = "report.pdf",
+                                   .files = {{.name = "report.pdf",
+                                              .path = "/work/report.pdf",
+                                              .sha256 = "ab12",
+                                              .reader = "pdftotext",
+                                              .bytes = 9000}},
+                                   .inline_at = 0,
+                                   .map_at = {},
+                                   .graph = {}},
+        apogee::logger::Attachment{.name = "src",
+                                   .files = {{.name = "src/a.cpp",
+                                              .path = "/work/src/a.cpp",
+                                              .sha256 = "cd34",
+                                              .reader = "text",
+                                              .bytes = 40},
+                                             {.name = "src/b.cpp",
+                                              .path = "/work/src/b.cpp",
+                                              .sha256 = "ef56",
+                                              .reader = "text",
+                                              .bytes = 2}},
+                                   .inline_at = {},
+                                   .map_at = 2,
+                                   .graph = {}},
+        // Retrieved rather than inlined: no message carries it.
+        apogee::logger::Attachment{.name = "big.log",
+                                   .files = {{.name = "big.log",
+                                              .path = "/work/big.log",
+                                              .sha256 = "0a",
+                                              .reader = "text",
+                                              .bytes = 5000000}},
+                                   .inline_at = {},
+                                   .map_at = {},
+                                   .graph = {}},
+    };
+    const std::vector<apogee::logger::SavedTurn> turns = apogee::logger::saved_turns(session);
+    REQUIRE(turns.size() == 2);
+    REQUIRE(turns[0].attachments.size() == 1);
+    CHECK(turns[0].attachments[0].name == "report.pdf");
+    CHECK(turns[0].attachments[0].files == 1);
+    CHECK(turns[0].attachments[0].bytes == std::optional<std::uint64_t>{9000});
+    // The message's own media first, by media type or URL, then the chat's.
+    REQUIRE(turns[1].attachments.size() == 3);
+    CHECK(turns[1].user == "and this chart?");
+    CHECK(turns[1].attachments[0].name == "image/png");
+    CHECK(turns[1].attachments[0].bytes == std::optional<std::uint64_t>{16});
+    CHECK(turns[1].attachments[1].name == "https://example.com/c.png");
+    CHECK_FALSE(turns[1].attachments[1].bytes.has_value());
+    CHECK(turns[1].attachments[2].name == "src");
+    CHECK(turns[1].attachments[2].files == 2);
+    CHECK(turns[1].attachments[2].bytes == std::optional<std::uint64_t>{42});
+    // Every one the chat holds, the retrieved one too.
+    std::vector<std::string> held;
+    for (const apogee::logger::SavedAttachment& attachment :
+         apogee::logger::saved_attachments(session)) {
+        held.push_back(attachment.name);
+    }
+    CHECK(held == std::vector<std::string>{"report.pdf", "src", "big.log"});
+    // No byte of the image, nor any path, anywhere in what was read.
+    for (const apogee::logger::SavedTurn& turn : turns) {
+        for (const apogee::logger::SavedAttachment& attachment : turn.attachments) {
+            CHECK(attachment.name.find(image) == std::string::npos);
+            CHECK(attachment.name.find("/work") == std::string::npos);
+        }
+        CHECK(turn.user.find(image) == std::string::npos);
+    }
+}
+
+TEST_CASE("a tool call's summary is its arguments in one clipped line",
+          "[logger][session][turns]") {
+    using apogee::logger::tool_call_summary;
+    CHECK(tool_call_summary(ToolCall{"c", "t", R"({ "path" : "a b.md" })"}) ==
+          R"({"path":"a b.md"})");
+    // A line break inside a value stays escaped; text that is not JSON has
+    // its own made spaces.
+    CHECK(tool_call_summary(ToolCall{"c", "t", R"({"text":"a\nb"})"}) == R"({"text":"a\nb"})");
+    CHECK(tool_call_summary(ToolCall{"c", "t", "not\njson\tat all"}) == "not json at all");
+    // Clipped on a character boundary.
+    const std::string long_path = std::string(119, 'p') + "é" + std::string(100, 'p');
+    CHECK(tool_call_summary(ToolCall{"c", "t", long_path}) == std::string(119, 'p') + "...");
+}

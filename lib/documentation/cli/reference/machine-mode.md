@@ -108,7 +108,10 @@ holds — and itself never carries `turn`; neither does anything said between
 turns (an `attach`'s notices). **The turn accounting:** every accepted `user`
 line ends in exactly one `result` or one `error`, cancelled or not, so N lines
 sent are N turns closed. A `task run`'s events carry no `turn`: its turns have
-no `user` line.
+no `user` line. The turns a resumed conversation already holds are a read,
+not events: `apogee chats show <id> --output-format json` (since M27,
+[below](#everything-else-is-a-cli-command)), whose last turn is `next_turn`
+minus one.
 
 ### Three rules a driver must follow
 
@@ -1214,6 +1217,53 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   the reason beside it where there is one (`load_unknown`, `gpu.unknown`,
   `model_budget_unknown`). The read takes about half a second: the CPU's
   utilization is measured over a 500 ms window.
+
+Since M27 a saved chat's turns read the same way -- what a host draws of a
+conversation it resumes, or shows without resuming it:
+
+```bash
+apogee chats show <id|name> --output-format json   # {"object":"chat","id",…,"attachments":[…],"turns":[…]}
+```
+
+The document is `id`, `name`, `backend` and `model` as `chats list`'s row
+says them, `title` (the generated title, `""` when it has none),
+`attachments` -- every attachment the chat holds, in the order attached, each
+`{name, files, bytes}` -- and `turns`, the whole conversation in order. Each
+entry is a **turn** -- a user message and everything after it up to the next
+-- or a **compaction**, where it happened:
+
+- `turn`: the conversation's turn count once the entry ended -- the count a
+  resumed session numbers on from. The last entry's is one before the
+  `next_turn` that `chat --resume <id>`'s `session` event announces, and an
+  answered turn carries the number its `user` line was given. A turn left
+  unanswered (cancelled at a terminal, or failed) and a compaction add
+  nothing: each carries the number before it. The turns a compaction folded
+  are in the count, not in `turns`.
+- `user`: `text`, the user's words (`""` on a compaction), and `attachments`,
+  what rode the message, each `{name, files, bytes}`: media the message
+  carries itself, named by its media type (`image/png`) or its URL, then what
+  the chat attached on it. An attachment is named, never its bytes -- no
+  image's data is in the document. One retrieved rather than inlined rides no
+  message, and a compaction clears what rode the messages it folded; the
+  chat's `attachments` names every one. `bytes` is `null` where the history
+  does not say (an image named by URL).
+- `answer`: `text`, the model's words -- each message's, a blank line
+  between, what it said before a tool call too -- and `tools`, each call in
+  order as `{name, summary, result_bytes}`: `summary` its arguments in one
+  line (compact JSON, clipped), `result_bytes` the size of what it returned,
+  `null` when the history keeps no result. A result itself is never here.
+- `answered`: whether the history holds the model's answer -- `false` for a
+  turn left unanswered, and for a compaction that kept none.
+- `compacted`: on a compaction alone, `{summary}`, the summary that stands in
+  for the turns before it; its `answer` is the last answer the compaction
+  kept.
+
+Nothing the transcript never held is here: no thinking, and no injected
+context -- retrieved excerpts, an inlined attachment's text, recall. The
+system prompt is a setting, not a turn. A private chat (`chat --private`) is
+never written, so there is nothing to show. A name no chat answers is refused
+as `chats info` refuses it: `apogee chats: no chat named '<name>'` on stderr,
+exit `1`, nothing on stdout.
 
 No document carries a key or a token. A command that has no JSON face refuses
 `--output-format json` and names the commands that have one.

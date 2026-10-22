@@ -9317,6 +9317,70 @@ Decisions taken while building, for veto:
 
 **Not run on real weights**: `models info`'s typed data reads files only; the fixtures stand in for real sets.
 
+### 2026-10-22 — `chats-show-reads-the-turns` (maintenance item M27): `chats show` reads a saved conversation's turns
+
+**Why.** The user, reopening a saved chat in the macOS app: "When we reload a chat, I want the previous turns to show." The app drew only `resumed: 5 earlier turns of this conversation aren't shown here -- apogee keeps them, and the model still has them`, because no verb read a saved conversation's turns. `chats` had `list`, `info`, `title`, `compact`, `recall` and `delete`, and only `chats list` was a machine read. The turns were on disk (`logger::Session::messages`), and even the terminal's `chat --resume` loaded them without showing them.
+
+- [x] **`apogee chats show <id|name>`**, with its completion (the store's chats, as `chats info` offers them):
+  - its text view prints each turn plainly, with the user's words, the answer and the tools called;
+  - `--output-format json` gives `{object:"chat", id, name, title, backend, model, attachments:[{name,files,bytes}], turns:[{turn, user:{text,attachments}, answer:{text,tools:[{name,summary,result_bytes}]}, answered, compacted?:{summary}}]}`, documented in `machine-mode.md`. `id`, `name`, `backend` and `model` are `chats list`'s row's.
+- [x] **Turns numbered as a resumed session numbers them.**
+  - The saved session keeps a count of answered turns, and a resumed session announces that count plus one. So the last answered turn takes the count, and the rest are numbered back from it.
+  - An unanswered turn (cancelled or failed) and a compaction add nothing; each carries the number before it.
+  - A file whose count is lower than the answers it holds starts at 1.
+  - Proved over a real driven chat: its third question was turn 3, and the resumed session announced turn 4.
+- [x] **Nothing the history doesn't hold:**
+  - no thinking and no injected context;
+  - the system prompt left out, as a setting rather than a turn;
+  - an attachment named with its size, never its bytes;
+  - tool results never printed, only their size.
+- [x] **One implementation, shared:**
+  - the grouping lives in `logger/session`, and `transcript_text` now renders from it, byte for byte as before;
+  - the compaction's preamble is declared there once, written by the compaction and recognized by the reader;
+  - `tool_call_summary` is shared with the result stubs the model is sent.
+- [x] **Its places:** `chats show` is classified in the TUI's parity table (it runs on the exec line; the Chats view doesn't draw it) and in the HTTP parity table (read-only, with no HTTP twin).
+
+**Decisions made while building** (2026-10-22, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - a turn is a user message and everything after it up to the next;
+  - tools are listed by name with a one-line argument summary;
+  - a compaction is its own entry where it happened;
+  - the whole conversation is printed;
+  - `chat --resume` in the terminal is unchanged.
+- **`answered` on every entry,** so a turn that failed is never taken for an empty answer.
+- **A compaction entry:**
+  - its `user` is blank, its `answer` the last the compaction kept, and its summary has the fixed preamble removed;
+  - stacked compactions share a number, since the history does not record when the earlier one happened.
+- **A chat-level `attachments` list,** besides each turn's. An attachment retrieved rather than inlined never rides a message, and a compaction clears the record, so the top-level list names every attachment.
+- **`answer.text` joins everything the model said in the turn,** text before a tool call included. The order of text and tool calls is not kept.
+- **Images a message carries itself** (a served client's, or an older file's) are named by media type or URL with their decoded size. `bytes` and `result_bytes` are `null` where the history doesn't say.
+- **Arguments that are not valid JSON** have their line breaks turned into spaces in the model's result stubs: the one behaviour change from sharing `tool_call_summary`.
+- **`cli.machine_schema_conformance` now holds every command the binary lists as taking `--output-format json` to `machine-mode.md`.** With `chats show` cut from a copy of the document, it fails naming it.
+
+**Verified.**
+- 11 new cases:
+  - `session_test` (5):
+    - a history read as turns;
+    - a compaction where it happened, with the answer it kept;
+    - an unanswered turn adding nothing to the count;
+    - a turn naming what rode its message, never its bytes;
+    - a tool call's summary clipped to one line.
+  - `chat_history_test` (6), over a chat written with `logger::save`:
+    - the text view and the JSON, each compared whole;
+    - resuming in machine mode announcing the last turn plus one;
+    - a real driven chat with scripted models (reasoning, a compaction, an inlined attachment, then a resume) reading back with no reasoning and no attachment content;
+    - an unknown name refused as `chats info` refuses it;
+    - completion offering what `chats info` does, each offer accepted.
+- The neighbouring suites pass: `[session]`, `[chat]`, `[reads]`, `[parity]`, `[completion]`, `[machine]`, `[httpserver]`, `[tui]`, `[logger]`, `[recall]`, `[knowledge]` and `[compaction]`.
+- These ctest cases pass:
+  - `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`;
+  - `cli.machine_schema_conformance`, `cli.machine_mode`;
+  - `cli.complete_lifecycle`, `cli.shell_completion`, `cli.complete_opens_no_listening_socket`;
+  - `cli.tui_shell`, `cli.tui_doors`, `cli.chat_typeahead_and_crash_safety`, `cli.chat_line_editing`;
+  - `cli.reference_driver`, `cli.knowledge_lifecycle`, `cli.config_lifecycle`.
+- One run of the new cases straight after a rebuild reported 2 failed assertions that were not captured. They did not recur in about 100 sequential runs, 40 parallel, 12 under CPU load, or 15 ctest repeats.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,859 tests and the macOS app's 400 cases passed, with no warning; the earlier two-assertion failure did not recur.
+
 ---
 
 ## Milestone AP — Runtime adapters

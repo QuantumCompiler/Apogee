@@ -338,6 +338,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/markdown/stream_renderer_test.cpp
     presentation/markdown/corpus_test.cpp
     presentation/cli/chat_test.cpp
+    presentation/cli/chat_history_test.cpp
     presentation/cli/check_test.cpp
     presentation/cli/lifecycle_test.cpp
     presentation/cli/reset_test.cpp

@@ -54,7 +54,7 @@ Upkeep and fixes, claimable at any time by name: opened 2026-10-20 with its firs
 |---|---|---|---|---|
 | M4 | Only backends that chat are offered to chat — Sessions, Settings and Training choose among the entries whose `kind` chats, an embedding, drafter, video or voice `mlx` entry left to its own places | maint. | [`chat-choices-follow-kind.md`](maintenance/chat-choices-follow-kind.md) | 🟢 |
 | M5 | The Backends table says each entry's kind and drafter — the kind beside the format, a paired base marked, **Pair a drafter…** from the base's details, a pairing that can no longer draft drawn | maint. | [`backends-say-kind-and-drafter.md`](maintenance/backends-say-kind-and-drafter.md) | 🟢 |
-| M7 | A resumed chat shows its earlier turns — the turns read by the CLI's `chats show` and drawn as live ones under a divider, the live session numbered on from them; the notice kept for an older binary | maint. | [`resumed-chat-shows-its-turns.md`](maintenance/resumed-chat-shows-its-turns.md) | 🔒 CLI M27 |
+| M7 | A resumed chat shows its earlier turns — the turns read by the CLI's `chats show` and drawn as live ones under a divider, the live session numbered on from them; the notice kept for an older binary | maint. | [`resumed-chat-shows-its-turns.md`](maintenance/resumed-chat-shows-its-turns.md) | 🟢 |
 
 ### v0.2.0
 
