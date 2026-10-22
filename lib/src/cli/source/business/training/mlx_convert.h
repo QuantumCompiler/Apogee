@@ -73,6 +73,18 @@ enum class MlxConverterKind : std::uint8_t { MlxLm, MlxVlm, MlxEmbeddings, MlxVi
 /// to every surface that offers or refuses the conversion.
 [[nodiscard]] std::filesystem::path find_mlx_video_converter(const std::filesystem::path& venv);
 
+/// mlx-video's Wan generator, the module the pinned commit holds it in (53l):
+/// `mlx_video.models.wan_2.generate`, its entry `generate_video` -- the
+/// package's console script `mlx_video.wan_2.generate`, which both READMEs
+/// spell as a module, runs that module's `main()`.
+inline constexpr std::string_view kMlxVideoGenerator = "mlx_video.models.wan_2.generate";
+
+/// mlx-video's Wan generator as the environment at `venv` holds it (53l): the
+/// module file `kMlxVideoGenerator` names, with the `torch` the set brings
+/// beside it -- 53k's reading of "installed", asked of the generator. Read
+/// from files, never imported; empty when either is not there.
+[[nodiscard]] std::filesystem::path find_mlx_video_generator(const std::filesystem::path& venv);
+
 /// One precision `models convert --mlx` writes, spelled the way a community
 /// build's name ends (`-4bit`, `-bf16`): `mlx_lm.convert`'s own choices --
 /// bits in its affine scheme with its default group of 64, its `mxfp4`

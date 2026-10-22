@@ -2236,10 +2236,12 @@ void check_video(CheckReport& report, const CheckInputs& inputs) {
                     " in " + host.venv.string() + " (their files, not imported by check)");
             break;
     }
-    // The two seeded drivers: the video one (49b) and the speech one (50a).
+    // The seeded drivers: the video one (49b), the speech one (50a) and the
+    // MLX engine's video one (53l).
     for (const auto& [label, file] :
          {std::pair<std::string, std::filesystem::path>{"driver", host.driver},
-          std::pair<std::string, std::filesystem::path>{"voice driver", host.voice_driver}}) {
+          std::pair<std::string, std::filesystem::path>{"voice driver", host.voice_driver},
+          std::pair<std::string, std::filesystem::path>{"mlx driver", host.mlx_driver}}) {
         const std::string script = file.filename().string();
         switch (harness::inspect_seeded_script(inputs.home, script, inputs.retired_scripts)) {
             case harness::SeededScript::Missing:

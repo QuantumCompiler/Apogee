@@ -56,7 +56,42 @@ nlohmann::json request_document(const VideoRequest& request,
         }
         document["loras"] = std::move(loras);
     }
+    // On MLX (53l): the engine named, the tokenizer from the store, and a
+    // shift when one is asked. PyTorch's request is what it always was.
+    if (request.engine == VideoEngine::Mlx) {
+        document["engine"] = std::string{to_string(request.engine)};
+        document["tokenizer"] = request.tokenizer.string();
+        if (request.shift.has_value()) {
+            document["shift"] = *request.shift;
+        }
+    }
     return document;
+}
+
+std::string video_request_refusal(const VideoRequest& request) {
+    if (request.engine != VideoEngine::Mlx) {
+        return {};
+    }
+    if (!mlx_video_frames(request.frames)) {
+        return "mlx-video's Wan generator takes 4n+1 frames (5, 9, ... 81, 121) -- " +
+               std::to_string(request.frames) + " is not one";
+    }
+    if (request.tokenizer.empty()) {
+        return "no T5 tokenizer to point mlx-video's Wan generator at -- it is never fetched from "
+               "the hub";
+    }
+    // The model's mode says whether a seed image is taken: Wan's TI2V takes
+    // one or none, its I2V needs one, its T2V takes none.
+    const std::string mode = mlx_video_mode(request.pipeline);
+    if (mode == "t2v" && !request.image.empty()) {
+        return "this MLX video model is text-to-video (its config.json says model_type t2v): it "
+               "takes no seed image -- generate without --image";
+    }
+    if (mode == "i2v" && request.image.empty()) {
+        return "this MLX video model is image-to-video (its config.json says model_type i2v): it "
+               "starts from a seed image -- give it one with --image";
+    }
+    return {};
 }
 
 std::optional<VideoEvent> read_video_event(const training::ScriptEvent& line) {
@@ -76,7 +111,10 @@ std::optional<VideoEvent> read_video_event(const training::ScriptEvent& line) {
                                .pipeline = string_at(line.record, "pipeline"),
                                .mode = string_at(line.record, "mode"),
                                .torch = string_at(line.record, "torch"),
-                               .diffusers = string_at(line.record, "diffusers")};
+                               .diffusers = string_at(line.record, "diffusers"),
+                               .engine = string_at(line.record, "engine"),
+                               .mlx = string_at(line.record, "mlx"),
+                               .mlx_video = string_at(line.record, "mlx_video")};
         return out;
     }
     if (event == "step") {
@@ -120,6 +158,15 @@ VideoOutcome generate_video(const VideoReadiness& readiness, const VideoRequest&
     };
     if (!readiness.ready()) {
         return finish(readiness.message());
+    }
+    // The one generation, either engine (53l): its own refusals up front,
+    // and the driver the ladder found for this engine and no other.
+    if (readiness.engine != request.engine) {
+        return finish("the runtime was made ready for " + std::string{to_string(readiness.engine)} +
+                      ", and the run asks for " + std::string{to_string(request.engine)});
+    }
+    if (std::string refused = video_request_refusal(request); !refused.empty()) {
+        return finish(std::move(refused));
     }
 
     sweep_abandoned(work_root);

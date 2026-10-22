@@ -52,12 +52,22 @@ struct VideoRequest {
     std::string variant{};
     /// Frames a second: the assembly's, never the driver's.
     int fps = 0;
-    /// The LoRAs to apply through diffusers' own loader, in order (49e).
+    /// The LoRAs to apply, in order: through diffusers' own loader (49e),
+    /// or mlx-video's on MLX (53l).
     std::vector<LoraFile> loras{};
+    /// The engine the run takes (53l), and on MLX what mlx-video's generator
+    /// is handed beside the settings: the T5 tokenizer it reads, from the
+    /// store (never the hub), and the noise schedule's shift when one is
+    /// asked (empty: the model's config decides).
+    VideoEngine engine = VideoEngine::Torch;
+    std::filesystem::path tokenizer{};
+    std::optional<double> shift{};
 };
 
 /// The request the driver reads: every field of `request` it takes, and
-/// where it writes its frames.
+/// where it writes its frames. On MLX (53l) it names its engine, the
+/// tokenizer and any shift too; a PyTorch run asks exactly what it asked
+/// before there were two engines.
 [[nodiscard]] nlohmann::json request_document(const VideoRequest& request,
                                               const std::filesystem::path& frames_dir);
 
@@ -70,6 +80,12 @@ struct VideoReady {
     std::string mode;
     std::string torch;
     std::string diffusers;
+    /// The engine the driver says it runs (53l) -- `mlx` from the MLX
+    /// driver, empty from the PyTorch one, which predates the word -- and on
+    /// MLX the versions that ran.
+    std::string engine{};
+    std::string mlx{};
+    std::string mlx_video{};
 };
 
 /// One thing a generation said as it went.
@@ -136,12 +152,21 @@ struct VideoOutcome {
     std::chrono::milliseconds elapsed{0};
 };
 
-/// Runs one generation on `readiness` (ready: `probe_video` passed):
+/// Why `request` cannot run on its engine, before anything is spawned
+/// (53l), or empty: on MLX, a frame count mlx-video's Wan generator does not
+/// take (`4n+1`), no tokenizer to point it at, or a seed image the model's
+/// mode does not take -- a `t2v` model given one, an `i2v` model none.
+[[nodiscard]] std::string video_request_refusal(const VideoRequest& request);
+
+/// Runs one generation on `readiness` (ready: the ladder of the request's
+/// engine passed -- `probe_video_engine`):
 /// a working directory made under `work_root` (and any a dead run left
 /// there removed), the request written into it, the driver run with every
 /// event to `on_event`, the frames assembled into the working directory,
 /// and the clip moved to `output`. The working directory is removed on
-/// every path; `output` is touched only when everything succeeded.
+/// every path; `output` is touched only when everything succeeded. A request
+/// its engine refuses (`video_request_refusal`), or one whose engine is not
+/// the one the ladder was asked for, is refused before anything is made.
 [[nodiscard]] VideoOutcome generate_video(const VideoReadiness& readiness,
                                           const VideoRequest& request,
                                           const std::filesystem::path& output,

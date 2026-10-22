@@ -773,12 +773,24 @@ whose last frame the run started from, or null) -- and `preset` (`draft`,
 `final`, or null); since 49e `loras` -- each LoRA the run applied, in the
 order given: `path` (the `.safetensors` file), `sha256` (the file as the run
 began, what a `--from` rerun verifies it against) and `scale` -- empty for
-none, with `versions` then naming `peft` too; and `error` when it did not
+none, with `versions` then naming `peft` too; since 53l `engine` -- `torch`
+(a diffusers pipeline, through diffusers) or `mlx` (an MLX video model,
+mlx-video's build of Wan's original layout, through mlx-video's own Wan
+generator) -- the engine the model's directory runs on, which `--engine
+auto|torch|mlx` only names or is refused by, and which a `--from` rerun
+replays; a record without it ran on `torch`. An `mlx` run's `model` is its
+store handle and directory, `class` `Wan <mode>` (its config's `model_type`:
+`t2v`, `i2v`, `ti2v`), `ref` the Wan set it was converted from, `variant`
+null; its `device` is MLX's (`gpu`) with `dtype` its quantization (`4-bit`,
+or empty when unstated); its `versions` carry `mlx` and `mlx_video` beside an
+empty `torch` and `diffusers`; and its `loras` are applied through
+mlx-video's own loader, with no `peft`. A pipeline's record is unchanged but
+for `engine`. The record carries `error` when the clip did not
 land. The clip and its sidecar are written only on `done`; a failed run exits `1` and a
 cancelled one `130`, the output path untouched either way. The narration --
 the device and the scale to expect, then each step -- goes to stderr. A run
-refused before it starts (a cap, an existing output, no pipeline, a runtime
-not installed) prints no document: one line on stderr naming the fix, exit
+refused before it starts (a cap, an existing output, no pipeline, an engine
+its model does not run on, a runtime not installed) prints no document: one line on stderr naming the fix, exit
 `1`. A run from a record (`--from`) or continuing a clip (`--extend`) says
 first, on stderr, what came from the record and what the flags changed.
 

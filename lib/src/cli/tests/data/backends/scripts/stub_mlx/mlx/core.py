@@ -28,3 +28,8 @@ class _Random:
 
 
 random = _Random()
+
+
+def default_device():
+    """Where arrays are made: the GPU, as on Apple silicon (53l)."""
+    return "Device(gpu, 0)"

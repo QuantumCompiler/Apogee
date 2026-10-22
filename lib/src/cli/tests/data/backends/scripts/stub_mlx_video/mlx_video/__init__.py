@@ -8,6 +8,13 @@ reads for "installed" and the seeded driver imports -- and writes what the
 real one writes (`convert.py`). A stub `torch` lies beside it: the real
 converter loads Wan's `.pth` checkpoints through torch, so the set installs
 it, and "installed" asks for both.
+
+Since 53l its Wan generator sits beside the converter, where the pinned
+commit holds it too (`mlx_video/models/wan_2/generate.py`, with the
+`save_video` it imports from `postprocess.py`), and with it the two packages
+it reaches for: a stub `tqdm`, whose bar it walks its steps under, and a stub
+`transformers`, whose `AutoTokenizer` it asks for its tokenizer -- refusing a
+hub name, as the real one does offline.
 """
 
 from mlx_video.version import __version__  # noqa: F401

@@ -211,6 +211,7 @@ add_library(apogee_tests_business OBJECT
     business/video/runtime_test.cpp
     business/video/generation_test.cpp
     business/video/video_driver_test.cpp
+    business/video/video_mlx_driver_test.cpp
     business/video/voice_test.cpp
     business/video/voice_driver_test.cpp
     business/video/compose_test.cpp
@@ -925,15 +926,20 @@ if(UNIX)
     # print on neither stream, the loop (49d: a draft, its final over the
     # same seed, a continuation, a clip with no record refused), `voice
     # say` (50a: one WAV, its sentences timed, no listener while the speech
-    # driver runs, Ctrl-C), and a missing runtime refused on a pipe.
+    # driver runs, Ctrl-C), and a missing runtime refused on a pipe; and
+    # since 53l, on Apple silicon, the same generation on MLX -- the seeded
+    # MLX driver over the stub mlx-video, its record's engine, an engine the
+    # model does not run on refused, --from replaying MLX, no socket in the
+    # MLX driver's tree, Ctrl-C, mlx-video missing refused.
     # Skips (77) without python3.
     add_test(NAME cli.video_lifecycle
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/video_e2e.sh"
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/video-e2e
             ${CMAKE_CURRENT_SOURCE_DIR}/business/video/scripts
+            ${CMAKE_CURRENT_SOURCE_DIR}/data/backends/scripts
     )
-    set_tests_properties(cli.video_lifecycle PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+    set_tests_properties(cli.video_lifecycle PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77)
 
     # `analyze` on the real binary: the bundled agents on the mock backend
     # against a fixture repository -- a ref reviewed without being checked out,

@@ -238,7 +238,7 @@ The release's MLX-for-every-kind track *(53e–53m, opened 2026-10-21 from that 
 - [x] **Gemma 4 drafters on MLX** *(53i, shipped 2026-10-21 — [Milestone AQ](MILESTONES.md#milestone-aq--mlx-for-every-kind))* — the four assistants become drafters beside their bases; built now and measured after (the user's call), the speed-up on their Mac their run.
 - [x] **Wan pulled whole** *(53j, shipped 2026-10-21 — [Milestone AQ](MILESTONES.md#milestone-aq--mlx-for-every-kind))* — the pull takes Wan's T5 encoder and VAE, the user's set is completed in place, and the refusal says what it lacks and what runs it.
 - [x] **Wan converted through mlx-video** *(53k, shipped 2026-10-21 — [Milestone AQ](MILESTONES.md#milestone-aq--mlx-for-every-kind))* — the original layout to an MLX video directory; mlx-video installed opt-in from GitHub, pinned to a reviewed commit (the user's call).
-- [ ] **`video generate` on MLX** *([53l](../backlog/v0.2.0/mlx-video-generate.md))* — a second engine on the one generation core, chosen by the model's directory.
+- [x] **`video generate` on MLX** *(53l, shipped 2026-10-21 — [Milestone AQ](MILESTONES.md#milestone-aq--mlx-for-every-kind))* — a second engine on the one generation core, chosen by the model's directory.
 - [ ] **Voice on MLX** *([53m](../backlog/v0.2.0/mlx-voice.md))* — Kokoro through mlx-audio, `voice say` on an MLX engine.
 
 ### v0.1.9 — Desktop-parity capabilities

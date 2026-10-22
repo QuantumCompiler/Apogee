@@ -193,6 +193,11 @@ struct BundledScript {
 /// `training/scripts/video_generate.py`, relative to the data directory.
 [[nodiscard]] std::string bundled_video_driver_relative_path();
 
+/// `training/scripts/video_generate_mlx.py` (53l), the MLX engine's video
+/// driver over mlx-video's Wan generator -- one of `bundled_video_scripts`,
+/// seeded beside the PyTorch one.
+[[nodiscard]] std::string bundled_video_mlx_driver_relative_path();
+
 /// `training/scripts/voice_say.py` (50a), the speech driver -- one of
 /// `bundled_video_scripts`, seeded beside the video driver.
 [[nodiscard]] std::string bundled_voice_driver_relative_path();

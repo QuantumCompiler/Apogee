@@ -7,7 +7,7 @@
 - **What `voice say` is around the engine** (50a, 50b): the record, the timings each segment measures from its own WAV header, the playback clock the GUI lights sentences by, and the install consent. None of that is PyTorch's. Only the driver is.
 
 **Core constraint(s).**
-- **One `voice say`, two engines,** as [53l](mlx-video-generate.md) does for video: the record, the timings and the refusals stay one implementation. The engine follows the voice model's directory (`voice` format on PyTorch, a `voice`-kind MLX directory, 53e, on MLX).
+- **One `voice say`, two engines,** as [53l](../../assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind) does for video (shipped 2026-10-21: the engine follows the model's directory, `engine` in the record, `--engine` names or refuses): the record, the timings and the refusals stay one implementation. The engine follows the voice model's directory (`voice` format on PyTorch, a `voice`-kind MLX directory, 53e, on MLX).
 - **Opt-in, in Apogee's own environment:** an `mlx-audio` set, installed by `train setup --with mlx-audio` and never unasked. Its Python range is read and dated (M19's rule).
 - **The interactive invariants:** the driver over the one script runner, its stderr a tail, its descriptor 1 on stderr before importing (`voice_driver_test`'s proof, mirrored).
 

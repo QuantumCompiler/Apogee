@@ -97,6 +97,9 @@ struct VideoGenerateOptions {
     /// cleared.
     std::vector<std::string> loras{};
     bool no_lora = false;
+    /// `--engine` (53l): `auto`, `torch` or `mlx`, or empty when not given.
+    /// It only names the engine the model's directory says, or is refused.
+    std::string engine{};
 };
 
 /// `given` -- `<path>[:<scale>]` -- read: the path, and the strength after
@@ -114,33 +117,39 @@ struct VideoGenerateOptions {
 /// `4k+1` (the video VAEs compress time four frames to one), at least 5.
 [[nodiscard]] int video_frames(double duration, int fps);
 
-/// The pipeline a run uses, resolved.
+/// The model a run uses, resolved: a diffusers pipeline, or since 53l an
+/// MLX video model -- mlx-video's build of Wan's original layout.
 struct ResolvedPipeline {
-    /// The name it was given by: a store handle (`<model>/pipeline/<id>`),
-    /// or the path a pipeline outside the store was named by.
+    /// The name it was given by: a store handle (`<model>/pipeline/<id>`,
+    /// `<model>/mlx/<id>`), or the path a model outside the store was named
+    /// by.
     std::string handle;
     std::filesystem::path dir;
     /// `--model`, or `models.default_video`.
     std::string source;
-    /// From its record and its index.
+    /// From its record and its index -- for an MLX video model, its record
+    /// (the set it was converted from) and `Wan <mode>` from its config.
     std::string ref{};
     std::string revision{};
     std::string pipeline_class{};
     std::string variant{};
+    /// What its directory runs on (53l, `video::engine_of_directory`).
+    video::VideoEngine engine = video::VideoEngine::Torch;
 };
 
 /// `given` (`--model`), else `pointer` (`models.default_video`), as one
-/// pipeline: a handle, a bare id, a model holding exactly one pipeline, or
-/// a path to a pipeline's directory. The refusal names what to do instead;
-/// empty `error` means `out` is set.
+/// model a clip runs on: a handle, a bare id, a model holding exactly one
+/// pipeline or MLX video model, or a path to either's directory. The
+/// refusal names what to do instead; empty `error` means `out` is set.
 [[nodiscard]] std::string resolve_video_pipeline(const models::StoreRoots& roots,
                                                  std::string_view given, std::string_view pointer,
                                                  ResolvedPipeline& out);
 
 /// What a run needs from outside.
 struct VideoGenerateSeams {
-    /// The ladder for the resolved pipeline -- in the command, the consent
-    /// to install the runtime first (`ready_video_runtime`).
+    /// The ladder for the resolved model on its engine -- in the command,
+    /// on PyTorch the consent to install the runtime first
+    /// (`ready_video_runtime`); on MLX the ladder alone (53l).
     std::function<video::VideoReadiness(const ResolvedPipeline&)> ready;
     /// The driver's spawn and the assembly.
     video::VideoSeams run{};
@@ -172,8 +181,10 @@ struct VideoGenerateResult {
 
 /// One `video generate`, composed: refused before anything runs when a
 /// setting meets a cap, the output exists or its directory does not, the
-/// seed image is missing, no pipeline resolves or the ladder refuses; else
-/// one generation, its record written beside the clip on success.
+/// seed image is missing, no model resolves, an engine asked for -- by
+/// `--engine`, or held from a record -- is not the model's (53l), or the
+/// ladder refuses; else one generation on the model's engine, its record
+/// written beside the clip on success.
 [[nodiscard]] VideoGenerateResult generate_clip(const harness::Config& config,
                                                 const models::StoreRoots& roots,
                                                 const VideoGenerateOptions& options,

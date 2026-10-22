@@ -36,6 +36,31 @@ namespace {
     throw CLI::RuntimeError(code);
 }
 
+/// This install's ladder host, its store where the config puts it.
+[[nodiscard]] video::VideoHost video_host(const harness::Config& config) {
+    video::VideoHost host = video::VideoHost::current();
+    host.roots = store_roots_of(config);
+    return host;
+}
+
+/// The runtime for `pipeline` on its engine, as a command asks it (53l): on
+/// PyTorch the environment and the `video` set asked for at a terminal,
+/// then the whole ladder over the pipeline; on MLX the ladder alone --
+/// mlx-video is opt-in, never asked about, its rungs naming its setup.
+[[nodiscard]] video::VideoReadiness ready_engine(const harness::Config& config,
+                                                 const ResolvedPipeline& pipeline,
+                                                 std::string_view purpose) {
+    if (pipeline.engine == video::VideoEngine::Torch) {
+        const video::VideoReadiness runtime = ready_video_runtime(config, purpose);
+        if (!runtime.ready() && runtime.refusal != video::VideoRefusal::NoDriver &&
+            runtime.refusal != video::VideoRefusal::NoFfmpeg) {
+            return runtime;
+        }
+    }
+    return video::probe_video_engine(video_host(config), pipeline.engine, pipeline.dir,
+                                     pipeline.handle);
+}
+
 struct GenerateFlags {
     VideoGenerateOptions options;
     std::int64_t seed = 0;
@@ -85,14 +110,7 @@ void video_generate(const RootContext& context, GenerateFlags flags, const CLI::
 
     VideoGenerateSeams seams;
     seams.ready = [&config](const ResolvedPipeline& pipeline) {
-        // The environment and the set, asked for at a terminal; then the
-        // whole ladder over this pipeline.
-        const video::VideoReadiness runtime = ready_video_runtime(config, "video generate");
-        if (!runtime.ready() && runtime.refusal != video::VideoRefusal::NoDriver &&
-            runtime.refusal != video::VideoRefusal::NoFfmpeg) {
-            return runtime;
-        }
-        return video::probe_video(video::VideoHost::current(), pipeline.dir, pipeline.handle);
+        return ready_engine(config, pipeline, "video generate");
     };
     seams.say = say;
     seams.on_event = [&](const video::VideoEvent& event) {
@@ -240,13 +258,10 @@ void video_compose(const RootContext& context, const ComposeFlags& flags) {
     std::size_t scene_now = 0;
 
     VideoComposeSeams seams;
+    // Each clip on whichever engine its model's directory says (53l): the
+    // composer has no engine of its own.
     seams.ready_video = [&config](const ResolvedPipeline& pipeline) {
-        const video::VideoReadiness runtime = ready_video_runtime(config, "video compose");
-        if (!runtime.ready() && runtime.refusal != video::VideoRefusal::NoDriver &&
-            runtime.refusal != video::VideoRefusal::NoFfmpeg) {
-            return runtime;
-        }
-        return video::probe_video(video::VideoHost::current(), pipeline.dir, pipeline.handle);
+        return ready_engine(config, pipeline, "video compose");
     };
     seams.ready_voice = [&config](const ResolvedVoiceModel& model) {
         const video::VideoReadiness runtime = ready_voice_runtime(config, "video compose");
@@ -295,8 +310,9 @@ void video_compose(const RootContext& context, const ComposeFlags& flags) {
         options.image = ask.image;
         options.output = mp4;
         VideoGenerateSeams run;
-        run.ready = [](const ResolvedPipeline& resolved) {
-            return video::probe_video(video::VideoHost::current(), resolved.dir, resolved.handle);
+        run.ready = [&config](const ResolvedPipeline& resolved) {
+            return video::probe_video_engine(video_host(config), resolved.engine, resolved.dir,
+                                             resolved.handle);
         };
         run.on_event = [&](const video::VideoEvent& event) {
             if (job.has_value()) {
@@ -401,9 +417,15 @@ void VideoCommand::bind(CLI::App& root, const RootContext& context) {
         ->type_name(kPathValue);
     generate
         ->add_option("-m,--model", flags->options.model,
-                     "The pipeline: a store handle, id or model, or a path (default: "
-                     "models.default_video)")
+                     "The pipeline, or an MLX video model: a store handle, id or model, or a "
+                     "path (default: models.default_video)")
         ->type_name(kVideoPipelineValue);
+    generate
+        ->add_option("--engine", flags->options.engine,
+                     "What the clip runs on: torch (a diffusers pipeline) or mlx (an MLX video "
+                     "model, through mlx-video) -- the model's directory decides, so this only "
+                     "names it or is refused (default: auto)")
+        ->type_name(words_value(video::video_engine_names()));
     generate->add_option("--seed", flags->seed,
                          "The seed (default: one drawn, and kept in the record)");
     generate->add_option("--duration", flags->duration,
@@ -482,8 +504,8 @@ void VideoCommand::bind(CLI::App& root, const RootContext& context) {
         "No captions (default: the narration's own sentences, timed from the voice)");
     compose
         ->add_option("-m,--model", compose_flags->options.model,
-                     "The pipeline: a store handle, id or model, or a path (default: "
-                     "models.default_video)")
+                     "The pipeline, or an MLX video model -- each clip runs on what it is: a "
+                     "store handle, id or model, or a path (default: models.default_video)")
         ->type_name(kVideoPipelineValue);
     compose
         ->add_option("--voice-model", compose_flags->options.voice_model,

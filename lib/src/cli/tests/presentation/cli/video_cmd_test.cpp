@@ -5,8 +5,11 @@
 #include <fstream>
 #include <string>
 
+#include "modelstore/store.h"
 #include "support/cli_home.h"
+#include "support/mlx_model.h"
 #include "support/pipeline_model.h"
+#include "support/wan_original.h"
 
 /// `apogee video` and its pointer through the real command tree (49c):
 /// `config set-default-video` resolved against the store and written by the
@@ -105,4 +108,61 @@ TEST_CASE("models rename carries models.default_video with the directory it name
     CHECK(out == "org--clips/pipeline/aaaaaaaaaaaa\n");
     CHECK(
         std::filesystem::is_directory(home.models() / "org--clips" / "pipeline" / "aaaaaaaaaaaa"));
+}
+
+TEST_CASE("an MLX video model completes and points like a pipeline, and --engine completes",
+          "[cli][video][complete][mlx]") {
+    // 53l: the door takes mlx-video's build of a Wan set, so completion
+    // offers it -- by model and handle, its source set never -- and the
+    // pointer takes it; an MLX model of another kind is offered nowhere.
+    const Home fixture;
+    const apogee::testing::CliHome& home = fixture.home;
+    const apogee::models::StoreRoots roots = apogee::models::StoreRoots::at(home.models());
+    const std::filesystem::path source = apogee::testing::write_user_wan_set(roots);
+    apogee::testing::complete_user_wan_set(source);
+    (void)apogee::testing::write_converted_wan(roots, source);
+    apogee::testing::write_mlx_model(home.models() / "org--m" / "mlx" / "cccccccccccc",
+                                     {.kind = "chat"});
+    const std::string handle = "Wan-AI--Wan2.2-TI2V-5B/mlx/bbbbbbbbbbbb";
+    std::string out;
+    std::string err;
+    for (const std::vector<std::string>& line :
+         {std::vector<std::string>{"__complete", "video", "generate", "a heron", "--model", ""},
+          std::vector<std::string>{"__complete", "video", "compose", "a brief", "--model", ""},
+          std::vector<std::string>{"__complete", "config", "set-default-video", ""}}) {
+        REQUIRE(home.run(line, &out, &err) == 0);
+        CHECK(out == "org--clip\norg--clip/pipeline/aaaaaaaaaaaa\nWan-AI--Wan2.2-TI2V-5B\n" +
+                         handle + "\n");
+    }
+    // What completion offers, the pointer takes.
+    REQUIRE(home.run({"config", "set-default-video", handle}, &out, &err) == 0);
+    CHECK(out == "models.default_video = " + handle + "\n");
+    REQUIRE(home.run({"config", "set-default-video", "Wan-AI--Wan2.2-TI2V-5B"}, &out, &err) == 0);
+    CHECK(home.run({"config", "set-default-video", "org--m/mlx/cccccccccccc"}, &out, &err) != 0);
+    CHECK_THAT(err,
+               ContainsSubstring("is an MLX chat model, not a pipeline or an MLX video model"));
+
+    REQUIRE(home.run({"__complete", "video", "generate", "a heron", "--engine", ""}, &out, &err) ==
+            0);
+    CHECK(out == "auto\ntorch\nmlx\n");
+}
+
+TEST_CASE("video generate refuses an engine its model does not run on, before anything runs",
+          "[cli][video][generate][engine]") {
+    const Home fixture;
+    const apogee::testing::CliHome& home = fixture.home;
+    const std::string clip = (home.home() / "clip.mp4").string();
+    std::string out;
+    std::string err;
+    CHECK(home.run({"video", "generate", "a heron", "-o", clip, "--model", "org--clip", "--engine",
+                    "mlx"},
+                   &out, &err) == 1);
+    CHECK_THAT(err, ContainsSubstring("apogee video: --engine mlx: "
+                                      "'org--clip/pipeline/aaaaaaaaaaaa' is a diffusers pipeline, "
+                                      "which runs on PyTorch, not MLX"));
+    CHECK(home.run({"video", "generate", "a heron", "-o", clip, "--model", "org--clip", "--engine",
+                    "cuda"},
+                   &out, &err) == 1);
+    CHECK_THAT(err, ContainsSubstring("--engine takes auto, torch or mlx (got 'cuda')"));
+    CHECK_FALSE(std::filesystem::exists(clip));
 }

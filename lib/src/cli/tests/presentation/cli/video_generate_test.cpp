@@ -14,10 +14,13 @@
 
 #include "contracts/sha256.h"
 #include "contracts/video_run.h"
+#include "modelstore/mlx_info.h"
 #include "modelstore/snapshot.h"
 #include "support/env_guard.h"
 #include "support/fake_child.h"
+#include "support/mlx_model.h"
 #include "support/pipeline_model.h"
+#include "support/wan_original.h"
 
 /// `video generate` composed (49c), in process, over its seams: the
 /// pipeline from `--model` or `models.default_video` in every spelling, the
@@ -65,6 +68,8 @@ struct Run {
                                         .diffusers_version = "0.35.1"};
     std::vector<std::string> said;
     std::vector<apogee::video::VideoEvent> events;
+    /// The model the ladder was asked about, when it was (53l).
+    std::optional<apogee::commands::ResolvedPipeline> readied{};
 
     Run() {
         apogee::testing::write_pipeline_model(pipeline);
@@ -81,7 +86,10 @@ struct Run {
 
     [[nodiscard]] VideoGenerateSeams seams() {
         VideoGenerateSeams seams;
-        seams.ready = [this](const apogee::commands::ResolvedPipeline&) { return ready; };
+        seams.ready = [this](const apogee::commands::ResolvedPipeline& model) {
+            readied = model;
+            return ready;
+        };
         seams.run.spawn = [this](const apogee::platform::ChildCommand& command,
                                  std::string&) -> std::unique_ptr<apogee::platform::ChildProcess> {
             spawned = true;
@@ -206,18 +214,18 @@ TEST_CASE(
     apogee::testing::write_pipeline_model(run.roots.models / "org--clip" / "pipeline" /
                                           "bbbbbbbbbbbb");
     CHECK(resolve("org--clip") ==
-          "'org--clip' holds 2 pipelines -- name one:\n  org--clip/pipeline/aaaaaaaaaaaa\n  "
+          "'org--clip' holds 2 video models -- name one:\n  org--clip/pipeline/aaaaaaaaaaaa\n  "
           "org--clip/pipeline/bbbbbbbbbbbb");
     std::filesystem::create_directories(run.roots.models / "org--m" / "gguf" / "cccccccccccc");
     std::ofstream{run.roots.models / "org--m" / "gguf" / "cccccccccccc" / "m.gguf"} << "GGUF";
     CHECK(resolve("org--m/gguf/cccccccccccc") ==
-          "'org--m/gguf/cccccccccccc' is a GGUF, not a "
-          "pipeline");
+          "'org--m/gguf/cccccccccccc' is a GGUF, not a pipeline or an MLX video model");
     CHECK(resolve("org--m") ==
-          "'org--m' holds no pipeline -- 'apogee models list' shows the "
+          "'org--m' holds no pipeline and no MLX video model -- 'apogee models list' shows the "
           "store's");
     CHECK(resolve(run.dir.path().string()) ==
-          run.dir.path().string() + " is not a pipeline (no model_index.json)");
+          run.dir.path().string() +
+              " is not a pipeline (no model_index.json), nor an MLX video model");
 }
 
 TEST_CASE("the caps refuse quoting their values, before anything runs",
@@ -815,4 +823,355 @@ TEST_CASE("a run from a record holds its LoRAs, verified; --lora replaces and --
     CHECK(result.error == "the record's LoRA " + style.string() +
                               " is gone -- --lora names the set to run with, --no-lora runs "
                               "without");
+}
+
+// ---- one generation, two engines (53l) ---------------------------------------------
+
+namespace {
+
+/// The MLX driver's answer: its engine, MLX's device, the versions that ran.
+constexpr std::string_view kMlxScript =
+    R"({"event": "ready", "device": "gpu", "dtype": "4-bit", "pipeline": "Wan ti2v", "mode": "t2v", "engine": "mlx", "mlx": "0.31.2", "mlx_video": "0.1.0"})"
+    "\n"
+    R"({"event": "step", "step": 1, "steps": 1})"
+    "\n"
+    R"({"event": "done", "frames": 5, "width": 128, "height": 128})"
+    "\n";
+
+/// The user's Wan set whole in the run's store, mlx-video's build of it
+/// beside it, and the run pointed at that build on a runtime ready for MLX.
+struct MlxRun {
+    Run run;
+    std::filesystem::path source = apogee::testing::write_user_wan_set(run.roots);
+    std::filesystem::path model;
+    std::string handle = std::string{apogee::testing::kWanModel} + "/mlx/bbbbbbbbbbbb";
+    /// The PyTorch run's own answer and runtime, for a pipeline beside it.
+    std::string torch_script{};
+    apogee::video::VideoReadiness torch_ready{};
+
+    MlxRun() {
+        apogee::testing::complete_user_wan_set(source);
+        model = apogee::testing::write_converted_wan(run.roots, source);
+        torch_script = run.script;
+        torch_ready = run.ready;
+        run.options.model = handle;
+        run.script = std::string{kMlxScript};
+        run.ready = {.interpreter = "/venv/bin/python",
+                     .driver = "/scripts/video_generate_mlx.py",
+                     .ffmpeg = "ffmpeg",
+                     .engine = apogee::video::VideoEngine::Mlx,
+                     .tokenizer = source / "google" / "umt5-xxl",
+                     .mlx_video_version = "0.1.0",
+                     .mlx_version = "0.31.2"};
+    }
+
+    [[nodiscard]] std::string source_handle() const {
+        return std::string{apogee::testing::kWanModel} + "/safetensors/" +
+               source.filename().string();
+    }
+};
+
+}  // namespace
+
+TEST_CASE("a pipeline still runs on PyTorch, its record unchanged but for its engine",
+          "[cli][video][generate][engine]") {
+    Run run;
+    const VideoGenerateResult result = run.go();
+    INFO(result.error);
+    REQUIRE(result.exit_code == 0);
+    REQUIRE(run.readied.has_value());
+    CHECK(run.readied->engine == apogee::video::VideoEngine::Torch);
+    // The request the diffusers driver reads is what it always was.
+    CHECK_FALSE(run.request.contains("engine"));
+    CHECK_FALSE(run.request.contains("tokenizer"));
+    // The record: every field there was, and `engine`.
+    std::vector<std::string> keys;
+    for (const auto& item : result.document.items()) {
+        keys.push_back(item.key());
+    }
+    std::ranges::sort(keys);
+    CHECK(keys == std::vector<std::string>{
+                      "codec", "created_at",  "device",   "engine",  "image",  "loras",   "mode",
+                      "model", "object",      "output",   "parent",  "preset", "prompt",  "seconds",
+                      "seed",  "seed_source", "settings", "sidecar", "status", "versions"});
+    CHECK(result.document["engine"] == "torch");
+    CHECK(result.document["versions"] ==
+          nlohmann::json{{"torch", "2.9.1"},
+                         {"diffusers", "0.35.1"},
+                         {"apogee", result.document["versions"]["apogee"]}});
+    CHECK(result.document["model"]["class"] == "WanPipeline");
+    CHECK(run.said.front().find("MLX") == std::string::npos);
+    CHECK(result.lines.at(1).ends_with(" s on mps"));
+
+    // A record from before there were two engines reads as PyTorch's.
+    nlohmann::json older = result.document;
+    older.erase("engine");
+    std::string error;
+    const std::optional<apogee::harness::VideoRun> read =
+        apogee::harness::parse_video_run(older, error);
+    REQUIRE(read.has_value());
+    CHECK(read->engine == "torch");
+    CHECK(apogee::harness::video_run_document(*read)["engine"] == "torch");
+}
+
+TEST_CASE("an MLX video model runs on MLX, recorded with its engine",
+          "[cli][video][generate][mlx]") {
+    MlxRun fixture;
+    Run& run = fixture.run;
+    const VideoGenerateResult result = run.go();
+    INFO(result.error);
+    REQUIRE(result.exit_code == 0);
+    CHECK(slurp(run.output) == "MP4 at 24");
+
+    // The engine the model's directory says, the ladder asked for it.
+    REQUIRE(run.readied.has_value());
+    CHECK(run.readied->engine == apogee::video::VideoEngine::Mlx);
+    CHECK(run.readied->dir == fixture.model);
+    CHECK(run.said.front() == fixture.handle +
+                                  " (--model): 1280x704, 121 frames (5 s at 24 fps), 50 steps, "
+                                  "seed 4242, on MLX (mlx-video)");
+    // The one request, its engine and the stored tokenizer named.
+    CHECK(run.request["engine"] == "mlx");
+    CHECK(run.request["pipeline"] == fixture.model.string());
+    CHECK(run.request["tokenizer"] == (fixture.source / "google" / "umt5-xxl").string());
+    CHECK(run.request["frames"] == 121);
+    CHECK(run.request["steps"] == 50);
+
+    // The one record, its engine MLX and the versions that ran.
+    const nlohmann::json& document = result.document;
+    CHECK(document["engine"] == "mlx");
+    CHECK(document["model"]["name"] == fixture.handle);
+    CHECK(document["model"]["path"] == fixture.model.string());
+    CHECK(document["model"]["class"] == "Wan ti2v");
+    CHECK(document["model"]["ref"] == fixture.source_handle());
+    CHECK(document["model"]["variant"].is_null());
+    CHECK(document["device"] ==
+          nlohmann::json{{"device", "gpu"}, {"dtype", "4-bit"}, {"platform", "macos-arm64"}});
+    CHECK(document["versions"]["mlx"] == "0.31.2");
+    CHECK(document["versions"]["mlx_video"] == "0.1.0");
+    CHECK(document["versions"]["torch"] == "");
+    CHECK(document["versions"]["diffusers"] == "");
+    CHECK_FALSE(document["versions"].contains("peft"));
+    CHECK(nlohmann::json::parse(slurp(apogee::harness::video_sidecar_path(run.output))) ==
+          document);
+    CHECK(result.lines.at(1).ends_with(" s on MLX (gpu)"));
+    std::string error;
+    const std::optional<apogee::harness::VideoRun> read =
+        apogee::harness::parse_video_run(document, error);
+    REQUIRE(read.has_value());
+    CHECK(read->engine == "mlx");
+    CHECK(read->mlx_video == "0.1.0");
+}
+
+TEST_CASE("the engine is chosen by the model's kind, named every way the store names it",
+          "[cli][video][generate][mlx][model]") {
+    MlxRun fixture;
+    Run& run = fixture.run;
+    apogee::commands::ResolvedPipeline resolved;
+    const auto resolve = [&](std::string_view given) {
+        resolved = {};
+        return apogee::commands::resolve_video_pipeline(run.roots, given, {}, resolved);
+    };
+    // By handle, bare id, model -- its source set beside it never counted --
+    // and path: the MLX video model, on MLX.
+    for (const std::string& name :
+         {fixture.handle, std::string{"bbbbbbbbbbbb"}, std::string{apogee::testing::kWanModel},
+          fixture.model.string()}) {
+        INFO(name);
+        CHECK(resolve(name).empty());
+        CHECK(resolved.dir == fixture.model);
+        CHECK(resolved.engine == apogee::video::VideoEngine::Mlx);
+        CHECK(resolved.pipeline_class == "Wan ti2v");
+        CHECK(resolved.ref == fixture.source_handle());
+    }
+    // The pipeline beside it on PyTorch.
+    CHECK(resolve(kHandle).empty());
+    CHECK(resolved.engine == apogee::video::VideoEngine::Torch);
+
+    // An MLX directory of another kind is no video model.
+    const std::filesystem::path chat = run.roots.models / "org--m" / "mlx" / "cccccccccccc";
+    apogee::testing::write_mlx_model(chat, {.kind = "chat"});
+    CHECK(resolve("org--m/mlx/cccccccccccc") ==
+          "'org--m/mlx/cccccccccccc' is an MLX chat model, not a pipeline or an MLX video model "
+          "-- a language model: an mlx backend chats with it");
+    CHECK(resolve("org--m") ==
+          "'org--m' holds no pipeline and no MLX video model -- 'apogee models list' shows the "
+          "store's");
+    // A model holding a pipeline and an MLX video model: name one.
+    apogee::testing::write_pipeline_model(
+        run.roots.models / std::string{apogee::testing::kWanModel} / "pipeline" / "dddddddddddd");
+    CHECK(resolve(apogee::testing::kWanModel) ==
+          "'" + std::string{apogee::testing::kWanModel} +
+              "' holds 2 video models -- name one:\n  " + fixture.handle + "\n  " +
+              std::string{apogee::testing::kWanModel} + "/pipeline/dddddddddddd");
+    CHECK(resolved.dir.empty());
+}
+
+TEST_CASE("an explicit engine that cannot run is refused before a spawn, naming the setup",
+          "[cli][video][generate][engine]") {
+    SECTION("MLX asked of a diffusers pipeline") {
+        Run run;
+        run.options.engine = "mlx";
+        const VideoGenerateResult result = run.go();
+        CHECK(result.exit_code == 1);
+        CHECK(result.document.is_null());
+        CHECK(result.error ==
+              "--engine mlx: 'org--clip/pipeline/aaaaaaaaaaaa' is a diffusers pipeline, which "
+              "runs on PyTorch, not MLX -- MLX runs an MLX video model: Wan's original layout "
+              "converted with 'apogee models convert <set> --mlx', after 'apogee train setup "
+              "--with mlx-video'");
+        CHECK_FALSE(run.readied.has_value());
+        CHECK_FALSE(run.spawned);
+    }
+    SECTION("PyTorch asked of an MLX video model") {
+        MlxRun fixture;
+        fixture.run.options.engine = "torch";
+        const VideoGenerateResult result = fixture.run.go();
+        CHECK(result.exit_code == 1);
+        CHECK_THAT(result.error, ContainsSubstring("--engine torch: '" + fixture.handle +
+                                                   "' is an MLX video model, which runs on MLX "
+                                                   "(mlx-video), not PyTorch -- "));
+        CHECK_THAT(result.error, ContainsSubstring("'apogee train setup --with video'"));
+        CHECK_FALSE(fixture.run.readied.has_value());
+        CHECK_FALSE(fixture.run.spawned);
+    }
+    SECTION("a word that names no engine") {
+        Run run;
+        run.options.engine = "cuda";
+        CHECK(run.go().error == "--engine takes auto, torch or mlx (got 'cuda')");
+        CHECK_FALSE(run.spawned);
+    }
+    SECTION("MLX, where its ladder refuses: the setup named") {
+        MlxRun fixture;
+        fixture.run.options.engine = "mlx";
+        fixture.run.ready.refusal = apogee::video::VideoRefusal::NoMlxVideo;
+        fixture.run.ready.reason = "mlx-video is not installed in the Python environment at /venv";
+        fixture.run.ready.remedy = std::string{apogee::video::kMlxVideoSetupRemedy};
+        const VideoGenerateResult result = fixture.run.go();
+        CHECK(result.exit_code == 1);
+        CHECK(result.error ==
+              "mlx-video is not installed in the Python environment at /venv -- apogee train "
+              "setup --with mlx-video");
+        CHECK_FALSE(fixture.run.spawned);
+    }
+    SECTION("the model's own engine, named or auto, runs") {
+        for (const std::string engine : {"torch", "auto"}) {
+            Run run;
+            run.options.engine = engine;
+            CHECK(run.go().exit_code == 0);
+        }
+        MlxRun fixture;
+        fixture.run.options.engine = "mlx";
+        CHECK(fixture.run.go().exit_code == 0);
+    }
+}
+
+TEST_CASE("a run from a record replays the engine it ran on", "[cli][video][generate][from][mlx]") {
+    MlxRun fixture;
+    Run& run = fixture.run;
+    const std::filesystem::path clip = first_clip(run);
+    const std::filesystem::path record = apogee::harness::video_sidecar_path(clip);
+    const auto again = [&run, &clip](const std::string& name,
+                                     const std::function<void(VideoGenerateOptions&)>& set) {
+        run.options = {};
+        run.options.from = clip;
+        run.options.output = run.dir.path() / "out" / name;
+        set(run.options);
+        run.said.clear();
+        run.readied.reset();
+        run.request = nullptr;
+        return run.go();
+    };
+
+    // Held, as the seed is: said, asked of the ladder, recorded.
+    VideoGenerateResult result = again("again.mp4", [](VideoGenerateOptions&) {});
+    INFO(result.error);
+    REQUIRE(result.exit_code == 0);
+    CHECK(run.said.at(0) == "from " + record.string() + ": model " + fixture.handle +
+                                ", the prompt, 1280x704, 24 fps, 5 s, 50 steps, seed 4242 (held), "
+                                "engine mlx");
+    CHECK(run.said.at(1) == "changed: nothing -- the same run again");
+    REQUIRE(run.readied.has_value());
+    CHECK(run.readied->engine == apogee::video::VideoEngine::Mlx);
+    CHECK(run.request["engine"] == "mlx");
+    CHECK(result.document["engine"] == "mlx");
+
+    // Another engine asked of it: refused, its model's engine said.
+    result = again("torch.mp4", [](VideoGenerateOptions& o) { o.engine = "torch"; });
+    CHECK(result.exit_code == 1);
+    CHECK_THAT(result.error,
+               ContainsSubstring("--engine torch: '" + fixture.handle + "' is an MLX video model"));
+    CHECK_FALSE(run.readied.has_value());
+
+    // A record saying an engine its model does not run on is refused by it.
+    nlohmann::json edited = nlohmann::json::parse(slurp(record));
+    edited["engine"] = "torch";
+    std::ofstream{record, std::ios::binary} << edited.dump(2);
+    result = again("edited.mp4", [](VideoGenerateOptions&) {});
+    CHECK(result.exit_code == 1);
+    CHECK_THAT(result.error, ContainsSubstring("the record ran on torch: '" + fixture.handle +
+                                               "' is an MLX video model"));
+
+    // Another model named: the engine follows that model.
+    run.script = fixture.torch_script;
+    run.ready = fixture.torch_ready;
+    result = again("pipeline.mp4", [](VideoGenerateOptions& o) { o.model = std::string{kHandle}; });
+    INFO(result.error);
+    REQUIRE(result.exit_code == 0);
+    CHECK(run.readied->engine == apogee::video::VideoEngine::Torch);
+    CHECK(result.document["engine"] == "torch");
+}
+
+TEST_CASE("a record from before two engines replays on PyTorch",
+          "[cli][video][generate][from][engine]") {
+    Run run;
+    const std::filesystem::path clip = first_clip(run);
+    const std::filesystem::path record = apogee::harness::video_sidecar_path(clip);
+    nlohmann::json older = nlohmann::json::parse(slurp(record));
+    older.erase("engine");
+    std::ofstream{record, std::ios::binary} << older.dump(2);
+    run.options = {};
+    run.options.from = clip;
+    run.options.output = run.dir.path() / "out" / "again.mp4";
+    const VideoGenerateResult result = run.go();
+    INFO(result.error);
+    REQUIRE(result.exit_code == 0);
+    // Held quietly: PyTorch's from-line is what it was.
+    CHECK(run.said.at(0).ends_with("seed 4242 (held)"));
+    CHECK(run.readied->engine == apogee::video::VideoEngine::Torch);
+    CHECK(result.document["engine"] == "torch");
+}
+
+TEST_CASE("LoRAs pass to the MLX engine through mlx-video's loader, recorded as today",
+          "[cli][video][lora][mlx]") {
+    MlxRun fixture;
+    Run& run = fixture.run;
+    // No peft asked: mlx-video loads a LoRA itself.
+    run.ready.peft = false;
+    const std::filesystem::path style = lora(run, "style.safetensors");
+    run.options.loras = {style.string() + ":0.8"};
+    const VideoGenerateResult result = run.go();
+    INFO(result.error);
+    REQUIRE(result.exit_code == 0);
+    CHECK(run.request["loras"] ==
+          nlohmann::json::array({{{"path", style.string()}, {"scale", 0.8}}}));
+    CHECK(result.document["loras"] ==
+          nlohmann::json::array(
+              {{{"path", style.string()},
+                {"sha256", apogee::models::sha256_hex("weights of style.safetensors")},
+                {"scale", 0.8}}}));
+    CHECK_FALSE(result.document["versions"].contains("peft"));
+    CHECK(run.said.back().ends_with(", LoRAs: style.safetensors x0.8, on MLX (mlx-video)"));
+}
+
+TEST_CASE("the narration says MLX and the scale on Apple silicon",
+          "[cli][video][generate][narration][mlx]") {
+    using apogee::commands::narrate_video_event;
+    apogee::video::VideoEvent ready{.kind = apogee::video::VideoEvent::Kind::Ready};
+    ready.ready = {.device = "gpu", .dtype = "4-bit", .mode = "t2v", .engine = "mlx"};
+    CHECK(narrate_video_event(ready) ==
+          "running on MLX (gpu, 4-bit) -- expect minutes per clip on Apple silicon");
+    ready.ready = {.device = "gpu", .mode = "i2v", .engine = "mlx"};
+    CHECK(narrate_video_event(ready) ==
+          "running on MLX (gpu), from the seed image -- expect minutes per clip on Apple silicon");
 }

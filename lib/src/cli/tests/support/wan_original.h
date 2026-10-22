@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "contracts/sha256.h"
+#include "modelstore/mlx_info.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
 #include "support/mlx_model.h"
@@ -151,6 +152,39 @@ inline void complete_user_wan_set(const std::filesystem::path& dir) {
                                 .sha256 = models::sha256_hex(bytes)});
     }
     (void)models::write_snapshot(dir, record);
+}
+
+/// mlx-video's build of the Wan set at `source` (53l's input), as `models
+/// convert --mlx` commits it beside the set under `roots`, `id` its
+/// directory: `config.json` as mlx-video's converter writes one (`model_type`
+/// the mode its generator reads, 4-bit), the T5 encoder, the VAE and the
+/// transformer's weights with real SafeTensors headers, and its record --
+/// kind `video`, `ref` the handle of the set it was converted from, whose
+/// `google/umt5-xxl/` the generator's tokenizer is read from. Its directory.
+inline std::filesystem::path write_converted_wan(const models::StoreRoots& roots,
+                                                 const std::filesystem::path& source,
+                                                 std::string_view model_type = "ti2v",
+                                                 std::string_view id = "bbbbbbbbbbbb") {
+    const std::filesystem::path dir = models::weights_dir(roots, models::kMlxFormat, kWanModel, id);
+    write_fixture_file(dir / "config.json",
+                       "{\"model_type\": \"" + std::string{model_type} +
+                           "\", \"model_version\": \"2.2\", \"dim\": 3072, \"in_dim\": 48, "
+                           "\"out_dim\": 48, \"sample_fps\": 24, \"sample_steps\": 50, "
+                           "\"quantization\": {\"group_size\": 64, \"bits\": 4}}\n");
+    write_fixture_file(dir / "model.safetensors",
+                       safetensors_bytes({{"blocks.0.self_attn.q.weight", 33}}));
+    write_fixture_file(dir / "t5_encoder.safetensors",
+                       safetensors_bytes({{"encoder.block.0.weight", 32}}));
+    write_fixture_file(dir / "vae.safetensors",
+                       safetensors_bytes({{"decoder.conv_in.weight", 32}}));
+    models::Snapshot record;
+    record.ref =
+        models::weights_handle(kWanModel, models::kSafetensorsFormat, source.filename().string());
+    record.source = "convert";
+    record.transform = "mlx_video.models.wan_2.convert 4bit";
+    record.kind = std::string{models::kMlxVideo};
+    (void)models::write_snapshot(dir, record);
+    return dir;
 }
 
 }  // namespace apogee::testing

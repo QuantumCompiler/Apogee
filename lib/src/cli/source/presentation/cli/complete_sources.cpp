@@ -535,11 +535,27 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         list.none = "the model store is empty -- 'apogee models pull'";
         list.as_listed = true;
     } else if (kind == kVideoPipelineValue) {
-        // The store's pipelines, by model then handle (49c).
-        list.names = stored_models(store_roots(config), false, false, false, true);
-        list.none = "no pipeline in the store -- 'apogee models pull <owner>/<repo>' stores one";
+        // The store's video models, by model then handle: its pipelines
+        // (49c) and, since 53l, its MLX video models -- by their records'
+        // kind -- which is what the resolver takes.
+        const models::StoreRoots roots = store_roots(config);
+        std::vector<std::pair<std::string, std::string>> found;
+        for (const models::StoredPipeline& stored : models::list_store_pipelines(roots)) {
+            found.emplace_back(stored.model, models::weights_handle(
+                                                 stored.model, models::kPipelineFormat, stored.id));
+        }
+        for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
+            if (models::read_mlx_kind(stored.dir).word == models::kMlxVideo) {
+                found.emplace_back(stored.model, models::weights_handle(
+                                                     stored.model, models::kMlxFormat, stored.id));
+            }
+        }
+        push_format(list.names, std::move(found));
+        list.none =
+            "no pipeline or MLX video model in the store -- 'apogee models pull <owner>/<repo>' "
+            "stores a pipeline";
         list.as_listed = true;
-        note_store(store_roots(config), list);
+        note_store(roots, list);
     } else if (kind == kVoiceModelValue) {
         // The store's voice models, by model then handle (50a).
         list.names = stored_models(store_roots(config), false, false, false, false, true);

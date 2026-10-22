@@ -8,8 +8,10 @@
 #include <exception>
 #include <random>
 #include <system_error>
+#include <utility>
 
 #include "contracts/config_edit.h"
+#include "modelstore/mlx_info.h"
 #include "modelstore/pipeline_info.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
@@ -54,11 +56,11 @@ namespace {
     return {};
 }
 
-/// The handles of `pipelines`, one a line.
-[[nodiscard]] std::string handles_of(const std::vector<models::StoredPipeline>& pipelines) {
+/// `handles`, one a line.
+[[nodiscard]] std::string handles_of(const std::vector<std::string>& handles) {
     std::string out;
-    for (const models::StoredPipeline& stored : pipelines) {
-        out += "\n  " + models::weights_handle(stored.model, models::kPipelineFormat, stored.id);
+    for (const std::string& handle : handles) {
+        out += "\n  " + handle;
     }
     return out;
 }
@@ -216,6 +218,17 @@ private:
             taken.push_back("seed " + std::to_string(record.seed) + " (held)");
         } else {
             changed.push_back("seed " + std::to_string(*options.seed));
+        }
+        // The engine, held as the seed is (53l) while the model is the
+        // record's: a run again runs where that one ran, or is refused.
+        if (options.engine.empty() && options.model.empty()) {
+            effective.engine = record.engine;
+            if (record.engine != video::to_string(video::VideoEngine::Torch)) {
+                taken.push_back("engine " + record.engine);
+            }
+        } else if (!options.engine.empty() && options.engine != "auto" &&
+                   options.engine != record.engine) {
+            changed.push_back("engine " + options.engine);
         }
         // The LoRAs, held as the seed is (49e): verified before the run.
         if (!options.loras.empty()) {
@@ -403,38 +416,79 @@ std::string resolve_video_pipeline(const models::StoreRoots& roots, std::string_
         return target.error;
     }
     if (target.outside) {
-        if (!models::is_pipeline_dir(target.path)) {
-            return target.path.string() + " is not a pipeline (no model_index.json)";
+        // A directory outside the store runs on what it is (53l).
+        const std::optional<video::VideoEngine> engine = video::engine_of_directory(target.path);
+        if (!engine.has_value()) {
+            return target.path.string() +
+                   " is not a pipeline (no model_index.json), nor an MLX video model";
         }
         out.handle = std::string{name};
         out.dir = target.path;
-    } else if (!target.format.empty() && target.format != models::kPipelineFormat) {
+        out.engine = *engine;
+    } else if (target.format == models::kMlxFormat && !target.id.empty()) {
+        // An MLX directory runs here only as a video model (53l).
+        const models::MlxKind kind = models::read_mlx_kind(target.path);
+        if (kind.word != models::kMlxVideo) {
+            return "'" + std::string{name} + "' is an MLX " + kind.word +
+                   " model, not a pipeline or an MLX video model -- " +
+                   models::describe_mlx_kind(kind.word);
+        }
+        out.handle = models::weights_handle(target.model, models::kMlxFormat, target.id);
+        out.dir = target.path;
+        out.engine = video::VideoEngine::Mlx;
+    } else if (!target.format.empty() && target.format != models::kPipelineFormat &&
+               target.format != models::kMlxFormat) {
         return "'" + std::string{name} + "' is " +
                (target.format == models::kGgufFormat ? std::string{"a GGUF"}
                                                      : "a " + target.format + " model") +
-               ", not a pipeline";
+               ", not a pipeline or an MLX video model";
     } else if (!target.id.empty()) {
         out.handle = models::weights_handle(target.model, models::kPipelineFormat, target.id);
         out.dir = target.path;
     } else {
-        const std::vector<models::StoredPipeline> pipelines =
-            models::list_store_pipelines(roots, target.model);
-        if (pipelines.empty()) {
+        // A model by name: the one video model it holds -- a pipeline, or an
+        // MLX video model (53l).
+        std::vector<std::pair<std::string, std::filesystem::path>> found;
+        for (const models::StoredPipeline& stored :
+             models::list_store_pipelines(roots, target.model)) {
+            found.emplace_back(
+                models::weights_handle(stored.model, models::kPipelineFormat, stored.id),
+                stored.dir);
+        }
+        for (const models::StoredMlx& stored : models::list_store_mlx(roots, target.model)) {
+            if (models::read_mlx_kind(stored.dir).word == models::kMlxVideo) {
+                found.emplace_back(
+                    models::weights_handle(stored.model, models::kMlxFormat, stored.id),
+                    stored.dir);
+            }
+        }
+        if (found.empty()) {
             return "'" + std::string{name} +
-                   "' holds no pipeline -- 'apogee models list' shows "
+                   "' holds no pipeline and no MLX video model -- 'apogee models list' shows "
                    "the store's";
         }
-        if (pipelines.size() > 1) {
-            return "'" + std::string{name} + "' holds " + std::to_string(pipelines.size()) +
-                   " pipelines -- name one:" + handles_of(pipelines);
+        if (found.size() > 1) {
+            std::vector<std::string> handles;
+            for (const auto& each : found) {
+                handles.push_back(each.first);
+            }
+            std::ranges::sort(handles);
+            return "'" + std::string{name} + "' holds " + std::to_string(found.size()) +
+                   " video models -- name one:" + handles_of(handles);
         }
-        out.handle = models::weights_handle(pipelines.front().model, models::kPipelineFormat,
-                                            pipelines.front().id);
-        out.dir = pipelines.front().dir;
+        out.handle = found.front().first;
+        out.dir = found.front().second;
+        out.engine = video::engine_of_directory(out.dir).value_or(video::VideoEngine::Torch);
     }
     if (const std::optional<models::Snapshot> record = models::load_snapshot(out.dir)) {
         out.ref = record->ref;
         out.revision = record->revision;
+    }
+    if (out.engine == video::VideoEngine::Mlx) {
+        // mlx-video's Wan, by the mode its config names.
+        const std::string mode = video::mlx_video_mode(out.dir);
+        out.pipeline_class = mode.empty() ? std::string{"Wan"} : "Wan " + mode;
+        return {};
     }
     const models::PipelineInfo info = models::read_pipeline_info(out.dir);
     out.pipeline_class = info.class_name;
@@ -448,6 +502,13 @@ std::optional<std::string> narrate_video_event(const video::VideoEvent& event) {
         case Kind::Message:
             return event.text;
         case Kind::Ready:
+            // MLX runs on Apple silicon alone, its device MLX's own (53l).
+            if (event.ready.engine == video::to_string(video::VideoEngine::Mlx)) {
+                return "running on MLX (" + event.ready.device +
+                       (event.ready.dtype.empty() ? "" : ", " + event.ready.dtype) + ")" +
+                       (event.ready.mode == "i2v" ? ", from the seed image" : "") +
+                       " -- expect minutes per clip on Apple silicon";
+            }
             return "running on " + event.ready.device +
                    (event.ready.dtype.empty() ? "" : " (" + event.ready.dtype + ")") +
                    (event.ready.mode == "i2v" ? ", from the seed image" : "") + " -- " +
@@ -558,11 +619,27 @@ VideoGenerateResult generate_clip(const harness::Config& config, const models::S
     if (options.model.empty() && !effective.model.empty()) {
         pipeline.source = parent.move == "extend" ? "the continued clip's record" : "the record";
     }
+    // The engine (53l): the model's directory says it; `--engine`, or the
+    // engine a record ran on, only names it or is refused -- before the
+    // ladder, so nothing is asked or spawned for an engine that cannot run.
+    video::VideoEngine engine = pipeline.engine;
+    if (std::string refused =
+            video::choose_video_engine(effective.engine, pipeline.engine, pipeline.handle, engine);
+        !refused.empty()) {
+        if (video::video_engine_from_string(effective.engine).has_value()) {
+            refused = (options.engine.empty() ? "the record ran on " + effective.engine
+                                              : "--engine " + options.engine) +
+                      ": " + refused;
+        }
+        return refuse(std::move(refused));
+    }
+    pipeline.engine = engine;
     const video::VideoReadiness ready = seams.ready(pipeline);
     if (!ready.ready()) {
         return refuse(ready.message());
     }
-    if (!loras.empty() && !ready.peft) {
+    // diffusers loads a LoRA through peft; mlx-video through its own loader.
+    if (!loras.empty() && engine == video::VideoEngine::Torch && !ready.peft) {
         return refuse("a LoRA loads through peft, which the video runtime does not have yet -- " +
                       std::string{video::kVideoSetupRemedy});
     }
@@ -611,8 +688,13 @@ VideoGenerateResult generate_clip(const harness::Config& config, const models::S
     run.diffusers = ready.diffusers_version;
     run.created_at = models::now_rfc3339();
     run.loras = loras;
-    if (!loras.empty()) {
+    if (!loras.empty() && engine == video::VideoEngine::Torch) {
         run.peft = ready.peft_version;
+    }
+    run.engine = std::string{video::to_string(engine)};
+    if (engine == video::VideoEngine::Mlx) {
+        run.mlx = ready.mlx_version;
+        run.mlx_video = ready.mlx_video_version;
     }
 
     if (seams.say) {
@@ -624,7 +706,8 @@ VideoGenerateResult generate_clip(const harness::Config& config, const models::S
                   std::to_string(settings.frames) + " frames (" + seconds_text(settings.duration) +
                   " s at " + std::to_string(settings.fps) + " fps), " +
                   std::to_string(settings.steps) + " steps, seed " + std::to_string(run.seed) +
-                  (loras.empty() ? std::string{} : ", LoRAs: " + loras_said(loras)));
+                  (loras.empty() ? std::string{} : ", LoRAs: " + loras_said(loras)) +
+                  (engine == video::VideoEngine::Mlx ? ", on MLX (mlx-video)" : ""));
     }
     const video::VideoRequest request{.pipeline = pipeline.dir,
                                       .prompt = effective.prompt,
@@ -637,7 +720,9 @@ VideoGenerateResult generate_clip(const harness::Config& config, const models::S
                                       .guidance = settings.guidance,
                                       .variant = pipeline.variant,
                                       .fps = settings.fps,
-                                      .loras = lora_files(loras)};
+                                      .loras = lora_files(loras),
+                                      .engine = engine,
+                                      .tokenizer = ready.tokenizer};
     const video::VideoOutcome outcome = video::generate_video(
         ready, request, output, seams.work_root, seams.on_event, cancellation, seams.run);
     run.mode = outcome.ready.mode.empty() ? (image.empty() ? "t2v" : "i2v") : outcome.ready.mode;
@@ -648,6 +733,12 @@ VideoGenerateResult generate_clip(const harness::Config& config, const models::S
     }
     if (!outcome.ready.diffusers.empty()) {
         run.diffusers = outcome.ready.diffusers;
+    }
+    if (!outcome.ready.mlx.empty()) {
+        run.mlx = outcome.ready.mlx;
+    }
+    if (!outcome.ready.mlx_video.empty()) {
+        run.mlx_video = outcome.ready.mlx_video;
     }
     run.codec = outcome.codec;
     run.seconds = static_cast<double>(outcome.elapsed.count()) / 1000.0;
@@ -677,15 +768,18 @@ VideoGenerateResult generate_clip(const harness::Config& config, const models::S
                        e.what();
         return result;
     }
-    result.lines = {output.string(),
-                    std::to_string(settings.width) + "x" + std::to_string(settings.height) + ", " +
-                        std::to_string(outcome.frames) + " frames at " +
-                        std::to_string(settings.fps) + " fps (" + seconds_text(settings.duration) +
-                        " s), " + std::to_string(settings.steps) + " steps, seed " +
-                        std::to_string(run.seed) + " -- " + seconds_text(std::round(run.seconds)) +
-                        " s on " +
-                        (run.device.empty() ? std::string{"an unstated device"} : run.device),
-                    "record: " + run.sidecar.string()};
+    result.lines = {
+        output.string(),
+        std::to_string(settings.width) + "x" + std::to_string(settings.height) + ", " +
+            std::to_string(outcome.frames) + " frames at " + std::to_string(settings.fps) +
+            " fps (" + seconds_text(settings.duration) + " s), " + std::to_string(settings.steps) +
+            " steps, seed " + std::to_string(run.seed) + " -- " +
+            seconds_text(std::round(run.seconds)) + " s on " +
+            (engine == video::VideoEngine::Mlx
+                 ? "MLX" + (run.device.empty() ? std::string{} : " (" + run.device + ")")
+             : run.device.empty() ? std::string{"an unstated device"}
+                                  : run.device),
+        "record: " + run.sidecar.string()};
     return result;
 }
 

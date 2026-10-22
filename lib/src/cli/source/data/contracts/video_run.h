@@ -104,6 +104,12 @@ struct VideoRun {
     /// that loaded them.
     std::vector<VideoLora> loras{};
     std::string peft{};
+    /// What it ran on (53l): `torch` (diffusers) or `mlx` (mlx-video) --
+    /// written always, a record from before reading as `torch` -- and on MLX
+    /// the versions that ran, written then only.
+    std::string engine{};
+    std::string mlx{};
+    std::string mlx_video{};
 };
 
 /// The `video.generation` document.

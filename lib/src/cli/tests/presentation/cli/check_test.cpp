@@ -2471,6 +2471,11 @@ TEST_CASE("the video runtime is a skip until set up, then its packages and drive
     REQUIRE(driver != nullptr);
     CHECK(driver->status == Status::Ok);
     CHECK(driver->detail == "video_generate.py matches the shipped copy");
+    // The MLX engine's driver (53l), held the same way.
+    const apogee::commands::CheckRow* mlx_driver = video_row(fresh, "mlx driver");
+    REQUIRE(mlx_driver != nullptr);
+    CHECK(mlx_driver->status == Status::Ok);
+    CHECK(mlx_driver->detail == "video_generate_mlx.py matches the shipped copy");
 
     // Set up: both packages found by their files, their versions said.
     write_fake_interpreter(install);

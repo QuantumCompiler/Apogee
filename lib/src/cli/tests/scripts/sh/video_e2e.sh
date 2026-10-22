@@ -19,14 +19,22 @@
 # stream ending on an error; `voice say` (50a) -- one WAV with its
 # sentences timed and its record, an unknown voice refused, no listener while
 # the speech driver runs, Ctrl-C leaving nothing; and on a pipe, a missing
-# runtime refused naming the command that installs it.
+# runtime refused naming the command that installs it; and since 53l, on
+# Apple silicon, the same generation on MLX -- mlx-video's build of a Wan set
+# beside the set in the store, the REAL seeded MLX driver over the stub
+# `mlx_video` (tests/data/backends/scripts) -- recorded with its engine, its
+# tokenizer the set's own, an engine it does not run on refused, `--from`
+# replaying MLX, the MLX driver's whole tree sampled for a socket, and a
+# Ctrl-C leaving nothing.
 #
 # POSIX only. Skips (77) without python3.
 set -eu
 
-APOGEE_BIN="${1:?usage: video_e2e.sh <apogee-binary> <work-dir> <stubs-dir>}"
-WORK_DIR="${2:?usage: video_e2e.sh <apogee-binary> <work-dir> <stubs-dir>}"
-STUBS="${3:?usage: video_e2e.sh <apogee-binary> <work-dir> <stubs-dir>}"
+USAGE="usage: video_e2e.sh <apogee-binary> <work-dir> <stubs-dir> [<mlx-stubs-dir>]"
+APOGEE_BIN="${1:?$USAGE}"
+WORK_DIR="${2:?$USAGE}"
+STUBS="${3:?$USAGE}"
+MLX_STUBS="${4:-}"
 
 if ! command -v python3 >/dev/null 2>&1; then
     echo "video_e2e: python3 not found (the driver runs under it); skipping"
@@ -124,6 +132,7 @@ python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$WORK_DIR/first.out"
 [ "$(field "$WORK_DIR/first.out" '["seed_source"]')" = "generated" ] || fail "the seed was not drawn"
 [ "$(field "$WORK_DIR/first.out" '["settings"]["frames"]')" = "9" ] || fail "1 s at 8 fps is not 9 frames"
 [ "$(field "$WORK_DIR/first.out" '["device"]["device"]')" = "cpu" ] || fail "the device"
+[ "$(field "$WORK_DIR/first.out" '["engine"]')" = "torch" ] || fail "a pipeline's engine is not torch (53l)"
 [ "$(cat "$WORK_DIR/out/first.mp4")" = "MP4 clip" ] || fail "the clip did not land"
 SIDECAR="$WORK_DIR/out/first.mp4.json"
 [ -f "$SIDECAR" ] || fail "no sidecar beside the clip"
@@ -599,3 +608,176 @@ grep -q "torch and diffusers are not installed in Apogee's Python environment --
     "$WORK_DIR/missing.err" || fail "the refusal: $(cat "$WORK_DIR/missing.err")"
 
 echo "video generate: a missing runtime refused on a pipe - OK"
+
+# --- on MLX (53l): mlx-video's build of a Wan set, the MLX driver ------------
+if [ -z "$MLX_STUBS" ] || [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
+    echo "video generate on MLX: skipped -- MLX runs on Apple silicon alone"
+    exit 0
+fi
+[ -f "$APOGEE_HOME/training/scripts/video_generate_mlx.py" ] || fail "check --fix did not seed the MLX driver"
+# What `train setup --with mlx-video` would install: mlx, mlx-video's
+# generator and the torch its set brings, the tqdm and transformers it uses.
+cp -R "$MLX_STUBS/stub_mlx/." "$SITE/"
+cp -R "$MLX_STUBS/stub_mlx_video/." "$SITE/"
+# The speech driver keeps the stub torch it runs on: the MLX ladder asks only
+# that a torch is there.
+cp -R "$STUBS/stub_video/torch/." "$SITE/torch/"
+SET="$APOGEE_HOME/models/Wan-AI--Wan2.2-TI2V-5B/safetensors/dddddddddddd"
+MLX_MODEL="$APOGEE_HOME/models/Wan-AI--Wan2.2-TI2V-5B/mlx/eeeeeeeeeeee"
+MLX_HANDLE="Wan-AI--Wan2.2-TI2V-5B/mlx/eeeeeeeeeeee"
+python3 - "$SET" "$MLX_MODEL" <<'PY'
+import hashlib, json, os, struct, sys
+source, model = sys.argv[1], sys.argv[2]
+def write(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as out:
+        out.write(data if isinstance(data, bytes) else data.encode())
+    return data if isinstance(data, bytes) else data.encode()
+def shard(name):
+    header = json.dumps({"__metadata__": {"format": "mlx"},
+                         name: {"dtype": "F16", "shape": [1], "data_offsets": [0, 2]}}).encode()
+    return struct.pack("<Q", len(header)) + header + b"\0\0"
+# The Wan set as 53j pulls it: its config, its tokenizer under google/umt5-xxl/.
+files = []
+for path, data in (("config.json", json.dumps({"_class_name": "WanModel",
+                                               "_diffusers_version": "0.33.0",
+                                               "model_type": "ti2v", "out_dim": 48})),
+                   ("diffusion_pytorch_model.safetensors", shard("w")),
+                   ("google/umt5-xxl/tokenizer_config.json", "{}"),
+                   ("google/umt5-xxl/tokenizer.json", "{}"),
+                   ("google/umt5-xxl/spiece.model", "a sentencepiece model, never one")):
+    data = write(f"{source}/{path}", data)
+    files.append({"path": path, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+write(f"{source}/apogee-snapshot.json", json.dumps({
+    "ref": "Wan-AI/Wan2.2-TI2V-5B", "revision": "main", "source": "huggingface",
+    "pulled_at": "2026-10-21T00:00:00Z", "files": files}))
+# mlx-video's build of it, as `models convert --mlx` commits it (53k).
+write(f"{model}/config.json", json.dumps({"model_type": "ti2v", "dim": 3072, "sample_fps": 24,
+                                          "quantization": {"group_size": 64, "bits": 4}}))
+for name in ("model", "t5_encoder", "vae"):
+    write(f"{model}/{name}.safetensors", shard(f"{name}.weight"))
+write(f"{model}/apogee-snapshot.json", json.dumps({
+    "ref": "Wan-AI--Wan2.2-TI2V-5B/safetensors/dddddddddddd", "source": "convert",
+    "transform": "mlx_video.models.wan_2.convert 4bit", "kind": "video", "files": []}))
+PY
+
+MLX_RECORD="$WORK_DIR/mlx-record.jsonl"
+export STUB_MLX_VIDEO_RECORD="$MLX_RECORD"
+generate mlx -o "$WORK_DIR/out/mlx.mp4" --model "$MLX_HANDLE" --output-format json
+[ "$STATUS" -eq 0 ] || fail "the MLX generation failed ($STATUS): $(cat "$WORK_DIR/mlx.err")"
+[ "$(field "$WORK_DIR/mlx.out" '["engine"]')" = "mlx" ] || fail "the record's engine: $(cat "$WORK_DIR/mlx.out")"
+[ "$(field "$WORK_DIR/mlx.out" '["status"]')" = "done" ] || fail "not done: $(cat "$WORK_DIR/mlx.out")"
+[ "$(field "$WORK_DIR/mlx.out" '["model"]["name"]')" = "$MLX_HANDLE" ] || fail "the model"
+[ "$(field "$WORK_DIR/mlx.out" '["model"]["class"]')" = "Wan ti2v" ] || fail "the model's class"
+[ "$(field "$WORK_DIR/mlx.out" '["versions"]["mlx_video"]')" = "0.0-video-stub" ] || fail "mlx-video's version"
+[ "$(field "$WORK_DIR/mlx.out" '["device"]["device"]')" = "gpu" ] || fail "MLX's device"
+[ "$(field "$WORK_DIR/mlx.out" '["settings"]["frames"]')" = "9" ] || fail "1 s at 8 fps is not 9 frames"
+[ "$(cat "$WORK_DIR/out/mlx.mp4")" = "MP4 clip" ] || fail "the MLX clip did not land"
+python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); b=json.load(open(sys.argv[2])); sys.exit(a != b)' \
+    "$WORK_DIR/out/mlx.mp4.json" "$WORK_DIR/mlx.out" || fail "the MLX sidecar is not the document"
+# The generator's tokenizer is the set's own, from its files; the hub never asked.
+python3 - "$MLX_RECORD" "$SET/google/umt5-xxl" <<'PY' || fail "the tokenizer: $(cat "$MLX_RECORD")"
+import json, sys
+entries = [json.loads(line) for line in open(sys.argv[1])]
+tokenizers = [e for e in entries if "tokenizer" in e]
+assert tokenizers == [{"tokenizer": sys.argv[2], "local_files_only": True}], tokenizers
+call = next(e for e in entries if "generate" in e)
+assert call["num_frames"] == 9 and call["steps"] == 2 and call["width"] == 128, call
+PY
+grep -q "\[video\] running on MLX (gpu, 4-bit) -- expect minutes per clip on Apple silicon" "$WORK_DIR/mlx.err" \
+    || fail "MLX and the scale were not said: $(cat "$WORK_DIR/mlx.err")"
+grep -q "on MLX (mlx-video)" "$WORK_DIR/mlx.err" || fail "the engine was not said before the run"
+grep -q "\[video\] step 2/2" "$WORK_DIR/mlx.err" || fail "the MLX steps were not said"
+for stream in out err; do
+    if grep -q "Generation (MLX)\|noise on stderr\|nobody should see\|Diffusion: " "$WORK_DIR/mlx.$stream"; then
+        fail "mlx-video's output reached apogee's std$stream"
+    fi
+done
+[ -z "$(ls -A "$APOGEE_HOME/cache/video")" ] || fail "an MLX run left its working directory"
+
+# An engine its model does not run on: refused before anything runs.
+generate mlx_torch -o "$WORK_DIR/out/mlx-torch.mp4" --model "$MLX_HANDLE" --engine torch
+[ "$STATUS" -eq 1 ] || fail "an MLX video model ran on --engine torch ($STATUS)"
+grep -q -- "--engine torch: '$MLX_HANDLE' is an MLX video model, which runs on MLX (mlx-video), not PyTorch" \
+    "$WORK_DIR/mlx_torch.err" || fail "the engine refusal: $(cat "$WORK_DIR/mlx_torch.err")"
+[ ! -e "$WORK_DIR/out/mlx-torch.mp4" ] || fail "a refused run wrote a clip"
+
+# A run again from its record replays MLX.
+run_video mlx_again --from "$WORK_DIR/out/mlx.mp4" -o "$WORK_DIR/out/mlx-again.mp4"
+[ "$(field "$WORK_DIR/mlx_again.out" '["engine"]')" = "mlx" ] || fail "--from did not replay MLX"
+grep -q "seed .* (held), engine mlx" "$WORK_DIR/mlx_again.err" || fail "the held engine was not said: $(cat "$WORK_DIR/mlx_again.err")"
+unset STUB_MLX_VIDEO_RECORD
+
+# The composer runs each clip on whichever engine its model's directory says.
+set +e
+"$APOGEE_BIN" video compose "the tides, twice a day" -m "$MLX_HANDLE" -o "$WORK_DIR/out/tides-mlx.mp4" \
+    --planner planner --output-format json </dev/null >"$WORK_DIR/compose-mlx.out" 2>"$WORK_DIR/compose-mlx.err"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 0 ] || fail "video compose on MLX failed ($STATUS): $(cat "$WORK_DIR/compose-mlx.err")"
+[ "$(field "$WORK_DIR/compose-mlx.out" '["status"]')" = "done" ] || fail "the MLX composition is not done"
+for scene in s01 s02; do
+    [ "$(field "$WORK_DIR/out/tides-mlx.scenes/$scene.mp4.json" '["engine"]')" = "mlx" ] \
+        || fail "the composition's $scene did not run on MLX"
+done
+if grep -q "Generation (MLX)\|noise on stderr" "$WORK_DIR/compose-mlx.out" "$WORK_DIR/compose-mlx.err"; then
+    fail "mlx-video's output reached compose's streams"
+fi
+
+echo "video generate on MLX: recorded with its engine, the set's tokenizer, --from replays it, composed - OK"
+
+# --- Ctrl-C mid-denoise on MLX, the MLX driver's whole tree sampled -----------
+rm -f "$MLX_RECORD"
+STUB_MLX_VIDEO_HANG=1 STUB_MLX_VIDEO_RECORD="$MLX_RECORD" "$APOGEE_BIN" video generate "a heron" \
+    --model "$MLX_HANDLE" --duration 1 --resolution 128x128 --steps 2 --fps 8 \
+    -o "$WORK_DIR/out/mlx-stopped.mp4" </dev/null >"$WORK_DIR/mlx-stopped.out" 2>"$WORK_DIR/mlx-stopped.err" &
+CHILD=$!
+tries=0
+until [ -s "$MLX_RECORD" ] && grep -q '"generate"' "$MLX_RECORD"; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 300 ] || { kill -9 "$CHILD" 2>/dev/null; fail "the MLX driver never started denoising"; }
+    sleep 0.1
+done
+if command -v lsof >/dev/null 2>&1; then
+    SEEN=0
+    for _ in 1 2 3 4 5; do
+        PIDS="$CHILD"
+        for pid in $(descendants "$CHILD"); do
+            PIDS="$PIDS,$pid"
+            ps -o command= -p "$pid" 2>/dev/null | grep -q video_generate_mlx.py && SEEN=1
+        done
+        # No socket of any kind anywhere below apogee, and no listener in its tree.
+        HIT="$(lsof -a -p "$PIDS" -i -sTCP:LISTEN -Fn 2>/dev/null || true)"
+        [ -z "$HIT" ] || { kill -9 "$CHILD" 2>/dev/null; fail "INVARIANT VIOLATED: an MLX generation's tree listens: $HIT"; }
+        for pid in $(descendants "$CHILD"); do
+            SOCKETS="$(lsof -a -p "$pid" -i -Fn 2>/dev/null || true)"
+            [ -z "$SOCKETS" ] || { kill -9 "$CHILD" 2>/dev/null; fail "INVARIANT VIOLATED: the MLX driver's tree holds a socket: $SOCKETS"; }
+        done
+        sleep 0.1
+    done
+    [ "$SEEN" = 1 ] || { kill -9 "$CHILD" 2>/dev/null; fail "the sample never saw the MLX driver, so it proved nothing"; }
+fi
+kill -INT "$CHILD"
+set +e
+wait "$CHILD"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 130 ] || fail "Ctrl-C on MLX exited $STATUS, not 130: $(cat "$WORK_DIR/mlx-stopped.err")"
+grep -q "cancelled -- nothing was written" "$WORK_DIR/mlx-stopped.err" || fail "the MLX cancel was not said"
+[ ! -e "$WORK_DIR/out/mlx-stopped.mp4" ] || fail "a cancelled MLX run left a clip"
+[ ! -e "$WORK_DIR/out/mlx-stopped.mp4.json" ] || fail "a cancelled MLX run left a sidecar"
+[ -z "$(ls -A "$APOGEE_HOME/cache/video")" ] || fail "a cancelled MLX run left its working directory"
+if pgrep -f "$APOGEE_HOME/training/scripts/video_generate_mlx.py" >/dev/null 2>&1; then
+    fail "the MLX driver outlived the cancelled run"
+fi
+
+echo "video generate on MLX: Ctrl-C mid-denoise leaves nothing; no socket in the MLX driver's tree - OK"
+
+# --- mlx-video not installed: refused on a pipe, naming its setup -------------
+rm -rf "$SITE/mlx_video"
+generate mlx_missing -o "$WORK_DIR/out/mlx-missing.mp4" --model "$MLX_HANDLE"
+[ "$STATUS" -ne 0 ] || fail "a run without mlx-video succeeded"
+grep -q "mlx-video is not installed in the Python environment at .* -- apogee train setup --with mlx-video" \
+    "$WORK_DIR/mlx_missing.err" || fail "the refusal: $(cat "$WORK_DIR/mlx_missing.err")"
+
+echo "video generate on MLX: mlx-video missing refused naming its setup - OK"

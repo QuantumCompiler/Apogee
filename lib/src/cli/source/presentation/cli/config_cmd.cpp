@@ -1213,7 +1213,8 @@ void bind_set_default_video(CLI::App& parent, const RootContext& context) {
     CLI::App* cmd = parent.add_subcommand(
         "set-default-video",
         "Set the pipeline 'video generate' runs when --model names none, or off for none");
-    cmd->add_option("name", *name, "A stored pipeline -- handle, id or model -- or off")
+    cmd->add_option("name", *name,
+                    "A stored pipeline or MLX video model -- handle, id or model -- or off")
         ->type_name(kVideoPipelineValue)
         ->required();
     cmd->callback([&context, name]() {

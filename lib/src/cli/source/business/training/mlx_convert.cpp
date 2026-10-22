@@ -157,14 +157,19 @@ RequirementSet mlx_converter_set(MlxConverterKind converter) noexcept {
     return RequirementSet::Mlx;
 }
 
-std::filesystem::path find_mlx_video_converter(const std::filesystem::path& venv) {
+namespace {
+
+/// The mlx-video module `dotted` names, as a file under the environment at
+/// `venv`, with the torch its set brings beside it -- or empty.
+[[nodiscard]] std::filesystem::path find_mlx_video_module(const std::filesystem::path& venv,
+                                                          std::string_view dotted) {
     const std::filesystem::path package = find_site_package(venv, "mlx_video");
     if (package.empty() || find_site_package(venv, "torch").empty()) {
         return {};
     }
-    // `mlx_video.models.wan_2.convert`, as a file under the package.
+    // `mlx_video.models.wan_2.<module>`, as a file under the package.
     std::filesystem::path module = package.parent_path();
-    for (std::string_view rest = kMlxVideoConverter; !rest.empty();) {
+    for (std::string_view rest = dotted; !rest.empty();) {
         const std::size_t dot = rest.find('.');
         module /= std::string{rest.substr(0, dot)};
         rest = dot == std::string_view::npos ? std::string_view{} : rest.substr(dot + 1);
@@ -172,6 +177,16 @@ std::filesystem::path find_mlx_video_converter(const std::filesystem::path& venv
     module += ".py";
     std::error_code code;
     return std::filesystem::is_regular_file(module, code) ? module : std::filesystem::path{};
+}
+
+}  // namespace
+
+std::filesystem::path find_mlx_video_converter(const std::filesystem::path& venv) {
+    return find_mlx_video_module(venv, kMlxVideoConverter);
+}
+
+std::filesystem::path find_mlx_video_generator(const std::filesystem::path& venv) {
+    return find_mlx_video_module(venv, kMlxVideoGenerator);
 }
 
 std::span<const MlxPrecision> mlx_precisions() noexcept {

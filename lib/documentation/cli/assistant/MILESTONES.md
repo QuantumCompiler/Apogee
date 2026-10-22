@@ -9861,3 +9861,80 @@ The refusal was true but incomplete. The set is Wan's original layout, and its r
 - `check` has no mlx-video row and does not compare the installed commit with the pin.
 - mlx-video's generator loads its tokenizer from the hub (`google/umt5-xxl`), and the converted directory carries none. That is 53l's to settle, recorded in its document.
 - Upstream, mlx-video's converter raises a `NameError` on its NaN/Inf error path (`model_path` is undefined there).
+
+### 2026-10-21 — `mlx-video-generate` (backlog item 53l): `video generate` on MLX
+
+**Why.** `video generate` had one engine, a seeded driver loading a diffusers pipeline on PyTorch (49b). A converted Wan directory (53k) needs mlx-video's generator. Everything around the engine was already engine-free: the request file, the working directory under `cache/video`, the JSONL progress protocol, the record, the LoRAs hashed in, and the clip moved into place only on success. Only the driver was PyTorch's. This was wall W7, its running half.
+
+- [x] **A second seeded driver, `assets/video/video_generate_mlx.py`,** over mlx-video's Wan generator at the pinned commit (`87db56a5`).
+  - **The call.** At the pin the generator is `mlx_video.models.wan_2.generate.generate_video(...)`; the README's `mlx_video.wan_2.generate` is the package's console-script name, not a module. The driver calls it with keyword arguments, so the prompt never reaches a command line.
+  - **What it replaces in its own process:**
+    - the tokenizer lookup;
+    - the `tqdm` progress bar, each step becoming the diffusers driver's `step` event;
+    - `save_video`, the frames written as PNGs so Apogee's one ffmpeg step assembles the clip as for every clip.
+  - **The interactive invariants.** It runs over the one script runner, with its descriptor 1 on stderr before importing, its stderr a bounded tail, and the library's prints off the protocol.
+- [x] **The tokenizer never comes from the network.** The generator loads `google/umt5-xxl` from the hub, and a converted directory carries no tokenizer.
+  - **Where it is found.** Before any spawn, the ladder reads the converted directory's record. Its `ref` names the source Wan set, found under either store root, and the tokenizer is that set's stored `google/umt5-xxl/`. Every file the set's record lists there must be present.
+  - **How it is opened.** The driver sets the offline environment before any import and opens that one name from local files. Any other name fails offline rather than downloading.
+  - **When it cannot be found,** the run is refused before a spawn, saying what is missing: the pull that brings the set back, `models repair` on the set, or converting again.
+- [x] **One generation, two engines** (ADR 0002).
+  - **The record.** `engine` is a field of the request and of the record (`video_run`), added only; a record without it reads as `torch`. A pipeline's record is unchanged apart from `engine`, checked key by key. An MLX record adds `versions.mlx` and `versions.mlx_video`, leaves `torch` and `diffusers` as empty strings, and records the model class as `Wan <mode>`.
+  - **The engine follows the model's directory:** a `video`-kind MLX directory runs on MLX, a diffusers pipeline on PyTorch.
+  - **`--engine auto|torch|mlx`,** with its completion, only names the engine or refuses it, naming the setup, before a spawn.
+  - **`--from`** replays the record's engine while the model is the record's own. A record whose engine contradicts its model is refused.
+- [x] **The MLX ladder, before any spawn:**
+  - Apple silicon;
+  - mlx-video and `torch` installed, naming `train setup --with mlx-video` since the set is opt-in;
+  - the directory whole by 53k's rule;
+  - the source set's tokenizer present;
+  - the 4n+1 frame rule;
+  - the mode rule from `config.json`'s `model_type`: `t2v` refuses `--image`, `i2v` requires one, and `ti2v` takes either.
+- [x] **The request maps onto the generator:** width, height, frames, steps, the guidance scale, shift, the seed, the negative prompt and the image. mlx-video rounds sizes down to its stride. The record keeps the size asked for, and the "frames written" line says the size made.
+- [x] **The surrounding surfaces:**
+  - `config set-default-video` and the model's completion accept an MLX video model, the same resolver.
+  - `check` gains a Video "mlx driver" row comparing the seeded copy with this build's.
+  - 53e's `video` kind wording, "'apogee video generate' runs it", is now true.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The open calls' defaults, taken.**
+  - **LoRAs.** They pass to the MLX engine as mlx-video's `loras`, applied to every model the mode loads, which on a high/low pair equals passing each to `--lora-high` and `--lora-low`. Every Wan mode at the pin takes them, and a generator without the parameter refuses them by name. They are recorded as today, without `versions.peft`.
+  - **The composer.** `video compose` uses each clip model's own engine, with no flag of its own. A whole composition on MLX runs in `cli.video_lifecycle`.
+- **The tokenizer is read from the stored source set, not copied into the converted directory.** That changes nothing in 53k's conversion or its completeness rule, and directories already converted work as they are. The cost is that deleting the source Wan set refuses generation until it is pulled again.
+- **Apogee sends its own default of 50 steps,** matching what the converter writes for TI2V-5B. Clips are assembled at the request's fps, as on PyTorch.
+- **`shift`, the guidance scale and the negative prompt** are passed through by the driver, but no CLI flag sets them, as on the PyTorch path.
+
+**Verified.**
+- 26 new cases (372 assertions), across:
+  - `video_mlx_driver_test` (new), the driver under the stub `mlx_video`;
+  - `runtime_test`, the MLX ladder, the tokenizer across both store roots, the engine choice, 4n+1 and the mode rule;
+  - `generation_test`, the request on each engine and an MLX run end to end;
+  - `video_generate_test`, a pipeline unchanged but for `engine`, an MLX run recorded, the engine by kind, an explicit engine refused, `--from` replay including a pre-53l record on PyTorch, LoRAs on MLX, narration;
+  - `video_cmd_test`, completion and the engine refusal through the real binary.
+- `cli.video_lifecycle` gained MLX phases on the real binary:
+  - a generation, with the tokenizer read from the set;
+  - `--engine torch` refused;
+  - `--from` replaying MLX;
+  - a composition on MLX;
+  - Ctrl-C leaving nothing;
+  - mlx-video missing, refused by name.
+
+  Its socket sampling covers the MLX driver's tree for listeners and for sockets of any kind, and must have seen the driver. Its timeout rose from 180 s to 240 s.
+- Mutation checks, each caught and then put back:
+  - a stub that listens, and one holding a UDP socket (each failed `cli.video_lifecycle`);
+  - removing the tokenizer redirect (6 cases);
+  - removing the frame-writing seam (4 cases);
+  - removing the step reporting (2 cases).
+- The neighbouring suites pass: `[video]`, `[engine]`, `[mlx]`, `[assets]`, `[check]`, `[completion]`, `[mlx_video]`, `[wan]`, `[kind]`, `[compose]`, `[commands]`, `[models]` and `[training]`.
+- ctest:
+  - `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`, `cli.install_is_ours_only`;
+  - `cli.video_lifecycle`, `cli.mlx_models_lifecycle`, `cli.mlx_lifecycle`, `cli.machine_schema_conformance`;
+  - the completion and no-socket checks.
+
+  All pass.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,818 tests and the macOS app's 342 cases passed, with no warning.
+
+**Not done:**
+- The real clip is the user's run. mlx-video was exercised only through the stubs, so a mismatch with the real generator would first show there.
+- 53j and 53k's wording for a Wan set still says "what runs this model today is its Diffusers pipeline", and does not yet name its MLX conversion.
+- `check` has no mlx-video runtime row.
+- The streamed `ready` event does not carry the engine (the final document does).
