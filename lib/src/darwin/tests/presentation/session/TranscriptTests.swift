@@ -241,6 +241,29 @@ struct TranscriptTests {
         ])
     }
 
+    @Test("a markdown answer folds to one answer, exactly its deltas, streaming until its end; read back by chats show it is the same text")
+    func markdownLiveAndReadBack() throws {
+        let lines = recorded("data/protocol/Fixtures/markdown-answer.jsonl").split(separator: "\n").map(String.init)
+        let turn = "My scraper's TaskGroup dies when one host times out. How do I keep the batch going?"
+        let result = try #require(lines.lazy.compactMap { JSONValue.parse($0) }.first { $0["type"]?.stringValue == "result" }?["text"]?.stringValue)
+        var live = Transcript()
+        var finished: [Bool] = []
+        for line in lines {
+            live.apply(decoded(line))
+            if JSONValue.parse(line)?["type"]?.stringValue == "session" { live.userSent(turn) }
+            if case .answer(let answer)? = live.items.last?.content { finished.append(answer.finished) }
+        }
+        #expect(shape(live) == ["user: \(turn)", "activity: |", "answer: \(result)"])
+        #expect(finished.filter { !$0 }.count == 151, "streaming from its start through all 150 deltas: the row reads its edge tolerantly")
+        #expect(finished.last == true, "finished once it ended: the row reads it whole")
+
+        let shown = try #require(ReadDocument(text: recorded("business/reads/Fixtures/chats-show-markdown.json")))
+        let chat = try #require(SavedChat(document: shown))
+        var resumed = Transcript()
+        resumed.earlier(chat)
+        #expect(shape(resumed) == ["user: \(turn)", "answer: \(result)", "divider: \(Transcript.earlierDivider)"])
+    }
+
     @Test("earlier turns go only into a transcript with no rows: one with its own keeps them; an empty read draws nothing")
     func earlierOnlyIntoAnEmptyTranscript() throws {
         var kept = Transcript()

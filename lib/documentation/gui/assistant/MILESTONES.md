@@ -323,6 +323,55 @@ That was the cost 1b recorded and deferred: "Widening the child's `PATH` is a la
 
 **Not done:** markdown in answers, live or earlier.
 
+### 2026-10-22 — `markdown-in-chat-answers` (maintenance item M8): chat answers render their markdown
+
+**Why.** The app drew every chat answer as plain text, live and resumed. The answer row was a `Text(answer.text)` (`session/Views/TranscriptRow.swift:25–31`), and SwiftUI parses markdown only from a string literal, never from a `String` value. So `**bold**`, inline code, lists and code fences showed raw. Nothing in the app rendered markdown. The design draws answers formatted (`lib/design/spec/html/main.html:300–345`): prose, inline code, and a code block under a caption with Copy. M7, which draws resumed turns through the same row, named the gap.
+
+- [x] **`MarkdownText`, a shared component in `styles`, over a Foundation-only model** (`Components/MarkdownDocument.swift`). The model runs `AttributedString(markdown:)` with its full syntax and groups the runs into a tree by their `PresentationIntent` components; that grouping is its only parsing of its own. The blocks it yields:
+  - paragraph, heading (`#` h1, `##` h2, deeper h3), and list with its items, keeping written numbers;
+  - quote, code (its language or "code" as the caption), rule, and table with column alignments, short rows padded;
+  - runs in no block (HTML) kept as written.
+
+  Inline: emphasis, strong, code, strikethrough, link and image.
+- [x] **Drawn in the design's terms:**
+  - **Inline code:** mono on `Palette.control`, rounded through a `TextRenderer`, used only on text with code or links, so a plain answer is pixel-identical to before in both themes.
+  - **Code blocks:** bordered on `Palette.code`, under the language caption and a **copy** button that says "copied".
+  - **Links and images:** links in the text colour, underlined in `line.strong`. An image is drawn as its alt text and address, never fetched.
+  - **Selection** works within each block.
+- [x] **Links follow the system only for `http`, `https` and `mailto`.** Every other scheme, `file:` included, is drawn but not opened. A small bubble above a link shows its address on hover, adding "not opened" where it isn't followed.
+- [x] **Streaming.** The answer row draws `MarkdownText(answer.text, streaming: !answer.finished)`. The parse runs in an `Equatable` child, so once per redraw, not per delta, and once for a finished answer.
+  - **At the stream's edge:** an unclosed fence draws as a code block in progress, never its fence line raw, and an unclosed `**` or backtick shows literally until it closes.
+  - **Two edge rules, applied only while streaming:** a last line of markers alone waits for the rest of its line (else `Text\n-` flashes as a heading), and a last paragraph opening with `|` waits for its delimiter row.
+- [x] **Recorded from the branch's binary,** over a sandbox home in scratch, the home written `/Users/someone`.
+  - A driven `chat`, launched as the app's `ChatLaunch` launches it, with the scripted mock answering the design's asyncio answer in markdown. The answer carries every shape, plus an ordered list, a quote, a rule, and `mailto:` and `file:` links. It streamed as 150 deltas of 8 bytes (`markdown-answer.jsonl`).
+  - Its `chats show` (`chats-show-markdown.json`).
+  - The script asserts the deltas join to the scripted text.
+- [x] **Previews:** `styles` gained its `Previews/`, with 5 previews of the component plus one more (a table's header waiting for its delimiter row). The session has 3 new row previews: a full answer, a resumed one, and one mid-stream with an open fence.
+
+**Decisions made while building** (2026-10-22, each recorded for veto):
+- **The open calls' defaults, taken:** no syntax colouring; the user's own words unrendered; the answer re-parsed per redraw, with no caching.
+- **No caching, by measure.** One parse took 0.41–0.49 ms for the recorded 1.2 KB answer, 4.3–4.5 ms at 12 KB and 18.6–18.9 ms at 48 KB (Release). 1,500 re-parses of the 12 KB answer averaged 2.15 ms, a quarter of a 60 Hz frame. Foundation's own parse is about 90% of each figure, and caching blocks would mean splitting the source before Foundation reads it, the hand-rolled parser the item ruled out.
+- **A single newline stays a line break,** unlike CommonMark, as the CLI's terminal renderer keeps it, so a plain answer reads as written.
+- **The design's line heights are not applied,** matching the rest of the app. Its 10 and 14 point gaps map to `Spacing.m` and `Spacing.s`.
+- **Two files, not one,** so the model being SwiftUI-free is structural.
+
+**Verified.**
+- 12 new cases:
+  - `MarkdownTests` (11):
+    - `recordedAnswer`, `readBack` (M7's read-back answers render too);
+    - `streamedInPieces`: each of the 150 recorded prefixes keeps blocks that never change once settled, and no closed marker raw;
+    - `openFence`, `edge`, `plainAnswers`, `structure`;
+    - `linkSchemes`, `linkClicks`, `imageNeverFetched`, `copyCode`. File links and images are checked through an injected opener, with network requests recorded beside a control fetch.
+  - `TranscriptTests` +1: `markdownLiveAndReadBack`.
+- Three mutants were each caught by at least one test: no held-back line, no table wait, and a soft break as a space.
+- The `PresentationStyles` scheme passed 16 of 16, `PresentationSession` 43 of 43, and `build.sh test` 429 of 429. The layering check passes, and `check-previews` finds nothing. The project file is unchanged.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,859 tests and the macOS app's 429 cases passed, with no Swift warning.
+
+**Not done:**
+- Hover with a real pointer is the user's live pass. SwiftUI ignores synthetic mouse events, and the bubble's placement was checked on a scratch copy instead.
+- Syntax colouring: the design's `code.*` tokens are not in `Palette`.
+- Markdown in Review, Knowledge and Tasks, which can reuse the component.
+
 ---
 
 ## Milestone B — The design's screens

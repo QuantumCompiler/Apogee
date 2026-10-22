@@ -24,10 +24,9 @@ struct TranscriptRow: View {
             ActivityView(activity: activity)
         case .answer(let answer):
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text(answer.text)
-                    .font(.apogeeProse)
-                    .foregroundStyle(Palette.textPrimary)
-                    .textSelection(.enabled)
+                // The model's markdown drawn, live and read back alike; the
+                // edge of one still streaming read tolerantly.
+                MarkdownText(answer.text, streaming: !answer.finished)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if let usage = answer.usage {
                     Text(Self.tokens(usage))
@@ -323,6 +322,39 @@ struct EndedCard: View {
     }
     .frame(width: 720)
     .padding(Spacing.xl)
+}
+
+#Preview("A markdown answer, live") {
+    let model = SessionPreview.session(SessionPreview.markdownAnswer)
+    ScrollView {
+        VStack(alignment: .leading, spacing: Spacing.m) {
+            ForEach(SessionPreview.markdownLive.items) { TranscriptRow(item: $0, model: model) }
+        }
+        .frame(width: 720)
+        .padding(Spacing.xl)
+    }
+    .frame(height: 900)
+}
+
+#Preview("A markdown answer, mid-stream: its fence open") {
+    let model = SessionPreview.session(SessionPreview.markdownAnswer)
+    VStack(alignment: .leading, spacing: Spacing.m) {
+        ForEach(SessionPreview.markdownOpenFence.items) { TranscriptRow(item: $0, model: model) }
+    }
+    .frame(width: 720)
+    .padding(Spacing.xl)
+}
+
+#Preview("A markdown answer, read back") {
+    let model = SessionPreview.session(SessionPreview.markdownAnswer)
+    ScrollView {
+        VStack(alignment: .leading, spacing: Spacing.m) {
+            ForEach(SessionPreview.markdownResumed.items) { TranscriptRow(item: $0, model: model) }
+        }
+        .frame(width: 720)
+        .padding(Spacing.xl)
+    }
+    .frame(height: 900)
 }
 
 #Preview("Resumed with no read: the turns kept, not shown") {

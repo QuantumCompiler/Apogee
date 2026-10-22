@@ -19,6 +19,8 @@ enum SessionPreview {
     static let executeProject = lines(SessionDocuments.executeProject)
     /// A saved conversation resumed: its `session` event, then one live turn.
     static let resumedChat = lines(SessionDocuments.resumedChat)
+    /// A turn the scripted mock answered in markdown, every shape the app draws.
+    static let markdownAnswer = lines(SessionDocuments.markdownAnswer)
 
     /// What the person sends and answers in the mock-actor conversation, as
     /// the window's end-to-end test does (SessionViewModelTests'
@@ -36,6 +38,13 @@ enum SessionPreview {
 
     /// Its launch: `--resume` with its id.
     static var resumeSaved: ChatLaunch { ChatLaunch(resume: savedChat.id) }
+
+    /// What the markdown turn was sent as, recorded with it (TranscriptTests'
+    /// `markdownLiveAndReadBack`).
+    static let markdownTurn = "My scraper's TaskGroup dies when one host times out. How do I keep the batch going?"
+
+    /// That conversation as `chats show` read it back.
+    static var markdownChat: SavedChat { SavedChat(document: ReadDocument(text: SessionDocuments.chatsShowMarkdown)!)! }
 
     /// What each `execute` stream was sent as (PlayNarrationTests).
     static let playTurn = "/play echo2 hello"
@@ -238,6 +247,24 @@ enum SessionPreview {
             #"{"type":"result","text":"café ok","turn":1,"usage":{"input_tokens":4,"output_tokens":2}}"#,
         ], typed: "hi")
     }
+
+    /// The markdown turn, streamed whole and answered.
+    static var markdownLive: Transcript { folded(markdownAnswer, typed: markdownTurn) }
+
+    /// The markdown turn mid-stream: its lines up to the delta that brought
+    /// `self.client.get`, the code block's fence still open.
+    static var markdownOpenFence: Transcript {
+        var text = ""
+        let through = markdownAnswer.firstIndex { line in
+            guard let delta = JSONValue.parse(line), delta["type"]?.stringValue == "answer_delta" else { return false }
+            text += delta["text"]?.stringValue ?? ""
+            return text.contains("self.client.get")
+        }
+        return folded(Array(markdownAnswer[...(through ?? markdownAnswer.count - 1)]), typed: markdownTurn)
+    }
+
+    /// The markdown turn read back by `chats show`, as a reopened chat draws it.
+    static var markdownResumed: Transcript { folded([], earlier: markdownChat) }
 
     /// A turn that failed, in the CLI's words (TranscriptTests' `error`).
     static var failed: Transcript {
