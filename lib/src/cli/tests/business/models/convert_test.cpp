@@ -18,6 +18,7 @@
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
 #include "support/mlx_model.h"
+#include "support/voice_model.h"
 #include "support/wan_original.h"
 
 using apogee::harness::CancellationToken;
@@ -582,6 +583,76 @@ TEST_CASE("the MLX ladder takes Wan's original layout on mlx-video's route, once
           "VAE (vae.safetensors) in " +
               work.out.string());
     CHECK_FALSE(std::filesystem::exists(work.out));
+}
+
+TEST_CASE("the MLX ladder takes a voice model on mlx-audio's route alone, read whole",
+          "[models][convert][mlx][voice][mlx_audio]") {
+    // 53m: a voice model as Kokoro publishes it is no snapshot -- every other
+    // route refuses it as one -- and mlx-audio's route, named by a caller that
+    // has found it installed, takes it whole and takes nothing else.
+    const MlxWork work;
+    const std::filesystem::path voice = work.root.path() / "kokoro";
+    apogee::testing::write_voice_model(voice);
+    CHECK(apogee::models::mlx_conversion_refusal(voice, work.out, "voice").empty());
+    for (const std::string_view other : {"", "chat", "vision", "video"}) {
+        INFO(other);
+        CHECK(apogee::models::mlx_conversion_refusal(voice, work.out, other)
+                  .find("is not a SafeTensors snapshot") != std::string::npos);
+    }
+    // Its route takes no snapshot.
+    CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out, "voice")
+              .find("is no whole voice model: mlx-audio's converter takes Kokoro's own layout") !=
+          std::string::npos);
+    // Never over something there.
+    std::filesystem::create_directories(work.out);
+    CHECK(apogee::models::mlx_conversion_refusal(voice, work.out, "voice") ==
+          "something already exists at " + work.out.string() + " -- delete it first");
+    std::filesystem::remove_all(work.out);
+
+    // Converted: read by mlx-audio's layout, recorded `voice`.
+    const auto audio = [](bool voices) -> apogee::models::MlxConvertFn {
+        return [voices](const std::filesystem::path&, const std::filesystem::path& out,
+                        const CancellationToken&) {
+            write_file(out / "config.json", R"({"model_type": "kokoro", "plbert": {}})");
+            write_file(out / "model.safetensors", apogee::testing::safetensors_bytes({{"w", 32}}));
+            if (voices) {
+                write_file(out / "voices" / "af_heart.safetensors",
+                           apogee::testing::safetensors_bytes({{"voice", 16}}));
+            }
+            return std::string{};
+        };
+    };
+    apogee::models::MlxConvertResult made = apogee::models::convert_snapshot_to_mlx(
+        voice, work.out, 0, audio(true), CancellationToken{}, "voice");
+    INFO(made.error);
+    REQUIRE(made.ok);
+    CHECK(made.kind == "voice");
+    CHECK(made.info.voice);
+    CHECK(made.info.complete);
+    std::filesystem::remove_all(work.out);
+    // A converter that wrote no voices is never committed, and leaves nothing.
+    made = apogee::models::convert_snapshot_to_mlx(voice, work.out, 0, audio(false),
+                                                   CancellationToken{}, "voice");
+    CHECK_FALSE(made.ok);
+    CHECK(made.error ==
+          "the converter finished but its output is not a loadable MLX model -- cannot load: no "
+          "voices (voices/*.safetensors) in " +
+              work.out.string());
+    CHECK_FALSE(std::filesystem::exists(work.out));
+    // A voice model cut short is refused before the converter runs.
+    std::filesystem::remove_all(voice / "voices");
+    bool ran = false;
+    made = apogee::models::convert_snapshot_to_mlx(
+        voice, work.out, 0,
+        [&ran](const std::filesystem::path&, const std::filesystem::path&,
+               const CancellationToken&) {
+            ran = true;
+            return std::string{};
+        },
+        CancellationToken{}, "voice");
+    CHECK_FALSE(made.ok);
+    CHECK(made.error.find("no voices (voices/*.pt)") != std::string::npos);
+    CHECK_FALSE(ran);
 }
 
 TEST_CASE("an embedding model is refused by the MLX ladder alone; its GGUF is the conversion",

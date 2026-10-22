@@ -809,7 +809,20 @@ header**, never estimated) and `offset`, and its `sentences` (`text`,
 `seconds` counted from the samples spoken, `offset`); `seconds` and
 `sample_rate` for the whole file; `device` (`device` as torch reported it,
 `platform`); `versions` (`torch`, `kokoro`, `apogee`); `run_seconds`;
-`created_at`; and `error` when it did not land. Exit `1` on a failure, `130`
+`created_at`; and `error` when it did not land. Since 53m `engine` --
+`torch` (a voice model as Kokoro publishes it, through kokoro) or `mlx`
+(mlx-audio's build of one, through mlx-audio's own Kokoro) -- the engine the
+voice model's directory speaks on, which `voice say --engine auto|torch|mlx`
+only names or is refused by; a record without it spoke on `torch`. An `mlx`
+run's `model` is its store handle (`<model>/mlx/<id>`) and directory, `ref`
+the voice model it was converted from, `checkpoint` its weights' file; its
+`device` is MLX's (`gpu`); its `versions` carry `mlx` and `mlx_audio` beside
+an empty `torch` and `kokoro`; and its `voice` is one of the presets the
+build carries -- `af_heart` by default, as on PyTorch. Its segments are
+measured from their own WAVs' headers exactly as PyTorch's are. A PyTorch
+record is unchanged but for `engine`. The composer's narration records
+(`<video>.scenes/sNN.wav.json`) are the same documents, each on its voice
+model's own engine. Exit `1` on a failure, `130`
 on a cancel, the output untouched either way; a refusal before the run
 prints no document, one line on stderr naming the fix.
 
@@ -1044,7 +1057,8 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   (the keys, as `config.json` names them, `[]` for a language model),
   `converter` (`mlx-vlm` or `mlx-lm`, what a plain `--mlx` runs, or `null`
   where only `--text-only` can; since 53h `mlx-embeddings` for an embedding
-  model it builds; since 53k `mlx-video` for Wan's original layout) and
+  model it builds; since 53k `mlx-video` for Wan's original layout; since 53m
+  `mlx-audio` for a voice model) and
   `text_only` (whether `--mlx --text-only` is offered:
   never for a language model, which has no tower to leave out, nor an
   embedding model).
@@ -1058,7 +1072,19 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   directory -- mlx-video's build of Wan's original layout -- is read by its
   own files (its `config.json`, `t5_encoder.safetensors`, `vae.safetensors`
   and the transformer's weights, each whole; no tokenizer), and its `window`
-  is `null`: a video model has no token window. Since 53h an MLX set's
+  is `null`: a video model has no token window. Since 53m a `voice`
+  directory -- mlx-audio's build of Kokoro -- is read by its own files too
+  (its `config.json`, the weights and every `voices/*.safetensors` pack, each
+  whole; no tokenizer), its `window` `null` as well, and its text lists its
+  voices by language in a `voices:` line, as a voice model's does. Since 53m
+  a voice model's `data` (the `voice` format) also carries `converts_to`
+  where mlx-audio is installed in Apogee's Python environment -- its
+  converter's module, its Kokoro package and the `torch` Kokoro's checkpoint
+  is read through, read from their files, never imported: `["mlx"]` for a
+  whole voice model, an MLX voice model and never a GGUF, its
+  `mlx_conversion.converter` `mlx-audio` (`towers` `[]`, `text_only`
+  `false`), and `[]` for one that is not whole; without mlx-audio both stay
+  `null`, as before. Since 53h an MLX set's
   `data` also carries `vector_width`: for an `embedding` directory, how wide
   its vectors are as its own files state it (the last sentence-transformers
   Dense module's `out_features`, else `config.json`'s `hidden_size`), a number;

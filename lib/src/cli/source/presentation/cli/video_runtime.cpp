@@ -98,4 +98,17 @@ video::VideoReadiness ready_voice_runtime(const harness::Config& config, std::st
         });
 }
 
+video::VideoReadiness ready_voice_engine(const harness::Config& config,
+                                         const std::filesystem::path& model,
+                                         std::string_view handle, video::VideoEngine engine,
+                                         std::string_view purpose) {
+    if (engine == video::VideoEngine::Torch) {
+        const video::VideoReadiness runtime = ready_voice_runtime(config, purpose);
+        if (!runtime.ready() && runtime.refusal != video::VideoRefusal::NoDriver) {
+            return runtime;
+        }
+    }
+    return video::probe_voice_engine(video::VideoHost::current(), engine, model, handle);
+}
+
 }  // namespace apogee::commands

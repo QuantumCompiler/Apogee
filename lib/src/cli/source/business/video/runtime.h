@@ -32,6 +32,11 @@
 /// directory says which (`engine_of_directory`); each engine has its ladder;
 /// the request, the progress protocol, the working directory and the record
 /// are the one generation's (`generation.h`).
+///
+/// **Two engines, one speech** (53m), the same way: a voice model as Kokoro
+/// publishes it speaks on PyTorch through `voice_say.py`; mlx-audio's build
+/// of one -- an MLX directory whose kind is `voice` -- on MLX through
+/// `voice_say_mlx.py`, over mlx-audio's own Kokoro (`voice.h`).
 namespace apogee::video {
 
 /// What a clip runs on (53l): PyTorch (diffusers) or MLX (mlx-video).
@@ -90,6 +95,11 @@ enum class VideoRefusal : std::uint8_t {
     NotAppleSilicon,
     NoMlxVideo,
     NoTokenizer,
+    /// The MLX speech engine's own rung (53m): mlx-audio's Kokoro, with the
+    /// misaki it reads text through, is not installed. `NoVoiceModel` and
+    /// `NotAVoiceModel` say the MLX voice model's directory, as they say a
+    /// voice model's.
+    NoMlxAudio,
 };
 
 [[nodiscard]] std::string_view to_string(VideoRefusal refusal) noexcept;
@@ -115,6 +125,9 @@ struct VideoHost {
     /// command whose config moves SafeTensors sets (`paths.hf_dir`) sets its
     /// own.
     models::StoreRoots roots{};
+    /// `<home>/training/scripts/voice_say_mlx.py`, the MLX engine's speech
+    /// driver (53m).
+    std::filesystem::path voice_mlx_driver{};
 
     [[nodiscard]] static VideoHost at(const std::filesystem::path& home);
     /// This install's: `apogee_home()`, and the PATH this process has.
@@ -147,6 +160,8 @@ struct VideoReadiness {
     std::filesystem::path tokenizer{};
     std::string mlx_video_version{};
     std::string mlx_version{};
+    /// mlx-audio's version, for an MLX voice probe (53m).
+    std::string mlx_audio_version{};
 
     [[nodiscard]] bool ready() const noexcept {
         return refusal == VideoRefusal::None;
@@ -232,6 +247,27 @@ inline constexpr std::string_view kMlxVideoTokenizer = "google/umt5-xxl";
 /// MLX -- the one question every caller asks of a model it runs.
 [[nodiscard]] VideoReadiness probe_video_engine(const VideoHost& host, VideoEngine engine,
                                                 const std::filesystem::path& dir = {},
+                                                std::string_view handle = {});
+
+/// The fix the MLX speech engine's package rungs name (53m): mlx-audio is
+/// opt-in, installed on the person's word alone, never asked about here.
+inline constexpr std::string_view kMlxAudioSetupRemedy = "apogee train setup --with mlx-audio";
+
+/// The MLX speech engine's ladder (53m), in order: Apple silicon, the
+/// environment, mlx-audio's Kokoro with the misaki it reads text through
+/// (`training::find_mlx_audio_kokoro`), then -- when `model` is given -- the
+/// MLX voice model read whole by its kind's rule (`read_mlx_info`, its kind
+/// `voice`), then the MLX speech driver. No ffmpeg, as on PyTorch, and no
+/// consent asked: mlx-audio is opt-in, and every package rung names
+/// `kMlxAudioSetupRemedy`.
+[[nodiscard]] VideoReadiness probe_voice_mlx(const VideoHost& host,
+                                             const std::filesystem::path& model = {},
+                                             std::string_view handle = {});
+
+/// The speech ladder for `engine`: `probe_voice` for PyTorch,
+/// `probe_voice_mlx` for MLX.
+[[nodiscard]] VideoReadiness probe_voice_engine(const VideoHost& host, VideoEngine engine,
+                                                const std::filesystem::path& model = {},
                                                 std::string_view handle = {});
 
 }  // namespace apogee::video

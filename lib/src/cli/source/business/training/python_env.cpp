@@ -15,33 +15,39 @@
 namespace apogee::training {
 namespace {
 
-constexpr std::array<std::string_view, 9> kSetNames{"prepare",  "mlx",   "peft",  "convert",
-                                                    "mlx-vlm",  "video", "voice", "mlx-embeddings",
-                                                    "mlx-video"};
+constexpr std::array<std::string_view, 10> kSetNames{
+    "prepare", "mlx",   "peft",           "convert",   "mlx-vlm",
+    "video",   "voice", "mlx-embeddings", "mlx-video", "mlx-audio"};
 
 /// Where each set runs, in the names' order (51): what `apogee bootstrap`
 /// installs on a host is the table's own word.
 enum class SetHost : std::uint8_t { Any, AppleSilicon, NvidiaGpu };
 constexpr std::array<SetHost, kSetNames.size()> kSetHosts{
-    SetHost::Any, SetHost::AppleSilicon, SetHost::NvidiaGpu,
-    SetHost::Any, SetHost::AppleSilicon, SetHost::Any,
-    SetHost::Any, SetHost::AppleSilicon, SetHost::AppleSilicon};
+    SetHost::Any,          SetHost::AppleSilicon, SetHost::NvidiaGpu, SetHost::Any,
+    SetHost::AppleSilicon, SetHost::Any,          SetHost::Any,       SetHost::AppleSilicon,
+    SetHost::AppleSilicon, SetHost::AppleSilicon};
 
 /// Which sets only the person installs, in the names' order (53k): the
-/// bootstrap says them skipped, and `train setup --with` installs them.
+/// bootstrap says them skipped, and `train setup --with` installs them --
+/// mlx-video, and since 53m mlx-audio ("installed by `train setup --with
+/// mlx-audio` and never unasked").
 constexpr std::array<bool, kSetNames.size()> kSetOptIn{false, false, false, false, false,
-                                                       false, false, false, true};
+                                                       false, false, false, true,  true};
 
 /// The Pythons each set runs on, in the names' order (M19): the tightest of
 /// its packages' `requires_python` as PyPI publishes them for the current
 /// releases, read on the date below. Only voice is bounded above -- `kokoro`
-/// 0.9.4 and `misaki` 0.9.4 say `<3.13` -- and mlx's floor is `mlx-lm`
+/// 0.9.4 and `misaki` 0.9.4 say `<3.13` (and since 53m mlx-audio, below) --
+/// and mlx's floor is `mlx-lm`
 /// 0.32.2's `>=3.11`; torch, transformers, diffusers, datasets, mlx-vlm,
 /// peft, bitsandbytes, accelerate and gguf all say `>=3.10`, and so does
 /// mlx-embeddings 0.1.0 (53h). mlx-video, from GitHub, says `>=3.11` in the
 /// `pyproject.toml` of the commit pinned below, as its README's requirements
-/// do (53k). A stale range fails as before, in pip's words; the date says
-/// when to read them again.
+/// do (53k). mlx-audio says `>=3.10` (0.4.0 through 0.6.1), and its set is
+/// bounded above by the `misaki` 0.9.4 its Kokoro speaks through, `<3.13`,
+/// as the voice set is -- those two read on its floor's date (53m,
+/// `kMlxAudioFloorReviewed`). A stale range fails as before, in pip's words;
+/// the date says when to read them again.
 constexpr std::string_view kRangesReviewed = "2026-10-21";
 constexpr std::array<PythonRange, kSetNames.size()> kSetRanges{
     PythonRange{.at_least = 10},
@@ -52,7 +58,8 @@ constexpr std::array<PythonRange, kSetNames.size()> kSetRanges{
     PythonRange{.at_least = 10},
     PythonRange{.at_least = 10, .below = 13},
     PythonRange{.at_least = 10},
-    PythonRange{.at_least = 11}};
+    PythonRange{.at_least = 11},
+    PythonRange{.at_least = 10, .below = 13}};
 
 constexpr std::array<std::string_view, 1> kPrepare{"datasets>=3.0"};
 constexpr std::array<std::string_view, 1> kMlx{"mlx-lm>=0.21"};
@@ -141,6 +148,30 @@ constexpr std::array<std::string_view, 2> kMlxVideo{
     "mlx-video @ git+https://github.com/Blaizzy/mlx-video.git@"
     "87db56a51758fefb748a359b90a5283bb8ba4837",
     "torch>=2.6"};
+
+// Kokoro on MLX (53m): `models convert --mlx` of a stored voice model, and
+// `voice_say_mlx.py`, which speaks with what it built. mlx-audio is on PyPI
+// (2025-02-28's 0.0.1 to 2026-10-20's 0.6.1, read from its JSON API on the
+// date below). Its floor is 0.4.0 (2026-03-07), the first release whose
+// top-level `mlx_audio/convert.py` takes `q_mode` (affine, mxfp4, nvfp4,
+// mxfp8) beside `model_domain`, `q_bits`, `q_group_size` and `dtype` -- 0.3.1
+// has the module without `q_mode`, its group and bits fixed at 64 and 4 --
+// and whose Kokoro (`mlx_audio/tts/models/kokoro/`) already loads a voice by
+// a direct path to its `voices/<name>.safetensors` (`load_voice_tensor`, the
+// file's `voice` tensor) and speaks through `Model.generate(text, voice,
+// speed, lang_code)` after `mlx_audio.tts.utils.load_model(<dir>)`, the paths
+// the converter and the driver are built against; read at v0.4.0 and v0.6.1
+// through GitHub. Its converter reads SafeTensors weights alone, and Kokoro's
+// published checkpoint is a PyTorch save (`kokoro-v1_0.pth`, `voices/*.pt`),
+// so the driver reads those through torch first -- the set carries it, at the
+// floor the other torch sets keep -- and Kokoro's text goes through misaki,
+// which mlx-audio's README asks for by name and only its 0.4.0 `tts` extra
+// brought: carried here, with the English extra the voice set has. An
+// environment already holding an older mlx-audio keeps it until this set is
+// installed again (M19's rule).
+constexpr std::string_view kMlxAudioFloorReviewed = "2026-10-22";
+constexpr std::array<std::string_view, 3> kMlxAudio{"mlx-audio>=0.4.0", "misaki[en]>=0.9.4",
+                                                    "torch>=2.6"};
 
 std::string now_rfc3339() {
     const std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
@@ -305,6 +336,10 @@ std::string_view mlx_embeddings_floor_reviewed() noexcept {
     return kMlxEmbeddingsFloorReviewed;
 }
 
+std::string_view mlx_audio_floor_reviewed() noexcept {
+    return kMlxAudioFloorReviewed;
+}
+
 std::string_view to_string(RequirementSet set) noexcept {
     return kSetNames.at(static_cast<std::size_t>(set));
 }
@@ -377,6 +412,8 @@ std::span<const std::string_view> packages_for(RequirementSet set) noexcept {
             return kMlxEmbeddings;
         case RequirementSet::MlxVideo:
             return kMlxVideo;
+        case RequirementSet::MlxAudio:
+            return kMlxAudio;
     }
     return {};
 }

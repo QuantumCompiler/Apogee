@@ -14,10 +14,12 @@
 #include <thread>
 #include <vector>
 
+#include "modelstore/mlx_info.h"
 #include "platform/child_process.h"
 #include "support/env_guard.h"
 #include "support/mlx_model.h"
 #include "support/towered_configs.h"
+#include "support/voice_model.h"
 #include "support/wan_original.h"
 
 /// `models convert --mlx`'s child (27b): the argument shape, the precisions,
@@ -752,6 +754,226 @@ TEST_CASE("the shipped driver converts Wan's original layout through mlx-video's
             "parser.parse_args()\n");
         const std::string error = convert_video(work, *find_mlx_precision("4bit"), nullptr,
                                                 "stub_mlx:stub_mlx_video", older);
+        CHECK(error.find("argument --with: invalid choice") != std::string::npos);
+        CHECK(error.find("the seeded converter at " + older.string() +
+                         " is older than this build: 'apogee check --fix'") != std::string::npos);
+    }
+}
+
+namespace {
+
+/// The driver on the mlx-audio route (53m), the stub mlx-audio (and its stub
+/// torch and misaki) laid beside mlx-lm -- or, with `stubs` naming another
+/// set, missing -- over a voice model as Kokoro publishes it.
+struct VoiceWork {
+    apogee::testing::TempDir root{"mlx-voice-convert-" + std::to_string(std::random_device{}())};
+    std::filesystem::path model = root.path() / "kokoro";
+    std::filesystem::path out = root.path() / "out";
+    std::filesystem::path record = root.path() / "calls.jsonl";
+    std::filesystem::path loads = root.path() / "loads.jsonl";
+
+    VoiceWork() {
+        apogee::testing::write_voice_model(
+            model, {.voices = {"af_heart", "bm_george"}, .checkpoint = "kokoro-v1_0.pth"});
+    }
+
+    [[nodiscard]] std::vector<nlohmann::json> lines(const std::filesystem::path& file) const {
+        std::vector<nlohmann::json> out_lines;
+        std::ifstream in{file};
+        for (std::string line; std::getline(in, line);) {
+            out_lines.push_back(nlohmann::json::parse(line));
+        }
+        return out_lines;
+    }
+
+    [[nodiscard]] std::string convert(const MlxPrecision& precision,
+                                      std::vector<std::string>* messages = nullptr,
+                                      const std::string& stubs = "stub_mlx:stub_mlx_audio",
+                                      const std::filesystem::path& script = kDriver) const {
+        std::string path;
+        for (std::size_t start = 0; start <= stubs.size();) {
+            const std::size_t end = std::min(stubs.find(':', start), stubs.size());
+            path +=
+                (path.empty() ? "" : ":") + (kStubs / stubs.substr(start, end - start)).string();
+            start = end + 1;
+        }
+        const apogee::testing::EnvGuard python_path{"PYTHONPATH", path};
+        const apogee::testing::EnvGuard calls{"STUB_MLX_CONVERT_RECORD", record.string()};
+        const apogee::testing::EnvGuard torch{"STUB_MLX_AUDIO_RECORD", loads.string()};
+        const apogee::training::MlxConverter converter = apogee::training::script_mlx_converter(
+            python3(), script, precision, kStubs / "stub_mlx_audio" / "mlx_audio",
+            apogee::training::MlxConverterKind::MlxAudio);
+        return converter(model, out,
+                         [messages](std::string_view message) {
+                             if (messages != nullptr) {
+                                 messages->emplace_back(message);
+                             }
+                         },
+                         {});
+    }
+};
+
+}  // namespace
+
+TEST_CASE("a voice model is mlx-audio's to convert, at every precision the table maps",
+          "[training][mlx][convert][mlx_audio]") {
+    using apogee::training::choose_mlx_converter;
+    using apogee::training::MlxConverterKind;
+    // 53m: a voice model goes to mlx-audio whatever else is asked, and
+    // nothing else does.
+    for (const bool towers : {false, true}) {
+        for (const bool text_only : {false, true}) {
+            CHECK(choose_mlx_converter(towers, text_only, false, false, false, true) ==
+                  MlxConverterKind::MlxAudio);
+        }
+    }
+    CHECK(choose_mlx_converter(false, false, false, false, false, false) ==
+          MlxConverterKind::MlxLm);
+    CHECK(apogee::training::to_string(MlxConverterKind::MlxAudio) == "mlx-audio");
+    CHECK(apogee::training::mlx_converter_package(MlxConverterKind::MlxAudio) == "mlx_audio");
+    CHECK(apogee::training::mlx_converter_entry(MlxConverterKind::MlxAudio) == "mlx_audio.convert");
+    CHECK(apogee::training::mlx_converter_set(MlxConverterKind::MlxAudio) ==
+          apogee::training::RequirementSet::MlxAudio);
+    const MlxPrecision& bf16 = *find_mlx_precision("bf16");
+    CHECK(mlx_converter_arguments(bf16, "/kokoro", "/out", MlxConverterKind::MlxAudio) ==
+          std::vector<std::string>{"--with", "mlx-audio", "--hf-path", "/kokoro", "--mlx-path",
+                                   "/out", "--dtype", "bfloat16"});
+    // Its converter takes affine bits, mxfp4 and a float type: all of them.
+    CHECK(apogee::training::mlx_precision_names(MlxConverterKind::MlxAudio) ==
+          apogee::training::mlx_precision_names());
+}
+
+TEST_CASE("mlx-audio builds Kokoro when its converter, Kokoro and torch are there, read from files",
+          "[training][mlx][convert][mlx_audio]") {
+    const apogee::testing::TempDir root{"mlx-audio-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path venv = root.path() / "venv";
+    const std::filesystem::path site = venv / "lib" / "python3.99" / "site-packages";
+    CHECK(apogee::training::find_mlx_audio_converter(venv).empty());
+    CHECK(apogee::training::find_mlx_audio_kokoro(venv).empty());
+    std::filesystem::create_directories(site);
+    std::filesystem::copy(kStubs / "stub_mlx_audio", site,
+                          std::filesystem::copy_options::recursive);
+    CHECK(apogee::training::find_mlx_audio_converter(venv) == site / "mlx_audio" / "convert.py");
+    CHECK(apogee::training::find_mlx_audio_kokoro(venv) ==
+          site / "mlx_audio" / "tts" / "models" / "kokoro");
+    // Without the torch the checkpoint is read through: no conversion; the
+    // speech needs none.
+    std::filesystem::remove_all(site / "torch");
+    CHECK(apogee::training::find_mlx_audio_converter(venv).empty());
+    CHECK_FALSE(apogee::training::find_mlx_audio_kokoro(venv).empty());
+    // Without misaki, Kokoro cannot read text: no speech.
+    std::filesystem::remove_all(site / "misaki");
+    CHECK(apogee::training::find_mlx_audio_kokoro(venv).empty());
+    std::filesystem::copy(kStubs / "stub_mlx_audio" / "misaki", site / "misaki",
+                          std::filesystem::copy_options::recursive);
+    std::filesystem::copy(kStubs / "stub_mlx_audio" / "torch", site / "torch",
+                          std::filesystem::copy_options::recursive);
+    // An mlx-audio that builds no Kokoro is none.
+    std::filesystem::remove_all(site / "mlx_audio" / "tts" / "models" / "kokoro");
+    CHECK(apogee::training::find_mlx_audio_converter(venv).empty());
+    CHECK(apogee::training::find_mlx_audio_kokoro(venv).empty());
+}
+
+TEST_CASE("the shipped driver converts a voice model through mlx_audio.convert, read through torch",
+          "[training][mlx][convert][mlx_audio][driver]") {
+    REQUIRE_PYTHON();
+    const VoiceWork work;
+    SECTION(
+        "bf16: the checkpoint flattened, the packs as voices, the converter's prints kept off") {
+        std::vector<std::string> messages;
+        REQUIRE(work.convert(*find_mlx_precision("bf16"), &messages).empty());
+        const std::vector<nlohmann::json> calls = work.lines(work.record);
+        REQUIRE(calls.size() == 1);
+        // The source mlx-audio read: SafeTensors written from the PyTorch
+        // release inside the output, Kokoro named, its modules under their
+        // own names with DataParallel's prefix gone, each pack a voice.
+        CHECK(calls[0]["hf_path"] == (work.out / ".apogee-source").string());
+        CHECK(calls[0]["mlx_path"] == work.out.string());
+        CHECK(calls[0]["model_type"] == "kokoro");
+        CHECK(calls[0]["model_domain"] == "tts");
+        CHECK(calls[0]["quantize"] == false);
+        CHECK(calls[0]["dtype"] == "bfloat16");
+        CHECK(calls[0]["weights"] ==
+              nlohmann::json::array(
+                  {"bert.embeddings.position_ids", "bert.embeddings.word_embeddings.weight",
+                   "decoder.generator.conv_post.weight_v", "predictor.lstm.weight_ih_l0"}));
+        CHECK(calls[0]["voices"] == nlohmann::json::array({"af_heart", "bm_george"}));
+        // Read through torch, weights only.
+        const std::vector<nlohmann::json> loads = work.lines(work.loads);
+        REQUIRE(loads.size() == 3);
+        for (const nlohmann::json& load : loads) {
+            CHECK(load["weights_only"] == true);
+            CHECK(load["map_location"] == "cpu");
+        }
+        CHECK(messages == std::vector<std::string>{"loading mlx-audio",
+                                                   "reading Kokoro's PyTorch checkpoint and voices",
+                                                   "converting"});
+        // What it wrote: an MLX voice model, its source gone.
+        CHECK(std::filesystem::is_regular_file(work.out / "config.json"));
+        CHECK(std::filesystem::is_regular_file(work.out / "model.safetensors"));
+        CHECK(std::filesystem::is_regular_file(work.out / "voices" / "af_heart.safetensors"));
+        CHECK(std::filesystem::is_regular_file(work.out / "voices" / "bm_george.safetensors"));
+        CHECK_FALSE(std::filesystem::exists(work.out / ".apogee-source"));
+        const apogee::models::MlxInfo info =
+            apogee::models::read_mlx_info(work.out, apogee::models::kMlxVoice);
+        INFO(info.problem);
+        CHECK(info.complete);
+    }
+    SECTION("4bit, and mxfp4 with its own group") {
+        REQUIRE(work.convert(*find_mlx_precision("4bit")).empty());
+        std::filesystem::remove_all(work.out);
+        REQUIRE(work.convert(*find_mlx_precision("mxfp4")).empty());
+        const std::vector<nlohmann::json> calls = work.lines(work.record);
+        REQUIRE(calls.size() == 2);
+        CHECK(calls[0]["quantize"] == true);
+        CHECK(calls[0]["q_bits"] == 4);
+        CHECK(calls[0]["q_group_size"] == 64);
+        CHECK(calls[0]["q_mode"] == "affine");
+        CHECK(calls[1]["q_mode"] == "mxfp4");
+        CHECK(calls[1]["q_group_size"].is_null());
+    }
+    SECTION("no mlx-audio: its setup named, nothing read or converted") {
+        const std::string error =
+            work.convert(*find_mlx_precision("bf16"), nullptr, "stub_mlx:stub_mlx_missing");
+        CHECK(error.find("mlx-audio is not installed in Apogee's Python environment") !=
+              std::string::npos);
+        CHECK(error.find("apogee train setup --with mlx-audio") != std::string::npos);
+        CHECK(work.lines(work.record).empty());
+        CHECK_FALSE(std::filesystem::exists(work.out));
+    }
+    SECTION("a checkpoint torch cannot read, in its words, nothing converted") {
+        const apogee::testing::EnvGuard error{"STUB_TORCH_LOAD_ERROR", "not a zip archive"};
+        CHECK(work.convert(*find_mlx_precision("bf16")) ==
+              "could not read the voice model: RuntimeError: not a zip archive");
+        CHECK(work.lines(work.record).empty());
+    }
+    SECTION("the converter's failure, in its own words, its source gone") {
+        const apogee::testing::EnvGuard error{"STUB_MLX_CONVERT_ERROR", "out of memory"};
+        CHECK(work.convert(*find_mlx_precision("bf16")).find("ValueError: out of memory") !=
+              std::string::npos);
+        CHECK_FALSE(std::filesystem::exists(work.out / ".apogee-source"));
+    }
+    SECTION("not a voice model: refused before anything is imported") {
+        std::filesystem::remove_all(work.model / "voices");
+        CHECK(work.convert(*find_mlx_precision("bf16")).find("is not a voice model") !=
+              std::string::npos);
+        CHECK(work.lines(work.loads).empty());
+    }
+    SECTION("a seeded driver from before the route") {
+        // 53k's converter knows mlx-video, and no mlx-audio.
+        const std::filesystem::path older = work.root.path() / "mlx_convert.py";
+        apogee::testing::write_fixture_file(
+            older,
+            "import argparse\n"
+            "parser = argparse.ArgumentParser()\n"
+            "parser.add_argument('--with', choices=['mlx-lm', 'mlx-vlm', 'mlx-embeddings',\n"
+            "                                       'mlx-video'])\n"
+            "for flag in ('--hf-path', '--mlx-path', '--q-bits', '--q-group-size', '--q-mode',\n"
+            "             '--dtype'):\n"
+            "    parser.add_argument(flag)\n"
+            "parser.parse_args()\n");
+        const std::string error =
+            work.convert(*find_mlx_precision("bf16"), nullptr, "stub_mlx:stub_mlx_audio", older);
         CHECK(error.find("argument --with: invalid choice") != std::string::npos);
         CHECK(error.find("the seeded converter at " + older.string() +
                          " is older than this build: 'apogee check --fix'") != std::string::npos);

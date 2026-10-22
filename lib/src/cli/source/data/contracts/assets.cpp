@@ -374,6 +374,10 @@ std::string bundled_voice_driver_relative_path() {
     return bundled_script_relative_path("voice_say.py");
 }
 
+std::string bundled_voice_mlx_driver_relative_path() {
+    return bundled_script_relative_path("voice_say_mlx.py");
+}
+
 std::string bundled_converter_relative_dir() {
     return "training/scripts/convert";
 }

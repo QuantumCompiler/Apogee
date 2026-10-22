@@ -202,6 +202,11 @@ struct BundledScript {
 /// `bundled_video_scripts`, seeded beside the video driver.
 [[nodiscard]] std::string bundled_voice_driver_relative_path();
 
+/// `training/scripts/voice_say_mlx.py` (53m), the MLX engine's speech driver
+/// over mlx-audio's Kokoro -- one of `bundled_video_scripts`, seeded beside
+/// the PyTorch one.
+[[nodiscard]] std::string bundled_voice_mlx_driver_relative_path();
+
 /// Every version of a seeded driver -- the trainers' and the MLX ones -- an
 /// earlier Apogee shipped and this one does not, as `<name> <sha256>` with
 /// the name as in `BundledScript::name`, sorted. From

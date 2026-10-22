@@ -9938,3 +9938,72 @@ The refusal was true but incomplete. The set is Wan's original layout, and its r
 - 53j and 53k's wording for a Wan set still says "what runs this model today is its Diffusers pipeline", and does not yet name its MLX conversion.
 - `check` has no mlx-video runtime row.
 - The streamed `ready` event does not carry the engine (the final document does).
+
+### 2026-10-22 — `mlx-voice` (backlog item 53m): voice on MLX
+
+**Why.** `voice say` had one engine: Kokoro on PyTorch (50a). A stored voice model could not convert to MLX, and nothing in Apogee would speak with an MLX build. mlx-audio speaks Kokoro on MLX and is on PyPI. Everything around the engine was already engine-free: the record, the timings each segment measures from its own WAV header, the playback clock, the install consent. This was wall W8, and with it the MLX-for-every-kind track is complete.
+
+- [x] **An `mlx-audio` requirement set, opt-in.**
+  - The set is `mlx-audio>=0.4.0` (released 2026-03-07), `misaki[en]>=0.9.4` and `torch>=2.6`, for Python `>=3.10,<3.13` (misaki's bound, the voice set's) on Apple silicon. It was reviewed 2026-10-22 against PyPI's JSON API (latest 0.6.1, 2026-10-20) and the source at v0.3.0, v0.3.1, v0.4.0 and v0.6.1. 0.4.0 is the first whose converter takes `q_mode`, and the first whose Kokoro loads a voice from a direct `.safetensors` path.
+  - It is installed by `train setup --with mlx-audio` alone, with its completion. The bootstrap never installs it (`set_opt_in`, 53k's): the document's "never unasked".
+- [x] **The `mlx_audio.convert` route** in the seeded `mlx_convert.py`, for a `voice`-format set. It calls `mlx_audio.convert.convert(..., model_domain="tts")`, and its record's kind is **`voice`**.
+  - **The stored Kokoro is read through torch first.** The user's Kokoro is a PyTorch `.pth` checkpoint with `voices/*.pt`, but the converter reads `*.safetensors` only; the README's example converts a re-upload that already has them.
+  - **What the driver writes.** It puts SafeTensors into `<out>/.apogee-source`: each tensor named `<module>.<name>` with the `module.` prefix dropped, each voice pack a `voice` tensor, and `model_type: kokoro` added to the config. It deletes that folder after the conversion. On a stop, Apogee removes the whole output.
+  - **Precision** defaults to bf16 for a voice model, the build mlx-audio's README loads first.
+- [x] **M20's decision for a voice set.**
+  - **Without mlx-audio,** `converts_to` stays `null`, exactly as before.
+  - **With mlx-audio,** it is `["mlx"]` for a whole model and `[]` for one cut short, and `mlx_conversion.converter` reads `mlx-audio`.
+  - **The door's refusals.** `--mlx` without mlx-audio is refused, naming `train setup --with mlx-audio`. `--register`, `--text-only` and `--model-type` are refused on a voice set.
+  - **"Installed" is read from files:** the converter, Kokoro's package and torch to convert; Kokoro's package, `tts/utils.py` and misaki to speak.
+- [x] **A second seeded driver, `assets/video/voice_say_mlx.py`,** over mlx-audio's Kokoro.
+  - It loads with `mlx_audio.tts.utils.load_model(<dir>)` and speaks through `Model.generate(text, voice, speed, lang_code)`, 24 kHz.
+  - Voices are passed as paths to `voices/<name>.safetensors`, which never touch the hub. A voice path containing a comma is refused, since mlx-audio splits names at commas.
+  - It speaks `voice_say.py`'s protocol (the `ready` event, the segments, their WAVs).
+  - It keeps the interactive invariants: descriptor 1 on stderr before importing, its stderr a bounded tail, the library's prints off the protocol, and no socket in its tree.
+- [x] **One `voice say`, two engines** (ADR 0002, 53l's shape).
+  - The engine follows the voice model's directory: a `voice`-format set runs on PyTorch, a `voice`-kind MLX directory on MLX.
+  - `voice say --engine auto|torch|mlx`, with its completion, only names the engine or refuses it.
+  - The record always gains `engine`, so a PyTorch record is unchanged but for that field. An MLX record adds `versions.mlx` and `versions.mlx_audio`, with empty `torch` and `kokoro`.
+  - The timings are measured from each segment's WAV header, as before.
+  - The composer narrates on each voice model's own engine, with no flag of its own.
+- [x] **The voices are the presets the MLX build carries** (`voices/*.safetensors`), listed by `models info` as today's are. The default is `af_heart`, else the first. `check` gains an "mlx voice driver" row.
+
+**Decisions made while building** (2026-10-22, each recorded for veto):
+- **The open call's default, taken:** the voices are the converted directory's presets, listed as today's, with today's default voice.
+- **`--engine` is added to `voice say`**, mirroring 53l. It does not narrow which model is the default.
+- **MLX voice models count among the store's voice models.** After a conversion, a bare `voice say` or `video compose` with no model named is refused, naming both models, and never guesses. The macOS app's Voice page runs `voice say` with no `--model`, so the GUI's 3b gives it the choice (recorded in 3b's document).
+- **The torch read-through** is why the set carries `torch`.
+- **A fix found while testing:** `resolve_voice_model` resets its output before filling it. A reused struct had kept a stale engine.
+
+**Verified.**
+- 21 new cases (`[mlx_audio]`) cover:
+  - the route;
+  - the engine by kind;
+  - the timings from the stub's WAV headers;
+  - the record's `engine`;
+  - the stub's prints kept off the protocol;
+  - the PyTorch engine unchanged for a `voice`-format set;
+  - `converts_to` with and without mlx-audio;
+  - the voices from the MLX build;
+  - the bootstrap's plan, with mlx-audio skipped and never run.
+- The fixtures are a stub `mlx_audio` (its converter, `tts/utils.py` and a Kokoro writing a WAV of known length and printing on both streams, with stub `torch` and `misaki`) and 50a's voice fixtures (`write_mlx_voice_model`).
+- `cli.video_lifecycle` gained MLX speech with its socket sampling, Ctrl-C, a composition narrated on MLX, and mlx-audio missing. `cli.mlx_models_lifecycle` gained a stored Kokoro converted.
+- Mutation checks, each caught and then put back:
+  - the speech driver without its descriptor-1 redirect;
+  - a stub Kokoro holding a socket;
+  - the engine never chosen as MLX;
+  - the staged weights keeping the `module.` prefix.
+- `generate_training_assets.py` reproduces the generated assets byte for byte.
+- These ctest cases pass:
+  - `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`, `cli.install_is_ours_only`, `cli.no_listen_symbols`;
+  - `cli.mlx_models_lifecycle`, `cli.mlx_lifecycle`, `cli.video_lifecycle`, `cli.train_lifecycle`;
+  - `cli.machine_schema_conformance`, `cli.config_lifecycle`, and the completion cases.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,839 tests and the macOS app's 342 cases passed, with no warning.
+
+**Not done:**
+- A real conversion and real speech are the user's run, including whether the staged tensor names match what mlx-audio's Kokoro expects. They could not be read without downloading the weights.
+- mlx-audio 0.6.1 pins `mlx==0.32.4` exactly, so installing it may move mlx in the shared environment.
+- misaki fetches spaCy's English model on first run, outside Apogee (50a's caveat).
+- `check` has no mlx-audio runtime row.
+- The streamed `ready` event does not carry the engine.
+- A pulled MLX-community Kokoro reads as `chat`, since 53e infers `voice` from a record only.

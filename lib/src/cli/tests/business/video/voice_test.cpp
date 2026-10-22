@@ -15,6 +15,8 @@
 #include "platform/ffmpeg.h"
 #include "support/env_guard.h"
 #include "support/fake_child.h"
+#include "support/mlx_model.h"
+#include "support/voice_model.h"
 
 /// Speech (50a) over a scripted driver that writes real WAV files: the
 /// request it reads, its lines read into events, every segment measured
@@ -36,6 +38,9 @@ struct Driver {
     bool hang = false;
     bool short_one = false;
     nlohmann::json request{};
+    /// The `ready` line it writes: the PyTorch driver's, unless a test says.
+    std::string ready_line =
+        R"({"event": "ready", "device": "cpu", "torch": "2.9.1", "kokoro": "0.9.4", "sample_rate": 24000})";
 
     [[nodiscard]] apogee::training::Spawner spawner() {
         return [this](const apogee::platform::ChildCommand& command,
@@ -44,9 +49,7 @@ struct Driver {
             request = nlohmann::json::parse(in);
             const std::filesystem::path out{request.at("out_dir").get<std::string>()};
             std::filesystem::create_directories(out);
-            std::string script =
-                R"({"event": "ready", "device": "cpu", "torch": "2.9.1", "kokoro": "0.9.4", "sample_rate": 24000})"
-                "\n";
+            std::string script = ready_line + "\n";
             const std::size_t count = short_one ? samples.size() - 1 : samples.size();
             for (std::size_t i = 0; i < count; ++i) {
                 const std::filesystem::path file = out / ("s0000" + std::to_string(i + 1) + ".wav");
@@ -191,4 +194,82 @@ TEST_CASE("a WAV's length is read from its header, and a broken one refused",
     std::ofstream{file, std::ios::binary} << "not audio";
     CHECK_FALSE(apogee::platform::read_wav(file, error).has_value());
     CHECK(error == file.string() + " is not a WAV file");
+}
+
+TEST_CASE("the speech engine is the voice model's directory's, and --engine only names it",
+          "[video][voice][engine][mlx_audio]") {
+    // 53m: a voice model as Kokoro publishes it speaks on PyTorch, an MLX
+    // directory whose kind is voice on MLX; nothing else is a voice model.
+    using apogee::video::VideoEngine;
+    const apogee::testing::TempDir root{"voice-engine-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path original = root.path() / "hexgrad--K" / "voice" / "aaaaaaaaaaaa";
+    const std::filesystem::path mlx = root.path() / "hexgrad--K" / "mlx" / "bbbbbbbbbbbb";
+    const std::filesystem::path chat = root.path() / "org--m" / "mlx" / "cccccccccccc";
+    apogee::testing::write_voice_model(original);
+    apogee::testing::write_mlx_voice_model(mlx);
+    apogee::testing::write_mlx_model(chat, {.kind = "chat"});
+    CHECK(apogee::video::voice_engine_of_directory(original) == VideoEngine::Torch);
+    CHECK(apogee::video::voice_engine_of_directory(mlx) == VideoEngine::Mlx);
+    CHECK_FALSE(apogee::video::voice_engine_of_directory(chat).has_value());
+    CHECK_FALSE(apogee::video::voice_engine_of_directory(root.path() / "nothing").has_value());
+    // Unrecorded, an MLX build is no voice model: only its record says so.
+    std::filesystem::remove(mlx / "apogee-snapshot.json");
+    CHECK_FALSE(apogee::video::voice_engine_of_directory(mlx).has_value());
+
+    VideoEngine engine = VideoEngine::Torch;
+    for (const std::string_view asked : {"", "auto", "mlx"}) {
+        INFO(asked);
+        CHECK(apogee::video::choose_voice_engine(asked, VideoEngine::Mlx, "m", engine).empty());
+        CHECK(engine == VideoEngine::Mlx);
+    }
+    CHECK(apogee::video::choose_voice_engine("torch", VideoEngine::Torch, "v", engine).empty());
+    CHECK(engine == VideoEngine::Torch);
+    CHECK(apogee::video::choose_voice_engine("torch", VideoEngine::Mlx, "k/mlx/b", engine) ==
+          "'k/mlx/b' is an MLX voice model, which speaks on MLX (mlx-audio), not PyTorch -- "
+          "PyTorch speaks with a voice model as Kokoro publishes it: 'apogee models pull "
+          "hexgrad/Kokoro-82M' stores one, and 'apogee train setup --with voice' installs what "
+          "runs it");
+    CHECK(apogee::video::choose_voice_engine("mlx", VideoEngine::Torch, "k/voice/a", engine) ==
+          "'k/voice/a' is a voice model as Kokoro publishes it, which speaks on PyTorch (kokoro), "
+          "not MLX -- MLX speaks with its MLX build: 'apogee models convert k/voice/a --mlx' "
+          "makes one, after 'apogee train setup --with mlx-audio'");
+    CHECK(apogee::video::choose_voice_engine("cuda", VideoEngine::Torch, "v", engine) ==
+          "--engine takes auto, torch or mlx (got 'cuda')");
+}
+
+TEST_CASE("speech on MLX: the engine named in the request, MLX's versions read, never mixed",
+          "[video][voice][mlx_audio]") {
+    // 53m: the one speech on either engine -- the PyTorch request exactly as
+    // it was, the MLX one naming its engine, the MLX driver's `ready` read.
+    Run torch;
+    REQUIRE(torch.go().ok);
+    CHECK_FALSE(torch.driver.request.contains("engine"));
+
+    Run run;
+    run.ready.engine = apogee::video::VideoEngine::Mlx;
+    run.ready.driver = "/scripts/voice_say_mlx.py";
+    run.request.engine = apogee::video::VideoEngine::Mlx;
+    run.driver.ready_line =
+        R"({"event": "ready", "device": "gpu", "engine": "mlx", "mlx": "0.32.4", "mlx_audio": "0.6.1", "sample_rate": 24000})";
+    const VoiceOutcome outcome = run.go();
+    INFO(outcome.error);
+    REQUIRE(outcome.ok);
+    CHECK(run.driver.request["engine"] == "mlx");
+    CHECK(outcome.ready.engine == "mlx");
+    CHECK(outcome.ready.device == "gpu");
+    CHECK(outcome.ready.mlx == "0.32.4");
+    CHECK(outcome.ready.mlx_audio == "0.6.1");
+    CHECK(outcome.ready.torch.empty());
+    // Measured from the files, as on PyTorch.
+    REQUIRE(outcome.segments.size() == 2);
+    CHECK(outcome.segments.at(0).seconds == 0.1);
+    CHECK(outcome.segments.at(1).seconds == 0.2);
+
+    // A runtime made ready for one engine never runs the other's speech.
+    Run mixed;
+    mixed.request.engine = apogee::video::VideoEngine::Mlx;
+    const VoiceOutcome refused = mixed.go();
+    CHECK_FALSE(refused.ok);
+    CHECK(refused.error == "the runtime was made ready for torch, and the speech asks for mlx");
+    CHECK(mixed.driver.request.is_null());
 }

@@ -25,7 +25,7 @@ namespace {
     return out;
 }
 
-constexpr std::array<std::string_view, 1> kMlxMlxConvertPy{{
+constexpr std::array<std::string_view, 2> kMlxMlxConvertPy{{
     R"PY(#!/usr/bin/env python3
 """MLX conversion driver for `apogee models convert --mlx` (Apple silicon).
 
@@ -39,7 +39,7 @@ there, and commits it by the store's own rule.
 Runs under the Python environment Apogee owns, never the system Python.
 Requires `mlx-lm` there:  apogee train setup --with mlx
 
-    mlx_convert.py [--with mlx-vlm|mlx-embeddings|mlx-video] --hf-path <snapshot>
+    mlx_convert.py [--with mlx-vlm|mlx-embeddings|mlx-video|mlx-audio] --hf-path <snapshot>
                    --mlx-path <out> [--q-bits N [--q-group-size N] [--q-mode M] | --dtype T]
 
 `--with mlx-vlm` converts with `mlx_vlm`'s own `convert` instead (53f): a
@@ -67,6 +67,22 @@ It quantizes the transformer alone, at 4 or 8 bits in groups of 32, 64 or
 `torch` its converter loads the checkpoints with:
 apogee train setup --with mlx-video
 
+`--with mlx-audio` converts a voice model as Kokoro publishes it -- its
+`config.json`, one PyTorch checkpoint (`*.pth`) and its voice packs
+(`voices/*.pt`), the store's `voice` format -- with `mlx_audio`'s own
+`convert` (53m), as its command line calls it: an MLX voice model's
+directory, its `config.json`, the weights and a `voices/<name>.safetensors`
+pack for every voice. mlx-audio's converter reads SafeTensors weights alone,
+so the checkpoint and the packs are first read through torch and written as
+SafeTensors in a source directory inside `<out>` -- the checkpoint's modules
+flattened under their own names (`bert.`, `predictor.` ...), DataParallel's
+`module.` prefix dropped, each pack as the `voice` tensor Kokoro on MLX loads
+-- with `model_type: kokoro` in its `config.json`, and that source is removed
+once the conversion is done (so a stopped one leaves it only where Apogee
+removes `<out>` whole). Requires `mlx-audio`, the `torch` that reads the
+checkpoint and the `misaki` Kokoro speaks through:
+apogee train setup --with mlx-audio
+
 `--q-bits` quantizes (the converter's own scheme: N bits a weight in groups, a
 scale and bias each); without it the weights are written at `--dtype`
 (`bfloat16`, `float16`, `float32`). `<out>` must not exist: both converters
@@ -78,7 +94,8 @@ The training drivers' protocol, one JSON object per line on stdout:
   {"converted": "<out>", "quantized": B, "mlx_lm": "..."}   at the end
       -- with `--with mlx-vlm`, "mlx_vlm": "..." in place of "mlx_lm"; with
       `--with mlx-embeddings`, "mlx_embeddings": "..."; with `--with
-      mlx-video`, "mlx_video": "..."
+      mlx-video`, "mlx_video": "..."; with `--with mlx-audio`, "mlx_audio":
+      "..." and "voices": N
 
 Everything a library prints goes to stderr, which Apogee captures: the
 protocol's stdout is a duplicate of the original descriptor, and descriptor 1
@@ -89,6 +106,7 @@ import argparse
 import inspect
 import json
 import os
+import shutil
 import signal
 import sys
 
@@ -126,6 +144,7 @@ def arguments(argv):
     # The converters, each by its package's name (mlx-lm's the default).
     converters = ["mlx-lm", "mlx-vlm"]
     converters += ["mlx-embeddings", "mlx-video"]
+    converters += ["mlx-audio"]
     parser.add_argument("--with", dest="converter", choices=converters, default="mlx-lm")
     parser.add_argument("--hf-path", required=True)
     parser.add_argument("--mlx-path", required=True)
@@ -148,6 +167,8 @@ def main(argv):
         return convert_with_embeddings(args)
     if args.converter == "mlx-video":
         return convert_with_video(args)
+    if args.converter == "mlx-audio":
+        return convert_with_audio(args)
 
     emit({"message": "loading mlx-lm"})
     try:
@@ -327,6 +348,161 @@ def convert_with_video(args):
 
     emit({"converted": args.mlx_path, "quantized": args.q_bits > 0, "mlx_video": version})
     return 0
+
+
+# Where the SafeTensors source mlx-audio's converter reads is written: inside
+# the output, so nothing of it outlives a conversion Apogee stops.
+AUDIO_SOURCE = ".apogee-source"
+
+
+def voice_checkpoint(model_dir):
+    """The voice model's one PyTorch checkpoint and its voice packs, by name."""
+    checkpoints = sorted(name for name in os.listdir(model_dir) if name.endswith(".pth"))
+    if len(checkpoints) != 1:
+        raise ValueError(f"{model_dir} holds {len(checkpoints)} checkpoints -- a voice model is one")
+    voices_dir = os.path.join(model_dir, "voices")
+    voices = sorted(name[:-3] for name in os.listdir(voices_dir) if name.endswith(".pt")) \
+        if os.path.isdir(voices_dir) else []
+    if not voices:
+        raise ValueError(f"{model_dir} holds no voices (voices/*.pt)")
+    return os.path.join(model_dir, checkpoints[0]), voices
+
+
+def to_mlx(mx, tensor):
+)PY",
+    R"PY(    """One torch tensor as an MLX array: floats read at 32 bits, which every
+    precision below converts from; any other type as it is."""
+    tensor = tensor.detach().cpu()
+    if tensor.is_floating_point():
+        tensor = tensor.float()
+    return mx.array(tensor.numpy())
+
+
+def stage_kokoro(torch, mx, model_dir, source):
+    """Kokoro's PyTorch release written as the SafeTensors source mlx-audio's
+    converter reads: its config naming Kokoro, the checkpoint's modules
+    flattened under their own names, each voice pack its `voice` tensor. The
+    number of voices."""
+    checkpoint, voices = voice_checkpoint(model_dir)
+    with open(os.path.join(model_dir, "config.json"), encoding="utf-8") as handle:
+        config = json.load(handle)
+    if not isinstance(config, dict):
+        raise ValueError("config.json is not a JSON object")
+    # Kokoro's own config names no type; the converter finds Kokoro by it.
+    config.setdefault("model_type", "kokoro")
+    os.makedirs(os.path.join(source, "voices"))
+    with open(os.path.join(source, "config.json"), "w", encoding="utf-8") as out:
+        json.dump(config, out, indent=2)
+
+    # The checkpoint is one state dict a module (bert, bert_encoder,
+    # predictor, text_encoder, decoder), trained under DataParallel: its names
+    # carry `module.`, which Kokoro's own loader drops too.
+    modules = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    if not isinstance(modules, dict) or not modules:
+        raise ValueError(f"{os.path.basename(checkpoint)} is not Kokoro's checkpoint "
+                         "(a state dict a module)")
+    weights = {}
+    for module, state in modules.items():
+        if not isinstance(state, dict):
+            raise ValueError(f"{os.path.basename(checkpoint)}: {module} is not a state dict")
+        for name, tensor in state.items():
+            if name.startswith("module."):
+                name = name[len("module."):]
+            weights[f"{module}.{name}"] = to_mlx(mx, tensor)
+    # `model.safetensors`: the name mlx-audio's converter reads the weights
+    # from and never copies beside what it writes.
+    mx.save_safetensors(os.path.join(source, "model.safetensors"), weights)
+    for voice in voices:
+        pack = torch.load(os.path.join(model_dir, "voices", voice + ".pt"), map_location="cpu",
+                          weights_only=True)
+        mx.save_safetensors(os.path.join(source, "voices", voice + ".safetensors"),
+                            {"voice": to_mlx(mx, pack)})
+    return len(voices)
+
+
+def convert_with_audio(args):
+    """A voice model as Kokoro publishes it, built into an MLX voice model by
+    mlx-audio's own converter (53m): its PyTorch release read through torch
+    into the SafeTensors source the converter takes, then the precision as its
+    command line hands it over."""
+    try:
+        voice_checkpoint(args.hf_path)
+    except (OSError, ValueError) as exc:
+        return fail(f"{args.hf_path} is not a voice model: {exc}", 2)
+    if "," in os.path.abspath(args.mlx_path):
+        # Kokoro on MLX reads a voice's path as a list of voices at a comma.
+        return fail(f"{args.mlx_path} holds a comma, which Kokoro on MLX reads between voices -- "
+                    "convert into a path without one", 2)
+
+    emit({"message": "loading mlx-audio"})
+    try:
+        import torch
+        import mlx.core as mx
+        import mlx_audio
+        from mlx_audio.convert import convert
+    except ImportError as exc:
+        return fail(
+            f"mlx-audio is not installed in Apogee's Python environment ({exc}) -- "
+            "apogee train setup --with mlx-audio",
+            3,
+        )
+    version = audio_version(mlx_audio)
+
+    source = os.path.join(args.mlx_path, AUDIO_SOURCE)
+    try:
+        emit({"message": "reading Kokoro's PyTorch checkpoint and voices"})
+        try:
+            voices = stage_kokoro(torch, mx, args.hf_path, source)
+        except Exception as exc:  # torch's own words, whatever they are
+            return fail(f"could not read the voice model: {type(exc).__name__}: {exc}", 4)
+
+        options = {"hf_path": source, "mlx_path": args.mlx_path}
+        if args.q_bits > 0:
+            options["quantize"] = True
+            options["q_bits"] = args.q_bits
+            # Unnamed, the group is the mode's own, as its command line leaves it.
+            options["q_group_size"] = args.q_group_size if args.q_group_size > 0 else None
+            if args.q_mode and args.q_mode != "affine":
+                options["q_mode"] = args.q_mode
+        elif args.dtype:
+            options["dtype"] = args.dtype
+        try:
+            accepted = set(inspect.signature(convert).parameters)
+        except (TypeError, ValueError):
+            accepted = set()
+        if "model_domain" in accepted:
+            # Said, never detected: a voice model is text to speech.
+            options["model_domain"] = "tts"
+
+        emit({"message": "quantizing" if args.q_bits > 0 else "converting"})
+        try:
+            convert(**options)
+        except TypeError as exc:
+            if "q_mode" in str(exc) or "dtype" in str(exc):
+                return fail(f"this mlx-audio ({version}) cannot write that precision: {exc}")
+            return fail(f"TypeError: {exc}")
+        except Exception as exc:  # the converter's own words, whatever they are
+            return fail(f"{type(exc).__name__}: {exc}")
+        # Its voices as Kokoro on MLX loads them, wherever the converter left
+        # them: copied from the source when it did not.
+        if not os.path.isdir(os.path.join(args.mlx_path, "voices")):
+            shutil.copytree(os.path.join(source, "voices"), os.path.join(args.mlx_path, "voices"))
+    finally:
+        shutil.rmtree(source, ignore_errors=True)
+
+    emit({"converted": args.mlx_path, "quantized": args.q_bits > 0, "mlx_audio": version,
+          "voices": voices})
+    return 0
+
+
+def audio_version(module):
+    version = getattr(module, "__version__", None)
+    if version is None:
+        try:
+            from mlx_audio.version import __version__ as version
+        except ImportError:
+            version = ""
+    return str(version)
 
 
 def video_version(module):

@@ -8,7 +8,9 @@
 #include <system_error>
 #include <utility>
 
+#include "modelstore/mlx_info.h"
 #include "modelstore/snapshot.h"
+#include "modelstore/store.h"
 
 namespace apogee::models {
 namespace {
@@ -174,6 +176,39 @@ VoiceInfo read_voice_info(const std::filesystem::path& dir) {
     }
     info.complete = true;
     return info;
+}
+
+VoiceInfo read_mlx_voice_info(const std::filesystem::path& dir) {
+    VoiceInfo info;
+    const MlxInfo files = read_mlx_info(dir, kMlxVoice);
+    info.complete = files.complete;
+    info.problem = files.problem;
+    info.config_read = files.config_read;
+    info.bytes = files.bytes;
+    if (!files.shards.empty()) {
+        info.checkpoint = files.shards.front().name;
+        info.checkpoint_bytes = files.shards.front().bytes;
+    }
+    std::error_code code;
+    for (const auto& entry : std::filesystem::directory_iterator(dir / "voices", code)) {
+        std::error_code type;
+        if (entry.is_regular_file(type) && entry.path().extension() == ".safetensors") {
+            const std::string name = entry.path().stem().string();
+            info.voices.push_back(
+                {.name = name, .language = voice_language(name), .bytes = entry.file_size(type)});
+        }
+    }
+    std::ranges::sort(info.voices, {}, &VoicePack::name);
+    return info;
+}
+
+std::vector<std::string> voice_conversions(const std::filesystem::path& dir,
+                                           const VoiceConverts& mlx_audio) {
+    // Asked of the caller only for a model whole enough to convert.
+    if (read_voice_info(dir).complete && mlx_audio && mlx_audio()) {
+        return {std::string{kMlxFormat}};
+    }
+    return {};
 }
 
 std::string describe(const VoiceInfo& info) {

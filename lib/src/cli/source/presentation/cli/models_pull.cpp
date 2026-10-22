@@ -58,6 +58,9 @@ namespace {
 /// What installs mlx-video's Wan converter (53k): opt-in, never at install.
 constexpr std::string_view kMlxVideoRemedy = "apogee train setup --with mlx-video";
 
+/// What installs mlx-audio's converter and its Kokoro (53m): opt-in too.
+constexpr std::string_view kMlxAudioRemedy = "apogee train setup --with mlx-audio";
+
 /// A failure said on the job's stream too, when one is open (52b): its
 /// `error` event carries the words stderr gets.
 void tell_job(const std::string& message) {
@@ -911,6 +914,8 @@ std::string_view MlxRoute::kind() const noexcept {
             return models::kMlxEmbedding;
         case training::MlxConverterKind::MlxVideo:
             return models::kMlxVideo;
+        case training::MlxConverterKind::MlxAudio:
+            return models::kMlxVoice;
         case training::MlxConverterKind::MlxLm:
             break;
     }
@@ -967,6 +972,73 @@ models::VideoConverts installed_mlx_video_converts() {
         }
         return *installed;
     };
+}
+
+bool installed_mlx_audio() {
+    return !training::find_mlx_audio_converter(backends::MlxHost::current().venv).empty();
+}
+
+models::VoiceConverts installed_mlx_audio_converts() {
+    return [installed = std::optional<bool>{}]() mutable {
+        if (!installed.has_value()) {
+            installed = installed_mlx_audio();
+        }
+        return *installed;
+    };
+}
+
+std::optional<VoiceSetChoice> locate_voice_set(const models::StoreRoots& roots,
+                                               std::string_view given, std::string_view from_id) {
+    const models::StoreTarget target = models::resolve_store_target(roots, given);
+    if (!target.error.empty()) {
+        return std::nullopt;
+    }
+    if (target.outside) {
+        if (!models::is_voice_dir(target.path)) {
+            return std::nullopt;
+        }
+        return VoiceSetChoice{.path = target.path,
+                              .model = models::safe_model_name(target.path.filename().string()),
+                              .id = {},
+                              .error = {}};
+    }
+    // A model by name is a voice model's only where it holds no SafeTensors
+    // set: what `convert` read before is read the same way.
+    if (target.format.empty() && !target.id.empty()) {
+        return std::nullopt;
+    }
+    if (target.format != models::kVoiceFormat &&
+        !(target.format.empty() && models::list_store_snapshots(roots, target.model).empty())) {
+        return std::nullopt;
+    }
+    const std::vector<models::StoredVoice> voices = models::list_store_voices(roots, target.model);
+    if (voices.empty()) {
+        if (target.format.empty()) {
+            return std::nullopt;
+        }
+        return VoiceSetChoice{.path = {},
+                              .model = target.model,
+                              .id = {},
+                              .error = "no voice model " + target.id + " for " + target.model};
+    }
+    VoiceSetChoice choice{.path = {}, .model = target.model, .id = {}, .error = {}};
+    const std::string id = !target.id.empty() ? target.id : std::string{from_id};
+    for (const models::StoredVoice& stored : voices) {
+        if (stored.id == id || (id.empty() && voices.size() == 1)) {
+            choice.path = stored.dir;
+            choice.id = stored.id;
+        }
+    }
+    if (choice.path.empty()) {
+        choice.error = id.empty() ? "'" + std::string{given} + "' holds " +
+                                        std::to_string(voices.size()) + " voice models -- name one:"
+                                  : "no voice model " + id + " for " + target.model + " -- it has:";
+        for (const models::StoredVoice& stored : voices) {
+            choice.error +=
+                "\n  " + models::weights_handle(stored.model, models::kVoiceFormat, stored.id);
+        }
+    }
+    return choice;
 }
 
 models::DrafterBuilds installed_mlx_drafter_builds() {
@@ -1200,10 +1272,11 @@ bool repair_snapshot_in_place(const std::filesystem::path& dir) {
 // --- MLX models (27b) ------------------------------------------------------------------
 
 std::string mlx_summary(const models::MlxInfo& info, const harness::BackendConfig& backend) {
-    // A video model has no token window (53k).
+    // A video model has no token window (53k), nor a voice model (53m).
     std::string line =
         info.quantization.describe() + ", " +
-        (info.video ? std::string{} : models::describe(models::mlx_window(info, backend)) + ", ") +
+        (info.video || info.voice ? std::string{}
+                                  : models::describe(models::mlx_window(info, backend)) + ", ") +
         format_progress_size(static_cast<std::int64_t>(info.bytes));
     if (!info.model_type.empty()) {
         line = info.model_type + ", " + line;
@@ -2024,6 +2097,113 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
         }
         print_mlx_backend_hint(stored_at(roots, out.model, out.dir));
     }
+    return out;
+}
+
+ConvertedMlx convert_voice_to_mlx(const models::StoreRoots& roots, const VoiceSetChoice& source,
+                                  const training::MlxPrecision& precision,
+                                  const training::MlxConverter& converter) {
+    ConvertedMlx out;
+    out.model = source.model;
+    const std::string handle =
+        source.id.empty() ? source.path.string()
+                          : models::weights_handle(source.model, models::kVoiceFormat, source.id);
+    models::Snapshot record;
+    record.ref = handle;
+    record.source = "convert";
+    record.transform =
+        std::string{training::mlx_converter_entry(training::MlxConverterKind::MlxAudio)} + " " +
+        std::string{precision.name};
+
+    // Recognised before it runs: the same model at the same precision is the
+    // same weights.
+    for (const models::StoredMlx& stored : models::list_store_mlx(roots, source.model)) {
+        const std::optional<models::Snapshot> made = models::load_snapshot(stored.dir);
+        if (made.has_value() && made->source == "convert" && made->ref == record.ref &&
+            made->transform == record.transform) {
+            std::cout << "already converted:\n  " << stored.dir.string() << "\n"
+                      << "(to convert it again, delete it first: apogee models delete "
+                      << models::weights_handle(stored.model, models::kMlxFormat, stored.id)
+                      << ")\n";
+            out.dir = stored.dir;
+            out.existed = true;
+            out.info = models::read_mlx_info(stored.dir);
+            return out;
+        }
+    }
+
+    const models::VoiceInfo voice = models::read_voice_info(source.path);
+    std::cout << "converting " << source.path.string() << " to MLX (" << precision.name
+              << ") -- mlx-audio's converter, Kokoro's checkpoint and its " << voice.voices.size()
+              << (voice.voices.size() == 1 ? " voice" : " voices")
+              << " built into an MLX voice model, in Apogee's Python environment\n";
+    // Named and claimed, never created: the driver makes the directory.
+    const std::filesystem::path staging =
+        models::incoming_path(roots, models::kMlxFormat, source.model);
+    models::MlxConvertResult result;
+    {
+        DownloadProgress progress{std::cout, job_download_options()};
+        {
+            const Ticker ticker{
+                [&progress, &staging]() { progress.bytes(bytes_under(staging), 0); }};
+            const InterruptScope interrupt;
+            result = models::convert_snapshot_to_mlx(
+                source.path, staging, precision.bits,
+                [&converter](const std::filesystem::path& model,
+                             const std::filesystem::path& output,
+                             const harness::CancellationToken& cancellation) {
+                    return converter(model, output, {}, cancellation);
+                },
+                InterruptScope::token(), models::kMlxVoice);
+        }
+        progress.finish();
+    }
+    if (result.cancelled) {
+        cancelled_nothing_written(staging);
+    }
+    if (!result.ok) {
+        (void)models::remove_weights(staging);
+        fail(result.error);
+    }
+    record.kind = result.kind;
+
+    std::cout << "hashing it ("
+              << format_progress_size(static_cast<std::int64_t>(result.info.bytes))
+              << ") -- its shards' SHA-256 names its folder in the store\n";
+    models::StoredDirectory stored;
+    {
+        DownloadProgress progress{std::cout, job_download_options()};
+        const InterruptScope interrupt;
+        const auto bytes = static_cast<std::int64_t>(result.info.bytes);
+        stored = models::commit_mlx(roots, source.model, staging, record,
+                                    [&progress, bytes](std::int64_t hashed) {
+                                        progress.bytes(hashed, bytes);
+                                        return !InterruptScope::token().stop_requested();
+                                    });
+        progress.finish();
+    }
+    if (stored.error == models::kStopped) {
+        cancelled_nothing_written(staging);
+    }
+    if (!stored.error.empty()) {
+        (void)models::remove_weights(staging);
+        fail(stored.error);
+    }
+    out.dir = stored.dir;
+    out.existed = stored.existed;
+    out.info = models::read_mlx_info(stored.dir);
+    const models::VoiceInfo built = models::read_mlx_voice_info(stored.dir);
+    const std::string made =
+        models::weights_handle(source.model, models::kMlxFormat, stored.dir.filename().string());
+    std::cout << "\n"
+              << (stored.existed ? "already here -- these exact weights are at\n  " : "")
+              << stored.dir.string() << "\n"
+              << "verified: " << models::kMlxVoiceFiles << " -- " << out.info.shards.size()
+              << " shard header(s) and " << built.voices.size() << " voice(s) read whole\n"
+              << "mlx model: " << mlx_summary(out.info) << "\n"
+              << "kind: " << models::describe(models::read_mlx_kind(out.dir)) << "\n"
+              << "\nSpeak with it on MLX:\n  apogee voice say \"<text>\" -o speech.wav --model "
+              << made << "\n";
     return out;
 }
 
@@ -2881,6 +3061,80 @@ void refuse_video_misuse(const std::string& subject, const std::string& class_na
     }
 }
 
+/// `models convert <voice model> --mlx` (53m), the voice route's door: what
+/// it does not take refused first -- a registration (no backend runs a voice
+/// model), `--text-only` and `--model-type` -- then the model read whole, the
+/// precision (bf16 unless one is named), Apple silicon, mlx-audio installed
+/// and building Kokoro, the environment and the seeded driver, each asked
+/// before anything is announced; then the core.
+void convert_voice_to_mlx_command(const models::StoreRoots& roots, const std::string& name,
+                                  const VoiceSetChoice& source, std::string type,
+                                  const std::string& model_type, bool registers, bool text_only) {
+    const std::string what =
+        "'" + name + "' is a voice model, which mlx-audio converts to an MLX voice model";
+    if (registers) {
+        fail(what +
+             " -- no backend runs a voice model, so --register and --register-with do not "
+             "apply: convert it with --mlx alone, then speak with it: apogee voice say");
+    }
+    if (text_only) {
+        fail(what +
+             " -- --text-only asks for mlx-lm's build of a language model, and a voice model "
+             "has none: convert it with --mlx alone");
+    }
+    if (!model_type.empty()) {
+        fail(what + " -- --model-type does not apply: mlx-audio converts it as Kokoro");
+    }
+    if (!source.error.empty()) {
+        fail(source.error);
+    }
+    if (const models::VoiceInfo voice = models::read_voice_info(source.path); !voice.complete) {
+        fail("'" + name + "' " + voice.problem +
+             (source.id.empty()
+                  ? std::string{}
+                  : " -- apogee models repair " +
+                        models::weights_handle(source.model, models::kVoiceFormat, source.id)));
+    }
+    // bf16 unless one is named: the build mlx-audio's README loads first for
+    // Kokoro, and an 82M-parameter model costs little unquantized.
+    if (type.empty()) {
+        type = "bf16";
+    }
+    const training::MlxPrecision* precision = training::find_mlx_precision(type);
+    if (precision == nullptr ||
+        !training::mlx_converter_writes(training::MlxConverterKind::MlxAudio, *precision)) {
+        fail("--mlx writes no '" + type + "'");
+    }
+    const backends::MlxHost host = backends::MlxHost::current();
+    const backends::MlxReadiness runtime = backends::probe_mlx_runtime(host);
+    if (runtime.refusal == backends::MlxRefusal::Platform) {
+        fail("--mlx builds '" + name +
+             "' through mlx-audio, an MLX voice model: " + runtime.message());
+    }
+    if (!installed_mlx_audio()) {
+        fail(what + ", and mlx-audio is not installed in Apogee's Python environment (its " +
+             std::string{training::kMlxAudioConverter} + ", its Kokoro and the torch its " +
+             "checkpoint is read through, read from their files) -- " +
+             std::string{kMlxAudioRemedy});
+    }
+    if (runtime.refusal == backends::MlxRefusal::NoEnvironment) {
+        fail("--mlx builds '" + name +
+             "' through mlx-audio, an MLX voice model: " + runtime.message());
+    }
+    const std::filesystem::path script = training::mlx_converter_script();
+    std::error_code code;
+    if (!std::filesystem::is_regular_file(script, code)) {
+        fail("the MLX converter is missing: " + script.string() +
+             " -- run 'apogee check --fix' to seed it");
+    }
+    const std::filesystem::path package = training::find_site_package(
+        host.venv, training::mlx_converter_package(training::MlxConverterKind::MlxAudio));
+    (void)convert_voice_to_mlx(
+        roots, source, *precision,
+        training::script_mlx_converter(runtime.interpreter, script, *precision, package,
+                                       training::MlxConverterKind::MlxAudio));
+}
+
 /// `models convert <model> --mlx [--type <precision>]` (27b): the
 /// precision, the runtime -- the backend's own ladder, file facts only --
 /// and the seeded driver asked before anything is announced, then the core.
@@ -2902,6 +3156,15 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
     // orders it: a draft head is no conversion's input but this one, whose
     // MLX build is a drafter (53i).
     const std::string& name = registers != nullptr ? registers->snapshot : given;
+    // A stored voice model is mlx-audio's route's alone (53m): what names
+    // none is read below exactly as before.
+    if (const std::optional<VoiceSetChoice> voice =
+            locate_voice_set(roots, name, registers != nullptr ? registers->snapshot_from : from)) {
+        convert_voice_to_mlx_command(roots, name, *voice, type,
+                                     registers != nullptr ? registers->model_type : model_type,
+                                     registers != nullptr, text_only);
+        return;
+    }
     // And Wan's original layout passes only whole, with mlx-video installed:
     // otherwise refused saying which is missing (53k).
     const SnapshotChoice source =
@@ -3559,7 +3822,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
     convert
         ->add_option("model", *convert_in,
                      "A model (its newest SafeTensors download), <model>/safetensors/<id>, or a "
-                     "snapshot directory")
+                     "snapshot directory -- with --mlx, a voice model too (<model>/voice/<id>)")
         ->type_name(kSnapshotValue)
         ->required();
     // One --type, two engines' precisions: each is checked against its own
@@ -3576,14 +3839,15 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
             ->add_option("-t,--type", *convert_type,
                          "Precision to write: a GGUF's (default f16; make it smaller with "
                          "'models quantize'), or with --mlx an MLX model's (default 4bit; bf16 "
-                         "for a draft head's drafter)")
+                         "for a draft head's drafter and a voice model)")
             ->type_name(kConvertPrecisionValue)
             ->check(CLI::IsMember(convert_types));
     convert->add_flag("--mlx", *convert_mlx,
                       "Make an MLX model (Apple silicon), quantized to --type, into the model's "
                       "mlx/: mlx-lm's converter, or for weights with a vision or audio tower "
                       "mlx-vlm's, the towers kept -- for a draft head mlx-vlm's drafter, run "
-                      "beside its base, and for Wan's original layout mlx-video's video model");
+                      "beside its base, for Wan's original layout mlx-video's video model, and "
+                      "for a voice model mlx-audio's");
     auto convert_text_only = std::make_shared<bool>(false);
     convert->add_flag("--text-only", *convert_text_only,
                       "With --mlx: build only the language model of weights with a vision or "
@@ -3627,7 +3891,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
             check_base_name(*convert_base_name, convert_base_name_option->count() > 0, registers);
             if (!registers) {
                 // Unnamed, the precision is the set's own default: 4bit, or
-                // bf16 for a drafter (53i).
+                // bf16 for a drafter (53i) and a voice model (53m).
                 convert_to_mlx_command(
                     roots, *convert_in, *convert_from,
                     convert_type_option->count() > 0 ? *convert_type : std::string{},

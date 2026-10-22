@@ -85,11 +85,11 @@ TEST_CASE("seeding writes absent files only: an edit survives a re-seed",
     // Fourteen agent files (40a), eight kits (42b), three training regimes
     // (42a, 42b), seven symphony starters (27q, 40b), three task recipes
     // (40c), three training drivers, the three mlx drivers (27a, 27b, 53h),
-    // the code-execution server (47b), the video, MLX video and voice
-    // drivers (49b, 53l, 50a), seven review skills (48b), the vendored
-    // converter.
+    // the code-execution server (47b), the video, MLX video, voice and MLX
+    // voice drivers (49b, 53l, 50a, 53m), seven review skills (48b), the
+    // vendored converter.
     CHECK(first.created.size() == apogee::harness::bundled_files().size());
-    CHECK(first.created.size() == 14 + 8 + 3 + 7 + 3 + 3 + 3 + 1 + 3 + 7 + 1 +
+    CHECK(first.created.size() == 14 + 8 + 3 + 7 + 3 + 3 + 3 + 1 + 4 + 7 + 1 +
                                       apogee::harness::bundled_converter_files().size());
     for (const apogee::harness::BundledSymphony& starter : apogee::harness::bundled_symphonies()) {
         CHECK(read(root.path() / "symphonies" / (std::string{starter.name} + ".yaml")) ==
@@ -340,7 +340,7 @@ TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
     CHECK(apogee::harness::bundled_script_relative_path(script.name) ==
           "training/scripts/prepare_dataset.py");
     CHECK(apogee::harness::bundled_files().size() ==
-          14 + 8 + 3 + 7 + 3 + 3 + 3 + 1 + 3 + 7 + 1 +
+          14 + 8 + 3 + 7 + 3 + 3 + 3 + 1 + 4 + 7 + 1 +
               apogee::harness::bundled_converter_files().size());
 }
 
@@ -448,12 +448,18 @@ TEST_CASE("the compiled-in video driver byte-matches the shipped file and seeds 
     // 49b: the drivers' rule -- the file is the source of truth, the literal
     // never drifts from it, and the seeded copy is the user's once edited.
     const std::filesystem::path assets{APOGEE_ASSETS_DIR};
-    REQUIRE(apogee::harness::bundled_video_scripts().size() == 3);
+    REQUIRE(apogee::harness::bundled_video_scripts().size() == 4);
     // The speech driver (50a) beside it, held to its file the same way.
     const apogee::harness::BundledScript& voice = apogee::harness::bundled_video_scripts()[2];
     CHECK(voice.name == "voice_say.py");
     CHECK(read(assets / "video" / "voice_say.py") == voice.text);
     CHECK(apogee::harness::bundled_voice_driver_relative_path() == "training/scripts/voice_say.py");
+    // The MLX engine's speech driver (53m), held to its file the same way.
+    const apogee::harness::BundledScript& voice_mlx = apogee::harness::bundled_video_scripts()[3];
+    CHECK(voice_mlx.name == "voice_say_mlx.py");
+    CHECK(read(assets / "video" / "voice_say_mlx.py") == voice_mlx.text);
+    CHECK(apogee::harness::bundled_voice_mlx_driver_relative_path() ==
+          "training/scripts/voice_say_mlx.py");
     // The MLX engine's driver (53l), held to its file the same way.
     const apogee::harness::BundledScript& mlx = apogee::harness::bundled_video_scripts()[1];
     CHECK(mlx.name == "video_generate_mlx.py");
@@ -478,6 +484,11 @@ TEST_CASE("the compiled-in video driver byte-matches the shipped file and seeds 
         root.path() / apogee::harness::bundled_video_mlx_driver_relative_path();
     CHECK(read(seeded_mlx) == mlx.text);
     CHECK(apogee::harness::inspect_seeded_script(root.path(), "video_generate_mlx.py") ==
+          apogee::harness::SeededScript::Current);
+    const std::filesystem::path seeded_voice_mlx =
+        root.path() / apogee::harness::bundled_voice_mlx_driver_relative_path();
+    CHECK(read(seeded_voice_mlx) == voice_mlx.text);
+    CHECK(apogee::harness::inspect_seeded_script(root.path(), "voice_say_mlx.py") ==
           apogee::harness::SeededScript::Current);
     std::ofstream{seeded, std::ios::binary} << "# my edit\n";
     CHECK(apogee::harness::inspect_seeded_script(root.path(), "video_generate.py") ==

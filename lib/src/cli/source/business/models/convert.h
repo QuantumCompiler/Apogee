@@ -121,8 +121,9 @@ struct MlxConvertResult {
     /// `chat` for mlx-lm's language model, `vision` for mlx-vlm's build with
     /// its towers kept (53f), `embedding` for mlx-embeddings' (53h),
     /// `drafter` for mlx-vlm's build of a draft head (53i), `video` for
-    /// mlx-video's build of Wan's original layout (53k) -- the route's, as
-    /// the caller names it. Set when `ok`.
+    /// mlx-video's build of Wan's original layout (53k), `voice` for
+    /// mlx-audio's build of a voice model (53m) -- the route's, as the caller
+    /// names it. Set when `ok`.
     std::string kind{};
 };
 
@@ -141,7 +142,9 @@ struct MlxConvertResult {
 /// the head's type (53i) -- lifts the draft-heads change's, and takes a draft
 /// head alone; `video` -- the caller has found mlx-video installed (53k) --
 /// lifts M20's for Wan's original layout once it is whole, and takes that
-/// layout alone; any other keeps them all, worded as they were.
+/// layout alone; `voice` -- the caller has found mlx-audio installed (53m) --
+/// takes a voice model as Kokoro publishes it, read whole (`read_voice_info`),
+/// and nothing else; any other keeps them all, worded as they were.
 [[nodiscard]] std::string mlx_conversion_refusal(const std::filesystem::path& snapshot,
                                                  const std::filesystem::path& out,
                                                  std::string_view kind = {});
@@ -160,9 +163,10 @@ struct MlxConvertResult {
 /// converter builds (53f): `chat` for mlx-lm's, `vision` for mlx-vlm's,
 /// `embedding` for mlx-embeddings' (53h), which rung 1 lets an embedding
 /// model through for, `drafter` for mlx-vlm's build of a draft head (53i),
-/// which it lets a draft head through for, and `video` for mlx-video's build
+/// which it lets a draft head through for, `video` for mlx-video's build
 /// of Wan's original layout (53k), which it lets that layout through for
-/// once it is whole.
+/// once it is whole, and `voice` for mlx-audio's build of a voice model
+/// (53m), whose input is that model's directory, not a snapshot.
 /// The `model_type` a snapshot's `config.json` declares, or empty.
 [[nodiscard]] std::string snapshot_model_type(const std::filesystem::path& snapshot);
 

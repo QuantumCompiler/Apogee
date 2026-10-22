@@ -307,6 +307,36 @@ void note_store(const models::StoreRoots& roots, NameList& list) {
     return !set.path.empty() && models::snapshot_wan_layout(set.path).has_value();
 }
 
+/// The stored voice model the command's first positional names for an MLX
+/// conversion (53m): what `models convert --mlx` takes through mlx-audio --
+/// the door's own choice, so what completes is what it accepts.
+[[nodiscard]] bool voice_set_on_line(const CompletionContext& context) {
+    if (context.positionals.empty() || context.config == nullptr) {
+        return false;
+    }
+    const std::optional<VoiceSetChoice> set =
+        locate_voice_set(store_roots(*context.config), context.positionals.front());
+    return set.has_value() && !set->path.empty();
+}
+
+/// The store's voice models by model then handle, with their notes: each as
+/// Kokoro publishes it (50a) and, since 53m, each MLX build of one -- by its
+/// record's kind -- which is what `voice say` resolves.
+void voice_models(const models::StoreRoots& roots, NameList& list) {
+    std::vector<std::pair<std::string, std::string>> found;
+    for (const models::StoredVoice& stored : models::list_store_voices(roots)) {
+        found.emplace_back(stored.model,
+                           models::weights_handle(stored.model, models::kVoiceFormat, stored.id));
+    }
+    for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
+        if (models::read_mlx_kind(stored.dir).word == models::kMlxVoice) {
+            found.emplace_back(stored.model,
+                               models::weights_handle(stored.model, models::kMlxFormat, stored.id));
+        }
+    }
+    push_format(list.names, std::move(found));
+}
+
 [[nodiscard]] std::vector<std::string> kit_names() {
     std::vector<std::string> out;
     for (const harness::BundledKit& kit : harness::bundled_kits()) {
@@ -492,6 +522,16 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         list.none = "no models -- 'apogee models pull' stores one";
     } else if (kind == kSnapshotValue) {
         list.names = stored_models(store_roots(config), false, true);
+        // And with --mlx, the voice models mlx-audio converts where it is
+        // installed (53m) -- what `models convert --mlx` takes.
+        if (context.flags.contains("--mlx") && installed_mlx_audio()) {
+            for (std::string& name :
+                 stored_models(store_roots(config), false, false, false, false, true)) {
+                if (std::ranges::find(list.names, name) == list.names.end()) {
+                    list.names.push_back(std::move(name));
+                }
+            }
+        }
         list.paths = true;
         list.as_listed = true;
         note_store(store_roots(config), list);
@@ -557,8 +597,9 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         list.as_listed = true;
         note_store(roots, list);
     } else if (kind == kVoiceModelValue) {
-        // The store's voice models, by model then handle (50a).
-        list.names = stored_models(store_roots(config), false, false, false, false, true);
+        // The store's voice models, by model then handle (50a) -- and their
+        // MLX builds (53m).
+        voice_models(store_roots(config), list);
         list.none = "no voice model in the store -- 'apogee models pull hexgrad/Kokoro-82M'";
         list.as_listed = true;
         note_store(store_roots(config), list);
@@ -572,6 +613,11 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         // Nor Wan's original layout, whose MLX build is a video model (53k).
         if (context.flags.contains("--mlx") && video_set_on_line(context)) {
             list.none = "Wan's original layout's MLX build is a video model, which no backend runs";
+            return list;
+        }
+        // Nor a voice model, whose MLX build is a voice model (53m).
+        if (context.flags.contains("--mlx") && voice_set_on_line(context)) {
+            list.none = "a voice model's MLX build is a voice model, which no backend runs";
             return list;
         }
         list.names = context.flags.contains("--mlx") ? training::mlx_precision_names()
@@ -596,6 +642,14 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
                 list.none =
                     "mlx-video converts Wan's original layout by its own config.json -- "
                     "--model-type does not apply";
+                return list;
+            }
+            if (voice_set_on_line(context)) {
+                // mlx-audio converts a voice model as Kokoro (53m): the flag
+                // is refused on one.
+                list.none =
+                    "mlx-audio converts a voice model as Kokoro -- --model-type does not "
+                    "apply";
                 return list;
             }
             const SnapshotChoice set =
@@ -641,13 +695,26 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         list.none = "no stored drafter pairs with " + base_dir.filename().string() +
                     " -- 'apogee models convert <its draft head> --mlx' makes one";
     } else if (kind == kVoiceValue) {
-        // Every voice the store's voice models carry, each with its language.
-        for (const models::StoredVoice& stored : models::list_store_voices(store_roots(config))) {
-            for (const models::VoicePack& voice : models::read_voice_info(stored.dir).voices) {
-                if (std::ranges::find(list.names, voice.name) == list.names.end()) {
-                    list.names.push_back(voice.name);
-                    list.notes[voice.name] = {.group = voice.language, .description = {}};
+        // Every voice the store's voice models carry, each with its language
+        // -- and since 53m every voice their MLX builds carry.
+        const models::StoreRoots roots = store_roots(config);
+        std::vector<models::VoicePack> voices;
+        for (const models::StoredVoice& stored : models::list_store_voices(roots)) {
+            for (models::VoicePack& voice : models::read_voice_info(stored.dir).voices) {
+                voices.push_back(std::move(voice));
+            }
+        }
+        for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
+            if (models::read_mlx_kind(stored.dir).word == models::kMlxVoice) {
+                for (models::VoicePack& voice : models::read_mlx_voice_info(stored.dir).voices) {
+                    voices.push_back(std::move(voice));
                 }
+            }
+        }
+        for (const models::VoicePack& voice : voices) {
+            if (std::ranges::find(list.names, voice.name) == list.names.end()) {
+                list.names.push_back(voice.name);
+                list.notes[voice.name] = {.group = voice.language, .description = {}};
             }
         }
         std::ranges::sort(list.names);

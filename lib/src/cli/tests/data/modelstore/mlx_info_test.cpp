@@ -772,3 +772,59 @@ TEST_CASE("an MLX video model is read by mlx-video's layout: no tokenizer, every
     CHECK(read_mlx_info(dir.model).problem.find("vae.safetensors is truncated") !=
           std::string::npos);
 }
+
+TEST_CASE("an MLX voice model is read by mlx-audio's layout: no tokenizer, its voices whole",
+          "[models][mlx][info][mlx_audio]") {
+    // 53m: what mlx-audio's converter writes for Kokoro -- config.json, the
+    // weights and a voices/ directory of SafeTensors packs -- and no
+    // tokenizer, since Kokoro reads text through its phonemizer.
+    const Dir dir;
+    write_fixture_file(dir.model / "config.json",
+                       R"({"model_type": "kokoro", "istftnet": {}, "plbert": {}})");
+    write_fixture_file(dir.model / "model.safetensors",
+                       apogee::testing::safetensors_bytes({{"bert.weight", 64}}, "mlx"));
+    for (const char* voice : {"af_heart", "bm_george"}) {
+        write_fixture_file(dir.model / "voices" / (std::string{voice} + ".safetensors"),
+                           apogee::testing::safetensors_bytes({{"voice", 16}}, "mlx"));
+    }
+
+    // Unrecorded, it is read as a language model's directory, and lacks one's
+    // tokenizer: only a record, or a caller that knows, makes it a voice model.
+    MlxInfo info = read_mlx_info(dir.model);
+    CHECK_FALSE(info.voice);
+    CHECK_FALSE(info.complete);
+    CHECK(info.problem.find("no tokenizer") != std::string::npos);
+
+    // Read as voice -- by the kind a conversion's staging is, or by its record.
+    info = read_mlx_info(dir.model, apogee::models::kMlxVoice);
+    CHECK(info.voice);
+    CHECK_FALSE(info.video);
+    CHECK(info.complete);
+    CHECK(info.problem.empty());
+    // The weights are its shards; the voices are not.
+    CHECK(info.shards.size() == 1);
+    CHECK(info.model_type == "kokoro");
+    apogee::models::Snapshot record;
+    record.source = "convert";
+    record.kind = std::string{apogee::models::kMlxVoice};
+    REQUIRE(apogee::models::write_snapshot(dir.model, record));
+    CHECK(read_mlx_info(dir.model).voice);
+    CHECK(read_mlx_info(dir.model).complete);
+    CHECK_FALSE(read_mlx_info(dir.model, apogee::models::kMlxChat).voice);
+
+    // A voice pack cut short is said by name, and never read as whole.
+    write_fixture_file(dir.model / "voices" / "bm_george.safetensors", "short");
+    info = read_mlx_info(dir.model);
+    CHECK_FALSE(info.complete);
+    CHECK(info.problem.find("voices/bm_george.safetensors is truncated") != std::string::npos);
+    // No voices at all: nothing to speak with.
+    std::filesystem::remove_all(dir.model / "voices");
+    info = read_mlx_info(dir.model);
+    CHECK_FALSE(info.complete);
+    CHECK(info.problem == "cannot load: no voices (voices/*.safetensors) in " + dir.model.string());
+    // No weights: a shard missing, as any directory's.
+    write_fixture_file(dir.model / "voices" / "af_heart.safetensors",
+                       apogee::testing::safetensors_bytes({{"voice", 16}}, "mlx"));
+    std::filesystem::remove(dir.model / "model.safetensors");
+    CHECK(read_mlx_info(dir.model).problem.find("no weights") != std::string::npos);
+}

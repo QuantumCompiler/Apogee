@@ -214,6 +214,7 @@ add_library(apogee_tests_business OBJECT
     business/video/video_mlx_driver_test.cpp
     business/video/voice_test.cpp
     business/video/voice_driver_test.cpp
+    business/video/voice_mlx_driver_test.cpp
     business/video/compose_test.cpp
     business/scaffold/mcp_server_test.cpp
     business/scaffold/agent_test.cpp
@@ -859,7 +860,9 @@ if(UNIX)
     # MLX model operations (27b) on the real binary: `models convert --mlx`
     # through the seeded driver under the stub mlx packages -- the set landed
     # by its hash, listed and checked, a REAL Ctrl-C mid-conversion leaving the
-    # store as it was, and the set deleted whole. Apple silicon only.
+    # store as it was, and the set deleted whole -- and since 53m a stored
+    # Kokoro converted through the stub mlx-audio, recorded `voice`. Apple
+    # silicon only.
     add_test(NAME cli.mlx_models_lifecycle
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/mlx_models_e2e.sh"
             $<TARGET_FILE:apogee>
@@ -930,7 +933,11 @@ if(UNIX)
     # since 53l, on Apple silicon, the same generation on MLX -- the seeded
     # MLX driver over the stub mlx-video, its record's engine, an engine the
     # model does not run on refused, --from replaying MLX, no socket in the
-    # MLX driver's tree, Ctrl-C, mlx-video missing refused.
+    # MLX driver's tree, Ctrl-C, mlx-video missing refused; and since 53m
+    # `voice say` on MLX -- the seeded MLX speech driver over the stub
+    # mlx-audio, its record's engine, its timings the WAV's, an engine the
+    # model does not speak on refused, no socket in its tree, Ctrl-C, a
+    # composition narrated on MLX, mlx-audio missing refused.
     # Skips (77) without python3.
     add_test(NAME cli.video_lifecycle
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/video_e2e.sh"

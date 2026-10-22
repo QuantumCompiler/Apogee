@@ -16,8 +16,8 @@
 /// full-weight SafeTensors snapshot in, an MLX model directory out, through
 /// `mlx_lm`'s own `convert` (27b) -- or, for a set that sees or hears,
 /// `mlx_vlm`'s, its towers kept (53f), for an embedding model,
-/// `mlx_embeddings`' (53h), and for Wan's original layout, mlx-video's Wan
-/// converter (53k).
+/// `mlx_embeddings`' (53h), for Wan's original layout, mlx-video's Wan
+/// converter (53k), and for a stored voice model, `mlx_audio`'s (53m).
 ///
 /// **A child, never a link** -- the GGUF converter's discipline, a different
 /// engine: the driver is seeded beside the trainers, run by the environment's
@@ -31,11 +31,14 @@ namespace apogee::training {
 /// language model, mlx-vlm's, which builds a model that sees or hears with
 /// its towers kept, or -- since 53h -- mlx-embeddings', which builds an
 /// embedding model whole, and -- since 53k -- mlx-video's, which builds Wan's
-/// original layout into an MLX video model. One driver runs each (`--with
-/// mlx-vlm`, `--with mlx-embeddings`, `--with mlx-video`).
-enum class MlxConverterKind : std::uint8_t { MlxLm, MlxVlm, MlxEmbeddings, MlxVideo };
+/// original layout into an MLX video model, and -- since 53m -- mlx-audio's,
+/// which builds a voice model as Kokoro publishes it into an MLX voice model.
+/// One driver runs each (`--with mlx-vlm`, `--with mlx-embeddings`, `--with
+/// mlx-video`, `--with mlx-audio`).
+enum class MlxConverterKind : std::uint8_t { MlxLm, MlxVlm, MlxEmbeddings, MlxVideo, MlxAudio };
 
-/// The converter a set's MLX conversion runs: mlx-video for Wan's original
+/// The converter a set's MLX conversion runs: mlx-audio for a voice model
+/// (`voice`, the store's `voice` format, 53m); mlx-video for Wan's original
 /// layout (`video`, by its own `config.json`'s class, 53k); mlx-vlm for a
 /// draft head (`drafter`, by its own `config.json`, 53i), built as the
 /// drafter its speculative path runs beside a base; mlx-embeddings for an
@@ -46,23 +49,25 @@ enum class MlxConverterKind : std::uint8_t { MlxLm, MlxVlm, MlxEmbeddings, MlxVi
 /// chosen by a name.
 [[nodiscard]] MlxConverterKind choose_mlx_converter(bool towers, bool text_only,
                                                     bool embedding = false, bool drafter = false,
-                                                    bool video = false) noexcept;
+                                                    bool video = false,
+                                                    bool voice = false) noexcept;
 
 /// Its name as a person says it: `mlx-lm`, `mlx-vlm`, `mlx-embeddings`,
-/// `mlx-video`.
+/// `mlx-video`, `mlx-audio`.
 [[nodiscard]] std::string_view to_string(MlxConverterKind converter) noexcept;
 
 /// Its Python package, where its types are read from: `mlx_lm`, `mlx_vlm`,
-/// `mlx_embeddings`, `mlx_video`.
+/// `mlx_embeddings`, `mlx_video`, `mlx_audio`.
 [[nodiscard]] std::string_view mlx_converter_package(MlxConverterKind converter) noexcept;
 
 /// Its own entry, as a record's transform names it: `mlx_lm.convert`,
-/// `mlx_vlm.convert`, `mlx_embeddings.convert`, and mlx-video's Wan converter
-/// as the pinned commit holds it, `mlx_video.models.wan_2.convert` (53k).
+/// `mlx_vlm.convert`, `mlx_embeddings.convert`, mlx-video's Wan converter
+/// as the pinned commit holds it, `mlx_video.models.wan_2.convert` (53k), and
+/// `mlx_audio.convert` (53m).
 [[nodiscard]] std::string_view mlx_converter_entry(MlxConverterKind converter) noexcept;
 
 /// The requirement set that installs it: `mlx`, `mlx-vlm`, `mlx-embeddings`,
-/// `mlx-video`.
+/// `mlx-video`, `mlx-audio`.
 [[nodiscard]] RequirementSet mlx_converter_set(MlxConverterKind converter) noexcept;
 
 /// mlx-video's Wan converter as the environment at `venv` holds it (53k):
@@ -84,6 +89,33 @@ inline constexpr std::string_view kMlxVideoGenerator = "mlx_video.models.wan_2.g
 /// beside it -- 53k's reading of "installed", asked of the generator. Read
 /// from files, never imported; empty when either is not there.
 [[nodiscard]] std::filesystem::path find_mlx_video_generator(const std::filesystem::path& venv);
+
+/// mlx-audio's converter (53m): `mlx_audio.convert`, the module its README
+/// runs (`python -m mlx_audio.convert`) and whose `convert(hf_path,
+/// mlx_path, ...)` the seeded driver calls.
+inline constexpr std::string_view kMlxAudioConverter = "mlx_audio.convert";
+
+/// mlx-audio's Kokoro (53m): the package its TTS loader builds a Kokoro
+/// directory with -- `mlx_audio.tts.models.kokoro` -- what "builds Kokoro"
+/// means, read from its files.
+inline constexpr std::string_view kMlxAudioKokoro = "mlx_audio.tts.models.kokoro";
+
+/// mlx-audio's converter as the environment at `venv` holds it, able to
+/// build Kokoro (53m): the module file `kMlxAudioConverter` names
+/// (`mlx_audio/convert.py` under site-packages), Kokoro's package beside it
+/// (`kMlxAudioKokoro`), and the `torch` the driver reads Kokoro's PyTorch
+/// checkpoint and voice packs through. Read from files, never imported (27a's
+/// rule); empty when any is not there. What "mlx-audio is installed and
+/// builds Kokoro" means to every surface that offers or refuses a voice
+/// model's MLX conversion.
+[[nodiscard]] std::filesystem::path find_mlx_audio_converter(const std::filesystem::path& venv);
+
+/// mlx-audio's Kokoro as the environment at `venv` holds it to speak with
+/// (53m): Kokoro's package (`kMlxAudioKokoro`, its directory returned), with
+/// the TTS loader beside it (`mlx_audio/tts/utils.py`) and `misaki`, the
+/// phonemizer Kokoro reads text through. Read from files, never imported;
+/// empty when any is not there.
+[[nodiscard]] std::filesystem::path find_mlx_audio_kokoro(const std::filesystem::path& venv);
 
 /// One precision `models convert --mlx` writes, spelled the way a community
 /// build's name ends (`-4bit`, `-bf16`): `mlx_lm.convert`'s own choices --
@@ -110,8 +142,9 @@ struct MlxPrecision {
 /// Every precision's name, in order -- for a flag's help and its check.
 [[nodiscard]] std::vector<std::string> mlx_precision_names();
 
-/// Whether `converter` writes `precision` (53k): mlx-lm, mlx-vlm and
-/// mlx-embeddings every one; mlx-video's Wan converter 4 or 8 bits in its
+/// Whether `converter` writes `precision` (53k): mlx-lm, mlx-vlm,
+/// mlx-embeddings and mlx-audio (53m: its `q_mode` takes affine and mxfp4,
+/// its `--dtype` bfloat16 and float16) every one; mlx-video's Wan converter 4 or 8 bits in its
 /// affine groups (`--quantize --bits`, its group 64) or a floating-point type
 /// unquantized (`--dtype`) -- never 3 or 6 bits, nor mxfp4.
 [[nodiscard]] bool mlx_converter_writes(MlxConverterKind converter,
@@ -128,8 +161,9 @@ struct MlxPrecision {
 /// `--q-bits`, `--q-group-size` and `--q-mode` for a quantized precision, or
 /// `--dtype` for one that is not -- the one table mapped for every converter.
 /// mlx-vlm's route leads with `--with mlx-vlm`, mlx-embeddings' with `--with
-/// mlx-embeddings` (53h), mlx-video's with `--with mlx-video` (53k); mlx-lm's
-/// is exactly what it was before there were two.
+/// mlx-embeddings` (53h), mlx-video's with `--with mlx-video` (53k),
+/// mlx-audio's with `--with mlx-audio` (53m); mlx-lm's is exactly what it was
+/// before there were two.
 [[nodiscard]] std::vector<std::string> mlx_converter_arguments(
     const MlxPrecision& precision, const std::filesystem::path& input,
     const std::filesystem::path& output, MlxConverterKind converter = MlxConverterKind::MlxLm);

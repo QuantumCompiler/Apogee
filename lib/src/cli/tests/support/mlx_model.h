@@ -65,7 +65,8 @@ struct MlxModelSpec {
     /// conversion writes one, `kind` beside its `transform`. No record when
     /// empty -- a directory made before the record, or placed by hand. A
     /// `video` directory holds mlx-video's layout too (53k): its text
-    /// encoder and VAE beside the transformer's `model.safetensors`.
+    /// encoder and VAE beside the transformer's `model.safetensors`; a
+    /// `voice` directory mlx-audio's (53m): a voice pack under `voices/`.
     std::string kind{};
 };
 
@@ -140,6 +141,10 @@ inline void write_mlx_model(const std::filesystem::path& dir, const MlxModelSpec
                            safetensors_bytes({{"encoder.block.0.weight", 32}}, spec.format));
         write_fixture_file(dir / "vae.safetensors",
                            safetensors_bytes({{"decoder.conv_in.weight", 32}}, spec.format));
+    }
+    if (spec.kind == "voice") {
+        write_fixture_file(dir / "voices" / "af_heart.safetensors",
+                           safetensors_bytes({{"voice", 16}}, spec.format));
     }
 }
 

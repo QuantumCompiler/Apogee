@@ -154,12 +154,13 @@ void pad(std::ostringstream& out, const std::string& value, std::size_t width, b
 void render_mlx_files(std::ostream& out, const models::MlxInfo& info,
                       const harness::BackendConfig& backend) {
     // A video model's files are mlx-video's layout's, with no tokenizer and
-    // no token window (53k).
+    // no token window (53k); a voice model's mlx-audio's, the same (53m).
     out << "files:        "
         << (!info.complete ? info.problem
-            : info.video
-                ? "whole -- " + std::string{models::kMlxVideoFiles} + ", " +
-                      std::to_string(info.shards.size()) +
+            : info.video || info.voice
+                ? "whole -- " +
+                      std::string{info.video ? models::kMlxVideoFiles : models::kMlxVoiceFiles} +
+                      ", " + std::to_string(info.shards.size()) +
                       " shard(s), each holding every byte its header lists"
                 : "whole -- config.json, a tokenizer and " + std::to_string(info.shards.size()) +
                       " shard(s), each holding every byte its header lists")
@@ -171,7 +172,7 @@ void render_mlx_files(std::ostream& out, const models::MlxInfo& info,
                     : "; not in mlx-lm's own format -- it converts the weights as it loads them")
             << "\n";
     }
-    if (info.video) {
+    if (info.video || info.voice) {
         out << "size:         " << format_progress_size(static_cast<std::int64_t>(info.bytes))
             << " on disk\n";
         return;
@@ -189,6 +190,22 @@ void render_mlx_files(std::ostream& out, const models::MlxInfo& info,
     }
     out << "size:         " << format_progress_size(static_cast<std::int64_t>(info.bytes))
         << " on disk\n";
+}
+
+/// `info`'s `voices:` lines (50a): a voice model's voices, one continuation
+/// line per language -- the original's packs, or since 53m an MLX build's.
+void render_voices(std::ostream& out, const models::VoiceInfo& info) {
+    bool first = true;
+    for (const std::string& language : info.languages()) {
+        std::string names;
+        for (const models::VoicePack& voice : info.voices) {
+            if (voice.language == language) {
+                names += (names.empty() ? "" : ", ") + voice.name;
+            }
+        }
+        out << (first ? "voices:       " : "              ") << language << ": " << names << "\n";
+        first = false;
+    }
 }
 
 /// The store `models_dir` and the config's `paths.hf_dir` make.
@@ -457,9 +474,11 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
                 if (files.config_read) {
                     row.quant = files.quantization.describe();
                 }
-                // A video model has no token window (53k).
-                row.window =
-                    files.video ? "-" : models::describe(models::mlx_window(files, backend));
+                // A video model has no token window (53k), nor a voice
+                // model (53m).
+                row.window = files.video || files.voice
+                                 ? "-"
+                                 : models::describe(models::mlx_window(files, backend));
                 // What the directory is (53e), when there is one: an entry
                 // over a kind no mlx backend chats with is said to be one.
                 std::error_code code;
@@ -681,8 +700,9 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
             if (info.config_read) {
                 row.quant = info.quantization.describe();
             }
-            // A video model has no token window (53k).
-            row.window = info.video ? "-" : models::describe(models::mlx_window(info, {}));
+            // A video model has no token window (53k), nor a voice model (53m).
+            row.window =
+                info.video || info.voice ? "-" : models::describe(models::mlx_window(info, {}));
             row.attention = !info.complete;
             row.note = info.complete ? mlx_summary(info) : info.problem;
             // Listed as its kind (53e): one no mlx backend chats with says
@@ -1558,6 +1578,11 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
         out << "vectors:      " << models::describe(models::read_mlx_embedding_width(stored.dir))
             << "\n";
     }
+    if (kind.word == models::kMlxVoice) {
+        // Its voices, by language, as a voice model's are listed (53m): the
+        // presets mlx-audio's build carries.
+        render_voices(out, models::read_mlx_voice_info(stored.dir));
+    }
     out << "lineage:      " << mlx_origin(models::load_snapshot(stored.dir), roots) << "\n";
     const models::MlxInfo info = models::read_mlx_info(stored.dir);
     out << "model_type:   " << (info.model_type.empty() ? "-" : info.model_type) << "\n";
@@ -1631,37 +1656,49 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
 
 /// `info` on one stored voice model (50a): where it came from, its
 /// checkpoint, and its voices by language -- the directory read whole, or
-/// said why it cannot load.
+/// said why it cannot load. Since 53m, where mlx-audio is installed or an MLX
+/// build of it is stored, what `--mlx` makes of it and what it made; with
+/// neither, exactly as before.
 [[nodiscard]] std::string render_stored_voice(const models::StoredVoice& stored,
                                               const models::StoreRoots& roots) {
     const std::string handle =
         models::weights_handle(stored.model, models::kVoiceFormat, stored.id);
+    const models::VoiceInfo info = models::read_voice_info(stored.dir);
+    const bool converts =
+        !models::voice_conversions(stored.dir, installed_mlx_audio_converts()).empty();
+    std::vector<std::string> mlx_made;
+    for (const models::StoredMlx& mlx : models::list_store_mlx(roots, stored.model)) {
+        const std::optional<models::Snapshot> made = models::load_snapshot(mlx.dir);
+        if (made.has_value() && made->source == "convert" && made->ref == handle) {
+            mlx_made.push_back(models::weights_handle(mlx.model, models::kMlxFormat, mlx.id));
+        }
+    }
     std::ostringstream out;
     out << "weights:      " << handle << "\n";
     out << "path:         " << stored.dir.string() << "\n";
-    out << "format:       voice -- a text-to-speech model, taken whole\n";
+    out << "format:       voice -- a text-to-speech model, taken whole"
+        << (converts ? "; --mlx converts it to an MLX voice model" : "") << "\n";
     out << "lineage:      " << mlx_origin(models::load_snapshot(stored.dir), roots) << "\n";
-    const models::VoiceInfo info = models::read_voice_info(stored.dir);
     out << "files:        "
         << (info.complete
                 ? "whole -- config.json, " + info.checkpoint + " and " +
                       std::to_string(info.voices.size()) + " voice(s), each a whole archive"
                 : info.problem)
         << "\n";
-    // The voices, one continuation line per language.
-    bool first = true;
-    for (const std::string& language : info.languages()) {
-        std::string names;
-        for (const models::VoicePack& voice : info.voices) {
-            if (voice.language == language) {
-                names += (names.empty() ? "" : ", ") + voice.name;
-            }
-        }
-        out << (first ? "voices:       " : "              ") << language << ": " << names << "\n";
-        first = false;
-    }
+    render_voices(out, info);
     out << "size:         " << format_progress_size(static_cast<std::int64_t>(info.bytes))
         << " on disk\n";
+    // Its MLX builds (53m), recorded; else the one conversion it takes, where
+    // mlx-audio is there to make it.
+    bool first = true;
+    for (const std::string& made : mlx_made) {
+        out << (first ? "made from it: " : "              ") << made << " (recorded)\n";
+        first = false;
+    }
+    if (mlx_made.empty() && converts) {
+        out << "made from it: nothing yet -- 'apogee models convert " << handle
+            << " --mlx' makes an MLX voice model of it\n";
+    }
     if (!info.complete) {
         out << "repair:       apogee models repair " << handle << "\n";
     }
@@ -2087,9 +2124,9 @@ namespace {
             if (!info.architecture.empty()) {
                 data["architecture"] = info.architecture;
             }
-            // A video model states no token window (53k): null, as a
-            // pipeline's is.
-            if (!info.video) {
+            // A video model states no token window (53k), nor a voice
+            // model (53m): null, as a pipeline's is.
+            if (!info.video && !info.voice) {
                 const models::MlxWindow window = models::mlx_window(info, {});
                 data["window"] = window_of(window.window, window.configured, window.trained);
             }
@@ -2124,6 +2161,21 @@ namespace {
     } else if (target.format == models::kVoiceFormat) {
         for (const models::StoredVoice& stored : models::list_store_voices(roots, target.model)) {
             dir = stored.id == target.id ? stored.dir : dir;
+        }
+        // Where mlx-audio is installed, the decision its converter makes
+        // (53m): `mlx` for a whole voice model, its converter named. With
+        // none installed, nothing is said, as before.
+        if (!dir.empty() && installed_mlx_audio()) {
+            const std::vector<std::string> conversions =
+                models::voice_conversions(dir, installed_mlx_audio_converts());
+            data["converts_to"] = conversions;
+            if (!conversions.empty()) {
+                data["mlx_conversion"] = {
+                    {"towers", nlohmann::json::array()},
+                    {"converter",
+                     std::string{training::to_string(training::MlxConverterKind::MlxAudio)}},
+                    {"text_only", false}};
+            }
         }
     } else {
         for (const models::StoredSnapshot& stored :

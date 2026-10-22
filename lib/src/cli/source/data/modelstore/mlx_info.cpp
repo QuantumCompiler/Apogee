@@ -363,18 +363,47 @@ namespace {
     return {};
 }
 
+/// What an MLX voice model lacks of mlx-audio's Kokoro layout (53m), or
+/// empty: a `voices/` directory holding at least one voice pack, each a whole
+/// SafeTensors file -- what Kokoro on MLX loads a voice from.
+[[nodiscard]] std::string voice_files_problem(const std::filesystem::path& dir) {
+    std::error_code code;
+    std::vector<std::filesystem::path> packs;
+    for (const auto& entry : std::filesystem::directory_iterator(dir / "voices", code)) {
+        std::error_code type;
+        if (entry.is_regular_file(type) && entry.path().extension() == ".safetensors") {
+            packs.push_back(entry.path());
+        }
+    }
+    if (packs.empty()) {
+        return "no voices (voices/*.safetensors) in " + dir.string();
+    }
+    std::ranges::sort(packs);
+    for (const std::filesystem::path& pack : packs) {
+        std::error_code size;
+        if (std::string problem =
+                safetensors_shard_problem(pack, std::filesystem::file_size(pack, size));
+            !problem.empty()) {
+            return "voices/" + problem;
+        }
+    }
+    return {};
+}
+
 }  // namespace
 
 MlxInfo read_mlx_info(const std::filesystem::path& dir, std::string_view kind) {
     MlxInfo info;
-    // A video model's own layout (53k), by what the caller knows or the
-    // record says -- never by its files' names alone.
+    // A video model's own layout (53k), and a voice model's (53m), by what
+    // the caller knows or the record says -- never by its files' names alone.
     if (kind.empty()) {
         if (const std::optional<Snapshot> record = load_snapshot(dir)) {
             info.video = record->kind == kMlxVideo;
+            info.voice = record->kind == kMlxVoice;
         }
     } else {
         info.video = kind == kMlxVideo;
+        info.voice = kind == kMlxVoice;
     }
     std::error_code code;
     if (!std::filesystem::is_directory(dir, code)) {
@@ -406,6 +435,14 @@ MlxInfo read_mlx_info(const std::filesystem::path& dir, std::string_view kind) {
     }
     if (info.video) {
         if (const std::string problem = video_files_problem(dir); !problem.empty()) {
+            info.problem = "cannot load: " + problem;
+            return info;
+        }
+        info.complete = true;
+        return info;
+    }
+    if (info.voice) {
+        if (const std::string problem = voice_files_problem(dir); !problem.empty()) {
             info.problem = "cannot load: " + problem;
             return info;
         }

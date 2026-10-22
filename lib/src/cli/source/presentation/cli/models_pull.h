@@ -168,7 +168,8 @@ struct MlxRoute {
     /// What its build records (53e): `video` for mlx-video's build of Wan's
     /// original layout, `drafter` for mlx-vlm's build of a draft head,
     /// `embedding` for mlx-embeddings', `vision` for mlx-vlm's, `chat` for
-    /// mlx-lm's.
+    /// mlx-lm's -- and `voice` for mlx-audio's build of a voice model (53m),
+    /// whose route is a voice model's own (`convert_voice_to_mlx`).
     [[nodiscard]] std::string_view kind() const noexcept;
 };
 
@@ -211,6 +212,36 @@ struct MlxRoute {
 /// The same, as `models::snapshot_conversions` and `snapshot_diffusion_model`
 /// are handed it: read once, when first asked.
 [[nodiscard]] models::VideoConverts installed_mlx_video_converts();
+
+/// Whether mlx-audio's converter is installed in Apogee's Python environment
+/// and builds Kokoro (53m), read from its own files (`training::
+/// find_mlx_audio_converter`: the converter's module, Kokoro's package and
+/// the torch the driver reads Kokoro's checkpoint through) -- never imported.
+[[nodiscard]] bool installed_mlx_audio();
+
+/// The same, as `models::voice_conversions` is handed it: read once, when
+/// first asked.
+[[nodiscard]] models::VoiceConverts installed_mlx_audio_converts();
+
+/// The stored voice model `models convert --mlx` takes (53m).
+struct VoiceSetChoice {
+    std::filesystem::path path{};
+    /// The model it belongs to -- where its MLX build goes.
+    std::string model{};
+    /// Its id, or empty for a directory outside the store.
+    std::string id{};
+    /// Why none, when `given` named voice models but not one of them.
+    std::string error{};
+};
+
+/// The voice model `given` names for an MLX conversion (53m), or nullopt
+/// where it names none -- a SafeTensors set's way, unchanged: a
+/// `<model>/voice/<id>` handle or its bare id; a model holding no SafeTensors
+/// set and voice models (`from_id`'s, else its one, else refused naming
+/// them); or a voice model's directory outside the store.
+[[nodiscard]] std::optional<VoiceSetChoice> locate_voice_set(const models::StoreRoots& roots,
+                                                             std::string_view given,
+                                                             std::string_view from_id = {});
 
 /// The MLX conversion a set is offered (53f), by the converters installed:
 /// a language model's is mlx-lm's, as M21 decided it; an embedding model's
@@ -437,6 +468,19 @@ struct ConvertedMlx {
                                                 const training::MlxConverter& converter,
                                                 std::string_view model_type = {},
                                                 bool chained = false, bool text_only = false);
+
+/// `models convert <voice model> --mlx` (53m): an MLX voice model of a
+/// stored voice model as Kokoro publishes it, at `precision`, made by
+/// `converter` (mlx-audio's `convert` through the seeded driver, or a test's
+/// stand-in) into a staging directory, verified whole by its kind's rule and
+/// committed under the model's `mlx/` with a record naming the voice model
+/// it was made from, its transform `mlx_audio.convert <precision>` and its
+/// kind `voice`. The same model at the same precision is recognised before
+/// anything runs; Ctrl-C mid-run, or mid-hash, removes the staging.
+[[nodiscard]] ConvertedMlx convert_voice_to_mlx(const models::StoreRoots& roots,
+                                                const VoiceSetChoice& source,
+                                                const training::MlxPrecision& precision,
+                                                const training::MlxConverter& converter);
 
 /// `--register-with`'s precisions with `--mlx` (M16): `--type`'s own MLX
 /// set, each once, in the order given. Fails before anything runs on any

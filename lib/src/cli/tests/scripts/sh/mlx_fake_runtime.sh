@@ -54,6 +54,15 @@ mlx_fake_video() {
     cp -R "$stubs/stub_mlx_video/." "$home/training/venv/lib/python3.99/site-packages/"
 }
 
+# mlx_fake_audio <apogee-home> <stub-scripts-dir>: lays the stub `mlx_audio`
+# (53m) -- its converter and Kokoro where the real ones sit, the stub `torch`
+# Kokoro's checkpoint is read through and the stub `misaki` -- beside the stub
+# `mlx_lm`: what `train setup --with mlx-audio` would install.
+mlx_fake_audio() {
+    local home="$1" stubs="$2"
+    cp -R "$stubs/stub_mlx_audio/." "$home/training/venv/lib/python3.99/site-packages/"
+}
+
 # mlx_descendants <pid>: every process below <pid>, one per line.
 mlx_descendants() {
     local child

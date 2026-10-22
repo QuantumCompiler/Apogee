@@ -60,11 +60,7 @@ void voice_say(const RootContext& context, SayFlags flags, const CLI::App& verb)
     };
     VoiceSaySeams seams;
     seams.ready = [&config](const ResolvedVoiceModel& model) {
-        const video::VideoReadiness runtime = ready_voice_runtime(config, "voice say");
-        if (!runtime.ready() && runtime.refusal != video::VideoRefusal::NoDriver) {
-            return runtime;
-        }
-        return video::probe_voice(video::VideoHost::current(), model.dir, model.handle);
+        return ready_voice_engine(config, model.dir, model.handle, model.engine, "voice say");
     };
     seams.say = say;
     seams.on_event = [&](const video::VoiceEvent& event) {
@@ -133,14 +129,19 @@ void VoiceCommand::bind(CLI::App& root, const RootContext& context) {
         ->type_name(kPathValue)
         ->required();
     say->add_option("-m,--model", flags->options.model,
-                    "The voice model: a store handle, id or model, or a path (default: the "
-                    "store's one)")
+                    "The voice model, or its MLX build: a store handle, id or model, or a path "
+                    "(default: the store's one)")
         ->type_name(kVoiceModelValue);
     say->add_option("--voice", flags->options.voice,
                     "One of the model's own voices (default: " + std::string{kDefaultVoice} +
                         " when it has it)")
         ->type_name(kVoiceValue);
     say->add_option("--speed", flags->speed, "How fast, 0.5-2.0 (default 1.0)");
+    say->add_option("--engine", flags->options.engine,
+                    "What it speaks on: torch (a voice model as Kokoro publishes it) or mlx (its "
+                    "MLX build, through mlx-audio) -- the model's directory decides, so this only "
+                    "names it or is refused (default: auto)")
+        ->type_name(words_value(video::video_engine_names()));
     add_job_format(say, format, /*document=*/true);
     say->callback([&context, flags, format, say]() {
         flags->format = *format;

@@ -25,7 +25,12 @@
 # `mlx_video` (tests/data/backends/scripts) -- recorded with its engine, its
 # tokenizer the set's own, an engine it does not run on refused, `--from`
 # replaying MLX, the MLX driver's whole tree sampled for a socket, and a
-# Ctrl-C leaving nothing.
+# Ctrl-C leaving nothing; and since 53m, `voice say` on MLX -- mlx-audio's
+# build of Kokoro in the store, the REAL seeded MLX speech driver over the
+# stub `mlx_audio` -- recorded with its engine, its timings the WAV's own, the
+# library's prints on neither stream, an engine it does not speak on refused,
+# the MLX speech driver's whole tree sampled for a socket, a Ctrl-C leaving
+# nothing, and mlx-audio missing refused naming its setup.
 #
 # POSIX only. Skips (77) without python3.
 set -eu
@@ -773,6 +778,148 @@ fi
 
 echo "video generate on MLX: Ctrl-C mid-denoise leaves nothing; no socket in the MLX driver's tree - OK"
 
+# --- voice say on MLX (53m): mlx-audio's build of Kokoro, the MLX speech driver ---
+[ -f "$APOGEE_HOME/training/scripts/voice_say_mlx.py" ] || fail "check --fix did not seed the MLX speech driver"
+# What `train setup --with mlx-audio` would install for speech: mlx-audio's
+# Kokoro and the misaki it reads text through, beside the stub mlx.
+cp -R "$MLX_STUBS/stub_mlx_audio/mlx_audio" "$SITE/"
+cp -R "$MLX_STUBS/stub_mlx_audio/misaki" "$SITE/"
+VOICE_MLX="$APOGEE_HOME/models/hexgrad--Kokoro-82M/mlx/ffffffffffff"
+VOICE_MLX_HANDLE="hexgrad--Kokoro-82M/mlx/ffffffffffff"
+python3 - "$VOICE_MLX" <<'PY'
+import json, os, struct, sys
+model = sys.argv[1]
+def write(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as out:
+        out.write(data if isinstance(data, bytes) else data.encode())
+def shard(name, elements):
+    header = json.dumps({"__metadata__": {"format": "mlx"},
+                         name: {"dtype": "F16", "shape": [elements],
+                                "data_offsets": [0, 2 * elements]}}).encode()
+    return struct.pack("<Q", len(header)) + header + b"\0" * (2 * elements)
+# mlx-audio's build of Kokoro, as `models convert --mlx` commits it (53m).
+write(f"{model}/config.json", json.dumps({"model_type": "kokoro", "istftnet": {}, "plbert": {}}))
+write(f"{model}/model.safetensors", shard("bert.weight", 32))
+for voice in ("af_heart", "bm_george"):
+    write(f"{model}/voices/{voice}.safetensors", shard("voice", 16))
+write(f"{model}/apogee-snapshot.json", json.dumps({
+    "ref": "hexgrad--Kokoro-82M/voice/cccccccccccc", "source": "convert",
+    "transform": "mlx_audio.convert bf16", "kind": "voice", "files": []}))
+PY
+
+VOICE_MLX_RECORD="$WORK_DIR/voice-mlx-record.jsonl"
+set +e
+STUB_MLX_AUDIO_RECORD="$VOICE_MLX_RECORD" "$APOGEE_BIN" voice say "Hello there. How are you?" \
+    --model "$VOICE_MLX_HANDLE" -o "$WORK_DIR/out/hello-mlx.wav" --output-format json \
+    </dev/null >"$WORK_DIR/voice-mlx.out" 2>"$WORK_DIR/voice-mlx.err"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 0 ] || fail "voice say on MLX failed ($STATUS): $(cat "$WORK_DIR/voice-mlx.err")"
+[ "$(field "$WORK_DIR/voice-mlx.out" '["engine"]')" = "mlx" ] || fail "the speech's engine: $(cat "$WORK_DIR/voice-mlx.out")"
+[ "$(field "$WORK_DIR/voice-mlx.out" '["voice"]')" = "af_heart" ] || fail "the default voice on MLX"
+[ "$(field "$WORK_DIR/voice-mlx.out" '["versions"]["mlx_audio"]')" = "0.0-audio-stub" ] || fail "mlx-audio's version"
+[ "$(field "$WORK_DIR/voice-mlx.out" '["device"]["device"]')" = "gpu" ] || fail "MLX's device"
+# Each segment's seconds the WAV's own header's, the record beside it.
+python3 - "$WORK_DIR/voice-mlx.out" "$WORK_DIR/out/hello-mlx.wav" <<'PY' || fail "the timings: $(cat "$WORK_DIR/voice-mlx.out")"
+import json, sys, wave
+document = json.load(open(sys.argv[1]))
+w = wave.open(sys.argv[2])
+seconds = w.getnframes() / w.getframerate()
+assert w.getframerate() == 24000 and w.getnframes() == 2400, (w.getframerate(), w.getnframes())
+assert document["segments"][0]["seconds"] == seconds == document["seconds"], document
+assert [s["text"] for s in document["segments"][0]["sentences"]] == ["Hello there.", "How are you?"]
+PY
+python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); b=json.load(open(sys.argv[2])); sys.exit(a != b)' \
+    "$WORK_DIR/out/hello-mlx.wav.json" "$WORK_DIR/voice-mlx.out" || fail "the MLX speech's sidecar is not the document"
+# Spoken with the build's own voice pack, by path -- the hub never asked.
+grep -q "\"voice\": \"$VOICE_MLX/voices/af_heart.safetensors\"" "$VOICE_MLX_RECORD" \
+    || fail "the voice was not the build's own pack: $(cat "$VOICE_MLX_RECORD")"
+grep -q "\[voice\] speaking on MLX (gpu)" "$WORK_DIR/voice-mlx.err" || fail "MLX was not said: $(cat "$WORK_DIR/voice-mlx.err")"
+for stream in out err; do
+    if grep -q "chatter\|noise on stderr" "$WORK_DIR/voice-mlx.$stream"; then
+        fail "mlx-audio's output reached voice say's std$stream"
+    fi
+done
+[ -z "$(ls -A "$APOGEE_HOME/cache/video")" ] || fail "an MLX speech left its working directory"
+
+# An engine its model does not speak on: refused before anything runs.
+set +e
+"$APOGEE_BIN" voice say "Hi." --model "$VOICE_MLX_HANDLE" --engine torch -o "$WORK_DIR/out/voice-torch.wav" \
+    </dev/null >/dev/null 2>"$WORK_DIR/voice-torch.err"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 1 ] || fail "an MLX voice model spoke on --engine torch ($STATUS)"
+grep -q -- "--engine torch: '$VOICE_MLX_HANDLE' is an MLX voice model, which speaks on MLX (mlx-audio), not PyTorch" \
+    "$WORK_DIR/voice-torch.err" || fail "the engine refusal: $(cat "$WORK_DIR/voice-torch.err")"
+[ ! -e "$WORK_DIR/out/voice-torch.wav" ] || fail "a refused speech wrote a file"
+
+echo "voice say on MLX: recorded with its engine, its timings the WAV's, the build's own voice - OK"
+
+# --- Ctrl-C mid-speech on MLX, the MLX speech driver's whole tree sampled ------
+rm -f "$VOICE_MLX_RECORD"
+STUB_MLX_AUDIO_HANG=1 STUB_MLX_AUDIO_RECORD="$VOICE_MLX_RECORD" "$APOGEE_BIN" voice say "A long one." \
+    --model "$VOICE_MLX_HANDLE" -o "$WORK_DIR/out/voice-mlx-stopped.wav" \
+    </dev/null >/dev/null 2>"$WORK_DIR/voice-mlx-stopped.err" &
+CHILD=$!
+tries=0
+until [ -s "$VOICE_MLX_RECORD" ] && grep -q '"say"' "$VOICE_MLX_RECORD"; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 300 ] || { kill -9 "$CHILD" 2>/dev/null || true; fail "the MLX speech driver never started"; }
+    sleep 0.1
+done
+if command -v lsof >/dev/null 2>&1; then
+    SEEN=0
+    for _ in 1 2 3 4 5; do
+        PIDS="$CHILD"
+        for pid in $(descendants "$CHILD"); do
+            PIDS="$PIDS,$pid"
+            ps -o command= -p "$pid" 2>/dev/null | grep -q voice_say_mlx.py && SEEN=1
+        done
+        # No socket of any kind anywhere below apogee, and no listener in its tree.
+        HIT="$(lsof -a -p "$PIDS" -i -sTCP:LISTEN -Fn 2>/dev/null || true)"
+        [ -z "$HIT" ] || { kill -9 "$CHILD" 2>/dev/null || true; fail "INVARIANT VIOLATED: an MLX speech's tree listens: $HIT"; }
+        for pid in $(descendants "$CHILD"); do
+            SOCKETS="$(lsof -a -p "$pid" -i -Fn 2>/dev/null || true)"
+            [ -z "$SOCKETS" ] || { kill -9 "$CHILD" 2>/dev/null || true; fail "INVARIANT VIOLATED: the MLX speech driver's tree holds a socket: $SOCKETS"; }
+        done
+        sleep 0.1
+    done
+    [ "$SEEN" = 1 ] || { kill -9 "$CHILD" 2>/dev/null || true; fail "the sample never saw the MLX speech driver, so it proved nothing"; }
+fi
+kill -INT "$CHILD"
+set +e
+wait "$CHILD"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 130 ] || fail "Ctrl-C mid-speech on MLX exited $STATUS: $(cat "$WORK_DIR/voice-mlx-stopped.err")"
+[ ! -e "$WORK_DIR/out/voice-mlx-stopped.wav" ] || fail "a cancelled MLX speech left a file"
+[ -z "$(ls -A "$APOGEE_HOME/cache/video")" ] || fail "a cancelled MLX speech left its working directory"
+if pgrep -f "$APOGEE_HOME/training/scripts/voice_say_mlx.py" >/dev/null 2>&1; then
+    fail "the MLX speech driver outlived the cancelled run"
+fi
+
+echo "voice say on MLX: Ctrl-C mid-speech leaves nothing; no socket in the MLX speech driver's tree - OK"
+
+# The composer narrates on whichever engine its voice model's directory says,
+# as each clip runs on its own model's (53m).
+set +e
+"$APOGEE_BIN" video compose "the tides, twice a day" -m "$MLX_HANDLE" --voice-model "$VOICE_MLX_HANDLE" \
+    -o "$WORK_DIR/out/tides-voice-mlx.mp4" --planner planner --output-format json \
+    </dev/null >"$WORK_DIR/compose-voice-mlx.out" 2>"$WORK_DIR/compose-voice-mlx.err"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 0 ] || fail "video compose with an MLX voice failed ($STATUS): $(cat "$WORK_DIR/compose-voice-mlx.err")"
+for scene in s01 s02; do
+    [ "$(field "$WORK_DIR/out/tides-voice-mlx.scenes/$scene.wav.json" '["engine"]')" = "mlx" ] \
+        || fail "the composition's $scene narration did not speak on MLX"
+done
+if grep -q "chatter\|noise on stderr" "$WORK_DIR/compose-voice-mlx.out" "$WORK_DIR/compose-voice-mlx.err"; then
+    fail "mlx-audio's output reached compose's streams"
+fi
+
+echo "video compose: narrated on MLX through the voice model's own engine - OK"
+
 # --- mlx-video not installed: refused on a pipe, naming its setup -------------
 rm -rf "$SITE/mlx_video"
 generate mlx_missing -o "$WORK_DIR/out/mlx-missing.mp4" --model "$MLX_HANDLE"
@@ -781,3 +928,16 @@ grep -q "mlx-video is not installed in the Python environment at .* -- apogee tr
     "$WORK_DIR/mlx_missing.err" || fail "the refusal: $(cat "$WORK_DIR/mlx_missing.err")"
 
 echo "video generate on MLX: mlx-video missing refused naming its setup - OK"
+
+# --- mlx-audio not installed: refused on a pipe, naming its setup -------------
+rm -rf "$SITE/mlx_audio"
+set +e
+"$APOGEE_BIN" voice say "Hi." --model "$VOICE_MLX_HANDLE" -o "$WORK_DIR/out/voice-missing.wav" \
+    </dev/null >/dev/null 2>"$WORK_DIR/voice-missing.err"
+STATUS=$?
+set -e
+[ "$STATUS" -ne 0 ] || fail "a speech without mlx-audio succeeded"
+grep -q "mlx-audio is not installed in the Python environment at .* -- apogee train setup --with mlx-audio" \
+    "$WORK_DIR/voice-missing.err" || fail "the refusal: $(cat "$WORK_DIR/voice-missing.err")"
+
+echo "voice say on MLX: mlx-audio missing refused naming its setup - OK"

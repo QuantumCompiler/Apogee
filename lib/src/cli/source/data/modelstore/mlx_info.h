@@ -72,8 +72,9 @@ struct MlxInfo {
     /// Every file a load needs was found whole: `config.json` (the model's,
     /// not a download record), a tokenizer, every shard the index names, and
     /// each shard's header within its file -- or, for a video model, its
-    /// layout's files in a tokenizer's place (`video`). Not a claim that
-    /// `mlx-lm` builds the architecture -- only a load says that.
+    /// layout's files in a tokenizer's place (`video`), and for a voice model
+    /// its voices (`voice`). Not a claim that `mlx-lm` builds the
+    /// architecture -- only a load says that.
     bool complete = false;
     /// Read as an MLX video model (53k): mlx-video's Wan layout, its
     /// `config.json` beside `t5_encoder.safetensors`, `vae.safetensors` and
@@ -82,6 +83,11 @@ struct MlxInfo {
     /// whole. No tokenizer -- mlx-video reads the text encoder's from its own
     /// source -- and no token window.
     bool video = false;
+    /// Read as an MLX voice model (53m): mlx-audio's build of Kokoro, its
+    /// `config.json` beside the weights and a `voices/` directory of voice
+    /// packs (`voices/<name>.safetensors`), each whole. No tokenizer --
+    /// Kokoro reads text through its phonemizer -- and no token window.
+    bool voice = false;
     /// Why not, in a sentence. Set exactly when `complete` is false.
     std::string problem;
     /// `config.json` was read and is the model's: what follows comes from it.
@@ -109,7 +115,8 @@ struct MlxInfo {
 /// with the reason. `kind` is what the directory is (53e), when the caller
 /// knows it before a record says it -- a conversion's staging (53k); empty,
 /// its record's word. A `video` directory is read by its own layout's files
-/// (`MlxInfo::video`); every other kind as a language model's.
+/// (`MlxInfo::video`), and since 53m a `voice` directory by its own
+/// (`MlxInfo::voice`); every other kind as a language model's.
 [[nodiscard]] MlxInfo read_mlx_info(const std::filesystem::path& dir, std::string_view kind = {});
 
 /// The files an MLX video model's directory holds (53k), as mlx-video's Wan
@@ -118,6 +125,12 @@ struct MlxInfo {
 inline constexpr std::string_view kMlxVideoFiles =
     "config.json, the T5 text encoder (t5_encoder.safetensors), the VAE (vae.safetensors) and "
     "the transformer's weights";
+
+/// The files an MLX voice model's directory holds (53m), as mlx-audio's
+/// converter writes Kokoro -- `config.json`, the weights, then its voice
+/// packs -- for a sentence.
+inline constexpr std::string_view kMlxVoiceFiles =
+    "config.json, the weights and its voices (voices/*.safetensors)";
 
 /// Whether the SafeTensors file `shard`, `size` bytes, is whole: its header
 /// reads and every tensor it lists lies within the file -- what tells a

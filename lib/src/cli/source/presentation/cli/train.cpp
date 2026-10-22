@@ -2011,7 +2011,8 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     setup
         ->add_option("--with", *setup_with,
                      "Install a requirement set: prepare (Parquet), mlx, peft, convert -- and "
-                     "mlx-video (Wan to MLX, from GitHub), which only this installs")
+                     "mlx-video (Wan to MLX, from GitHub) and mlx-audio (Kokoro on MLX), which "
+                     "only this installs")
         ->type_name(words_value(training::requirement_set_names()));
     setup
         ->add_option("--python", *setup_python,

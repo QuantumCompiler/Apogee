@@ -263,12 +263,10 @@ void video_compose(const RootContext& context, const ComposeFlags& flags) {
     seams.ready_video = [&config](const ResolvedPipeline& pipeline) {
         return ready_engine(config, pipeline, "video compose");
     };
+    // The narration on whichever engine its voice model's directory says
+    // (53m), as each clip is.
     seams.ready_voice = [&config](const ResolvedVoiceModel& model) {
-        const video::VideoReadiness runtime = ready_voice_runtime(config, "video compose");
-        if (!runtime.ready() && runtime.refusal != video::VideoRefusal::NoDriver) {
-            return runtime;
-        }
-        return video::probe_voice(video::VideoHost::current(), model.dir, model.handle);
+        return ready_voice_engine(config, model.dir, model.handle, model.engine, "video compose");
     };
     seams.plan = [&config, &config_path, &busy](const std::string& backend,
                                                 const std::string& system, const std::string& user,
@@ -286,7 +284,8 @@ void video_compose(const RootContext& context, const ComposeFlags& flags) {
         options.output = wav;
         VoiceSaySeams run;
         run.ready = [](const ResolvedVoiceModel& resolved) {
-            return video::probe_voice(video::VideoHost::current(), resolved.dir, resolved.handle);
+            return video::probe_voice_engine(video::VideoHost::current(), resolved.engine,
+                                             resolved.dir, resolved.handle);
         };
         if (job.has_value()) {
             run.on_event = [&](const video::VoiceEvent& event) {

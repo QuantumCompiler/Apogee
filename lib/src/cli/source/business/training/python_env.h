@@ -73,6 +73,13 @@ enum class RequirementSet : std::uint8_t {
     /// opt-in only: `train setup --with mlx-video`, never the bootstrap
     /// (`set_opt_in`). Brings mlx-vlm and mlx-lm with it.
     MlxVideo,
+    /// `mlx-audio`, with the `torch` Kokoro's PyTorch checkpoint is read
+    /// through and the `misaki` its text is phonemized by (53m): `models
+    /// convert --mlx` makes a stored voice model an MLX one through its
+    /// converter, and `voice say` speaks with that through its Kokoro, the
+    /// seeded driver `voice_say_mlx.py`. Opt-in only, as mlx-video is: `train
+    /// setup --with mlx-audio`, never the bootstrap (`set_opt_in`).
+    MlxAudio,
 };
 
 [[nodiscard]] std::string_view to_string(RequirementSet set) noexcept;
@@ -85,17 +92,18 @@ enum class RequirementSet : std::uint8_t {
 
 /// Why `set` is not for a host with these facts (51) -- the table's own
 /// column, so a set added to it says there where it runs: `mlx`, `mlx-vlm`,
-/// `mlx-embeddings` and `mlx-video` are Apple silicon's, `peft` an NVIDIA
-/// GPU's, every other set any host's. Empty when it is for this one.
+/// `mlx-embeddings`, `mlx-video` and `mlx-audio` are Apple silicon's, `peft`
+/// an NVIDIA GPU's, every other set any host's. Empty when it is for this one.
 [[nodiscard]] std::string set_unfit_reason(RequirementSet set, bool apple_silicon, bool nvidia_smi);
 
 /// Whether `set` is installed only on the person's word (53k) -- the table's
 /// own column: `train setup --with <set>` installs it, and the install's
-/// bootstrap never does, saying it skipped with that command named. Only
+/// bootstrap never does, saying it skipped with that command named:
 /// `mlx-video`, whose package comes from a GitHub commit rather than PyPI
-/// ("never at install unasked", the user's call, 2026-10-21). Its Python
-/// range still counts toward the environment's choice, since the person may
-/// install it later.
+/// ("never at install unasked", the user's call, 2026-10-21), and since 53m
+/// `mlx-audio` ("installed by `train setup --with mlx-audio` and never
+/// unasked"). Their Python ranges still count toward the environment's
+/// choice, since the person may install them later.
 [[nodiscard]] bool set_opt_in(RequirementSet set) noexcept;
 
 /// A set's package that is not on PyPI (53k): pip builds it from its
@@ -170,6 +178,10 @@ struct PythonRange {
 /// first whose `models/gemma3_text.py` pools before its dense layers and
 /// converts its padding mask -- the module the embedding route is built on.
 [[nodiscard]] std::string_view mlx_embeddings_floor_reviewed() noexcept;
+/// When mlx-audio's floor was last read against its releases (53m): the
+/// first whose `convert` takes every precision the table maps (`q_mode`) and
+/// whose Kokoro loads a voice by a direct path to its SafeTensors pack.
+[[nodiscard]] std::string_view mlx_audio_floor_reviewed() noexcept;
 
 /// What the environment holds, read from `apogee.json` and the filesystem.
 struct PythonEnvStatus {

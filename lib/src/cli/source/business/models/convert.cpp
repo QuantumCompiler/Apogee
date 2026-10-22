@@ -10,6 +10,7 @@
 
 #include "modelstore/mlx_info.h"
 #include "modelstore/snapshot.h"
+#include "modelstore/voice_info.h"
 
 namespace apogee::models {
 namespace {
@@ -196,6 +197,21 @@ std::int64_t estimated_mlx_bytes(std::int64_t elements, int bits) {
 
 std::string mlx_conversion_refusal(const std::filesystem::path& snapshot,
                                    const std::filesystem::path& out, std::string_view kind) {
+    // A voice model as Kokoro publishes it is mlx-audio's route's input, and
+    // its alone (53m): no snapshot, so its rung 1 is the model read whole.
+    if (kind == kMlxVoice) {
+        if (const VoiceInfo voice = read_voice_info(snapshot); !voice.complete) {
+            return snapshot.string() +
+                   " is no whole voice model: mlx-audio's converter takes Kokoro's own layout "
+                   "(config.json, its checkpoint and voices/*.pt) -- " +
+                   voice.problem;
+        }
+        std::error_code code;
+        if (std::filesystem::exists(out, code)) {
+            return "something already exists at " + out.string() + " -- delete it first";
+        }
+        return {};
+    }
     // --- rung 1: a snapshot, an intact one, of full weights ---------------------
     if (!is_snapshot_dir(snapshot)) {
         return snapshot.string() +

@@ -81,7 +81,12 @@ constexpr std::string_view kMlxVideoConverter = "mlx_video.models.wan_2.convert"
 }  // namespace
 
 MlxConverterKind choose_mlx_converter(bool towers, bool text_only, bool embedding, bool drafter,
-                                      bool video) noexcept {
+                                      bool video, bool voice) noexcept {
+    if (voice) {
+        // A voice model as Kokoro publishes it is mlx-audio's alone (53m): no
+        // other converter takes a text-to-speech model.
+        return MlxConverterKind::MlxAudio;
+    }
     if (video) {
         // Wan's original layout is mlx-video's alone (53k): no language
         // model's converter builds a diffusion transformer.
@@ -111,6 +116,8 @@ std::string_view to_string(MlxConverterKind converter) noexcept {
             return "mlx-embeddings";
         case MlxConverterKind::MlxVideo:
             return "mlx-video";
+        case MlxConverterKind::MlxAudio:
+            return "mlx-audio";
     }
     return "mlx-lm";
 }
@@ -125,6 +132,8 @@ std::string_view mlx_converter_package(MlxConverterKind converter) noexcept {
             return "mlx_embeddings";
         case MlxConverterKind::MlxVideo:
             return "mlx_video";
+        case MlxConverterKind::MlxAudio:
+            return "mlx_audio";
     }
     return "mlx_lm";
 }
@@ -139,6 +148,8 @@ std::string_view mlx_converter_entry(MlxConverterKind converter) noexcept {
             return "mlx_embeddings.convert";
         case MlxConverterKind::MlxVideo:
             return kMlxVideoConverter;
+        case MlxConverterKind::MlxAudio:
+            return kMlxAudioConverter;
     }
     return "mlx_lm.convert";
 }
@@ -153,11 +164,27 @@ RequirementSet mlx_converter_set(MlxConverterKind converter) noexcept {
             return RequirementSet::MlxEmbeddings;
         case MlxConverterKind::MlxVideo:
             return RequirementSet::MlxVideo;
+        case MlxConverterKind::MlxAudio:
+            return RequirementSet::MlxAudio;
     }
     return RequirementSet::Mlx;
 }
 
 namespace {
+
+/// `dotted` as a path under `package`'s parent -- `mlx_video.models.wan_2.
+/// convert` as `<site-packages>/mlx_video/models/wan_2/convert`, without a
+/// suffix.
+[[nodiscard]] std::filesystem::path module_path(const std::filesystem::path& package,
+                                                std::string_view dotted) {
+    std::filesystem::path out = package.parent_path();
+    for (std::string_view rest = dotted; !rest.empty();) {
+        const std::size_t dot = rest.find('.');
+        out /= std::string{rest.substr(0, dot)};
+        rest = dot == std::string_view::npos ? std::string_view{} : rest.substr(dot + 1);
+    }
+    return out;
+}
 
 /// The mlx-video module `dotted` names, as a file under the environment at
 /// `venv`, with the torch its set brings beside it -- or empty.
@@ -167,13 +194,7 @@ namespace {
     if (package.empty() || find_site_package(venv, "torch").empty()) {
         return {};
     }
-    // `mlx_video.models.wan_2.<module>`, as a file under the package.
-    std::filesystem::path module = package.parent_path();
-    for (std::string_view rest = dotted; !rest.empty();) {
-        const std::size_t dot = rest.find('.');
-        module /= std::string{rest.substr(0, dot)};
-        rest = dot == std::string_view::npos ? std::string_view{} : rest.substr(dot + 1);
-    }
+    std::filesystem::path module = module_path(package, dotted);
     module += ".py";
     std::error_code code;
     return std::filesystem::is_regular_file(module, code) ? module : std::filesystem::path{};
@@ -187,6 +208,46 @@ std::filesystem::path find_mlx_video_converter(const std::filesystem::path& venv
 
 std::filesystem::path find_mlx_video_generator(const std::filesystem::path& venv) {
     return find_mlx_video_module(venv, kMlxVideoGenerator);
+}
+
+namespace {
+
+/// mlx-audio's Kokoro package under the environment at `venv` -- its
+/// `__init__.py` there -- or empty.
+[[nodiscard]] std::filesystem::path find_kokoro_package(const std::filesystem::path& venv,
+                                                        std::filesystem::path& package) {
+    package = find_site_package(venv, "mlx_audio");
+    if (package.empty()) {
+        return {};
+    }
+    const std::filesystem::path kokoro = module_path(package, kMlxAudioKokoro);
+    std::error_code code;
+    return std::filesystem::is_regular_file(kokoro / "__init__.py", code) ? kokoro
+                                                                          : std::filesystem::path{};
+}
+
+}  // namespace
+
+std::filesystem::path find_mlx_audio_converter(const std::filesystem::path& venv) {
+    std::filesystem::path package;
+    if (find_kokoro_package(venv, package).empty() || find_site_package(venv, "torch").empty()) {
+        return {};
+    }
+    std::filesystem::path converter = module_path(package, kMlxAudioConverter);
+    converter += ".py";
+    std::error_code code;
+    return std::filesystem::is_regular_file(converter, code) ? converter : std::filesystem::path{};
+}
+
+std::filesystem::path find_mlx_audio_kokoro(const std::filesystem::path& venv) {
+    std::filesystem::path package;
+    const std::filesystem::path kokoro = find_kokoro_package(venv, package);
+    std::error_code code;
+    if (kokoro.empty() || !std::filesystem::is_regular_file(package / "tts" / "utils.py", code) ||
+        find_site_package(venv, "misaki").empty()) {
+        return {};
+    }
+    return kokoro;
 }
 
 std::span<const MlxPrecision> mlx_precisions() noexcept {

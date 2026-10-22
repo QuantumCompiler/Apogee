@@ -112,16 +112,16 @@ struct ScriptedPath {
 };
 
 /// Every set an Apple-silicon host can install, in the table's order --
-/// mlx-video too, opt-in (53k).
+/// mlx-video too, opt-in (53k), and mlx-audio, opt-in (53m).
 const std::vector<RequirementSet> kAppleSets{
-    RequirementSet::Prepare,       RequirementSet::Mlx,     RequirementSet::Convert,
-    RequirementSet::MlxVlm,        RequirementSet::Video,   RequirementSet::Voice,
-    RequirementSet::MlxEmbeddings, RequirementSet::MlxVideo};
+    RequirementSet::Prepare,       RequirementSet::Mlx,      RequirementSet::Convert,
+    RequirementSet::MlxVlm,        RequirementSet::Video,    RequirementSet::Voice,
+    RequirementSet::MlxEmbeddings, RequirementSet::MlxVideo, RequirementSet::MlxAudio};
 
 }  // namespace
 
 TEST_CASE("requirement sets are named and carry packages", "[training][python]") {
-    CHECK(requirement_set_names().size() == 9);
+    CHECK(requirement_set_names().size() == 10);
     // The speech driver's stack (50a).
     CHECK(requirement_set_from_string("voice") == RequirementSet::Voice);
     CHECK(packages_for(RequirementSet::Voice)[1] == "kokoro>=0.9.4");
@@ -376,7 +376,8 @@ TEST_CASE("the choice is the newest Python every set the host can install runs o
     CHECK(chosen.version.str() == "3.12.13");
     CHECK(chosen.reason ==
           "the newest Python every set this host can install runs on (>=3.11,<3.13); passed over "
-          "python3 (3.14.5), python3.13 (3.13.13): the 'voice' set runs on >=3.10,<3.13");
+          "python3 (3.14.5), python3.13 (3.13.13): the 'voice' set runs on >=3.10,<3.13; the "
+          "'mlx-audio' set runs on >=3.10,<3.13");
 
     // The person's word stands: never swapped, refused before anything runs.
     const apogee::training::PythonChoice named = choose_base_python(
@@ -400,8 +401,9 @@ TEST_CASE("with no Python for every set, the requested ones decide; with none fo
     const apogee::training::PythonChoice prepare =
         choose_base_python("", kAppleSets, std::vector{RequirementSet::Prepare}, fixture.runner());
     CHECK(prepare.path.filename() == "python3");
-    CHECK(prepare.reason.find("so the 'voice' set cannot go in this environment") !=
-          std::string::npos);
+    // The voice set and, since 53m, mlx-audio's -- both bounded by misaki.
+    CHECK(prepare.reason.find("so the 'voice' and 'mlx-audio' sets cannot go in this "
+                              "environment") != std::string::npos);
 
     const apogee::training::PythonChoice voice =
         choose_base_python("", kAppleSets, std::vector{RequirementSet::Voice}, fixture.runner());
@@ -449,12 +451,39 @@ TEST_CASE("mlx-video is a set from one reviewed GitHub commit, with the torch it
         const RequirementSet set = *requirement_set_from_string(name);
         CHECK(apogee::training::pinned_source(set).has_value() ==
               (set == RequirementSet::MlxVideo));
-        CHECK(apogee::training::set_opt_in(set) == (set == RequirementSet::MlxVideo));
+        CHECK(apogee::training::set_opt_in(set) ==
+              (set == RequirementSet::MlxVideo || set == RequirementSet::MlxAudio));
     }
     // Its Python, per its pyproject and README at the commit; Apple silicon's.
     CHECK(python_range(RequirementSet::MlxVideo).describe() == ">=3.11");
     CHECK(apogee::training::set_unfit_reason(RequirementSet::MlxVideo, true, false).empty());
     CHECK(apogee::training::set_unfit_reason(RequirementSet::MlxVideo, false, true) ==
+          "for Apple silicon, which this host is not");
+}
+
+TEST_CASE("mlx-audio is an opt-in set: its floor, the torch and misaki Kokoro needs, its range",
+          "[training][python][mlx_audio]") {
+    // 53m: on PyPI, so floors -- mlx-audio's the first release whose convert
+    // takes every precision and whose Kokoro loads a voice by its pack's
+    // path, read on a recorded date -- with the torch Kokoro's checkpoint is
+    // read through and the misaki it speaks through.
+    REQUIRE(requirement_set_from_string("mlx-audio") == RequirementSet::MlxAudio);
+    CHECK(to_string(RequirementSet::MlxAudio) == "mlx-audio");
+    const auto packages = packages_for(RequirementSet::MlxAudio);
+    REQUIRE(packages.size() == 3);
+    CHECK(packages[0] == "mlx-audio>=0.4.0");
+    CHECK(packages[1] == "misaki[en]>=0.9.4");
+    CHECK(packages[2] == "torch>=2.6");
+    CHECK(apogee::training::mlx_audio_floor_reviewed() == "2026-10-22");
+    CHECK_FALSE(apogee::training::pinned_source(RequirementSet::MlxAudio).has_value());
+    // Installed on the person's word alone, as mlx-video is.
+    CHECK(apogee::training::set_opt_in(RequirementSet::MlxAudio));
+    // Bounded by misaki as the voice set is; Apple silicon's.
+    CHECK(python_range(RequirementSet::MlxAudio).describe() == ">=3.10,<3.13");
+    CHECK(python_range(RequirementSet::MlxAudio).describe() ==
+          python_range(RequirementSet::Voice).describe());
+    CHECK(apogee::training::set_unfit_reason(RequirementSet::MlxAudio, true, false).empty());
+    CHECK(apogee::training::set_unfit_reason(RequirementSet::MlxAudio, false, true) ==
           "for Apple silicon, which this host is not");
 }
 

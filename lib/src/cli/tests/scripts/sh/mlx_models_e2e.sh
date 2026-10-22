@@ -27,7 +27,13 @@
 # whole with the stub mlx-video installed, converted through the real driver
 # to an MLX video model recorded `video`, said so by `models info`,
 # registered as nothing by `config scan`, the converter's prints on neither
-# of apogee's streams.
+# of apogee's streams. Since 53m a stored Kokoro in the `voice` format:
+# offered no conversion and refused naming mlx-audio's setup while mlx-audio
+# is not installed; then, with the stub mlx-audio installed, offered `mlx`,
+# converted through the real driver -- its PyTorch checkpoint and voice packs
+# read through the stub torch -- to an MLX voice model recorded `voice`, said
+# so by `models info` with its voices, registered as nothing by `config scan`,
+# the converter's prints on neither of apogee's streams.
 #
 # Apple silicon only: the mlx runtime runs nowhere else (the in-process
 # suite, `models_mlx_test`, covers the rest on every platform).
@@ -499,6 +505,80 @@ grep -q "not registered -- a video model" "$WORK_DIR/wan-scan.txt" \
     || fail "the scan did not say the video model apart: $(cat "$WORK_DIR/wan-scan.txt")"
 if grep -rqF "$(basename "${WAN_SETS[0]}")" "$WORK_DIR/config/"; then
     fail "the scan registered the video model as a backend: $(cat "$WORK_DIR/wan-scan.txt")"
+fi
+
+# --- a voice model (53m): through mlx-audio to an MLX voice model ---------------------
+# Kokoro as `models pull` stores it: its config, its PyTorch checkpoint and its
+# voice packs, each a zip archive's shape -- small fake bytes.
+KOKORO="$WORK_DIR/models/hexgrad--Kokoro-82M/voice/aaaaaaaaaaaa"
+KOKORO_HANDLE="hexgrad--Kokoro-82M/voice/aaaaaaaaaaaa"
+python3 - "$KOKORO" <<'EOF' || fail "could not write the voice model"
+import json, os, sys
+d = sys.argv[1]
+def save(path, size=96):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as out:
+        out.write(b"PK\x03\x04" + b"w" * size + b"PK\x05\x06" + b"\0" * 22)
+os.makedirs(d, exist_ok=True)
+json.dump({"istftnet": {"upsample_rates": [10, 6]}, "plbert": {}, "vocab": {"a": 43}},
+          open(os.path.join(d, "config.json"), "w"))
+save(os.path.join(d, "kokoro-v1_0.pth"), 256)
+for voice in ("af_heart", "bm_george"):
+    save(os.path.join(d, "voices", voice + ".pt"))
+EOF
+# No mlx-audio: nothing offered, the conversion refused naming its setup.
+"$APOGEE_BIN" models info "$KOKORO_HANDLE" --output-format json >"$WORK_DIR/voice-info.json" 2>&1 \
+    || fail "models info of the voice model"
+grep -q '"converts_to":null' "$WORK_DIR/voice-info.json" \
+    || fail "a voice model was offered a conversion with no mlx-audio: $(cat "$WORK_DIR/voice-info.json")"
+if "$APOGEE_BIN" models convert "$KOKORO_HANDLE" --mlx >"$WORK_DIR/voice.txt" 2>&1; then
+    fail "a voice model converted with no mlx-audio: $(cat "$WORK_DIR/voice.txt")"
+fi
+grep -q "mlx-audio is not installed in Apogee's Python environment" "$WORK_DIR/voice.txt" \
+    || fail "the refusal did not say mlx-audio is missing: $(cat "$WORK_DIR/voice.txt")"
+grep -q "apogee train setup --with mlx-audio" "$WORK_DIR/voice.txt" \
+    || fail "the refusal did not name mlx-audio's setup: $(cat "$WORK_DIR/voice.txt")"
+[ ! -e "$WORK_DIR/models/hexgrad--Kokoro-82M/mlx" ] || fail "a refusal left an MLX directory"
+
+# mlx-audio installed: offered MLX, converted through the real seeded driver.
+mlx_fake_audio "$WORK_DIR" "$MLX_STUBS"
+"$APOGEE_BIN" models info "$KOKORO_HANDLE" --output-format json >"$WORK_DIR/voice-info.json" 2>&1 \
+    || fail "models info of the voice model"
+grep -q '"converts_to":\["mlx"\]' "$WORK_DIR/voice-info.json" \
+    || fail "the voice model was not offered MLX through mlx-audio: $(cat "$WORK_DIR/voice-info.json")"
+"$APOGEE_BIN" models convert "$KOKORO_HANDLE" --mlx >"$WORK_DIR/voice.txt" 2>"$WORK_DIR/voice.err" \
+    || fail "convert --mlx of the voice model failed: $(cat "$WORK_DIR/voice.err")"
+grep -q "mlx-audio's converter, Kokoro's checkpoint and its 2 voices built into an MLX voice model" \
+    "$WORK_DIR/voice.txt" || fail "the conversion did not say mlx-audio built it: $(cat "$WORK_DIR/voice.txt")"
+grep -q "kind: voice (recorded)" "$WORK_DIR/voice.txt" \
+    || fail "the conversion did not say it made a voice model: $(cat "$WORK_DIR/voice.txt")"
+if grep -q "\[INFO\]\|noise on stderr" "$WORK_DIR/voice.txt" "$WORK_DIR/voice.err"; then
+    fail "mlx-audio's own print reached a terminal stream"
+fi
+VOICE_SETS=("$WORK_DIR"/models/hexgrad--Kokoro-82M/mlx/*/)
+[ "${#VOICE_SETS[@]}" -eq 1 ] || fail "expected one MLX build of the voice model, found: ${VOICE_SETS[*]}"
+for part in config.json model.safetensors voices/af_heart.safetensors voices/bm_george.safetensors; do
+    [ -f "${VOICE_SETS[0]}$part" ] || fail "the MLX voice model lacks $part"
+done
+[ ! -e "${VOICE_SETS[0]}.apogee-source" ] || fail "the converter's source was left in the model"
+grep -q '"transform": "mlx_audio.convert bf16"' "${VOICE_SETS[0]}apogee-snapshot.json" \
+    || fail "the record does not say mlx-audio made it: $(cat "${VOICE_SETS[0]}apogee-snapshot.json")"
+grep -q '"kind": "voice"' "${VOICE_SETS[0]}apogee-snapshot.json" \
+    || fail "the record does not say voice: $(cat "${VOICE_SETS[0]}apogee-snapshot.json")"
+no_driver_left
+VOICE_MLX="hexgrad--Kokoro-82M/mlx/$(basename "${VOICE_SETS[0]}")"
+"$APOGEE_BIN" models info "$VOICE_MLX" -q >"$WORK_DIR/voice-mlx.txt" 2>&1 \
+    || fail "models info of the MLX voice model: $(cat "$WORK_DIR/voice-mlx.txt")"
+grep -q "kind:         voice (recorded) -- a voice model" "$WORK_DIR/voice-mlx.txt" \
+    || fail "models info did not say it is a voice model: $(cat "$WORK_DIR/voice-mlx.txt")"
+grep -q "voices:       American English: af_heart" "$WORK_DIR/voice-mlx.txt" \
+    || fail "models info did not list its voices: $(cat "$WORK_DIR/voice-mlx.txt")"
+# Never a chat backend: the scan says it apart, and registers nothing of it.
+"$APOGEE_BIN" config scan --register >"$WORK_DIR/voice-scan.txt" 2>&1 || fail "config scan --register"
+grep -q "not registered -- a voice model" "$WORK_DIR/voice-scan.txt" \
+    || fail "the scan did not say the voice model apart: $(cat "$WORK_DIR/voice-scan.txt")"
+if grep -rqF "$(basename "${VOICE_SETS[0]}")" "$WORK_DIR/config/"; then
+    fail "the scan registered the voice model as a backend: $(cat "$WORK_DIR/voice-scan.txt")"
 fi
 
 echo "mlx_models_e2e: ok"

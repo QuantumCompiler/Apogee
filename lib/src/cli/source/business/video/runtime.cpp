@@ -181,6 +181,8 @@ std::string_view to_string(VideoRefusal refusal) noexcept {
             return "no mlx-video";
         case VideoRefusal::NoTokenizer:
             return "no tokenizer";
+        case VideoRefusal::NoMlxAudio:
+            return "no mlx-audio";
     }
     return "unknown";
 }
@@ -194,6 +196,7 @@ VideoHost VideoHost::at(const std::filesystem::path& home) {
     host.mlx_driver = home / harness::bundled_video_mlx_driver_relative_path();
     host.target = platform::host_target();
     host.roots = models::StoreRoots::at(home / "models");
+    host.voice_mlx_driver = home / harness::bundled_voice_mlx_driver_relative_path();
     return host;
 }
 
@@ -507,6 +510,85 @@ VideoReadiness probe_voice(const VideoHost& host, const std::filesystem::path& m
     }
     readiness.driver = host.voice_driver;
     return readiness;
+}
+
+VideoReadiness probe_voice_mlx(const VideoHost& host, const std::filesystem::path& model,
+                               std::string_view handle) {
+    VideoReadiness readiness;
+    readiness.engine = VideoEngine::Mlx;
+    if (host.target != kVideoMlxTarget) {
+        return refused(std::move(readiness), VideoRefusal::NotAppleSilicon,
+                       "MLX runs on Apple silicon alone, and this is " +
+                           (host.target.empty() ? std::string{"another host"} : host.target),
+                       "a voice model as Kokoro publishes it speaks here on PyTorch: apogee "
+                       "models pull hexgrad/Kokoro-82M");
+    }
+    const training::PythonEnv env{host.venv};
+    if (!env.exists()) {
+        return refused(std::move(readiness), VideoRefusal::NoEnvironment,
+                       "there is no Python environment at " + host.venv.string() +
+                           " -- speech on MLX runs mlx-audio there, never the system Python",
+                       std::string{kMlxAudioSetupRemedy});
+    }
+    readiness.interpreter = env.interpreter();
+    if (training::find_mlx_audio_kokoro(host.venv).empty()) {
+        return refused(std::move(readiness), VideoRefusal::NoMlxAudio,
+                       "mlx-audio is not installed in the Python environment at " +
+                           host.venv.string() + " (its Kokoro, " +
+                           std::string{training::kMlxAudioKokoro} +
+                           ", and the misaki it reads text through, read from their files)",
+                       std::string{kMlxAudioSetupRemedy});
+    }
+    if (const std::filesystem::path package = training::find_site_package(host.venv, "mlx_audio");
+        !package.empty()) {
+        readiness.mlx_audio_version = training::installed_package_version(package);
+    }
+    if (const std::filesystem::path package = training::find_site_package(host.venv, "mlx");
+        !package.empty()) {
+        readiness.mlx_version = training::installed_package_version(package);
+    }
+
+    if (!model.empty()) {
+        const std::string name = handle.empty() ? model.string() : std::string{handle};
+        std::error_code code;
+        if (!std::filesystem::is_directory(model, code)) {
+            return refused(std::move(readiness), VideoRefusal::NoVoiceModel,
+                           "there is no MLX voice model at " + model.string(),
+                           "apogee models convert <a voice model> --mlx (mlx-audio)");
+        }
+        const models::MlxKind kind = models::read_mlx_kind(model);
+        if (kind.word != models::kMlxVoice) {
+            return refused(std::move(readiness), VideoRefusal::NotAVoiceModel,
+                           name + " is an MLX " + kind.word + " model, not a voice model -- " +
+                               models::describe_mlx_kind(kind.word),
+                           {});
+        }
+        const models::MlxInfo info = models::read_mlx_info(model, models::kMlxVoice);
+        if (!info.complete) {
+            const std::optional<models::Snapshot> record = models::load_snapshot(model);
+            return refused(std::move(readiness), VideoRefusal::NotAVoiceModel,
+                           name + " " + info.problem,
+                           record.has_value() && !record->ref.empty() && !handle.empty()
+                               ? "convert it again: apogee models delete " + std::string{handle} +
+                                     ", then apogee models convert " + record->ref + " --mlx"
+                               : std::string{"convert its voice model again with --mlx"});
+        }
+    }
+
+    std::error_code code;
+    if (!std::filesystem::is_regular_file(host.voice_mlx_driver, code)) {
+        return refused(std::move(readiness), VideoRefusal::NoDriver,
+                       "the MLX voice driver is missing: " + host.voice_mlx_driver.string(),
+                       "apogee check --fix");
+    }
+    readiness.driver = host.voice_mlx_driver;
+    return readiness;
+}
+
+VideoReadiness probe_voice_engine(const VideoHost& host, VideoEngine engine,
+                                  const std::filesystem::path& model, std::string_view handle) {
+    return engine == VideoEngine::Mlx ? probe_voice_mlx(host, model, handle)
+                                      : probe_voice(host, model, handle);
 }
 
 }  // namespace apogee::video

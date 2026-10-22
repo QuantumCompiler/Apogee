@@ -128,6 +128,15 @@ TEST_CASE("the bootstrap's plan is train setup's own table, the host deciding ea
     for (const BootstrapStep& each : apple) {
         CHECK(std::ranges::find(each.words, "mlx-video") == each.words.end());
     }
+    // 53m: mlx-audio the same -- installed by `train setup --with mlx-audio`
+    // and never unasked.
+    CHECK(step(apple, "mlx-audio").words.empty());
+    CHECK(step(apple, "mlx-audio").status == "skipped");
+    CHECK(step(apple, "mlx-audio").reason ==
+          "opt-in, never installed unasked -- 'apogee train setup --with mlx-audio' installs it");
+    for (const BootstrapStep& each : apple) {
+        CHECK(std::ranges::find(each.words, "mlx-audio") == each.words.end());
+    }
     // An NVIDIA box: the other way round.
     const std::vector<BootstrapStep> cuda =
         apogee::commands::bootstrap_plan(BootstrapHost{.nvidia_smi = true});
@@ -136,6 +145,7 @@ TEST_CASE("the bootstrap's plan is train setup's own table, the host deciding ea
     CHECK(step(cuda, "convert").words == Words{"train", "setup", "--with", "convert"});
     CHECK(step(cuda, "mlx-embeddings").reason == "for Apple silicon, which this host is not");
     CHECK(step(cuda, "mlx-video").reason == "for Apple silicon, which this host is not");
+    CHECK(step(cuda, "mlx-audio").reason == "for Apple silicon, which this host is not");
 }
 
 TEST_CASE("each step runs once, in order, said as it goes; one that fails is skipped",
@@ -159,7 +169,8 @@ TEST_CASE("each step runs once, in order, said as it goes; one that fails is ski
                                            {"train", "setup", "--with", "video"},
                                            {"train", "setup", "--with", "voice"},
                                            {"train", "setup", "--with", "mlx-embeddings"},
-                                           // never mlx-video's (53k)
+                                           // never mlx-video's (53k) nor
+                                           // mlx-audio's (53m)
                                            {"mcp", "create", "code", "--from", "code-exec"},
                                            {"providers", "scan", "--register"},
                                            {"config", "scan", "--register"}});
@@ -170,26 +181,31 @@ TEST_CASE("each step runs once, in order, said as it goes; one that fails is ski
     CHECK(script.said.front() ==
           "bootstrap: the runtimes this machine can run, then its "
           "providers and its model store, registered");
-    CHECK(said("[1/13] the 'prepare' set -- apogee train setup --with prepare"));
+    CHECK(said("[1/14] the 'prepare' set -- apogee train setup --with prepare"));
     CHECK(
-        said("[3/13] the 'peft' set -- skipped: for an NVIDIA GPU, and nvidia-smi is not on "
+        said("[3/14] the 'peft' set -- skipped: for an NVIDIA GPU, and nvidia-smi is not on "
              "PATH here"));
     CHECK(
-        said("[9/13] the 'mlx-video' set -- skipped: opt-in, never installed unasked -- 'apogee "
+        said("[9/14] the 'mlx-video' set -- skipped: opt-in, never installed unasked -- 'apogee "
              "train setup --with mlx-video' installs it"));
+    // 53m: mlx-audio is opt-in too, said skipped with the command that
+    // installs it.
+    CHECK(
+        said("[10/14] the 'mlx-audio' set -- skipped: opt-in, never installed unasked -- 'apogee "
+             "train setup --with mlx-audio' installs it"));
     CHECK(said("  environment already exists at /home/.apogee/training/venv"));
     CHECK(
         said("  skipped -- exit 1: ERROR: Could not find a version that satisfies the "
              "requirement torch>=2.6"));
-    CHECK(said("[10/13] the code-execution server -- apogee mcp create code --from code-exec"));
-    CHECK(said("[11/13] the providers -- apogee providers scan --register"));
+    CHECK(said("[11/14] the code-execution server -- apogee mcp create code --from code-exec"));
+    CHECK(said("[12/14] the providers -- apogee providers scan --register"));
     CHECK(said("  claude  credentials found  backend: claude"));
     CHECK(
-        said("[13/13] ffmpeg with captions -- skipped: Homebrew's ffmpeg-full is macOS's -- "
+        said("[14/14] ffmpeg with captions -- skipped: Homebrew's ffmpeg-full is macOS's -- "
              "'apogee check' names this host's way"));
     // The voice set still ran after video's failed; the last line is the door.
     CHECK(script.said.back() ==
-          "done: 9 of 13 steps, 4 skipped -- 'apogee bootstrap' runs it again any time");
+          "done: 9 of 14 steps, 5 skipped -- 'apogee bootstrap' runs it again any time");
     const auto& video = *std::ranges::find(result.steps, "the 'video' set", &BootstrapStep::name);
     CHECK(video.status == "skipped");
     const auto& store = *std::ranges::find(result.steps, "the model store", &BootstrapStep::name);
@@ -199,7 +215,7 @@ TEST_CASE("each step runs once, in order, said as it goes; one that fails is ski
     const nlohmann::json document = apogee::commands::bootstrap_document(result);
     CHECK(document["object"] == "apogee.bootstrap");
     CHECK(document["minimal"] == false);
-    REQUIRE(document["steps"].size() == 13);
+    REQUIRE(document["steps"].size() == 14);
     CHECK(document["steps"][2] == nlohmann::json{{"name", "the 'peft' set"},
                                                  {"command", nullptr},
                                                  {"status", "skipped"},
@@ -214,11 +230,18 @@ TEST_CASE("each step runs once, in order, said as it goes; one that fails is ski
                          {"reason",
                           "opt-in, never installed unasked -- 'apogee train setup --with "
                           "mlx-video' installs it"}});
-    CHECK(document["steps"][11] == nlohmann::json{{"name", "the model store"},
+    CHECK(document["steps"][9] ==
+          nlohmann::json{{"name", "the 'mlx-audio' set"},
+                         {"command", nullptr},
+                         {"status", "skipped"},
+                         {"reason",
+                          "opt-in, never installed unasked -- 'apogee train setup --with "
+                          "mlx-audio' installs it"}});
+    CHECK(document["steps"][12] == nlohmann::json{{"name", "the model store"},
                                                   {"command", "apogee config scan --register"},
                                                   {"status", "done"},
                                                   {"reason", nullptr}});
-    CHECK(document["steps"][12]["command"] == nullptr);
+    CHECK(document["steps"][13]["command"] == nullptr);
 }
 
 TEST_CASE("a step that cannot start is skipped, saying why", "[cli][bootstrap]") {
@@ -287,10 +310,10 @@ TEST_CASE("ffmpeg with captions: check's remedy run on a Mac with Homebrew, in i
         // link still runs; the step is done.
         CHECK(result.steps.back().status == "done");
         CHECK(std::ranges::find(script.said,
-                                "[13/13] ffmpeg with captions -- brew install "
+                                "[14/14] ffmpeg with captions -- brew install "
                                 "ffmpeg-full && brew unlink ffmpeg; brew link "
                                 "--force ffmpeg-full") != script.said.end());
-        CHECK(apogee::commands::bootstrap_document(result)["steps"][12]["command"] ==
+        CHECK(apogee::commands::bootstrap_document(result)["steps"][13]["command"] ==
               "brew install ffmpeg-full && brew unlink ffmpeg; brew link --force ffmpeg-full");
     }
     // An install that fails ends the step there, never fatal, saying which.

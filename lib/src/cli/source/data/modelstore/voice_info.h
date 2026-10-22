@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -70,5 +71,31 @@ struct VoiceInfo {
 /// One line: "kokoro-v1_0.pth, 54 voices (American English, British
 /// English, …)".
 [[nodiscard]] std::string describe(const VoiceInfo& info);
+
+// --- a voice model on MLX (53m) ---------------------------------------------------------
+
+/// What an MLX voice model's directory is (53m) -- mlx-audio's build of a
+/// Kokoro model, its record's kind `voice` -- read as `read_voice_info` reads
+/// the format it was built from: `complete` by the MLX reader's own rule for
+/// the kind (`read_mlx_info`: its `config.json`, the weights and every voice
+/// pack whole), `checkpoint` the weights' file (`model.safetensors`, or the
+/// first of its shards), and `voices` its packs, `voices/<name>.safetensors`,
+/// each named and its language said as a Kokoro voice's is. So `voice say`,
+/// its completion and `models info` read the voices an MLX build carries --
+/// mlx-audio's Kokoro presets -- as they read the original's.
+[[nodiscard]] VoiceInfo read_mlx_voice_info(const std::filesystem::path& dir);
+
+/// Whether mlx-audio's converter, with the Kokoro it builds, is installed in
+/// Apogee's Python environment (53m) -- the caller's reading of that
+/// environment, handed down as `VideoConverts` is: this floor reads none.
+using VoiceConverts = std::function<bool()>;
+
+/// The formats the stored voice model at `dir` converts to (53m) -- M20's
+/// decision, one more answer: `mlx` exactly where the model is whole
+/// (`read_voice_info`) and `mlx_audio` says mlx-audio is installed and builds
+/// Kokoro; none anywhere else. Never a GGUF: llama.cpp's converter takes no
+/// text-to-speech model.
+[[nodiscard]] std::vector<std::string> voice_conversions(const std::filesystem::path& dir,
+                                                         const VoiceConverts& mlx_audio = {});
 
 }  // namespace apogee::models

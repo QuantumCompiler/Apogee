@@ -497,3 +497,115 @@ TEST_CASE("mlx-video's Wan generator takes 4n+1 frames, and a model's mode is it
     CHECK(apogee::video::mlx_video_mode(install.model) == "ti2v");
     CHECK(apogee::video::mlx_video_mode(install.root.path()).empty());
 }
+
+namespace {
+
+/// An install the MLX speech engine runs on (53m): Apple silicon; the
+/// environment with mlx-audio's Kokoro, the TTS loader beside it, misaki and
+/// mlx in it; the MLX speech driver; an MLX voice model in the store.
+struct MlxVoiceInstall {
+    apogee::testing::TempDir root{"voice-runtime-mlx-" + std::to_string(std::random_device{}())};
+    VideoHost host = VideoHost::at(root.path());
+    std::filesystem::path site = host.venv / "lib" / "python3.99" / "site-packages";
+    std::filesystem::path model = root.path() / "models" / "hexgrad--K" / "mlx" / "dddddddddddd";
+    std::string handle = "hexgrad--K/mlx/dddddddddddd";
+
+    MlxVoiceInstall() {
+        host.target = "macos-arm64";
+        write(apogee::training::PythonEnv{host.venv}.interpreter(), "#!/bin/sh\n");
+        write(site / "mlx_audio" / "__init__.py");
+        write(site / "mlx_audio" / "tts" / "__init__.py");
+        write(site / "mlx_audio" / "tts" / "utils.py");
+        write(site / "mlx_audio" / "tts" / "models" / "kokoro" / "__init__.py");
+        std::filesystem::create_directories(site / "mlx_audio-0.6.1.dist-info");
+        write(site / "misaki" / "__init__.py");
+        write(site / "mlx" / "__init__.py");
+        std::filesystem::create_directories(site / "mlx-0.32.4.dist-info");
+        write(host.voice_mlx_driver, "# the MLX speech driver\n");
+        apogee::testing::write_mlx_voice_model(model);
+    }
+
+    [[nodiscard]] VideoReadiness probe() const {
+        return apogee::video::probe_voice_mlx(host, model, handle);
+    }
+};
+
+}  // namespace
+
+TEST_CASE("the MLX speech engine's install is ready, and says what it found",
+          "[video][runtime][ladder][voice][mlx_audio]") {
+    const MlxVoiceInstall install;
+    const VideoReadiness ready = install.probe();
+    INFO(ready.message());
+    REQUIRE(ready.ready());
+    CHECK(ready.engine == VideoEngine::Mlx);
+    CHECK(ready.driver == install.host.voice_mlx_driver);
+    CHECK(ready.interpreter == apogee::training::PythonEnv{install.host.venv}.interpreter());
+    CHECK(ready.mlx_audio_version == "0.6.1");
+    CHECK(ready.mlx_version == "0.32.4");
+    // No ffmpeg, no torch, no kokoro asked for: its own rungs alone.
+    VideoHost bare = install.host;
+    bare.ffmpeg.clear();
+    CHECK(apogee::video::probe_voice_engine(bare, VideoEngine::Mlx, install.model, install.handle)
+              .ready());
+    // The PyTorch engine's ladder for the same host asks for its own set.
+    CHECK(apogee::video::probe_voice_engine(install.host, VideoEngine::Torch).refusal ==
+          VideoRefusal::NoTorch);
+}
+
+TEST_CASE("the MLX speech ladder: every rung refuses with its own reason and its exact fix",
+          "[video][runtime][ladder][voice][mlx_audio]") {
+    MlxVoiceInstall install;
+    const auto message = [&install] { return install.probe().message(); };
+
+    // The voice model's own rungs.
+    apogee::testing::write_fixture_file(install.model / "voices" / "am_adam.safetensors", "short");
+    CHECK(install.probe().refusal == VideoRefusal::NotAVoiceModel);
+    CHECK(message() == install.handle +
+                           " cannot load: voices/am_adam.safetensors is truncated or not a "
+                           "SafeTensors file (its header does not fit in its 5 bytes) -- convert "
+                           "it again: apogee models delete " +
+                           install.handle +
+                           ", then apogee models convert hexgrad--Kokoro-82M/voice/aaaaaaaaaaaa "
+                           "--mlx");
+    std::filesystem::remove_all(install.model);
+    apogee::testing::write_mlx_model(install.model, {.kind = "chat"});
+    CHECK(install.probe().refusal == VideoRefusal::NotAVoiceModel);
+    CHECK(message() == install.handle +
+                           " is an MLX chat model, not a voice model -- a language model: an mlx "
+                           "backend chats with it");
+    std::filesystem::remove_all(install.model);
+    CHECK(install.probe().refusal == VideoRefusal::NoVoiceModel);
+    CHECK(message() == "there is no MLX voice model at " + install.model.string() +
+                           " -- apogee models convert <a voice model> --mlx (mlx-audio)");
+
+    // The driver, asked last.
+    std::filesystem::remove(install.host.voice_mlx_driver);
+    CHECK(apogee::video::probe_voice_mlx(install.host).message() ==
+          "the MLX voice driver is missing: " + install.host.voice_mlx_driver.string() +
+              " -- apogee check --fix");
+
+    // mlx-audio's Kokoro, and the misaki it reads text through.
+    std::filesystem::remove_all(install.site / "misaki");
+    CHECK(apogee::video::probe_voice_mlx(install.host).refusal == VideoRefusal::NoMlxAudio);
+    CHECK(apogee::video::probe_voice_mlx(install.host).message() ==
+          "mlx-audio is not installed in the Python environment at " + install.host.venv.string() +
+              " (its Kokoro, mlx_audio.tts.models.kokoro, and the misaki it reads text through, "
+              "read from their files) -- apogee train setup --with mlx-audio");
+    write(install.site / "misaki" / "__init__.py");
+    std::filesystem::remove_all(install.site / "mlx_audio" / "tts" / "models" / "kokoro");
+    CHECK(apogee::video::probe_voice_mlx(install.host).refusal == VideoRefusal::NoMlxAudio);
+
+    // The environment, then the platform.
+    std::filesystem::remove(apogee::training::PythonEnv{install.host.venv}.interpreter());
+    CHECK(apogee::video::probe_voice_mlx(install.host).message() ==
+          "there is no Python environment at " + install.host.venv.string() +
+              " -- speech on MLX runs mlx-audio there, never the system Python -- apogee train "
+              "setup --with mlx-audio");
+    install.host.target = "linux-x64";
+    CHECK(apogee::video::probe_voice_mlx(install.host).refusal == VideoRefusal::NotAppleSilicon);
+    CHECK(apogee::video::probe_voice_mlx(install.host).message() ==
+          "MLX runs on Apple silicon alone, and this is linux-x64 -- a voice model as Kokoro "
+          "publishes it speaks here on PyTorch: apogee models pull hexgrad/Kokoro-82M");
+    CHECK(apogee::video::to_string(VideoRefusal::NoMlxAudio) == "no mlx-audio");
+}
