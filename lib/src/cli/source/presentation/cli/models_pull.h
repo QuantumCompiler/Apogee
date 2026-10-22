@@ -258,6 +258,38 @@ struct GgufChoice {
 /// saying what it did on stdout. False when it could not.
 [[nodiscard]] bool repair_snapshot_in_place(const std::filesystem::path& dir);
 
+// --- SafeTensors snapshots ------------------------------------------------------------
+
+/// What `pull --safetensors` stored, found stored, or completed.
+struct PulledSnapshot {
+    std::string model;
+    std::string id;
+    std::filesystem::path dir;
+    /// The files pulling it again fetched into a set already stored: what its
+    /// record lacked of what the pull takes (53j). Empty otherwise.
+    std::vector<std::string> completed{};
+};
+
+/// `models pull <owner>/<repo> --safetensors`: the whole full-weight
+/// repository -- shards, configuration, tokenizer, and for Wan's original
+/// layout its root checkpoints (`snapshot_files`, 53j) -- through the tree
+/// ladder over `client`, each shard checked against the sha256 Hugging Face
+/// publishes for it, into `<model>/safetensors/<id>` and committed by rename
+/// so a half snapshot never appears. What the training track fine-tunes and
+/// `convert` reads.
+///
+/// The id is known before a byte moves -- Hugging Face publishes every
+/// shard's sha256 -- so weights already here are found, not fetched again.
+/// For Wan's original layout alone, what their record lacks of the files the
+/// pull takes is fetched into the same set (`complete_snapshot`), which keeps
+/// its id (53j); any other set is found and left as it is. The client is a
+/// parameter so a test serves a fixture source; `chained` (M3) leaves out
+/// what to do next.
+[[nodiscard]] PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& roots,
+                                           backends::HttpClient& client,
+                                           const harness::CancellationToken& cancellation,
+                                           bool chained = false);
+
 // --- MLX models (27b) ------------------------------------------------------------------
 
 /// One line for an MLX model: its quantization, the window an entry over it

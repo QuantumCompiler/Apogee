@@ -9748,3 +9748,59 @@ Mlx-lm converted 6 of them as text alone, and Qwen3-Omni-30B (`qwen3_omni_moe`) 
 - The speed with and without the drafter, measured on the user's Mac, is their run, recorded once made.
 - `models rename` of a drafter's or base's folder does not update a `draft:` path or the drafter's recorded `bases`. The ladder then refuses, naming the stale base, and converting again fixes it.
 - 27e's footprint does not count a drafter's weights.
+
+### 2026-10-21 — `wan-pulled-whole` (backlog item 53j): a Wan set pulled whole, and said for what it is
+
+**Why.** The user's run after M20 shipped:
+
+`'Wan-AI--Wan2.2-TI2V-5B/safetensors/6ef9b00b8b83' is a diffusion model's weights (WanModel, a diffusers class): neither converter takes one -- …`
+
+The refusal was true but incomplete. The set is Wan's original layout, and its record lists 10 files: the transformer's three shards, their index, two configs and the tokenizer. It lacks the T5 text encoder (`models_t5_umt5-xxl-enc-bf16.pth`) and the VAE (`Wan2.2_VAE.pth`). The cause is that the SafeTensors pull kept no `.pth` (`snapshot_wanted`). Nothing in Apogee could make video from the set, and the refusal said none of this. This was wall W6.
+
+- [x] **The pull takes a Wan original layout whole** (`snapshot_wanted`). A layout is recognized as follows:
+  - **The config:** a root `config.json` that diffusers wrote: a `_class_name` with `_diffusers_version` and no `architectures`.
+  - **The class:** its `_class_name` names a Wan model. That covers `WanModel`, `VaceWanModel` and `WanModel_S2V`, but not diffusers' own `WanTransformer3DModel`.
+  - **Beside it:** at least one root `.pth`.
+
+  Every root `.pth` of such a repository is taken, recorded and verified like any file. `config.json` is fetched for that check only when the tree has both, so every other repository costs nothing more and keeps exactly today's list. The voice pull is untouched. `has_root_checkpoint` now shares the one root-checkpoint rule, with no change in behaviour.
+- [x] **Pulling again completes a stored Wan set in place** (`acquire`'s `complete_snapshot`). The pull already recognizes a stored set by its shards' hash, and now fetches only what that set's record lacks.
+  - Each file is downloaded beside its place, checked against the published size and sha256, renamed in and recorded at once. If one fails, the files already landed are kept and the next pull fetches only the rest.
+  - A hand-placed file not on the record is replaced by the verified download.
+  - The set keeps its id, which hashes `.safetensors` alone (ADR 0006).
+- [x] **One reader says whether a set is whole** (`modelstore/snapshot`'s `snapshot_wan_layout(dir)`). It returns the layout, `whole()`, and `missing()` by name. Names come from the file on disk, else the record, else Wan's own release names:
+  - the text encoder is always `models_t5_umt5-xxl-enc-bf16.pth`;
+  - the VAE follows the config's `out_dim`: 48 gives `Wan2.2_VAE.pth`, 16 gives `Wan2.1_VAE.pth`.
+- [x] **Every surface says what the set is, what it lacks, and what runs it.** The surfaces are M20's `describe_diffusion_model`, `models info`'s `diffusion:` line, the conversion's refusal, and the pull's closing hint.
+  - **What it lacks:** the files missing, by name, with the pull that fetches them; or "complete".
+  - **What runs it:** today, the Diffusers pipeline in `apogee video generate`, named as the record's ref plus `-Diffusers` (Wan-AI's twin).
+  - **The JSON:** `models info`'s `data` gains `wan_layout: {class, whole, missing}` (`null` for every other set and format), added only, documented in `machine-mode.md`.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - The layout is a root `config.json` naming a Wan model class beside root `.pth` files, and every root `.pth` is taken.
+  - Pulling again fetches only the missing files and keeps the set's id. The pull had no download resume, so the stored-set step it already had was extended.
+- **Completion is limited to the recognized Wan layout.** Pulling a stored non-Wan set again behaves exactly as before, even if its repository has since added a file (the document's "nothing outside a recognized layout changes"). The builder had first extended completion to every set, and it was narrowed before shipping.
+- **The pull's closing hint for any diffusion set** now says what the set is, rather than "make a GGUF of it", which also changes M20's other diffusion classes.
+- **The code's word is `whole`, the prose's "complete".** `whole` is 53k's word.
+- **`pull_snapshot` takes its client and cancel token as parameters,** as `pull_voice` and `pull_mlx` do. Both callers still build a curl client and a fresh token, so Ctrl-C behaves as before.
+
+**Verified.**
+- 12 new cases (`[wan]`, 286 assertions) cover:
+  - the class rule;
+  - the user's set missing two files, then one, then complete, and how missing files are named;
+  - the file list with and without the layout, with the config read only when the tree has a root `config.json` and a root `.pth`;
+  - completion's refusals, a tampered file never landing, a hand-placed file replaced, the id unmoved;
+  - over the fake listing, the user's set pulled again gaining exactly the two files, verified, in the same set;
+  - a fresh pull taking all 12;
+  - a Llama repository's list unchanged with or without a root `.pth`;
+  - the refusal's wording;
+  - a stored non-Wan set pulled again left as it is, though its record lacks a file the listing now has: nothing fetched, its record byte-identical, `models info` unchanged. With the restriction removed, it fails.
+- The fixture is the user's own record, written inline (`tests/support/wan_original.h`). Three M20 cases now expect the new wording.
+- The neighbouring suites pass: `[diffusion]`, `[models]`, `[hf]`, `[acquire]`, `[store]`, `[voice]`, `[pipeline]`, `[mlx]`, `[convert]`, `[commands]`, `[video]`, `[check]` and `[scan]`.
+- These ctest cases pass: `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`, `cli.video_lifecycle`, `cli.machine_schema_conformance`, `cli.mlx_models_lifecycle` and `cli.config_lifecycle`.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,780 tests and the macOS app's 342 cases passed, with no warning.
+
+**Not done:**
+- The real download is the user's run.
+- `video generate`'s refusal, `models list`, `check` and `config scan` do not mention the layout. They are outside the document's seam.
+- Wan2.2-A14B's layout (no root `config.json`, its transformers in subfolders) is not recognized.

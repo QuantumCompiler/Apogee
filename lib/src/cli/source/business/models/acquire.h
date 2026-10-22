@@ -149,6 +149,19 @@ struct AcquireTreeResult {
                                              const std::vector<TreeItem>& items,
                                              const TreeProgressFn& progress = {});
 
+/// A committed SafeTensors set at `dir` completed from its record's gaps
+/// (53j): each item a file its record (`apogee-snapshot.json`) does not list,
+/// streamed through `acquire_file` beside its place and checked against its
+/// promise, then renamed into place -- over a file of unknown provenance the
+/// record does not list -- and added to the record at once. So what lands
+/// before a failure stays, recorded, and pulling again fetches the rest; a
+/// failed file leaves nothing of itself. The set keeps its id, which is its
+/// shards' hash: an item the record already lists, a shard, or a path
+/// leaving the set is refused before a byte moves (ADR 0006).
+[[nodiscard]] AcquireTreeResult complete_snapshot(const std::filesystem::path& dir,
+                                                  const std::vector<TreeItem>& items,
+                                                  const TreeProgressFn& progress = {});
+
 /// Re-runs verification against an already-acquired model and its sidecar.
 ///
 /// This is what `models repair` diagnoses with, and what makes the sidecar's

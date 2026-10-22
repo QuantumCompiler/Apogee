@@ -18,6 +18,7 @@
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
 #include "support/mlx_model.h"
+#include "support/wan_original.h"
 
 using apogee::harness::CancellationToken;
 using apogee::models::convert_snapshot;
@@ -492,16 +493,20 @@ TEST_CASE("a diffusion model is refused by both ladders before any converter run
           "[models][convert][mlx][diffusion]") {
     // The user's Wan2.2-TI2V-5B (M20, 2026-10-21): its MLX conversion ran
     // three seconds and failed in mlx-lm's own words -- the weights are a
-    // diffusers transformer, which neither converter takes.
+    // diffusers transformer, which neither converter takes. Since 53j the
+    // refusal says it is Wan's original layout, what it lacks and what runs
+    // it; with no record, no repository is named.
     const MlxWork work;
-    write_file(work.snapshot / "config.json",
-               R"({"_class_name": "WanModel", "_diffusers_version": "0.33.0",
-                   "model_type": "ti2v", "dim": 3072})");
+    write_file(work.snapshot / "config.json", std::string{apogee::testing::kWanTi2vConfig});
     const std::string mlx = apogee::models::mlx_conversion_refusal(work.snapshot, work.out);
     CHECK(mlx == work.snapshot.string() +
-                     " is a diffusion model's weights (WanModel, a diffusers class): neither "
-                     "converter takes one -- llama.cpp's finds a model by its architectures, and "
-                     "mlx-lm's builds a language model");
+                     " is Wan's original layout (WanModel), missing "
+                     "models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth -- pulling its "
+                     "repository again with --safetensors fetches them into this set; neither "
+                     "converter takes it -- llama.cpp's finds a model by its architectures, and "
+                     "mlx-lm's builds a language model; what runs this model today is its "
+                     "Diffusers pipeline in 'apogee video generate', pulled whole (a repository "
+                     "with model_index.json at its root)");
     CHECK(apogee::models::conversion_refusal(work.snapshot, work.root.path() / "out.gguf") == mlx);
 }
 

@@ -129,6 +129,53 @@ bool snapshot_wanted(std::string_view path) noexcept {
     return false;
 }
 
+bool root_checkpoint(std::string_view path) noexcept {
+    return path.ends_with(".pth") && path.find('/') == std::string_view::npos;
+}
+
+HfWanLayout read_wan_layout(backends::HttpClient& client, const HfRef& ref,
+                            const std::vector<HfFile>& tree, std::string_view token,
+                            const harness::CancellationToken& cancellation) {
+    HfWanLayout out;
+    const bool config =
+        std::ranges::any_of(tree, [](const HfFile& file) { return file.path == "config.json"; });
+    const bool checkpoints =
+        std::ranges::any_of(tree, [](const HfFile& file) { return root_checkpoint(file.path); });
+    if (!config || !checkpoints) {
+        out.ok = true;
+        return out;
+    }
+    const HfText text =
+        fetch_repo_text(client, ref, HfRepoKind::Model, "config.json", token, cancellation);
+    if (!text.ok) {
+        out.error = text.error;
+        return out;
+    }
+    out.class_name = wan_transformer_class(text.text);
+    out.ok = true;
+    return out;
+}
+
+std::vector<HfFile> snapshot_files(const std::vector<HfFile>& tree, bool wan_layout) {
+    std::vector<HfFile> out;
+    for (const HfFile& file : tree) {
+        if (snapshot_wanted(file.path) || (wan_layout && root_checkpoint(file.path))) {
+            out.push_back(file);
+        }
+    }
+    return out;
+}
+
+std::vector<HfFile> snapshot_gaps(const Snapshot& record, const std::vector<HfFile>& wanted) {
+    std::vector<HfFile> out;
+    for (const HfFile& file : wanted) {
+        if (std::ranges::find(record.files, file.path, &SnapshotFile::path) == record.files.end()) {
+            out.push_back(file);
+        }
+    }
+    return out;
+}
+
 std::vector<HfFile> pipeline_wanted(const std::vector<HfFile>& tree,
                                     const std::vector<std::string>& components) {
     const auto parent = [](std::string_view path) {
@@ -292,9 +339,7 @@ HfListing list_gguf_files(backends::HttpClient& client, const HfRef& ref, std::s
                 listing.has_model_index = true;
             }
             listing.has_root_config = listing.has_root_config || name == "config.json";
-            listing.has_root_checkpoint =
-                listing.has_root_checkpoint ||
-                (name.ends_with(".pth") && name.find('/') == std::string::npos);
+            listing.has_root_checkpoint = listing.has_root_checkpoint || root_checkpoint(name);
             listing.has_voice_packs =
                 listing.has_voice_packs || (name.starts_with("voices/") && name.ends_with(".pt"));
             if (name.size() > 5 && name.ends_with(".gguf")) {

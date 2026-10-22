@@ -118,6 +118,63 @@ struct ConfigWidth {
 [[nodiscard]] std::string draft_head_note(const DraftHead& head,
                                           const std::vector<std::string>& bases);
 
+/// One component **Wan's original layout** keeps beside its transformer (53j):
+/// a root PyTorch checkpoint, stored and verified like any file and never
+/// loaded by Apogee -- only a runtime of the original layout reads it
+/// (mlx-video's converter, 53k).
+struct WanComponent {
+    /// What it is: `text encoder` (`models_t5_*.pth`), `VAE` (`*_VAE.pth`), or
+    /// `checkpoint` for any other root `.pth` the set's record lists.
+    std::string role{};
+    /// Its file at the set's root: as it lies there, else as the record lists
+    /// it, else as Wan's releases name it -- the text encoder always
+    /// `models_t5_umt5-xxl-enc-bf16.pth`, the VAE by the latent width the
+    /// transformer's `out_dim` declares (48 `Wan2.2_VAE.pth`, 16
+    /// `Wan2.1_VAE.pth`, any other `*_VAE.pth`).
+    std::string file{};
+    bool present = false;
+};
+
+/// **Wan's original layout** (53j, 2026-10-21): a Wan video model as Wan
+/// publishes it beside its Diffusers pipeline -- the transformer at the root
+/// (`config.json` naming Wan's own class, `WanModel`, and its
+/// `diffusion_pytorch_model*.safetensors` shards), with the components every
+/// runtime needs beside it as root `.pth` files: the T5 text encoder and the
+/// VAE. Known by its config's class, never its repository's name.
+struct WanLayout {
+    /// `_class_name` as written: `WanModel`.
+    std::string class_name{};
+    /// The text encoder, the VAE, then any other root `.pth` on record or on
+    /// disk, by name.
+    std::vector<WanComponent> components{};
+
+    /// Every component is there: the set is whole, as a runtime of the
+    /// original layout takes it (53k's question).
+    [[nodiscard]] bool whole() const noexcept;
+    /// The components' files that are not there, in order.
+    [[nodiscard]] std::vector<std::string> missing() const;
+};
+
+/// Whether `class_name` is a Wan transformer of Wan's own code (53j):
+/// `WanModel`, or a later class named after it (`VaceWanModel`,
+/// `WanModel_S2V`) -- never diffusers' port (`WanTransformer3DModel`), which
+/// a Diffusers pipeline's transformer names.
+[[nodiscard]] bool is_wan_transformer_class(std::string_view class_name) noexcept;
+
+/// The Wan transformer class a `config.json`'s text names, read as
+/// `snapshot_diffusion_model` reads a diffusers class (a `_class_name` with a
+/// `_diffusers_version` and no `architectures`); empty for anything else. What
+/// a SafeTensors pull reads a repository's config with before a byte of
+/// weights moves (53j).
+[[nodiscard]] std::string wan_transformer_class(std::string_view config_text);
+
+/// The set at `dir` read as Wan's original layout (53j): its class, and each
+/// component it needs beside its transformer, there or not. nullopt when its
+/// `config.json` names no Wan transformer. The one answer to "is this Wan set
+/// whole, and what does it lack" -- what the conversion's refusal, `models
+/// info` and an MLX conversion of the original layout (53k) all ask.
+[[nodiscard]] std::optional<WanLayout> snapshot_wan_layout(const std::filesystem::path& dir);
+
 /// A **diffusion model's** weights (M20, 2026-10-21): a component of a
 /// diffusers pipeline -- a video model's transformer, `WanModel` -- whose
 /// `config.json` names the class diffusers builds it as (`_class_name`, beside
@@ -128,18 +185,34 @@ struct ConfigWidth {
 struct DiffusionModel {
     /// `_class_name`: the class diffusers builds it as.
     std::string class_name;
+    /// Wan's original layout, when the class is a Wan transformer (53j): what
+    /// the set is, and what it lacks.
+    std::optional<WanLayout> wan{};
+    /// The repository the set was pulled from, as its record says --
+    /// `owner/repo`, with `@revision` when it was not `main` -- which the way
+    /// to complete it and the pipeline that runs it are named by (53j). Empty
+    /// without a record.
+    std::string ref{};
 };
 
 /// The diffusion model `dir`'s `config.json` describes: one naming a
 /// `_class_name` with a `_diffusers_version` and no `architectures`. nullopt
 /// for anything else, or for a directory with no readable `config.json`.
+/// Wan's original layout is read with it (`snapshot_wan_layout`, 53j).
 [[nodiscard]] std::optional<DiffusionModel> snapshot_diffusion_model(
     const std::filesystem::path& dir);
 
 /// What a diffusion model is, in the one wording every surface uses: "a
 /// diffusion model's weights (<class>, a diffusers class): neither converter
 /// takes one -- llama.cpp's finds a model by its architectures, and mlx-lm's
-/// builds a language model".
+/// builds a language model". For Wan's original layout (53j), what it is,
+/// complete or what it lacks and the pull that fetches it, that neither
+/// converter takes it, and what runs the model today: "Wan's original layout
+/// (WanModel), missing models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth --
+/// 'apogee models pull <ref> --safetensors' fetches them into this set;
+/// neither converter takes it -- ...; what runs this model today is its
+/// Diffusers pipeline in 'apogee video generate', pulled whole with 'apogee
+/// models pull <ref>-Diffusers'".
 [[nodiscard]] std::string describe_diffusion_model(const DiffusionModel& model);
 
 /// The refusal a conversion of one says, `subject` its name or path.

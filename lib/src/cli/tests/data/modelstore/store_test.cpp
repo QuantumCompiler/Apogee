@@ -25,6 +25,7 @@
 #include "support/pipeline_model.h"
 #include "support/towered_configs.h"
 #include "support/voice_model.h"
+#include "support/wan_original.h"
 
 using apogee::models::StoreRoots;
 using apogee::models::StoreTarget;
@@ -1061,13 +1062,189 @@ TEST_CASE("a diffusion model is read from its config: its diffusers class, and n
     CHECK_FALSE(apogee::models::snapshot_diffusion_model(unwritten).has_value());
     CHECK_FALSE(apogee::models::snapshot_diffusion_model(store.root.path() / "absent").has_value());
 
-    // One wording, and the refusal built on it.
-    CHECK(apogee::models::describe_diffusion_model(*read) ==
-          "a diffusion model's weights (WanModel, a diffusers class): neither converter takes one "
-          "-- llama.cpp's finds a model by its architectures, and mlx-lm's builds a language "
-          "model");
-    CHECK(apogee::models::diffusion_model_refusal("'Wan-AI--Wan2.2-TI2V-5B'", *read) ==
-          "'Wan-AI--Wan2.2-TI2V-5B' is " + apogee::models::describe_diffusion_model(*read));
+    // One wording, and the refusal built on it -- M20's for a diffusers
+    // class that is no Wan transformer (Wan's is 53j's, below).
+    const std::filesystem::path ltx = store.root.path() / "ltx";
+    place_snapshot_with(ltx, R"({"_class_name": "LTXVideoTransformer3DModel",
+                                 "_diffusers_version": "0.33.0"})");
+    const std::optional<apogee::models::DiffusionModel> other =
+        apogee::models::snapshot_diffusion_model(ltx);
+    REQUIRE(other.has_value());
+    CHECK_FALSE(other->wan.has_value());
+    CHECK(apogee::models::describe_diffusion_model(*other) ==
+          "a diffusion model's weights (LTXVideoTransformer3DModel, a diffusers class): neither "
+          "converter takes one -- llama.cpp's finds a model by its architectures, and mlx-lm's "
+          "builds a language model");
+    CHECK(apogee::models::diffusion_model_refusal("'Lightricks--LTX-Video'", *other) ==
+          "'Lightricks--LTX-Video' is " + apogee::models::describe_diffusion_model(*other));
+}
+
+TEST_CASE("a Wan transformer is known by its config's class, never diffusers' port of it",
+          "[models][store][diffusion][wan]") {
+    using apogee::models::is_wan_transformer_class;
+    CHECK(is_wan_transformer_class("WanModel"));
+    CHECK(is_wan_transformer_class("VaceWanModel"));
+    CHECK(is_wan_transformer_class("WanModel_S2V"));
+    CHECK_FALSE(is_wan_transformer_class("WanTransformer3DModel"));
+    CHECK_FALSE(is_wan_transformer_class("WanVACETransformer3DModel"));
+    CHECK_FALSE(is_wan_transformer_class("LTXVideoTransformer3DModel"));
+    CHECK_FALSE(is_wan_transformer_class("WanPipeline"));
+    CHECK_FALSE(is_wan_transformer_class(""));
+
+    // A config's text, as the pull reads one before a byte of weights moves:
+    // diffusers wrote it, it names no architectures, and its class is Wan's.
+    using apogee::models::wan_transformer_class;
+    CHECK(wan_transformer_class(apogee::testing::kWanTi2vConfig) == "WanModel");
+    CHECK(wan_transformer_class(R"({"_class_name": "WanModel"})").empty());
+    CHECK(wan_transformer_class(R"({"_class_name": "WanModel", "_diffusers_version": "0.33.0",
+                                    "architectures": ["LlamaForCausalLM"]})")
+              .empty());
+    CHECK(wan_transformer_class(R"({"_class_name": "WanTransformer3DModel",
+                                    "_diffusers_version": "0.33.0"})")
+              .empty());
+    CHECK(wan_transformer_class(R"({"architectures": ["LlamaForCausalLM"]})").empty());
+    CHECK(wan_transformer_class("not json").empty());
+}
+
+TEST_CASE("the user's Wan set reads as Wan's original layout, missing its two checkpoints by name",
+          "[models][store][diffusion][wan]") {
+    // 53j: the user's record of ten files and config, as the pull before
+    // 53j left them.
+    const Store store;
+    // The fixture is the user's: ten files on record, the config and the
+    // configuration at the sizes the record lists.
+    CHECK(apogee::testing::kWanTi2vConfig.size() == 251);
+    CHECK(apogee::testing::kWanConfiguration.size() == 43);
+    CHECK(apogee::testing::wan_record().files.size() == 10);
+    const std::filesystem::path dir = apogee::testing::write_user_wan_set(store.roots);
+    const std::string encoder{apogee::testing::kWanTextEncoder};
+    const std::string vae{apogee::testing::kWanVae};
+
+    std::optional<apogee::models::WanLayout> layout = apogee::models::snapshot_wan_layout(dir);
+    REQUIRE(layout.has_value());
+    CHECK(layout->class_name == "WanModel");
+    REQUIRE(layout->components.size() == 2);
+    CHECK(layout->components[0].role == "text encoder");
+    CHECK(layout->components[1].role == "VAE");
+    CHECK_FALSE(layout->whole());
+    CHECK(layout->missing() == std::vector<std::string>{encoder, vae});
+
+    // The refusal and `info`'s line say what it is, what it lacks with the
+    // pull that fetches it, that neither converter takes it, and what runs
+    // the model today.
+    std::optional<apogee::models::DiffusionModel> model =
+        apogee::models::snapshot_diffusion_model(dir);
+    REQUIRE(model.has_value());
+    CHECK(model->ref == "Wan-AI/Wan2.2-TI2V-5B");
+    CHECK(apogee::models::diffusion_model_refusal(
+              "'Wan-AI--Wan2.2-TI2V-5B/safetensors/6ef9b00b8b83'", *model) ==
+          "'Wan-AI--Wan2.2-TI2V-5B/safetensors/6ef9b00b8b83' is Wan's original layout "
+          "(WanModel), missing models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth -- 'apogee "
+          "models pull Wan-AI/Wan2.2-TI2V-5B --safetensors' fetches them into this set; neither "
+          "converter takes it -- llama.cpp's finds a model by its architectures, and mlx-lm's "
+          "builds a language model; what runs this model today is its Diffusers pipeline in "
+          "'apogee video generate', pulled whole with 'apogee models pull "
+          "Wan-AI/Wan2.2-TI2V-5B-Diffusers'");
+
+    // One there, one not: the one named.
+    apogee::testing::write_fixture_file(dir / vae, apogee::testing::wan_bytes(vae));
+    layout = apogee::models::snapshot_wan_layout(dir);
+    REQUIRE(layout.has_value());
+    CHECK(layout->missing() == std::vector<std::string>{encoder});
+    model = apogee::models::snapshot_diffusion_model(dir);
+    REQUIRE(model.has_value());
+    CHECK(apogee::models::describe_diffusion_model(*model).starts_with(
+        "Wan's original layout (WanModel), missing models_t5_umt5-xxl-enc-bf16.pth -- 'apogee "
+        "models pull Wan-AI/Wan2.2-TI2V-5B --safetensors' fetches it into this set; "));
+
+    // Both there: whole, and said complete.
+    apogee::testing::write_fixture_file(dir / encoder, apogee::testing::wan_bytes(encoder));
+    layout = apogee::models::snapshot_wan_layout(dir);
+    REQUIRE(layout.has_value());
+    CHECK(layout->whole());
+    CHECK(layout->missing().empty());
+    model = apogee::models::snapshot_diffusion_model(dir);
+    REQUIRE(model.has_value());
+    CHECK(apogee::models::describe_diffusion_model(*model) ==
+          "Wan's original layout (WanModel), complete -- its transformer beside "
+          "models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth; neither converter takes it -- "
+          "llama.cpp's finds a model by its architectures, and mlx-lm's builds a language model; "
+          "what runs this model today is its Diffusers pipeline in 'apogee video generate', "
+          "pulled whole with 'apogee models pull Wan-AI/Wan2.2-TI2V-5B-Diffusers'");
+    // Still no conversion: the original layout converts through mlx-video,
+    // which is 53k's.
+    CHECK(apogee::models::snapshot_conversions(dir).empty());
+}
+
+TEST_CASE(
+    "a Wan set's components are named as it holds them, as its record lists them, or as Wan "
+    "names them",
+    "[models][store][diffusion][wan]") {
+    const Store store;
+    // A record that took the checkpoints, one since removed, and an image
+    // encoder beside them: each a component, the lost one by its recorded name.
+    const std::filesystem::path dir = store.root.path() / "i2v";
+    place_snapshot_with(dir, R"({"_class_name": "WanModel", "_diffusers_version": "0.30.0",
+                                 "model_type": "i2v", "in_dim": 36, "out_dim": 16})");
+    apogee::models::Snapshot record;
+    record.ref = "Wan-AI/Wan2.1-I2V-14B-480P";
+    record.revision = "0123abcd";
+    record.source = "huggingface";
+    record.files = {{.path = "model.safetensors", .size = 1, .sha256 = std::string(64, 'a')},
+                    {.path = "models_t5_umt5-xxl-enc-bf16.pth", .size = 1, .sha256 = {}},
+                    {.path = "Wan2.1_VAE.pth", .size = 1, .sha256 = {}},
+                    {.path = "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
+                     .size = 1,
+                     .sha256 = {}}};
+    REQUIRE(apogee::models::write_snapshot(dir, record));
+    write_file(dir / "models_t5_umt5-xxl-enc-bf16.pth");
+    write_file(dir / "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth");
+    const std::optional<apogee::models::WanLayout> layout =
+        apogee::models::snapshot_wan_layout(dir);
+    REQUIRE(layout.has_value());
+    REQUIRE(layout->components.size() == 3);
+    CHECK(layout->components[2].role == "checkpoint");
+    CHECK(layout->components[2].present);
+    CHECK(layout->missing() == std::vector<std::string>{"Wan2.1_VAE.pth"});
+    // The way names the revision it was pulled at; the pipeline, the
+    // repository alone.
+    const std::optional<apogee::models::DiffusionModel> model =
+        apogee::models::snapshot_diffusion_model(dir);
+    REQUIRE(model.has_value());
+    const std::string said = apogee::models::describe_diffusion_model(*model);
+    CHECK(said.find("missing Wan2.1_VAE.pth -- 'apogee models pull "
+                    "Wan-AI/Wan2.1-I2V-14B-480P@0123abcd --safetensors' fetches it") !=
+          std::string::npos);
+    CHECK(said.ends_with("'apogee models pull Wan-AI/Wan2.1-I2V-14B-480P-Diffusers'"));
+
+    // No record and no checkpoints: the names Wan's releases give them -- the
+    // VAE by the latent width the transformer declares -- and no repository
+    // to name.
+    const std::filesystem::path bare = store.root.path() / "bare";
+    place_snapshot_with(bare, R"({"_class_name": "WanModel", "_diffusers_version": "0.30.0",
+                                  "out_dim": 16})");
+    const std::optional<apogee::models::DiffusionModel> unrecorded =
+        apogee::models::snapshot_diffusion_model(bare);
+    REQUIRE(unrecorded.has_value());
+    REQUIRE(unrecorded->wan.has_value());
+    CHECK(unrecorded->wan->missing() ==
+          std::vector<std::string>{"models_t5_umt5-xxl-enc-bf16.pth", "Wan2.1_VAE.pth"});
+    CHECK(apogee::models::describe_diffusion_model(*unrecorded) ==
+          "Wan's original layout (WanModel), missing models_t5_umt5-xxl-enc-bf16.pth and "
+          "Wan2.1_VAE.pth -- pulling its repository again with --safetensors fetches them into "
+          "this set; neither converter takes it -- llama.cpp's finds a model by its "
+          "architectures, and mlx-lm's builds a language model; what runs this model today is "
+          "its Diffusers pipeline in 'apogee video generate', pulled whole (a repository with "
+          "model_index.json at its root)");
+    const std::filesystem::path unsized = store.root.path() / "unsized";
+    place_snapshot_with(unsized, R"({"_class_name": "WanModel", "_diffusers_version": "0.30.0"})");
+    CHECK(apogee::models::snapshot_wan_layout(unsized)->missing().back() == "*_VAE.pth");
+
+    // Anything else is no Wan layout.
+    const std::filesystem::path llama = store.root.path() / "llama";
+    place_snapshot_with(llama, R"({"architectures": ["LlamaForCausalLM"], "model_type": "llama"})");
+    CHECK_FALSE(apogee::models::snapshot_wan_layout(llama).has_value());
+    CHECK_FALSE(apogee::models::snapshot_wan_layout(store.root.path() / "absent").has_value());
 }
 
 TEST_CASE(

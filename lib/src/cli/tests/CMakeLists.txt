@@ -141,6 +141,7 @@ add_library(apogee_tests_data OBJECT
     support/fake_llama.h
     support/fake_transport.cpp
     support/media_fakes.h
+    support/wan_original.h
 )
 target_link_libraries(apogee_tests_data PRIVATE apogee_data apogee_infrastructure Catch2::Catch2)
 
@@ -300,6 +301,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/models_mlx_test.cpp
     presentation/cli/models_pipeline_test.cpp
     presentation/cli/models_voice_test.cpp
+    presentation/cli/models_wan_test.cpp
     presentation/cli/video_runtime_test.cpp
     presentation/cli/video_generate_test.cpp
     presentation/cli/video_cmd_test.cpp

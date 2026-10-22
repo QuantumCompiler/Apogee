@@ -2024,6 +2024,9 @@ namespace {
     data["kind"] = nullptr;
     // An MLX embedding model's vector width, below (53h); null otherwise.
     data["vector_width"] = nullptr;
+    // Wan's original layout, whole or what it lacks, below (53j); null for
+    // every other set and format.
+    data["wan_layout"] = nullptr;
     if (target.format == models::kGgufFormat) {
         for (const models::StoredGguf& stored : models::list_store_ggufs(roots, target.model)) {
             if (stored.id != target.id) {
@@ -2109,6 +2112,11 @@ namespace {
             const std::optional<MlxOffer> offer = set_mlx_offer(dir);
             data["converts_to"] = set_conversions(dir, offer);
             data["mlx_conversion"] = mlx_conversion_of(offer);
+            if (const std::optional<models::WanLayout> wan = models::snapshot_wan_layout(dir)) {
+                data["wan_layout"] = {{"class", wan->class_name},
+                                      {"whole", wan->whole()},
+                                      {"missing", wan->missing()}};
+            }
         }
     }
     if (dir.empty()) {

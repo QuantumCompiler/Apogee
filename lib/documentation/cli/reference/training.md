@@ -272,6 +272,21 @@ rename. `models list` shows a snapshot as `safetensors` -- trainable with
 removes it whole. Pulling a SafeTensors repository *without* the flag still
 refuses, naming both the converter and `--safetensors`.
 
+Wan's original layout comes whole (53j): a repository whose root
+`config.json` names Wan's own transformer class (`WanModel`) beside root
+`.pth` files -- `Wan-AI/Wan2.2-TI2V-5B`, for one -- gives its root
+checkpoints too, the T5 text encoder and the VAE, each recorded and verified
+like any file and never loaded by Apogee. Every other repository's file list
+is unchanged. A set already stored is found by its shards' hash before a
+byte moves; pulling a Wan set again fetches only what its record lacks of
+what the pull takes, into the same set, which keeps its id -- so one pulled
+before its checkpoints were taken is completed in place. Any other set
+already stored is found and left as it is. `models info`'s
+`diffusion:` line says whether it is complete, names what it lacks and the
+pull that fetches it, and what runs the model today -- its Diffusers
+pipeline (`<repo>-Diffusers`, pulled without the flag) in `apogee video
+generate`. Neither converter takes it.
+
 ## Training kits
 
 A kit is one YAML file bundling a teacher **synthesis spec** and an inline

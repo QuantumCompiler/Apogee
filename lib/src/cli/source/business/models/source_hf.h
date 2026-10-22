@@ -9,6 +9,7 @@
 
 #include "models/acquire.h"
 #include "modelstore/hf_ref.h"
+#include "modelstore/snapshot.h"
 #include "transport/http_client.h"
 
 /// Downloading a model file directly from Hugging Face.
@@ -128,8 +129,49 @@ struct HfTree {
 /// Whether `path` belongs in a SafeTensors snapshot: the shards, the model
 /// and tokenizer configuration, the tokenizer's own files, and any custom
 /// code -- never a GGUF, a PyTorch checkpoint, an image or the repository's
-/// housekeeping.
+/// housekeeping. Wan's original layout adds its root checkpoints
+/// (`snapshot_files`, 53j).
 [[nodiscard]] bool snapshot_wanted(std::string_view path) noexcept;
+
+/// Whether `path` is a PyTorch checkpoint at the repository's root (`*.pth`,
+/// no directory): a voice model's (50a), and Wan's original layout's text
+/// encoder and VAE (53j).
+[[nodiscard]] bool root_checkpoint(std::string_view path) noexcept;
+
+/// Whether a repository is **Wan's original layout** (53j): a root
+/// `config.json` naming a Wan transformer class -- read by the store's own
+/// reader of one, `wan_transformer_class` -- beside root checkpoints. Known
+/// by the config's class, never the repository's name.
+struct HfWanLayout {
+    bool ok = false;
+    std::string error{};
+    /// The Wan transformer class the config names; empty when it is not one.
+    std::string class_name{};
+
+    [[nodiscard]] bool layout() const noexcept {
+        return !class_name.empty();
+    }
+};
+
+/// Reads `config.json` of the repository whose `tree` it is -- only when the
+/// tree holds it and a root checkpoint, so every other repository's pull
+/// asks Hugging Face nothing more.
+[[nodiscard]] HfWanLayout read_wan_layout(backends::HttpClient& client, const HfRef& ref,
+                                          const std::vector<HfFile>& tree, std::string_view token,
+                                          const harness::CancellationToken& cancellation);
+
+/// What a SafeTensors pull takes of a repository's `tree`, in its order:
+/// what `snapshot_wanted` takes and, for Wan's original layout
+/// (`wan_layout`, 53j), every root checkpoint too -- its text encoder and VAE,
+/// recorded and verified like any file, never loaded by Apogee. Every other
+/// repository's list is `snapshot_wanted`'s alone.
+[[nodiscard]] std::vector<HfFile> snapshot_files(const std::vector<HfFile>& tree, bool wan_layout);
+
+/// The files of `wanted` a stored set's `record` does not list, by path, in
+/// `wanted`'s order (53j): what pulling a Wan original-layout set again
+/// fetches into it. No other set is completed.
+[[nodiscard]] std::vector<HfFile> snapshot_gaps(const Snapshot& record,
+                                                const std::vector<HfFile>& wanted);
 
 /// What a pipeline pull takes of a repository's `tree` (49a): the root's
 /// `model_index.json`, and under each of `components` (the index's names)

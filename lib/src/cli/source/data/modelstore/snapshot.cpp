@@ -259,23 +259,195 @@ std::string draft_head_note(const DraftHead& head, const std::vector<std::string
            ", never alone";
 }
 
-std::optional<DiffusionModel> snapshot_diffusion_model(const std::filesystem::path& dir) {
-    const nlohmann::json config = read_model_config(dir);
+namespace {
+
+/// The class a diffusers-written config names (M20): `_class_name` beside a
+/// `_diffusers_version`, with no `architectures`; empty for anything else.
+[[nodiscard]] std::string diffusers_class(const nlohmann::json& config) {
     if (!config.is_object() || config.contains("architectures")) {
-        return std::nullopt;
+        return {};
     }
     const auto class_name = config.find("_class_name");
     if (class_name == config.end() || !class_name->is_string() ||
-        class_name->get<std::string>().empty() || !config.contains("_diffusers_version")) {
+        !config.contains("_diffusers_version")) {
+        return {};
+    }
+    return class_name->get<std::string>();
+}
+
+/// The root `.pth` files under `dir`, sorted by name.
+[[nodiscard]] std::vector<std::string> root_checkpoints(const std::filesystem::path& dir) {
+    std::vector<std::string> out;
+    std::error_code code;
+    for (const auto& entry : std::filesystem::directory_iterator(dir, code)) {
+        if (code) {
+            break;
+        }
+        if (entry.is_regular_file(code) && entry.path().extension() == ".pth") {
+            out.push_back(entry.path().filename().string());
+        }
+    }
+    std::ranges::sort(out);
+    return out;
+}
+
+/// The VAE a Wan transformer decodes through, as Wan's releases name it: by
+/// the latent width its `out_dim` declares -- 48 channels Wan2.2's, 16
+/// Wan2.1's.
+[[nodiscard]] std::string wan_vae_name(const nlohmann::json& config) {
+    switch (positive_integer(config, "out_dim")) {
+        case 48:
+            return "Wan2.2_VAE.pth";
+        case 16:
+            return "Wan2.1_VAE.pth";
+        default:
+            return "*_VAE.pth";
+    }
+}
+
+[[nodiscard]] bool is_text_encoder_file(std::string_view name) noexcept {
+    return name.starts_with("models_t5_");
+}
+
+[[nodiscard]] bool is_vae_file(std::string_view name) noexcept {
+    return name.find("VAE") != std::string_view::npos || name.find("vae") != std::string_view::npos;
+}
+
+/// "a", "a and b", "a, b and c".
+[[nodiscard]] std::string said_together(const std::vector<std::string>& names) {
+    std::string out;
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        out += (i == 0 ? "" : i + 1 == names.size() ? " and " : ", ") + names[i];
+    }
+    return out;
+}
+
+}  // namespace
+
+bool WanLayout::whole() const noexcept {
+    return std::ranges::all_of(components, &WanComponent::present);
+}
+
+std::vector<std::string> WanLayout::missing() const {
+    std::vector<std::string> out;
+    for (const WanComponent& component : components) {
+        if (!component.present) {
+            out.push_back(component.file);
+        }
+    }
+    return out;
+}
+
+bool is_wan_transformer_class(std::string_view class_name) noexcept {
+    return class_name.find("Wan") != std::string_view::npos &&
+           class_name.find("Model") != std::string_view::npos &&
+           class_name.find("Transformer") == std::string_view::npos;
+}
+
+std::string wan_transformer_class(std::string_view config_text) {
+    const nlohmann::json config = nlohmann::json::parse(config_text, nullptr, false);
+    std::string name = diffusers_class(config);
+    return is_wan_transformer_class(name) ? name : std::string{};
+}
+
+std::optional<WanLayout> snapshot_wan_layout(const std::filesystem::path& dir) {
+    const nlohmann::json config = read_model_config(dir);
+    WanLayout layout{.class_name = diffusers_class(config), .components = {}};
+    if (!is_wan_transformer_class(layout.class_name)) {
         return std::nullopt;
     }
-    return DiffusionModel{.class_name = class_name->get<std::string>()};
+    const std::vector<std::string> on_disk = root_checkpoints(dir);
+    // What a pull that took the components recorded, for a set that lost one
+    // since: named as it was pulled.
+    std::vector<std::string> recorded;
+    if (const std::optional<Snapshot> record = load_snapshot(dir)) {
+        for (const SnapshotFile& file : record->files) {
+            if (file.path.find('/') == std::string::npos && file.path.ends_with(".pth")) {
+                recorded.push_back(file.path);
+            }
+        }
+    }
+    const auto resolve = [&](std::string role, bool (*is)(std::string_view) noexcept,
+                             std::string named) {
+        WanComponent component{.role = std::move(role), .file = std::move(named), .present = false};
+        if (const auto found = std::ranges::find_if(on_disk, is); found != on_disk.end()) {
+            component.file = *found;
+            component.present = true;
+        } else if (const auto listed = std::ranges::find_if(recorded, is);
+                   listed != recorded.end()) {
+            component.file = *listed;
+        }
+        layout.components.push_back(std::move(component));
+    };
+    resolve("text encoder", is_text_encoder_file, "models_t5_umt5-xxl-enc-bf16.pth");
+    resolve("VAE", is_vae_file, wan_vae_name(config));
+    // Any other root checkpoint the set holds or its record lists -- an image
+    // encoder, say -- is a component too.
+    std::vector<std::string> others = on_disk;
+    others.insert(others.end(), recorded.begin(), recorded.end());
+    std::ranges::sort(others);
+    others.erase(std::ranges::unique(others).begin(), others.end());
+    for (const std::string& name : others) {
+        if (std::ranges::find(layout.components, name, &WanComponent::file) ==
+            layout.components.end()) {
+            layout.components.push_back(
+                {.role = "checkpoint",
+                 .file = name,
+                 .present = std::ranges::find(on_disk, name) != on_disk.end()});
+        }
+    }
+    return layout;
+}
+
+std::optional<DiffusionModel> snapshot_diffusion_model(const std::filesystem::path& dir) {
+    const std::string class_name = diffusers_class(read_model_config(dir));
+    if (class_name.empty()) {
+        return std::nullopt;
+    }
+    DiffusionModel model{.class_name = class_name, .wan = snapshot_wan_layout(dir), .ref = {}};
+    if (const std::optional<Snapshot> record = load_snapshot(dir);
+        record.has_value() && !record->ref.empty()) {
+        model.ref = record->ref;
+        if (!record->revision.empty() && record->revision != "main") {
+            model.ref += "@" + record->revision;
+        }
+    }
+    return model;
 }
 
 std::string describe_diffusion_model(const DiffusionModel& model) {
-    return "a diffusion model's weights (" + model.class_name +
-           ", a diffusers class): neither converter takes one -- llama.cpp's finds a model by its "
-           "architectures, and mlx-lm's builds a language model";
+    if (!model.wan.has_value()) {
+        return "a diffusion model's weights (" + model.class_name +
+               ", a diffusers class): neither converter takes one -- llama.cpp's finds a model by "
+               "its architectures, and mlx-lm's builds a language model";
+    }
+    // What it is, whole or what it lacks and the way to complete it.
+    const WanLayout& wan = *model.wan;
+    std::string out = "Wan's original layout (" + wan.class_name + ")";
+    if (wan.whole()) {
+        std::vector<std::string> files;
+        for (const WanComponent& component : wan.components) {
+            files.push_back(component.file);
+        }
+        out += ", complete -- its transformer beside " + said_together(files);
+    } else {
+        const std::vector<std::string> missing = wan.missing();
+        out += ", missing " + said_together(missing) + " -- " +
+               (model.ref.empty() ? std::string{"pulling its repository again with --safetensors"}
+                                  : "'apogee models pull " + model.ref + " --safetensors'") +
+               " fetches " + (missing.size() == 1 ? "it" : "them") + " into this set";
+    }
+    // That neither converter takes it, and what runs the model today: the
+    // pipeline Wan publishes beside the original layout, by its repository's
+    // name and without its revision.
+    const std::string repository = model.ref.substr(0, model.ref.find('@'));
+    out +=
+        "; neither converter takes it -- llama.cpp's finds a model by its architectures, and "
+        "mlx-lm's builds a language model; what runs this model today is its Diffusers "
+        "pipeline in 'apogee video generate', pulled whole";
+    out += repository.empty() ? std::string{" (a repository with model_index.json at its root)"}
+                              : " with 'apogee models pull " + repository + "-Diffusers'";
+    return out;
 }
 
 std::string diffusion_model_refusal(std::string_view subject, const DiffusionModel& model) {

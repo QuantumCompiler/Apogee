@@ -352,23 +352,100 @@ namespace {
     return model_base_name(model);  // the base its backends are named after (46a reads it too)
 }
 
-/// What `pull --safetensors` stored, or found already stored.
-struct PulledSnapshot {
-    std::string model;
-    std::string id;
-    std::filesystem::path dir;
-};
+/// How a pull of a SafeTensors set ends, standalone: what to do next with
+/// what it is. A diffusion model's weights say what they are and what runs
+/// them (M20, 53j) -- no conversion takes them.
+void print_snapshot_next(const std::filesystem::path& dir, const std::string& repo_id) {
+    if (const std::optional<models::DiffusionModel> diffusion =
+            models::snapshot_diffusion_model(dir)) {
+        std::cout << "\nThe set is " << models::describe_diffusion_model(*diffusion) << "\n";
+        return;
+    }
+    std::cout << "\nA full-weight snapshot: trainable with 'apogee train', not runnable -- make "
+                 "a GGUF of it with\n  apogee models convert "
+              << repo_id
+              << "\nNext time one command pulls, converts and registers it:\n  apogee models "
+                 "pull "
+              << repo_id << " --safetensors --register-with Q4_K_M\n";
+}
 
-/// `models pull <owner>/<repo> --safetensors`: the whole full-weight
-/// repository -- shards, configuration, tokenizer -- through the tree ladder,
-/// each shard checked against the sha256 Hugging Face publishes for it, into
-/// `<model>/safetensors/<id>` and committed by rename so a half snapshot
-/// never appears. What the training track fine-tunes and `convert` reads.
-///
-/// The id is known before a byte moves -- Hugging Face publishes every shard's
-/// sha256 -- so weights already here are found, not fetched again.
+/// The items of a tree download over `client`, each promising what the
+/// listing published of its file.
+[[nodiscard]] std::vector<models::TreeItem> tree_items(
+    backends::HttpClient& client, const models::HfRef& ref,
+    const std::vector<models::HfFile>& files, std::string_view token,
+    const harness::CancellationToken& cancellation) {
+    std::vector<models::TreeItem> items;
+    for (const models::HfFile& file : files) {
+        models::SourcePromise promise;
+        models::TreeItem item;
+        item.relative = file.path;
+        item.source = models::http_source(client, ref, models::HfRepoKind::Model, file, token,
+                                          cancellation, promise);
+        item.promise = promise;
+        items.push_back(std::move(item));
+    }
+    return items;
+}
+
+/// Pulling a set already stored again (53j): what its record lacks of the
+/// files the pull takes, fetched into the same set -- which keeps its id --
+/// each checked against what the repository publishes and recorded as it
+/// lands.
+[[nodiscard]] std::vector<std::string> complete_stored_snapshot(
+    backends::HttpClient& client, const models::HfRef& ref, const std::filesystem::path& dir,
+    const std::vector<models::HfFile>& gaps, std::string_view token,
+    const harness::CancellationToken& cancellation) {
+    std::int64_t total = 0;
+    for (const models::HfFile& file : gaps) {
+        total += file.size;
+    }
+    std::cout << "its record lacks " << gaps.size() << " file(s) this pull takes, "
+              << human_size(total) << ": fetching them into the same set\n";
+    DownloadProgress progress{std::cout, job_download_options()};
+    const models::AcquireTreeResult result = models::complete_snapshot(
+        dir, tree_items(client, ref, gaps, token, cancellation),
+        [&progress](std::size_t index, std::size_t count, std::string_view relative,
+                    std::int64_t written,
+                    std::int64_t size) { progress.file(index, count, relative, written, size); });
+    progress.finish();
+    std::vector<std::string> landed;
+    for (std::size_t i = 0; i < result.sidecars.size() && i < gaps.size(); ++i) {
+        landed.push_back(gaps[i].path);
+    }
+    if (!result.ok) {
+        // What landed before the failure stays, on the record: pulling again
+        // fetches the rest.
+        std::string kept;
+        for (const std::string& path : landed) {
+            kept += (kept.empty() ? "" : ", ") + path;
+        }
+        fail(result.error + (kept.empty() ? std::string{}
+                                          : " (" + kept +
+                                                " landed and stays on the set's record; pull "
+                                                "again for the rest)"));
+    }
+    std::size_t digests = 0;
+    for (const models::Sidecar& sidecar : result.sidecars) {
+        digests += sidecar.verification.digest_checked ? 1U : 0U;
+    }
+    std::string fetched;
+    for (const std::string& path : landed) {
+        fetched += (fetched.empty() ? "" : ", ") + path;
+    }
+    std::cout << "\n"
+              << dir.string() << "\n"
+              << "completed: " << fetched << "\n"
+              << "verified: " << result.files << " file(s), " << human_size(result.bytes) << ", "
+              << digests << " checked against a published sha256 -- the set keeps its id\n";
+    return landed;
+}
+
+}  // namespace
+
 PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& roots,
-                             bool chained) {
+                             backends::HttpClient& client,
+                             const harness::CancellationToken& cancellation, bool chained) {
     if (!looks_like_hf(ref)) {
         fail("--safetensors takes a Hugging Face repository (owner/repo); '" + ref +
              "' is not one");
@@ -380,9 +457,7 @@ PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& r
     if (!parsed->file.empty()) {
         fail("--safetensors downloads the whole repository; drop ':" + parsed->file + "'");
     }
-    backends::HttpClient client{std::make_unique<backends::CurlTransport>()};
     const std::string token = models::hf_token({});
-    const harness::CancellationToken cancellation;
 
     const models::HfTree tree =
         models::list_repo_tree(client, *parsed, models::HfRepoKind::Model, token, cancellation);
@@ -399,23 +474,30 @@ PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& r
              "' is a diffusion pipeline (model_index.json at its root) -- pull it without "
              "--safetensors; it lands whole in the store's pipeline/ format");
     }
-    std::vector<models::HfFile> wanted;
-    std::vector<models::SnapshotFile> published;
-    bool any_shard = false;
-    std::int64_t total = 0;
-    for (const models::HfFile& file : tree.files) {
-        if (!models::snapshot_wanted(file.path)) {
-            continue;
-        }
-        any_shard = any_shard || file.path.ends_with(".safetensors");
-        total += file.size;
-        wanted.push_back(file);
-        published.push_back({file.path, file.size, file.sha256});
-    }
-    if (!any_shard) {
+    if (std::ranges::none_of(tree.files, [](const models::HfFile& file) {
+            return models::snapshot_wanted(file.path) && file.path.ends_with(".safetensors");
+        })) {
         fail("'" + parsed->repo_id() +
              "' holds no .safetensors shards -- nothing to snapshot. For a GGUF, pull it "
              "without --safetensors");
+    }
+    // Wan's original layout comes whole, its root checkpoints with it (53j);
+    // every other repository's list is the snapshot rule's alone.
+    const models::HfWanLayout wan =
+        models::read_wan_layout(client, *parsed, tree.files, token, cancellation);
+    if (!wan.ok) {
+        fail(wan.error);
+    }
+    const std::vector<models::HfFile> wanted = models::snapshot_files(tree.files, wan.layout());
+    std::vector<models::SnapshotFile> published;
+    std::int64_t total = 0;
+    std::string checkpoints;
+    for (const models::HfFile& file : wanted) {
+        total += file.size;
+        published.push_back({file.path, file.size, file.sha256});
+        if (models::root_checkpoint(file.path)) {
+            checkpoints += (checkpoints.empty() ? "" : ", ") + file.path;
+        }
     }
 
     const std::string model = models::repo_directory_name(*parsed);
@@ -427,32 +509,39 @@ PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& r
         if (std::filesystem::is_directory(existing, code)) {
             std::cout << "already here -- these exact weights are at\n  " << existing.string()
                       << "\n";
-            return PulledSnapshot{.model = model, .id = known_id, .dir = existing};
+            PulledSnapshot pulled{.model = model, .id = known_id, .dir = existing, .completed = {}};
+            // Its id is its shards' hash, so a Wan set pulled before the pull
+            // took its checkpoints is this one: completed in place, never moved
+            // (53j). Any other set is found and left exactly as before.
+            const std::optional<models::Snapshot> record =
+                wan.layout() ? models::load_snapshot(existing) : std::nullopt;
+            const std::vector<models::HfFile> gaps = record.has_value()
+                                                         ? models::snapshot_gaps(*record, wanted)
+                                                         : std::vector<models::HfFile>{};
+            if (!gaps.empty()) {
+                pulled.completed =
+                    complete_stored_snapshot(client, *parsed, existing, gaps, token, cancellation);
+                if (!chained) {
+                    print_snapshot_next(existing, parsed->repo_id());
+                }
+            }
+            return pulled;
         }
     }
     // Without a published digest on every shard the id waits for the bytes.
     const std::filesystem::path destination =
         known_id.empty() ? models::incoming_path(roots, models::kSafetensorsFormat, model)
                          : models::weights_dir(roots, models::kSafetensorsFormat, model, known_id);
+    if (wan.layout()) {
+        std::cout << "Wan's original layout (" << wan.class_name
+                  << "): its root checkpoints come too -- " << checkpoints << "\n";
+    }
     std::cout << "downloading " << wanted.size() << " file(s), " << human_size(total) << ", into "
               << (known_id.empty() ? destination.parent_path() : destination).string() << "\n";
 
-    std::vector<models::TreeItem> items;
-    std::vector<models::SourcePromise> promises;
-    promises.reserve(wanted.size());
-    for (const models::HfFile& file : wanted) {
-        promises.emplace_back();
-        models::TreeItem item;
-        item.relative = file.path;
-        item.source = models::http_source(client, *parsed, models::HfRepoKind::Model, file, token,
-                                          cancellation, promises.back());
-        item.promise = promises.back();
-        items.push_back(std::move(item));
-    }
-
     DownloadProgress progress{std::cout, job_download_options()};
     const models::AcquireTreeResult result = models::acquire_tree(
-        destination, items,
+        destination, tree_items(client, *parsed, wanted, token, cancellation),
         [&progress](std::size_t index, std::size_t count, std::string_view relative,
                     std::int64_t written,
                     std::int64_t size) { progress.file(index, count, relative, written, size); });
@@ -485,8 +574,10 @@ PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& r
         if (commit.existed) {
             std::cout << "\nalready here -- these exact weights are at\n  " << commit.dir.string()
                       << "\n";
-            return PulledSnapshot{
-                .model = model, .id = commit.dir.filename().string(), .dir = commit.dir};
+            return PulledSnapshot{.model = model,
+                                  .id = commit.dir.filename().string(),
+                                  .dir = commit.dir,
+                                  .completed = {}};
         }
         final_dir = commit.dir;
     }
@@ -505,18 +596,11 @@ PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& r
               << "verified: " << result.files << " file(s), " << human_size(result.bytes) << ", "
               << digests << " checked against a published sha256\n";
     if (!chained) {
-        std::cout
-            << "\nA full-weight snapshot: trainable with 'apogee train', not runnable -- make "
-               "a GGUF of it with\n  apogee models convert "
-            << parsed->repo_id()
-            << "\nNext time one command pulls, converts and registers it:\n  apogee models "
-               "pull "
-            << parsed->repo_id() << " --safetensors --register-with Q4_K_M\n";
+        print_snapshot_next(final_dir, parsed->repo_id());
     }
-    return PulledSnapshot{.model = model, .id = final_dir.filename().string(), .dir = final_dir};
+    return PulledSnapshot{
+        .model = model, .id = final_dir.filename().string(), .dir = final_dir, .completed = {}};
 }
-
-}  // namespace
 
 DeletePlan plan_delete(const models::StoreRoots& roots, std::string_view name) {
     DeletePlan plan;
@@ -2453,8 +2537,11 @@ void run_register_chain(const RegisterChainRequest& request, const ChainTools& t
     std::vector<ChainStage> stages;
     if (pulls) {
         stages.push_back({"pull " + request.pull_ref + "'s full weights", [&](ChainLog& chain) {
+                              backends::HttpClient client{
+                                  std::make_unique<backends::CurlTransport>()};
                               const PulledSnapshot pulled =
-                                  pull_snapshot(request.pull_ref, roots, /*chained=*/true);
+                                  pull_snapshot(request.pull_ref, roots, client,
+                                                harness::CancellationToken{}, /*chained=*/true);
                               note_stored(pulled.model, models::kSafetensorsFormat, pulled.id);
                               snapshot = pulled.model + "/safetensors/" + pulled.id;
                               // Everything after the pull runs offline: resuming
@@ -2926,7 +3013,9 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
             return;
         }
         if (*pull_safetensors) {
-            const PulledSnapshot pulled = pull_snapshot(ref, roots, /*chained=*/false);
+            backends::HttpClient client{std::make_unique<backends::CurlTransport>()};
+            const PulledSnapshot pulled =
+                pull_snapshot(ref, roots, client, harness::CancellationToken{}, /*chained=*/false);
             note_stored(pulled.model, models::kSafetensorsFormat, pulled.id);
             return;
         }

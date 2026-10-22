@@ -1042,8 +1042,21 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   Dense module's `out_features`, else `config.json`'s `hidden_size`), a number;
   `null` for every other kind, every other format, and an embedding directory
   whose files state no width. The text says it in a `vectors:` line -- on the
-  set, and on an `mlx` backend over one, beside an `embeds:` line. A backend's
-  document has no `data`.
+  set, and on an `mlx` backend over one, beside an `embeds:` line. Since 53j a
+  SafeTensors set's `data` also carries `wan_layout`: for Wan's original
+  layout -- a `config.json` naming Wan's own transformer class (`WanModel`, or
+  a later class named after it; never diffusers' `WanTransformer3DModel`) --
+  `class` (as written), `whole` (whether every component it needs beside its
+  transformer is there: its T5 text encoder, its VAE, and any other root
+  `.pth` its record lists) and `missing` (those not there, by file name, in
+  that order: `[]` when whole). A file not there and never recorded is named
+  as Wan's releases name it -- `models_t5_umt5-xxl-enc-bf16.pth`, and the VAE
+  by the latent width the config's `out_dim` declares (`Wan2.2_VAE.pth` for
+  48, `Wan2.1_VAE.pth` for 16, else `*_VAE.pth`). `models pull <repo>
+  --safetensors` on such a set fetches what is missing into it, its id
+  unchanged. It is `null` for every other set and on every other format; the
+  text says the same in the `diffusion:` line, with the pull that completes
+  the set and what runs the model today. A backend's document has no `data`.
 - **`chats list`**: newest first, each conversation's `id`, `updated`, `turns`
   and `name`, and since 52a the `backend` it runs on and the roster `model` it
   pinned there with `-m` or `/model` — empty when it runs on the backend's own

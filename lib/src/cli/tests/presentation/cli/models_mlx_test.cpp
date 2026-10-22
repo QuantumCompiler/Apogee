@@ -1007,11 +1007,14 @@ TEST_CASE("a diffusion model is refused at every conversion door, and offered no
     apogee::testing::write_fixture_file(wan / "config.json",
                                         R"({"_class_name": "WanModel", "_diffusers_version":
             "0.33.0", "model_type": "ti2v", "dim": 3072, "num_layers": 30})");
+    // Since 53j the refusal says it is Wan's original layout and what it
+    // lacks; with no record, no repository is named.
     const std::string refused =
         "'" + handle +
-        "' is a diffusion model's weights (WanModel, a diffusers class): neither converter takes "
-        "one -- llama.cpp's finds a model by its architectures, and mlx-lm's builds a language "
-        "model";
+        "' is Wan's original layout (WanModel), missing models_t5_umt5-xxl-enc-bf16.pth and "
+        "*_VAE.pth -- pulling its repository again with --safetensors fetches them into this "
+        "set; neither converter takes it -- llama.cpp's finds a model by its architectures, and "
+        "mlx-lm's builds a language model";
 
     std::string out;
     // The user's command, and the chain the app now builds, refused alike.
