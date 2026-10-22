@@ -15,15 +15,22 @@
 namespace apogee::training {
 namespace {
 
-constexpr std::array<std::string_view, 8> kSetNames{"prepare", "mlx",   "peft",  "convert",
-                                                    "mlx-vlm", "video", "voice", "mlx-embeddings"};
+constexpr std::array<std::string_view, 9> kSetNames{"prepare",  "mlx",   "peft",  "convert",
+                                                    "mlx-vlm",  "video", "voice", "mlx-embeddings",
+                                                    "mlx-video"};
 
 /// Where each set runs, in the names' order (51): what `apogee bootstrap`
 /// installs on a host is the table's own word.
 enum class SetHost : std::uint8_t { Any, AppleSilicon, NvidiaGpu };
 constexpr std::array<SetHost, kSetNames.size()> kSetHosts{
-    SetHost::Any,          SetHost::AppleSilicon, SetHost::NvidiaGpu, SetHost::Any,
-    SetHost::AppleSilicon, SetHost::Any,          SetHost::Any,       SetHost::AppleSilicon};
+    SetHost::Any, SetHost::AppleSilicon, SetHost::NvidiaGpu,
+    SetHost::Any, SetHost::AppleSilicon, SetHost::Any,
+    SetHost::Any, SetHost::AppleSilicon, SetHost::AppleSilicon};
+
+/// Which sets only the person installs, in the names' order (53k): the
+/// bootstrap says them skipped, and `train setup --with` installs them.
+constexpr std::array<bool, kSetNames.size()> kSetOptIn{false, false, false, false, false,
+                                                       false, false, false, true};
 
 /// The Pythons each set runs on, in the names' order (M19): the tightest of
 /// its packages' `requires_python` as PyPI publishes them for the current
@@ -31,8 +38,10 @@ constexpr std::array<SetHost, kSetNames.size()> kSetHosts{
 /// 0.9.4 and `misaki` 0.9.4 say `<3.13` -- and mlx's floor is `mlx-lm`
 /// 0.32.2's `>=3.11`; torch, transformers, diffusers, datasets, mlx-vlm,
 /// peft, bitsandbytes, accelerate and gguf all say `>=3.10`, and so does
-/// mlx-embeddings 0.1.0 (53h). A stale range fails as before, in pip's
-/// words; the date says when to read them again.
+/// mlx-embeddings 0.1.0 (53h). mlx-video, from GitHub, says `>=3.11` in the
+/// `pyproject.toml` of the commit pinned below, as its README's requirements
+/// do (53k). A stale range fails as before, in pip's words; the date says
+/// when to read them again.
 constexpr std::string_view kRangesReviewed = "2026-10-21";
 constexpr std::array<PythonRange, kSetNames.size()> kSetRanges{
     PythonRange{.at_least = 10},
@@ -42,7 +51,8 @@ constexpr std::array<PythonRange, kSetNames.size()> kSetRanges{
     PythonRange{.at_least = 10},
     PythonRange{.at_least = 10},
     PythonRange{.at_least = 10, .below = 13},
-    PythonRange{.at_least = 10}};
+    PythonRange{.at_least = 10},
+    PythonRange{.at_least = 11}};
 
 constexpr std::array<std::string_view, 1> kPrepare{"datasets>=3.0"};
 constexpr std::array<std::string_view, 1> kMlx{"mlx-lm>=0.21"};
@@ -105,6 +115,32 @@ constexpr std::array<std::string_view, 3> kVoice{"torch>=2.6", "kokoro>=0.9.4",
 // reads the installed one's `models/`, never this floor.
 constexpr std::string_view kMlxEmbeddingsFloorReviewed = "2026-10-21";
 constexpr std::array<std::string_view, 1> kMlxEmbeddings{"mlx-embeddings>=0.1.0"};
+
+// Wan's original layout to MLX (53k): mlx-video is on no index -- its README
+// installs it with `pip install git+https://github.com/Blaizzy/mlx-video.git`
+// and its Releases are empty -- so it is built from one commit, the user's
+// call ("Pinned GitHub install", 2026-10-21). The commit is main's head on the
+// date below, read through GitHub's API: the merge of pull request #23
+// (2026-05-13). Its tree holds the Wan converter at
+// `mlx_video/models/wan_2/convert.py` -- both READMEs' module paths
+// (`mlx_video.wan2.convert`, `mlx_video.wan_2.generate`) name no module there
+// -- whose command line takes `--checkpoint-dir`, `--output-dir`,
+// `--quantize`, `--bits` (4, 8), `--group-size` (32, 64, 128) and `--dtype`;
+// its `pyproject.toml` requires Python >=3.11, mlx>=0.22.0 and mlx-vlm. torch
+// is not among its dependencies, and its converter loads the `.pth`
+// checkpoints through it (`torch.load(..., weights_only=True)`) -- "For
+// weight conversion: PyTorch", its README says -- so the set carries it, at
+// the floor the other torch sets keep. A later commit is a deliberate bump:
+// read its converter again, move the commit, its date and the review's.
+constexpr PinnedSource kMlxVideoSource{.package = "mlx-video",
+                                       .repository = "https://github.com/Blaizzy/mlx-video",
+                                       .commit = "87db56a51758fefb748a359b90a5283bb8ba4837",
+                                       .committed = "2026-05-13",
+                                       .reviewed = "2026-10-21"};
+constexpr std::array<std::string_view, 2> kMlxVideo{
+    "mlx-video @ git+https://github.com/Blaizzy/mlx-video.git@"
+    "87db56a51758fefb748a359b90a5283bb8ba4837",
+    "torch>=2.6"};
 
 std::string now_rfc3339() {
     const std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
@@ -286,6 +322,28 @@ std::string set_unfit_reason(RequirementSet set, bool apple_silicon, bool nvidia
     return {};
 }
 
+bool set_opt_in(RequirementSet set) noexcept {
+    return kSetOptIn.at(static_cast<std::size_t>(set));
+}
+
+std::string PinnedSource::requirement() const {
+    return std::string{package} + " @ git+" + std::string{repository} + ".git@" +
+           std::string{commit};
+}
+
+std::string PinnedSource::describe() const {
+    return std::string{package} + " is not on PyPI: pip builds it with git from " +
+           std::string{repository} + " at commit " + std::string{commit.substr(0, 12)} + " (" +
+           std::string{committed} + "), the one this Apogee reviewed on " + std::string{reviewed};
+}
+
+std::optional<PinnedSource> pinned_source(RequirementSet set) noexcept {
+    if (set == RequirementSet::MlxVideo) {
+        return kMlxVideoSource;
+    }
+    return std::nullopt;
+}
+
 std::optional<RequirementSet> requirement_set_from_string(std::string_view name) noexcept {
     for (std::size_t i = 0; i < kSetNames.size(); ++i) {
         if (kSetNames.at(i) == name) {
@@ -317,6 +375,8 @@ std::span<const std::string_view> packages_for(RequirementSet set) noexcept {
             return kVoice;
         case RequirementSet::MlxEmbeddings:
             return kMlxEmbeddings;
+        case RequirementSet::MlxVideo:
+            return kMlxVideo;
     }
     return {};
 }
@@ -421,6 +481,17 @@ std::string PythonEnv::install(RequirementSet set, const harness::CancellationTo
                python_range(set).describe() +
                " -- rebuild it on a Python that fits: apogee train "
                "setup --rebuild --with " +
+               std::string{to_string(set)};
+    }
+    // A package built from a commit is fetched with git (53k): without it,
+    // said here with the way out, not in pip's words.
+    if (const std::optional<PinnedSource> source = pinned_source(set);
+        source.has_value() && platform::find_on_path("git").empty()) {
+        return "the '" + std::string{to_string(set)} + "' set installs " +
+               std::string{source->package} + " from " + std::string{source->repository} +
+               " at commit " + std::string{source->commit.substr(0, 12)} +
+               ", which pip fetches with git, and git is not on PATH -- install git (on macOS, "
+               "'xcode-select --install'), then: apogee train setup --with " +
                std::string{to_string(set)};
     }
     platform::ChildCommand command;

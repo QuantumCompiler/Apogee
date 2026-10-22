@@ -175,13 +175,20 @@ struct WanLayout {
 /// info` and an MLX conversion of the original layout (53k) all ask.
 [[nodiscard]] std::optional<WanLayout> snapshot_wan_layout(const std::filesystem::path& dir);
 
+/// Whether mlx-video's Wan converter is installed in Apogee's Python
+/// environment (53k) -- the caller's reading of that environment, handed down
+/// as `EmbeddingBuilds` is: this floor reads none.
+using VideoConverts = std::function<bool()>;
+
 /// A **diffusion model's** weights (M20, 2026-10-21): a component of a
 /// diffusers pipeline -- a video model's transformer, `WanModel` -- whose
 /// `config.json` names the class diffusers builds it as (`_class_name`, beside
 /// the `_diffusers_version` that wrote it) and no `architectures`. Neither
-/// converter Apogee runs takes one: llama.cpp's finds a model by its
+/// language model's converter takes one: llama.cpp's finds a model by its
 /// architectures, and mlx-lm's builds a language model by its `model_type`.
-/// So no surface offers one as a model to convert; each says what it is.
+/// So no surface offers one as a model to convert, and each says what it is
+/// -- but Wan's original layout, whole, which mlx-video converts to MLX where
+/// it is installed (53k).
 struct DiffusionModel {
     /// `_class_name`: the class diffusers builds it as.
     std::string class_name;
@@ -193,26 +200,40 @@ struct DiffusionModel {
     /// to complete it and the pipeline that runs it are named by (53j). Empty
     /// without a record.
     std::string ref{};
+    /// Whether mlx-video's Wan converter is installed (53k), as the caller
+    /// read it (`VideoConverts`): nullopt when not asked, and then the wording
+    /// names mlx-video's conversion without saying whether it is there.
+    std::optional<bool> mlx_video{};
+
+    /// Wan's original layout, whole, with mlx-video installed (53k): what
+    /// `models convert --mlx` takes to an MLX video model.
+    [[nodiscard]] bool mlx_convertible() const noexcept;
 };
 
 /// The diffusion model `dir`'s `config.json` describes: one naming a
 /// `_class_name` with a `_diffusers_version` and no `architectures`. nullopt
 /// for anything else, or for a directory with no readable `config.json`.
-/// Wan's original layout is read with it (`snapshot_wan_layout`, 53j).
+/// Wan's original layout is read with it (`snapshot_wan_layout`, 53j), and,
+/// for one, whether `mlx_video` says mlx-video is installed (53k).
 [[nodiscard]] std::optional<DiffusionModel> snapshot_diffusion_model(
-    const std::filesystem::path& dir);
+    const std::filesystem::path& dir, const VideoConverts& mlx_video = {});
 
 /// What a diffusion model is, in the one wording every surface uses: "a
 /// diffusion model's weights (<class>, a diffusers class): neither converter
 /// takes one -- llama.cpp's finds a model by its architectures, and mlx-lm's
 /// builds a language model". For Wan's original layout (53j), what it is,
-/// complete or what it lacks and the pull that fetches it, that neither
-/// converter takes it, and what runs the model today: "Wan's original layout
-/// (WanModel), missing models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth --
-/// 'apogee models pull <ref> --safetensors' fetches them into this set;
-/// neither converter takes it -- ...; what runs this model today is its
-/// Diffusers pipeline in 'apogee video generate', pulled whole with 'apogee
-/// models pull <ref>-Diffusers'".
+/// complete or what it lacks and the pull that fetches it; that mlx-video
+/// converts it to MLX once it is complete, and whether mlx-video is installed
+/// with the setup that installs it (53k); that llama.cpp's converter takes
+/// none; and what runs the model today: "Wan's original layout (WanModel),
+/// missing models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth -- 'apogee
+/// models pull <ref> --safetensors' fetches them into this set; once it is
+/// complete, mlx-video converts it to an MLX video model (--mlx), and is not
+/// installed in Apogee's Python environment -- 'apogee train setup --with
+/// mlx-video'; llama.cpp's converter takes no diffusion model -- it finds a
+/// model by its architectures; what runs this model today is its Diffusers
+/// pipeline in 'apogee video generate', pulled whole with 'apogee models pull
+/// <ref>-Diffusers'".
 [[nodiscard]] std::string describe_diffusion_model(const DiffusionModel& model);
 
 /// The refusal a conversion of one says, `subject` its name or path.
@@ -280,10 +301,13 @@ using DrafterBuilds = std::function<bool(std::string_view model_type)>;
 /// unbuilt, or no mlx-embeddings to ask -- M21's answer stands. A draft head
 /// gains `mlx` alone -- an MLX drafter, never a GGUF -- where `mlx_drafters`
 /// says the installed mlx-vlm drafts its `model_type` (53i); anywhere else
-/// the draft-heads change's answer stands: none.
+/// the draft-heads change's answer stands: none. Wan's original layout gains
+/// `mlx` alone -- an MLX video model, never a GGUF -- exactly where it is
+/// whole (`snapshot_wan_layout`) and `mlx_video` says mlx-video is installed
+/// (53k); anywhere else M20's answer stands: none.
 [[nodiscard]] std::vector<std::string> snapshot_conversions(
     const std::filesystem::path& dir, const EmbeddingBuilds& mlx_embeddings = {},
-    const DrafterBuilds& mlx_drafters = {});
+    const DrafterBuilds& mlx_drafters = {}, const VideoConverts& mlx_video = {});
 
 /// A set's **towers** (53f, 2026-10-21): what its `config.json` declares
 /// beside its language model -- a `vision_config`, an `audio_config`, or an

@@ -138,4 +138,19 @@ inline std::filesystem::path write_user_wan_set(const models::StoreRoots& roots)
     return dir;
 }
 
+/// The user's set at `dir` completed as 53j's pull completes it: the two root
+/// checkpoints landed beside the ten, each on its record with its size and
+/// sha256, the set's id unmoved -- Wan's original layout, whole (53k's input).
+inline void complete_user_wan_set(const std::filesystem::path& dir) {
+    models::Snapshot record = models::load_snapshot(dir).value_or(wan_record());
+    for (const std::string_view path : {kWanVae, kWanTextEncoder}) {
+        const std::string bytes = wan_bytes(path);
+        write_fixture_file(dir / path, bytes);
+        record.files.push_back({.path = std::string{path},
+                                .size = static_cast<std::int64_t>(bytes.size()),
+                                .sha256 = models::sha256_hex(bytes)});
+    }
+    (void)models::write_snapshot(dir, record);
+}
+
 }  // namespace apogee::testing

@@ -1957,7 +1957,13 @@ void run_train_setup(const harness::Config& config, const SetupRequest& request)
         for (const std::string_view package : training::packages_for(set)) {
             std::cout << " " << package;
         }
-        std::cout << " ...\n" << std::flush;
+        std::cout << " ...\n";
+        // A package built from a reviewed commit rather than PyPI, said as
+        // such (53k).
+        if (const std::optional<training::PinnedSource> source = training::pinned_source(set)) {
+            std::cout << "  " << source->describe() << "\n";
+        }
+        std::cout << std::flush;
         if (const std::string failure = env.install(set); !failure.empty()) {
             fail_user(failure);
         }
@@ -2004,7 +2010,8 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         ->type_name(words_value(installable_trainers()));
     setup
         ->add_option("--with", *setup_with,
-                     "Install a requirement set: prepare (Parquet), mlx, peft, convert")
+                     "Install a requirement set: prepare (Parquet), mlx, peft, convert -- and "
+                     "mlx-video (Wan to MLX, from GitHub), which only this installs")
         ->type_name(words_value(training::requirement_set_names()));
     setup
         ->add_option("--python", *setup_python,

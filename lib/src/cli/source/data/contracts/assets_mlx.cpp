@@ -39,8 +39,8 @@ there, and commits it by the store's own rule.
 Runs under the Python environment Apogee owns, never the system Python.
 Requires `mlx-lm` there:  apogee train setup --with mlx
 
-    mlx_convert.py [--with mlx-vlm|mlx-embeddings] --hf-path <snapshot> --mlx-path <out>
-                   [--q-bits N [--q-group-size N] [--q-mode M] | --dtype T]
+    mlx_convert.py [--with mlx-vlm|mlx-embeddings|mlx-video] --hf-path <snapshot>
+                   --mlx-path <out> [--q-bits N [--q-group-size N] [--q-mode M] | --dtype T]
 
 `--with mlx-vlm` converts with `mlx_vlm`'s own `convert` instead (53f): a
 model that sees or hears -- its config declares a vision, audio or omni
@@ -56,6 +56,17 @@ the pooled vector passes through -- where mlx-lm builds language models
 alone. The same precisions, mapped onto its own flags. Requires
 `mlx-embeddings`:  apogee train setup --with mlx-embeddings
 
+`--with mlx-video` converts Wan's original layout -- the transformer's
+`diffusion_pytorch_model*.safetensors` beside its T5 text encoder and VAE
+checkpoints (`models_t5_umt5-xxl-enc-bf16.pth`, `Wan2.*_VAE.pth`) -- with
+mlx-video's own Wan converter (53k), `mlx_video.models.wan_2.convert`, as its
+command line calls it: an MLX video model's directory, its `config.json`,
+`t5_encoder.safetensors`, `vae.safetensors` and the transformer's weights.
+It quantizes the transformer alone, at 4 or 8 bits in groups of 32, 64 or
+128, or writes it at a floating-point type. Requires `mlx-video` and the
+`torch` its converter loads the checkpoints with:
+apogee train setup --with mlx-video
+
 `--q-bits` quantizes (the converter's own scheme: N bits a weight in groups, a
 scale and bias each); without it the weights are written at `--dtype`
 (`bfloat16`, `float16`, `float32`). `<out>` must not exist: both converters
@@ -66,7 +77,8 @@ The training drivers' protocol, one JSON object per line on stdout:
   {"error": "..."}                         fatal; a non-zero exit follows
   {"converted": "<out>", "quantized": B, "mlx_lm": "..."}   at the end
       -- with `--with mlx-vlm`, "mlx_vlm": "..." in place of "mlx_lm"; with
-      `--with mlx-embeddings`, "mlx_embeddings": "..."
+      `--with mlx-embeddings`, "mlx_embeddings": "..."; with `--with
+      mlx-video`, "mlx_video": "..."
 
 Everything a library prints goes to stderr, which Apogee captures: the
 protocol's stdout is a duplicate of the original descriptor, and descriptor 1
@@ -111,8 +123,10 @@ def fail(message, code=1):
 
 def arguments(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--with", dest="converter",
-                        choices=["mlx-lm", "mlx-vlm", "mlx-embeddings"], default="mlx-lm")
+    # The converters, each by its package's name (mlx-lm's the default).
+    converters = ["mlx-lm", "mlx-vlm"]
+    converters += ["mlx-embeddings", "mlx-video"]
+    parser.add_argument("--with", dest="converter", choices=converters, default="mlx-lm")
     parser.add_argument("--hf-path", required=True)
     parser.add_argument("--mlx-path", required=True)
     parser.add_argument("--q-bits", type=int, default=0)
@@ -132,6 +146,8 @@ def main(argv):
         return convert_with_vlm(args)
     if args.converter == "mlx-embeddings":
         return convert_with_embeddings(args)
+    if args.converter == "mlx-video":
+        return convert_with_video(args)
 
     emit({"message": "loading mlx-lm"})
     try:
@@ -266,6 +282,61 @@ def convert_with_embeddings(args):
 
     emit({"converted": args.mlx_path, "quantized": args.q_bits > 0, "mlx_embeddings": version})
     return 0
+
+
+def convert_with_video(args):
+    """Wan's original layout built into an MLX video model by mlx-video's own
+    Wan converter (53k): the function its command line calls, with the
+    precision as that command line takes it -- `--quantize --bits N
+    --group-size G` for the transformer, or `--dtype` unquantized."""
+    if args.q_bits > 0:
+        if args.q_mode not in ("", "affine") or args.q_bits not in (4, 8) or \
+                args.q_group_size not in (0, 32, 64, 128):
+            return fail("mlx-video's converter quantizes 4 or 8 bits in groups of 32, 64 or "
+                        f"128, never {args.q_bits} bits ({args.q_mode or 'affine'}, group "
+                        f"{args.q_group_size or 'unset'})", 2)
+    elif args.dtype not in ("", "bfloat16", "float16", "float32"):
+        return fail(f"mlx-video's converter writes bfloat16, float16 or float32, never "
+                    f"{args.dtype}", 2)
+
+    emit({"message": "loading mlx-video"})
+    try:
+        import mlx_video
+        from mlx_video.models.wan_2.convert import convert_wan_checkpoint
+    except ImportError as exc:
+        return fail(
+            f"mlx-video is not installed in Apogee's Python environment ({exc}) -- "
+            "apogee train setup --with mlx-video",
+            3,
+        )
+    version = video_version(mlx_video)
+
+    options = {"model_version": "auto"}
+    if args.q_bits > 0:
+        options["quantize"] = True
+        options["bits"] = args.q_bits
+        options["group_size"] = args.q_group_size or 64
+    elif args.dtype:
+        options["dtype"] = args.dtype
+
+    emit({"message": "quantizing" if args.q_bits > 0 else "converting"})
+    try:
+        convert_wan_checkpoint(args.hf_path, args.mlx_path, **options)
+    except Exception as exc:  # the converter's own words, whatever they are
+        return fail(f"{type(exc).__name__}: {exc}")
+
+    emit({"converted": args.mlx_path, "quantized": args.q_bits > 0, "mlx_video": version})
+    return 0
+
+
+def video_version(module):
+    version = getattr(module, "__version__", None)
+    if version is None:
+        try:
+            from mlx_video.version import __version__ as version
+        except ImportError:
+            version = ""
+    return str(version)
 
 
 def embeddings_version(module):

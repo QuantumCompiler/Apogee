@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <condition_variable>
@@ -53,6 +54,9 @@
 
 namespace apogee::commands {
 namespace {
+
+/// What installs mlx-video's Wan converter (53k): opt-in, never at install.
+constexpr std::string_view kMlxVideoRemedy = "apogee train setup --with mlx-video";
 
 /// A failure said on the job's stream too, when one is open (52b): its
 /// `error` event carries the words stderr gets.
@@ -357,7 +361,7 @@ namespace {
 /// them (M20, 53j) -- no conversion takes them.
 void print_snapshot_next(const std::filesystem::path& dir, const std::string& repo_id) {
     if (const std::optional<models::DiffusionModel> diffusion =
-            models::snapshot_diffusion_model(dir)) {
+            models::snapshot_diffusion_model(dir, installed_mlx_video_converts())) {
         std::cout << "\nThe set is " << models::describe_diffusion_model(*diffusion) << "\n";
         return;
     }
@@ -873,7 +877,7 @@ SnapshotChoice locate_snapshot(const models::StoreRoots& roots, std::string_view
 }  // namespace
 
 SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view given,
-                               std::string_view from_id, bool drafters) {
+                               std::string_view from_id, bool drafters, bool videos) {
     SnapshotChoice choice = locate_snapshot(roots, given, from_id);
     if (choice.path.empty()) {
         return choice;
@@ -884,8 +888,12 @@ SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view
                                                   models::draft_head_bases(roots, *head));
         choice.path.clear();
     } else if (const std::optional<models::DiffusionModel> diffusion =
-                   models::snapshot_diffusion_model(choice.path)) {
-        // Neither converter takes one (M20): refused before any Python starts.
+                   models::snapshot_diffusion_model(choice.path, installed_mlx_video_converts());
+               diffusion.has_value() && !(videos && diffusion->mlx_convertible())) {
+        // Neither language model's converter takes one (M20): refused before
+        // any Python starts, saying what it is -- for Wan's original layout,
+        // what it lacks and whether mlx-video is there to convert it, which
+        // the MLX door alone passes it to once both are (53k).
         choice.error = models::diffusion_model_refusal("'" + std::string{given} + "'", *diffusion);
         choice.path.clear();
     }
@@ -901,6 +909,8 @@ std::string_view MlxRoute::kind() const noexcept {
             return models::kMlxVision;
         case training::MlxConverterKind::MlxEmbeddings:
             return models::kMlxEmbedding;
+        case training::MlxConverterKind::MlxVideo:
+            return models::kMlxVideo;
         case training::MlxConverterKind::MlxLm:
             break;
     }
@@ -912,8 +922,9 @@ MlxRoute mlx_route(const std::filesystem::path& snapshot, bool text_only) {
     route.towers = models::snapshot_towers(snapshot);
     route.embedding = models::snapshot_embedding_model(snapshot).has_value();
     route.drafter = models::snapshot_draft_head(snapshot).has_value();
+    route.video = models::snapshot_wan_layout(snapshot).has_value();
     route.converter = training::choose_mlx_converter(!route.towers.empty(), text_only,
-                                                     route.embedding, route.drafter);
+                                                     route.embedding, route.drafter, route.video);
     return route;
 }
 
@@ -945,6 +956,19 @@ models::EmbeddingBuilds installed_mlx_embedding_builds() {
         };
 }
 
+bool installed_mlx_video() {
+    return !training::find_mlx_video_converter(backends::MlxHost::current().venv).empty();
+}
+
+models::VideoConverts installed_mlx_video_converts() {
+    return [installed = std::optional<bool>{}]() mutable {
+        if (!installed.has_value()) {
+            installed = installed_mlx_video();
+        }
+        return *installed;
+    };
+}
+
 models::DrafterBuilds installed_mlx_drafter_builds() {
     return [vlm = std::optional<backends::MlxVlmPackage>{}](std::string_view model_type) mutable {
         if (!vlm.has_value()) {
@@ -958,6 +982,27 @@ MlxOffer installed_mlx_offer(const std::filesystem::path& snapshot) {
     MlxOffer offer;
     offer.towers = models::snapshot_towers(snapshot);
     offer.type = models::read_mlx_config(snapshot).model_type;
+    if (const std::optional<models::WanLayout> wan = models::snapshot_wan_layout(snapshot)) {
+        // mlx-video's build of Wan's original layout (53k), exactly where the
+        // set is whole and mlx-video installed; with either missing, nothing
+        // is offered, and the gap says which.
+        const bool installed = installed_mlx_video();
+        if (wan->whole() && installed) {
+            offer.converter = training::MlxConverterKind::MlxVideo;
+            return offer;
+        }
+        std::string missing;
+        for (const std::string& file : wan->missing()) {
+            missing += (missing.empty() ? "" : ", ") + file;
+        }
+        offer.gap = wan->whole()
+                        ? std::string{"mlx-video is not installed in Apogee's Python environment"}
+                        : "the set lacks " + missing;
+        if (!installed) {
+            offer.remedy = std::string{kMlxVideoRemedy};
+        }
+        return offer;
+    }
     if (models::snapshot_draft_head(snapshot).has_value()) {
         // mlx-vlm's drafter, where the one installed drafts its type (53i):
         // with none installed to ask, the draft-heads change's answer stands
@@ -1155,9 +1200,11 @@ bool repair_snapshot_in_place(const std::filesystem::path& dir) {
 // --- MLX models (27b) ------------------------------------------------------------------
 
 std::string mlx_summary(const models::MlxInfo& info, const harness::BackendConfig& backend) {
-    std::string line = info.quantization.describe() + ", " +
-                       models::describe(models::mlx_window(info, backend)) + ", " +
-                       format_progress_size(static_cast<std::int64_t>(info.bytes));
+    // A video model has no token window (53k).
+    std::string line =
+        info.quantization.describe() + ", " +
+        (info.video ? std::string{} : models::describe(models::mlx_window(info, backend)) + ", ") +
+        format_progress_size(static_cast<std::int64_t>(info.bytes));
     if (!info.model_type.empty()) {
         line = info.model_type + ", " + line;
     }
@@ -1241,6 +1288,48 @@ void print_mlx_embedding_hint(const models::StoredMlx& stored) {
         }
     }
     return out;
+}
+
+/// What mlx-video's README says an MLX build of a Wan transformer weighs
+/// (53k), as its Wan README states it at the pinned commit (read 2026-10-21):
+/// the 1.3B's and the 14B's, in bf16 and at 4 bits, and no other model or
+/// precision. Each is known by its transformer's width (`dim`), the fact its
+/// config states that tells them apart.
+struct WanReadmeSize {
+    std::int64_t dim = 0;
+    std::string_view model{};
+    std::string_view bf16{};
+    std::string_view four_bit{};
+};
+
+constexpr std::array<WanReadmeSize, 2> kWanReadmeSizes{{
+    {.dim = 1536, .model = "Wan2.1's 1.3B", .bf16 = "2.7 GB", .four_bit = "799 MB"},
+    {.dim = 5120, .model = "Wan's 14B", .bf16 = "about 28 GB", .four_bit = "about 8 GB"},
+}};
+
+/// The size a conversion of Wan's original layout says beside its precision
+/// (53k): the README's figure for its transformer where it states one, and
+/// that it states none otherwise -- never a figure of Apogee's own.
+[[nodiscard]] std::string wan_readme_estimate(const std::filesystem::path& snapshot,
+                                              const training::MlxPrecision& precision) {
+    std::ifstream in{snapshot / "config.json", std::ios::binary};
+    const nlohmann::json config = nlohmann::json::parse(in, nullptr, false);
+    const std::int64_t dim =
+        config.is_object() && config.contains("dim") && config["dim"].is_number_integer()
+            ? config["dim"].get<std::int64_t>()
+            : 0;
+    const auto row = std::ranges::find(kWanReadmeSizes, dim, &WanReadmeSize::dim);
+    const std::string_view figure = row == kWanReadmeSizes.end() ? std::string_view{}
+                                    : precision.name == "bf16"   ? row->bf16
+                                    : precision.name == "4bit"   ? row->four_bit
+                                                                 : std::string_view{};
+    if (figure.empty()) {
+        return "no size estimate -- mlx-video's README states none for this model" +
+               (row == kWanReadmeSizes.end() ? std::string{}
+                                             : " at " + std::string{precision.name});
+    }
+    return "its transformer " + std::string{figure} + ", as mlx-video's README states for " +
+           std::string{row->model};
 }
 
 [[nodiscard]] models::StoredMlx stored_at(const models::StoreRoots& roots, std::string_view model,
@@ -1691,8 +1780,10 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
                                   const training::MlxConverter& converter,
                                   std::string_view model_type, bool chained, bool text_only) {
     // A draft head is chosen too (53i): its MLX build is a drafter, which
-    // the command's door has already asked mlx-vlm about.
-    const SnapshotChoice source = choose_snapshot(roots, given, from, /*drafters=*/true);
+    // the command's door has already asked mlx-vlm about -- and Wan's
+    // original layout, whole with mlx-video installed (53k).
+    const SnapshotChoice source =
+        choose_snapshot(roots, given, from, /*drafters=*/true, /*videos=*/true);
     if (!source.error.empty()) {
         fail(source.error);
     }
@@ -1716,7 +1807,7 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
         !refused.empty()) {
         fail(refused);
     }
-    if (text_only && route.towers.empty()) {
+    if (text_only && route.towers.empty() && !route.video) {
         std::cout << "the snapshot declares no vision or audio tower -- --text-only changes "
                      "nothing; converting it as it is\n";
     }
@@ -1767,21 +1858,31 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
                 print_mlx_drafter_hint(stored);
             } else if (!chained && route.embedding) {
                 print_mlx_embedding_hint(stored);
-            } else if (!chained) {
+            } else if (!chained && !route.video) {
+                // A video model has no backend to add (53k).
                 print_mlx_backend_hint(stored);
             }
             return out;
         }
     }
 
-    const std::int64_t estimate = models::estimated_mlx_bytes(
-        models::snapshot_elements(source.path).value_or(0), precision.bits);
+    // A video model's size is mlx-video's README's to state, where it does
+    // (53k): never Apogee's own reckoning of its parts.
+    const std::int64_t estimate =
+        route.video ? 0
+                    : models::estimated_mlx_bytes(
+                          models::snapshot_elements(source.path).value_or(0), precision.bits);
     const std::string towers = models::describe_towers(route.towers);
     std::cout << "converting " << source.path.string() << " to MLX (" << precision.name
-              << (estimate > 0 ? ", about " + format_progress_size(estimate) : std::string{})
+              << (route.video    ? "; " + wan_readme_estimate(source.path, precision)
+                  : estimate > 0 ? ", about " + format_progress_size(estimate)
+                                 : std::string{})
               << ") -- "
-              << (route.drafter ? "mlx-vlm's converter, a drafter to run beside " +
-                                      drafts_beside(head, record.bases)
+              << (route.video     ? "mlx-video's converter, Wan's original layout (" +
+                                        models::snapshot_wan_layout(source.path)->class_name +
+                                        ") built into an MLX video model"
+                  : route.drafter ? "mlx-vlm's converter, a drafter to run beside " +
+                                        drafts_beside(head, record.bases)
                   : route.embedding
                       ? "mlx-embeddings' converter, an embedding model built whole (" +
                             embedding_modules(source.path) + ")"
@@ -1886,10 +1987,12 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
     std::cout << "\n"
               << (stored.existed ? "already here -- these exact weights are at\n  " : "")
               << stored.dir.string() << "\n"
-              << "verified: config.json, a tokenizer and " << out.info.shards.size()
-              << " shard header(s) read whole\n"
+              << "verified: "
+              << (route.video ? std::string{models::kMlxVideoFiles} + " -- "
+                              : std::string{"config.json, a tokenizer and "})
+              << out.info.shards.size() << " shard header(s) read whole\n"
               << "mlx model: " << mlx_summary(out.info) << "\n";
-    if (vlm || route.embedding) {
+    if (vlm || route.embedding || route.video) {
         // What its record now says it is (53e), and so what runs it.
         std::cout << "kind: " << models::describe(models::read_mlx_kind(out.dir)) << "\n";
     }
@@ -1904,6 +2007,10 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
                   << "\n";
     }
     if (!chained) {
+        if (route.video) {
+            // No backend runs a video model (53k): its kind line says what does.
+            return out;
+        }
         if (route.drafter) {
             print_mlx_drafter_hint(stored_at(roots, out.model, out.dir));
             return out;
@@ -2748,12 +2855,38 @@ void refuse_drafter_misuse(const models::StoreRoots& roots, const std::string& s
     }
 }
 
+/// What Wan's original layout's MLX conversion does not take (53k), each
+/// refused before anything is announced: a registration -- no backend runs a
+/// video model -- mlx-lm's build of a language model (`--text-only`), which a
+/// video model has none of, and a type named over its own (`--model-type`):
+/// mlx-video converts it by its own config.
+void refuse_video_misuse(const std::string& subject, const std::string& class_name, bool registers,
+                         bool text_only, const std::string& model_type) {
+    const std::string what = subject + " is Wan's original layout (" + class_name +
+                             "), which mlx-video converts to an MLX video model";
+    if (registers) {
+        fail(what +
+             " -- no backend runs a video model, so --register and --register-with do not "
+             "apply: convert it with --mlx alone");
+    }
+    if (text_only) {
+        fail(what +
+             " -- --text-only asks for mlx-lm's build of a language model, and a video model "
+             "has none: convert it with --mlx alone");
+    }
+    if (!model_type.empty()) {
+        fail(what +
+             " -- --model-type does not apply: mlx-video converts it by its own "
+             "config.json");
+    }
+}
+
 /// `models convert <model> --mlx [--type <precision>]` (27b): the
 /// precision, the runtime -- the backend's own ladder, file facts only --
 /// and the seeded driver asked before anything is announced, then the core.
 /// The converter is the set's route (53f): mlx-vlm for a set with towers,
-/// unless `text_only`; each refused before Python starts where it cannot
-/// build the set.
+/// unless `text_only`; mlx-video for Wan's original layout (53k); each
+/// refused before Python starts where it cannot build the set.
 void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& given,
                             const std::string& from, std::string type,
                             const std::string& model_type, const MlxRegisterRequest* registers,
@@ -2769,10 +2902,12 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
     // orders it: a draft head is no conversion's input but this one, whose
     // MLX build is a drafter (53i).
     const std::string& name = registers != nullptr ? registers->snapshot : given;
+    // And Wan's original layout passes only whole, with mlx-video installed:
+    // otherwise refused saying which is missing (53k).
     const SnapshotChoice source =
         registers != nullptr
-            ? choose_snapshot(roots, registers->snapshot, registers->snapshot_from, true)
-            : choose_snapshot(roots, given, from, true);
+            ? choose_snapshot(roots, registers->snapshot, registers->snapshot_from, true, true)
+            : choose_snapshot(roots, given, from, true, true);
     if (!source.error.empty()) {
         fail(source.error);
     }
@@ -2786,12 +2921,30 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
             type = "bf16";
         }
     }
+    const std::optional<models::WanLayout> wan = models::snapshot_wan_layout(source.path);
+    if (wan.has_value()) {
+        refuse_video_misuse("'" + name + "'", wan->class_name, registers != nullptr, text_only, as);
+    }
+    // 4bit unless one is named: the community builds' usual choice, and
+    // mlx-video's README's quantization (53k).
     if (type.empty()) {
         type = "4bit";
     }
     const training::MlxPrecision* precision = training::find_mlx_precision(type);
     if (precision == nullptr) {
         fail("--mlx writes no '" + type + "'");
+    }
+    // mlx-video's converter quantizes 4 or 8 bits, or writes a float type
+    // (53k): any other precision refused before anything runs.
+    if (wan.has_value() &&
+        !training::mlx_converter_writes(training::MlxConverterKind::MlxVideo, *precision)) {
+        std::string names;
+        for (const std::string& known :
+             training::mlx_precision_names(training::MlxConverterKind::MlxVideo)) {
+            names += (names.empty() ? "" : ", ") + known;
+        }
+        fail("--mlx builds '" + name + "' through mlx-video, whose converter writes " + names +
+             "; '" + type + "' is not one of them");
     }
     // Nor is an embedding model an MLX conversion's (M21) -- unless the
     // mlx-embeddings installed builds its type (53h). Everywhere else, that
@@ -2833,7 +2986,16 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
         }
     }
     const backends::MlxReadiness runtime = backends::probe_mlx_runtime(host);
-    if (!runtime.ready() && runtime.refusal != backends::MlxRefusal::NoDriver) {
+    if (route.video) {
+        // mlx-video's set brings mlx-lm with it, and the backend's driver is
+        // no part of a conversion: the platform and the environment are the
+        // runtime's rungs here, mlx-video's own asked by the door (53k).
+        if (runtime.refusal == backends::MlxRefusal::Platform ||
+            runtime.refusal == backends::MlxRefusal::NoEnvironment) {
+            fail("--mlx builds '" + name +
+                 "' through mlx-video, an MLX video model: " + runtime.message());
+        }
+    } else if (!runtime.ready() && runtime.refusal != backends::MlxRefusal::NoDriver) {
         if (route.drafter) {
             // mlx-vlm's set brings mlx-lm with it.
             fail("--mlx builds '" + name + "' through mlx-vlm, as a drafter: " + runtime.reason +
@@ -2886,7 +3048,7 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
     // call); M15's door -- naming the type it is -- stays open. A drafter's
     // type is its speculative path's, asked above (53i).
     if (const std::vector<std::string> types = training::mlx_model_types(package);
-        !types.empty() && !route.drafter) {
+        !types.empty() && !route.drafter && !route.video) {
         const std::string wanted =
             as.empty() ? models::read_mlx_config(source.path).model_type : as;
         if (!wanted.empty() && std::ranges::find(types, wanted) == types.end()) {
@@ -3420,8 +3582,8 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
     convert->add_flag("--mlx", *convert_mlx,
                       "Make an MLX model (Apple silicon), quantized to --type, into the model's "
                       "mlx/: mlx-lm's converter, or for weights with a vision or audio tower "
-                      "mlx-vlm's, the towers kept -- and for a draft head mlx-vlm's drafter, run "
-                      "beside its base");
+                      "mlx-vlm's, the towers kept -- for a draft head mlx-vlm's drafter, run "
+                      "beside its base, and for Wan's original layout mlx-video's video model");
     auto convert_text_only = std::make_shared<bool>(false);
     convert->add_flag("--text-only", *convert_text_only,
                       "With --mlx: build only the language model of weights with a vision or "

@@ -21,7 +21,13 @@
 # and as a backend, converted through the stub `mlx_vlm.convert` to a drafter
 # recorded beside its base, named as that base's entry's draft, and a turn
 # answered through mlx-vlm's speculative path with the base's own answer --
-# the same bytes as the turn without it.
+# the same bytes as the turn without it. Since 53k the user's Wan2.2-TI2V-5B
+# in Wan's original layout: refused while it lacks its checkpoints and while
+# mlx-video is not installed, each refusal naming what is missing; then,
+# whole with the stub mlx-video installed, converted through the real driver
+# to an MLX video model recorded `video`, said so by `models info`,
+# registered as nothing by `config scan`, the converter's prints on neither
+# of apogee's streams.
 #
 # Apple silicon only: the mlx runtime runs nowhere else (the in-process
 # suite, `models_mlx_test`, covers the rest on every platform).
@@ -415,6 +421,84 @@ grep -q "^vlm draft $(basename "$DRAFTER") kind=mtp " "$STUB_MLX_RECORD" \
     || fail "the turn did not run the speculative path: $(cat "$STUB_MLX_RECORD")"
 if pgrep -f "$WORK_DIR/training/scripts/mlx_generate.py" >/dev/null 2>&1; then
     fail "a driver outlived its apogee: $(pgrep -fl "$WORK_DIR/training/scripts/mlx_generate.py")"
+fi
+
+# --- Wan's original layout (53k): through mlx-video to an MLX video model ------------
+# The user's set as 53j names it: its own config, a transformer shard -- small
+# fake bytes -- and, once whole, the two root checkpoints.
+WAN="$WORK_DIR/models/Wan-AI--Wan2.2-TI2V-5B/safetensors/6ef9b00b8b83"
+WAN_HANDLE="Wan-AI--Wan2.2-TI2V-5B/safetensors/6ef9b00b8b83"
+python3 - "$WAN" <<'EOF' || fail "could not write the Wan set"
+import json, os, sys
+d = sys.argv[1]
+os.makedirs(d)
+json.dump({"_class_name": "WanModel", "_diffusers_version": "0.33.0", "dim": 3072,
+           "eps": 1e-06, "ffn_dim": 14336, "freq_dim": 256, "in_dim": 48, "model_type": "ti2v",
+           "num_heads": 24, "num_layers": 30, "out_dim": 48, "text_len": 512},
+          open(os.path.join(d, "config.json"), "w"), indent=2)
+with open(os.path.join(d, "diffusion_pytorch_model-00001-of-00001.safetensors"), "wb") as out:
+    out.write(b"fake shard bytes, never weights\n")
+EOF
+# Lacking its checkpoints, and no mlx-video: both named, nothing run.
+if "$APOGEE_BIN" models convert "$WAN_HANDLE" --mlx >"$WORK_DIR/wan.txt" 2>&1; then
+    fail "a Wan set lacking its checkpoints converted: $(cat "$WORK_DIR/wan.txt")"
+fi
+grep -q "missing models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth" "$WORK_DIR/wan.txt" \
+    || fail "the refusal did not name the missing checkpoints: $(cat "$WORK_DIR/wan.txt")"
+grep -q "and is not installed in Apogee's Python environment -- 'apogee train setup --with mlx-video'" \
+    "$WORK_DIR/wan.txt" || fail "the refusal did not name mlx-video's setup: $(cat "$WORK_DIR/wan.txt")"
+# Whole, mlx-video still not installed: mlx-video alone named, MLX not offered.
+printf 'fake checkpoint bytes\n' >"$WAN/models_t5_umt5-xxl-enc-bf16.pth"
+printf 'fake checkpoint bytes\n' >"$WAN/Wan2.2_VAE.pth"
+if "$APOGEE_BIN" models convert "$WAN_HANDLE" --mlx >"$WORK_DIR/wan.txt" 2>&1; then
+    fail "a Wan set converted with no mlx-video: $(cat "$WORK_DIR/wan.txt")"
+fi
+grep -q "complete -- its transformer beside models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth; mlx-video converts it to an MLX video model (--mlx), and is not installed" \
+    "$WORK_DIR/wan.txt" || fail "the refusal of the whole set did not name mlx-video alone: $(cat "$WORK_DIR/wan.txt")"
+"$APOGEE_BIN" models info "$WAN_HANDLE" --output-format json >"$WORK_DIR/wan-info.json" 2>&1 \
+    || fail "models info of the Wan set"
+grep -q '"converts_to":\[\]' "$WORK_DIR/wan-info.json" \
+    || fail "the whole set was offered a conversion with no mlx-video: $(cat "$WORK_DIR/wan-info.json")"
+[ ! -e "$WORK_DIR/models/Wan-AI--Wan2.2-TI2V-5B/mlx" ] || fail "a refusal left an MLX directory"
+
+# mlx-video installed: offered MLX, converted through the real seeded driver.
+mlx_fake_video "$WORK_DIR" "$MLX_STUBS"
+"$APOGEE_BIN" models info "$WAN_HANDLE" --output-format json >"$WORK_DIR/wan-info.json" 2>&1 \
+    || fail "models info of the Wan set"
+grep -q '"converts_to":\["mlx"\]' "$WORK_DIR/wan-info.json" \
+    || fail "the whole set was not offered MLX through mlx-video: $(cat "$WORK_DIR/wan-info.json")"
+"$APOGEE_BIN" models convert "$WAN_HANDLE" --mlx >"$WORK_DIR/wan.txt" 2>"$WORK_DIR/wan.err" \
+    || fail "convert --mlx of the whole Wan set failed: $(cat "$WORK_DIR/wan.err")"
+grep -q "mlx-video's converter, Wan's original layout (WanModel) built into an MLX video model" \
+    "$WORK_DIR/wan.txt" || fail "the conversion did not say mlx-video built it: $(cat "$WORK_DIR/wan.txt")"
+grep -q "kind: video (recorded)" "$WORK_DIR/wan.txt" \
+    || fail "the conversion did not say it made a video model: $(cat "$WORK_DIR/wan.txt")"
+if grep -q "Converting\|Auto-detected" "$WORK_DIR/wan.txt" "$WORK_DIR/wan.err"; then
+    fail "mlx-video's own print reached a terminal stream"
+fi
+WAN_SETS=("$WORK_DIR"/models/Wan-AI--Wan2.2-TI2V-5B/mlx/*/)
+[ "${#WAN_SETS[@]}" -eq 1 ] || fail "expected one MLX build of the Wan set, found: ${WAN_SETS[*]}"
+for part in config.json t5_encoder.safetensors vae.safetensors model.safetensors; do
+    [ -f "${WAN_SETS[0]}$part" ] || fail "the MLX video model lacks $part"
+done
+grep -q '"transform": "mlx_video.models.wan_2.convert 4bit"' "${WAN_SETS[0]}apogee-snapshot.json" \
+    || fail "the record does not say mlx-video made it: $(cat "${WAN_SETS[0]}apogee-snapshot.json")"
+grep -q '"kind": "video"' "${WAN_SETS[0]}apogee-snapshot.json" \
+    || fail "the record does not say video: $(cat "${WAN_SETS[0]}apogee-snapshot.json")"
+no_driver_left
+WAN_MLX="Wan-AI--Wan2.2-TI2V-5B/mlx/$(basename "${WAN_SETS[0]}")"
+"$APOGEE_BIN" models info "$WAN_MLX" -q >"$WORK_DIR/wan-mlx.txt" 2>&1 \
+    || fail "models info of the MLX video model: $(cat "$WORK_DIR/wan-mlx.txt")"
+grep -q "kind:         video (recorded) -- a video model" "$WORK_DIR/wan-mlx.txt" \
+    || fail "models info did not say it is a video model: $(cat "$WORK_DIR/wan-mlx.txt")"
+grep -q "files:        whole -- config.json, the T5 text encoder" "$WORK_DIR/wan-mlx.txt" \
+    || fail "models info did not read it whole: $(cat "$WORK_DIR/wan-mlx.txt")"
+# Never a chat backend: the scan says it apart, and registers nothing of it.
+"$APOGEE_BIN" config scan --register >"$WORK_DIR/wan-scan.txt" 2>&1 || fail "config scan --register"
+grep -q "not registered -- a video model" "$WORK_DIR/wan-scan.txt" \
+    || fail "the scan did not say the video model apart: $(cat "$WORK_DIR/wan-scan.txt")"
+if grep -rqF "$(basename "${WAN_SETS[0]}")" "$WORK_DIR/config/"; then
+    fail "the scan registered the video model as a backend: $(cat "$WORK_DIR/wan-scan.txt")"
 fi
 
 echo "mlx_models_e2e: ok"

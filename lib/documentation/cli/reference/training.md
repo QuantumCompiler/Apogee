@@ -45,6 +45,7 @@ apogee train setup                        # create the environment, install noth
 apogee train setup --with prepare         # + the `datasets` library, for Parquet
 apogee train setup --trainer auto         # + the trainer stack for this host
 apogee train setup --trainer mlx --with convert
+apogee train setup --with mlx-video       # Wan to MLX: mlx-video from a reviewed GitHub commit
 apogee train setup --python python3.12    # this Python for a new environment, this run
 apogee train setup --rebuild              # remake it on a Python every set runs on (asked)
 ```
@@ -56,7 +57,8 @@ sets asked for with the environment's own pip. **Which Python** (since M19,
 runs on, because one environment serves them all. Each set's range is
 carried from its packages' published `requires_python` (read 2026-10-21):
 `voice` runs on `>=3.10,<3.13` (Kokoro and misaki), `mlx` on `>=3.11`
-(mlx-lm), every other set on `>=3.10` -- so an Apple-silicon Mac whose
+(mlx-lm) and, since 53k, `mlx-video` on `>=3.11` (its `pyproject.toml` at
+the pinned commit), every other set on `>=3.10` -- so an Apple-silicon Mac whose
 `python3` is 3.13 or newer gets its environment from a 3.12 or 3.11 beside it,
 and setup says which and why. `training.python` in the config (`config set
 training.python <path>` writes it), or `--python` for one run, is used as
@@ -75,9 +77,11 @@ Python cannot take names that rebuild.
 
 Nothing else ever installs a Python package. Every install's last step,
 `apogee bootstrap` (51), runs this command for the sets this host can
-install -- `APOGEE_MINIMAL_INSTALL=1` skips it -- and otherwise a command
-that needs the environment and finds it missing asks on a terminal, and on a
-pipe refuses naming this command.
+install -- `APOGEE_MINIMAL_INSTALL=1` skips it -- but never for `mlx-video`,
+which is opt-in (53k): the bootstrap says it skipped and names `apogee train
+setup --with mlx-video`. Otherwise a command that needs the environment and
+finds it missing asks on a terminal, and on a pipe refuses naming this
+command.
 
 | Set | Packages | Needed by |
 |---|---|---|
@@ -87,9 +91,11 @@ pipe refuses naming this command.
 | `convert` | `torch`, `transformers`, `gguf`, `numpy`, `sentencepiece`, `protobuf` | `train promote`'s GGUF conversion (not `--target mlx`, which converts nothing) |
 | `mlx-vlm` | `mlx-vlm` | an `mlx` backend over a vision model reading pictures as they are; without it such a model's pictures go to the `vision` role, and `apogee check` says so. Since 53f also `models convert --mlx` of a set whose `config.json` declares a vision, audio or omni tower (`vision_config`, `audio_config`, `thinker_config`): built through mlx-vlm's own converter with its towers kept, and recorded as kind `vision`, so an `mlx` backend over it runs every turn through mlx-vlm, text included. MLX is offered such a set where the mlx-vlm installed builds its type, read from its own `models/`; otherwise `--text-only` where mlx-lm builds it, and `models info` says which. Its floor, `0.6.1` (read 2026-10-21), is the first release that builds Qwen3-Omni, Gemma 4's unified model and Qwen 3.5; an environment holding an older one keeps it until this set is installed again. Since 53g it is also how an `mlx` backend hears: over an omni model mlx-vlm built (recorded `vision`, its `config.json` declaring an `audio_config` or a `thinker_config`), with the installed mlx-vlm holding its type's module, an attached recording is heard as it is on the turn it is attached and read as its transcript after; any other `mlx` backend has its recordings transcribed by the `transcription` role, as before |
 | `mlx-embeddings` | `mlx-embeddings` | since 53h, an embedding model on MLX: `models convert --mlx` of a set sentence-transformers publishes (its `modules.json` naming a Pooling module) builds it whole -- its encoder, and the dense layers its pooled vector passes through -- through mlx-embeddings' own converter, and records it as kind `embedding`. MLX is offered such a set, second after its GGUF, exactly where the mlx-embeddings installed builds its `model_type`, read from its own `models/`; without this set, or for a type it has no module for, the set converts to GGUF alone and `--mlx` is refused as before. `config scan --register` registers what it built as an `mlx` entry, which embeds through the seeded `mlx_embed.py` -- one child holding the model, batches of 64 texts, unmetered -- for the `embedding` role (`config set-default-embedding`), and answers no chat; its vectors are as wide as its `config.json` says (`models info`'s `vectors:` line), and a collection it vectorises is bound to that backend's own space (`mlx:<model>`), so the same set's GGUF build is another model to it. Its floor, `0.1.0` (read 2026-10-21), is the first release whose `gemma3_text` pools before its dense layers and converts its padding mask, as the module this route was read against does; it brings mlx-vlm and mlx-lm with it |
+| `mlx-video` | `mlx-video @ git+https://github.com/Blaizzy/mlx-video.git@87db56a51758fefb748a359b90a5283bb8ba4837`, `torch` | since 53k, Wan's original layout on MLX: `models convert --mlx` of a Wan set pulled whole (`models info`'s `wan_layout` saying `whole`: its transformer beside its T5 text encoder and VAE checkpoints) builds it through mlx-video's own Wan converter -- `mlx_video.models.wan_2.convert` at that commit; both its READMEs name module paths the commit lacks -- into an MLX video model's directory (`config.json`, `t5_encoder.safetensors`, `vae.safetensors` and the transformer's weights), recorded as kind `video`, which no backend runs and `config scan` registers as nothing. MLX is offered such a set exactly where it is whole and this set is installed -- mlx-video's converter module and the `torch` it loads the checkpoints through, read from their files -- and otherwise refused naming what is missing, the checkpoints or this setup. Its precisions are its converter's: `4bit` (the default, its README's), `8bit`, `bf16`, `f16`; the size it says is its README's, only where that states one (the 1.3B's and the 14B's transformer, in bf16 and at 4 bits -- none for TI2V-5B). **Opt-in only**: mlx-video is on no index (its README installs it from GitHub, its Releases are empty), so pip builds it with git from the one commit Apogee reviewed -- main's head on 2026-10-21, the merge of its pull request #23, dated 2026-05-13 -- and the bootstrap never installs it; `train setup` says so as it installs, and refuses before pip where git is not on PATH. A later commit is a deliberate bump. It brings mlx-vlm and mlx-lm with it |
 
 `--trainer auto` picks `mlx` on macOS/arm64, `peft` where `nvidia-smi` is on
-PATH, and says so when neither fits. Versions are floors, not exact pins.
+PATH, and says so when neither fits. Versions are floors, not exact pins --
+but `mlx-video`'s, built from one reviewed commit (53k).
 
 ```jsonc
 "training": {

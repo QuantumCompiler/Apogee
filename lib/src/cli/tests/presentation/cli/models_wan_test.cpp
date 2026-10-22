@@ -20,6 +20,8 @@
 #include "contracts/sha256.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
+#include "platform/child_process.h"
+#include "platform/platform.h"
 #include "support/cli_home.h"
 #include "support/wan_original.h"
 #include "transport/http_client.h"
@@ -236,20 +238,23 @@ struct Pull {
     return sorted(twelve);
 }
 
+// No mlx-video in these homes: since 53k each line names its setup.
 const std::string kMissingLine =
     "diffusion:    Wan's original layout (WanModel), missing models_t5_umt5-xxl-enc-bf16.pth and "
     "Wan2.2_VAE.pth -- 'apogee models pull Wan-AI/Wan2.2-TI2V-5B --safetensors' fetches them "
-    "into this set; neither converter takes it -- llama.cpp's finds a model by its "
-    "architectures, and mlx-lm's builds a language model; what runs this model today is its "
-    "Diffusers pipeline in 'apogee video generate', pulled whole with 'apogee models pull "
-    "Wan-AI/Wan2.2-TI2V-5B-Diffusers'\n";
+    "into this set; once it is complete, mlx-video converts it to an MLX video model (--mlx), "
+    "and is not installed in Apogee's Python environment -- 'apogee train setup --with "
+    "mlx-video'; llama.cpp's converter takes no diffusion model -- it finds a model by its "
+    "architectures; what runs this model today is its Diffusers pipeline in 'apogee video "
+    "generate', pulled whole with 'apogee models pull Wan-AI/Wan2.2-TI2V-5B-Diffusers'\n";
 
 const std::string kCompleteLine =
     "diffusion:    Wan's original layout (WanModel), complete -- its transformer beside "
-    "models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth; neither converter takes it -- "
-    "llama.cpp's finds a model by its architectures, and mlx-lm's builds a language model; what "
-    "runs this model today is its Diffusers pipeline in 'apogee video generate', pulled whole "
-    "with 'apogee models pull Wan-AI/Wan2.2-TI2V-5B-Diffusers'\n";
+    "models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth; mlx-video converts it to an MLX video "
+    "model (--mlx), and is not installed in Apogee's Python environment -- 'apogee train setup "
+    "--with mlx-video'; llama.cpp's converter takes no diffusion model -- it finds a model by "
+    "its architectures; what runs this model today is its Diffusers pipeline in 'apogee video "
+    "generate', pulled whole with 'apogee models pull Wan-AI/Wan2.2-TI2V-5B-Diffusers'\n";
 
 }  // namespace
 
@@ -491,9 +496,11 @@ TEST_CASE(
         "apogee models: '" + handle +
         "' is Wan's original layout (WanModel), missing models_t5_umt5-xxl-enc-bf16.pth and "
         "Wan2.2_VAE.pth -- 'apogee models pull Wan-AI/Wan2.2-TI2V-5B --safetensors' fetches them "
-        "into this set; neither converter takes it -- llama.cpp's finds a model by its "
-        "architectures, and mlx-lm's builds a language model; what runs this model today is its "
-        "Diffusers pipeline in 'apogee video generate', pulled whole with 'apogee models pull "
+        "into this set; once it is complete, mlx-video converts it to an MLX video model "
+        "(--mlx), and is not installed in Apogee's Python environment -- 'apogee train setup "
+        "--with mlx-video'; llama.cpp's converter takes no diffusion model -- it finds a model "
+        "by its architectures; what runs this model today is its Diffusers pipeline in 'apogee "
+        "video generate', pulled whole with 'apogee models pull "
         "Wan-AI/Wan2.2-TI2V-5B-Diffusers'\n";
     std::string out;
     // The user's command, and the GGUF form, refused alike before anything runs.
@@ -504,11 +511,307 @@ TEST_CASE(
     CHECK(apogee::models::list_store_mlx(pull.roots).empty());
     CHECK(apogee::models::list_store_ggufs(pull.roots).empty());
 
-    // Completed, it says so -- and still no converter takes it (53k's).
+    // Completed, it says so -- and still nothing converts it here, mlx-video
+    // not installed: its setup named (53k).
     std::string pulled;
     REQUIRE(pull.run(std::string{apogee::testing::kWanRepo}, &pulled) == 0);
     CHECK(pull.home.run({"models", "convert", handle, "--mlx"}, &out) != 0);
     CHECK(out.find("' is Wan's original layout (WanModel), complete -- its transformer beside "
-                   "models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth; neither converter takes "
-                   "it") != std::string::npos);
+                   "models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth; mlx-video converts it "
+                   "to an MLX video model (--mlx), and is not installed in Apogee's Python "
+                   "environment -- 'apogee train setup --with mlx-video'; ") != std::string::npos);
+}
+
+// ---- Wan's original layout to MLX, through mlx-video (53k) -----------------------------
+
+namespace {
+
+/// The stub mlx-video -- its Wan converter, and the stub torch beside it --
+/// laid out with the stub mlx-lm as the environment Apogee owns under
+/// `home`, as `train setup --with mlx-video` would leave it: its interpreter
+/// the host's python3 with them on its path. Without `with_video`, the
+/// environment alone, mlx-video not installed.
+void fake_video_runtime(const std::filesystem::path& home, bool with_video = true) {
+    const std::filesystem::path stubs =
+        std::filesystem::path{APOGEE_TESTS_DIR} / "data" / "backends" / "scripts";
+    const std::filesystem::path site =
+        home / "training" / "venv" / "lib" / "python3.99" / "site-packages";
+    std::filesystem::create_directories(site);
+    std::filesystem::copy(stubs / "stub_mlx", site, std::filesystem::copy_options::recursive);
+    if (with_video) {
+        std::filesystem::copy(stubs / "stub_mlx_video", site,
+                              std::filesystem::copy_options::recursive);
+    }
+    const std::filesystem::path python = home / "training" / "venv" / "bin" / "python";
+    apogee::testing::write_fixture_file(python,
+                                        "#!/bin/sh\nPYTHONPATH='" + site.string() +
+                                            "' PYTHONDONTWRITEBYTECODE=1 exec python3 \"$@\"\n");
+    std::filesystem::permissions(python, std::filesystem::perms::owner_all);
+}
+
+/// Where the converter can run: Apple silicon, and a python3 for the driver.
+[[nodiscard]] bool video_driver_runs() {
+    return apogee::platform::host_target() == "macos-arm64" &&
+           !apogee::platform::find_on_path("python3").empty();
+}
+
+[[nodiscard]] std::string converted_handle(const StoreRoots& roots) {
+    const std::vector<apogee::models::StoredMlx> stored =
+        apogee::models::list_store_mlx(roots, apogee::testing::kWanModel);
+    return stored.size() == 1
+               ? apogee::models::weights_handle(stored.front().model, apogee::models::kMlxFormat,
+                                                stored.front().id)
+               : std::string{};
+}
+
+}  // namespace
+
+TEST_CASE(
+    "Wan's original layout is offered MLX only whole with mlx-video installed, else refused "
+    "saying which is missing",
+    "[commands][models][wan][convert][mlx_video]") {
+    // 53k: M20's decision answers ["mlx"] exactly for the user's set whole
+    // with mlx-video installed -- read from its files, nothing run -- and
+    // the refusal otherwise names what is missing: the checkpoints, or
+    // mlx-video by its setup.
+    const Pull pull{{wan_repository()}};
+    const std::filesystem::path dir = apogee::testing::write_user_wan_set(pull.roots);
+    const std::string handle = "Wan-AI--Wan2.2-TI2V-5B/safetensors/" + dir.filename().string();
+    const std::string tail =
+        "llama.cpp's converter takes no diffusion model -- it finds a model by its "
+        "architectures; what runs this model today is its Diffusers pipeline in 'apogee video "
+        "generate', pulled whole with 'apogee models pull Wan-AI/Wan2.2-TI2V-5B-Diffusers'\n";
+    std::string out;
+
+    // mlx-video installed, the set not whole: the checkpoints alone named.
+    fake_video_runtime(pull.home.home());
+    nlohmann::json data = pull.data(handle);
+    CHECK(data["converts_to"] == nlohmann::json::array());
+    CHECK(data["mlx_conversion"].is_null());
+    CHECK(pull.home.run({"models", "convert", handle, "--mlx"}, &out) != 0);
+    CHECK(out ==
+          "apogee models: '" + handle +
+              "' is Wan's original layout (WanModel), missing models_t5_umt5-xxl-enc-bf16.pth "
+              "and Wan2.2_VAE.pth -- 'apogee models pull Wan-AI/Wan2.2-TI2V-5B --safetensors' "
+              "fetches them into this set; once it is complete, mlx-video converts it to an MLX "
+              "video model (--mlx); " +
+              tail);
+
+    // Whole, per 53j, with mlx-video installed: MLX, and MLX alone.
+    apogee::testing::complete_user_wan_set(dir);
+    data = pull.data(handle);
+    CHECK(data["converts_to"] == nlohmann::json::array({"mlx"}));
+    CHECK(data["mlx_conversion"] == nlohmann::json{{"towers", nlohmann::json::array()},
+                                                   {"converter", "mlx-video"},
+                                                   {"text_only", false}});
+    CHECK(data["wan_layout"]["whole"] == true);
+    REQUIRE(pull.home.run({"models", "info", handle, "-q"}, &out) == 0);
+    INFO(out);
+    CHECK(out.find("format:       SafeTensors -- a diffusion model's weights, not runnable; --mlx "
+                   "converts it to an MLX video model\n") != std::string::npos);
+    CHECK(out.find("diffusion:    Wan's original layout (WanModel), complete -- its transformer "
+                   "beside models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth; --mlx converts it "
+                   "to an MLX video model through mlx-video; " +
+                   tail) != std::string::npos);
+    CHECK(out.find("made from it: nothing yet -- 'apogee models convert " + handle +
+                   " --mlx' makes an MLX video model of it\n") != std::string::npos);
+    // The GGUF door refused, the way named.
+    CHECK(pull.home.run({"models", "convert", handle}, &out) != 0);
+    CHECK(out.find("; --mlx converts it to an MLX video model through mlx-video; " + tail) !=
+          std::string::npos);
+    // What its MLX conversion does not take, each refused before anything runs.
+    const std::string what = "apogee models: '" + handle +
+                             "' is Wan's original layout (WanModel), which mlx-video converts to "
+                             "an MLX video model -- ";
+    CHECK(pull.home.run({"models", "convert", handle, "--mlx", "--register"}, &out) != 0);
+    CHECK(out == what +
+                     "no backend runs a video model, so --register and --register-with do not "
+                     "apply: convert it with --mlx alone\n");
+    CHECK(pull.home.run({"models", "convert", handle, "--mlx", "--register-with", "4bit,8bit"},
+                        &out) != 0);
+    CHECK(out.starts_with(what + "no backend runs a video model"));
+    CHECK(pull.home.run({"models", "convert", handle, "--mlx", "--text-only"}, &out) != 0);
+    CHECK(out == what +
+                     "--text-only asks for mlx-lm's build of a language model, and a video model "
+                     "has none: convert it with --mlx alone\n");
+    CHECK(pull.home.run({"models", "convert", handle, "--mlx", "--model-type", "wan"}, &out) != 0);
+    CHECK(out == what +
+                     "--model-type does not apply: mlx-video converts it by its own "
+                     "config.json\n");
+    for (const std::string& precision : std::vector<std::string>{"3bit", "6bit", "mxfp4"}) {
+        INFO(precision);
+        CHECK(pull.home.run({"models", "convert", handle, "--mlx", "--type", precision}, &out) !=
+              0);
+        CHECK(out == "apogee models: --mlx builds '" + handle +
+                         "' through mlx-video, whose converter writes 4bit, 8bit, bf16, f16; '" +
+                         precision + "' is not one of them\n");
+    }
+    CHECK(apogee::models::list_store_mlx(pull.roots).empty());
+    CHECK(apogee::models::find_abandoned_staging(pull.roots).empty());
+    // Completion offers what the door takes: mlx-video's precisions, and no
+    // registration or type.
+    REQUIRE(pull.home.run({"__complete", "models", "convert", handle, "--mlx", "--type", ""},
+                          &out) == 0);
+    CHECK(out.find("4bit\n") != std::string::npos);
+    CHECK(out.find("8bit\n") != std::string::npos);
+    CHECK(out.find("bf16\n") != std::string::npos);
+    CHECK(out.find("3bit") == std::string::npos);
+    CHECK(out.find("mxfp4") == std::string::npos);
+    REQUIRE(
+        pull.home.run({"__complete", "models", "convert", handle, "--mlx", "--register-with", ""},
+                      &out) == 0);
+    CHECK(out.empty());
+    REQUIRE(pull.home.run({"__complete", "models", "convert", handle, "--mlx", "--model-type", ""},
+                          &out) == 0);
+    CHECK(out.empty());
+
+    // Whole, mlx-video not installed: mlx-video alone named, by its setup.
+    const Pull bare{{wan_repository()}};
+    const std::filesystem::path other = apogee::testing::write_user_wan_set(bare.roots);
+    apogee::testing::complete_user_wan_set(other);
+    fake_video_runtime(bare.home.home(), /*with_video=*/false);
+    const std::string other_handle =
+        "Wan-AI--Wan2.2-TI2V-5B/safetensors/" + other.filename().string();
+    CHECK(bare.data(other_handle)["converts_to"] == nlohmann::json::array());
+    CHECK(bare.home.run({"models", "convert", other_handle, "--mlx"}, &out) != 0);
+    CHECK(out ==
+          "apogee models: '" + other_handle +
+              "' is Wan's original layout (WanModel), complete -- its transformer beside "
+              "models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth; mlx-video converts it to an "
+              "MLX video model (--mlx), and is not installed in Apogee's Python environment -- "
+              "'apogee train setup --with mlx-video'; " +
+              tail);
+    REQUIRE(bare.home.run({"models", "info", other_handle, "-q"}, &out) == 0);
+    CHECK(out.find("made from it: nothing -- no conversion takes these weights\n") !=
+          std::string::npos);
+}
+
+TEST_CASE(
+    "the user's whole Wan set converts through mlx-video to an MLX video model, recorded video",
+    "[commands][models][wan][convert][mlx_video][driver]") {
+    if (!video_driver_runs()) {
+        SKIP("the converter runs on Apple silicon, and its driver needs a python3");
+    }
+    // 53k's acceptance on the user's own set, completed per 53j, over the
+    // REAL seeded driver and the stub mlx-video: an MLX video directory
+    // under the model's mlx/, recorded `video`, said so in `models info` --
+    // the converter's own prints on neither stream.
+    const Pull pull{{wan_repository()}};
+    const std::filesystem::path dir = apogee::testing::write_user_wan_set(pull.roots);
+    apogee::testing::complete_user_wan_set(dir);
+    fake_video_runtime(pull.home.home());
+    const std::string handle = "Wan-AI--Wan2.2-TI2V-5B/safetensors/" + dir.filename().string();
+    const std::string config_before = pull.home.config_text();
+
+    std::string out;
+    std::string err;
+    REQUIRE(pull.home.run({"models", "convert", handle, "--mlx"}, &out, &err) == 0);
+    INFO(out);
+    INFO(err);
+    // The default precision, and the README's word on its size: none for
+    // TI2V-5B.
+    CHECK(out.find("converting " + dir.string() +
+                   " to MLX (4bit; no size estimate -- mlx-video's README states none for this "
+                   "model) -- mlx-video's converter, Wan's original layout (WanModel) built into "
+                   "an MLX video model, in Apogee's Python environment\n") != std::string::npos);
+    CHECK(out.find("verified: config.json, the T5 text encoder (t5_encoder.safetensors), the VAE "
+                   "(vae.safetensors) and the transformer's weights -- 3 shard header(s) read "
+                   "whole\n") != std::string::npos);
+    CHECK(out.find("mlx model: ti2v, 4-bit (affine, group 64), ") != std::string::npos);
+    CHECK(out.find("token window") == std::string::npos);
+    CHECK(out.find("kind: video (recorded) -- a video model: 'apogee video generate' runs it, "
+                   "never a chat backend\n") != std::string::npos);
+    // No backend is offered for it.
+    CHECK(out.find("add-backend") == std::string::npos);
+    // The converter's own print reached neither stream.
+    for (const std::string& stream : {out, err}) {
+        CHECK(stream.find("Converting") == std::string::npos);
+        CHECK(stream.find("Auto-detected") == std::string::npos);
+    }
+
+    // In the store under the model's mlx/, its record the conversion's.
+    const std::string made = converted_handle(pull.roots);
+    REQUIRE_FALSE(made.empty());
+    const std::filesystem::path mlx = apogee::models::list_store_mlx(pull.roots).front().dir;
+    for (const char* file :
+         {"config.json", "t5_encoder.safetensors", "vae.safetensors", "model.safetensors"}) {
+        INFO(file);
+        CHECK(std::filesystem::is_regular_file(mlx / file));
+    }
+    const std::optional<apogee::models::Snapshot> record = apogee::models::load_snapshot(mlx);
+    REQUIRE(record.has_value());
+    CHECK(record->kind == "video");
+    CHECK(record->source == "convert");
+    CHECK(record->ref == handle);
+    CHECK(record->transform == "mlx_video.models.wan_2.convert 4bit");
+
+    // `models info` says it: the kind, the files read by mlx-video's layout,
+    // no window -- and its data.
+    REQUIRE(pull.home.run({"models", "info", made, "-q"}, &out) == 0);
+    CHECK(out.find("kind:         video (recorded) -- a video model: 'apogee video generate' runs "
+                   "it, never a chat backend\n") != std::string::npos);
+    CHECK(out.find("files:        whole -- config.json, the T5 text encoder "
+                   "(t5_encoder.safetensors), the VAE (vae.safetensors) and the transformer's "
+                   "weights, 3 shard(s), each holding every byte its header lists\n") !=
+          std::string::npos);
+    CHECK(out.find("window:") == std::string::npos);
+    CHECK(out.find("repair:") == std::string::npos);
+    const nlohmann::json data = pull.data(made);
+    CHECK(data["kind"] == "video");
+    CHECK(data["window"].is_null());
+    CHECK(data["lineage"][0]["from"] == handle);
+    // The set says what was made of it.
+    REQUIRE(pull.home.run({"models", "info", handle, "-q"}, &out) == 0);
+    CHECK(out.find("made from it: " + made + " (recorded)\n") != std::string::npos);
+    // `check` reads it whole; `config scan --register` registers no backend,
+    // saying what it is.
+    (void)pull.home.run({"check"}, &out);
+    CHECK(out.find(made) != std::string::npos);
+    CHECK(out.find("MLX model that cannot load") == std::string::npos);
+    (void)pull.home.run({"config", "scan", "--register"}, &out);
+    CHECK(out.find("not registered -- a video model") != std::string::npos);
+    CHECK(pull.home.config_text() == config_before);
+
+    // Converted again: found, nothing run.
+    REQUIRE(pull.home.run({"models", "convert", handle, "--mlx"}, &out) == 0);
+    CHECK(out.starts_with("already converted:\n  " + mlx.string() + "\n"));
+    CHECK(out.find("add-backend") == std::string::npos);
+}
+
+TEST_CASE("an MLX video conversion's size is mlx-video's README's, where it states one",
+          "[commands][models][wan][convert][mlx_video][driver]") {
+    if (!video_driver_runs()) {
+        SKIP("the converter runs on Apple silicon, and its driver needs a python3");
+    }
+    // 53k: the README states the 1.3B's and the 14B's transformer in bf16
+    // and at 4 bits, and nothing else; a Wan2.1 1.3B set, whole, unrecorded.
+    const Pull pull{{wan_repository()}};
+    fake_video_runtime(pull.home.home());
+    const std::filesystem::path set =
+        pull.home.models() / "Wan-AI--Wan2.1-T2V-1.3B" / "safetensors" / "0123456789ab";
+    apogee::testing::write_fixture_file(set / "config.json",
+                                        R"({"_class_name": "WanModel", "_diffusers_version":
+            "0.30.0", "model_type": "t2v", "dim": 1536, "num_layers": 30, "out_dim": 16})");
+    apogee::testing::write_fixture_file(set / "diffusion_pytorch_model.safetensors",
+                                        "fake shard bytes\n");
+    apogee::testing::write_fixture_file(set / "models_t5_umt5-xxl-enc-bf16.pth", "fake\n");
+    apogee::testing::write_fixture_file(set / "Wan2.1_VAE.pth", "fake\n");
+    const std::string handle = "Wan-AI--Wan2.1-T2V-1.3B/safetensors/0123456789ab";
+    std::string out;
+    for (const auto& [precision, said] : std::vector<std::pair<std::string, std::string>>{
+             {"4bit",
+              "4bit; its transformer 799 MB, as mlx-video's README states for Wan2.1's "
+              "1.3B"},
+             {"bf16",
+              "bf16; its transformer 2.7 GB, as mlx-video's README states for Wan2.1's "
+              "1.3B"},
+             {"8bit",
+              "8bit; no size estimate -- mlx-video's README states none for this model "
+              "at 8bit"}}) {
+        INFO(precision);
+        REQUIRE(pull.home.run({"models", "convert", handle, "--mlx", "--type", precision}, &out) ==
+                0);
+        CHECK(out.find("to MLX (" + said + ") -- mlx-video's converter") != std::string::npos);
+    }
+    CHECK(apogee::models::list_store_mlx(pull.roots).size() == 3);
 }

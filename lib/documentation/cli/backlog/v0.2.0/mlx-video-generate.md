@@ -28,6 +28,10 @@
 **Reference.** 49b–49e (the video runtime, the record, LoRAs) and 50c (the composer drives clips through this same core). [mlx-video's README](https://github.com/Blaizzy/mlx-video).
 
 **Decisions made** (dated):
+- 2026-10-21 — **What 53k found that this item builds on** (recorded when 53k shipped):
+  - **The pinned commit.** mlx-video is pinned at `87db56a5` (2026-05-13), and its Wan modules live at `mlx_video.models.wan_2.*`. Neither README's path (`mlx_video.wan2.*`, `mlx_video.wan_2.*`) exists at that commit, so read the generator's module and entry there.
+  - **The tokenizer.** The generator loads `AutoTokenizer.from_pretrained("google/umt5-xxl")` from the Hugging Face hub, and the converted directory carries no tokenizer, though the Wan set stores one under `google/umt5-xxl/`. A run must never reach the network for it. That means pointing the generator at the stored tokenizer, or carrying it into the converted directory.
+  - **The `video` kind's wording.** 53e's wording ("'apogee video generate' runs it") becomes true only with this item.
 - 2026-10-21 — **The engine follows the model's directory**, with `--engine` there only to refuse or to name it. A person picks the model, and the model says its engine.
 
 **Open calls:**
@@ -43,4 +47,4 @@
 - [ ] A pipeline generates as before. A `--from` rerun replays the engine its record names.
 - [ ] `lib/scripts/cicd.sh --test` is green, `cli.video_lifecycle` included.
 
-**Scope note.** v0.2.0, gated on [53k](mlx-video-convert.md). The GUI's [3b](../../../gui/backlog/v0.2.0/mlx-engines-and-drafters.md) shows the engine.
+**Scope note.** v0.2.0. Its gate, [53k](../../assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind), shipped 2026-10-21. The GUI's [3b](../../../gui/backlog/v0.2.0/mlx-engines-and-drafters.md) shows the engine.

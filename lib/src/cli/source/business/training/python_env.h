@@ -35,7 +35,9 @@ namespace apogee::training {
 /// A named group of packages, installed together. Pinned as version FLOORS
 /// rather than exact versions: an exact pin ages into an uninstallable one
 /// the day it is yanked, and the drivers are written against the libraries'
-/// stable surfaces.
+/// stable surfaces. A package not on PyPI is the one exception (53k): pip
+/// builds it from its repository at one reviewed commit (`pinned_source`),
+/// since there is no release to name a floor by.
 enum class RequirementSet : std::uint8_t {
     /// `datasets`, for Parquet in `prepare_dataset.py`.
     Prepare,
@@ -64,6 +66,13 @@ enum class RequirementSet : std::uint8_t {
     /// through it, its seeded driver `mlx_embed.py`. Installed on demand, or
     /// by the bootstrap on Apple silicon; brings mlx-vlm and mlx-lm with it.
     MlxEmbeddings,
+    /// `mlx-video`, with the `torch` its converter loads Wan's `.pth`
+    /// checkpoints through (53k): `models convert --mlx` makes Wan's original
+    /// layout an MLX video model through it. Not on PyPI -- built from its
+    /// GitHub repository at one reviewed commit (`pinned_source`) -- and
+    /// opt-in only: `train setup --with mlx-video`, never the bootstrap
+    /// (`set_opt_in`). Brings mlx-vlm and mlx-lm with it.
+    MlxVideo,
 };
 
 [[nodiscard]] std::string_view to_string(RequirementSet set) noexcept;
@@ -75,10 +84,46 @@ enum class RequirementSet : std::uint8_t {
 [[nodiscard]] std::span<const std::string_view> packages_for(RequirementSet set) noexcept;
 
 /// Why `set` is not for a host with these facts (51) -- the table's own
-/// column, so a set added to it says there where it runs: `mlx`, `mlx-vlm`
-/// and `mlx-embeddings` are Apple silicon's, `peft` an NVIDIA GPU's, every
-/// other set any host's. Empty when it is for this one.
+/// column, so a set added to it says there where it runs: `mlx`, `mlx-vlm`,
+/// `mlx-embeddings` and `mlx-video` are Apple silicon's, `peft` an NVIDIA
+/// GPU's, every other set any host's. Empty when it is for this one.
 [[nodiscard]] std::string set_unfit_reason(RequirementSet set, bool apple_silicon, bool nvidia_smi);
+
+/// Whether `set` is installed only on the person's word (53k) -- the table's
+/// own column: `train setup --with <set>` installs it, and the install's
+/// bootstrap never does, saying it skipped with that command named. Only
+/// `mlx-video`, whose package comes from a GitHub commit rather than PyPI
+/// ("never at install unasked", the user's call, 2026-10-21). Its Python
+/// range still counts toward the environment's choice, since the person may
+/// install it later.
+[[nodiscard]] bool set_opt_in(RequirementSet set) noexcept;
+
+/// A set's package that is not on PyPI (53k): pip builds it from its
+/// repository at one commit, read and dated as the Python ranges are (ADR
+/// 0009's discipline). Apogee's environment trusts that commit alone; a later
+/// one is a deliberate bump. Its requirement in `packages_for` is `<package>
+/// @ git+<repository>.git@<commit>`, which pip fetches with git.
+struct PinnedSource {
+    std::string_view package{};
+    /// `https://github.com/Blaizzy/mlx-video`.
+    std::string_view repository{};
+    /// The full commit sha.
+    std::string_view commit{};
+    /// The commit's own date.
+    std::string_view committed{};
+    /// When it was read and chosen.
+    std::string_view reviewed{};
+
+    /// `<package> @ git+<repository>.git@<commit>`: what pip installs.
+    [[nodiscard]] std::string requirement() const;
+    /// What `train setup` says of it: "mlx-video is not on PyPI: pip builds
+    /// it with git from https://github.com/Blaizzy/mlx-video at commit
+    /// 87db56a51758 (2026-05-13), the one this Apogee reviewed on 2026-10-21".
+    [[nodiscard]] std::string describe() const;
+};
+
+/// `set`'s pinned source, or nullopt for a set whose packages are all PyPI's.
+[[nodiscard]] std::optional<PinnedSource> pinned_source(RequirementSet set) noexcept;
 
 /// A Python's version, as `sys.version_info` states it (M19).
 struct PythonVersion {
@@ -170,7 +215,9 @@ public:
 
     /// Installs `set` into the environment with its own pip and records it.
     /// The error text, or empty. An environment whose Python the set does
-    /// not run on is refused before pip, naming the rebuild (M19).
+    /// not run on is refused before pip, naming the rebuild (M19); so is a
+    /// set with a pinned source (53k) where git -- what pip fetches it with
+    /// -- is not on PATH.
     [[nodiscard]] std::string install(RequirementSet set,
                                       const harness::CancellationToken& cancellation = {});
 

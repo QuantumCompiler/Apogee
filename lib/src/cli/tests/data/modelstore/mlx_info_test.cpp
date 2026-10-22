@@ -709,3 +709,66 @@ TEST_CASE(
     CHECK(mlx_drafter_refusal(e4b_base, unsized, models)
               .find("does not say how wide a model it reads") != std::string::npos);
 }
+
+TEST_CASE("an MLX video model is read by mlx-video's layout: no tokenizer, every part whole",
+          "[models][mlx][info][mlx_video]") {
+    // 53k: what mlx-video's Wan converter writes -- config.json, the T5 text
+    // encoder, the VAE and the transformer's weights -- and no tokenizer,
+    // which its generator reads from the encoder's own source.
+    const Dir dir;
+    const auto shard = [&dir](const char* name) {
+        write_fixture_file(dir.model / name,
+                           apogee::testing::safetensors_bytes({{"weight", 32}}, "mlx"));
+    };
+    write_fixture_file(dir.model / "config.json",
+                       R"({"model_type": "ti2v", "dim": 3072, "num_layers": 30,
+                           "quantization": {"group_size": 64, "bits": 4}})");
+    shard("model.safetensors");
+    shard("t5_encoder.safetensors");
+    shard("vae.safetensors");
+
+    // Unrecorded, it is read as a language model's directory, and lacks one's
+    // tokenizer: only a record, or a caller that knows, makes it a video model.
+    MlxInfo info = read_mlx_info(dir.model);
+    CHECK_FALSE(info.video);
+    CHECK_FALSE(info.complete);
+    CHECK(info.problem.find("no tokenizer") != std::string::npos);
+
+    // Read as video -- by the kind a conversion's staging is, or by its record.
+    info = read_mlx_info(dir.model, apogee::models::kMlxVideo);
+    CHECK(info.video);
+    CHECK(info.complete);
+    CHECK(info.problem.empty());
+    CHECK(info.shards.size() == 3);
+    CHECK(info.quantization.bits == 4);
+    CHECK(info.model_type == "ti2v");
+    apogee::models::Snapshot record;
+    record.source = "convert";
+    record.kind = std::string{apogee::models::kMlxVideo};
+    REQUIRE(apogee::models::write_snapshot(dir.model, record));
+    CHECK(read_mlx_info(dir.model).video);
+    CHECK(read_mlx_info(dir.model).complete);
+    // Another kind named by the caller reads as it always did.
+    CHECK_FALSE(read_mlx_info(dir.model, apogee::models::kMlxChat).video);
+
+    // Each part missing is said by name, and never committed as whole.
+    for (const char* part : {"vae.safetensors", "t5_encoder.safetensors", "model.safetensors"}) {
+        INFO(part);
+        std::filesystem::rename(dir.model / part, dir.model / "aside");
+        info = read_mlx_info(dir.model);
+        CHECK_FALSE(info.complete);
+        CHECK(info.problem.starts_with("cannot load: no "));
+        CHECK(info.problem.find(part) != std::string::npos);
+        std::filesystem::rename(dir.model / "aside", dir.model / part);
+    }
+    // A pair of transformers stands for the one: Wan2.2's two experts.
+    std::filesystem::remove(dir.model / "model.safetensors");
+    shard("low_noise_model.safetensors");
+    CHECK_FALSE(read_mlx_info(dir.model).complete);
+    shard("high_noise_model.safetensors");
+    CHECK(read_mlx_info(dir.model).complete);
+    // A part cut short is a shard cut short.
+    write_fixture_file(dir.model / "vae.safetensors", "short");
+    CHECK(read_mlx_info(dir.model).problem.find("vae.safetensors is truncated") !=
+          std::string::npos);
+}

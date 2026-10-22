@@ -338,8 +338,44 @@ MlxInfo read_mlx_config(const std::filesystem::path& dir) {
     return info;
 }
 
-MlxInfo read_mlx_info(const std::filesystem::path& dir) {
+namespace {
+
+/// What an MLX video model lacks of mlx-video's Wan layout (53k), or empty:
+/// the text encoder, the VAE, and the transformer's weights -- one model's,
+/// or both of a pair's.
+[[nodiscard]] std::string video_files_problem(const std::filesystem::path& dir) {
+    std::error_code code;
+    const auto has = [&dir, &code](const char* name) {
+        return std::filesystem::is_regular_file(dir / name, code);
+    };
+    if (!has("t5_encoder.safetensors")) {
+        return "no T5 text encoder (t5_encoder.safetensors) in " + dir.string();
+    }
+    if (!has("vae.safetensors")) {
+        return "no VAE (vae.safetensors) in " + dir.string();
+    }
+    if (!has("model.safetensors") &&
+        !(has("low_noise_model.safetensors") && has("high_noise_model.safetensors"))) {
+        return "no transformer weights (model.safetensors, or low_noise_model.safetensors and "
+               "high_noise_model.safetensors) in " +
+               dir.string();
+    }
+    return {};
+}
+
+}  // namespace
+
+MlxInfo read_mlx_info(const std::filesystem::path& dir, std::string_view kind) {
     MlxInfo info;
+    // A video model's own layout (53k), by what the caller knows or the
+    // record says -- never by its files' names alone.
+    if (kind.empty()) {
+        if (const std::optional<Snapshot> record = load_snapshot(dir)) {
+            info.video = record->kind == kMlxVideo;
+        }
+    } else {
+        info.video = kind == kMlxVideo;
+    }
     std::error_code code;
     if (!std::filesystem::is_directory(dir, code)) {
         info.problem = "cannot load: " + dir.string() + " is not a directory";
@@ -366,6 +402,14 @@ MlxInfo read_mlx_info(const std::filesystem::path& dir) {
     // Every shard whole, and every shard the index names present.
     if (const std::string problem = check_weights(dir, info); !problem.empty()) {
         info.problem = "cannot load: " + problem;
+        return info;
+    }
+    if (info.video) {
+        if (const std::string problem = video_files_problem(dir); !problem.empty()) {
+            info.problem = "cannot load: " + problem;
+            return info;
+        }
+        info.complete = true;
         return info;
     }
     if (!has_tokenizer(dir)) {

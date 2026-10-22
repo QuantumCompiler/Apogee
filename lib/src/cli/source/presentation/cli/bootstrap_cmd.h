@@ -77,8 +77,9 @@ struct BootstrapHost {
 
 /// Every step a bootstrap takes on a host with these facts, in order: each
 /// set of the table -- one this host is not for already skipped, saying
-/// why -- then the code-execution server, the providers, the model store,
-/// and ffmpeg with captions.
+/// why, and an opt-in one (53k: `mlx-video`) skipped naming the command that
+/// installs it -- then the code-execution server, the providers, the model
+/// store, and ffmpeg with captions.
 [[nodiscard]] std::vector<BootstrapStep> bootstrap_plan(const BootstrapHost& host);
 
 /// What a bootstrap needs from outside.

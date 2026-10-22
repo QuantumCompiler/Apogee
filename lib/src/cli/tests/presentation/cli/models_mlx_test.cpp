@@ -1008,13 +1008,16 @@ TEST_CASE("a diffusion model is refused at every conversion door, and offered no
                                         R"({"_class_name": "WanModel", "_diffusers_version":
             "0.33.0", "model_type": "ti2v", "dim": 3072, "num_layers": 30})");
     // Since 53j the refusal says it is Wan's original layout and what it
-    // lacks; with no record, no repository is named.
+    // lacks; with no record, no repository is named. Since 53k it says
+    // mlx-video converts it once complete, and that mlx-video is not here.
     const std::string refused =
         "'" + handle +
         "' is Wan's original layout (WanModel), missing models_t5_umt5-xxl-enc-bf16.pth and "
         "*_VAE.pth -- pulling its repository again with --safetensors fetches them into this "
-        "set; neither converter takes it -- llama.cpp's finds a model by its architectures, and "
-        "mlx-lm's builds a language model";
+        "set; once it is complete, mlx-video converts it to an MLX video model (--mlx), and is "
+        "not installed in Apogee's Python environment -- 'apogee train setup --with mlx-video'; "
+        "llama.cpp's converter takes no diffusion model -- it finds a model by its "
+        "architectures";
 
     std::string out;
     // The user's command, and the chain the app now builds, refused alike.

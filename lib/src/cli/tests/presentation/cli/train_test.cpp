@@ -2059,3 +2059,34 @@ TEST_CASE("an environment on 3.14 refuses voice before pip; --rebuild asks, then
     CHECK(said.find("(Python 3.12.13); sets: prepare, mlx, convert, mlx-vlm, video, voice") !=
           std::string::npos);
 }
+
+TEST_CASE("train setup --with mlx-video says the commit pip builds it from, and installs it",
+          "[commands][train][setup][mlx_video]") {
+    if (apogee::platform::host_target().starts_with("windows")) {
+        SKIP("the scripted interpreters are POSIX files on a POSIX PATH");
+    }
+    using apogee::training::RequirementSet;
+    // 53k: mlx-video comes from one reviewed GitHub commit, never PyPI --
+    // said as it installs, the requirement pip is handed the commit's.
+    SetupMachine machine;
+    std::string said;
+    // No git on this PATH: refused before pip, naming what pip fetches it with.
+    CHECK(machine.run({}, machine.request({RequirementSet::MlxVideo}), &said) != 0);
+    CHECK(said.find("which pip fetches with git, and git is not on PATH") != std::string::npos);
+    CHECK(machine.pips().empty());
+    // With git: installed, and said.
+    std::ofstream{machine.bin.path() / "git"} << "#!/bin/sh\n";
+    std::filesystem::permissions(machine.bin.path() / "git", std::filesystem::perms::owner_all);
+    REQUIRE(machine.run({}, machine.request({RequirementSet::MlxVideo}), &said) == 0);
+    INFO(said);
+    CHECK(said.find("installing the 'mlx-video' set: mlx-video @ "
+                    "git+https://github.com/Blaizzy/mlx-video.git@"
+                    "87db56a51758fefb748a359b90a5283bb8ba4837 torch>=2.6 ...\n  mlx-video is not "
+                    "on PyPI: pip builds it with git from https://github.com/Blaizzy/mlx-video at "
+                    "commit 87db56a51758 (2026-05-13), the one this Apogee reviewed on "
+                    "2026-10-21\ninstalled\n") != std::string::npos);
+    CHECK(machine.pips() ==
+          std::vector<std::string>{"mlx-video @ git+https://github.com/Blaizzy/mlx-video.git@"
+                                   "87db56a51758fefb748a359b90a5283bb8ba4837"});
+    CHECK(said.find("sets: mlx-video") != std::string::npos);
+}

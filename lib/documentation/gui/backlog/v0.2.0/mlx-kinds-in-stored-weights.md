@@ -25,6 +25,7 @@ M3 already offers only the conversions `data.converts_to` names (`StoreViewModel
 - **Fixtures:** `models list` and `models info` of a directory of each kind, recorded from the binary that ships 53e, beside `tests/business/reads/Fixtures/store-*.json`.
 
 **Decisions made** (dated):
+- 2026-10-21 — **What the CLI's 53k gives this item** (recorded when 53k shipped): a whole Wan original layout's `converts_to` is `["mlx"]` with `data.mlx_conversion.converter` `mlx-video`, and its `data.wan_layout` (53j) says whether it is whole and what it lacks. The CLI refuses `--register`, `--register-with`, `--text-only` and `--model-type` on such a set, since no backend runs a video model, so the convert sheet passes none of them there.
 - 2026-10-21 — **What the CLI's 53f gives this item** (recorded when 53f shipped): `models info`'s `data.mlx_conversion` (`towers`, `converter`, `text_only`) says which converter a set routes to and whether only mlx-lm's text-only build is offered. A plain `--mlx` on a towered set whose mlx-vlm cannot build it is refused, naming `--text-only`, never quietly reduced to text. So the convert sheet passes `--text-only` when that field says so, and says the towers are left out.
 - 2026-10-21 — **Opened from the CLI's MLX-for-every-kind spike** (the user's call: "create the documents for v0.2.0"), as the GUI sibling its 53e names.
 

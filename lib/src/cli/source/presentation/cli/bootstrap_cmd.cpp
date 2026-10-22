@@ -108,6 +108,12 @@ std::vector<BootstrapStep> bootstrap_plan(const BootstrapHost& host) {
             !unfit.empty()) {
             step.status = "skipped";
             step.reason = std::move(unfit);
+        } else if (training::set_opt_in(*set)) {
+            // Never at install unasked (53k): said, with the command that
+            // installs it on the person's word.
+            step.status = "skipped";
+            step.reason = "opt-in, never installed unasked -- 'apogee train setup --with " +
+                          std::string{name} + "' installs it";
         } else {
             step.words = {"train", "setup", "--with", std::string{name}};
         }

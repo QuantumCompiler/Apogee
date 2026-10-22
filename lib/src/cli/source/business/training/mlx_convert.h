@@ -15,8 +15,9 @@
 /// `mlx_convert.py`, run under Apogee's own Python environment: a
 /// full-weight SafeTensors snapshot in, an MLX model directory out, through
 /// `mlx_lm`'s own `convert` (27b) -- or, for a set that sees or hears,
-/// `mlx_vlm`'s, its towers kept (53f), and for an embedding model,
-/// `mlx_embeddings`' (53h).
+/// `mlx_vlm`'s, its towers kept (53f), for an embedding model,
+/// `mlx_embeddings`' (53h), and for Wan's original layout, mlx-video's Wan
+/// converter (53k).
 ///
 /// **A child, never a link** -- the GGUF converter's discipline, a different
 /// engine: the driver is seeded beside the trainers, run by the environment's
@@ -29,35 +30,48 @@ namespace apogee::training {
 /// Which converter an MLX conversion runs (53f): mlx-lm's, which builds a
 /// language model, mlx-vlm's, which builds a model that sees or hears with
 /// its towers kept, or -- since 53h -- mlx-embeddings', which builds an
-/// embedding model whole. One driver runs each (`--with mlx-vlm`, `--with
-/// mlx-embeddings`).
-enum class MlxConverterKind : std::uint8_t { MlxLm, MlxVlm, MlxEmbeddings };
+/// embedding model whole, and -- since 53k -- mlx-video's, which builds Wan's
+/// original layout into an MLX video model. One driver runs each (`--with
+/// mlx-vlm`, `--with mlx-embeddings`, `--with mlx-video`).
+enum class MlxConverterKind : std::uint8_t { MlxLm, MlxVlm, MlxEmbeddings, MlxVideo };
 
-/// The converter a set's MLX conversion runs: mlx-vlm for a draft head
-/// (`drafter`, by its own `config.json`, 53i), built as the drafter its
-/// speculative path runs beside a base; mlx-embeddings for an embedding model
-/// (`embedding`, sentence-transformers' by its own `modules.json`, 53h);
-/// mlx-vlm for a set whose own files declare towers -- kept by default
-/// (2026-10-21) -- unless the person asked for mlx-lm's build of its language
-/// model alone (`--text-only`); mlx-lm for every other. Never chosen by a
-/// name.
+/// The converter a set's MLX conversion runs: mlx-video for Wan's original
+/// layout (`video`, by its own `config.json`'s class, 53k); mlx-vlm for a
+/// draft head (`drafter`, by its own `config.json`, 53i), built as the
+/// drafter its speculative path runs beside a base; mlx-embeddings for an
+/// embedding model (`embedding`, sentence-transformers' by its own
+/// `modules.json`, 53h); mlx-vlm for a set whose own files declare towers --
+/// kept by default (2026-10-21) -- unless the person asked for mlx-lm's build
+/// of its language model alone (`--text-only`); mlx-lm for every other. Never
+/// chosen by a name.
 [[nodiscard]] MlxConverterKind choose_mlx_converter(bool towers, bool text_only,
-                                                    bool embedding = false,
-                                                    bool drafter = false) noexcept;
+                                                    bool embedding = false, bool drafter = false,
+                                                    bool video = false) noexcept;
 
-/// Its name as a person says it: `mlx-lm`, `mlx-vlm`, `mlx-embeddings`.
+/// Its name as a person says it: `mlx-lm`, `mlx-vlm`, `mlx-embeddings`,
+/// `mlx-video`.
 [[nodiscard]] std::string_view to_string(MlxConverterKind converter) noexcept;
 
 /// Its Python package, where its types are read from: `mlx_lm`, `mlx_vlm`,
-/// `mlx_embeddings`.
+/// `mlx_embeddings`, `mlx_video`.
 [[nodiscard]] std::string_view mlx_converter_package(MlxConverterKind converter) noexcept;
 
 /// Its own entry, as a record's transform names it: `mlx_lm.convert`,
-/// `mlx_vlm.convert`, `mlx_embeddings.convert`.
+/// `mlx_vlm.convert`, `mlx_embeddings.convert`, and mlx-video's Wan converter
+/// as the pinned commit holds it, `mlx_video.models.wan_2.convert` (53k).
 [[nodiscard]] std::string_view mlx_converter_entry(MlxConverterKind converter) noexcept;
 
-/// The requirement set that installs it: `mlx`, `mlx-vlm`, `mlx-embeddings`.
+/// The requirement set that installs it: `mlx`, `mlx-vlm`, `mlx-embeddings`,
+/// `mlx-video`.
 [[nodiscard]] RequirementSet mlx_converter_set(MlxConverterKind converter) noexcept;
+
+/// mlx-video's Wan converter as the environment at `venv` holds it (53k):
+/// the module file `mlx_converter_entry` names -- `mlx_video/models/wan_2/
+/// convert.py` under site-packages -- with the `torch` it loads Wan's `.pth`
+/// checkpoints through beside it. Read from files, never imported (27a's
+/// rule); empty when either is not there. What "mlx-video is installed" means
+/// to every surface that offers or refuses the conversion.
+[[nodiscard]] std::filesystem::path find_mlx_video_converter(const std::filesystem::path& venv);
 
 /// One precision `models convert --mlx` writes, spelled the way a community
 /// build's name ends (`-4bit`, `-bf16`): `mlx_lm.convert`'s own choices --
@@ -84,6 +98,17 @@ struct MlxPrecision {
 /// Every precision's name, in order -- for a flag's help and its check.
 [[nodiscard]] std::vector<std::string> mlx_precision_names();
 
+/// Whether `converter` writes `precision` (53k): mlx-lm, mlx-vlm and
+/// mlx-embeddings every one; mlx-video's Wan converter 4 or 8 bits in its
+/// affine groups (`--quantize --bits`, its group 64) or a floating-point type
+/// unquantized (`--dtype`) -- never 3 or 6 bits, nor mxfp4.
+[[nodiscard]] bool mlx_converter_writes(MlxConverterKind converter,
+                                        const MlxPrecision& precision) noexcept;
+
+/// The precisions `converter` writes, by name, in the table's order: what
+/// `--type` offers and takes on its route.
+[[nodiscard]] std::vector<std::string> mlx_precision_names(MlxConverterKind converter);
+
 /// Where the seeded driver lives: `training/scripts/mlx_convert.py`.
 [[nodiscard]] std::filesystem::path mlx_converter_script();
 
@@ -91,8 +116,8 @@ struct MlxPrecision {
 /// `--q-bits`, `--q-group-size` and `--q-mode` for a quantized precision, or
 /// `--dtype` for one that is not -- the one table mapped for every converter.
 /// mlx-vlm's route leads with `--with mlx-vlm`, mlx-embeddings' with `--with
-/// mlx-embeddings` (53h); mlx-lm's is exactly what it was before there were
-/// two.
+/// mlx-embeddings` (53h), mlx-video's with `--with mlx-video` (53k); mlx-lm's
+/// is exactly what it was before there were two.
 [[nodiscard]] std::vector<std::string> mlx_converter_arguments(
     const MlxPrecision& precision, const std::filesystem::path& input,
     const std::filesystem::path& output, MlxConverterKind converter = MlxConverterKind::MlxLm);

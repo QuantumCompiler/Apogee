@@ -295,6 +295,18 @@ void note_store(const models::StoreRoots& roots, NameList& list) {
     return !set.path.empty() && models::snapshot_draft_head(set.path).has_value();
 }
 
+/// Whether the set the command's first positional names is Wan's original
+/// layout that `models convert --mlx` takes (53k): whole, with mlx-video
+/// installed -- the door's own choice, so what completes is what it accepts.
+[[nodiscard]] bool video_set_on_line(const CompletionContext& context) {
+    if (context.positionals.empty() || context.config == nullptr) {
+        return false;
+    }
+    const SnapshotChoice set =
+        choose_snapshot(store_roots(*context.config), context.positionals.front(), {}, true, true);
+    return !set.path.empty() && models::snapshot_wan_layout(set.path).has_value();
+}
+
 [[nodiscard]] std::vector<std::string> kit_names() {
     std::vector<std::string> out;
     for (const harness::BundledKit& kit : harness::bundled_kits()) {
@@ -541,6 +553,11 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
             list.none = "a draft head's MLX build is a drafter, which no backend runs";
             return list;
         }
+        // Nor Wan's original layout, whose MLX build is a video model (53k).
+        if (context.flags.contains("--mlx") && video_set_on_line(context)) {
+            list.none = "Wan's original layout's MLX build is a video model, which no backend runs";
+            return list;
+        }
         list.names = context.flags.contains("--mlx") ? training::mlx_precision_names()
                                                      : models::quant_type_names();
     } else if (kind == kMlxModelTypeValue) {
@@ -554,6 +571,14 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
                 // the flag is refused on one, so nothing is offered.
                 list.none =
                     "a draft head converts as the drafter its config.json names -- "
+                    "--model-type does not apply";
+                return list;
+            }
+            if (video_set_on_line(context)) {
+                // mlx-video converts Wan's original layout by its own config
+                // (53k): the flag is refused on one.
+                list.none =
+                    "mlx-video converts Wan's original layout by its own config.json -- "
                     "--model-type does not apply";
                 return list;
             }
@@ -621,7 +646,11 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         // `--mlx` after `--type` cannot be seen: the line is read up to the
         // cursor.
         // A draft head converts with --mlx alone (53i): its precisions only.
-        if (context.flags.contains("--mlx") || draft_head_on_line(context)) {
+        // Wan's original layout, whole with mlx-video installed, takes the
+        // precisions mlx-video's converter writes (53k).
+        if (context.flags.contains("--mlx") && video_set_on_line(context)) {
+            list.names = training::mlx_precision_names(training::MlxConverterKind::MlxVideo);
+        } else if (context.flags.contains("--mlx") || draft_head_on_line(context)) {
             list.names = training::mlx_precision_names();
         } else {
             list.names = training::converter_out_types();

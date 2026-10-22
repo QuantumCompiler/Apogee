@@ -495,19 +495,93 @@ TEST_CASE("a diffusion model is refused by both ladders before any converter run
     // three seconds and failed in mlx-lm's own words -- the weights are a
     // diffusers transformer, which neither converter takes. Since 53j the
     // refusal says it is Wan's original layout, what it lacks and what runs
-    // it; with no record, no repository is named.
+    // it; with no record, no repository is named. Since 53k it names
+    // mlx-video's conversion -- this core asks no environment, so it says
+    // nothing of whether mlx-video is there.
     const MlxWork work;
     write_file(work.snapshot / "config.json", std::string{apogee::testing::kWanTi2vConfig});
     const std::string mlx = apogee::models::mlx_conversion_refusal(work.snapshot, work.out);
     CHECK(mlx == work.snapshot.string() +
                      " is Wan's original layout (WanModel), missing "
                      "models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth -- pulling its "
-                     "repository again with --safetensors fetches them into this set; neither "
-                     "converter takes it -- llama.cpp's finds a model by its architectures, and "
-                     "mlx-lm's builds a language model; what runs this model today is its "
-                     "Diffusers pipeline in 'apogee video generate', pulled whole (a repository "
-                     "with model_index.json at its root)");
+                     "repository again with --safetensors fetches them into this set; once it "
+                     "is complete, mlx-video converts it to an MLX video model (--mlx); "
+                     "llama.cpp's converter takes no diffusion model -- it finds a model by its "
+                     "architectures; what runs this model today is its Diffusers pipeline in "
+                     "'apogee video generate', pulled whole (a repository with model_index.json "
+                     "at its root)");
     CHECK(apogee::models::conversion_refusal(work.snapshot, work.root.path() / "out.gguf") == mlx);
+}
+
+TEST_CASE("the MLX ladder takes Wan's original layout on mlx-video's route, once it is whole",
+          "[models][convert][mlx][diffusion][mlx_video]") {
+    // 53k: the route's kind `video` -- named by a caller that has found
+    // mlx-video installed -- lifts M20's refusal for Wan's original layout,
+    // whole, and for nothing else; every other route keeps it.
+    const MlxWork work;
+    write_file(work.snapshot / "config.json", std::string{apogee::testing::kWanTi2vConfig});
+    // Not whole: refused on every route, the two files named.
+    const std::string missing = apogee::models::mlx_conversion_refusal(work.snapshot, work.out);
+    CHECK(missing.find("missing models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth") !=
+          std::string::npos);
+    CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out, "video") == missing);
+    // Whole: mlx-video's route alone takes it.
+    for (const std::string_view file :
+         {apogee::testing::kWanTextEncoder, apogee::testing::kWanVae}) {
+        write_file(work.snapshot / file, "fake checkpoint bytes\n");
+    }
+    CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out, "video").empty());
+    for (const std::string_view other : {"", "chat", "vision", "embedding"}) {
+        INFO(other);
+        CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out, other)
+                  .find("Wan's original layout (WanModel), complete") != std::string::npos);
+    }
+    CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out, "drafter")
+              .find("is no draft head") != std::string::npos);
+    CHECK(apogee::models::conversion_refusal(work.snapshot, work.root.path() / "out.gguf")
+              .find("llama.cpp's converter takes no diffusion model") != std::string::npos);
+    // And its route takes nothing else.
+    const MlxWork plain;
+    CHECK(apogee::models::mlx_conversion_refusal(plain.snapshot, plain.out, "video")
+              .find("is no Wan original layout: mlx-video's converter takes Wan's own "
+                    "transformer") != std::string::npos);
+
+    // Converted: read by mlx-video's layout, recorded `video`.
+    const auto video = [](bool vae) -> apogee::models::MlxConvertFn {
+        return [vae](const std::filesystem::path&, const std::filesystem::path& out,
+                     const CancellationToken&) {
+            write_file(out / "config.json",
+                       R"({"model_type": "ti2v", "dim": 3072,
+                           "quantization": {"group_size": 64, "bits": 4}})");
+            for (const char* name : {"model.safetensors", "t5_encoder.safetensors"}) {
+                write_file(out / name, apogee::testing::safetensors_bytes({{"w", 32}}));
+            }
+            if (vae) {
+                write_file(out / "vae.safetensors",
+                           apogee::testing::safetensors_bytes({{"w", 32}}));
+            }
+            return std::string{};
+        };
+    };
+    apogee::models::MlxConvertResult made = apogee::models::convert_snapshot_to_mlx(
+        work.snapshot, work.out, 4, video(true), CancellationToken{}, "video");
+    INFO(made.error);
+    REQUIRE(made.ok);
+    CHECK(made.kind == "video");
+    CHECK(made.info.video);
+    CHECK(made.info.complete);
+    CHECK(made.info.shards.size() == 3);
+    std::filesystem::remove_all(work.out);
+    // A converter that wrote less than the layout -- no VAE -- is never
+    // committed, and leaves nothing.
+    made = apogee::models::convert_snapshot_to_mlx(work.snapshot, work.out, 4, video(false),
+                                                   CancellationToken{}, "video");
+    CHECK_FALSE(made.ok);
+    CHECK(made.error ==
+          "the converter finished but its output is not a loadable MLX model -- cannot load: no "
+          "VAE (vae.safetensors) in " +
+              work.out.string());
+    CHECK_FALSE(std::filesystem::exists(work.out));
 }
 
 TEST_CASE("an embedding model is refused by the MLX ladder alone; its GGUF is the conversion",

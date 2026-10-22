@@ -1008,7 +1008,12 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   `["mlx"]` — an MLX drafter, never a GGUF — where the mlx-vlm installed in
   Apogee's Python environment drafts its `model_type` (a package under its
   own `speculative/drafters/`), its `mlx_conversion.converter` `mlx-vlm`; with
-  none installed, or one without that drafter, it stays `[]`. Since M21, an embedding model's
+  none installed, or one without that drafter, it stays `[]`. Since 53k Wan's
+  original layout's is `["mlx"]` -- an MLX video model, never a GGUF --
+  exactly where its `wan_layout` is `whole` and mlx-video is installed in
+  Apogee's Python environment (its Wan converter's module and the `torch` it
+  loads checkpoints through, read from their files, never imported), its
+  `mlx_conversion.converter` `mlx-video`; anywhere else it stays `[]`. Since M21, an embedding model's
   (sentence-transformers', by its `modules.json`) is `["gguf"]` -- and since
   53h `["gguf","mlx"]` where the mlx-embeddings installed in Apogee's Python
   environment builds its `model_type`, read from its own `models/`; with none
@@ -1027,7 +1032,8 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   (the keys, as `config.json` names them, `[]` for a language model),
   `converter` (`mlx-vlm` or `mlx-lm`, what a plain `--mlx` runs, or `null`
   where only `--text-only` can; since 53h `mlx-embeddings` for an embedding
-  model it builds) and `text_only` (whether `--mlx --text-only` is offered:
+  model it builds; since 53k `mlx-video` for Wan's original layout) and
+  `text_only` (whether `--mlx --text-only` is offered:
   never for a language model, which has no tower to leave out, nor an
   embedding model).
   It is `null` where `mlx` is not offered, and on every other format; the
@@ -1036,7 +1042,11 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   `models list` row's `kind` above — and the text gains a `kind:` line saying
   the word, where it came from (`recorded`, `inferred from its files`, or `no
   kind recorded`) and what runs it; `kind` is `null` on every other format. An
-  `mlx` backend's own record has the `kind:` line too. Since 53h an MLX set's
+  `mlx` backend's own record has the `kind:` line too. Since 53k a `video`
+  directory -- mlx-video's build of Wan's original layout -- is read by its
+  own files (its `config.json`, `t5_encoder.safetensors`, `vae.safetensors`
+  and the transformer's weights, each whole; no tokenizer), and its `window`
+  is `null`: a video model has no token window. Since 53h an MLX set's
   `data` also carries `vector_width`: for an `embedding` directory, how wide
   its vectors are as its own files state it (the last sentence-transformers
   Dense module's `out_features`, else `config.json`'s `hidden_size`), a number;

@@ -9804,3 +9804,60 @@ The refusal was true but incomplete. The set is Wan's original layout, and its r
 - The real download is the user's run.
 - `video generate`'s refusal, `models list`, `check` and `config scan` do not mention the layout. They are outside the document's seam.
 - Wan2.2-A14B's layout (no root `config.json`, its transformers in subfolders) is not recognized.
+
+### 2026-10-21 — `mlx-video-convert` (backlog item 53k): Wan converted to MLX through mlx-video
+
+**Why.** M20 refused the user's Wan set because no converter Apogee ran takes a diffusion transformer. One exists: Blaizzy's mlx-video ports Wan to MLX, the user's TI2V-5B among them. Its converter needs the original layout whole, which 53j now pulls. It needs PyTorch, and it is not on PyPI. This was wall W7, its conversion half.
+
+- [x] **An `mlx-video` requirement set, installed opt-in from GitHub at a reviewed commit** (the user's call at the run's start).
+  - **The pin:** `87db56a51758fefb748a359b90a5283bb8ba4837`, dated 2026-05-13 (the merge of mlx-video's PR #23). It was main's head when read through GitHub's API on 2026-10-21, and its Wan converter takes the documented flags (`--checkpoint-dir`, `--output-dir`, `--quantize`, `--bits` 4|8, `--group-size` 32|64|128) and `--dtype`.
+  - **How the pin is held:** a `PinnedSource` (repository, commit, its date, the review date) builds the requirement `mlx-video @ git+https://github.com/Blaizzy/mlx-video.git@<sha>`, beside `torch>=2.6`. It needs Python `>=3.11` and Apple silicon.
+  - **Opt-in:** it is installed by `train setup --with mlx-video` alone, with its completion. The bootstrap never installs it; it shows the set as a skipped step naming that command (`set_opt_in`). A later commit is a deliberate bump.
+  - **What `train setup` says:** it names the source and commit before pip runs, and refuses with no `git` on PATH.
+- [x] **The module path, settled at the pin:** `mlx_video.models.wan_2.convert`. Neither README's spelling (`mlx_video.wan2.convert`, `mlx_video.wan_2.generate`) exists there. The converter has no `main()`, so the seeded `mlx_convert.py` calls `convert_wan_checkpoint(...)` as its `__main__` block does, over the one script runner with the library's prints kept off both streams. The record's kind is **`video`**.
+- [x] **M20's decision answers `["mlx"]`** for a Wan original layout exactly when 53j's `snapshot_wan_layout` says it is `whole()` and mlx-video is installed. "Installed" is read from the environment's files: the converter module and the `torch` package.
+  - Otherwise the refusal says which is missing: the `.pth` files by name with the pull that fetches them, or mlx-video with `train setup --with mlx-video`.
+  - In that case `converts_to` has no `mlx`.
+  - The Wan wording replaces "neither converter takes it" in the refusal, the `diffusion:` line and the pull's closing hint. Other diffusion models keep M20's wording.
+- [x] **The door.**
+  - Precision is 4-bit by default, the README's. `--type` offers `4bit`, `8bit`, `bf16` and `f16`. `3bit`, `6bit` and `mxfp4` are refused before anything runs.
+  - The estimate uses the README's figures, matched by the config's `dim`: 1.3B is 2.7 GB in bf16 and 799 MB at 4-bit; 14B is about 28 GB and about 8 GB. Any other model, TI2V-5B included, says the README states none.
+  - The door asks only for Apple silicon and the environment, not mlx-lm.
+  - `--register`, `--register-with`, `--text-only` and `--model-type` are refused on a Wan set, since no backend runs a video model.
+- [x] **A `video` directory has its own completeness rule:** a config, the T5 encoder, the VAE and the transformer's weights, with no tokenizer. Its `window` is `null` in JSON and `-` in `models list`. `config scan` registers nothing for it (53e).
+- [x] **Machine mode, additively:** `converts_to` is `["mlx"]` for a convertible Wan set, and `mlx_conversion.converter` gains the value `mlx-video`. Both are documented in `machine-mode.md`, and `training.md` documents the set.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The open call's default, taken:** 4-bit by default, with `--type` offering the precisions the converter takes.
+- **The pin is main's head on the review date.** The commit is the newest whose Wan converter takes the documented flags.
+- **"Installed" includes `torch`,** since the converter cannot read the `.pth` files without it.
+- **The set is never bootstrapped.** That follows the document's "never at install unasked", even though every PyPI set is bootstrapped since the 2026-10-19 amendment.
+- **A video directory's size has no total in the progress line.** The README's figures are the transformer's alone.
+
+**Verified.**
+- 12 new cases (`[mlx_video]`, 258 assertions) cover:
+  - the pinned requirement built from its source, and the opt-in skip;
+  - the route and its refusals, the driver's prints kept off both streams;
+  - the `video` completeness rule;
+  - the decision's three answers and the refusal's wording each way;
+  - the conversion recorded `video`;
+  - the bootstrap never running the set.
+- `cli.mlx_models_lifecycle` gained a phase on the real binary and driver:
+  - a set that is not whole is refused, then one with mlx-video missing;
+  - the conversion is recorded `video`;
+  - `config scan` registers nothing.
+- Mutation checks: dropping the "whole" check (1 assertion) and the bootstrap's opt-in skip (8) were each caught, then put back.
+- The neighbouring suites pass: `[wan]`, `[diffusion]`, `[bootstrap]`, `[python]`, `[kind]`, `[assets]`, `[mlx]`, `[store]`, `[convert]`, `[completion]`, `[models]`, `[training]`, `[check]`, `[towers]`, `[drafter]`, `[embedding]`, `[video]` and `[backends]`.
+- ctest:
+  - `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`, `cli.install_is_ours_only`;
+  - `cli.mlx_lifecycle`, `cli.mlx_models_lifecycle`, `cli.video_lifecycle`, `cli.train_lifecycle`;
+  - `cli.machine_schema_conformance`, `cli.config_lifecycle`, and the completion cases.
+
+  All pass.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,792 tests and the macOS app's 342 cases passed, with no warning.
+
+**Not done:**
+- pip's real install, and a real conversion, are the user's run.
+- `check` has no mlx-video row and does not compare the installed commit with the pin.
+- mlx-video's generator loads its tokenizer from the hub (`google/umt5-xxl`), and the converted directory carries none. That is 53l's to settle, recorded in its document.
+- Upstream, mlx-video's converter raises a `NameError` on its NaN/Inf error path (`model_path` is undefined there).

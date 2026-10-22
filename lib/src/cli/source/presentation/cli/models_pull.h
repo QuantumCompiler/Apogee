@@ -133,13 +133,20 @@ struct SnapshotChoice {
 /// base model and never alone, the stored base named (2026-10-21): every verb
 /// that chooses here converts, and nothing converted from one is a backend --
 /// unless `drafters`, which `models convert --mlx` alone passes: a draft
-/// head's MLX build is a drafter, run beside its base (53i).
+/// head's MLX build is a drafter, run beside its base (53i). A diffusion
+/// model is refused too (M20), saying what it is -- for Wan's original
+/// layout, what it lacks and whether mlx-video is installed (53k) -- unless
+/// `videos`, which `models convert --mlx` alone passes, and the set is Wan's
+/// original layout, whole, with mlx-video installed: its MLX build is a video
+/// model.
 [[nodiscard]] SnapshotChoice choose_snapshot(const models::StoreRoots& roots,
                                              std::string_view given, std::string_view from_id = {},
-                                             bool drafters = false);
+                                             bool drafters = false, bool videos = false);
 
 /// Which converter `models convert --mlx` runs for a set (53f), from its own
-/// files: mlx-vlm for a draft head (53i, `models::snapshot_draft_head`),
+/// files: mlx-video for Wan's original layout (53k,
+/// `models::snapshot_wan_layout`); mlx-vlm for a draft head (53i,
+/// `models::snapshot_draft_head`),
 /// built as the drafter its speculative path runs beside a base;
 /// mlx-embeddings for an embedding model (53h, by its `modules.json`,
 /// `models::snapshot_embedding_model`); mlx-vlm, its towers kept, for a set
@@ -154,10 +161,14 @@ struct MlxRoute {
     bool embedding = false;
     /// The set is a draft head (53i): its MLX build is a drafter.
     bool drafter = false;
+    /// The set is Wan's original layout (53k): its MLX build is a video
+    /// model, mlx-video's.
+    bool video = false;
 
-    /// What its build records (53e): `drafter` for mlx-vlm's build of a draft
-    /// head, `embedding` for mlx-embeddings', `vision` for mlx-vlm's, `chat`
-    /// for mlx-lm's.
+    /// What its build records (53e): `video` for mlx-video's build of Wan's
+    /// original layout, `drafter` for mlx-vlm's build of a draft head,
+    /// `embedding` for mlx-embeddings', `vision` for mlx-vlm's, `chat` for
+    /// mlx-lm's.
     [[nodiscard]] std::string_view kind() const noexcept;
 };
 
@@ -191,10 +202,22 @@ struct MlxRoute {
 /// is not installed.
 [[nodiscard]] models::DrafterBuilds installed_mlx_drafter_builds();
 
+/// Whether mlx-video's Wan converter is installed in Apogee's Python
+/// environment (53k), read from its own files (`training::
+/// find_mlx_video_converter`: the converter's module, and the torch it loads
+/// checkpoints through) -- never imported.
+[[nodiscard]] bool installed_mlx_video();
+
+/// The same, as `models::snapshot_conversions` and `snapshot_diffusion_model`
+/// are handed it: read once, when first asked.
+[[nodiscard]] models::VideoConverts installed_mlx_video_converts();
+
 /// The MLX conversion a set is offered (53f), by the converters installed:
 /// a language model's is mlx-lm's, as M21 decided it; an embedding model's
 /// mlx-embeddings', where it builds its type (53h); a draft head's mlx-vlm's
-/// drafter, where it drafts its type (53i). A set with towers is
+/// drafter, where it drafts its type (53i); Wan's original layout's
+/// mlx-video's, where the set is whole and mlx-video is installed (53k),
+/// its gap otherwise the files it lacks or mlx-video. A set with towers is
 /// offered mlx-vlm's build, its towers kept, where the mlx-vlm installed
 /// builds its type; otherwise mlx-lm's build of its language model alone,
 /// where the mlx-lm installed builds that, and said so; otherwise none. With
@@ -215,7 +238,8 @@ struct MlxOffer {
     /// installed, or building no model of its type. Empty when it is.
     std::string gap{};
     /// The command that would keep its towers, where one would: mlx-vlm's
-    /// set, when it is not installed. Empty otherwise.
+    /// set, when it is not installed -- or, for Wan's original layout,
+    /// mlx-video's (53k). Empty otherwise.
     std::string remedy{};
 
     [[nodiscard]] bool offered() const noexcept {
@@ -403,8 +427,10 @@ struct ConvertedMlx {
 /// The set's route (`mlx_route`, 53f) names what is made: a set with towers
 /// is built by mlx-vlm and recorded `vision`, its transform
 /// `mlx_vlm.convert <precision>`; with `text_only`, or for a language model,
-/// mlx-lm's build, recorded `chat`, exactly as before. `converter` is the
-/// route's.
+/// mlx-lm's build, recorded `chat`, exactly as before; Wan's original layout,
+/// whole with mlx-video installed, mlx-video's build, recorded `video`, its
+/// transform `mlx_video.models.wan_2.convert <precision>` (53k). `converter`
+/// is the route's.
 [[nodiscard]] ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots,
                                                 std::string_view given, std::string_view from,
                                                 const training::MlxPrecision& precision,

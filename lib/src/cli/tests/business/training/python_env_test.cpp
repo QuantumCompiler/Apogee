@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -110,16 +111,17 @@ struct ScriptedPath {
     }
 };
 
-/// Every set an Apple-silicon host can install, in the table's order.
-const std::vector<RequirementSet> kAppleSets{RequirementSet::Prepare,      RequirementSet::Mlx,
-                                             RequirementSet::Convert,      RequirementSet::MlxVlm,
-                                             RequirementSet::Video,        RequirementSet::Voice,
-                                             RequirementSet::MlxEmbeddings};
+/// Every set an Apple-silicon host can install, in the table's order --
+/// mlx-video too, opt-in (53k).
+const std::vector<RequirementSet> kAppleSets{
+    RequirementSet::Prepare,       RequirementSet::Mlx,     RequirementSet::Convert,
+    RequirementSet::MlxVlm,        RequirementSet::Video,   RequirementSet::Voice,
+    RequirementSet::MlxEmbeddings, RequirementSet::MlxVideo};
 
 }  // namespace
 
 TEST_CASE("requirement sets are named and carry packages", "[training][python]") {
-    CHECK(requirement_set_names().size() == 8);
+    CHECK(requirement_set_names().size() == 9);
     // The speech driver's stack (50a).
     CHECK(requirement_set_from_string("voice") == RequirementSet::Voice);
     CHECK(packages_for(RequirementSet::Voice)[1] == "kokoro>=0.9.4");
@@ -411,5 +413,89 @@ TEST_CASE("with no Python for every set, the requested ones decide; with none fo
     // Nothing was created or installed: version questions only.
     for (const apogee::platform::ChildCommand& command : fixture.commands) {
         CHECK(command.arguments.at(0) == "-c");
+    }
+}
+
+TEST_CASE("mlx-video is a set from one reviewed GitHub commit, with the torch its converter needs",
+          "[training][python][mlx_video]") {
+    // 53k, the user's call (2026-10-21): mlx-video is on no index, so pip
+    // builds it from its repository at one commit, read and dated, with the
+    // torch its Wan converter loads the .pth checkpoints through.
+    REQUIRE(requirement_set_from_string("mlx-video") == RequirementSet::MlxVideo);
+    CHECK(to_string(RequirementSet::MlxVideo) == "mlx-video");
+    const auto packages = packages_for(RequirementSet::MlxVideo);
+    REQUIRE(packages.size() == 2);
+    CHECK(packages[0] ==
+          "mlx-video @ git+https://github.com/Blaizzy/mlx-video.git@"
+          "87db56a51758fefb748a359b90a5283bb8ba4837");
+    CHECK(packages[1] == "torch>=2.6");
+    // The pin is carried with its facts, and the requirement is built from
+    // them: a bump moves both or this fails.
+    const std::optional<apogee::training::PinnedSource> source =
+        apogee::training::pinned_source(RequirementSet::MlxVideo);
+    REQUIRE(source.has_value());
+    CHECK(source->package == "mlx-video");
+    CHECK(source->repository == "https://github.com/Blaizzy/mlx-video");
+    CHECK(source->commit.size() == 40);
+    CHECK(source->committed == "2026-05-13");
+    CHECK(source->reviewed == "2026-10-21");
+    CHECK(source->requirement() == packages[0]);
+    CHECK(source->describe() ==
+          "mlx-video is not on PyPI: pip builds it with git from "
+          "https://github.com/Blaizzy/mlx-video at commit 87db56a51758 (2026-05-13), the one this "
+          "Apogee reviewed on 2026-10-21");
+    // Every other set is PyPI's alone, floors and all.
+    for (const std::string_view name : requirement_set_names()) {
+        const RequirementSet set = *requirement_set_from_string(name);
+        CHECK(apogee::training::pinned_source(set).has_value() ==
+              (set == RequirementSet::MlxVideo));
+        CHECK(apogee::training::set_opt_in(set) == (set == RequirementSet::MlxVideo));
+    }
+    // Its Python, per its pyproject and README at the commit; Apple silicon's.
+    CHECK(python_range(RequirementSet::MlxVideo).describe() == ">=3.11");
+    CHECK(apogee::training::set_unfit_reason(RequirementSet::MlxVideo, true, false).empty());
+    CHECK(apogee::training::set_unfit_reason(RequirementSet::MlxVideo, false, true) ==
+          "for Apple silicon, which this host is not");
+}
+
+TEST_CASE("installing mlx-video runs pip with the pinned commit, and needs git to fetch it",
+          "[training][python][mlx_video]") {
+    if (apogee::platform::host_target().starts_with("windows")) {
+        SKIP("the scripted git is a POSIX file on a POSIX PATH");
+    }
+    Fixture fixture;
+    PythonEnv env = fixture.env();
+    REQUIRE(env.create("/usr/bin/python3").empty());
+    SECTION("git there: pip with the commit's requirement and torch, recorded") {
+        // A PATH holding git alone, so no host's PATH decides the case.
+        const apogee::testing::TempDir bin{"python-git-" + std::to_string(std::random_device{}())};
+        std::ofstream{bin.path() / "git"} << "#!/bin/sh\n";
+        std::filesystem::permissions(bin.path() / "git", std::filesystem::perms::owner_all);
+        const apogee::testing::EnvGuard path{"PATH", bin.path().string()};
+        REQUIRE(env.install(RequirementSet::MlxVideo).empty());
+        REQUIRE(fixture.commands.size() == 2);
+        const std::vector<std::string>& arguments = fixture.commands[1].arguments;
+        REQUIRE(arguments.size() == 6);
+        CHECK(arguments[2] == "install");
+        CHECK(arguments[4] ==
+              "mlx-video @ git+https://github.com/Blaizzy/mlx-video.git@"
+              "87db56a51758fefb748a359b90a5283bb8ba4837");
+        CHECK(arguments[5] == "torch>=2.6");
+        CHECK(env.status().has(RequirementSet::MlxVideo));
+    }
+    SECTION("no git: refused before pip, saying what pip fetches it with") {
+        const apogee::testing::TempDir empty{"python-nogit-" +
+                                             std::to_string(std::random_device{}())};
+        const apogee::testing::EnvGuard path{"PATH", empty.path().string()};
+        const std::string error = env.install(RequirementSet::MlxVideo);
+        CHECK(error ==
+              "the 'mlx-video' set installs mlx-video from https://github.com/Blaizzy/mlx-video at "
+              "commit 87db56a51758, which pip fetches with git, and git is not on PATH -- install "
+              "git (on macOS, 'xcode-select --install'), then: apogee train setup --with "
+              "mlx-video");
+        CHECK(fixture.commands.size() == 1);
+        CHECK_FALSE(env.status().has(RequirementSet::MlxVideo));
+        // A PyPI set needs no git.
+        REQUIRE(env.install(RequirementSet::Prepare).empty());
     }
 }

@@ -46,8 +46,13 @@ constexpr std::array<MlxPrecision, 7> kPrecisions{{
 constexpr std::string_view kUnknownRoute = "unrecognized arguments: --with";
 
 /// What a seeded driver from before the mlx-embeddings route says when
-/// handed it (53h): argparse refusing the choice.
+/// handed it (53h): argparse refusing the choice -- and before mlx-video's
+/// (53k), the same.
 constexpr std::string_view kUnknownChoice = "argument --with: invalid choice";
+
+/// mlx-video's Wan converter, the module the pinned commit holds it in
+/// (53k, `python_env.cpp`): both its READMEs name others that commit lacks.
+constexpr std::string_view kMlxVideoConverter = "mlx_video.models.wan_2.convert";
 
 /// Whether `source` names `Model` as a word of its own -- an import or a
 /// definition, never a longer name that ends in it (`LanguageModel`).
@@ -75,8 +80,13 @@ constexpr std::string_view kUnknownChoice = "argument --with: invalid choice";
 
 }  // namespace
 
-MlxConverterKind choose_mlx_converter(bool towers, bool text_only, bool embedding,
-                                      bool drafter) noexcept {
+MlxConverterKind choose_mlx_converter(bool towers, bool text_only, bool embedding, bool drafter,
+                                      bool video) noexcept {
+    if (video) {
+        // Wan's original layout is mlx-video's alone (53k): no language
+        // model's converter builds a diffusion transformer.
+        return MlxConverterKind::MlxVideo;
+    }
     if (drafter) {
         // A draft head is built as the drafter mlx-vlm's speculative path
         // runs (53i): mlx-lm has no network for one, whatever is asked.
@@ -99,6 +109,8 @@ std::string_view to_string(MlxConverterKind converter) noexcept {
             return "mlx-vlm";
         case MlxConverterKind::MlxEmbeddings:
             return "mlx-embeddings";
+        case MlxConverterKind::MlxVideo:
+            return "mlx-video";
     }
     return "mlx-lm";
 }
@@ -111,6 +123,8 @@ std::string_view mlx_converter_package(MlxConverterKind converter) noexcept {
             return "mlx_vlm";
         case MlxConverterKind::MlxEmbeddings:
             return "mlx_embeddings";
+        case MlxConverterKind::MlxVideo:
+            return "mlx_video";
     }
     return "mlx_lm";
 }
@@ -123,6 +137,8 @@ std::string_view mlx_converter_entry(MlxConverterKind converter) noexcept {
             return "mlx_vlm.convert";
         case MlxConverterKind::MlxEmbeddings:
             return "mlx_embeddings.convert";
+        case MlxConverterKind::MlxVideo:
+            return kMlxVideoConverter;
     }
     return "mlx_lm.convert";
 }
@@ -135,8 +151,27 @@ RequirementSet mlx_converter_set(MlxConverterKind converter) noexcept {
             return RequirementSet::MlxVlm;
         case MlxConverterKind::MlxEmbeddings:
             return RequirementSet::MlxEmbeddings;
+        case MlxConverterKind::MlxVideo:
+            return RequirementSet::MlxVideo;
     }
     return RequirementSet::Mlx;
+}
+
+std::filesystem::path find_mlx_video_converter(const std::filesystem::path& venv) {
+    const std::filesystem::path package = find_site_package(venv, "mlx_video");
+    if (package.empty() || find_site_package(venv, "torch").empty()) {
+        return {};
+    }
+    // `mlx_video.models.wan_2.convert`, as a file under the package.
+    std::filesystem::path module = package.parent_path();
+    for (std::string_view rest = kMlxVideoConverter; !rest.empty();) {
+        const std::size_t dot = rest.find('.');
+        module /= std::string{rest.substr(0, dot)};
+        rest = dot == std::string_view::npos ? std::string_view{} : rest.substr(dot + 1);
+    }
+    module += ".py";
+    std::error_code code;
+    return std::filesystem::is_regular_file(module, code) ? module : std::filesystem::path{};
 }
 
 std::span<const MlxPrecision> mlx_precisions() noexcept {
@@ -157,6 +192,26 @@ std::vector<std::string> mlx_precision_names() {
     names.reserve(kPrecisions.size());
     for (const MlxPrecision& precision : kPrecisions) {
         names.emplace_back(precision.name);
+    }
+    return names;
+}
+
+bool mlx_converter_writes(MlxConverterKind converter, const MlxPrecision& precision) noexcept {
+    if (converter != MlxConverterKind::MlxVideo) {
+        return true;
+    }
+    // Its command line's own choices: `--bits 4|8` in affine groups, or a
+    // `--dtype` -- bfloat16, float16, float32 -- unquantized.
+    return precision.bits == 0 ||
+           (precision.mode == "affine" && (precision.bits == 4 || precision.bits == 8));
+}
+
+std::vector<std::string> mlx_precision_names(MlxConverterKind converter) {
+    std::vector<std::string> names;
+    for (const MlxPrecision& precision : kPrecisions) {
+        if (mlx_converter_writes(converter, precision)) {
+            names.emplace_back(precision.name);
+        }
     }
     return names;
 }

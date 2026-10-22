@@ -18,6 +18,7 @@
 #include "support/env_guard.h"
 #include "support/mlx_model.h"
 #include "support/towered_configs.h"
+#include "support/wan_original.h"
 
 /// `models convert --mlx`'s child (27b): the argument shape, the precisions,
 /// and the shipped `assets/mlx/mlx_convert.py` -- the file, not a copy --
@@ -577,4 +578,182 @@ TEST_CASE("a draft head is mlx-vlm's to convert, as a drafter, whatever else is 
         apogee::training::mlx_converter_arguments(*bf16, "/in", "/out", MlxConverterKind::MlxVlm) ==
         std::vector<std::string>{"--with", "mlx-vlm", "--hf-path", "/in", "--mlx-path", "/out",
                                  "--dtype", "bfloat16"});
+}
+
+namespace {
+
+/// The driver on the mlx-video route (53k), the stub mlx-video (and its stub
+/// torch) laid beside mlx-lm -- or, with `stubs` naming another set, missing.
+[[nodiscard]] std::string convert_video(const Work& work, const MlxPrecision& precision,
+                                        std::vector<std::string>* messages = nullptr,
+                                        const std::string& stubs = "stub_mlx:stub_mlx_video",
+                                        const std::filesystem::path& script = kDriver) {
+    std::string path;
+    for (std::size_t start = 0; start <= stubs.size();) {
+        const std::size_t end = std::min(stubs.find(':', start), stubs.size());
+        path += (path.empty() ? "" : ":") + (kStubs / stubs.substr(start, end - start)).string();
+        start = end + 1;
+    }
+    const apogee::testing::EnvGuard python_path{"PYTHONPATH", path};
+    const apogee::testing::EnvGuard record{"STUB_MLX_CONVERT_RECORD", work.record.string()};
+    const apogee::training::MlxConverter converter = apogee::training::script_mlx_converter(
+        python3(), script, precision, kStubs / "stub_mlx_video" / "mlx_video",
+        apogee::training::MlxConverterKind::MlxVideo);
+    return converter(work.snapshot, work.out,
+                     [messages](std::string_view message) {
+                         if (messages != nullptr) {
+                             messages->emplace_back(message);
+                         }
+                     },
+                     {});
+}
+
+/// The user's Wan2.2-TI2V-5B, whole: its own config, a transformer shard,
+/// and the two root checkpoints 53j completes it with -- small fake bytes.
+void as_wan_layout(const Work& work) {
+    apogee::testing::write_fixture_file(work.snapshot / "config.json",
+                                        std::string{apogee::testing::kWanTi2vConfig});
+    for (const std::string_view file :
+         {apogee::testing::kWanTextEncoder, apogee::testing::kWanVae}) {
+        apogee::testing::write_fixture_file(work.snapshot / file, "fake checkpoint bytes\n");
+    }
+}
+
+}  // namespace
+
+TEST_CASE("Wan's original layout is mlx-video's to convert, at the precisions it writes",
+          "[training][mlx][convert][mlx_video]") {
+    using apogee::training::choose_mlx_converter;
+    using apogee::training::MlxConverterKind;
+    // 53k: the layout goes to mlx-video whatever else its files might say,
+    // and nothing else does.
+    for (const bool towers : {false, true}) {
+        for (const bool text_only : {false, true}) {
+            CHECK(choose_mlx_converter(towers, text_only, false, false, true) ==
+                  MlxConverterKind::MlxVideo);
+        }
+    }
+    CHECK(choose_mlx_converter(false, false, false, false, false) == MlxConverterKind::MlxLm);
+    CHECK(apogee::training::to_string(MlxConverterKind::MlxVideo) == "mlx-video");
+    CHECK(apogee::training::mlx_converter_package(MlxConverterKind::MlxVideo) == "mlx_video");
+    // The module the pinned commit holds its converter in -- neither README's.
+    CHECK(apogee::training::mlx_converter_entry(MlxConverterKind::MlxVideo) ==
+          "mlx_video.models.wan_2.convert");
+    CHECK(apogee::training::mlx_converter_set(MlxConverterKind::MlxVideo) ==
+          apogee::training::RequirementSet::MlxVideo);
+    // Its argv is the one table's, led by its route.
+    const MlxPrecision& four = *find_mlx_precision("4bit");
+    CHECK(mlx_converter_arguments(four, "/wan", "/out", MlxConverterKind::MlxVideo) ==
+          std::vector<std::string>{"--with", "mlx-video", "--hf-path", "/wan", "--mlx-path", "/out",
+                                   "--q-bits", "4", "--q-group-size", "64", "--q-mode", "affine"});
+    // What its converter's command line takes: --bits 4 or 8 in affine
+    // groups, or a --dtype; never 3 or 6 bits, nor mxfp4. Every other
+    // converter writes them all.
+    CHECK(apogee::training::mlx_precision_names(MlxConverterKind::MlxVideo) ==
+          std::vector<std::string>{"4bit", "8bit", "bf16", "f16"});
+    for (const MlxConverterKind other :
+         {MlxConverterKind::MlxLm, MlxConverterKind::MlxVlm, MlxConverterKind::MlxEmbeddings}) {
+        CHECK(apogee::training::mlx_precision_names(other) ==
+              apogee::training::mlx_precision_names());
+    }
+}
+
+TEST_CASE("mlx-video is installed when its Wan converter and torch are there, read from files",
+          "[training][mlx][convert][mlx_video]") {
+    const apogee::testing::TempDir root{"mlx-video-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path venv = root.path() / "venv";
+    const std::filesystem::path site = venv / "lib" / "python3.99" / "site-packages";
+    CHECK(apogee::training::find_mlx_video_converter(venv).empty());
+    std::filesystem::create_directories(site);
+    std::filesystem::copy(kStubs / "stub_mlx_video", site,
+                          std::filesystem::copy_options::recursive);
+    CHECK(apogee::training::find_mlx_video_converter(venv) ==
+          site / "mlx_video" / "models" / "wan_2" / "convert.py");
+    // Without the torch its converter loads checkpoints through: not
+    // installed, whatever mlx-video has.
+    std::filesystem::remove_all(site / "torch");
+    CHECK(apogee::training::find_mlx_video_converter(venv).empty());
+    std::filesystem::copy(kStubs / "stub_mlx_video" / "torch", site / "torch",
+                          std::filesystem::copy_options::recursive);
+    // A converter only where a README says it -- `mlx_video/wan2/` -- is none.
+    std::filesystem::remove_all(site / "mlx_video" / "models" / "wan_2");
+    apogee::testing::write_fixture_file(site / "mlx_video" / "wan2" / "convert.py", "\n");
+    CHECK(apogee::training::find_mlx_video_converter(venv).empty());
+}
+
+TEST_CASE("the shipped driver converts Wan's original layout through mlx-video's converter",
+          "[training][mlx][convert][mlx_video][driver]") {
+    REQUIRE_PYTHON();
+    const Work work;
+    as_wan_layout(work);
+    SECTION("4bit as its command line takes it, the converter's prints kept off") {
+        std::vector<std::string> messages;
+        REQUIRE(convert_video(work, *find_mlx_precision("4bit"), &messages).empty());
+        const std::vector<nlohmann::json> calls = work.calls();
+        REQUIRE(calls.size() == 1);
+        CHECK(calls[0] == nlohmann::json{{"converter", "mlx_video"},
+                                         {"checkpoint_dir", work.snapshot.string()},
+                                         {"output_dir", work.out.string()},
+                                         {"dtype", "bfloat16"},
+                                         {"model_version", "auto"},
+                                         {"quantize", true},
+                                         {"bits", 4},
+                                         {"group_size", 64}});
+        // Its progress, and none of the converter's print().
+        CHECK(messages == std::vector<std::string>{"loading mlx-video", "quantizing"});
+        // What it writes: the documented output.
+        for (const char* file :
+             {"config.json", "t5_encoder.safetensors", "vae.safetensors", "model.safetensors"}) {
+            INFO(file);
+            CHECK(std::filesystem::is_regular_file(work.out / file));
+        }
+    }
+    SECTION("8bit, and a float type unquantized") {
+        REQUIRE(convert_video(work, *find_mlx_precision("8bit")).empty());
+        std::filesystem::remove_all(work.out);
+        REQUIRE(convert_video(work, *find_mlx_precision("f16")).empty());
+        const std::vector<nlohmann::json> calls = work.calls();
+        REQUIRE(calls.size() == 2);
+        CHECK(calls[0]["bits"] == 8);
+        CHECK(calls[0]["quantize"] == true);
+        CHECK(calls[1]["quantize"] == false);
+        CHECK(calls[1]["dtype"] == "float16");
+    }
+    SECTION("a precision its converter does not write, refused before it is loaded") {
+        const std::string error = convert_video(work, *find_mlx_precision("3bit"));
+        CHECK(error.find("mlx-video's converter quantizes 4 or 8 bits in groups of 32, 64 or "
+                         "128, never 3 bits") != std::string::npos);
+        CHECK(work.calls().empty());
+    }
+    SECTION("no mlx-video: its setup named, nothing converted") {
+        const std::string error =
+            convert_video(work, *find_mlx_precision("4bit"), nullptr, "stub_mlx:stub_mlx_missing");
+        CHECK(error.find("mlx-video is not installed in Apogee's Python environment") !=
+              std::string::npos);
+        CHECK(error.find("apogee train setup --with mlx-video") != std::string::npos);
+        CHECK(work.calls().empty());
+    }
+    SECTION("the converter's failure, in its own words") {
+        const apogee::testing::EnvGuard error{"STUB_MLX_CONVERT_ERROR", "out of memory"};
+        CHECK(convert_video(work, *find_mlx_precision("4bit")).find("ValueError: out of memory") !=
+              std::string::npos);
+    }
+    SECTION("a seeded driver from before the route") {
+        // 53h's converter knows mlx-embeddings, and no mlx-video.
+        const std::filesystem::path older = work.root.path() / "mlx_convert.py";
+        apogee::testing::write_fixture_file(
+            older,
+            "import argparse\n"
+            "parser = argparse.ArgumentParser()\n"
+            "parser.add_argument('--with', choices=['mlx-lm', 'mlx-vlm', 'mlx-embeddings'])\n"
+            "for flag in ('--hf-path', '--mlx-path', '--q-bits', '--q-group-size', '--q-mode',\n"
+            "             '--dtype'):\n"
+            "    parser.add_argument(flag)\n"
+            "parser.parse_args()\n");
+        const std::string error = convert_video(work, *find_mlx_precision("4bit"), nullptr,
+                                                "stub_mlx:stub_mlx_video", older);
+        CHECK(error.find("argument --with: invalid choice") != std::string::npos);
+        CHECK(error.find("the seeded converter at " + older.string() +
+                         " is older than this build: 'apogee check --fix'") != std::string::npos);
+    }
 }

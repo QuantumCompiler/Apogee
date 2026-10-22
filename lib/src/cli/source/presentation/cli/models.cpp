@@ -153,11 +153,16 @@ void pad(std::ostringstream& out, const std::string& value, std::size_t width, b
 /// its size -- all from its files.
 void render_mlx_files(std::ostream& out, const models::MlxInfo& info,
                       const harness::BackendConfig& backend) {
+    // A video model's files are mlx-video's layout's, with no tokenizer and
+    // no token window (53k).
     out << "files:        "
-        << (info.complete
-                ? "whole -- config.json, a tokenizer and " + std::to_string(info.shards.size()) +
+        << (!info.complete ? info.problem
+            : info.video
+                ? "whole -- " + std::string{models::kMlxVideoFiles} + ", " +
+                      std::to_string(info.shards.size()) +
                       " shard(s), each holding every byte its header lists"
-                : info.problem)
+                : "whole -- config.json, a tokenizer and " + std::to_string(info.shards.size()) +
+                      " shard(s), each holding every byte its header lists")
         << "\n";
     if (info.config_read) {
         out << "quantization: " << info.quantization.describe()
@@ -165,6 +170,11 @@ void render_mlx_files(std::ostream& out, const models::MlxInfo& info,
                     ? ""
                     : "; not in mlx-lm's own format -- it converts the weights as it loads them")
             << "\n";
+    }
+    if (info.video) {
+        out << "size:         " << format_progress_size(static_cast<std::int64_t>(info.bytes))
+            << " on disk\n";
+        return;
     }
     const models::MlxWindow window = models::mlx_window(info, backend);
     out << "window:       ";
@@ -447,7 +457,9 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
                 if (files.config_read) {
                     row.quant = files.quantization.describe();
                 }
-                row.window = models::describe(models::mlx_window(files, backend));
+                // A video model has no token window (53k).
+                row.window =
+                    files.video ? "-" : models::describe(models::mlx_window(files, backend));
                 // What the directory is (53e), when there is one: an entry
                 // over a kind no mlx backend chats with is said to be one.
                 std::error_code code;
@@ -669,7 +681,8 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
             if (info.config_read) {
                 row.quant = info.quantization.describe();
             }
-            row.window = models::describe(models::mlx_window(info, {}));
+            // A video model has no token window (53k).
+            row.window = info.video ? "-" : models::describe(models::mlx_window(info, {}));
             row.attention = !info.complete;
             row.note = info.complete ? mlx_summary(info) : info.problem;
             // Listed as its kind (53e): one no mlx backend chats with says
@@ -1309,7 +1322,8 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
 /// installed mlx-embeddings builds it, 53h); nullopt where they do not.
 [[nodiscard]] std::optional<MlxOffer> set_mlx_offer(const std::filesystem::path& dir) {
     const std::vector<std::string> formats = models::snapshot_conversions(
-        dir, installed_mlx_embedding_builds(), installed_mlx_drafter_builds());
+        dir, installed_mlx_embedding_builds(), installed_mlx_drafter_builds(),
+        installed_mlx_video_converts());
     if (std::ranges::find(formats, std::string{models::kMlxFormat}) == formats.end()) {
         return std::nullopt;
     }
@@ -1322,7 +1336,8 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
 [[nodiscard]] std::vector<std::string> set_conversions(const std::filesystem::path& dir,
                                                        const std::optional<MlxOffer>& offer) {
     std::vector<std::string> conversions = models::snapshot_conversions(
-        dir, installed_mlx_embedding_builds(), installed_mlx_drafter_builds());
+        dir, installed_mlx_embedding_builds(), installed_mlx_drafter_builds(),
+        installed_mlx_video_converts());
     if (!offer.has_value() || !offer->offered()) {
         std::erase(conversions, std::string{models::kMlxFormat});
     }
@@ -1378,7 +1393,7 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     out << "path:         " << stored.dir.string() << "\n";
     const std::optional<models::DraftHead> head = models::snapshot_draft_head(stored.dir);
     const std::optional<models::DiffusionModel> diffusion =
-        models::snapshot_diffusion_model(stored.dir);
+        models::snapshot_diffusion_model(stored.dir, installed_mlx_video_converts());
     std::optional<MlxOffer> offer;
     if (head.has_value()) {
         // An MLX drafter, where the installed mlx-vlm drafts its type (53i);
@@ -1396,8 +1411,14 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
                              (offer->remedy.empty() ? "" : " -- '" + offer->remedy + "'"))
             << "\n";
     } else if (diffusion.has_value()) {
-        out << "format:       SafeTensors -- a diffusion model's weights, not runnable and not "
-               "convertible\n";
+        // Wan's original layout converts to an MLX video model through
+        // mlx-video, whole and with it installed (53k); the line says what
+        // else it needs.
+        offer = set_mlx_offer(stored.dir);
+        out << "format:       SafeTensors -- a diffusion model's weights, not runnable"
+            << (diffusion->mlx_convertible() ? "; --mlx converts it to an MLX video model"
+                                             : " and not convertible")
+            << "\n";
         out << "diffusion:    " << models::describe_diffusion_model(*diffusion) << "\n";
     }
     if (!head.has_value() && !diffusion.has_value()) {
@@ -1449,6 +1470,10 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
             // Its one conversion: a drafter, never a GGUF (53i).
             out << "made from it: nothing yet -- 'apogee models convert " << handle
                 << " --mlx' makes an MLX drafter of it\n";
+        } else if (diffusion.has_value()) {
+            // Its one conversion: an MLX video model, never a GGUF (53k).
+            out << "made from it: nothing yet -- 'apogee models convert " << handle
+                << " --mlx' makes an MLX video model of it\n";
         } else {
             out << "made from it: nothing yet -- 'apogee models convert " << handle
                 << "' makes a GGUF of it"
@@ -2062,8 +2087,12 @@ namespace {
             if (!info.architecture.empty()) {
                 data["architecture"] = info.architecture;
             }
-            const models::MlxWindow window = models::mlx_window(info, {});
-            data["window"] = window_of(window.window, window.configured, window.trained);
+            // A video model states no token window (53k): null, as a
+            // pipeline's is.
+            if (!info.video) {
+                const models::MlxWindow window = models::mlx_window(info, {});
+                data["window"] = window_of(window.window, window.configured, window.trained);
+            }
             const models::MlxKind kind = models::read_mlx_kind(stored.dir);
             data["kind"] = kind.word;
             if (const models::MlxEmbeddingWidth width =

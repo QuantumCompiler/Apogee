@@ -399,18 +399,29 @@ std::optional<WanLayout> snapshot_wan_layout(const std::filesystem::path& dir) {
     return layout;
 }
 
-std::optional<DiffusionModel> snapshot_diffusion_model(const std::filesystem::path& dir) {
+bool DiffusionModel::mlx_convertible() const noexcept {
+    return wan.has_value() && wan->whole() && mlx_video.value_or(false);
+}
+
+std::optional<DiffusionModel> snapshot_diffusion_model(const std::filesystem::path& dir,
+                                                       const VideoConverts& mlx_video) {
     const std::string class_name = diffusers_class(read_model_config(dir));
     if (class_name.empty()) {
         return std::nullopt;
     }
-    DiffusionModel model{.class_name = class_name, .wan = snapshot_wan_layout(dir), .ref = {}};
+    DiffusionModel model{
+        .class_name = class_name, .wan = snapshot_wan_layout(dir), .ref = {}, .mlx_video = {}};
     if (const std::optional<Snapshot> record = load_snapshot(dir);
         record.has_value() && !record->ref.empty()) {
         model.ref = record->ref;
         if (!record->revision.empty() && record->revision != "main") {
             model.ref += "@" + record->revision;
         }
+    }
+    // Whether mlx-video is there to convert it, asked of the caller only for
+    // the layout it converts (53k).
+    if (model.wan.has_value() && mlx_video) {
+        model.mlx_video = mlx_video();
     }
     return model;
 }
@@ -437,14 +448,27 @@ std::string describe_diffusion_model(const DiffusionModel& model) {
                                   : "'apogee models pull " + model.ref + " --safetensors'") +
                " fetches " + (missing.size() == 1 ? "it" : "them") + " into this set";
     }
-    // That neither converter takes it, and what runs the model today: the
-    // pipeline Wan publishes beside the original layout, by its repository's
-    // name and without its revision.
+    // How it converts (53k): through mlx-video to MLX once it is whole --
+    // said ready where mlx-video is installed, its setup named where it is
+    // not -- and never through llama.cpp's converter.
+    if (wan.whole() && model.mlx_video == true) {
+        out += "; --mlx converts it to an MLX video model through mlx-video";
+    } else {
+        out += std::string{"; "} + (wan.whole() ? "" : "once it is complete, ") +
+               "mlx-video converts it to an MLX video model (--mlx)";
+        if (model.mlx_video == false) {
+            out +=
+                ", and is not installed in Apogee's Python environment -- 'apogee train setup "
+                "--with mlx-video'";
+        }
+    }
+    // And what runs the model today: the pipeline Wan publishes beside the
+    // original layout, by its repository's name and without its revision.
     const std::string repository = model.ref.substr(0, model.ref.find('@'));
     out +=
-        "; neither converter takes it -- llama.cpp's finds a model by its architectures, and "
-        "mlx-lm's builds a language model; what runs this model today is its Diffusers "
-        "pipeline in 'apogee video generate', pulled whole";
+        "; llama.cpp's converter takes no diffusion model -- it finds a model by its "
+        "architectures; what runs this model today is its Diffusers pipeline in 'apogee video "
+        "generate', pulled whole";
     out += repository.empty() ? std::string{" (a repository with model_index.json at its root)"}
                               : " with 'apogee models pull " + repository + "-Diffusers'";
     return out;
@@ -515,7 +539,8 @@ std::string describe_embedding_model_both(const EmbeddingModel& model) {
 
 std::vector<std::string> snapshot_conversions(const std::filesystem::path& dir,
                                               const EmbeddingBuilds& mlx_embeddings,
-                                              const DrafterBuilds& mlx_drafters) {
+                                              const DrafterBuilds& mlx_drafters,
+                                              const VideoConverts& mlx_video) {
     if (const std::optional<DraftHead> head = snapshot_draft_head(dir)) {
         // An MLX drafter where the installed mlx-vlm drafts its type (53i),
         // never a GGUF: llama.cpp's would be no backend Apogee runs.
@@ -524,7 +549,12 @@ std::vector<std::string> snapshot_conversions(const std::filesystem::path& dir,
         }
         return {};
     }
-    if (snapshot_diffusion_model(dir).has_value()) {
+    if (const std::optional<DiffusionModel> diffusion = snapshot_diffusion_model(dir, mlx_video)) {
+        // An MLX video model where mlx-video converts it (53k): Wan's
+        // original layout, whole, mlx-video installed. Never a GGUF.
+        if (diffusion->mlx_convertible()) {
+            return {std::string{kMlxFormat}};
+        }
         return {};
     }
     if (snapshot_embedding_model(dir).has_value()) {

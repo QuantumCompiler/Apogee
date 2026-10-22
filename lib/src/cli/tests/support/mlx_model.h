@@ -63,7 +63,9 @@ struct MlxModelSpec {
     bool vision = false;
     /// The kind its record names (53e): an `apogee-snapshot.json` as a
     /// conversion writes one, `kind` beside its `transform`. No record when
-    /// empty -- a directory made before the record, or placed by hand.
+    /// empty -- a directory made before the record, or placed by hand. A
+    /// `video` directory holds mlx-video's layout too (53k): its text
+    /// encoder and VAE beside the transformer's `model.safetensors`.
     std::string kind{};
 };
 
@@ -132,6 +134,12 @@ inline void write_mlx_model(const std::filesystem::path& dir, const MlxModelSpec
     if (spec.index) {
         write_fixture_file(dir / "model.safetensors.index.json",
                            "{\"metadata\": {}, \"weight_map\": {" + map + "}}\n");
+    }
+    if (spec.kind == "video") {
+        write_fixture_file(dir / "t5_encoder.safetensors",
+                           safetensors_bytes({{"encoder.block.0.weight", 32}}, spec.format));
+        write_fixture_file(dir / "vae.safetensors",
+                           safetensors_bytes({{"decoder.conv_in.weight", 32}}, spec.format));
     }
 }
 

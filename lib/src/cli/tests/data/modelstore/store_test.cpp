@@ -1140,11 +1140,11 @@ TEST_CASE("the user's Wan set reads as Wan's original layout, missing its two ch
               "'Wan-AI--Wan2.2-TI2V-5B/safetensors/6ef9b00b8b83'", *model) ==
           "'Wan-AI--Wan2.2-TI2V-5B/safetensors/6ef9b00b8b83' is Wan's original layout "
           "(WanModel), missing models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth -- 'apogee "
-          "models pull Wan-AI/Wan2.2-TI2V-5B --safetensors' fetches them into this set; neither "
-          "converter takes it -- llama.cpp's finds a model by its architectures, and mlx-lm's "
-          "builds a language model; what runs this model today is its Diffusers pipeline in "
-          "'apogee video generate', pulled whole with 'apogee models pull "
-          "Wan-AI/Wan2.2-TI2V-5B-Diffusers'");
+          "models pull Wan-AI/Wan2.2-TI2V-5B --safetensors' fetches them into this set; once it "
+          "is complete, mlx-video converts it to an MLX video model (--mlx); llama.cpp's "
+          "converter takes no diffusion model -- it finds a model by its architectures; what "
+          "runs this model today is its Diffusers pipeline in 'apogee video generate', pulled "
+          "whole with 'apogee models pull Wan-AI/Wan2.2-TI2V-5B-Diffusers'");
 
     // One there, one not: the one named.
     apogee::testing::write_fixture_file(dir / vae, apogee::testing::wan_bytes(vae));
@@ -1167,12 +1167,13 @@ TEST_CASE("the user's Wan set reads as Wan's original layout, missing its two ch
     REQUIRE(model.has_value());
     CHECK(apogee::models::describe_diffusion_model(*model) ==
           "Wan's original layout (WanModel), complete -- its transformer beside "
-          "models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth; neither converter takes it -- "
-          "llama.cpp's finds a model by its architectures, and mlx-lm's builds a language model; "
-          "what runs this model today is its Diffusers pipeline in 'apogee video generate', "
-          "pulled whole with 'apogee models pull Wan-AI/Wan2.2-TI2V-5B-Diffusers'");
-    // Still no conversion: the original layout converts through mlx-video,
-    // which is 53k's.
+          "models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth; mlx-video converts it to an MLX "
+          "video model (--mlx); llama.cpp's converter takes no diffusion model -- it finds a "
+          "model by its architectures; what runs this model today is its Diffusers pipeline in "
+          "'apogee video generate', pulled whole with 'apogee models pull "
+          "Wan-AI/Wan2.2-TI2V-5B-Diffusers'");
+    // Still no conversion with no mlx-video to ask: the original layout
+    // converts through mlx-video where it is installed (53k, below).
     CHECK(apogee::models::snapshot_conversions(dir).empty());
 }
 
@@ -1232,10 +1233,10 @@ TEST_CASE(
     CHECK(apogee::models::describe_diffusion_model(*unrecorded) ==
           "Wan's original layout (WanModel), missing models_t5_umt5-xxl-enc-bf16.pth and "
           "Wan2.1_VAE.pth -- pulling its repository again with --safetensors fetches them into "
-          "this set; neither converter takes it -- llama.cpp's finds a model by its "
-          "architectures, and mlx-lm's builds a language model; what runs this model today is "
-          "its Diffusers pipeline in 'apogee video generate', pulled whole (a repository with "
-          "model_index.json at its root)");
+          "this set; once it is complete, mlx-video converts it to an MLX video model (--mlx); "
+          "llama.cpp's converter takes no diffusion model -- it finds a model by its "
+          "architectures; what runs this model today is its Diffusers pipeline in 'apogee video "
+          "generate', pulled whole (a repository with model_index.json at its root)");
     const std::filesystem::path unsized = store.root.path() / "unsized";
     place_snapshot_with(unsized, R"({"_class_name": "WanModel", "_diffusers_version": "0.30.0"})");
     CHECK(apogee::models::snapshot_wan_layout(unsized)->missing().back() == "*_VAE.pth");
@@ -1261,6 +1262,91 @@ TEST_CASE(
     CHECK(apogee::models::snapshot_conversions(wan).empty());
     CHECK(apogee::models::snapshot_conversions(head).empty());
     CHECK(apogee::models::snapshot_conversions(llama) == std::vector<std::string>{"gguf", "mlx"});
+}
+
+TEST_CASE(
+    "Wan's original layout converts to MLX exactly where it is whole and mlx-video is "
+    "installed",
+    "[models][store][diffusion][wan][mlx_video]") {
+    // 53k: the decision's three answers over the user's own set -- as the
+    // pull before 53j left it, then completed per 53j -- and the wording each
+    // way, naming what is missing: the checkpoints by name, or mlx-video by
+    // its setup.
+    using Formats = std::vector<std::string>;
+    const Store store;
+    const std::filesystem::path dir = apogee::testing::write_user_wan_set(store.roots);
+    int asked = 0;
+    const apogee::models::VideoConverts installed = [&asked] {
+        ++asked;
+        return true;
+    };
+    const apogee::models::VideoConverts absent = [] { return false; };
+    const std::string tail =
+        "; llama.cpp's converter takes no diffusion model -- it finds a model by its "
+        "architectures; what runs this model today is its Diffusers pipeline in 'apogee video "
+        "generate', pulled whole with 'apogee models pull Wan-AI/Wan2.2-TI2V-5B-Diffusers'";
+
+    // Not whole: none, mlx-video or not -- the refusal names the two files.
+    CHECK(apogee::models::snapshot_conversions(dir, {}, {}, installed).empty());
+    CHECK(apogee::models::snapshot_conversions(dir, {}, {}, absent).empty());
+    std::optional<apogee::models::DiffusionModel> model =
+        apogee::models::snapshot_diffusion_model(dir, installed);
+    REQUIRE(model.has_value());
+    CHECK(model->mlx_video == true);
+    CHECK_FALSE(model->mlx_convertible());
+    const std::string missing =
+        "Wan's original layout (WanModel), missing models_t5_umt5-xxl-enc-bf16.pth and "
+        "Wan2.2_VAE.pth -- 'apogee models pull Wan-AI/Wan2.2-TI2V-5B --safetensors' fetches them "
+        "into this set; once it is complete, mlx-video converts it to an MLX video model (--mlx)";
+    CHECK(apogee::models::describe_diffusion_model(*model) == missing + tail);
+    // Neither there: both said, the files and mlx-video's setup.
+    model = apogee::models::snapshot_diffusion_model(dir, absent);
+    REQUIRE(model.has_value());
+    CHECK(model->mlx_video == false);
+    CHECK(apogee::models::diffusion_model_refusal("'wan'", *model) ==
+          "'wan' is " + missing +
+              ", and is not installed in Apogee's Python environment -- 'apogee train setup "
+              "--with mlx-video'" +
+              tail);
+
+    // Whole, per 53j.
+    apogee::testing::complete_user_wan_set(dir);
+    REQUIRE(apogee::models::snapshot_wan_layout(dir)->whole());
+    const std::string complete =
+        "Wan's original layout (WanModel), complete -- its transformer beside "
+        "models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth";
+    // Whole and installed: MLX alone, never a GGUF -- said ready.
+    CHECK(apogee::models::snapshot_conversions(dir, {}, {}, installed) == Formats{"mlx"});
+    model = apogee::models::snapshot_diffusion_model(dir, installed);
+    REQUIRE(model.has_value());
+    CHECK(model->mlx_convertible());
+    CHECK(apogee::models::describe_diffusion_model(*model) ==
+          complete + "; --mlx converts it to an MLX video model through mlx-video" + tail);
+    // Whole, mlx-video not installed: none, its setup named.
+    CHECK(apogee::models::snapshot_conversions(dir, {}, {}, absent).empty());
+    model = apogee::models::snapshot_diffusion_model(dir, absent);
+    REQUIRE(model.has_value());
+    CHECK_FALSE(model->mlx_convertible());
+    CHECK(apogee::models::describe_diffusion_model(*model) ==
+          complete +
+              "; mlx-video converts it to an MLX video model (--mlx), and is not installed in "
+              "Apogee's Python environment -- 'apogee train setup --with mlx-video'" +
+              tail);
+    // Nobody asked: none, and nothing claimed either way.
+    CHECK(apogee::models::snapshot_conversions(dir).empty());
+    CHECK_FALSE(apogee::models::snapshot_diffusion_model(dir)->mlx_video.has_value());
+
+    // Asked of the layout alone: a language model, and a diffusers class
+    // that is no Wan transformer, never ask, and keep their answers.
+    asked = 0;
+    const std::filesystem::path llama = store.root.path() / "llama";
+    place_snapshot_with(llama, R"({"architectures": ["LlamaForCausalLM"], "model_type": "llama"})");
+    CHECK(apogee::models::snapshot_conversions(llama, {}, {}, installed) == Formats{"gguf", "mlx"});
+    const std::filesystem::path ltx = store.root.path() / "ltx";
+    place_snapshot_with(ltx, R"({"_class_name": "LTXVideoTransformer3DModel",
+                                 "_diffusers_version": "0.33.0"})");
+    CHECK(apogee::models::snapshot_conversions(ltx, {}, {}, installed).empty());
+    CHECK(asked == 0);
 }
 
 TEST_CASE(

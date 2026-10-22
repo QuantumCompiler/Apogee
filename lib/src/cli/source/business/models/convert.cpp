@@ -224,9 +224,19 @@ std::string mlx_conversion_refusal(const std::filesystem::path& snapshot,
                " is no draft head: only a draft head converts to a drafter (its config.json "
                "declaring backbone_hidden_size, or a draft head's architecture)";
     }
-    // Nor for a diffusion model's: it builds language models (M20).
-    if (const std::optional<DiffusionModel> diffusion = snapshot_diffusion_model(snapshot)) {
+    // Nor for a diffusion model's: it builds language models (M20) -- unless
+    // the route is mlx-video's (53k), the caller having found it installed,
+    // which takes Wan's original layout once it is whole.
+    if (const std::optional<DiffusionModel> diffusion = snapshot_diffusion_model(snapshot);
+        diffusion.has_value() &&
+        !(kind == kMlxVideo && diffusion->wan.has_value() && diffusion->wan->whole())) {
         return diffusion_model_refusal(snapshot.string(), *diffusion);
+    }
+    // And mlx-video's route takes Wan's original layout alone.
+    if (kind == kMlxVideo && !snapshot_wan_layout(snapshot).has_value()) {
+        return snapshot.string() +
+               " is no Wan original layout: mlx-video's converter takes Wan's own transformer "
+               "(its config.json naming WanModel) beside its text encoder and VAE checkpoints";
     }
     // Nor an embedding model, which the mlx backend could not embed with
     // anyway: its GGUF is the conversion (M21) -- unless the route is
@@ -327,7 +337,9 @@ MlxConvertResult convert_snapshot_to_mlx(const std::filesystem::path& snapshot,
     }
 
     // --- rung 4: what landed is a whole MLX model, quantized as asked ---------------
-    result.info = read_mlx_info(out);
+    // Read as the route's kind says, its record not yet written: a video
+    // model by mlx-video's layout (53k).
+    result.info = read_mlx_info(out, kind);
     if (!result.info.complete) {
         remove_tree_quietly(out);
         result.error = "the converter finished but its output is not a loadable MLX model -- " +
@@ -343,7 +355,8 @@ MlxConvertResult convert_snapshot_to_mlx(const std::filesystem::path& snapshot,
     result.ok = true;
     // What the route's converter built, said by its record since its files
     // need not (53e): mlx-lm a language model, whatever the snapshot also
-    // carried; mlx-vlm the whole model, its towers kept (53f).
+    // carried; mlx-vlm the whole model, its towers kept (53f); mlx-video a
+    // video model (53k).
     result.kind = std::string{kind};
     return result;
 }
