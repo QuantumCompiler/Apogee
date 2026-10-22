@@ -327,5 +327,33 @@ enum SessionDocuments {
  "problems": []
 }
 """#
+    /// tests/data/protocol/Fixtures/resumed-chat.jsonl
+    static let resumedChat = #"""
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","document"],"schema":"2026-10-20","tools":true},"model":"chatty","next_turn":6,"protocol_version":1,"type":"session"}
+{"text":"utility — restating the follow-up to rank the tools, with helper","turn":6,"type":"tool_status"}
+{"turn":6,"type":"thinking"}
+{"turn":6,"type":"answer_start"}
+{"text":"Nothing ","turn":6,"type":"answer_delta"}
+{"text":"else: th","turn":6,"type":"answer_delta"}
+{"text":"e beta e","turn":6,"type":"answer_delta"}
+{"text":"nds on 2","turn":6,"type":"answer_delta"}
+{"text":"026-10-3","turn":6,"type":"answer_delta"}
+{"text":"1, and t","turn":6,"type":"answer_delta"}
+{"text":"he launc","turn":6,"type":"answer_delta"}
+{"text":"h is on ","turn":6,"type":"answer_delta"}
+{"text":"2026-11-","turn":6,"type":"answer_delta"}
+{"text":"12.","turn":6,"type":"answer_delta"}
+{"turn":6,"type":"answer_end"}
+{"finish_reason":"stop","model":"chatty","text":"Nothing else: the beta ends on 2026-10-31, and the launch is on 2026-11-12.","turn":6,"type":"result"}
+"""#
+    /// tests/business/reads/Fixtures/chats-show.json
+    static let chatsShow = #"""
+{"attachments":[{"bytes":71,"files":1,"name":"/Users/someone/Documents/report.md"}],"backend":"chatty","id":"20261022-182803-f9f6","model":"","name":"Planning A Note","object":"chat","title":"Planning A Note","turns":[{"answer":{"text":"Then write the date first, as 2026-10-22.","tools":[]},"answered":true,"compacted":{"summary":"They asked how to write a note; a short list, the date first."},"turn":2,"user":{"attachments":[],"text":""}},{"answer":{"text":"The dev server listens on port 8080.","tools":[]},"answered":true,"turn":3,"user":{"attachments":[],"text":"Which port does the dev server use?"}},{"answer":{"text":"notes.md holds two items: **buy milk** and *call the plumber*.","tools":[{"name":"read_file","result_bytes":30,"summary":"{\"path\":\"Documents/notes.md\"}"}]},"answered":true,"turn":4,"user":{"attachments":[],"text":"What is in notes.md?"}},{"answer":{"text":"","tools":[]},"answered":false,"turn":4,"user":{"attachments":[],"text":"Is the launch still on?"}},{"answer":{"text":"The report says the launch moved to **November**:\n\n- the beta ends on 2026-10-31\n- the launch is on 2026-11-12","tools":[]},"answered":true,"turn":5,"user":{"attachments":[{"bytes":71,"files":1,"name":"/Users/someone/Documents/report.md"}],"text":"What does the report I attached say?"}}]}
+"""#
+    /// tests/business/reads/Fixtures/chats-show-refused.err
+    static let chatsShowRefused = #"""
+A subcommand is required
+Run with --help for more information.
+"""#
 }
 #endif

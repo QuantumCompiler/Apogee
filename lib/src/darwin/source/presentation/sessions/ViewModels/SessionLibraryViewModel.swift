@@ -144,7 +144,7 @@ public final class SessionLibraryViewModel {
         self.preferences = preferences
         self.now = now
         inspectorOpen = preferences.inspectorOpen
-        current = SessionViewModel(starter: starter)
+        current = SessionViewModel(starter: starter, launch: ChatLaunch(), reader: runner)
     }
 
     // MARK: - The place
@@ -400,21 +400,22 @@ public final class SessionLibraryViewModel {
             let model = nextModel
             nextModel = nil
             current = SessionViewModel(
-                starter: starter, launch: ChatLaunch(settings: model.map { RunSettings(model: $0) }))
+                starter: starter, launch: ChatLaunch(settings: model.map { RunSettings(model: $0) }), reader: runner)
             listedBeforeNew = Set(chats.map(\.id))
             preferences.openChat = nil
         case .privately:
             let nothingWritten = privateIsNothingWritten
             current = SessionViewModel(
-                starter: starter, launch: ChatLaunch(privately: nothingWritten, noRecall: !nothingWritten))
+                starter: starter, launch: ChatLaunch(privately: nothingWritten, noRecall: !nothingWritten),
+                reader: runner)
             listedBeforeNew = nothingWritten ? nil : Set(chats.map(\.id))
             preferences.openChat = nil
         case .chat(let id):
-            current = SessionViewModel(starter: starter, launch: ChatLaunch(resume: id))
+            current = SessionViewModel(starter: starter, launch: ChatLaunch(resume: id), reader: runner)
             listedBeforeNew = nil
             preferences.openChat = id
         case .execute(let launch):
-            current = SessionViewModel(starter: starter, launch: launch)
+            current = SessionViewModel(starter: starter, launch: launch, reader: runner)
             current.plays = plays
             current.defaultSuite = defaultSuite
             listedBeforeNew = Set(chats.map(\.id))

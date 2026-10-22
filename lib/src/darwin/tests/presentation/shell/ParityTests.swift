@@ -42,6 +42,14 @@ struct ParityTests {
         #expect(count { $0 == .plumbing } == 3)
     }
 
+    @Test("a verb an item placed is named on its family's row: chats show, a resumed chat's turns in the session window (M7)")
+    func chatsShowPlaced() throws {
+        let chats = try #require(ParityTable.place(of: "chats"))
+        #expect(chats.kind == .screen(module: "PresentationSessions"))
+        #expect(chats.note.contains("`chats show`"))
+        #expect(chats.note.contains("session window (PresentationSession)"))
+    }
+
     @Test("a screen names a module the app has: its folder exists")
     func screensAreReal() {
         for place in ParityTable.places {

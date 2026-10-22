@@ -233,6 +233,27 @@ struct MissingBinaryView: View {
         .task { await SessionPreview.converse(model, typed: SessionPreview.noteTurn) }
 }
 
+#Preview("Resumed: its earlier turns read back") {
+    let model = SessionPreview.session(SessionPreview.resumedChat, launch: SessionPreview.resumeSaved, reader: .saved)
+    SessionWindow(model: model)
+        .frame(width: 900, height: 720)
+        .task { await SessionPreview.ready(model) }
+}
+
+#Preview("Resumed, carried on under the divider") {
+    let model = SessionPreview.session(SessionPreview.resumedChat, launch: SessionPreview.resumeSaved, reader: .saved)
+    SessionWindow(model: model)
+        .frame(width: 900, height: 720)
+        .task { await SessionPreview.converse(model, typed: SessionPreview.resumedTurn) }
+}
+
+#Preview("Resumed on a binary without chats show: the notice") {
+    let model = SessionPreview.session(SessionPreview.resumedChat, launch: SessionPreview.resumeSaved, reader: .older)
+    SessionWindow(model: model)
+        .frame(width: 900, height: 520)
+        .task { await SessionPreview.ready(model) }
+}
+
 #Preview("Paused: freed for another session") {
     let model = SessionPreview.session(SessionPreview.mockActor)
     SessionWindow(model: model)

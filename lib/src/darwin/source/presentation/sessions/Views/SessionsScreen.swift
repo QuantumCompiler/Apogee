@@ -222,6 +222,17 @@ public struct SessionCommands: Commands {
         }
 }
 
+#Preview("A saved session reopened: its earlier turns, then the live one") {
+    let library = SessionsPreview.library(
+        chats: SessionsDocuments.chatsList, lines: SessionsPreview.resumedChat, openChat: SessionsPreview.savedChatID)
+    SessionsScreen(library: library, shell: SessionsPreview.shell())
+        .frame(width: 1100, height: 760)
+        .task {
+            await library.start(inView: true)
+            await SessionsPreview.converse(library.current, typed: SessionsPreview.resumedTurn)
+        }
+}
+
 #Preview("Apogee isn't installed") {
     let library = SessionsPreview.library(missing: true)
     SessionsScreen(library: library, shell: SessionsPreview.shell())

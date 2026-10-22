@@ -1,3 +1,4 @@
+import BusinessReads
 import BusinessSession
 import DataProtocol
 import InfrastructureProcess
@@ -8,27 +9,6 @@ import Testing
 /// acts: every test here is a scripted sequence and what it folds to.
 @Suite("Transcript")
 struct TranscriptTests {
-    /// What each item is, in a word or two, for comparing whole transcripts.
-    func shape(_ transcript: Transcript) -> [String] {
-        transcript.items.map { item in
-            switch item.content {
-            case .user(let text): "user: \(text)"
-            case .activity(let a): "activity\(a.live ? " live" : ""): \(a.reasoning)|\(a.lines.joined(separator: ","))"
-            case .answer(let a): "answer\(a.finished ? "" : " streaming"): \(a.text)"
-            case .notice(let text): "notice: \(text)"
-            case .recalled(let recall): "recalled: \(recall.chats.map(\.name).joined(separator: ","))"
-            case .sources(let sources): "sources: \(sources.map(\.file).joined(separator: ","))"
-            case .question(let card): "question: \(card.answers?.joined(separator: ",") ?? "waiting")"
-            case .permission(let card): "permission: \(card.answer ?? "waiting")"
-            case .error(let message): "error: \(message)"
-            case .stopped: "stopped"
-            case .todo(let items): "todo: \(items.map(\.text).joined(separator: ","))"
-            case .unknown(let type): "unknown: \(type)"
-            case .ended(let ending): "ended: \(ending.message)"
-            }
-        }
-    }
-
     func lastID(_ transcript: Transcript) -> Int { transcript.items.last!.id }
 
     @Test("the mock-actor conversation folds to the rows a person should see, each state from its event")
@@ -197,5 +177,86 @@ struct TranscriptTests {
         transcript.cancelling()
         transcript.apply(decoded(#"{"type":"question","turn":1,"questions":[{"question":"?"}]}"#))
         #expect(transcript.status == .stopping(turn: 1))
+    }
+
+    // MARK: - A saved conversation's earlier turns (M7)
+
+    /// The recorded conversation's earlier turns, as the transcript draws them.
+    static let earlierShape = [
+        "notice: attached to the chat: /Users/someone/Documents/report.md (1 file, 71 bytes)",
+        "notice: history compacted; what came before is this summary:\nThey asked how to write a note; a short list, the date first.",
+        "answer: Then write the date first, as 2026-10-22.",
+        "user: Which port does the dev server use?",
+        "answer: The dev server listens on port 8080.",
+        "user: What is in notes.md?",
+        #"activity: |[tool] read_file {"path":"Documents/notes.md"} -- returned 30 bytes"#,
+        "answer: notes.md holds two items: **buy milk** and *call the plumber*.",
+        "user: Is the launch still on?",
+        "unanswered",
+        "user: What does the report I attached say?",
+        "notice: attached: /Users/someone/Documents/report.md (1 file, 71 bytes)",
+        "answer: The report says the launch moved to **November**:\n\n- the beta ends on 2026-10-31\n- the launch is on 2026-11-12",
+        "divider: earlier in this conversation",
+    ]
+
+    @Test("the earlier turns read back fold to rows drawn as live ones, the divider, then a live turn numbered next -- and no notice")
+    func earlierThenLive() {
+        var transcript = Transcript()
+        transcript.earlier(savedChat)
+        #expect(shape(transcript) == Self.earlierShape)
+        #expect(transcript.items.map(\.turn) == [nil, 2, 2, 3, 3, 4, 4, 4, 4, 4, 5, 5, 5, nil])
+        #expect(transcript.status == .connecting, "the rows are drawn; the session has not spoken")
+        let earlier = transcript.items.count
+        for line in resumedChatLines {
+            transcript.apply(decoded(line))
+            if JSONValue.parse(line)?["type"]?.stringValue == "session" {
+                #expect(transcript.status == .ready)
+                #expect(transcript.items.count == earlier, "no notice: the turns are shown")
+                #expect(transcript.userSent(resumedTurn) == 6, "numbered on from the session's next_turn")
+            }
+        }
+        #expect(Array(shape(transcript).dropFirst(earlier)) == [
+            "user: Thanks -- anything else?",
+            "activity: |utility — restating the follow-up to rank the tools, with helper",
+            "answer: Nothing else: the beta ends on 2026-10-31, and the launch is on 2026-11-12.",
+        ])
+        #expect(transcript.items.dropFirst(earlier).allSatisfy { $0.turn == 6 })
+        #expect(savedChat.turns.last?.turn == 5, "the read's last turn is one before the live one")
+        #expect(!shape(transcript).contains { $0.contains("aren't shown") })
+        #expect(transcript.status == .ready)
+        guard case .activity(let tools) = transcript.items[6].content else {
+            Issue.record("the tool call is an activity row")
+            return
+        }
+        #expect(!tools.live, "folded, as a finished turn's is")
+        #expect(tools.typed == "What is in notes.md?")
+    }
+
+    @Test("a binary without chats show: the recorded resumed session says its turns are kept, as today")
+    func olderBinaryNotice() {
+        var transcript = Transcript()
+        transcript.apply(decoded(resumedChatLines[0]))
+        #expect(shape(transcript) == [
+            "notice: resumed: 5 earlier turns of this conversation aren't shown here -- apogee keeps them, and the model still has them"
+        ])
+    }
+
+    @Test("earlier turns go only into a transcript with no rows: one with its own keeps them; an empty read draws nothing")
+    func earlierOnlyIntoAnEmptyTranscript() throws {
+        var kept = Transcript()
+        kept.apply(decoded(#"{"type":"session","protocol_version":1,"model":"m","next_turn":1}"#))
+        kept.userSent("hello")
+        kept.apply(decoded(#"{"type":"result","text":"hi","turn":1}"#))
+        let before = kept
+        kept.earlier(savedChat)
+        #expect(kept == before)
+
+        let document = try #require(ReadDocument(text: #"{"object":"chat","id":"c1","turns":[]}"#))
+        let none = try #require(SavedChat(document: document))
+        var empty = Transcript()
+        empty.earlier(none)
+        #expect(empty.items.isEmpty)
+        empty.apply(decoded(resumedChatLines[0]))
+        #expect(shape(empty).count == 1 && shape(empty)[0].hasPrefix("notice: resumed: 5 earlier turns"), "nothing to show: the notice stands")
     }
 }

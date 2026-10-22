@@ -272,6 +272,57 @@ That was the cost 1b recorded and deferred: "Widening the child's `PATH` is a la
 - **The design canvas** (`lib/design/spec`) doesn't yet show General's new row.
 - **The app run from the Dock against the real binary** (`check` finding all four CLIs) is the user's run: it needs the real `apogee` against `~/.apogee`. The live harness check stands in for it.
 
+### 2026-10-22 — `resumed-chat-shows-its-turns` (maintenance item M7): a resumed chat shows its earlier turns
+
+**Why.** The user: "When we reload a chat, I want the previous turns to show." A reopened conversation drew only `resumed: 5 earlier turns of this conversation aren't shown here -- apogee keeps them, and the model still has them`. The transcript said the turns existed because the CLI handed a driver no read of them. The CLI's M27, shipped the same day, added that read: `chats show <id> --output-format json`.
+
+- [x] **`SavedChat`** (`business/reads`): `chats show`'s document typed, every field optional, unknown fields tolerated.
+- [x] **A resuming session reads its turns.** On `start()` (first open, Try again, Start again), a session with a conversation id starts `chats show <id>` and the child together. Before drawing the child's first event, it waits for the read and hands the turns to the transcript.
+  - Live events wait in their stream meanwhile, and the input stays on "Starting" until the session event opens it. So whichever comes first, the earlier turns stand above the live ones, and the notice is never drawn when the read succeeds.
+  - A session the app paused and carried on, or restarted for its settings, reads nothing.
+  - `Transcript.earlier` folds only into an empty transcript.
+  - The Sessions library passes its runner to every session, and a new session it later identifies reads its turns back when started again.
+- [x] **The earlier turns are drawn as live ones:**
+  - the user's text, the answer, and tools as folded activity lines (`[tool] read_file {"path":…} -- returned 30 bytes`);
+  - a compaction as a notice where it happened ("history compacted; what came before is this summary:");
+  - an unanswered turn as "no answer kept: the turn was cancelled or failed", the CLI text view's words;
+  - attachments as quiet notices, one heading the turns ("attached to the chat: …") and one after the turn each rode.
+
+  A divider, "earlier in this conversation" with an up-arrow, stands where the live session takes over, and live turns number on from the session's `nextTurn`.
+- [x] **An older binary keeps the notice.** Where the read is refused or prints no chat, the notice reads exactly as before.
+- [x] **ADR 0003:** `chats show` is recorded on the `chats` row's note (Sessions, plus the session window) and pinned by a test, since the table classifies top-level words. The parity fixture's refresh against the branch's binary left it unchanged (29 words).
+- [x] **Recorded from the branch's binary** over a sandbox home in scratch, the home written `/Users/someone/.apogee`. A driven `chat --tools` was run over stream-json, hello first as the app runs it, with two mock backends and an unreachable one. It made every shape asked for and one more:
+  - a compaction, a plain turn, a `read_file` tool call, an attachment, and a failed turn (`answered: false`);
+  - `chats show`'s JSON and text (`chats-show.json`, `.txt`), `chats list`, the resumed session's opening (`resumed-chat.jsonl`, `next_turn` 6, one live turn 6);
+  - a pre-M27 build's refusal of the read (`chats-show-refused.err`).
+
+  The previews embed them byte for byte.
+
+**Decisions made while building** (2026-10-22, each recorded for veto):
+- **The open calls' defaults, taken:** every earlier turn is drawn as a live one, with no paging, tools folded and a compaction a notice where it happened.
+- **The read is held before the first live event,** rather than spliced in later. The live path is unchanged, and no row already drawn is moved or removed. The wait has no deadline of its own beyond the read's 60-second limit; `chats show` answers in milliseconds.
+- **The divider stands where the live session takes over,** as the item's seam put it, with an up-arrow so it reads as pointing at the turns above.
+- **Answers are plain text, live and earlier alike.** The app draws no markdown in a live answer, and earlier answers share that row, so `**bold**` shows literally in both. Rendering markdown would change every live answer and is its own item.
+- **Attachments are quiet notices,** not chips in the user's card, which would have changed the user row everywhere.
+- **Two new row kinds,** `.unanswered` and `.divider`. The history does not say whether an unanswered turn was cancelled or failed, so it is neither the "stopped" row nor the failed-turn card.
+
+**Verified.**
+- 17 new cases:
+
+  | Suite | Cases |
+  |---|---|
+  | `SavedChatTests` (6) | `recorded`, `numberedAsTheSessionNumbers`, `textFormAgrees`, `theRead`, `tolerant`, `notAChat` |
+  | `TranscriptTests` (+3) | `earlierThenLive` (the reducer over the recorded read and stream, live turn 6, no notice), `olderBinaryNotice`, `earlierOnlyIntoAnEmptyTranscript` |
+  | `ResumedSessionTests` (6) | `readFirst`, `sessionFirst` (status held at connecting with no rows until the read answers), `olderBinary`, `unreadable`, `pausedAndCarriedOn` (reads once), `newThenStartedAgain` |
+  | `SessionLibraryTests` (+1) | `openedChatReadsItsTurns` |
+  | `ParityTests` (+1) | `chatsShowPlaced` |
+- **Module schemes:** `PresentationSession` passed 42 of 42, `PresentationSessions` 25 of 25, `PresentationShell` 19 of 19, and `BusinessReadsTests` with the layering check 64 of 64.
+- **`check-previews`** finds nothing.
+- **A live harness over the real binaries** drew the earlier turns, the divider and live turn 7 on the M27 build, and the notice on the older one.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,859 tests and the macOS app's 417 cases passed, with no Swift warning.
+
+**Not done:** markdown in answers, live or earlier.
+
 ---
 
 ## Milestone B — The design's screens

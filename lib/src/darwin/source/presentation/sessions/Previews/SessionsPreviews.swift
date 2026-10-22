@@ -16,6 +16,13 @@ enum SessionsPreview {
 
     static let mockActor = SessionsDocuments.mockActor.split(separator: "\n").map(String.init)
 
+    /// A saved conversation resumed: its `session` event, then one live turn
+    /// -- and the conversation as `chats list` and `chats show` read it before.
+    static let resumedChat = SessionsDocuments.resumedChat.split(separator: "\n").map(String.init)
+    static var savedChatID: String { ChatSummary.list(from: ReadDocument(text: SessionsDocuments.chatsList)!)[0].id }
+    /// What its live turn was sent as, recorded with it.
+    static let resumedTurn = "Thanks -- anything else?"
+
     /// What the person sends and answers in it, as the session window's
     /// end-to-end test does (tests/presentation/session/SessionViewModelTests).
     static let noteTurn = "Write me a note."
@@ -60,6 +67,7 @@ enum SessionsPreview {
         PreviewRunner(
             reads: [
                 (["chats", "list"], chats),
+                (["chats", "show"], SessionsDocuments.chatsShow),
                 (["models", "list"], modelsList),
                 (["models", "status"], modelsStatus),
                 (["symphonies", "list"], SessionsDocuments.symphoniesList),

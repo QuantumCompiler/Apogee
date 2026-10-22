@@ -1,8 +1,11 @@
+import BusinessReads
 import BusinessSession
 import DataProtocol
+import Foundation
 
 /// The conversation as the window shows it, folded from the session's events
-/// and nothing else.
+/// and nothing else -- and, for a saved conversation opened again, from its
+/// earlier turns as `chats show` read them back.
 ///
 /// A pure reducer: `apply` takes each event as it arrives, and the user's own
 /// acts (`userSent`, `answered`, `cancelling`) are applied the moment they
@@ -126,6 +129,81 @@ public struct Transcript: Equatable {
         append(.error(reason), turn: nil)
     }
 
+    // MARK: - The earlier turns
+
+    /// A saved conversation's earlier turns, as `chats show` read them back
+    /// (the CLI's M27), folded in as rows drawn as live turns are -- then the
+    /// divider where the live session takes over. The session's own `next_turn`
+    /// numbers the live turns on from them, and with rows drawn its `session`
+    /// event says no "aren't shown here" notice.
+    ///
+    /// Only into a transcript with no rows yet: the window hands them over
+    /// before the session's first event. One that has rows -- a conversation
+    /// the app paused and carried on itself -- keeps its own, and takes none.
+    /// A chat with no entries draws nothing, and the notice stands as before.
+    public mutating func earlier(_ chat: SavedChat) {
+        guard items.isEmpty, !chat.turns.isEmpty else { return }
+        if !chat.attachments.isEmpty {
+            append(.notice("attached to the chat: " + Self.named(chat.attachments)), turn: nil)
+        }
+        for entry in chat.turns {
+            if let summary = entry.compaction {
+                append(.notice(Self.compacted(summary)), turn: entry.turn)
+            } else {
+                if !entry.text.isEmpty { append(.user(entry.text), turn: entry.turn) }
+                if !entry.attachments.isEmpty {
+                    append(.notice("attached: " + Self.named(entry.attachments)), turn: entry.turn)
+                }
+            }
+            if !entry.tools.isEmpty {
+                var activity = Activity()
+                activity.lines = entry.tools.map(Self.line)
+                activity.typed = entry.isCompaction ? nil : entry.text
+                append(.activity(activity), turn: entry.turn)
+            }
+            if !entry.answer.isEmpty {
+                append(.answer(Answer(text: entry.answer, finished: true, usage: nil)), turn: entry.turn)
+            }
+            if !entry.answered && !entry.isCompaction {
+                append(.unanswered, turn: entry.turn)
+            }
+        }
+        append(.divider(Self.earlierDivider), turn: nil)
+    }
+
+    /// The divider's words, where the live session takes over from the turns
+    /// read back.
+    public static let earlierDivider = "earlier in this conversation"
+
+    /// A compaction where it happened, in the words of `chats show`'s own text.
+    static func compacted(_ summary: String) -> String {
+        "history compacted; what came before is this summary:\n\(summary)"
+    }
+
+    /// A tool a turn called, as the live line names it (`[tool] read_file`),
+    /// with its arguments and the size of what it returned.
+    static func line(_ call: SavedToolCall) -> String {
+        var line = "[tool] \(call.name)"
+        if !call.summary.isEmpty { line += " \(call.summary)" }
+        if let bytes = call.resultBytes { line += " -- returned \(size(bytes))" }
+        return line
+    }
+
+    /// Attachments by name, each with its files and size where the read says.
+    static func named(_ attachments: [SavedAttachment]) -> String {
+        attachments.map { attachment in
+            let facts = [
+                attachment.files.map { "\($0) \($0 == 1 ? "file" : "files")" },
+                attachment.bytes.map(size),
+            ].compactMap { $0 }
+            return facts.isEmpty ? attachment.name : "\(attachment.name) (\(facts.joined(separator: ", ")))"
+        }.joined(separator: ", ")
+    }
+
+    static func size(_ bytes: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+
     // MARK: - The session's events
 
     public mutating func apply(_ event: SessionEvent) {
@@ -151,9 +229,10 @@ public struct Transcript: Equatable {
                 status = .ready
             }
             if items.isEmpty && info.nextTurn > 1 {
-                // A resumed conversation: the CLI hands no read of its saved
-                // turns to a driver, so say they are there rather than show
-                // a conversation that seems to start here.
+                // A resumed conversation whose turns were not read back (a
+                // binary before the CLI's M27 has no `chats show`): say they
+                // are there rather than show a conversation that seems to
+                // start here.
                 let earlier = info.nextTurn - 1
                 append(.notice(Self.resumed(earlier: earlier)), turn: nil)
             }
@@ -350,6 +429,13 @@ public struct TranscriptItem: Equatable, Identifiable {
         case error(String)
         /// The turn was cancelled.
         case stopped
+        /// A turn read back from the saved conversation with no answer kept:
+        /// cancelled or failed, which the history does not say (`chats show`'s
+        /// `answered: false`).
+        case unanswered
+        /// Where the live session takes over from the turns read back: the
+        /// thin divider, and its words.
+        case divider(String)
         /// The session's plan, drawn in place.
         case todo([TodoItem])
         /// An event this client does not know: shown, quietly.

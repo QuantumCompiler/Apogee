@@ -37,6 +37,32 @@ struct SessionLibraryTests {
         #expect(library.isOpen(library.chats[1]))
     }
 
+    @Test("a saved conversation opened reads its earlier turns back through the library's runner; a new one reads none")
+    func openedChatReadsItsTurns() async throws {
+        let tests = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let shown = try String(contentsOf: tests.appendingPathComponent("business/reads/Fixtures/chats-show.json"), encoding: .utf8)
+        let resumed = try String(contentsOf: tests.appendingPathComponent("data/protocol/Fixtures/resumed-chat.jsonl"), encoding: .utf8)
+        let runner = ScriptedRunner()
+        runner.reading(["chats", "list"], Self.twoChats)
+        runner.reading(["chats", "show"], shown)
+        let first = ScriptedSession()
+        let second = ScriptedSession()
+        let starter = ScriptedStarter(sessions: [first, second])
+        let library = library(runner, starter)
+        await library.start(inView: true)
+        first.emit(Self.session)
+        #expect(await eventually { library.current.transcript.status == .ready })
+        await library.open(.chat("c2"))
+        #expect(await eventually { starter.openedCount == 2 })
+        second.emit(String(resumed.prefix { $0 != "\n" }))
+        #expect(await eventually { library.current.transcript.status == .ready })
+        #expect(runner.calls.filter { $0.hasPrefix("read chats show") } == ["read chats show c2"])
+        #expect(library.current.transcript.items.last?.content == .divider("earlier in this conversation"))
+        #expect(!library.current.transcript.items.contains { item in
+            if case .notice(let text) = item.content { text.hasPrefix("resumed:") } else { false }
+        })
+    }
+
     @Test("at launch with another place in view, no child starts until Sessions comes into view")
     func launchOutOfView() async {
         let runner = ScriptedRunner()

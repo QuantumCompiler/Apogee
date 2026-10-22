@@ -1,8 +1,10 @@
+import BusinessReads
 import BusinessSession
 import DataDiscovery
 import DataProtocol
 import Foundation
 import InfrastructureProcess
+import PresentationSession
 import Synchronization
 
 /// The recorded mock-actor stream: the real binary's stdout for one turn that
@@ -16,6 +18,108 @@ let mockActorLines: [String] = {
 }()
 
 func decoded(_ line: String) -> SessionEvent { .event(EventDecoder.decode(line: line)) }
+
+/// A recorded fixture, by its path under `tests/`.
+func recorded(_ path: String) -> String {
+    let tests = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    return (try? String(contentsOf: tests.appendingPathComponent(path), encoding: .utf8)) ?? ""
+}
+
+/// A saved conversation resumed by the binary that ships the CLI's M27: its
+/// `session` event (`next_turn` 6), then one live turn, sent as
+/// `resumedTurn` (tests/data/protocol/Fixtures/resumed-chat.jsonl).
+let resumedChatLines: [String] = recorded("data/protocol/Fixtures/resumed-chat.jsonl")
+    .split(separator: "\n").map(String.init)
+let resumedTurn = "Thanks -- anything else?"
+
+/// That conversation as `chats show` read it back before the resume
+/// (tests/business/reads/Fixtures/chats-show.json), and as a binary before
+/// M27 refuses the read (`chats-show-refused.err`, exit 106).
+let savedChatDocument = ReadDocument(text: recorded("business/reads/Fixtures/chats-show.json"))!
+let savedChat = SavedChat(document: savedChatDocument)!
+var chatsShowRefused: ReadOutcome {
+    var tail = BoundedTail()
+    tail.append(Data(recorded("business/reads/Fixtures/chats-show-refused.err").utf8))
+    return .failed(exit: ChildExit(reason: .exited, status: 106), stderrTail: tail)
+}
+
+/// What each item is, in a word or two, for comparing whole transcripts.
+func shape(_ transcript: Transcript) -> [String] {
+    transcript.items.map { item in
+        switch item.content {
+        case .user(let text): "user: \(text)"
+        case .activity(let a): "activity\(a.live ? " live" : ""): \(a.reasoning)|\(a.lines.joined(separator: ","))"
+        case .answer(let a): "answer\(a.finished ? "" : " streaming"): \(a.text)"
+        case .notice(let text): "notice: \(text)"
+        case .recalled(let recall): "recalled: \(recall.chats.map(\.name).joined(separator: ","))"
+        case .sources(let sources): "sources: \(sources.map(\.file).joined(separator: ","))"
+        case .question(let card): "question: \(card.answers?.joined(separator: ",") ?? "waiting")"
+        case .permission(let card): "permission: \(card.answer ?? "waiting")"
+        case .error(let message): "error: \(message)"
+        case .stopped: "stopped"
+        case .unanswered: "unanswered"
+        case .divider(let text): "divider: \(text)"
+        case .todo(let items): "todo: \(items.map(\.text).joined(separator: ","))"
+        case .unknown(let type): "unknown: \(type)"
+        case .ended(let ending): "ended: \(ending.message)"
+        }
+    }
+}
+
+/// What reads a resumed session's earlier turns back in a test: every read
+/// answered with `outcome` -- at once, or, `held`, once `release()` lets it
+/// -- and recorded.
+final class ScriptedReader: CommandRunning, @unchecked Sendable {
+    private struct State {
+        var calls: [String] = []
+        var released: Bool
+        var waiting: [CheckedContinuation<Void, Never>] = []
+    }
+
+    private let outcome: ReadOutcome
+    private let state: Mutex<State>
+
+    init(_ outcome: ReadOutcome, held: Bool = false) {
+        self.outcome = outcome
+        state = Mutex(State(released: !held))
+    }
+
+    /// Answers with the recorded `chats show` document.
+    convenience init(held: Bool = false) {
+        self.init(.document(savedChatDocument), held: held)
+    }
+
+    var calls: [String] { state.withLock { $0.calls } }
+
+    /// Lets every held read answer, and every later one at once.
+    func release() {
+        let waiting = state.withLock { state in
+            state.released = true
+            defer { state.waiting = [] }
+            return state.waiting
+        }
+        waiting.forEach { $0.resume() }
+    }
+
+    func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
+        state.withLock { $0.calls.append("read " + arguments.joined(separator: " ")) }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let now = state.withLock { state in
+                if state.released { return true }
+                state.waiting.append(continuation)
+                return false
+            }
+            if now { continuation.resume() }
+        }
+        return outcome
+    }
+
+    func command(binary: URL, _ arguments: [String]) async -> CommandOutcome {
+        state.withLock { $0.calls.append("run " + arguments.joined(separator: " ")) }
+        return .done(stdout: "")
+    }
+}
 
 /// A chat session a test drives by hand: it says what the test emits, and
 /// records every line it was asked to write, in order.

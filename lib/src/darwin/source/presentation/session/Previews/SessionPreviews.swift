@@ -1,4 +1,5 @@
 #if DEBUG
+import BusinessReads
 import BusinessSession
 import DataDiscovery
 import DataProtocol
@@ -16,12 +17,25 @@ enum SessionPreview {
     static let executeOrchestrate = lines(SessionDocuments.executeOrchestrate)
     static let executePlayRefused = lines(SessionDocuments.executePlayRefused)
     static let executeProject = lines(SessionDocuments.executeProject)
+    /// A saved conversation resumed: its `session` event, then one live turn.
+    static let resumedChat = lines(SessionDocuments.resumedChat)
 
     /// What the person sends and answers in the mock-actor conversation, as
     /// the window's end-to-end test does (SessionViewModelTests'
     /// `mockActorEndToEnd`).
     static let noteTurn = "Write me a note."
     static let noteAnswers = ["todo.md", "yes"]
+
+    /// What the resumed conversation's live turn was sent as, recorded with
+    /// it (TranscriptTests' `earlierThenLive`).
+    static let resumedTurn = "Thanks -- anything else?"
+
+    /// The saved conversation that stream resumes, as `chats show` read it
+    /// back before the resume.
+    static var savedChat: SavedChat { SavedChat(document: ReadDocument(text: SessionDocuments.chatsShow)!)! }
+
+    /// Its launch: `--resume` with its id.
+    static var resumeSaved: ChatLaunch { ChatLaunch(resume: savedChat.id) }
 
     /// What each `execute` stream was sent as (PlayNarrationTests).
     static let playTurn = "/play echo2 hello"
@@ -54,9 +68,14 @@ enum SessionPreview {
 
     /// A session over a chat saying `lines`, short of the first line of type
     /// `silentFrom`, its child ending as `ending` says once every line is
-    /// said; not started.
-    static func session(_ lines: [String], silentFrom: String? = nil, ending: SessionEnd? = nil, launch: ChatLaunch = ChatLaunch()) -> SessionViewModel {
-        SessionViewModel(starter: PreviewChats(lines: lines, silentFrom: silentFrom, ending: ending), launch: launch)
+    /// said; a saved conversation it resumes read back through `reader`.
+    /// Not started.
+    static func session(
+        _ lines: [String], silentFrom: String? = nil, ending: SessionEnd? = nil, launch: ChatLaunch = ChatLaunch(),
+        reader: PreviewReader? = nil
+    ) -> SessionViewModel {
+        SessionViewModel(
+            starter: PreviewChats(lines: lines, silentFrom: silentFrom, ending: ending), launch: launch, reader: reader)
     }
 
     /// A session where no binary is found; not started.
@@ -134,9 +153,15 @@ enum SessionPreview {
 
     /// What `lines` fold to, short of the first line of type `silentFrom`:
     /// the person sends `typed` once the session has spoken and answers each
-    /// card with the next of `answers` (PlayNarrationTests' `folded`).
-    static func folded(_ lines: [String], typed: String? = nil, answers: [String] = [], silentFrom type: String? = nil) -> Transcript {
+    /// card with the next of `answers` (PlayNarrationTests' `folded`). A
+    /// saved conversation's `earlier` turns are folded in first, as the
+    /// window hands them over before the first event.
+    static func folded(
+        _ lines: [String], typed: String? = nil, answers: [String] = [], silentFrom type: String? = nil,
+        earlier: SavedChat? = nil
+    ) -> Transcript {
         var transcript = Transcript()
+        if let earlier { transcript.earlier(earlier) }
         var answers = answers[...]
         for line in lines {
             if let type, JSONValue.parse(line)?["type"]?.stringValue == type { break }

@@ -38,7 +38,7 @@ public enum ParityTable {
     public static let places: [CommandPlace] = [
         // --- screens: drawn in the app today ------------------------------------
         CommandPlace("chat", .screen(module: "PresentationSession"), "the session window: a conversation driven over machine mode"),
-        CommandPlace("chats", .screen(module: "PresentationSessions"), "Sessions: the saved conversations, renamed, deleted, resumed"),
+        CommandPlace("chats", .screen(module: "PresentationSessions"), "Sessions: the saved conversations, renamed, deleted, resumed -- and `chats show`, a resumed one's earlier turns drawn in the session window (PresentationSession)"),
         CommandPlace("execute", .screen(module: "PresentationSessions"), "Sessions' execute door: a suite or bare, a project folder, orchestrate; /play in the session"),
         CommandPlace("models", .screen(module: "PresentationModels"), "Models: the library, a model's details, the roles, downloads"),
         CommandPlace("config", .screen(module: "PresentationSettings"), "Settings' panes, and Suites (PresentationSuites)"),

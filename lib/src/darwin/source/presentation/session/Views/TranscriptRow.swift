@@ -68,6 +68,21 @@ struct TranscriptRow: View {
             }
         case .stopped:
             QuietLine(symbol: "stop.circle", text: "stopped")
+        case .unanswered:
+            QuietLine(symbol: "stop.circle", text: "no answer kept: the turn was cancelled or failed")
+        case .divider(let text):
+            // Where the live session takes over: the turns above were read
+            // back from the saved conversation.
+            HStack(spacing: Spacing.s) {
+                Rectangle().fill(Palette.border).frame(height: 1)
+                Label(text, systemImage: "arrow.up")
+                    .font(.apogeeMeta)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize()
+                Rectangle().fill(Palette.border).frame(height: 1)
+            }
+            .padding(.vertical, Spacing.xs)
+            .accessibilityElement(children: .combine)
         case .todo(let items):
             Card {
                 CardLabel(text: "Plan")
@@ -295,6 +310,25 @@ struct EndedCard: View {
     let transcript = SessionPreview.folded(SessionPreview.executeProject, typed: "hi")
     VStack(alignment: .leading, spacing: Spacing.m) {
         ForEach(transcript.items) { TranscriptRow(item: $0, model: model) }
+    }
+    .frame(width: 720)
+    .padding(Spacing.xl)
+}
+
+#Preview("The earlier turns read back, then a live one") {
+    let model = SessionPreview.session(SessionPreview.resumedChat)
+    let transcript = SessionPreview.folded(SessionPreview.resumedChat, typed: SessionPreview.resumedTurn, earlier: SessionPreview.savedChat)
+    VStack(alignment: .leading, spacing: Spacing.m) {
+        ForEach(transcript.items) { TranscriptRow(item: $0, model: model) }
+    }
+    .frame(width: 720)
+    .padding(Spacing.xl)
+}
+
+#Preview("Resumed with no read: the turns kept, not shown") {
+    let model = SessionPreview.session(SessionPreview.resumedChat)
+    VStack(alignment: .leading, spacing: Spacing.m) {
+        ForEach(SessionPreview.folded(SessionPreview.resumedChat).items) { TranscriptRow(item: $0, model: model) }
     }
     .frame(width: 720)
     .padding(Spacing.xl)

@@ -1,3 +1,4 @@
+import BusinessReads
 import BusinessSession
 import DataDiscovery
 import DataProtocol
@@ -59,11 +60,18 @@ public final class SessionViewModel {
     public private(set) var lastSent: String?
 
     private let starter: any ChatStarting
+    /// What reads a saved conversation's earlier turns back (`chats show`);
+    /// `nil` reads none, and a resumed session says its turns aren't shown.
+    private let reader: (any CommandRunning)?
     private var launch: ChatLaunch
     private var session: (any ChatSession)?
     private var outbox: AsyncStream<Outbound>.Continuation?
     /// Its child is being ended to free it, not for good.
     private var pausing = false
+    /// The next child opens on an empty transcript (`start`), so a saved
+    /// conversation's earlier turns are read back beside it. A pause's
+    /// resume and a restart keep their rows, and read nothing again.
+    private var readsEarlier = false
     /// The session's run: located, opened, its events read to the end.
     private var running: Task<Void, Never>?
 
@@ -83,9 +91,18 @@ public final class SessionViewModel {
         self.init(starter: starter, launch: ChatLaunch())
     }
 
-    /// A chat started as `launch` says -- new, or resuming a saved one.
-    public init(starter: any ChatStarting, launch: ChatLaunch) {
+    /// A chat started as `launch` says -- new, or resuming a saved one, whose
+    /// earlier turns are then not read back.
+    public convenience init(starter: any ChatStarting, launch: ChatLaunch) {
+        self.init(starter: starter, launch: launch, reader: nil)
+    }
+
+    /// A chat started as `launch` says; a saved conversation it opens is
+    /// read back through `reader` -- `chats show <id>` -- and its earlier
+    /// turns drawn above the live ones (the CLI's M27).
+    public init(starter: any ChatStarting, launch: ChatLaunch, reader: (any CommandRunning)?) {
         self.starter = starter
+        self.reader = reader
         self.launch = launch
         chatID = launch.resume
         settings = launch.settings
@@ -147,10 +164,13 @@ public final class SessionViewModel {
         }
         connection = .locating
         transcript = Transcript()
+        readsEarlier = true
         running = Task { await connect() }
     }
 
     private func connect() async {
+        let readsEarlier = self.readsEarlier
+        self.readsEarlier = false
         switch await starter.locateBinary() {
         case .notFound(let skipped):
             connection = .missing(
@@ -160,12 +180,22 @@ public final class SessionViewModel {
             connection = .connected(binary: found.url.path, version: found.version)
             var launch = self.launch
             launch.resume = chatID
+            // A saved conversation opened afresh: its earlier turns are read
+            // beside the child starting, and handed to the transcript before
+            // its first event -- the events wait in the stream until the read
+            // has answered, so whichever comes first, the earlier turns stand
+            // above the live ones and the notice is never drawn over them.
+            var earlier = readsEarlier ? readEarlier(binary: found.url) : nil
             let session = starter.openChat(binary: found.url, launch: launch)
             self.session = session
             let (lines, outbox) = AsyncStream.makeStream(of: Outbound.self)
             self.outbox = outbox
             Task { await Self.write(lines, to: session) }
             for await event in session.events {
+                if let read = earlier {
+                    earlier = nil
+                    if let chat = await read.value { transcript.earlier(chat) }
+                }
                 if case .ended = event, pausing {
                     // Freed, not finished: no ending card.
                     pausing = false
@@ -178,6 +208,18 @@ public final class SessionViewModel {
             outbox.finish()
             self.outbox = nil
             self.session = nil
+        }
+    }
+
+    /// `chats show <id>` for the saved conversation this session opens, run
+    /// beside its child; `nil` when there is none to read -- a new chat, or
+    /// no reader. It answers `nil` too when the binary has no such read (one
+    /// before the CLI's M27 refuses it) or prints no chat: the session's own
+    /// notice then says the earlier turns are kept, as before.
+    private func readEarlier(binary: URL) -> Task<SavedChat?, Never>? {
+        guard let reader, let id = chatID else { return nil }
+        return Task {
+            await reader.read(binary: binary, SavedChat.arguments(id: id)).document.flatMap(SavedChat.init(document:))
         }
     }
 

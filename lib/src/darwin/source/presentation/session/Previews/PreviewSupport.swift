@@ -1,4 +1,5 @@
 #if DEBUG
+import BusinessReads
 import BusinessSession
 import DataDiscovery
 import DataProtocol
@@ -101,6 +102,33 @@ struct PreviewChats: ChatStarting {
 
     func openChat(binary: URL, launch: ChatLaunch) -> any ChatSession {
         PreviewChat(saying: lines, silentFrom: silentFrom, ending: ending)
+    }
+}
+
+/// Reads a resumed session's earlier turns back as the binary does: `chats
+/// show`'s recorded document -- or, with none, the recorded refusal of a
+/// binary before the CLI's M27, which has no such read (exit 106). Every
+/// other read and command answers as nothing ran. Nothing starts the binary.
+struct PreviewReader: CommandRunning {
+    var document: String?
+
+    /// The binary that recorded the saved conversation.
+    static let saved = PreviewReader(document: SessionDocuments.chatsShow)
+    /// A binary before `chats show`.
+    static let older = PreviewReader(document: nil)
+
+    func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
+        guard arguments.starts(with: ["chats", "show"]) else {
+            return .couldNotStart("no preview document for apogee \(arguments.joined(separator: " "))")
+        }
+        if let document, let read = ReadDocument(text: document) { return .document(read) }
+        var tail = BoundedTail()
+        tail.append(Data((SessionDocuments.chatsShowRefused + "\n").utf8))
+        return .failed(exit: ChildExit(reason: .exited, status: 106), stderrTail: tail)
+    }
+
+    func command(binary: URL, _ arguments: [String]) async -> CommandOutcome {
+        .done(stdout: "")
     }
 }
 

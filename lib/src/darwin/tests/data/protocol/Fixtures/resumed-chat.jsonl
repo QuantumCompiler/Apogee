@@ -1,0 +1,16 @@
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","document"],"schema":"2026-10-20","tools":true},"model":"chatty","next_turn":6,"protocol_version":1,"type":"session"}
+{"text":"utility — restating the follow-up to rank the tools, with helper","turn":6,"type":"tool_status"}
+{"turn":6,"type":"thinking"}
+{"turn":6,"type":"answer_start"}
+{"text":"Nothing ","turn":6,"type":"answer_delta"}
+{"text":"else: th","turn":6,"type":"answer_delta"}
+{"text":"e beta e","turn":6,"type":"answer_delta"}
+{"text":"nds on 2","turn":6,"type":"answer_delta"}
+{"text":"026-10-3","turn":6,"type":"answer_delta"}
+{"text":"1, and t","turn":6,"type":"answer_delta"}
+{"text":"he launc","turn":6,"type":"answer_delta"}
+{"text":"h is on ","turn":6,"type":"answer_delta"}
+{"text":"2026-11-","turn":6,"type":"answer_delta"}
+{"text":"12.","turn":6,"type":"answer_delta"}
+{"turn":6,"type":"answer_end"}
+{"finish_reason":"stop","model":"chatty","text":"Nothing else: the beta ends on 2026-10-31, and the launch is on 2026-11-12.","turn":6,"type":"result"}
