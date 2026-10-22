@@ -67,6 +67,7 @@ Opened 2026-10-21 from the CLI's MLX-for-every-kind spike (the user's call): the
 - [x] **Convert offers what the set takes** — maintenance item M3 *(shipped 2026-10-21 — [MILESTONES → Milestone C](MILESTONES.md#milestone-c--cli-parity))*: Stored weights offers both conversions on every SafeTensors set, so the user could start one on `Wan-AI--Wan2.2-TI2V-5B`, a diffusion model no converter takes, and on their draft heads. Once `models info` states `data.converts_to`, the buttons follow it; an older binary as today.
 - [ ] **Only backends that chat are offered to chat** *([M4](../backlog/maintenance/chat-choices-follow-kind.md))* — Sessions, Settings and Training offer every backend, so the embedding entry the CLI's 53h registers can be chosen to chat with; their choices follow each row's `kind`.
 - [ ] **The Backends table says kinds and drafters** *([M5](../backlog/maintenance/backends-say-kind-and-drafter.md))* — the kind beside the format, a paired base marked, a drafter paired from the base's details, a pairing that can no longer draft drawn.
+- [ ] **The app's children get the shell's PATH** *([M6](../backlog/maintenance/children-get-the-shell-path.md))* — launched from the Dock the app gives `apogee` launchd's `PATH`, so every cloud backend's vendor CLI is unreachable (the user's `claude` default refused); the login shell's `PATH` is resolved once at launch, bounded, with a well-known-directories fallback.
 
 ## Unspecced ideas
 

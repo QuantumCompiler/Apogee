@@ -314,6 +314,7 @@ The standing upkeep queue *(created 2026-10-03, the user's call)* — release-ag
 - [ ] **`check` says every MLX runtime and its version** *([M23](../backlog/maintenance/mlx-runtimes-in-check.md))* — rows for mlx-video and mlx-audio, each MLX set's installed version or commit against its floor or pin (mlx-vlm's moved to 0.6.1), a backend's hearing beside its vision, and `train setup --with`'s help from the one set list.
 - [ ] **The MLX engine said everywhere** *([M24](../backlog/maintenance/mlx-engine-said-everywhere.md))* — a Wan set's description names its MLX conversion beside its Diffusers pipeline, the streamed `ready` event carries `engine`, and `video generate` points a Wan original layout to its conversion.
 - [ ] **Drafters survive renames** *([M25](../backlog/maintenance/drafters-follow-renames.md))* — `models rename` rebases `draft:` and the drafter's recorded `bases`, and a suite's footprint counts a member's drafter.
+- [ ] **A backend that could not start says why** *([M26](../backlog/maintenance/skipped-backend-says-why.md))* — the user's app run met `no backend serves 'claude' (configured backends: …)` with `claude` configured but skipped (its CLI not on the app's `PATH`); the router's refusal names a skipped backend, the factory's reason and remedy, and calls its list the started backends.
 
 ## Up next
 
