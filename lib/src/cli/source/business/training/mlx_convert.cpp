@@ -41,7 +41,55 @@ constexpr std::array<MlxPrecision, 7> kPrecisions{{
     {.name = "f16", .bits = 0, .mode = "", .dtype = "float16", .summary = "unquantized, f16"},
 }};
 
+/// What an older seeded driver says when handed the mlx-vlm route it does
+/// not know: argparse's own words.
+constexpr std::string_view kUnknownRoute = "unrecognized arguments: --with";
+
+/// Whether `source` names `Model` as a word of its own -- an import or a
+/// definition, never a longer name that ends in it (`LanguageModel`).
+[[nodiscard]] bool names_model(const std::string& source) {
+    constexpr std::string_view kWord = "Model";
+    const auto word_char = [](char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+               c == '_';
+    };
+    for (std::size_t at = source.find(kWord); at != std::string::npos;
+         at = source.find(kWord, at + 1)) {
+        const std::size_t end = at + kWord.size();
+        if ((at == 0 || !word_char(source[at - 1])) &&
+            (end >= source.size() || !word_char(source[end]))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] std::string read_text(const std::filesystem::path& path) {
+    std::ifstream in{path, std::ios::binary};
+    return {std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+}
+
 }  // namespace
+
+MlxConverterKind choose_mlx_converter(bool towers, bool text_only) noexcept {
+    return towers && !text_only ? MlxConverterKind::MlxVlm : MlxConverterKind::MlxLm;
+}
+
+std::string_view to_string(MlxConverterKind converter) noexcept {
+    return converter == MlxConverterKind::MlxVlm ? "mlx-vlm" : "mlx-lm";
+}
+
+std::string_view mlx_converter_package(MlxConverterKind converter) noexcept {
+    return converter == MlxConverterKind::MlxVlm ? "mlx_vlm" : "mlx_lm";
+}
+
+std::string_view mlx_converter_entry(MlxConverterKind converter) noexcept {
+    return converter == MlxConverterKind::MlxVlm ? "mlx_vlm.convert" : "mlx_lm.convert";
+}
+
+RequirementSet mlx_converter_set(MlxConverterKind converter) noexcept {
+    return converter == MlxConverterKind::MlxVlm ? RequirementSet::MlxVlm : RequirementSet::Mlx;
+}
 
 std::span<const MlxPrecision> mlx_precisions() noexcept {
     return kPrecisions;
@@ -71,8 +119,13 @@ std::filesystem::path mlx_converter_script() {
 
 std::vector<std::string> mlx_converter_arguments(const MlxPrecision& precision,
                                                  const std::filesystem::path& input,
-                                                 const std::filesystem::path& output) {
-    std::vector<std::string> arguments{"--hf-path", input.string(), "--mlx-path", output.string()};
+                                                 const std::filesystem::path& output,
+                                                 MlxConverterKind converter) {
+    std::vector<std::string> arguments;
+    if (converter == MlxConverterKind::MlxVlm) {
+        arguments = {"--with", std::string{to_string(converter)}};
+    }
+    arguments.insert(arguments.end(), {"--hf-path", input.string(), "--mlx-path", output.string()});
     if (precision.bits > 0) {
         arguments.insert(arguments.end(), {"--q-bits", std::to_string(precision.bits)});
         if (precision.mode == "affine") {
@@ -86,15 +139,16 @@ std::vector<std::string> mlx_converter_arguments(const MlxPrecision& precision,
 }
 
 MlxConverter script_mlx_converter(std::filesystem::path interpreter, std::filesystem::path script,
-                                  const MlxPrecision& precision, std::filesystem::path mlx_lm) {
+                                  const MlxPrecision& precision, std::filesystem::path package,
+                                  MlxConverterKind converter) {
     return [interpreter = std::move(interpreter), script = std::move(script), precision,
-            mlx_lm = std::move(mlx_lm)](
+            package = std::move(package), converter](
                const std::filesystem::path& input, const std::filesystem::path& output,
                const MessageSink& on_message, const harness::CancellationToken& cancellation) {
         ScriptRequest request;
         request.interpreter = interpreter;
         request.script = script;
-        request.arguments = mlx_converter_arguments(precision, input, output);
+        request.arguments = mlx_converter_arguments(precision, input, output, converter);
         request.environment.emplace_back("PYTHONDONTWRITEBYTECODE", "1");
         const ScriptOutcome outcome = run_script(
             request,
@@ -110,39 +164,53 @@ MlxConverter script_mlx_converter(std::filesystem::path interpreter, std::filesy
         if (outcome.cancelled) {
             return std::string{"cancelled"};
         }
-        // A type mlx-lm knows no converter for: its own lists read now, at
-        // failure time, to name the way out (M15).
+        // A type the converter knows no model for: its own lists read now,
+        // at failure time, to name the way out (M15).
         const std::string error = fold_name_list(outcome.describe());
+        if (converter == MlxConverterKind::MlxVlm &&
+            error.find(kUnknownRoute) != std::string::npos) {
+            // A seeded driver from before the mlx-vlm route (53f).
+            return error + " -- the seeded converter at " + script.string() +
+                   " is older than this build: 'apogee check --fix' brings an earlier Apogee's "
+                   "up to this build's, and an edited one is kept, so delete it first";
+        }
         return unsupported_model_type(error).empty()
                    ? error
-                   : fold_model_type_failure(error, mlx_model_types(mlx_lm));
+                   : fold_model_type_failure(error, mlx_model_types(package), converter);
     };
 }
 
-std::vector<std::string> mlx_model_types(const std::filesystem::path& mlx_lm) {
+std::vector<std::string> mlx_model_types(const std::filesystem::path& package) {
     std::vector<std::string> out;
     std::error_code code;
-    if (mlx_lm.empty() || !std::filesystem::is_directory(mlx_lm, code)) {
+    if (package.empty() || !std::filesystem::is_directory(package, code)) {
         return out;
     }
-    for (const auto& entry : std::filesystem::directory_iterator(mlx_lm / "models", code)) {
+    for (const auto& entry : std::filesystem::directory_iterator(package / "models", code)) {
         const std::filesystem::path& path = entry.path();
         const std::string stem = path.stem().string();
-        if (path.extension() != ".py" || stem.empty() || stem.front() == '_') {
+        if (stem.empty() || stem.front() == '_') {
             continue;
         }
-        // A model's module defines its `Model`; a helper (`cache`, `base`)
-        // does not, and is no type.
-        std::ifstream module{path, std::ios::binary};
-        const std::string source{std::istreambuf_iterator<char>{module},
-                                 std::istreambuf_iterator<char>{}};
-        if (source.find("class Model(") != std::string::npos) {
+        std::error_code type;
+        if (entry.is_directory(type)) {
+            // mlx-vlm's types are packages (53f): its loader imports
+            // `models.<type>` and takes its `Model`, which the package's
+            // `__init__.py` names; a helper package names none.
+            if (names_model(read_text(path / "__init__.py"))) {
+                out.push_back(path.filename().string());
+            }
+            continue;
+        }
+        // mlx-lm's are modules: a model's defines its `Model`; a helper
+        // (`cache`, `base`) does not, and is no type.
+        if (path.extension() == ".py" &&
+            read_text(path).find("class Model(") != std::string::npos) {
             out.push_back(stem);
         }
     }
     // MODEL_REMAPPING's keys: `"<type>": "<module>"` pairs inside its braces.
-    std::ifstream in{mlx_lm / "utils.py", std::ios::binary};
-    const std::string text{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    const std::string text = read_text(package / "utils.py");
     if (const std::size_t named = text.find("MODEL_REMAPPING"); named != std::string::npos) {
         const std::size_t open = text.find('{', named);
         const std::size_t close = open == std::string::npos ? open : text.find('}', open);
@@ -202,8 +270,8 @@ std::vector<std::string> nearest_model_types(std::string_view wanted,
     return out;
 }
 
-std::string fold_model_type_failure(const std::string& error,
-                                    const std::vector<std::string>& types) {
+std::string fold_model_type_failure(const std::string& error, const std::vector<std::string>& types,
+                                    MlxConverterKind converter) {
     const std::string wanted = unsupported_model_type(error);
     if (wanted.empty()) {
         return error;
@@ -212,9 +280,8 @@ std::string fold_model_type_failure(const std::string& error,
     for (const std::string& type : nearest_model_types(wanted, types)) {
         near += (near.empty() ? "" : ", ") + type;
     }
-    return error +
-           " -- if these weights are a type this mlx-lm knows, convert them as it: "
-           "--model-type <type>" +
+    return error + " -- if these weights are a type this " + std::string{to_string(converter)} +
+           " knows, convert them as it: --model-type <type>" +
            (near.empty() ? std::string{} : " (nearest here: " + near + ")");
 }
 

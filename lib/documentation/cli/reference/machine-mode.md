@@ -1004,7 +1004,19 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   no model of the set's `model_type`, by its own modules; with none installed
   nothing is decided, and `mlx` stays. It is decided once, from the set's own
   files, by the same functions that make those refusals, and it is `null` on
-  the other formats, which are what conversions make. Since 53e an MLX set's
+  the other formats, which are what conversions make. Since 53f a set whose
+  `config.json` declares a tower (`vision_config`, `audio_config`, an omni
+  model's `thinker_config`) is offered `mlx` by the mlx-vlm installed, which
+  builds it with its towers kept, where that builds its `model_type`; else by
+  mlx-lm's build of its language model alone (`--mlx --text-only`), where
+  mlx-lm builds it; else not; with neither installed, nothing is decided. Its
+  `data` also carries `mlx_conversion`, what an MLX conversion runs: `towers`
+  (the keys, as `config.json` names them, `[]` for a language model),
+  `converter` (`mlx-vlm` or `mlx-lm`, what a plain `--mlx` runs, or `null`
+  where only `--text-only` can) and `text_only` (whether `--mlx --text-only`
+  is offered: never for a language model, which has no tower to leave out).
+  It is `null` where `mlx` is not offered, and on every other format; the
+  text says the same for a set with towers in a `towers:` line. Since 53e an MLX set's
   `data` also carries `kind` — the same word, from the same reader, as its
   `models list` row's `kind` above — and the text gains a `kind:` line saying
   the word, where it came from (`recorded`, `inferred from its files`, or `no

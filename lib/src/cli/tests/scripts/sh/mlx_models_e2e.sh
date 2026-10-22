@@ -9,7 +9,10 @@
 # `check` reading it whole; a REAL Ctrl-C -- a SIGINT to apogee while its
 # converter is mid-write -- ending the child and leaving the store exactly as
 # it was, no staging and no driver behind; and `models delete` taking the
-# directory whole.
+# directory whole. Since 53f a set that sees, converted through the stub
+# `mlx_vlm.convert` with its tower kept and recorded `vision`, then a backend
+# over it answering a text turn and a picture through mlx-vlm, mlx-lm's
+# loader never asked.
 #
 # Apple silicon only: the mlx runtime runs nowhere else (the in-process
 # suite, `models_mlx_test`, covers the rest on every platform).
@@ -135,5 +138,86 @@ no_driver_left
     || fail "delete failed: $(cat "$WORK_DIR/delete.txt")"
 [ ! -e "$WORK_DIR/models/org--m/mlx" ] || fail "delete left the set behind"
 [ -f "$SNAPSHOT/model.safetensors" ] || fail "delete took the snapshot too"
+
+# --- a set that sees (53f): built whole through mlx-vlm, every turn through it ---
+# The stub mlx-vlm beside the stub mlx-lm (what `train setup --with mlx-vlm`
+# installs), and a Qwen3-VL-shaped snapshot: a vision tower in its
+# configuration, the processor that feeds it beside it.
+mlx_fake_vlm "$WORK_DIR" "$MLX_STUBS"
+VL="$WORK_DIR/models/org--vl/safetensors/bbbbbbbbbbbb"
+python3 - "$VL" <<'EOF' || fail "could not write the towered snapshot"
+import json, os, struct, sys
+d = sys.argv[1]
+os.makedirs(d)
+json.dump({"architectures": ["Qwen3VLForConditionalGeneration"], "model_type": "qwen3_vl",
+           "text_config": {"model_type": "qwen3_vl_text", "max_position_embeddings": 262144},
+           "vision_config": {"model_type": "qwen3_vl", "depth": 27, "hidden_size": 1152}},
+          open(os.path.join(d, "config.json"), "w"))
+json.dump({}, open(os.path.join(d, "preprocessor_config.json"), "w"))
+json.dump({"model": {"type": "BPE"}}, open(os.path.join(d, "tokenizer.json"), "w"))
+json.dump({"chat_template": "{{ messages }}"}, open(os.path.join(d, "tokenizer_config.json"), "w"))
+header = json.dumps({"__metadata__": {"format": "pt"},
+                     "w": {"dtype": "F16", "shape": [64], "data_offsets": [0, 128]}}).encode()
+with open(os.path.join(d, "model.safetensors"), "wb") as out:
+    out.write(struct.pack("<Q", len(header)) + header + b"\0" * 128)
+EOF
+"$APOGEE_BIN" models convert org--vl --mlx >"$WORK_DIR/vl.txt" 2>"$WORK_DIR/vl.err" \
+    || fail "convert --mlx of a set that sees failed: $(cat "$WORK_DIR/vl.err")"
+grep -q "mlx-vlm's converter, its towers kept (vision_config)" "$WORK_DIR/vl.txt" \
+    || fail "the conversion did not say mlx-vlm keeps the tower: $(cat "$WORK_DIR/vl.txt")"
+if grep -q "\[INFO\]" "$WORK_DIR/vl.txt" "$WORK_DIR/vl.err"; then
+    fail "mlx-vlm's own print reached a terminal stream"
+fi
+VL_SETS=("$WORK_DIR"/models/org--vl/mlx/*/)
+[ "${#VL_SETS[@]}" -eq 1 ] || fail "expected one MLX build of the set that sees, found: ${VL_SETS[*]}"
+grep -q '"transform": "mlx_vlm.convert 4bit"' "${VL_SETS[0]}apogee-snapshot.json" \
+    || fail "the record does not say mlx-vlm made it: $(cat "${VL_SETS[0]}apogee-snapshot.json")"
+grep -q '"kind": "vision"' "${VL_SETS[0]}apogee-snapshot.json" \
+    || fail "the record does not say vision: $(cat "${VL_SETS[0]}apogee-snapshot.json")"
+no_driver_left
+
+"$APOGEE_BIN" config add-backend vl --type mlx --model-path "${VL_SETS[0]%/}" >/dev/null \
+    || fail "add-backend vl"
+"$APOGEE_BIN" models info vl >"$WORK_DIR/vl-info.txt" 2>&1 || fail "models info vl"
+grep -q "kind:         vision (recorded)" "$WORK_DIR/vl-info.txt" \
+    || fail "models info did not say the kind: $(cat "$WORK_DIR/vl-info.txt")"
+export STUB_MLX_REPLIES="$WORK_DIR/replies.json"
+export STUB_MLX_RECORD="$WORK_DIR/record.txt"
+printf '{"rules": [["<|image|>", "I see {images}."]], "default": "Hello there."}' \
+    >"$STUB_MLX_REPLIES"
+
+# A text turn: answered by mlx-vlm's model; mlx-lm's loader never sees it.
+: >"$STUB_MLX_RECORD"
+"$APOGEE_BIN" complete -m vl "Hello?" >"$WORK_DIR/turn.txt" 2>"$WORK_DIR/turn.err" \
+    || fail "a text turn on the set mlx-vlm built failed: $(cat "$WORK_DIR/turn.err")"
+grep -q "Hello there." "$WORK_DIR/turn.txt" \
+    || fail "the text turn was not answered: $(cat "$WORK_DIR/turn.txt")"
+[ "$(grep -c '^vlm load ' "$STUB_MLX_RECORD")" -eq 1 ] \
+    || fail "expected one load through mlx-vlm: $(cat "$STUB_MLX_RECORD")"
+grep -q '^vlm generate images=0 ' "$STUB_MLX_RECORD" \
+    || fail "the text turn did not run through mlx-vlm: $(cat "$STUB_MLX_RECORD")"
+if grep -q '^load ' "$STUB_MLX_RECORD"; then
+    fail "mlx-lm loaded a directory mlx-vlm built: $(cat "$STUB_MLX_RECORD")"
+fi
+
+# A picture on it: read as it is, through the same.
+mkdir -p "$WORK_DIR/work"
+python3 - "$WORK_DIR/work/photo.png" <<'EOF' || fail "could not write the picture"
+import base64, sys
+open(sys.argv[1], "wb").write(base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="))
+EOF
+PHOTO_BYTES="$(wc -c <"$WORK_DIR/work/photo.png" | tr -d ' ')"
+: >"$STUB_MLX_RECORD"
+(cd "$WORK_DIR/work" && "$APOGEE_BIN" complete -m vl --image photo.png "What is it?" \
+    >"$WORK_DIR/look.txt" 2>"$WORK_DIR/look.err") \
+    || fail "a picture on the set mlx-vlm built failed: $(cat "$WORK_DIR/look.err")"
+grep -q "I see 1 image: $PHOTO_BYTES bytes .png." "$WORK_DIR/look.txt" \
+    || fail "the picture did not reach the model as it is: $(cat "$WORK_DIR/look.txt")"
+grep -q '^vlm generate images=1 ' "$STUB_MLX_RECORD" \
+    || fail "no turn carried the picture: $(cat "$STUB_MLX_RECORD")"
+if pgrep -f "$WORK_DIR/training/scripts/mlx_generate.py" >/dev/null 2>&1; then
+    fail "a driver outlived its apogee: $(pgrep -fl "$WORK_DIR/training/scripts/mlx_generate.py")"
+fi
 
 echo "mlx_models_e2e: ok"

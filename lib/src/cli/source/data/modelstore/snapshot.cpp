@@ -324,6 +324,36 @@ std::vector<std::string> snapshot_conversions(const std::filesystem::path& dir) 
     return {std::string{kGgufFormat}, std::string{kMlxFormat}};
 }
 
+std::vector<std::string> snapshot_towers(const std::filesystem::path& dir) {
+    std::vector<std::string> out;
+    const nlohmann::json config = read_model_config(dir);
+    if (!config.is_object()) {
+        return out;
+    }
+    // As the GGUF path reads its encoders (`models::snapshot_encoders`): a
+    // config that declares itself its language model alone has none, and a
+    // key set to null, to an empty object or to anything else declares none.
+    if (const auto only = config.find("language_model_only");
+        only != config.end() && only->is_boolean() && only->get<bool>()) {
+        return out;
+    }
+    for (const char* key : {"vision_config", "audio_config", "thinker_config"}) {
+        if (const auto found = config.find(key);
+            found != config.end() && found->is_object() && !found->empty()) {
+            out.emplace_back(key);
+        }
+    }
+    return out;
+}
+
+std::string describe_towers(const std::vector<std::string>& towers) {
+    std::string out;
+    for (const std::string& tower : towers) {
+        out += (out.empty() ? "" : ", ") + tower;
+    }
+    return out;
+}
+
 bool is_download_record(const std::filesystem::path& file) {
     std::ifstream in{file, std::ios::binary};
     if (!in) {

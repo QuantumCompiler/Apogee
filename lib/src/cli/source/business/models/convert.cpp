@@ -296,7 +296,8 @@ std::string stage_model_type_overlay(const std::filesystem::path& snapshot,
 MlxConvertResult convert_snapshot_to_mlx(const std::filesystem::path& snapshot,
                                          const std::filesystem::path& out, int bits,
                                          const MlxConvertFn& convert,
-                                         const harness::CancellationToken& cancellation) {
+                                         const harness::CancellationToken& cancellation,
+                                         std::string_view kind) {
     MlxConvertResult result;
     result.error = mlx_conversion_refusal(snapshot, out);
     if (!result.error.empty()) {
@@ -329,9 +330,10 @@ MlxConvertResult convert_snapshot_to_mlx(const std::filesystem::path& snapshot,
         return result;
     }
     result.ok = true;
-    // mlx-lm builds language models, whatever the snapshot also carried: its
-    // record says so, since its files need not (53e).
-    result.kind = std::string{kMlxChat};
+    // What the route's converter built, said by its record since its files
+    // need not (53e): mlx-lm a language model, whatever the snapshot also
+    // carried; mlx-vlm the whole model, its towers kept (53f).
+    result.kind = std::string{kind};
     return result;
 }
 

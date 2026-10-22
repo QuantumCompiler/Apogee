@@ -46,8 +46,10 @@ enum class RequirementSet : std::uint8_t {
     /// The GGUF converter's stack (the run item).
     Convert,
     /// `mlx-vlm`: an `mlx` backend over a vision model reads images through
-    /// it (27c). Installed on demand, never with `mlx`: only a vision model
-    /// needs it, and without it such a model's images go to the vision role.
+    /// it (27c), and `models convert --mlx` builds a model that sees or
+    /// hears through it, its towers kept (53f). Installed on demand, never
+    /// with `mlx`: only those need it, and without it such a model's images
+    /// go to the vision role.
     MlxVlm,
     /// `torch` and `diffusers` with what a diffusion pipeline loads through
     /// (49b): what `video_generate.py` runs a pipeline on. Installed on
@@ -111,6 +113,9 @@ struct PythonRange {
 [[nodiscard]] PythonRange python_range(std::span<const RequirementSet> sets) noexcept;
 /// When the ranges were last read against PyPI.
 [[nodiscard]] std::string_view python_ranges_reviewed() noexcept;
+/// When mlx-vlm's floor was last read against its releases (53f): the
+/// first whose `models/` builds every towered set the store holds.
+[[nodiscard]] std::string_view mlx_vlm_floor_reviewed() noexcept;
 
 /// What the environment holds, read from `apogee.json` and the filesystem.
 struct PythonEnvStatus {

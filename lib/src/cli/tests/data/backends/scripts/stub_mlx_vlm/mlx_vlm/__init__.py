@@ -9,6 +9,11 @@ it, so the same runtime can be had with mlx-vlm and without.
 The reply is the scripted one `mlx_lm`'s stub hands out (STUB_MLX_REPLIES),
 with `{images}` replaced by what was seen: "2 images: 1234 bytes .png, 99
 bytes .jpg" -- so a test can tell the pictures reached the model.
+
+Since 53f it converts too (`convert.py`), and says which types it builds the
+way a real mlx-vlm does: a package under `models/` naming its `Model`, and
+`utils.py`'s remap table -- `gemma4`, `gemma4_unified`, `qwen3_5` and
+`qwen3_vl`, never `qwen3_omni_moe`, which a test adds to its own copy.
 """
 
 import os

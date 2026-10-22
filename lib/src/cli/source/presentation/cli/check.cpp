@@ -1989,6 +1989,7 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
         case backends::MlxRefusal::NoModelPath:
         case backends::MlxRefusal::ModelMissing:
         case backends::MlxRefusal::NotAModelDirectory:
+        case backends::MlxRefusal::NoMlxVlm:
             break;  // the runtime's rungs never answer these
     }
 

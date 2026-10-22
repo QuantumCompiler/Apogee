@@ -173,8 +173,24 @@ struct EmbeddingModel {
 /// (M20): `gguf` and `mlx` for a language model's weights, `gguf` alone for an
 /// embedding model's (M21), none for a draft head or a diffusion model's.
 /// What both conversion ladders refuse, what `models info` offers, and its
-/// `data.converts_to`, all read this.
+/// `data.converts_to`, all read this. A set with towers converts to `mlx`
+/// too (53f): which converter builds it is the route's, below.
 [[nodiscard]] std::vector<std::string> snapshot_conversions(const std::filesystem::path& dir);
+
+/// A set's **towers** (53f, 2026-10-21): what its `config.json` declares
+/// beside its language model -- a `vision_config`, an `audio_config`, or an
+/// omni model's `thinker_config`, which nests both -- each an object. mlx-lm
+/// builds the language model alone and leaves them out; mlx-vlm builds the
+/// whole model, its towers kept, and its build is recorded as the kind
+/// `vision` (53e). The keys found, in that order; empty for a language
+/// model's weights, one declaring itself `language_model_only`, or a
+/// directory with no readable `config.json`. The set's own declaration, never
+/// its name -- read as the GGUF path reads its encoders, with an omni model's
+/// `thinker_config` beside them.
+[[nodiscard]] std::vector<std::string> snapshot_towers(const std::filesystem::path& dir);
+
+/// The towers as one phrase: "vision_config, audio_config".
+[[nodiscard]] std::string describe_towers(const std::vector<std::string>& towers);
 
 /// Every snapshot directory directly under `root`, sorted by name.
 [[nodiscard]] std::vector<std::filesystem::path> list_snapshots(const std::filesystem::path& root);

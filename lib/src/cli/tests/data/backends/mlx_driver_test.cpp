@@ -856,6 +856,42 @@ TEST_CASE(
     }
 }
 
+TEST_CASE(
+    "a directory mlx-vlm built answers its text turns through mlx-vlm alone, never mlx-lm's "
+    "model",
+    "[backends][mlx][driver][vision][kind]") {
+    // 53f: the backend starts the driver with --vision for every turn of a
+    // directory recorded as mlx-vlm's; a conversation with no picture in it
+    // is still mlx-vlm's model and processor, mlx-lm lending its format only.
+    REQUIRE_PYTHON();
+    const apogee::testing::TempDir dir{"mlx-driver"};
+    Driver driver{dir, {}, {"first", "second"}, kModel, std::string{kWithVlm}, {"--vision"}};
+    const json ready = driver.next();
+    CHECK(ready["vision"] == true);
+    CHECK(ready["mlx_vlm"] == "0.0-vlm-stub");
+    driver.send(generate(1, json::array({user("hello")})));
+    const std::vector<json> first = driver.until_done(1);
+    CHECK(joined(first, "text") == "first");
+    CHECK(first.back()["finish"] == "stop");
+    CHECK(first.back()["cached_tokens"] == 0);
+    driver.send(generate(
+        2, json::array(
+               {user("hello"), {{"role", "assistant"}, {"content", "first"}}, user("and again")})));
+    CHECK(joined(driver.until_done(2), "text") == "second");
+    CHECK(driver.close() == 0);
+
+    const std::vector<std::string> record = driver.record();
+    CHECK(count(record, "vlm load ") == 1);
+    CHECK(count(record, "vlm generate images=0 ") == 2);
+    // mlx-lm's tokenizer read the format; its model was never loaded, nor a
+    // turn generated through it.
+    CHECK(count(record, "tokenizer ") == 1);
+    CHECK(count(record, "load ") == 0);
+    CHECK(count(record, "prefill ") == 0);
+    CHECK(count(record, "step ") == 0);
+    CHECK(count(record, "cache new") == 0);
+}
+
 TEST_CASE("the driver hands its --adapter directory to the loader, and ready names it",
           "[backends][mlx][driver][adapters]") {
     // 53a: mlx-lm's own adapter_path, applied over the weights at load and

@@ -126,7 +126,10 @@ TEST_CASE("requirement sets are named and carry packages", "[training][python]")
     CHECK(requirement_set_from_string("convert") == RequirementSet::Convert);
     // The mlx backend's vision path, installed on demand (27c).
     CHECK(requirement_set_from_string("mlx-vlm") == RequirementSet::MlxVlm);
-    CHECK(packages_for(RequirementSet::MlxVlm)[0] == "mlx-vlm>=0.3");
+    CHECK(packages_for(RequirementSet::MlxVlm)[0] == "mlx-vlm>=0.6.1");
+    // 53f: the first release whose models/ builds every towered set the
+    // store holds, read on a recorded date.
+    CHECK(apogee::training::mlx_vlm_floor_reviewed() == "2026-10-21");
     // The video driver's stack (49b), never installed with anything else.
     CHECK(requirement_set_from_string("video") == RequirementSet::Video);
     CHECK(to_string(RequirementSet::Video) == "video");
@@ -336,7 +339,7 @@ TEST_CASE("a rebuild reinstalls every recorded set in order, and a failed one pu
         installed.push_back(fixture.commands[i].arguments.at(4));
     }
     CHECK(installed == std::vector<std::string>{"datasets>=3.0", "mlx-lm>=0.21", "torch>=2.11",
-                                                "mlx-vlm>=0.3", "torch>=2.6"});
+                                                "mlx-vlm>=0.6.1", "torch>=2.6"});
     CHECK(env.status().base_version.str() == "3.12.13");
     CHECK(env.status().sets == recorded);
     CHECK_FALSE(std::filesystem::exists(env.dir().string() + ".previous"));

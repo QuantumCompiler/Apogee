@@ -32,6 +32,7 @@
 #include "support/cli_home.h"
 #include "support/env_guard.h"
 #include "support/mlx_model.h"
+#include "support/towered_configs.h"
 #include "training/mlx_convert.h"
 #include "transport/http_client.h"
 
@@ -1551,4 +1552,302 @@ TEST_CASE("convert --mlx records chat beside its transform, and a kind survives 
                 {"models", "info", "org--embedder/mlx/bbbbbbbbbbbb", "--output-format", "json"},
                 &out, &err) == 0);
     CHECK(nlohmann::json::parse(out).at("data").at("kind") == "embedding");
+}
+
+// ---- sets that see or hear (53f) ------------------------------------------------------
+
+namespace {
+
+/// The stub `mlx_vlm` laid beside the stub `mlx_lm` that `fake_mlx_runtime`
+/// laid (what `train setup --with mlx-vlm` installs), its packages building
+/// `gemma4`, `gemma4_unified`, `qwen3_5` and `qwen3_vl`. Its site-packages.
+std::filesystem::path fake_mlx_vlm(const std::filesystem::path& home) {
+    const std::filesystem::path stubs =
+        std::filesystem::path{APOGEE_TESTS_DIR} / "data" / "backends" / "scripts" / "stub_mlx_vlm";
+    const std::filesystem::path site =
+        home / "training" / "venv" / "lib" / "python3.99" / "site-packages";
+    std::filesystem::copy(stubs, site,
+                          std::filesystem::copy_options::recursive |
+                              std::filesystem::copy_options::overwrite_existing);
+    return site;
+}
+
+/// A full-weight set at `dir` whose `config.json` is `config` -- one of the
+/// user's (`support/towered_configs.h`) -- with the image processor a
+/// release that sees ships beside it.
+void towered_snapshot(const std::filesystem::path& dir, const char* config) {
+    write_mlx_model(dir, {.bits = 0, .format = "pt"});
+    apogee::testing::write_fixture_file(dir / "config.json", config);
+    apogee::testing::write_fixture_file(dir / "preprocessor_config.json", "{}");
+}
+
+[[nodiscard]] std::vector<nlohmann::json> converter_calls(const std::filesystem::path& file) {
+    std::vector<nlohmann::json> out;
+    std::ifstream in{file};
+    for (std::string line; std::getline(in, line);) {
+        out.push_back(nlohmann::json::parse(line));
+    }
+    return out;
+}
+
+/// The one MLX build of `model` made with `transform`, or an empty path.
+[[nodiscard]] std::filesystem::path mlx_made_by(const StoreRoots& roots, const std::string& model,
+                                                const std::string& transform) {
+    for (const apogee::models::StoredMlx& stored : apogee::models::list_store_mlx(roots, model)) {
+        const std::optional<apogee::models::Snapshot> record =
+            apogee::models::load_snapshot(stored.dir);
+        if (record.has_value() && record->transform == transform) {
+            return stored.dir;
+        }
+    }
+    return {};
+}
+
+}  // namespace
+
+TEST_CASE(
+    "a set with towers converts through mlx-vlm, kept and recorded vision; a language model as "
+    "before; --text-only asks for mlx-lm's build",
+    "[commands][models][mlx][convert][driver][towers]") {
+    if (apogee::platform::host_target() != "macos-arm64" ||
+        apogee::platform::find_on_path("python3").empty()) {
+        SKIP("the mlx runtime is Apple silicon's, and the driver needs a python3");
+    }
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    fake_mlx_runtime(home.home());
+    (void)fake_mlx_vlm(home.home());
+    const StoreRoots roots = StoreRoots::at(home.models());
+    const std::string vl = "Qwen3-VL-8B-Instruct/safetensors/63f2634a2019";
+    towered_snapshot(home.models() / vl, apogee::testing::kQwen3VlConfig);
+    const std::string gemma = "Gemma4-E4B-Instruct/safetensors/aaaaaaaaaaaa";
+    towered_snapshot(home.models() / gemma, apogee::testing::kGemma4Config);
+    const std::string llama = "Llama3.2-1B-Instruct/safetensors/edaba290ce7f";
+    write_mlx_model(home.models() / llama, {.bits = 0, .format = "pt"});
+    apogee::testing::write_fixture_file(home.models() / llama / "config.json",
+                                        apogee::testing::kLlamaConfig);
+    const std::filesystem::path calls_file = home.home() / "calls.jsonl";
+    const apogee::testing::EnvGuard record{"STUB_MLX_CONVERT_RECORD", calls_file.string()};
+    std::string out;
+
+    // Qwen3-VL: mlx-vlm's converter, its tower kept, recorded vision.
+    REQUIRE(home.run({"models", "convert", vl, "--mlx"}, &out) == 0);
+    INFO(out);
+    CHECK(out.find(") -- mlx-vlm's converter, its towers kept (vision_config), in Apogee's "
+                   "Python environment\n") != std::string::npos);
+    CHECK(out.find("kind: vision (recorded) -- a vision model: an mlx backend chats with it, "
+                   "and shows it images through mlx-vlm\n") != std::string::npos);
+    CHECK(out.find("[INFO]") == std::string::npos);  // the library's print stays off
+    std::vector<nlohmann::json> calls = converter_calls(calls_file);
+    REQUIRE(calls.size() == 1);
+    CHECK(calls[0]["converter"] == "mlx_vlm");
+    CHECK(calls[0]["q_bits"] == 4);
+    CHECK(calls[0]["q_group_size"] == 64);
+    CHECK(calls[0]["trust_remote_code"] == false);
+    const std::filesystem::path seeing =
+        mlx_made_by(roots, "Qwen3-VL-8B-Instruct", "mlx_vlm.convert 4bit");
+    REQUIRE_FALSE(seeing.empty());
+    CHECK(apogee::models::load_snapshot(seeing)->kind == "vision");
+    const apogee::models::MlxKind kind = apogee::models::read_mlx_kind(seeing);
+    CHECK(kind.word == "vision");
+    CHECK(kind.source == apogee::models::MlxKindSource::Recorded);
+    CHECK(apogee::models::mlx_vision_files(seeing));
+
+    // --text-only where the mlx-lm installed builds no qwen3_vl: refused
+    // before Python, mlx-vlm's way named.
+    CHECK(home.run({"models", "convert", vl, "--mlx", "--text-only"}, &out) != 0);
+    CHECK(out.find("'" + vl +
+                   "' is a qwen3_vl model, which the mlx-lm in Apogee's Python environment "
+                   "builds no model for") != std::string::npos);
+    CHECK(out.find(" -- without --text-only, mlx-vlm builds it with its towers kept") !=
+          std::string::npos);
+    CHECK(converter_calls(calls_file).size() == 1);
+
+    // Gemma 4: its language model alone with --text-only, mlx-lm's and
+    // recorded chat; its towers kept without -- two builds, each its own.
+    REQUIRE(home.run({"models", "convert", gemma, "--mlx", "--text-only"}, &out) == 0);
+    CHECK(out.find(") -- mlx-lm's converter, its language model alone (--text-only: "
+                   "vision_config, audio_config left out), in Apogee's Python environment\n") !=
+          std::string::npos);
+    REQUIRE(home.run({"models", "convert", gemma, "--mlx"}, &out) == 0);
+    calls = converter_calls(calls_file);
+    REQUIRE(calls.size() == 3);
+    CHECK_FALSE(calls[1].contains("converter"));  // the stub mlx-lm's
+    CHECK(calls[1]["model_type"] == "gemma4");
+    CHECK(calls[2]["converter"] == "mlx_vlm");
+    const std::filesystem::path text =
+        mlx_made_by(roots, "Gemma4-E4B-Instruct", "mlx_lm.convert 4bit");
+    const std::filesystem::path whole =
+        mlx_made_by(roots, "Gemma4-E4B-Instruct", "mlx_vlm.convert 4bit");
+    REQUIRE_FALSE(text.empty());
+    REQUIRE_FALSE(whole.empty());
+    CHECK(apogee::models::read_mlx_kind(text).word == "chat");
+    CHECK(apogee::models::read_mlx_kind(whole).word == "vision");
+    // Each recognised as itself before anything runs.
+    for (const std::vector<std::string>& again :
+         {std::vector<std::string>{"models", "convert", gemma, "--mlx", "--text-only"},
+          std::vector<std::string>{"models", "convert", gemma, "--mlx"}}) {
+        REQUIRE(home.run(again, &out) == 0);
+        CHECK(out.find("already converted:") != std::string::npos);
+    }
+    CHECK(converter_calls(calls_file).size() == 3);
+
+    // A language model: mlx-lm's, as it always was.
+    REQUIRE(home.run({"models", "convert", llama, "--mlx"}, &out) == 0);
+    CHECK(out.find(") -- mlx-lm's converter, in Apogee's Python environment\n") !=
+          std::string::npos);
+    CHECK(out.find("kind:") == std::string::npos);
+    calls = converter_calls(calls_file);
+    REQUIRE(calls.size() == 4);
+    CHECK_FALSE(calls[3].contains("converter"));
+    CHECK(calls[3]["quantize"] == true);
+    CHECK(calls[3]["q_bits"] == 4);
+    CHECK(calls[3]["q_group_size"] == 64);
+    CHECK(calls[3]["q_mode"] == "affine");
+    const std::filesystem::path chat =
+        mlx_made_by(roots, "Llama3.2-1B-Instruct", "mlx_lm.convert 4bit");
+    REQUIRE_FALSE(chat.empty());
+    CHECK(apogee::models::load_snapshot(chat)->kind == "chat");
+    // --text-only leaves nothing out of it, and says so.
+    REQUIRE(home.run({"models", "convert", llama, "--mlx", "--text-only"}, &out) == 0);
+    CHECK(out.find("the snapshot declares no vision or audio tower -- --text-only changes "
+                   "nothing; converting it as it is") != std::string::npos);
+    CHECK(out.find("already converted:") != std::string::npos);
+
+    // Without --mlx the flag means nothing, and is refused saying why.
+    CHECK(home.run({"models", "convert", gemma, "--text-only"}, &out) != 0);
+    CHECK(out.find("--text-only asks --mlx for mlx-lm's build of a model's language model "
+                   "alone") != std::string::npos);
+
+    // Registered, each build is the backend its kind is.
+    REQUIRE(home.run({"models", "convert", gemma, "--mlx", "--text-only", "--register",
+                      "--base-name", "gemma-text"},
+                     &out) == 0);
+    REQUIRE(home.run({"models", "convert", gemma, "--mlx", "--register", "--base-name", "gemma"},
+                     &out) == 0);
+    REQUIRE(home.run({"models", "info", "gemma-text-4bit", "-q"}, &out) == 0);
+    CHECK(out.find("kind:         chat (recorded)") != std::string::npos);
+    REQUIRE(home.run({"models", "info", "gemma-4bit", "-q"}, &out) == 0);
+    CHECK(out.find("kind:         vision (recorded)") != std::string::npos);
+    CHECK(converter_calls(calls_file).size() == 4);  // both found stored
+}
+
+TEST_CASE(
+    "a set with towers is offered MLX by the installed mlx-vlm's own packages, else mlx-lm's "
+    "text-only build, said -- the omni model refused before Python where neither builds it",
+    "[commands][models][mlx][convert][driver][towers]") {
+    if (apogee::platform::host_target() != "macos-arm64" ||
+        apogee::platform::find_on_path("python3").empty()) {
+        SKIP("the mlx runtime is Apple silicon's, and the driver needs a python3");
+    }
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    const std::string omni = "Qwen3-Omni-30B-A3B-Instruct/safetensors/bbbbbbbbbbbb";
+    towered_snapshot(home.models() / omni, apogee::testing::kQwen3OmniConfig);
+    const std::string gemma = "Gemma4-E4B-Instruct/safetensors/cccccccccccc";
+    towered_snapshot(home.models() / gemma, apogee::testing::kGemma4Config);
+    std::string out;
+    std::string err;
+    const auto data = [&](const std::string& handle) {
+        REQUIRE(home.run({"models", "info", handle, "--output-format", "json"}, &out, &err) == 0);
+        return nlohmann::json::parse(out)["data"];
+    };
+    const auto route = [](const nlohmann::json& towers, const nlohmann::json& converter,
+                          bool text_only) {
+        return nlohmann::json{
+            {"towers", towers}, {"converter", converter}, {"text_only", text_only}};
+    };
+    const nlohmann::json thinker = nlohmann::json::array({"thinker_config"});
+    const nlohmann::json both = nlohmann::json::array({"vision_config", "audio_config"});
+
+    // Nothing installed to ask: nothing decided (M21), its towers the default.
+    CHECK(data(omni)["converts_to"] == nlohmann::json::array({"gguf", "mlx"}));
+    CHECK(data(omni)["mlx_conversion"] == route(thinker, "mlx-vlm", true));
+
+    // mlx-lm alone, which builds gemma4 and no qwen3_omni_moe.
+    fake_mlx_runtime(home.home());
+    CHECK(data(omni)["converts_to"] == nlohmann::json::array({"gguf"}));
+    CHECK(data(omni)["mlx_conversion"].is_null());
+    REQUIRE(home.run({"models", "info", omni}, &out) == 0);
+    CHECK(out.find("towers:       thinker_config -- no MLX conversion: mlx-vlm is not installed "
+                   "in Apogee's Python environment, and the mlx-lm there builds no "
+                   "qwen3_omni_moe model\n") != std::string::npos);
+    CHECK(out.find("makes a GGUF of it\n") != std::string::npos);
+    const std::filesystem::path calls_file = home.home() / "calls.jsonl";
+    const apogee::testing::EnvGuard record{"STUB_MLX_CONVERT_RECORD", calls_file.string()};
+    CHECK(home.run({"models", "convert", omni, "--mlx"}, &out) != 0);
+    CHECK(out.find("'" + omni +
+                   "' declares towers (thinker_config): its MLX build keeps them through "
+                   "mlx-vlm, which is not installed in Apogee's Python environment -- apogee "
+                   "train setup --with mlx-vlm") != std::string::npos);
+    CHECK(out.find("--text-only") == std::string::npos);  // mlx-lm cannot build it either
+    // Gemma 4: its language model alone is offered, and said.
+    CHECK(data(gemma)["converts_to"] == nlohmann::json::array({"gguf", "mlx"}));
+    CHECK(data(gemma)["mlx_conversion"] == route(both, nullptr, true));
+    REQUIRE(home.run({"models", "info", gemma}, &out) == 0);
+    CHECK(out.find("towers:       vision_config, audio_config -- mlx-vlm is not installed in "
+                   "Apogee's Python environment, so --mlx --text-only builds its language model "
+                   "alone with mlx-lm; 'apogee train setup --with mlx-vlm' keeps them\n") !=
+          std::string::npos);
+    CHECK(out.find("makes a GGUF of it (--mlx --text-only an MLX model of its language model)\n") !=
+          std::string::npos);
+    CHECK(home.run({"models", "convert", gemma, "--mlx"}, &out) != 0);
+    CHECK(out.find("which is not installed in Apogee's Python environment -- apogee train setup "
+                   "--with mlx-vlm, or build its language model alone with mlx-lm: --text-only") !=
+          std::string::npos);
+
+    // mlx-vlm beside it, building gemma4 and no qwen3_omni_moe.
+    const std::filesystem::path site = fake_mlx_vlm(home.home());
+    CHECK(data(gemma)["mlx_conversion"] == route(both, "mlx-vlm", true));
+    REQUIRE(home.run({"models", "info", gemma}, &out) == 0);
+    CHECK(out.find("towers:       vision_config, audio_config -- --mlx builds it through mlx-vlm, "
+                   "its towers kept; --mlx --text-only builds its language model alone with "
+                   "mlx-lm\n") != std::string::npos);
+    CHECK(data(omni)["converts_to"] == nlohmann::json::array({"gguf"}));
+    CHECK(home.run({"models", "convert", omni, "--mlx"}, &out) != 0);
+    CHECK(out.find("'" + omni +
+                   "' is a qwen3_omni_moe model with towers (thinker_config), which the mlx-vlm "
+                   "in Apogee's Python environment builds no model for -- convert it without "
+                   "--mlx, or, if these weights are a type this mlx-vlm knows, convert them as "
+                   "it: --model-type <type> (nearest here: qwen3_5, qwen3_vl, qwen3_vl_moe)") !=
+          std::string::npos);
+    CHECK(home.run({"models", "convert", omni, "--mlx", "--model-type", "nosuch"}, &out) != 0);
+    CHECK(out.find("--model-type nosuch is no type the mlx-vlm in Apogee's Python environment "
+                   "builds") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(calls_file));  // no converter ever started
+    // --model-type completes from the converter the line's set routes to.
+    REQUIRE(home.run({"__complete", "models", "convert", omni, "--mlx", "--model-type", "qwen3"},
+                     &out) == 0);
+    CHECK(out == "qwen3_5\nqwen3_vl\nqwen3_vl_moe\n");
+    REQUIRE(home.run({"__complete", "models", "convert", gemma, "--mlx", "--text-only",
+                      "--model-type", "gemma4"},
+                     &out) == 0);
+    CHECK(out == "gemma4\ngemma4_text\ngemma4_unified\n");
+
+    // An mlx-vlm that builds qwen3_omni_moe: offered, and converted whole.
+    apogee::testing::write_fixture_file(
+        site / "mlx_vlm" / "models" / "qwen3_omni_moe" / "__init__.py",
+        "from .qwen3_omni_moe import Model\n");
+    CHECK(data(omni)["converts_to"] == nlohmann::json::array({"gguf", "mlx"}));
+    CHECK(data(omni)["mlx_conversion"] == route(thinker, "mlx-vlm", false));
+    REQUIRE(home.run({"models", "convert", omni, "--mlx"}, &out) == 0);
+    INFO(out);
+    const std::vector<nlohmann::json> calls = converter_calls(calls_file);
+    REQUIRE(calls.size() == 1);
+    CHECK(calls[0]["converter"] == "mlx_vlm");
+    CHECK(calls[0]["model_type"] == "qwen3_omni_moe");
+    const std::filesystem::path made = mlx_made_by(
+        StoreRoots::at(home.models()), "Qwen3-Omni-30B-A3B-Instruct", "mlx_vlm.convert 4bit");
+    REQUIRE_FALSE(made.empty());
+    CHECK(apogee::models::read_mlx_kind(made).word == "vision");
+
+    // A language model's document says its route too: mlx-lm's, no towers.
+    const std::string llama = "Llama3.2-1B-Instruct/safetensors/edaba290ce7f";
+    write_mlx_model(home.models() / llama, {.bits = 0, .format = "pt"});
+    CHECK(data(llama)["mlx_conversion"] == route(nlohmann::json::array(), "mlx-lm", false));
+    // What conversions make has none.
+    const std::vector<apogee::models::StoredMlx> stored = apogee::models::list_store_mlx(
+        StoreRoots::at(home.models()), "Qwen3-Omni-30B-A3B-Instruct");
+    REQUIRE(stored.size() == 1);
+    CHECK(data("Qwen3-Omni-30B-A3B-Instruct/mlx/" + stored.front().id)["mlx_conversion"].is_null());
 }

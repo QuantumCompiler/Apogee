@@ -45,8 +45,19 @@ constexpr std::array<PythonRange, kSetNames.size()> kSetRanges{
 constexpr std::array<std::string_view, 1> kPrepare{"datasets>=3.0"};
 constexpr std::array<std::string_view, 1> kMlx{"mlx-lm>=0.21"};
 // The mlx backend's vision path (27c): `load`, `stream_generate` and the
-// step's sampler, which the driver asks for by name.
-constexpr std::array<std::string_view, 1> kMlxVlm{"mlx-vlm>=0.3"};
+// step's sampler, which the driver asks for by name. And since 53f the
+// converter of a set that sees or hears: 0.6.1 (2026-06-03) is the first
+// release whose `models/` holds `qwen3_omni_moe`, `gemma4_unified` and
+// `qwen3_5` -- 0.6.0 lacks `gemma4_unified` -- so every towered set the
+// store holds converts on it, and its `convert` takes `q_mode`, `dtype` and
+// `trust_remote_code`. Read on the date below from PyPI's release history and
+// the project's tags (`mlx_vlm/models/` at v0.6.0 and v0.6.1). An
+// environment already holding an older one keeps it until this set is
+// installed again -- `train setup --with mlx-vlm`, the person's own or the
+// one their install's bootstrap runs, and nothing else (M19's rule); what is
+// offered meanwhile reads the installed one's `models/`, never this floor.
+constexpr std::string_view kMlxVlmFloorReviewed = "2026-10-21";
+constexpr std::array<std::string_view, 1> kMlxVlm{"mlx-vlm>=0.6.1"};
 // `train_peft.py` drives transformers' own Trainer, so trl is not here: trl's
 // response-template collator has been removed, and the exact prompt mask
 // needs no library.
@@ -228,6 +239,10 @@ PythonRange python_range(std::span<const RequirementSet> sets) noexcept {
 
 std::string_view python_ranges_reviewed() noexcept {
     return kRangesReviewed;
+}
+
+std::string_view mlx_vlm_floor_reviewed() noexcept {
+    return kMlxVlmFloorReviewed;
 }
 
 std::string_view to_string(RequirementSet set) noexcept {

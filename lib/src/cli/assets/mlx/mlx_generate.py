@@ -19,6 +19,9 @@ read exactly as a text model's is -- the format's markers and call parser
 are `mlx_lm`'s, from the same model directory. A vision model answers every
 turn whole, with no cache kept between turns. Requires `mlx-vlm` too:
   apogee train setup --with mlx-vlm
+The backend asks for it from the first turn on, text turns included, for a
+directory mlx-vlm built (53f: its record says `vision`), whose weights are
+laid out the way mlx-vlm loads them; for any other, from the first picture.
 
 `--adapter` applies a LoRA adapter over the model at load, never fused into
 it (53a): the directory mlx-lm's training wrote (adapter_config.json beside
@@ -921,8 +924,9 @@ def serve_vision(mx, api, model_dir, model_type, version, adapter=None):
         from mlx_vlm import stream_generate
     except ImportError as e:
         error("missing_dependency",
-              f"mlx-vlm is not installed in the Python environment ({e}), so this model's "
-              "images cannot be read. Run: apogee train setup --with mlx-vlm")
+              f"mlx-vlm is not installed in the Python environment ({e}), so this model "
+              "cannot be loaded through it -- neither its images read nor, for one mlx-vlm "
+              "built, any turn answered. Run: apogee train setup --with mlx-vlm")
         return 3
     try:
         if adapter:

@@ -807,20 +807,64 @@ SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view
     return choice;
 }
 
-std::vector<std::string> installed_mlx_model_types() {
-    const backends::MlxHost host = backends::MlxHost::current();
-    return training::mlx_model_types(training::find_site_package(host.venv, "mlx_lm"));
+std::string_view MlxRoute::kind() const noexcept {
+    return converter == training::MlxConverterKind::MlxVlm ? models::kMlxVision : models::kMlxChat;
 }
 
-std::optional<bool> installed_mlx_builds(const std::filesystem::path& snapshot,
-                                         std::string_view as) {
+MlxRoute mlx_route(const std::filesystem::path& snapshot, bool text_only) {
+    MlxRoute route;
+    route.towers = models::snapshot_towers(snapshot);
+    route.converter = training::choose_mlx_converter(!route.towers.empty(), text_only);
+    return route;
+}
+
+std::vector<std::string> installed_mlx_model_types(training::MlxConverterKind converter) {
+    const backends::MlxHost host = backends::MlxHost::current();
+    return training::mlx_model_types(
+        training::find_site_package(host.venv, training::mlx_converter_package(converter)));
+}
+
+std::optional<bool> installed_mlx_builds(const std::filesystem::path& snapshot, std::string_view as,
+                                         bool text_only) {
     const std::string type =
         as.empty() ? models::read_mlx_config(snapshot).model_type : std::string{as};
-    const std::vector<std::string> types = installed_mlx_model_types();
+    const std::vector<std::string> types =
+        installed_mlx_model_types(mlx_route(snapshot, text_only).converter);
     if (type.empty() || types.empty()) {
         return std::nullopt;
     }
     return std::ranges::find(types, type) != types.end();
+}
+
+MlxOffer installed_mlx_offer(const std::filesystem::path& snapshot) {
+    MlxOffer offer;
+    offer.towers = models::snapshot_towers(snapshot);
+    offer.type = models::read_mlx_config(snapshot).model_type;
+    // mlx-lm's answer: the whole route of a language model, the text-only
+    // one of a set with towers.
+    const std::optional<bool> lm = installed_mlx_builds(snapshot, {}, /*text_only=*/true);
+    if (offer.towers.empty()) {
+        if (lm != false) {
+            offer.converter = training::MlxConverterKind::MlxLm;
+        }
+        return offer;
+    }
+    // Towers kept by default (2026-10-21): mlx-vlm's build where it can be
+    // made, mlx-lm's text-only one where it can, and nothing decided where
+    // neither is installed to ask (M21).
+    const std::optional<bool> vlm = installed_mlx_builds(snapshot);
+    const bool undecided = !vlm.has_value() && !lm.has_value();
+    if (vlm == true || undecided) {
+        offer.converter = training::MlxConverterKind::MlxVlm;
+    } else if (vlm.has_value()) {
+        offer.gap = "the mlx-vlm in Apogee's Python environment builds no " +
+                    (offer.type.empty() ? std::string{"model of its type"} : offer.type + " model");
+    } else {
+        offer.gap = "mlx-vlm is not installed in Apogee's Python environment";
+        offer.remedy = std::string{backends::kMlxVisionRemedy};
+    }
+    offer.text_only = lm == true || undecided;
+    return offer;
 }
 
 GgufChoice choose_gguf(const models::StoreRoots& roots, std::string_view given,
@@ -1432,7 +1476,7 @@ PulledVoice pull_voice(const std::string& ref, const models::StoreRoots& roots,
 ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_view given,
                                   std::string_view from, const training::MlxPrecision& precision,
                                   const training::MlxConverter& converter,
-                                  std::string_view model_type, bool chained) {
+                                  std::string_view model_type, bool chained, bool text_only) {
     const SnapshotChoice source = choose_snapshot(roots, given, from);
     if (!source.error.empty()) {
         fail(source.error);
@@ -1447,13 +1491,24 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
         fail(refused);
     }
 
+    // Which converter builds it, from its own files (53f): mlx-vlm keeps a
+    // set's towers, and mlx-lm builds a language model -- or, asked, a
+    // towered set's language model alone.
+    const MlxRoute route = mlx_route(source.path, text_only);
+    const bool vlm = route.converter == training::MlxConverterKind::MlxVlm;
+    if (text_only && route.towers.empty()) {
+        std::cout << "the snapshot declares no vision or audio tower -- --text-only changes "
+                     "nothing; converting it as it is\n";
+    }
+
     ConvertedMlx out;
     out.model = source.model;
     models::Snapshot record;
     record.ref =
         source.id.empty() ? source.path.string() : source.model + "/safetensors/" + source.id;
     record.source = "convert";
-    record.transform = "mlx_lm.convert " + std::string{precision.name};
+    record.transform = std::string{training::mlx_converter_entry(route.converter)} + " " +
+                       std::string{precision.name};
     // The user's word on the type (M15), recorded for good.
     std::string declared;
     if (!model_type.empty()) {
@@ -1490,9 +1545,16 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
 
     const std::int64_t estimate = models::estimated_mlx_bytes(
         models::snapshot_elements(source.path).value_or(0), precision.bits);
+    const std::string towers = models::describe_towers(route.towers);
     std::cout << "converting " << source.path.string() << " to MLX (" << precision.name
               << (estimate > 0 ? ", about " + format_progress_size(estimate) : std::string{})
-              << ") -- mlx-lm's converter, in Apogee's Python environment\n";
+              << ") -- "
+              << (vlm ? "mlx-vlm's converter, its towers kept (" + towers + ")"
+                  : route.towers.empty()
+                      ? std::string{"mlx-lm's converter"}
+                      : "mlx-lm's converter, its language model alone (--text-only: " + towers +
+                            " left out)")
+              << ", in Apogee's Python environment\n";
     // A view the converter reads as the named type, gone however this ends.
     std::filesystem::path overlay;
     if (!model_type.empty()) {
@@ -1544,7 +1606,7 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
                     return converter(overlay.empty() ? snapshot : overlay, output, {},
                                      cancellation);
                 },
-                InterruptScope::token());
+                InterruptScope::token(), route.kind());
         }
         progress.finish();
     }
@@ -1591,6 +1653,10 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
               << "verified: config.json, a tokenizer and " << out.info.shards.size()
               << " shard header(s) read whole\n"
               << "mlx model: " << mlx_summary(out.info) << "\n";
+    if (vlm) {
+        // What its record now says it is (53e), and so what runs it.
+        std::cout << "kind: " << models::describe(models::read_mlx_kind(out.dir)) << "\n";
+    }
     if (!chained) {
         if (!models::snapshot_has_chat_template(source.path)) {
             std::cout << base_model_note() << "\n";
@@ -2361,7 +2427,8 @@ void run_mlx_register_chain(const MlxRegisterRequest& request,
         (request.listed ? " --register-with " + joined
                         : " --register --type " + request.precisions.front()) +
         (request.base_name.empty() ? std::string{} : " --base-name " + request.base_name) +
-        (request.model_type.empty() ? std::string{} : " --model-type " + request.model_type);
+        (request.model_type.empty() ? std::string{} : " --model-type " + request.model_type) +
+        (request.text_only ? " --text-only" : "");
 
     std::vector<ChainStage> stages;
     std::vector<ConvertedMlx> made(request.precisions.size());
@@ -2372,7 +2439,7 @@ void run_mlx_register_chain(const MlxRegisterRequest& request,
             {"convert to MLX " + std::string{precision.name}, [&, index](ChainLog& chain) {
                  made[index] = convert_model_to_mlx(roots, snapshot, snapshot_from, precision,
                                                     converter_for(precision), request.model_type,
-                                                    /*chained=*/true);
+                                                    /*chained=*/true, request.text_only);
                  if (!models::snapshot_has_chat_template(source.path)) {
                      chain.note(base_model_note());
                  }
@@ -2392,9 +2459,13 @@ namespace {
 /// `models convert <model> --mlx [--type <precision>]` (27b): the
 /// precision, the runtime -- the backend's own ladder, file facts only --
 /// and the seeded driver asked before anything is announced, then the core.
+/// The converter is the set's route (53f): mlx-vlm for a set with towers,
+/// unless `text_only`; each refused before Python starts where it cannot
+/// build the set.
 void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& given,
                             const std::string& from, const std::string& type,
-                            const std::string& model_type, const MlxRegisterRequest* registers) {
+                            const std::string& model_type, const MlxRegisterRequest* registers,
+                            bool text_only) {
     const training::MlxPrecision* precision = training::find_mlx_precision(type);
     if (precision == nullptr) {
         std::string names;
@@ -2418,9 +2489,20 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
             models::snapshot_embedding_model(source.path)) {
         fail(models::embedding_model_mlx_refusal("'" + name + "'", *embedding));
     }
+    // Which converter, by the set's own files (53f): its towers kept through
+    // mlx-vlm unless --text-only asks for mlx-lm's build.
+    const MlxRoute route = mlx_route(source.path, text_only);
+    const bool vlm = route.converter == training::MlxConverterKind::MlxVlm;
+    const std::string towers = models::describe_towers(route.towers);
+    const std::string_view converter_name = training::to_string(route.converter);
     const backends::MlxHost host = backends::MlxHost::current();
     const backends::MlxReadiness runtime = backends::probe_mlx_runtime(host);
     if (!runtime.ready() && runtime.refusal != backends::MlxRefusal::NoDriver) {
+        if (vlm) {
+            // mlx-vlm's set brings mlx-lm with it.
+            fail("--mlx builds '" + name + "' through mlx-vlm, its towers kept (" + towers +
+                 "): " + runtime.reason + " -- apogee train setup --with mlx-vlm");
+        }
         fail("--mlx runs mlx-lm's converter: " + runtime.message());
     }
     const std::filesystem::path script = training::mlx_converter_script();
@@ -2429,12 +2511,35 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
         fail("the MLX converter is missing: " + script.string() +
              " -- run 'apogee check --fix' to seed it");
     }
-    const std::filesystem::path mlx_lm = training::find_site_package(host.venv, "mlx_lm");
-    // A type this mlx-lm builds no model for is refused here, by its own
-    // modules, rather than in it once Python has started (M21, the user's
-    // call); M15's door -- naming the type it is -- stays open.
     const std::string& as = registers != nullptr ? registers->model_type : model_type;
-    if (const std::vector<std::string> types = training::mlx_model_types(mlx_lm); !types.empty()) {
+    const std::filesystem::path package =
+        training::find_site_package(host.venv, training::mlx_converter_package(route.converter));
+    // The other route's answer, said beside a refusal where it would work:
+    // mlx-lm's text-only build for a set whose towers mlx-vlm cannot keep,
+    // mlx-vlm's for one --text-only sent to an mlx-lm that cannot build it.
+    const auto other_route = [&source, &as, &route, vlm]() -> std::string {
+        if (route.towers.empty()) {
+            return {};
+        }
+        if (vlm) {
+            return installed_mlx_builds(source.path, as, /*text_only=*/true) == true
+                       ? ", or build its language model alone with mlx-lm: --text-only"
+                       : "";
+        }
+        return installed_mlx_builds(source.path, as) == true
+                   ? " -- without --text-only, mlx-vlm builds it with its towers kept"
+                   : "";
+    };
+    if (vlm && package.empty()) {
+        fail("'" + name + "' declares towers (" + towers +
+             "): its MLX build keeps them through mlx-vlm, which is not installed in Apogee's "
+             "Python environment -- apogee train setup --with mlx-vlm" +
+             other_route());
+    }
+    // A type this converter builds no model for is refused here, by its own
+    // files, rather than in it once Python has started (M21, the user's
+    // call); M15's door -- naming the type it is -- stays open.
+    if (const std::vector<std::string> types = training::mlx_model_types(package); !types.empty()) {
         const std::string wanted =
             as.empty() ? models::read_mlx_config(source.path).model_type : as;
         if (!wanted.empty() && std::ranges::find(types, wanted) == types.end()) {
@@ -2442,29 +2547,35 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
             for (const std::string& candidate : training::nearest_model_types(wanted, types)) {
                 near += (near.empty() ? "" : ", ") + candidate;
             }
-            fail((as.empty() ? "'" + name + "' is a " + wanted +
-                                   " model, which the mlx-lm in Apogee's Python environment "
-                                   "builds no model for -- convert it without --mlx, or, if "
-                                   "these weights are a type this mlx-lm knows, convert them "
-                                   "as it: --model-type <type>"
-                             : "--model-type " + wanted +
-                                   " is no type the mlx-lm in Apogee's Python environment "
-                                   "builds") +
-                 (near.empty() ? std::string{} : " (nearest here: " + near + ")"));
+            const std::string kept = vlm ? " with towers (" + towers + ")" : "";
+            fail(
+                (as.empty()
+                     ? "'" + name + "' is a " + wanted + " model" + kept + ", which the " +
+                           std::string{converter_name} +
+                           " in Apogee's Python environment builds no model for -- "
+                           "convert it without --mlx" +
+                           (vlm ? other_route() : std::string{}) +
+                           ", or, if these weights are a type this " + std::string{converter_name} +
+                           " knows, convert them as it: --model-type <type>"
+                     : "--model-type " + wanted + " is no type the " + std::string{converter_name} +
+                           " in Apogee's Python environment builds") +
+                (near.empty() ? std::string{} : " (nearest here: " + near + ")") +
+                (vlm ? std::string{} : other_route()));
         }
     }
     if (registers != nullptr) {
         // M16: the hint executed -- each precision converted and registered.
-        run_mlx_register_chain(
-            *registers, [&runtime, &script, &mlx_lm](const training::MlxPrecision& wanted) {
-                return training::script_mlx_converter(runtime.interpreter, script, wanted, mlx_lm);
-            });
+        run_mlx_register_chain(*registers, [&runtime, &script, &package,
+                                            &route](const training::MlxPrecision& wanted) {
+            return training::script_mlx_converter(runtime.interpreter, script, wanted, package,
+                                                  route.converter);
+        });
         return;
     }
-    (void)convert_model_to_mlx(
-        roots, given, from, *precision,
-        training::script_mlx_converter(runtime.interpreter, script, *precision, mlx_lm),
-        model_type);
+    (void)convert_model_to_mlx(roots, given, from, *precision,
+                               training::script_mlx_converter(runtime.interpreter, script,
+                                                              *precision, package, route.converter),
+                               model_type, /*chained=*/false, text_only);
 }
 
 }  // namespace
@@ -2957,16 +3068,21 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
             ->type_name(kConvertPrecisionValue)
             ->check(CLI::IsMember(convert_types));
     convert->add_flag("--mlx", *convert_mlx,
-                      "Make an MLX model with mlx-lm's converter (Apple silicon), quantized to "
-                      "--type, into the model's mlx/");
+                      "Make an MLX model (Apple silicon), quantized to --type, into the model's "
+                      "mlx/: mlx-lm's converter, or for weights with a vision or audio tower "
+                      "mlx-vlm's, the towers kept");
+    auto convert_text_only = std::make_shared<bool>(false);
+    convert->add_flag("--text-only", *convert_text_only,
+                      "With --mlx: build only the language model of weights with a vision or "
+                      "audio tower, with mlx-lm's converter -- the towers left out");
     convert->add_option("--from", *convert_from, "Which of the model's SafeTensors sets, by id")
         ->type_name(kSnapshotIdValue);
     auto convert_model_type = std::make_shared<std::string>();
     convert
         ->add_option("--model-type", *convert_model_type,
-                     "With --mlx: convert these weights as a type mlx-lm knows -- your word, for "
-                     "a vendor's variant its converter does not list; the snapshot is untouched "
-                     "and the record says so")
+                     "With --mlx: convert these weights as a type their converter knows (mlx-lm, "
+                     "or mlx-vlm for weights with a tower) -- your word, for a vendor's variant "
+                     "it does not list; the snapshot is untouched and the record says so")
         ->type_name(kMlxModelTypeValue);
     auto convert_register = std::make_shared<bool>(false);
     auto convert_register_with = std::make_shared<std::vector<std::string>>();
@@ -2988,9 +3104,9 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         "with --mlx -4bit, -8bit ... (default: the model's name)");
 
     convert->callback([convert_in, convert_type, convert_type_option, convert_mlx, convert_from,
-                       convert_model_type, convert_register, convert_register_with,
-                       register_with_option, convert_base_name, convert_base_name_option,
-                       models_dir, &context]() {
+                       convert_model_type, convert_text_only, convert_register,
+                       convert_register_with, register_with_option, convert_base_name,
+                       convert_base_name_option, models_dir, &context]() {
         const models::StoreRoots roots = store_roots(models_dir, context.config_path);
         const bool registers = *convert_register || register_with_option->count() > 0;
         if (*convert_mlx) {
@@ -2998,7 +3114,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
             check_base_name(*convert_base_name, convert_base_name_option->count() > 0, registers);
             if (!registers) {
                 convert_to_mlx_command(roots, *convert_in, *convert_from, type, *convert_model_type,
-                                       nullptr);
+                                       nullptr, *convert_text_only);
                 return;
             }
             // M16: with --mlx the chain converts once a precision.
@@ -3018,15 +3134,21 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                 .base_name = *convert_base_name,
                 .model_type = *convert_model_type,
                 .listed = listed,
+                .text_only = *convert_text_only,
             };
             convert_to_mlx_command(roots, *convert_in, *convert_from, request.precisions.front(),
-                                   *convert_model_type, &request);
+                                   *convert_model_type, &request, *convert_text_only);
             return;
         }
         if (!convert_model_type->empty()) {
             fail(
                 "--model-type names the type mlx-lm converts these weights as -- it works with "
                 "--mlx; the GGUF converter finds a model by its architectures");
+        }
+        if (*convert_text_only) {
+            fail(
+                "--text-only asks --mlx for mlx-lm's build of a model's language model alone, "
+                "its vision or audio tower left out -- it works with --mlx");
         }
         if (std::ranges::find(training::converter_out_types(), *convert_type) ==
             training::converter_out_types().end()) {

@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -16,6 +17,7 @@
 #include "platform/child_process.h"
 #include "support/env_guard.h"
 #include "support/mlx_model.h"
+#include "support/towered_configs.h"
 
 /// `models convert --mlx`'s child (27b): the argument shape, the precisions,
 /// and the shipped `assets/mlx/mlx_convert.py` -- the file, not a copy --
@@ -81,6 +83,32 @@ struct Work {
         cancellation);
 }
 
+/// The driver on the mlx-vlm route (53f), mlx-vlm laid beside mlx-lm --
+/// or, with `stubs` naming mlx-lm's alone, missing.
+[[nodiscard]] std::string convert_vlm(const Work& work, const MlxPrecision& precision,
+                                      std::vector<std::string>* messages = nullptr,
+                                      const std::string& stubs = "stub_mlx:stub_mlx_vlm",
+                                      const std::filesystem::path& script = kDriver) {
+    std::string path;
+    for (std::size_t start = 0; start <= stubs.size();) {
+        const std::size_t end = std::min(stubs.find(':', start), stubs.size());
+        path += (path.empty() ? "" : ":") + (kStubs / stubs.substr(start, end - start)).string();
+        start = end + 1;
+    }
+    const apogee::testing::EnvGuard python_path{"PYTHONPATH", path};
+    const apogee::testing::EnvGuard record{"STUB_MLX_CONVERT_RECORD", work.record.string()};
+    const apogee::training::MlxConverter converter = apogee::training::script_mlx_converter(
+        python3(), script, precision, kStubs / "stub_mlx_vlm" / "mlx_vlm",
+        apogee::training::MlxConverterKind::MlxVlm);
+    return converter(work.snapshot, work.out,
+                     [messages](std::string_view message) {
+                         if (messages != nullptr) {
+                             messages->emplace_back(message);
+                         }
+                     },
+                     {});
+}
+
 #define REQUIRE_PYTHON()                                                          \
     do {                                                                          \
         if (python3().empty() || !apogee::platform::supports_child_processes()) { \
@@ -118,6 +146,38 @@ TEST_CASE("the driver is called with one argument shape", "[training][mlx][conve
           std::vector<std::string>{"--hf-path", "/snap", "--mlx-path", "/out", "--dtype",
                                    "bfloat16"});
     CHECK(apogee::training::mlx_converter_script().filename() == "mlx_convert.py");
+}
+
+TEST_CASE("the converter is the set's towers' to choose, and mlx-lm's argv stays as it was",
+          "[training][mlx][convert][towers]") {
+    using apogee::training::choose_mlx_converter;
+    using apogee::training::MlxConverterKind;
+    // 53f: towers go to mlx-vlm, kept; --text-only asks for mlx-lm's build;
+    // a language model is mlx-lm's whatever is asked.
+    CHECK(choose_mlx_converter(true, false) == MlxConverterKind::MlxVlm);
+    CHECK(choose_mlx_converter(true, true) == MlxConverterKind::MlxLm);
+    CHECK(choose_mlx_converter(false, false) == MlxConverterKind::MlxLm);
+    CHECK(choose_mlx_converter(false, true) == MlxConverterKind::MlxLm);
+    CHECK(apogee::training::to_string(MlxConverterKind::MlxVlm) == "mlx-vlm");
+    CHECK(apogee::training::mlx_converter_package(MlxConverterKind::MlxVlm) == "mlx_vlm");
+    CHECK(apogee::training::mlx_converter_package(MlxConverterKind::MlxLm) == "mlx_lm");
+    CHECK(apogee::training::mlx_converter_entry(MlxConverterKind::MlxVlm) == "mlx_vlm.convert");
+    CHECK(apogee::training::mlx_converter_entry(MlxConverterKind::MlxLm) == "mlx_lm.convert");
+    CHECK(apogee::training::mlx_converter_set(MlxConverterKind::MlxVlm) ==
+          apogee::training::RequirementSet::MlxVlm);
+    CHECK(apogee::training::mlx_converter_set(MlxConverterKind::MlxLm) ==
+          apogee::training::RequirementSet::Mlx);
+
+    // The one table, mapped for both: mlx-vlm's leads with its route; the
+    // default and mlx-lm's named are byte for byte what they were.
+    for (const MlxPrecision& precision : apogee::training::mlx_precisions()) {
+        INFO(precision.name);
+        const std::vector<std::string> lm = mlx_converter_arguments(precision, "/snap", "/out");
+        CHECK(mlx_converter_arguments(precision, "/snap", "/out", MlxConverterKind::MlxLm) == lm);
+        std::vector<std::string> vlm{"--with", "mlx-vlm"};
+        vlm.insert(vlm.end(), lm.begin(), lm.end());
+        CHECK(mlx_converter_arguments(precision, "/snap", "/out", MlxConverterKind::MlxVlm) == vlm);
+    }
 }
 
 TEST_CASE("the shipped driver converts through mlx_lm.convert as asked, its prints kept off",
@@ -188,6 +248,110 @@ TEST_CASE("a cancel ends the driver mid-conversion", "[training][mlx][convert][d
     canceller.join();
     CHECK(result == "cancelled");
     CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds{15});
+}
+
+TEST_CASE("the shipped driver converts through mlx_vlm.convert as its command line would",
+          "[training][mlx][convert][driver][towers]") {
+    // 53f: the whole model, its towers kept -- the precision on mlx-vlm's own
+    // flags, remote code never trusted, the library's print kept off.
+    REQUIRE_PYTHON();
+    Work work;
+    apogee::testing::write_fixture_file(work.snapshot / "config.json",
+                                        apogee::testing::kQwen3VlConfig);
+    apogee::testing::write_fixture_file(work.snapshot / "preprocessor_config.json", "{}");
+    std::vector<std::string> messages;
+    REQUIRE(convert_vlm(work, *find_mlx_precision("4bit"), &messages).empty());
+    std::vector<nlohmann::json> calls = work.calls();
+    REQUIRE(calls.size() == 1);
+    CHECK(calls[0]["converter"] == "mlx_vlm");
+    CHECK(calls[0]["hf_path"] == work.snapshot.string());
+    CHECK(calls[0]["mlx_path"] == work.out.string());
+    CHECK(calls[0]["quantize"] == true);
+    CHECK(calls[0]["q_bits"] == 4);
+    CHECK(calls[0]["q_group_size"] == 64);
+    CHECK(calls[0]["q_mode"] == "affine");
+    CHECK(calls[0]["trust_remote_code"] == false);
+    CHECK(messages == std::vector<std::string>{"loading mlx-vlm", "quantizing"});
+    // Its towers and the processor that feeds one, kept.
+    CHECK(std::filesystem::exists(work.out / "preprocessor_config.json"));
+
+    // mxfp4: the mode's own group, as mlx-vlm's command line leaves it.
+    Work fp4;
+    REQUIRE(convert_vlm(fp4, *find_mlx_precision("mxfp4")).empty());
+    calls = fp4.calls();
+    REQUIRE(calls.size() == 1);
+    CHECK(calls[0]["q_group_size"].is_null());
+    CHECK(calls[0]["q_mode"] == "mxfp4");
+    // Unquantized: the dtype, no quantize.
+    Work plain;
+    REQUIRE(convert_vlm(plain, *find_mlx_precision("bf16")).empty());
+    calls = plain.calls();
+    REQUIRE(calls.size() == 1);
+    CHECK(calls[0]["quantize"] == false);
+    CHECK(calls[0]["dtype"] == "bfloat16");
+}
+
+TEST_CASE("the mlx-vlm route names its fix, its own door, and a driver too old for it",
+          "[training][mlx][convert][driver][towers]") {
+    REQUIRE_PYTHON();
+    const Work work;
+    SECTION("mlx-vlm missing from the environment") {
+        const std::string error =
+            convert_vlm(work, *find_mlx_precision("4bit"), nullptr, "stub_mlx:stub_mlx_missing");
+        CHECK(error.find("mlx-vlm is not installed in Apogee's Python environment") !=
+              std::string::npos);
+        CHECK(error.find("apogee train setup --with mlx-vlm") != std::string::npos);
+        CHECK(work.calls().empty());
+    }
+    SECTION("a type mlx-vlm has no package for: its door, its own nearest types") {
+        apogee::testing::write_fixture_file(work.snapshot / "config.json",
+                                            apogee::testing::kQwen3OmniConfig);
+        const apogee::testing::EnvGuard unsupported{"STUB_MLX_UNSUPPORTED", "qwen3_omni_moe"};
+        const std::string error = convert_vlm(work, *find_mlx_precision("4bit"));
+        CHECK(error.find("ValueError: Model type qwen3_omni_moe not supported.") !=
+              std::string::npos);
+        CHECK(error.ends_with(
+            "if these weights are a type this mlx-vlm knows, convert them as it: --model-type "
+            "<type> (nearest here: qwen3_5, qwen3_vl, qwen3_vl_moe)"));
+    }
+    SECTION("a seeded driver from before the route") {
+        const std::filesystem::path older = work.root.path() / "mlx_convert.py";
+        apogee::testing::write_fixture_file(
+            older,
+            "import argparse\n"
+            "parser = argparse.ArgumentParser()\n"
+            "for flag in ('--hf-path', '--mlx-path', '--q-bits', '--q-group-size', '--q-mode',\n"
+            "             '--dtype'):\n"
+            "    parser.add_argument(flag)\n"
+            "parser.parse_args()\n");
+        const std::string error =
+            convert_vlm(work, *find_mlx_precision("4bit"), nullptr, "stub_mlx", older);
+        CHECK(error.find("unrecognized arguments: --with mlx-vlm") != std::string::npos);
+        CHECK(error.find("the seeded converter at " + older.string() +
+                         " is older than this build: 'apogee check --fix'") != std::string::npos);
+    }
+}
+
+TEST_CASE("the types an installed mlx-vlm builds are read from its own packages",
+          "[training][mlx][convert][model_type][towers]") {
+    // 53f: a package under models/ whose __init__ names its Model -- what
+    // mlx-vlm's loader takes -- and its remap table's keys, never imported.
+    CHECK(apogee::training::mlx_model_types(kStubs / "stub_mlx_vlm" / "mlx_vlm") ==
+          std::vector<std::string>{"gemma4", "gemma4_unified", "qwen3_5", "qwen3_vl",
+                                   "qwen3_vl_moe"});
+    // A package naming only a longer name, or nothing, is no type; nor is a
+    // private one.
+    const apogee::testing::TempDir dir{"mlx-vlm-types-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path models = dir.path() / "mlx_vlm" / "models";
+    apogee::testing::write_fixture_file(
+        models / "qwen3_omni_moe" / "__init__.py",
+        "from .qwen3_omni_moe import LanguageModel, Model, VisionModel\n");
+    apogee::testing::write_fixture_file(models / "helpers" / "__init__.py",
+                                        "from .output import LanguageModelOutput\n");
+    apogee::testing::write_fixture_file(models / "empty" / "__init__.py", "");
+    apogee::testing::write_fixture_file(models / "_private" / "__init__.py", "Model = None\n");
+    CHECK(apogee::training::mlx_model_types(dir.path() / "mlx_vlm") ==
+          std::vector<std::string>{"qwen3_omni_moe"});
 }
 
 TEST_CASE("the types an installed mlx-lm converts are read from its own files",

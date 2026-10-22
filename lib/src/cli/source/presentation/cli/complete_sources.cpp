@@ -14,6 +14,7 @@
 #include "cli/config_cmd.h"
 #include "cli/embed.h"
 #include "cli/graph.h"
+#include "cli/models_pull.h"
 #include "cli/task_cmd.h"
 #include "contracts/assets.h"
 #include "contracts/cancellation.h"
@@ -524,10 +525,22 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         list.names = context.flags.contains("--mlx") ? training::mlx_precision_names()
                                                      : models::quant_type_names();
     } else if (kind == kMlxModelTypeValue) {
-        // M15: the types the installed mlx-lm converts, read from its files.
-        list.names = training::mlx_model_types(
-            training::find_site_package(harness::training_venv_dir(), "mlx_lm"));
-        list.none = "no mlx-lm in Apogee's Python environment -- 'apogee train setup --with mlx'";
+        // M15: the types the converter the line's set routes to builds, read
+        // from its files -- mlx-vlm's for a set with towers, unless
+        // --text-only came earlier on the line (53f); mlx-lm's otherwise.
+        training::MlxConverterKind converter = training::MlxConverterKind::MlxLm;
+        if (!context.positionals.empty() && context.config != nullptr) {
+            const SnapshotChoice set =
+                choose_snapshot(store_roots(*context.config), context.positionals.front());
+            if (!set.path.empty()) {
+                converter = mlx_route(set.path, context.flags.contains("--text-only")).converter;
+            }
+        }
+        list.names = training::mlx_model_types(training::find_site_package(
+            harness::training_venv_dir(), training::mlx_converter_package(converter)));
+        list.none = "no " + std::string{training::to_string(converter)} +
+                    " in Apogee's Python environment -- 'apogee train setup --with " +
+                    std::string{training::to_string(training::mlx_converter_set(converter))} + "'";
     } else if (kind == kVoiceValue) {
         // Every voice the store's voice models carry, each with its language.
         for (const models::StoredVoice& stored : models::list_store_voices(store_roots(config))) {

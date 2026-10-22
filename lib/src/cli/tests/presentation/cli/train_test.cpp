@@ -2055,7 +2055,7 @@ TEST_CASE("an environment on 3.14 refuses voice before pip; --rebuild asks, then
     CHECK(said.find("(Python 3.12.13)") != std::string::npos);
     CHECK(said.find("reinstalling prepare, mlx, convert, mlx-vlm, video") != std::string::npos);
     CHECK(machine.pips() == std::vector<std::string>{"datasets>=3.0", "mlx-lm>=0.21", "torch>=2.11",
-                                                     "mlx-vlm>=0.3", "torch>=2.6", "torch>=2.6"});
+                                                     "mlx-vlm>=0.6.1", "torch>=2.6", "torch>=2.6"});
     CHECK(said.find("(Python 3.12.13); sets: prepare, mlx, convert, mlx-vlm, video, voice") !=
           std::string::npos);
 }

@@ -134,17 +134,69 @@ struct SnapshotChoice {
 [[nodiscard]] SnapshotChoice choose_snapshot(const models::StoreRoots& roots,
                                              std::string_view given, std::string_view from_id = {});
 
-/// The model types the mlx-lm in Apogee's Python environment builds, read
-/// from its own modules (M15's reader): empty when none is installed to ask.
-[[nodiscard]] std::vector<std::string> installed_mlx_model_types();
+/// Which converter `models convert --mlx` runs for a set (53f), from its own
+/// files: mlx-vlm, its towers kept, for a set whose `config.json` declares
+/// one (`models::snapshot_towers`) -- unless `--text-only` asks for mlx-lm's
+/// build of its language model alone -- and mlx-lm for every other. Never a
+/// name.
+struct MlxRoute {
+    training::MlxConverterKind converter = training::MlxConverterKind::MlxLm;
+    /// The towers the set declares; empty for a language model's weights.
+    std::vector<std::string> towers{};
 
-/// Whether that mlx-lm builds `snapshot`'s model type -- its `config.json`'s,
-/// or `as` when named (`--model-type`): nullopt when no mlx-lm is installed
-/// to ask, or the type is unsaid, so nothing is decided without it. What MLX
-/// is offered and refused by, before anything runs (M21, the user's call:
-/// never offer a conversion that cannot work).
+    /// What its build records (53e): `vision` for mlx-vlm's, `chat` for
+    /// mlx-lm's.
+    [[nodiscard]] std::string_view kind() const noexcept;
+};
+
+[[nodiscard]] MlxRoute mlx_route(const std::filesystem::path& snapshot, bool text_only = false);
+
+/// The model types `converter` in Apogee's Python environment builds, read
+/// from its own files (M15's reader): empty when it is not installed to ask.
+[[nodiscard]] std::vector<std::string> installed_mlx_model_types(
+    training::MlxConverterKind converter = training::MlxConverterKind::MlxLm);
+
+/// Whether the converter `snapshot`'s route runs (`mlx_route`, `text_only`
+/// its flag) builds its model type -- its `config.json`'s, or `as` when named
+/// (`--model-type`): nullopt when that converter is not installed to ask, or
+/// the type is unsaid, so nothing is decided without it. What MLX is offered
+/// and refused by, before anything runs (M21, the user's call: never offer a
+/// conversion that cannot work).
 [[nodiscard]] std::optional<bool> installed_mlx_builds(const std::filesystem::path& snapshot,
-                                                       std::string_view as = {});
+                                                       std::string_view as = {},
+                                                       bool text_only = false);
+
+/// The MLX conversion a set is offered (53f), by the converters installed:
+/// a language model's is mlx-lm's, as M21 decided it. A set with towers is
+/// offered mlx-vlm's build, its towers kept, where the mlx-vlm installed
+/// builds its type; otherwise mlx-lm's build of its language model alone,
+/// where the mlx-lm installed builds that, and said so; otherwise none. With
+/// neither installed to ask, nothing is decided and both stand (M21).
+struct MlxOffer {
+    /// The set's towers; empty for a language model's weights.
+    std::vector<std::string> towers{};
+    /// Its `model_type`, as `config.json` says it.
+    std::string type{};
+    /// What a plain `--mlx` runs, where it can: mlx-vlm for a set with
+    /// towers, mlx-lm for a language model. nullopt where only `--text-only`
+    /// can, or nothing.
+    std::optional<training::MlxConverterKind> converter{};
+    /// `--mlx --text-only` is offered: mlx-lm builds the language model of a
+    /// set with towers. Never for a language model, which has none to leave.
+    bool text_only = false;
+    /// Why a set with towers is not offered mlx-vlm's build: mlx-vlm not
+    /// installed, or building no model of its type. Empty when it is.
+    std::string gap{};
+    /// The command that would keep its towers, where one would: mlx-vlm's
+    /// set, when it is not installed. Empty otherwise.
+    std::string remedy{};
+
+    [[nodiscard]] bool offered() const noexcept {
+        return converter.has_value() || text_only;
+    }
+};
+
+[[nodiscard]] MlxOffer installed_mlx_offer(const std::filesystem::path& snapshot);
 
 /// Which GGUF `models quantize` reads.
 struct GgufChoice {
@@ -288,12 +340,18 @@ struct ConvertedMlx {
 /// `config.json` says so (`models::stage_model_type_overlay`, removed
 /// either way), the snapshot untouched, and the record says it was
 /// converted as that type and what the snapshot declared.
+///
+/// The set's route (`mlx_route`, 53f) names what is made: a set with towers
+/// is built by mlx-vlm and recorded `vision`, its transform
+/// `mlx_vlm.convert <precision>`; with `text_only`, or for a language model,
+/// mlx-lm's build, recorded `chat`, exactly as before. `converter` is the
+/// route's.
 [[nodiscard]] ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots,
                                                 std::string_view given, std::string_view from,
                                                 const training::MlxPrecision& precision,
                                                 const training::MlxConverter& converter,
                                                 std::string_view model_type = {},
-                                                bool chained = false);
+                                                bool chained = false, bool text_only = false);
 
 /// `--register-with`'s precisions with `--mlx` (M16): `--type`'s own MLX
 /// set, each once, in the order given. Fails before anything runs on any
@@ -322,6 +380,8 @@ struct MlxRegisterRequest {
     /// Typed as `--register-with <list>` rather than `--register --type`:
     /// the resume line says it the same way.
     bool listed = false;
+    /// `--text-only` (53f): mlx-lm's build of a set with towers, each time.
+    bool text_only = false;
 };
 
 /// For each precision: convert the set with `models convert --mlx`'s own

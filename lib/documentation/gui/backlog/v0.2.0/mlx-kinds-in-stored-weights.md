@@ -25,6 +25,7 @@ M3 already offers only the conversions `data.converts_to` names (`StoreViewModel
 - **Fixtures:** `models list` and `models info` of a directory of each kind, recorded from the binary that ships 53e, beside `tests/business/reads/Fixtures/store-*.json`.
 
 **Decisions made** (dated):
+- 2026-10-21 — **What the CLI's 53f gives this item** (recorded when 53f shipped): `models info`'s `data.mlx_conversion` (`towers`, `converter`, `text_only`) says which converter a set routes to and whether only mlx-lm's text-only build is offered. A plain `--mlx` on a towered set whose mlx-vlm cannot build it is refused, naming `--text-only`, never quietly reduced to text. So the convert sheet passes `--text-only` when that field says so, and says the towers are left out.
 - 2026-10-21 — **Opened from the CLI's MLX-for-every-kind spike** (the user's call: "create the documents for v0.2.0"), as the GUI sibling its 53e names.
 
 **Open calls:**
@@ -38,4 +39,4 @@ M3 already offers only the conversions `data.converts_to` names (`StoreViewModel
 - [ ] Against a binary before the CLI's 53e, Stored weights reads as today.
 - [ ] Previews cover each kind. `check-previews`, the layering check and `lib/scripts/cicd.sh --test` pass, with no Swift warning.
 
-**Scope note.** GUI v0.2.0, track 3, its gate, the CLI's [53e](../../../cli/assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind), shipped 2026-10-21 (`data.kind` and the list rows' `kind`, in `machine-mode.md`). Each kind's actions land as its CLI item ships: the embedding role with [53h](../../../cli/backlog/v0.2.0/mlx-embeddings.md), and text-only conversion with [53f](../../../cli/backlog/v0.2.0/mlx-vlm-conversions.md). A kind whose CLI item has not shipped has no documents to show yet.
+**Scope note.** GUI v0.2.0, track 3, its gate, the CLI's [53e](../../../cli/assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind), shipped 2026-10-21 (`data.kind` and the list rows' `kind`, in `machine-mode.md`). Each kind's actions land as its CLI item ships: the embedding role with [53h](../../../cli/backlog/v0.2.0/mlx-embeddings.md), and text-only conversion with [53f](../../../cli/assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind), shipped 2026-10-21. A kind whose CLI item has not shipped has no documents to show yet.

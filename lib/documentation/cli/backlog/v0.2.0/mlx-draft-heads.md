@@ -38,4 +38,4 @@
 - [ ] Chat and GGUF conversions of a draft head are refused as before.
 - [ ] `lib/scripts/cicd.sh --test` is green.
 
-**Scope note.** v0.2.0, gated on [53f](mlx-vlm-conversions.md) (mlx-vlm's route and its text path), Drafting on llama.cpp, where Gemma 4's heads load as `GEMMA4_ASSISTANT`, is out of scope. The GUI's [3b](../../../gui/backlog/v0.2.0/mlx-engines-and-drafters.md) pairs a drafter in the app.
+**Scope note.** v0.2.0. Its gate, [53f](../../assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind) (mlx-vlm's route and its text path), shipped 2026-10-21. Drafting on llama.cpp, where Gemma 4's heads load as `GEMMA4_ASSISTANT`, is out of scope. The GUI's [3b](../../../gui/backlog/v0.2.0/mlx-engines-and-drafters.md) pairs a drafter in the app.

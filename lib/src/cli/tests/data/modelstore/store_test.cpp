@@ -20,6 +20,7 @@
 #include "support/file_time.h"
 #include "support/mlx_model.h"
 #include "support/pipeline_model.h"
+#include "support/towered_configs.h"
 #include "support/voice_model.h"
 
 using apogee::models::StoreRoots;
@@ -1083,6 +1084,48 @@ TEST_CASE(
     CHECK(apogee::models::snapshot_conversions(wan).empty());
     CHECK(apogee::models::snapshot_conversions(head).empty());
     CHECK(apogee::models::snapshot_conversions(llama) == std::vector<std::string>{"gguf", "mlx"});
+}
+
+TEST_CASE(
+    "a set's towers are what its config declares beside its language model: vision, audio, an "
+    "omni model's thinker, never a name",
+    "[models][store][towers]") {
+    // 53f: the converter is chosen by these, so each of the user's sets is
+    // read from its own configuration.
+    const Store store;
+    const auto towers = [&store](const std::string& name, const std::string& config) {
+        const std::filesystem::path dir = store.root.path() / name;
+        place_snapshot_with(dir, config);
+        return apogee::models::snapshot_towers(dir);
+    };
+    using Towers = std::vector<std::string>;
+    CHECK(towers("qwen3-vl", apogee::testing::kQwen3VlConfig) == Towers{"vision_config"});
+    CHECK(towers("qwen3-omni", apogee::testing::kQwen3OmniConfig) == Towers{"thinker_config"});
+    CHECK(towers("gemma4", apogee::testing::kGemma4Config) ==
+          Towers{"vision_config", "audio_config"});
+    CHECK(towers("gemma4-unified", apogee::testing::kGemma4UnifiedConfig) ==
+          Towers{"vision_config", "audio_config"});
+    CHECK(towers("qwen3.8", apogee::testing::kQwen35Config) == Towers{"vision_config"});
+    CHECK(towers("llama", apogee::testing::kLlamaConfig).empty());
+    // A key set to nothing declares nothing, and neither does a model that
+    // says it is its language model alone -- as the GGUF path reads them.
+    CHECK(towers("null", R"({"model_type": "gemma4", "audio_config": null,
+                             "vision_config": {}})")
+              .empty());
+    CHECK(towers("only", R"({"model_type": "mistral3", "language_model_only": true,
+                             "vision_config": {"hidden_size": 1024}})")
+              .empty());
+    // The name says nothing: a Llama called "VL" is a Llama.
+    CHECK(towers("Qwen3-VL-named", apogee::testing::kLlamaConfig).empty());
+    CHECK(apogee::models::snapshot_towers(store.root.path() / "absent").empty());
+    CHECK(apogee::models::describe_towers({"vision_config", "audio_config"}) ==
+          "vision_config, audio_config");
+    // What a set converts to is unchanged by them: MLX stays a format, its
+    // converter the route's.
+    CHECK(apogee::models::snapshot_conversions(store.root.path() / "qwen3-omni") ==
+          std::vector<std::string>{"gguf", "mlx"});
+    CHECK(apogee::models::snapshot_conversions(store.root.path() / "gemma4") ==
+          std::vector<std::string>{"gguf", "mlx"});
 }
 
 namespace {

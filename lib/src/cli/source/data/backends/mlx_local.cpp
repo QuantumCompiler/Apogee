@@ -116,6 +116,12 @@ constexpr std::string_view kSetupRemedy = "apogee train setup --with mlx";
     return {};
 }
 
+/// A directory mlx-vlm built, by its record (53f): it loads through mlx-vlm
+/// for every turn. One recorded otherwise, or not at all, keeps its way.
+[[nodiscard]] bool loads_through_vlm(const models::MlxKind& kind) noexcept {
+    return kind.word == models::kMlxVision && kind.source == models::MlxKindSource::Recorded;
+}
+
 /// The platform, the environment and `mlx-lm`: the rungs an entry shares
 /// with every other.
 [[nodiscard]] MlxReadiness probe_environment(const MlxHost& host) {
@@ -254,6 +260,8 @@ std::string_view to_string(MlxRefusal refusal) noexcept {
             return "model missing";
         case MlxRefusal::NotAModelDirectory:
             return "not a model directory";
+        case MlxRefusal::NoMlxVlm:
+            return "no mlx-vlm";
         case MlxRefusal::NoDriver:
             return "no driver";
     }
@@ -314,6 +322,19 @@ MlxReadiness probe_mlx_backend(std::string_view name, const harness::BackendConf
         readiness.remedy = fix;
         return readiness;
     }
+    // A directory mlx-vlm built loads through it alone (53f): without it not
+    // even a text turn can be answered.
+    if (loads_through_vlm(models::read_mlx_kind(readiness.model_dir)) &&
+        !find_mlx_vlm(host).installed()) {
+        readiness.refusal = MlxRefusal::NoMlxVlm;
+        readiness.reason = readiness.model_dir.string() +
+                           " was built by mlx-vlm (its record says vision), which loads it for "
+                           "every turn, and mlx-vlm is not installed in the Python environment "
+                           "at " +
+                           host.venv.string();
+        readiness.remedy = std::string{kMlxVisionRemedy};
+        return readiness;
+    }
     refuse_driver(readiness, host);
     return readiness;
 }
@@ -331,8 +352,14 @@ MlxModelInfo inspect_mlx_model(const std::filesystem::path& dir) {
         // A vision tower in the configuration, and the processor that
         // turns a picture into its input beside it (27c) -- the store's one
         // reading of it, which an unrecorded directory's kind follows (53e).
-        info.vision = models::mlx_vision_files(dir);
+        info.vision_files = models::mlx_vision_files(dir);
     }
+    // What it is, by the one reader (53e): its record's word over its files.
+    // A vision model is one whose kind says so (53f), and one mlx-vlm built
+    // runs through it for every turn.
+    info.kind = models::read_mlx_kind(dir);
+    info.vision = info.kind.word == models::kMlxVision;
+    info.through_vlm = loads_through_vlm(info.kind);
     if (std::filesystem::is_regular_file(dir / "chat_template.jinja", code) ||
         std::filesystem::is_regular_file(dir / "chat_template.json", code)) {
         info.chat_template = true;
@@ -381,6 +408,18 @@ MlxVision probe_mlx_vision(const MlxModelInfo& info, const MlxHost& host) {
     MlxVision vision;
     vision.model = info.vision;
     if (!vision.model) {
+        if (info.kind.source == models::MlxKindSource::Recorded && info.vision_files) {
+            // Its record wins over its files (53f): what was built is what
+            // runs, whatever configuration came along with it.
+            vision.reason =
+                info.kind.word == models::kMlxChat
+                    ? std::string{"its record says it is mlx-lm's build of its language model "
+                                  "alone (kind chat), its vision tower left out -- 'apogee "
+                                  "models convert <its SafeTensors set> --mlx' builds it through "
+                                  "mlx-vlm, the tower kept"}
+                    : "its record says it is kind " + info.kind.word + ", not a vision model";
+            return vision;
+        }
         vision.reason =
             "it is not a vision model: its config.json declares no vision_config, or no image "
             "processor (preprocessor_config.json or processor_config.json) ships with it";
@@ -544,7 +583,8 @@ void MlxLocalProvider::preload(const harness::StatusSink& on_status) {
     const std::scoped_lock lock{mutex_};
     harness::StreamOptions options;
     options.on_status = on_status;
-    ensure_child(options);
+    // A directory mlx-vlm built is loaded through it from the first (53f).
+    ensure_child(options, options_.info.through_vlm);
 }
 
 std::vector<harness::ModelInfo> MlxLocalProvider::list_models(
@@ -692,7 +732,9 @@ void MlxLocalProvider::ensure_child(const harness::StreamOptions& options, bool 
     }
     stderr_tail_.clear();
     say(options, harness::StatusEvent::Type::ModelLoading, harness::StatusEvent::Phase::Start,
-        vision ? "through mlx-vlm, to read images" : std::string{});
+        !vision                     ? std::string{}
+        : options_.info.through_vlm ? "through mlx-vlm, which built it"
+                                    : "through mlx-vlm, to read images");
 
     platform::ChildCommand command;
     command.program = options_.interpreter.string();
@@ -719,14 +761,16 @@ void MlxLocalProvider::ensure_child(const harness::StreamOptions& options, bool 
     const mlx::Event& ready = ready_.value();
     if (vision && !ready.vision) {
         // A driver from before 27c: it ignores --vision and loads text only,
-        // and a picture sent to it would never be seen.
+        // and a picture sent to it would never be seen -- nor a directory
+        // mlx-vlm built ever be loaded the way it was built (53f).
         drop_child();
         throw harness::ProviderError(
             options_.backend_name,
             "the MLX driver at " + options_.driver.string() +
-                " does not read images -- it is an older copy: 'apogee check --fix' brings an "
-                "earlier Apogee's up to this build's, and an edited one is kept, so delete it "
-                "first");
+                (options_.info.through_vlm ? " does not load models through mlx-vlm"
+                                           : " does not read images") +
+                " -- it is an older copy: 'apogee check --fix' brings an earlier Apogee's up to "
+                "this build's, and an edited one is kept, so delete it first");
     }
     if (!options_.adapters.empty() && ready.adapter.empty()) {
         // A driver from before 53a: it ignores --adapter and loads the bare
@@ -1045,7 +1089,9 @@ harness::ChatResponse MlxLocalProvider::run(const harness::ChatRequest& request,
     const bool images = std::ranges::any_of(
         request.messages, [](const harness::ChatMessage& m) { return m.content.is_rich(); });
     expire_if_idle();
-    ensure_child(options, images);
+    // A picture asks for mlx-vlm (27c); so does every turn, text included, of
+    // a directory mlx-vlm built (53f).
+    ensure_child(options, images || options_.info.through_vlm);
     used_ = true;
     last_use_ = options_.clock();
 

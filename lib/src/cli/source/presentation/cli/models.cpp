@@ -1284,16 +1284,63 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     return out.str();
 }
 
+/// The MLX conversion a SafeTensors set is offered (53f) -- which converter,
+/// its towers kept or its language model alone -- where its files make `mlx`
+/// a format it takes at all (M20, M21); nullopt where they do not.
+[[nodiscard]] std::optional<MlxOffer> set_mlx_offer(const std::filesystem::path& dir) {
+    const std::vector<std::string> formats = models::snapshot_conversions(dir);
+    if (std::ranges::find(formats, std::string{models::kMlxFormat}) == formats.end()) {
+        return std::nullopt;
+    }
+    return installed_mlx_offer(dir);
+}
+
 /// The formats a SafeTensors set converts to: the one decision from its files
-/// (M20, M21), MLX left out where the mlx-lm installed builds no model of its
-/// type -- never offered where it cannot work (the user's call, 2026-10-21).
-[[nodiscard]] std::vector<std::string> set_conversions(const std::filesystem::path& dir) {
+/// (M20, M21), MLX left out where no converter installed builds it -- never
+/// offered where it cannot work (the user's call, 2026-10-21).
+[[nodiscard]] std::vector<std::string> set_conversions(const std::filesystem::path& dir,
+                                                       const std::optional<MlxOffer>& offer) {
     std::vector<std::string> conversions = models::snapshot_conversions(dir);
-    if (std::ranges::find(conversions, std::string{models::kMlxFormat}) != conversions.end() &&
-        installed_mlx_builds(dir) == false) {
+    if (!offer.has_value() || !offer->offered()) {
         std::erase(conversions, std::string{models::kMlxFormat});
     }
     return conversions;
+}
+
+/// `info`'s `towers:` line for a set that has them (53f): which converter an
+/// MLX conversion runs, whether its towers are kept, and what asks for its
+/// language model alone -- or why no MLX conversion is offered.
+[[nodiscard]] std::string towers_line(const MlxOffer& offer) {
+    std::string out = models::describe_towers(offer.towers) + " -- ";
+    if (offer.converter.has_value()) {
+        out += "--mlx builds it through mlx-vlm, its towers kept";
+        if (offer.text_only) {
+            out += "; --mlx --text-only builds its language model alone with mlx-lm";
+        }
+    } else if (offer.text_only) {
+        out += offer.gap + ", so --mlx --text-only builds its language model alone with mlx-lm";
+        if (!offer.remedy.empty()) {
+            out += "; '" + offer.remedy + "' keeps them";
+        }
+    } else {
+        out += "no MLX conversion: " + offer.gap + ", and the mlx-lm there builds no " +
+               (offer.type.empty() ? std::string{"model of its type"} : offer.type + " model");
+    }
+    return out;
+}
+
+/// `data.mlx_conversion` (53f): what an MLX conversion of the set runs,
+/// where one is offered; null where none is.
+[[nodiscard]] nlohmann::json mlx_conversion_of(const std::optional<MlxOffer>& offer) {
+    if (!offer.has_value() || !offer->offered()) {
+        return nullptr;
+    }
+    nlohmann::json out{
+        {"towers", offer->towers}, {"converter", nullptr}, {"text_only", offer->text_only}};
+    if (offer->converter.has_value()) {
+        out["converter"] = std::string{training::to_string(*offer->converter)};
+    }
+    return out;
 }
 
 /// `info` on one stored SafeTensors set: where it came from, what was made
@@ -1319,11 +1366,19 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
         out << "format:       SafeTensors -- a diffusion model's weights, not runnable and not "
                "convertible\n";
         out << "diffusion:    " << models::describe_diffusion_model(*diffusion) << "\n";
-    } else {
+    }
+    std::optional<MlxOffer> offer;
+    if (!head.has_value() && !diffusion.has_value()) {
+        offer = set_mlx_offer(stored.dir);
         out << "format:       SafeTensors -- full weights, trainable, not runnable\n";
         if (const std::optional<models::EmbeddingModel> embedding =
                 models::snapshot_embedding_model(stored.dir)) {
             out << "embedding:    " << models::describe_embedding_model(*embedding) << "\n";
+        }
+        // What sees or hears beside the language model, and which MLX
+        // conversion keeps it (53f).
+        if (offer.has_value() && !offer->towers.empty()) {
+            out << "towers:       " << towers_line(*offer) << "\n";
         }
     }
     render_lineage(out, lineage, lineage.origin_of(handle));
@@ -1343,16 +1398,22 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
             mlx_made.push_back(models::weights_handle(mlx.model, models::kMlxFormat, mlx.id));
         }
     }
-    const std::vector<std::string> conversions = set_conversions(stored.dir);
+    const std::vector<std::string> conversions = set_conversions(stored.dir, offer);
     if (!consumed.has_value() && mlx_made.empty() && conversions.empty()) {
         // What no conversion takes is offered none (M20).
         out << "made from it: nothing -- no conversion takes these weights\n";
     } else if (!consumed.has_value() && mlx_made.empty()) {
-        // Only what can work is offered (M21).
+        // Only what can work is offered (M21), and only its language model
+        // where that is all an installed converter keeps (53f).
         const bool mlx =
             std::ranges::find(conversions, std::string{models::kMlxFormat}) != conversions.end();
+        const bool text_only = mlx && offer.has_value() && !offer->converter.has_value();
         out << "made from it: nothing yet -- 'apogee models convert " << handle
-            << "' makes a GGUF of it" << (mlx ? " (--mlx an MLX model)" : "") << "\n";
+            << "' makes a GGUF of it"
+            << (text_only ? " (--mlx --text-only an MLX model of its language model)"
+                : mlx     ? " (--mlx an MLX model)"
+                          : "")
+            << "\n";
     } else {
         bool first = true;
         if (consumed.has_value()) {
@@ -1847,6 +1908,8 @@ namespace {
         {"lineage", nlohmann::json::array()}};
     // A SafeTensors set's conversions, below; null for what conversions make.
     data["converts_to"] = nullptr;
+    // Which converter its MLX conversion runs (53f), below; null where none.
+    data["mlx_conversion"] = nullptr;
     // An MLX directory's kind, below (53e); null for every other format.
     data["kind"] = nullptr;
     if (target.format == models::kGgufFormat) {
@@ -1923,8 +1986,11 @@ namespace {
                 data["architecture"] = architecture;
             }
             data["lineage"] = lineage_entries(lineage, lineage.origin_of(handle));
-            // The formats it converts to, as the ladders decide (M20, M21).
-            data["converts_to"] = set_conversions(dir);
+            // The formats it converts to, as the ladders decide (M20, M21),
+            // and which converter an MLX conversion runs (53f).
+            const std::optional<MlxOffer> offer = set_mlx_offer(dir);
+            data["converts_to"] = set_conversions(dir, offer);
+            data["mlx_conversion"] = mlx_conversion_of(offer);
         }
     }
     if (dir.empty()) {

@@ -911,6 +911,118 @@ TEST_CASE(
     CHECK(sighted.provider->spawn_count() == 0);
 }
 
+TEST_CASE(
+    "a directory mlx-vlm built answers every turn through mlx-vlm, text included; one recorded "
+    "as mlx-lm's reads no images; one with no record keeps 27c's way",
+    "[backends][mlx][vision][kind]") {
+    // 53f: the backend chooses by the recorded kind (53e's reader), never by
+    // the files alone.
+    Runtime runtime;
+    const std::filesystem::path model = runtime.dir.path() / "model";
+    std::ofstream{model / "config.json"}
+        << R"({"model_type":"qwen3_vl","vision_config":{"depth":27},)"
+           R"("text_config":{"model_type":"qwen3_vl_text"}})";
+    std::ofstream{model / "preprocessor_config.json"} << "{}";
+    const std::filesystem::path site = runtime.host.venv / "lib" / "python3.14" / "site-packages";
+    Runtime::touch(site / "mlx_vlm" / "__init__.py");
+    std::filesystem::create_directories(site / "mlx_vlm-0.6.1.dist-info");
+    const auto record = [&model](std::string_view kind) {
+        std::ofstream{model / "apogee-snapshot.json"}
+            << R"({"source": "convert", "transform": "a converter", "files": [], "kind": ")" << kind
+            << R"("})";
+    };
+    const auto options = [&runtime] {
+        return MlxLocalProvider::options_from("local", runtime.entry, runtime.host);
+    };
+    const auto sighted = [] {
+        DriverState state;
+        state.vision_startup = std::string{apogee::testing::kVisionReady};
+        state.replies = {numbered(text("ok")) + done()};
+        return state;
+    };
+
+    SECTION("no record: text through mlx-lm, its cache kept, mlx-vlm from the first picture") {
+        const MlxLocalProvider::Options unrecorded = options();
+        CHECK(unrecorded.info.kind.source == apogee::models::MlxKindSource::Files);
+        CHECK(unrecorded.vision);
+        CHECK_FALSE(unrecorded.info.through_vlm);
+        Fixture fixture{sighted(), unrecorded};
+        (void)fixture.provider->chat(ask("hello"), {});
+        REQUIRE(fixture.commands.size() == 1);
+        CHECK_FALSE(asked_for_vision(fixture.commands[0]));
+        CHECK(apogee::backends::probe_mlx_backend("local", runtime.entry, runtime.host).ready());
+    }
+    SECTION("recorded vision: mlx-vlm from the first turn, one driver for every turn") {
+        record("vision");
+        const MlxLocalProvider::Options built = options();
+        CHECK(built.info.kind.source == apogee::models::MlxKindSource::Recorded);
+        CHECK(built.info.through_vlm);
+        CHECK(built.vision);
+        Fixture fixture{sighted(), built};
+        CHECK(fixture.provider->accepts_images());
+        Streamed streamed;
+        (void)fixture.provider->stream_chat(ask("hello"), streamed.options);
+        REQUIRE(fixture.commands.size() == 1);
+        CHECK(asked_for_vision(fixture.commands[0]));
+        CHECK(fixture.provider->has_vision_child());
+        const apogee::harness::StatusEvent* loading =
+            streamed.status(apogee::harness::StatusEvent::Type::ModelLoading);
+        REQUIRE(loading != nullptr);
+        CHECK(loading->detail == "through mlx-vlm, which built it");
+        // A picture, then text again: the same driver, never swapped.
+        (void)fixture.provider->chat(look(), {});
+        (void)fixture.provider->chat(ask("and now?"), {});
+        CHECK(fixture.provider->spawn_count() == 1);
+        CHECK(fixture.drivers[0]->writes.size() == 3);
+
+        // Preloaded the same way.
+        Fixture preloaded{sighted(), built};
+        preloaded.provider->preload({});
+        REQUIRE(preloaded.commands.size() == 1);
+        CHECK(asked_for_vision(preloaded.commands[0]));
+
+        // A driver from before 27c ignores --vision: refused, the fix named.
+        DriverState older;
+        older.replies = {numbered(text("never")) + done()};
+        Fixture stale{std::move(older), built};
+        try {
+            (void)stale.provider->chat(ask("hello"), {});
+            FAIL("an older driver must not answer for a directory mlx-vlm built");
+        } catch (const apogee::harness::ProviderError& e) {
+            const std::string message = e.what();
+            CHECK(message.find("does not load models through mlx-vlm") != std::string::npos);
+            CHECK(message.find("apogee check --fix") != std::string::npos);
+        }
+        CHECK(stale.drivers[0]->writes.empty());
+    }
+    SECTION("recorded chat: mlx-lm's build of its language model reads no images") {
+        record("chat");
+        const MlxLocalProvider::Options text_only = options();
+        CHECK(text_only.info.vision_files);
+        CHECK_FALSE(text_only.vision);
+        CHECK_FALSE(text_only.info.through_vlm);
+        const apogee::backends::MlxVision vision = apogee::backends::probe_mlx_vision(
+            apogee::backends::inspect_mlx_model(model), runtime.host);
+        CHECK_FALSE(vision.model);
+        CHECK(vision.reason.find("its record says it is mlx-lm's build of its language model "
+                                 "alone (kind chat), its vision tower left out") !=
+              std::string::npos);
+        Fixture fixture{sighted(), text_only};
+        CHECK_FALSE(fixture.provider->accepts_images());
+        try {
+            (void)fixture.provider->chat(look(), {});
+            FAIL("a picture went to mlx-lm's build of a language model");
+        } catch (const apogee::harness::ProviderError& e) {
+            CHECK(std::string{e.what()}.find("cannot read images: its record says") !=
+                  std::string::npos);
+        }
+        CHECK(fixture.provider->spawn_count() == 0);
+        (void)fixture.provider->chat(ask("hello"), {});
+        REQUIRE(fixture.commands.size() == 1);
+        CHECK_FALSE(asked_for_vision(fixture.commands[0]));
+    }
+}
+
 TEST_CASE("preload starts the driver and waits for its model", "[backends][mlx][session]") {
     Fixture fixture{DriverState{}};
     CHECK(fixture.provider->model_status().type ==
@@ -989,13 +1101,27 @@ TEST_CASE("the refusal ladder: every rung refuses with its own reason and its ex
                 "--type mlx");
     }
     {
+        // A directory mlx-vlm built (53f), with no mlx-vlm to load it -- asked
+        // before the driver, which could not load it either.
+        const Runtime runtime;
+        std::ofstream{runtime.dir.path() / "model" / "apogee-snapshot.json"}
+            << R"({"source": "convert", "transform": "mlx_vlm.convert 4bit", "files": [],)"
+               R"( "kind": "vision"})";
+        std::filesystem::remove(runtime.host.driver);
+        refused(runtime.probe(), MlxRefusal::NoMlxVlm,
+                "was built by mlx-vlm (its record says vision), which loads it for every turn, "
+                "and mlx-vlm is not installed",
+                "apogee train setup --with mlx-vlm");
+    }
+    {
         const Runtime runtime;
         std::filesystem::remove(runtime.host.driver);
         refused(runtime.probe(), MlxRefusal::NoDriver, "the MLX driver is missing",
                 "apogee check --fix");
     }
-    // Eight rungs, eight different sentences.
-    CHECK(messages.size() == 8);
+    // Nine rungs, nine different sentences.
+    CHECK(messages.size() == 9);
+    CHECK(apogee::backends::to_string(MlxRefusal::NoMlxVlm) == "no mlx-vlm");
 }
 
 TEST_CASE("the ladder asks the platform first, the runtime before the model",

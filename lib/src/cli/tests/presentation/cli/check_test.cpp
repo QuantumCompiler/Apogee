@@ -2138,6 +2138,59 @@ void install_mlx_vlm(const Install& install) {
 }  // namespace
 
 TEST_CASE(
+    "an entry over a directory mlx-vlm built warns without mlx-vlm, which it runs on for every "
+    "turn; one recorded as mlx-lm's build claims no sight",
+    "[commands][check][mlx][vision][kind]") {
+    // 53f: the doctor asks the backend's own ladder, so it says what
+    // construction would -- by the directory's recorded kind.
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", "models:\n  default: local\n" + mlx_entry(install));
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    make_vision_model(install);
+    install.write("mlx-model/apogee-snapshot.json",
+                  R"({"source": "convert", "transform": "mlx_vlm.convert 4bit", "files": [], )"
+                  R"("kind": "vision"})");
+    {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->status == Status::Warn);
+        CHECK(entry->detail.find("was built by mlx-vlm (its record says vision), which loads it "
+                                 "for every turn, and mlx-vlm is not installed") !=
+              std::string::npos);
+        CHECK(entry->remedy == "apogee train setup --with mlx-vlm");
+    }
+    install_mlx_vlm(install);
+    {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->status == Status::Ok);
+        CHECK(entry->detail.find("a vision model, reading images through mlx-vlm") !=
+              std::string::npos);
+    }
+    install.write("mlx-model/apogee-snapshot.json",
+                  R"({"source": "convert", "transform": "mlx_lm.convert 4bit", "files": [], )"
+                  R"("kind": "chat"})");
+    {
+        // Its vision files came along; its record says mlx-lm left the tower.
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->status == Status::Ok);
+        CHECK(entry->detail.find("vision") == std::string::npos);
+    }
+}
+
+TEST_CASE(
     "the MLX vision row says what it found: mlx-vlm present passes on its files, absent is "
     "skipped until a vision model needs it, then a warning with the fix",
     "[commands][check][mlx][vision]") {

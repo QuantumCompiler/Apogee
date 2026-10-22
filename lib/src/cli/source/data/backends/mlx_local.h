@@ -19,6 +19,7 @@
 #include "backends/sampling.h"
 #include "contracts/config.h"
 #include "contracts/provider.h"
+#include "modelstore/mlx_info.h"
 #include "platform/child_process.h"
 #include "transport/jsonl_framer.h"
 
@@ -85,6 +86,9 @@ enum class MlxRefusal : std::uint8_t {
     ModelMissing,
     /// `model_path` is not a model directory (no `config.json`).
     NotAModelDirectory,
+    /// The directory loads through mlx-vlm alone -- its record says mlx-vlm
+    /// built it (53f) -- and the environment has no `mlx_vlm` package.
+    NoMlxVlm,
     /// The seeded driver is not there.
     NoDriver,
 };
@@ -119,8 +123,9 @@ struct MlxReadiness {
 [[nodiscard]] MlxReadiness probe_mlx_runtime(const MlxHost& host);
 
 /// The whole ladder for one entry `name`: the platform, the environment and
-/// `mlx-lm`, then its `model_path`, then the driver. Construction and `check`
-/// both ask this, so they cannot disagree about whether an entry can run.
+/// `mlx-lm`, then its `model_path`, then mlx-vlm for a directory that loads
+/// through it alone (53f), then the driver. Construction and `check` both ask
+/// this, so they cannot disagree about whether an entry can run.
 [[nodiscard]] MlxReadiness probe_mlx_backend(std::string_view name,
                                              const harness::BackendConfig& config,
                                              const MlxHost& host);
@@ -135,11 +140,27 @@ struct MlxModelInfo {
     std::string text_model_type;
     bool chat_template = false;
     SamplingRung sampling;
-    /// A vision model (27c): `config.json` declares a `vision_config`, and an
-    /// image processor's configuration (`preprocessor_config.json` or
-    /// `processor_config.json`) ships beside it -- what mlx-vlm needs to
-    /// read a picture. A fact of the files, never of the name.
+    /// What the directory is (53e's one reader, `read_mlx_kind`): its
+    /// record's word, else `vision` where its files say so, else `chat`.
+    models::MlxKind kind{};
+    /// A vision model: its kind is `vision` (53f) -- recorded by mlx-vlm's
+    /// conversion, or, with no record, read from its files (27c): a
+    /// `vision_config` and an image processor's configuration
+    /// (`preprocessor_config.json` or `processor_config.json`) beside it,
+    /// what mlx-vlm needs to read a picture. A record saying it is something
+    /// else -- mlx-lm's build of its language model alone -- wins over the
+    /// files. Never a fact of the name.
     bool vision = false;
+    /// The files carry a vision tower and its processor, whatever the record
+    /// says (`models::mlx_vision_files`).
+    bool vision_files = false;
+    /// Every turn loads through mlx-vlm (53f): its record says mlx-vlm built
+    /// it (kind `vision`, recorded), so its weights are laid out the way
+    /// mlx-vlm loads them -- whether mlx-lm could load them for a text turn
+    /// is not known without real weights. An unrecorded directory with
+    /// vision files keeps 27c's way: text through mlx-lm, its cache kept, and
+    /// mlx-vlm from the first picture on.
+    bool through_vlm = false;
 };
 
 [[nodiscard]] MlxModelInfo inspect_mlx_model(const std::filesystem::path& dir);
@@ -162,8 +183,8 @@ struct MlxVlmPackage {
 [[nodiscard]] MlxVlmPackage find_mlx_vlm(const MlxHost& host);
 
 /// Whether an MLX model reads images natively (27c), from file facts alone:
-/// the directory is a vision model (`MlxModelInfo::vision`) and mlx-vlm is
-/// installed in the environment. The provider's `accepts_images`, `check`
+/// the directory is a vision model (`MlxModelInfo::vision`, by its kind
+/// since 53f) and mlx-vlm is installed in the environment. The provider's `accepts_images`, `check`
 /// and `models info/status` all ask this, so no surface claims a capability
 /// another denies.
 struct MlxVision {
@@ -358,7 +379,9 @@ private:
     /// ProviderError with the driver's own words when it cannot. `vision`
     /// asks for one loaded through mlx-vlm: a running text driver is ended
     /// and the model loaded again that way (27c); a running vision driver
-    /// answers text turns too, so it is never swapped back.
+    /// answers text turns too, so it is never swapped back. A directory
+    /// mlx-vlm built (`MlxModelInfo::through_vlm`, 53f) is always asked for
+    /// one, its first turn and every turn after.
     void ensure_child(const harness::StreamOptions& options, bool vision = false);
 
     /// Refuses a request carrying what this model cannot read: an image

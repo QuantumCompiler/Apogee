@@ -118,7 +118,8 @@ struct MlxConvertResult {
     /// shards and size.
     MlxInfo info;
     /// What kind of MLX directory the converter made (53e), for its record:
-    /// `chat`, since mlx-lm's converter builds a language model. Set when
+    /// `chat` for mlx-lm's language model, `vision` for mlx-vlm's build with
+    /// its towers kept (53f) -- the route's, as the caller names it. Set when
     /// `ok`.
     std::string kind{};
 };
@@ -143,7 +144,8 @@ struct MlxConvertResult {
 ///      to `bits` when `bits` is set -- a directory that cannot load, or one
 ///      the converter did not quantize as asked, is never committed
 /// A failure at any rung, cancellation included, removes `out`. Committing
-/// it under its id is the store's (`commit_mlx`).
+/// it under its id is the store's (`commit_mlx`). `kind` is what the route's
+/// converter builds (53f): `chat` for mlx-lm's, `vision` for mlx-vlm's.
 /// The `model_type` a snapshot's `config.json` declares, or empty.
 [[nodiscard]] std::string snapshot_model_type(const std::filesystem::path& snapshot);
 
@@ -158,6 +160,7 @@ struct MlxConvertResult {
 
 [[nodiscard]] MlxConvertResult convert_snapshot_to_mlx(
     const std::filesystem::path& snapshot, const std::filesystem::path& out, int bits,
-    const MlxConvertFn& convert, const harness::CancellationToken& cancellation);
+    const MlxConvertFn& convert, const harness::CancellationToken& cancellation,
+    std::string_view kind = kMlxChat);
 
 }  // namespace apogee::models

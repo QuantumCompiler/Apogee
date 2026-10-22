@@ -9497,3 +9497,66 @@ Decisions taken while building, for veto:
 - `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,709 tests and the macOS app's 342 cases passed, with no warning.
 
 **Not done:** the mlx backend still decides vision from the files when it runs a directory. Routing a turn by the recorded kind is 53f's.
+
+### 2026-10-21 — `mlx-vlm-conversions` (backlog item 53f): a set that sees or hears keeps its towers on MLX
+
+**Why.** `models convert --mlx` had one converter (`mlx_lm.convert`). Mlx-lm builds language models. 7 of the user's 18 SafeTensors sets declare towers:
+- Gemma4 ×5;
+- Qwen3.8-27B;
+- Qwen3-VL-8B.
+
+Mlx-lm converted 6 of them as text alone, and Qwen3-Omni-30B (`qwen3_omni_moe`) not at all. Mlx-vlm builds every one of them with their towers, and Apogee already installed and ran it (27c's vision driver). These were walls W1 and W2, and W10's mlx-vlm part.
+
+- [x] **The set's own files choose the converter.**
+  - `snapshot_towers` (`modelstore/snapshot`) reads the towers by the GGUF encoder reader's rules: a `vision_config`, an `audio_config` or an omni model's `thinker_config`. `language_model_only` means none, and an empty or null key is no tower.
+  - `training/mlx_convert` chooses (`MlxConverterKind`, `choose_mlx_converter`).
+  - `cli/models_pull` joins the two into `MlxRoute`.
+  - The split follows the layer law, since the training and model-store modules include neither the other. A name never decides.
+- [x] **Mlx-vlm's route.**
+  - The seeded `mlx_convert.py` gains `--with mlx-vlm`, which calls `mlx_vlm.convert`'s own entry the way its command line does. It passes `trust_remote_code=False`, and no group size for `mxfp4`, whose 32 the function's default 64 would break.
+  - The precision table maps onto its flags.
+  - The record's transform is `mlx_vlm.convert <precision>`, and its kind is **`vision`**.
+  - A language model converts through mlx-lm, byte for byte as before.
+- [x] **Offered only where it works** (M21's rule, carried to two converters).
+  - MLX is offered for a towered set when the installed mlx-vlm's own `models/` builds its type, read as M15 reads mlx-lm's.
+  - Otherwise mlx-lm's text-only build is offered where it builds the type, and `models info` says so. Its hint reads `--mlx --text-only`.
+  - With neither library installed, both stay offered. Neither building it is refused before Python, with M15's `--model-type` door kept.
+  - A plain `--mlx` never quietly falls back to text: it is refused, naming `--text-only`.
+- [x] **`--text-only`** on `models convert --mlx` (with its completion) gives a towered set mlx-lm's build. On a language model it converts as it is and says so, and without `--mlx` it is refused. `--model-type` completion follows the converter the set on the line routes to.
+- [x] **A `vision` directory runs through mlx-vlm for every turn.**
+  - A directory recorded `vision` loads through mlx-vlm from the first turn, text turns included (`mlx_local`'s `through_vlm`, the driver's `--vision` mode). Its loading line says "through mlx-vlm, which built it".
+  - A new readiness rung, `NoMlxVlm`, refuses it at build time when mlx-vlm is missing, and `check` warns with `train setup --with mlx-vlm`.
+  - A directory recorded `chat` no longer claims to read images even with vision files. `check` and `models info` say it is mlx-lm's build with the tower left out, and that `--mlx` keeps it.
+- [x] **Mlx-vlm's floor is raised from `>=0.3` to `>=0.6.1`, reviewed 2026-10-21.**
+  - 0.6.1 was released 2026-06-03, per PyPI's release history.
+  - GitHub's contents API shows `mlx_vlm/models/gemma4_unified` missing at v0.6.0, and v0.6.1 holding `gemma4_unified`, `qwen3_omni_moe` and `qwen3_5`.
+  - It needs Python >=3.10 and mlx-lm>=0.31.3, so M19's range is unchanged.
+- [x] **`models info` JSON gains `data.mlx_conversion`** (`towers`, `converter`, `text_only`), additively, and its text gains a `towers:` line. Both are documented in `machine-mode.md` and `training.md`. The earlier digests of both drivers joined `retired-scripts.txt`.
+
+**Decisions made while building** (2026-10-21, each recorded for veto):
+- **The open calls' defaults, taken:** `--text-only` is the word for mlx-lm's build, and the floor is read at build time and dated (0.6.1, above).
+- **An unrecorded directory with vision files keeps today's way:** text through mlx-lm with its prompt cache, and mlx-vlm from the first picture. Such a directory was written by 27b's mlx-lm converter, by a pull or by `train promote`, before records existed. Its weights are laid out for mlx-lm, which is the text path proved on real weights.
+- **A record wins over the files.** A directory recorded `chat` with vision files is mlx-lm's build, its tower left out. Only sets converted on this branch under 53e carry that record.
+- **A plain `--mlx` refuses rather than reducing a set to text.** The macOS app's convert sheet runs `--mlx` without `--text-only`, so on a host without mlx-vlm a towered set is refused until the GUI's 3a passes the flag. The installer's bootstrap installs mlx-vlm on Apple silicon. 3a's document records the field it reads.
+- **A text-only build keeps the `mlx_lm.convert <precision>` transform.** A towered set converted under 53e is recognised as its text-only build. A plain `--mlx` then makes the vision build beside it.
+- **The floor upgrades an environment only through `train setup --with mlx-vlm`.** The install's bootstrap runs that command for every set the host can install, so `make install` or the installers bring it up. That is the existing behaviour of every set's floor.
+
+**Verified.**
+- 10 new cases, 266 assertions:
+  - 7 `[towers]`:
+    - the towers reader;
+    - the converter choice and argv;
+    - the driver's mlx-vlm path and its refusals;
+    - the mlx-vlm type reader;
+    - the route, record and `--text-only`;
+    - the offer, with the omni model offered only where the stub mlx-vlm lists `qwen3_omni_moe`.
+  - 3 `[kind][vision]`: a `vision` directory's text turn through the vision driver, never mlx-lm, in `mlx_local_test`, `mlx_driver_test` and `check_test`.
+- Fixtures: the user's set shapes written inline from the publishers' public configs (`tests/support/towered_configs.h`), and a stub `mlx_vlm` package (`convert.py`, `utils.py`, `models/{gemma4,gemma4_unified,qwen3_5,qwen3_vl}`), with a missing-mlx-vlm twin.
+- The refusal ladder's case now covers 9 rungs. `python_env_test` pins the floor and its date.
+- `cli.mlx_models_lifecycle` gained a real-binary phase: a Qwen3-VL-shaped set converted through the stub mlx-vlm, recorded `vision`, registered, then a text turn and a picture each answered through mlx-vlm, with mlx-lm's loader never called. With the kind routing removed, 6 `[kind]` assertions and that phase failed. It was put back.
+- ctest: `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`, `cli.mlx_lifecycle`, `cli.mlx_models_lifecycle`, `cli.machine_schema_conformance`, `cli.complete_lifecycle`, `cli.shell_completion` and `cli.train_lifecycle` pass.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,719 tests and the macOS app's 342 cases passed, with no warning.
+
+**Not done:**
+- A real conversion, and W2's real-weights question (whether mlx-lm could load mlx-vlm's layout for text), are the user's run.
+- `check` does not compare an installed mlx-vlm's version against the floor.

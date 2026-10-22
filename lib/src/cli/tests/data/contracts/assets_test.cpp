@@ -828,10 +828,12 @@ TEST_CASE("the compiled-in driver list names earlier versions, never this build'
     }
     std::ranges::sort(recorded);
     CHECK(std::vector<std::string>{retired.begin(), retired.end()} == recorded);
-    // Every version an earlier Apogee seeded: 27a's driver, and v0.1.0's
-    // trainers and preparer before their 2026-10-04 edits.
+    // Every version an earlier Apogee seeded: 27a's driver, v0.1.0's
+    // trainers and preparer before their 2026-10-04 edits, and the MLX
+    // converter before its mlx-vlm route (53f).
     for (const std::string_view earlier :
          {"mlx_generate.py 4676e348595cdbfdb4a23191f7b008e718c29b097da45b5f563c75091e8c2335",
+          "mlx_convert.py 26e95774b422a532805992082bf019fefd3ba305ba449eaf304a47ad1799ef41",
           "prepare_dataset.py 868db898b9bb043399a4f57b2ee5f1ad4bf6e614022b0d0249f1b118ec0de41f",
           "train_mlx.py 7f5b206c455094c5d63b72dd804f9ba49a0647d84cf87b723be6192db4ddc478",
           "train_peft.py 8663c7508fb6630ed0d63bbbb856c55ca817196e05178ea71a1621d77199f508"}) {

@@ -39,18 +39,26 @@ there, and commits it by the store's own rule.
 Runs under the Python environment Apogee owns, never the system Python.
 Requires `mlx-lm` there:  apogee train setup --with mlx
 
-    mlx_convert.py --hf-path <snapshot> --mlx-path <out>
+    mlx_convert.py [--with mlx-vlm] --hf-path <snapshot> --mlx-path <out>
                    [--q-bits N [--q-group-size N] [--q-mode M] | --dtype T]
 
-`--q-bits` quantizes (mlx-lm's own scheme: N bits a weight in groups, a scale
-and bias each); without it the weights are written at `--dtype` (`bfloat16`,
-`float16`, `float32`). `<out>` must not exist: mlx-lm refuses to write into a
-path that does, and so does this.
+`--with mlx-vlm` converts with `mlx_vlm`'s own `convert` instead (53f): a
+model that sees or hears -- its config declares a vision, audio or omni
+tower -- built whole, its towers kept, where mlx-lm would build its language
+model alone. The same precisions, mapped onto mlx-vlm's own flags as its
+command line passes them, and remote code never trusted, as its command line
+defaults. Requires `mlx-vlm` too:  apogee train setup --with mlx-vlm
+
+`--q-bits` quantizes (the converter's own scheme: N bits a weight in groups, a
+scale and bias each); without it the weights are written at `--dtype`
+(`bfloat16`, `float16`, `float32`). `<out>` must not exist: both converters
+refuse to write into a path that does, and so does this.
 
 The training drivers' protocol, one JSON object per line on stdout:
   {"message": "..."}                       as it goes
   {"error": "..."}                         fatal; a non-zero exit follows
   {"converted": "<out>", "quantized": B, "mlx_lm": "..."}   at the end
+      -- with `--with mlx-vlm`, "mlx_vlm": "..." in place of "mlx_lm"
 
 Everything a library prints goes to stderr, which Apogee captures: the
 protocol's stdout is a duplicate of the original descriptor, and descriptor 1
@@ -58,6 +66,7 @@ itself is pointed at stderr before anything is imported.
 """
 
 import argparse
+import inspect
 import json
 import os
 import signal
@@ -94,6 +103,8 @@ def fail(message, code=1):
 
 def arguments(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--with", dest="converter", choices=["mlx-lm", "mlx-vlm"],
+                        default="mlx-lm")
     parser.add_argument("--hf-path", required=True)
     parser.add_argument("--mlx-path", required=True)
     parser.add_argument("--q-bits", type=int, default=0)
@@ -109,6 +120,8 @@ def main(argv):
         return fail(f"{args.hf_path} is not a local snapshot directory", 2)
     if os.path.exists(args.mlx_path):
         return fail(f"{args.mlx_path} already exists -- a conversion never writes over one", 2)
+    if args.converter == "mlx-vlm":
+        return convert_with_vlm(args)
 
     emit({"message": "loading mlx-lm"})
     try:
@@ -154,6 +167,65 @@ def main(argv):
     return 0
 
 
+def convert_with_vlm(args):
+    """The snapshot built whole through mlx-vlm's own `convert`, its towers
+    kept (53f): the precision as mlx-vlm's command line hands it over."""
+    emit({"message": "loading mlx-vlm"})
+    try:
+        import mlx_vlm
+        from mlx_vlm.convert import convert
+    except ImportError as exc:
+        return fail(
+            f"mlx-vlm is not installed in Apogee's Python environment ({exc}) -- "
+            "apogee train setup --with mlx-vlm",
+            3,
+        )
+    version = vlm_version(mlx_vlm)
+
+    options = {"hf_path": args.hf_path, "mlx_path": args.mlx_path}
+    if args.q_bits > 0:
+        options["quantize"] = True
+        options["q_bits"] = args.q_bits
+        # Unnamed, the group is the mode's own, as mlx-vlm's command line
+        # leaves it: its function's default (64) would not fit mxfp4's 32.
+        options["q_group_size"] = args.q_group_size if args.q_group_size > 0 else None
+        if args.q_mode and args.q_mode != "affine":
+            options["q_mode"] = args.q_mode
+    elif args.dtype:
+        options["dtype"] = args.dtype
+    try:
+        accepted = set(inspect.signature(convert).parameters)
+    except (TypeError, ValueError):
+        accepted = set()
+    if "trust_remote_code" in accepted:
+        # Its command line's default; its function's is to trust. A snapshot's
+        # own code never runs here.
+        options["trust_remote_code"] = False
+
+    emit({"message": "quantizing" if args.q_bits > 0 else "converting"})
+    try:
+        convert(**options)
+    except TypeError as exc:
+        if "q_mode" in str(exc) or "dtype" in str(exc):
+            return fail(f"this mlx-vlm ({version}) cannot write that precision: {exc}")
+        return fail(f"TypeError: {exc}")
+    except Exception as exc:  # the converter's own words, whatever they are
+        return fail(f"{type(exc).__name__}: {exc}")
+
+    emit({"converted": args.mlx_path, "quantized": args.q_bits > 0, "mlx_vlm": version})
+    return 0
+
+
+def vlm_version(module):
+    version = getattr(module, "__version__", None)
+    if version is None:
+        try:
+            from mlx_vlm.version import __version__ as version
+        except ImportError:
+            version = ""
+    return str(version)
+
+
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
 )PY",
@@ -186,6 +258,9 @@ read exactly as a text model's is -- the format's markers and call parser
 are `mlx_lm`'s, from the same model directory. A vision model answers every
 turn whole, with no cache kept between turns. Requires `mlx-vlm` too:
   apogee train setup --with mlx-vlm
+The backend asks for it from the first turn on, text turns included, for a
+directory mlx-vlm built (53f: its record says `vision`), whose weights are
+laid out the way mlx-vlm loads them; for any other, from the first picture.
 
 `--adapter` applies a LoRA adapter over the model at load, never fused into
 it (53a): the directory mlx-lm's training wrote (adapter_config.json beside
@@ -531,14 +606,14 @@ class Reader:
         # Hold the longest tail that could still begin a marker.
         hold = 0
         for marker, _ in self._markers():
-            for size in range(min(len(marker) - 1, len(self.pending)), 0, -1):
+)PY",
+    R"PY(            for size in range(min(len(marker) - 1, len(self.pending)), 0, -1):
                 if self.pending.endswith(marker[:size]):
                     hold = max(hold, size)
                     break
         if hold:
             self._route(self.pending[:-hold])
-)PY",
-    R"PY(            self.pending = self.pending[-hold:]
+            self.pending = self.pending[-hold:]
         else:
             self._route(self.pending)
             self.pending = ""
@@ -868,13 +943,13 @@ def image_file(uri, directory, index):
     try:
         data = base64.b64decode(payload, validate=False)
     except (binascii.Error, ValueError) as e:
-        raise ValueError(f"an image's data: URI does not decode: {e}") from None
+)PY",
+    R"PY(        raise ValueError(f"an image's data: URI does not decode: {e}") from None
     if not data:
         raise ValueError("an image's data: URI is empty")
     media = header[len("data:"):-len(";base64")].lower()
     path = os.path.join(directory, f"image-{index}{IMAGE_SUFFIXES.get(media, '.img')}")
-)PY",
-    R"PY(    with open(path, "wb") as out:
+    with open(path, "wb") as out:
         out.write(data)
     return path
 
@@ -1090,8 +1165,9 @@ def serve_vision(mx, api, model_dir, model_type, version, adapter=None):
         from mlx_vlm import stream_generate
     except ImportError as e:
         error("missing_dependency",
-              f"mlx-vlm is not installed in the Python environment ({e}), so this model's "
-              "images cannot be read. Run: apogee train setup --with mlx-vlm")
+              f"mlx-vlm is not installed in the Python environment ({e}), so this model "
+              "cannot be loaded through it -- neither its images read nor, for one mlx-vlm "
+              "built, any turn answered. Run: apogee train setup --with mlx-vlm")
         return 3
     try:
         if adapter:

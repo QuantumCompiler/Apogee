@@ -33,4 +33,4 @@ Today an attached recording reaches such a model only as the transcription role'
 - [ ] A backend that cannot hear says so before anything starts, and the transcription fallback stands.
 - [ ] `lib/scripts/cicd.sh --test` is green.
 
-**Scope note.** v0.2.0, gated on [53f](mlx-vlm-conversions.md). Speech *out* of an omni model (Qwen3-Omni's talker) is not in scope: it is a speech engine's work, nearer [53m](mlx-voice.md), and unasked.
+**Scope note.** v0.2.0. Its gate, [53f](../../assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind) (mlx-vlm's route, a `vision` directory run through mlx-vlm for every turn), shipped 2026-10-21. Speech *out* of an omni model (Qwen3-Omni's talker) is not in scope: it is a speech engine's work, nearer [53m](mlx-voice.md), and unasked.
