@@ -58,6 +58,23 @@ Opened 2026-10-21 from the CLI's MLX-for-every-kind spike (the user's call): the
 - [x] **MLX engines and drafters** *(3b, shipped 2026-10-22 — [Milestone D](MILESTONES.md#milestone-d--mlx-kinds-in-the-app))* — drafters paired with their bases, and the clip and say sheets naming their engine.
 
 
+### v0.2.0 — Track 4, the CLI/GUI audit's findings
+
+Opened 2026-10-22 (the user's call): a thorough bug and feature-disparity audit over the CLI and GUI, 14 dimensions, probes against the branch binary and a three-lens adversarial panel per finding. 111 of 112 findings survived; the GUI's 68 (11 high) land here as twelve items. The CLI's 43 are its track 55.
+
+- [ ] **Private sessions survive** *([4a](../backlog/v0.2.0/private-sessions-survive.md))* — leaving Sessions never wipes a private conversation; ⌘Q completes the shutdown; a stop during launch reaps its child.
+- [ ] **Honest session lines** *([4b](../backlog/v0.2.0/session-lines-honest.md))* — lines queued between turns, relaunch on current settings, dead cards closed, earlier and live rows kept apart, resumed chips and warnings, renames that stick.
+- [ ] **Children end cleanly** *([4c](../backlog/v0.2.0/children-end-cleanly.md))* — Stop always ends a job; no leaks; a failing override said; PATH read safely; every child on the monitor.
+- [ ] **Markdown and code keep every line** *([4d](../backlog/v0.2.0/markdown-code-edges.md))* — link definitions, short math answers, pipe paragraphs, bare fences, heredoc shifts.
+- [ ] **Store jobs keep their identity** *([4e](../backlog/v0.2.0/downloads-and-store-jobs.md))* — a quantize registers its own GGUF; resumes only on stops; delete's warnings shown.
+- [ ] **The media studio, finished** *([4f](../backlog/v0.2.0/media-studio-finished.md))* — supervised installs, compose's voice model and consent, honest toasts, captions said up front.
+- [ ] **Console and argv safety** *([4g](../backlog/v0.2.0/console-and-argv-safety.md))* — carve-outs refused after root options, the exec line's refusals, user text after `--`.
+- [ ] **Buttons that do what they say** *([4h](../backlog/v0.2.0/library-tasks-review-correctness.md))* — Tasks' resume in its folder and state, no stale saves, results on their own selection, empty states and failures said.
+- [ ] **Training and suites parity** *([4i](../backlog/v0.2.0/training-and-suites-parity.md))* — adapter promote and editing, datasets pull, the shared-base fit, a chat under any suite.
+- [ ] **Pipeline and cycle screens** *([4j](../backlog/v0.2.0/pipeline-and-cycle-screens.md))* — gated on the CLI's 55h JSON.
+- [ ] **The remaining verbs** *([4k](../backlog/v0.2.0/settings-sessions-graph-parity.md))* — saved-chat compact/info/recall, one provider registered, `server_tools` shown, graph export/dedupe/delete, MCP remove, raw records, capabilities from launch.
+- [ ] **Docs and the board catch up** *([4l](../backlog/v0.2.0/docs-and-board-catch-up.md))* — shipped gaps flipped by probe; ROADMAP, SPEC and CLAUDE stating what shipped.
+
 ---
 
 ## Fast follow

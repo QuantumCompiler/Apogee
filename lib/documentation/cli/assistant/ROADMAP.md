@@ -241,6 +241,19 @@ The release's MLX-for-every-kind track *(53e–53m, opened 2026-10-21 from that 
 - [x] **`video generate` on MLX** *(53l, shipped 2026-10-21 — [Milestone AQ](MILESTONES.md#milestone-aq--mlx-for-every-kind))* — a second engine on the one generation core, chosen by the model's directory.
 - [x] **Voice on MLX** *(53m, shipped 2026-10-22 — [Milestone AQ](MILESTONES.md#milestone-aq--mlx-for-every-kind))* — Kokoro through mlx-audio, `voice say` on an MLX engine.
 
+
+The release's audit track *(track 55, opened 2026-10-22 from the user-requested CLI/GUI audit: 14 dimensions, probes against the branch binary, a three-lens adversarial panel per finding; 111 of 112 findings survived, the CLI's 43 with 6 high)*. In build order:
+
+- [ ] **Private stays private** *([55a](../backlog/v0.2.0/private-stays-private.md))* — a private terminal session writes no `chat_history`, never sends its questions to the utility backend for a title, and `compact`/`set model` settle the title call first.
+- [ ] **The session record tells the truth** *([55b](../backlog/v0.2.0/session-record-truth.md))* — failed compactions said and uncounted, recall naming renamed chats, resume degradations reaching drivers as notices, reconciled turn numbers, outside renames and deletes surviving a live session.
+- [ ] **Job streams and the composer keep their word** *([55c](../backlog/v0.2.0/job-streams-and-compose-honesty.md))* — every `models pull` cancellable, resumed compositions applying or refusing `--edit`, no `.srt` overwritten, dry runs never saying "rendering".
+- [ ] **Model-store hygiene** *([55d](../backlog/v0.2.0/model-store-hygiene.md))* — delete and rename see `draft:`, adapters and default pointers; MLX families rename; every hint runnable; voice and video sets never chat backends.
+- [ ] **Adapters and shared bases, closed** *([55e](../backlog/v0.2.0/adapters-and-shared-bases-closed.md))* — a joiner's window priced once, MLX embeddings honoring adapters, pins checked on base moves and rollbacks, embedding spaces carrying their adapters.
+- [ ] **The config editor writes only what it means** *([55f](../backlog/v0.2.0/config-editor-correctness.md))* — block-aware lists, quote-aware `#`, names editable in both formats, a lock around every edit.
+- [ ] **Config reads and validation** *([55g](../backlog/v0.2.0/config-reads-and-validation.md))* — `config get` reading every field the editor writes, derived completion, typo'd keys said, the template and upgrade made true.
+- [ ] **`train pipeline` and `train cycle` speak JSON** *([55h](../backlog/v0.2.0/train-pipeline-cycle-json.md))* — the GUI's pipeline and cycle screens build on it.
+- [ ] **The docs at the release boundary** *([55i](../backlog/v0.2.0/docs-at-the-release-boundary.md))* — VERSION and the CLI version to 0.2.0 (without it the merge publishes nothing), ROADMAP, README, CLAUDE and DEVELOPER stating today's facts.
+
 ### v0.1.9 — Desktop-parity capabilities
 
 Opened 2026-10-16 (the user's call, from that day's built-in-MCP parity spike — track **47**): the capabilities that make Claude Desktop and ChatGPT feel ahead, shipped Apogee's way. The spike's reframe, measured: MCP servers are provider-neutral (the host already translates per vendor; Apogee itself answers the MCP handshake with 17 tools), so the provider-specific work is the vendors' **server-side tools** — and that is wire work in the backends, settled by the user the same day as **allowed, default-off, per entry** (the dated SPEC principle). In build order:
