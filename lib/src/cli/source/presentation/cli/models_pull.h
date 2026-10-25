@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -573,9 +574,18 @@ struct RegisterChainRequest {
     std::string base_name;
 };
 
-/// What the chain makes things with, so a test can stand in for llama.cpp.
+/// Makes the transport a pull reaches Hugging Face through, one per client:
+/// libcurl's, or a test's fixture source (55c).
+using TransportMaker = std::function<std::unique_ptr<backends::HttpTransport>()>;
+
+/// libcurl's transport, which every pull from the command line takes.
+[[nodiscard]] TransportMaker curl_transport();
+
+/// What the chain makes things with, so a test can stand in for llama.cpp --
+/// and, since 55c, for Hugging Face.
 struct ChainTools {
     Quantizer quantize = default_quantizer();
+    TransportMaker transport = curl_transport();
 };
 
 /// Pull (when asked), convert to F16 with its projector, quantize to each
@@ -588,6 +598,32 @@ struct ChainTools {
 /// output stays in the store, and the resumed chain finds it rather than
 /// making it again.
 void run_register_chain(const RegisterChainRequest& request, const ChainTools& tools = {});
+
+/// What `models pull` was asked for: its flags, as data (55c).
+struct PullRequest {
+    models::StoreRoots roots{};
+    std::filesystem::path config_path{};
+    std::string ref{};
+    /// `--yes`: no stop for the unrunnable-architecture warning.
+    bool yes = false;
+    bool safetensors = false;
+    /// `--register`, or `--register-with` given.
+    bool registers = false;
+    std::vector<std::string> register_with{};
+    std::string base_name{};
+    bool base_name_given = false;
+    /// `--output-format stream-json`: the pull's progress as events (52b).
+    bool stream = false;
+};
+
+/// `apogee models pull`, whole: a copy from the Ollama store, a GGUF, a
+/// SafeTensors snapshot, an MLX model, a pipeline, a voice model, or the
+/// register chain. Every path stops on Ctrl-C (55c): one `InterruptScope`
+/// over the pull's work -- for the chain, over its download, each later
+/// stage under its own -- so what it staged is removed, the exit is 130, and
+/// a stream ends on its `error`. On a stream, each set stored is said last
+/// as `models info` says it.
+void run_pull(const PullRequest& request, const ChainTools& tools = {});
 
 void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_dir,
                           const RootContext& context);

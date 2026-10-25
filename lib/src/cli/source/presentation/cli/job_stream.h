@@ -55,7 +55,9 @@ public:
     }
 
     /// The run failed: an `error` event with `message`, once -- the first
-    /// failure said is the one that ended it.
+    /// failure said is the one that ended it. Said as the stream closes, so
+    /// it is the stream's last event whatever the run says after it fails --
+    /// where a chain stopped and the command that resumes it (55c).
     void failed(std::string_view message);
 
     [[nodiscard]] bool has_failed() const noexcept {
@@ -71,6 +73,7 @@ private:
     std::unique_ptr<LineRelay> relay_;
     std::vector<std::string> handles_;
     bool failed_ = false;
+    std::string failure_{};
 };
 
 /// `stdout_download_options()`, relayed as `bytes` events while a stream is

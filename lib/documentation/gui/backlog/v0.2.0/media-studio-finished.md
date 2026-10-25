@@ -14,7 +14,7 @@
 
 **Seam + files.** `presentation/video/ViewModels/VideoViewModel.swift`, `presentation/voice/ViewModels/VoiceViewModel.swift` (installs as supervised jobs, drawn, retry consumed, failure said), a shared install view in `presentation/styles` or `media`, `business/media/Projects.swift` + `presentation/compose/` (the voice-model picker, consent flow, planned toast, supervised preview, skipped diagnostics, captions row read), `presentation/settings/Views/SettingsView.swift` (skipped rows with remedies). Tests: install job lifecycle (progress, stop, failure toast, retry); compose with two voice models; the plan-first toast; preview stop and timeout; skipped records listed; the captions wording over a check fixture with the row skipped.
 
-**Reference.** GUI MILESTONES 1m–1o and Milestone D; CLI 52c/52e (dry runs; the ffmpeg rows); [`job-streams-and-compose-honesty.md`](../../../cli/backlog/v0.2.0/job-streams-and-compose-honesty.md) (CLI 55c), referenced and not gated; the CLI/GUI audit (2026-10-22).
+**Reference.** GUI MILESTONES 1m–1o and Milestone D; CLI 52c/52e (dry runs; the ffmpeg rows); [CLI 55c](../../../cli/assistant/MILESTONES.md#milestone-ar--the-audits-cli-findings) (shipped 2026-10-25: a resumed composition applies or refuses `--edit`, a dry run never says "rendering"), referenced and not gated; the CLI/GUI audit (2026-10-22).
 
 **Decisions made** (dated):
 - 2026-10-22: Specced from the CLI/GUI audit (the user's call). G14's board entry flips with [`docs-and-board-catch-up.md`](docs-and-board-catch-up.md) (4l).

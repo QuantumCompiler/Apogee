@@ -551,6 +551,58 @@ for name in ("chat.jsonl", "complete.jsonl"):
     assert not [e for e in events if e["type"] == "result"], (name, events)
 PY
 
+# --- a pull stops on Ctrl-C, its stream ending on the cancel (55c) -------------
+# `models pull` from an Ollama store whose blob is a FIFO fed a MiB at a time
+# -- the scripted slow source -- and a real SIGINT to the binary mid-copy, as
+# a person's Ctrl-C or the GUI's stop sends it: exit 130, the stream's last
+# event the cancel, every line whole, and nothing left in the store. Before
+# 55c the copy ignored the signal or died of it, its stream cut on a `bytes`.
+PULL_DIR="$WORK_DIR/pull"
+PULL_LIB="$PULL_DIR/ollama/manifests/registry.ollama.ai/library/slow"
+mkdir -p "$PULL_DIR/ollama/blobs" "$PULL_LIB"
+PULL_SIZE=$((32 * 1024 * 1024))
+PULL_DIGEST="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(bytes(int(sys.argv[1]))).hexdigest())' "$PULL_SIZE")"
+PULL_BLOB="$PULL_DIR/ollama/blobs/sha256-$PULL_DIGEST"
+mkfifo "$PULL_BLOB" || fail "mkfifo"
+printf '{"schemaVersion":2,"layers":[{"mediaType":"application/vnd.ollama.image.model","digest":"sha256:%s","size":%d}]}' \
+    "$PULL_DIGEST" "$PULL_SIZE" >"$PULL_LIB/latest"
+python3 - "$PULL_BLOB" "$PULL_SIZE" 2>/dev/null <<'PY' &
+import sys, time
+with open(sys.argv[1], "wb") as out:
+    for _ in range(int(sys.argv[2]) >> 20):
+        out.write(bytes(1 << 20))
+        out.flush()
+        time.sleep(0.1)
+PY
+PULL_WRITER=$!
+OLLAMA_MODELS="$PULL_DIR/ollama" "$APOGEE_BIN" models pull slow:latest --output-format stream-json \
+    </dev/null >"$PULL_DIR/pull.jsonl" 2>"$PULL_DIR/pull.err" &
+PULL_CHILD=$!
+tries=0
+until grep -q '"done":[1-9]' "$PULL_DIR/pull.jsonl" 2>/dev/null; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 200 ] || { kill -9 "$PULL_CHILD" "$PULL_WRITER" 2>/dev/null; fail "the copy never started: $(cat "$PULL_DIR/pull.err")"; }
+    sleep 0.05
+done
+kill -INT "$PULL_CHILD"
+wait "$PULL_CHILD"
+PULL_STATUS=$?
+kill "$PULL_WRITER" 2>/dev/null
+wait "$PULL_WRITER" 2>/dev/null
+[ "$PULL_STATUS" -eq 130 ] || fail "a Ctrl-C'd pull exited $PULL_STATUS: $(cat "$PULL_DIR/pull.err")"
+grep -q "apogee models: cancelled -- nothing was written" "$PULL_DIR/pull.err" \
+    || fail "the cancel was not said on stderr: $(cat "$PULL_DIR/pull.err")"
+python3 - "$PULL_DIR/pull.jsonl" <<'PY' || fail "the Ctrl-C'd pull's stream: $(cat "$PULL_DIR/pull.jsonl")"
+import json, sys
+events = [json.loads(line) for line in open(sys.argv[1])]
+types = [e["type"] for e in events]
+assert types[0] == "job" and events[0]["verb"] == "models pull", types
+assert events[-1] == {"type": "error", "message": "cancelled -- nothing was written"}, events[-1]
+assert types.count("error") == 1 and "document" not in types, types
+assert any(e["type"] == "bytes" and e["done"] > 0 for e in events), "no bytes moved before the Ctrl-C"
+PY
+[ ! -e "$APOGEE_HOME/models/slow-latest" ] || fail "a Ctrl-C'd pull left $(find "$APOGEE_HOME/models/slow-latest")"
+
 # --- the schema artifact (28g): every captured stream validates ----------------
 # The real streams this script captured -- complete, driven chats, handshakes
 # -- validated line by line against what this binary prints as its schema, with
@@ -682,5 +734,5 @@ else
     grep -q '"type":"result"' "$WORK_DIR/held.jsonl" || fail "the held turn produced no result"
 fi
 
-echo "machine mode: stdout is pure JSONL, one child served 2 turns, bytes that are not UTF-8" \
-    "ended nothing, no listening socket - OK"
+echo "machine mode: stdout is pure JSONL, one child served 2 turns, a Ctrl-C'd pull ended on its" \
+    "cancel, bytes that are not UTF-8 ended nothing, no listening socket - OK"

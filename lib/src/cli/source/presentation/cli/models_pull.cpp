@@ -30,6 +30,7 @@
 #include "cli/models_migrate.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
+#include "contracts/errors.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "models/acquire.h"
@@ -73,6 +74,23 @@ void tell_job(const std::string& message) {
     std::cerr << "apogee models: " << message << "\n";
     tell_job(message);
     throw CLI::RuntimeError(1);
+}
+
+/// A Ctrl-C said: `cancelled -- <what>`, on stderr and as the stream's
+/// error, exit 130.
+[[noreturn]] void say_cancelled(const std::string& what) {
+    std::cerr << "apogee models: cancelled -- " << what << "\n";
+    tell_job("cancelled -- " + what);
+    throw CLI::RuntimeError(kCancelled);
+}
+
+/// A run Ctrl-C stopped: what it staged removed (none when `staging` is
+/// empty), and said.
+[[noreturn]] void cancelled_nothing_written(const std::filesystem::path& staging) {
+    if (!staging.empty()) {
+        (void)models::remove_weights(staging);
+    }
+    say_cancelled("nothing was written");
 }
 
 /// A set of weights the pull stored, for the stream's documents (52b).
@@ -422,12 +440,18 @@ void print_snapshot_next(const models::StoreRoots& roots, const std::filesystem:
     for (std::size_t i = 0; i < result.sidecars.size() && i < gaps.size(); ++i) {
         landed.push_back(gaps[i].path);
     }
-    if (!result.ok) {
-        // What landed before the failure stays, on the record: pulling again
-        // fetches the rest.
+    if (!result.ok || cancellation.stop_requested()) {
+        // What landed before the failure -- or the Ctrl-C (55c) -- stays, on
+        // the record: pulling again fetches the rest.
         std::string kept;
         for (const std::string& path : landed) {
             kept += (kept.empty() ? "" : ", ") + path;
+        }
+        if (cancellation.stop_requested()) {
+            say_cancelled(kept.empty() ? std::string{"nothing was written"}
+                                       : kept +
+                                             " landed and stays on the set's record; pull again "
+                                             "for the rest");
         }
         fail(result.error + (kept.empty() ? std::string{}
                                           : " (" + kept +
@@ -555,6 +579,10 @@ PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& r
                     std::int64_t written,
                     std::int64_t size) { progress.file(index, count, relative, written, size); });
     progress.finish();
+    if (cancellation.stop_requested()) {
+        // The ladder removed its staging tree; the claim on the name goes too.
+        cancelled_nothing_written(destination);
+    }
     if (!result.ok) {
         fail(result.error);
     }
@@ -1470,13 +1498,6 @@ constexpr std::array<WanReadmeSize, 2> kWanReadmeSizes{{
     return "verified: " + std::to_string(result.files) + " file(s), " + human_size(result.bytes) +
            " -- " + std::to_string(sized) + " size(s) checked, " + std::to_string(digests) +
            " against a published sha256" + none + "; " + std::string{read_whole};
-}
-
-[[noreturn]] void cancelled_nothing_written(const std::filesystem::path& staging) {
-    (void)models::remove_weights(staging);
-    std::cerr << "apogee models: cancelled -- nothing was written\n";
-    tell_job("cancelled -- nothing was written");
-    throw CLI::RuntimeError(kCancelled);
 }
 
 /// What a pulled MLX set's last rung read whole, by its layout (M22): a
@@ -2811,6 +2832,10 @@ Quantizer default_quantizer() {
     };
 }
 
+TransportMaker curl_transport() {
+    return [] { return std::make_unique<backends::CurlTransport>(); };
+}
+
 void run_register_chain(const RegisterChainRequest& request, const ChainTools& tools) {
     const models::StoreRoots& roots = request.roots;
     const std::vector<std::string>& levels = request.levels;
@@ -2866,11 +2891,19 @@ void run_register_chain(const RegisterChainRequest& request, const ChainTools& t
     std::vector<ChainStage> stages;
     if (pulls) {
         stages.push_back({"pull " + request.pull_ref + "'s full weights", [&](ChainLog& chain) {
-                              backends::HttpClient client{
-                                  std::make_unique<backends::CurlTransport>()};
-                              const PulledSnapshot pulled =
-                                  pull_snapshot(request.pull_ref, roots, client,
-                                                harness::CancellationToken{}, /*chained=*/true);
+                              // Ctrl-C stops the download as it stops a
+                              // conversion (55c); each later stage has its own.
+                              const InterruptScope interrupt;
+                              backends::HttpClient client{tools.transport()};
+                              PulledSnapshot pulled;
+                              try {
+                                  pulled = pull_snapshot(request.pull_ref, roots, client,
+                                                         InterruptScope::token(),
+                                                         /*chained=*/true);
+                              } catch (const harness::CancelledError&) {
+                                  // Stopped in a request, before a byte was staged.
+                                  say_cancelled("nothing was written");
+                              }
                               note_stored(pulled.model, models::kSafetensorsFormat, pulled.id);
                               snapshot = pulled.model + "/safetensors/" + pulled.id;
                               // Everything after the pull runs offline: resuming
@@ -3357,9 +3390,9 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
         const std::string wanted =
             as.empty() ? models::read_mlx_config(source.path).model_type : as;
         if (!wanted.empty() && std::ranges::find(types, wanted) == types.end()) {
-            std::string near;
+            std::string nearest;
             for (const std::string& candidate : training::nearest_model_types(wanted, types)) {
-                near += (near.empty() ? "" : ", ") + candidate;
+                nearest += (nearest.empty() ? "" : ", ") + candidate;
             }
             const std::string kept = vlm ? " with towers (" + towers + ")" : "";
             fail(
@@ -3373,7 +3406,7 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
                            " knows, convert them as it: --model-type <type>"
                      : "--model-type " + wanted + " is no type the " + std::string{converter_name} +
                            " in Apogee's Python environment builds") +
-                (near.empty() ? std::string{} : " (nearest here: " + near + ")") +
+                (nearest.empty() ? std::string{} : " (nearest here: " + nearest + ")") +
                 (vlm ? std::string{} : other_route()));
         }
     }
@@ -3392,7 +3425,290 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
                                model_type, /*chained=*/false, text_only);
 }
 
+/// `source`, asked between its chunks whether Ctrl-C was pressed (55c): the
+/// copy from the Ollama store reads a local file, which no transport stops.
+[[nodiscard]] models::ByteSource stoppable(models::ByteSource source,
+                                           const harness::CancellationToken& cancellation) {
+    return [source = std::move(source), cancellation](
+               const std::function<bool(std::string_view)>& write, std::string& error) {
+        const bool ok = source(
+            [&write, &cancellation](std::string_view chunk) {
+                return !cancellation.stop_requested() && write(chunk);
+            },
+            error);
+        if (cancellation.stop_requested()) {
+            error = "cancelled";
+            return false;
+        }
+        return ok;
+    };
+}
+
+/// A pull from Hugging Face or the Ollama store -- a SafeTensors snapshot,
+/// a pipeline, a voice model, an MLX model, or a GGUF -- every request, byte
+/// and file of it under `cancellation`, the one scope `pull_model` arms.
+void pull_stored(const PullRequest& request, const TransportMaker& transport,
+                 const harness::CancellationToken& cancellation) {
+    const std::string& ref = request.ref;
+    const models::StoreRoots& roots = request.roots;
+    if (request.safetensors) {
+        backends::HttpClient client{transport()};
+        const PulledSnapshot pulled =
+            pull_snapshot(ref, roots, client, cancellation, /*chained=*/false);
+        note_stored(pulled.model, models::kSafetensorsFormat, pulled.id);
+        return;
+    }
+
+    models::SourcePromise promise;
+    models::ByteSource source;
+
+    // Ollama first when the store actually has it: a ref like "user/model"
+    // is ambiguous, and a local copy is free while a download is not.
+    const std::filesystem::path store = models::ollama_store_root();
+    std::optional<models::OllamaEntry> entry = models::find_in_store(store, ref);
+
+    std::unique_ptr<backends::HttpClient> client;
+    models::HfRef hf;
+
+    if (entry.has_value()) {
+        promise = models::promise_for(*entry);
+        source = stoppable(models::blob_source(*entry), cancellation);
+    } else if (looks_like_hf(ref)) {
+        std::optional<models::HfRef> parsed = models::parse_hf_ref(ref);
+        if (!parsed.has_value()) {
+            fail("'" + ref + "' is not a Hugging Face ref (expected owner/repo[:file.gguf])");
+        }
+        hf = *parsed;
+
+        client = std::make_unique<backends::HttpClient>(transport());
+        const std::string token = models::hf_token({});
+
+        if (hf.file.empty()) {
+            // A diffusion pipeline is a directory, pulled whole, when
+            // its root carries model_index.json (49a); an MLX model is
+            // one when its model card says so and there is no GGUF to
+            // prefer (27b).
+            const models::HfListing listing =
+                models::list_gguf_files(*client, hf, token, cancellation);
+            if (listing.ok && listing.pipeline()) {
+                const auto pulled = pull_pipeline(ref, roots, *client, cancellation);
+                note_stored(pulled.model, models::kPipelineFormat, pulled.dir.filename().string());
+                return;
+            }
+            // A voice model is a directory too, pulled whole when its
+            // files are laid out as one (50a).
+            if (listing.ok && listing.gguf_files.empty() && listing.voice()) {
+                const auto pulled = pull_voice(ref, roots, *client, cancellation);
+                note_stored(pulled.model, models::kVoiceFormat, pulled.dir.filename().string());
+                return;
+            }
+            if (listing.ok && listing.gguf_files.empty() && listing.mlx()) {
+                const auto pulled = pull_mlx(ref, roots, *client, cancellation);
+                note_stored(pulled.model, models::kMlxFormat, pulled.dir.filename().string());
+                return;
+            }
+            std::string error;
+            if (!models::choose_file(listing, hf, error)) {
+                fail(error);
+            }
+        }
+        source = models::http_source(*client, hf, token, cancellation, promise);
+    } else if (models::store_has_manifest(store, ref)) {
+        // Found in the store, but with no model layer: a CLOUD model, whose
+        // weights are on Ollama's servers. Telling this user to `ollama
+        // pull` would send them to re-fetch what they already have.
+        fail("'" + ref +
+             "' is an Ollama cloud model -- its weights run on Ollama's servers, so there is "
+             "nothing local to copy. Use it through a 'ollama-cli' backend instead, or pull a "
+             "local variant such as '" +
+             std::string{models::split_ref(ref).first} + "' without the -cloud tag");
+    } else {
+        fail("'" + ref +
+             "' is not in your Ollama store and is not a Hugging Face ref. Pull it with "
+             "'ollama pull " +
+             ref + "' first, or name a Hugging Face repository as owner/repo");
+    }
+
+    // One directory per model, one per set of weights inside it.
+    const std::string model =
+        entry.has_value() ? models::safe_model_name(ref) : models::repo_directory_name(hf);
+    const std::string file_name =
+        entry.has_value() ? model + ".gguf" : std::filesystem::path{hf.file}.filename().string();
+
+    // Ollama names its blob by digest, so weights already here are found
+    // before a byte moves. (Hugging Face promises no digest for a single
+    // file; those are found once they land, below.)
+    if (const std::string known = models::weight_id_from_digest(promise.digest); !known.empty()) {
+        for (const models::StoredGguf& stored : models::list_store_ggufs(roots, model)) {
+            if (stored.id == known) {
+                std::cout << "already here -- these exact weights are at\n  "
+                          << stored.file.string() << "\n";
+                note_stored(model, models::kGgufFormat, stored.id);
+                return;
+            }
+        }
+    }
+    std::cout << (entry.has_value()
+                      ? "copying from your Ollama store (" + human_size(entry->size) + ")"
+                      : "downloading " + promise.source_url)
+              << "\n";
+
+    // The advisory warning, BEFORE the bytes move. It never refuses -- the
+    // open-model policy means the user's answer is final.
+    if (entry.has_value() && !request.yes) {
+        const models::GgufInfo peek = models::inspect_gguf(entry->blob);
+        if (peek.parsed && models::is_known_unrunnable(peek.architecture)) {
+            std::cout << "warning: architecture '" << peek.architecture
+                      << "' is not known to run in Apogee's llama.cpp.\n"
+                      << "         Pulling anyway is fine -- pass --yes to skip this notice.\n";
+        }
+    }
+
+    // Everything lands in a staging directory first and is renamed to its
+    // id once the bytes are verified and hashed.
+    const std::filesystem::path staging =
+        models::make_incoming_dir(roots, models::kGgufFormat, model);
+    DownloadProgress progress{std::cout, job_download_options()};
+    const models::AcquireResult result = models::acquire(
+        staging / file_name, promise, source,
+        [&progress](std::int64_t written, std::int64_t total) { progress.bytes(written, total); });
+    progress.finish();
+    if (cancellation.stop_requested()) {
+        cancelled_nothing_written(staging);
+    }
+    if (!result.ok) {
+        std::error_code code;
+        (void)models::remove_weights(staging);
+        fail(result.error);
+    }
+
+    // A vision model's projector is a SEPARATE layer in Ollama's manifest,
+    // and useless to leave behind: without it the model can only do text,
+    // and the user has no way to know a second file was sitting there. It
+    // lives beside its model, in the same directory.
+    bool projector_copied = false;
+    const std::string projector_name =
+        std::filesystem::path{file_name}.stem().string() + "-mmproj.gguf";
+    if (entry.has_value() && entry->has_projector()) {
+        std::cout << "this model has a vision projector; copying that too ("
+                  << human_size(entry->projector_size) << ")\n";
+        const models::AcquireResult vision =
+            models::acquire(staging / projector_name, models::projector_promise_for(*entry),
+                            stoppable(models::projector_source(*entry), cancellation));
+        if (cancellation.stop_requested()) {
+            cancelled_nothing_written(staging);
+        }
+        if (!vision.ok) {
+            // The model is already in place and usable for text, so this is
+            // a warning rather than a failure of the whole pull.
+            std::cout << "warning: the projector could not be copied -- " << vision.error
+                      << "\n         this model will work for text but not for images\n";
+        } else {
+            projector_copied = true;
+        }
+    }
+
+    std::string id = models::weight_id_from_digest(result.sidecar.file_digest);
+    if (id.empty()) {
+        id = models::random_weight_id();
+    }
+    const models::Commit commit =
+        models::commit_weights(staging, models::weights_dir(roots, models::kGgufFormat, model, id));
+    if (!commit.error.empty()) {
+        fail(commit.error);
+    }
+    std::filesystem::path model_file = commit.dir / file_name;
+    std::filesystem::path projector = projector_copied ? commit.dir / projector_name : "";
+    if (commit.existed) {
+        // Identical weights were already stored, perhaps under another name.
+        for (const models::StoredGguf& stored : models::list_store_ggufs(roots, model)) {
+            if (stored.id == id) {
+                model_file = stored.file;
+                projector = stored.projector;
+            }
+        }
+        std::cout << "\nalready here -- these exact weights are at\n  " << model_file.string()
+                  << "\n";
+    } else {
+        std::cout << "\n" << model_file.string() << "\n";
+        std::cout << "verified: " << result.sidecar.verification.summary() << "\n";
+        if (!result.error.empty()) {
+            std::cout << "note: " << result.error << "\n";
+        }
+    }
+
+    print_backend_hint(model_file, projector);
+    note_stored(model, models::kGgufFormat, id);
+}
+
+/// `models pull` on its one path (55c): the register chain, whose download
+/// has its own scope beside its conversions', or any other pull under one
+/// `InterruptScope` over all of it -- a listing, a download, a copy -- so a
+/// Ctrl-C anywhere is noticed between chunks.
+void pull_model(const PullRequest& request, const ChainTools& tools) {
+    check_base_name(request.base_name, request.base_name_given, request.registers);
+    if (request.registers) {
+        if (!request.safetensors) {
+            fail(
+                "--register needs --safetensors: the chain converts a full-weight pull. A "
+                "GGUF pull is runnable as it lands -- it prints the backend to add");
+        }
+        run_register_chain(
+            RegisterChainRequest{
+                .roots = request.roots,
+                .config_path = request.config_path,
+                .pull_ref = request.ref,
+                .snapshot = {},
+                .snapshot_from = {},
+                .levels = buildable_levels(request.register_with),
+                .base_name = request.base_name,
+            },
+            tools);
+        return;
+    }
+    const InterruptScope interrupt;
+    try {
+        pull_stored(request, tools.transport, InterruptScope::token());
+    } catch (const harness::CancelledError&) {
+        // Stopped in a request, before anything was staged.
+        cancelled_nothing_written({});
+    }
+}
+
 }  // namespace
+
+void run_pull(const PullRequest& request, const ChainTools& tools) {
+    if (!request.stream) {
+        pull_model(request, tools);
+        return;
+    }
+    // The same pull, its progress as events (52b), and each set it stored
+    // said last as `models info` says it.
+    JobStream job{"models pull"};
+    try {
+        pull_model(request, tools);
+    } catch (const CLI::RuntimeError&) {
+        job.failed("the pull failed; stderr says why");
+        throw;
+    } catch (const std::exception& e) {
+        job.failed(e.what());
+        throw;
+    }
+    harness::Config config;
+    try {
+        config = harness::load_config(request.config_path);
+    } catch (const std::exception&) {
+        config = harness::Config{};
+    }
+    for (const std::string& handle : job.handles()) {
+        const nlohmann::json document = model_info_document(config, handle, request.config_path);
+        if (document.is_null()) {
+            job.events().on_notice("no document for " + handle);
+            continue;
+        }
+        job.events().emit_document(document);
+    }
+}
 
 void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_dir,
                           const RootContext& context) {
@@ -3455,255 +3771,21 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
     auto pull_format = std::make_shared<JobFormat>(JobFormat::Text);
     add_job_format(pull, pull_format, /*document=*/false);
 
-    const auto pull_one = [pull_ref, pull_yes, pull_safetensors, pull_register, pull_register_with,
-                           pull_register_option, pull_base_name, pull_base_name_option, models_dir,
-                           &context]() {
-        const std::string& ref = *pull_ref;
-        const models::StoreRoots roots = store_roots(models_dir, context.config_path);
-        const bool registers = *pull_register || pull_register_option->count() > 0;
-        check_base_name(*pull_base_name, pull_base_name_option->count() > 0, registers);
-        if (registers) {
-            if (!*pull_safetensors) {
-                fail(
-                    "--register needs --safetensors: the chain converts a full-weight pull. A "
-                    "GGUF pull is runnable as it lands -- it prints the backend to add");
-            }
-            run_register_chain(RegisterChainRequest{
-                .roots = roots,
-                .config_path = harness::resolve_config_path(context.config_path),
-                .pull_ref = ref,
-                .snapshot = {},
-                .snapshot_from = {},
-                .levels = buildable_levels(*pull_register_with),
-                .base_name = *pull_base_name,
-            });
-            return;
-        }
-        if (*pull_safetensors) {
-            backends::HttpClient client{std::make_unique<backends::CurlTransport>()};
-            const PulledSnapshot pulled =
-                pull_snapshot(ref, roots, client, harness::CancellationToken{}, /*chained=*/false);
-            note_stored(pulled.model, models::kSafetensorsFormat, pulled.id);
-            return;
-        }
-
-        models::SourcePromise promise;
-        models::ByteSource source;
-
-        // Ollama first when the store actually has it: a ref like "user/model"
-        // is ambiguous, and a local copy is free while a download is not.
-        const std::filesystem::path store = models::ollama_store_root();
-        std::optional<models::OllamaEntry> entry = models::find_in_store(store, ref);
-
-        std::unique_ptr<backends::HttpClient> client;
-        models::HfRef hf;
-        const harness::CancellationToken cancellation;
-
-        if (entry.has_value()) {
-            promise = models::promise_for(*entry);
-            source = models::blob_source(*entry);
-        } else if (looks_like_hf(ref)) {
-            std::optional<models::HfRef> parsed = models::parse_hf_ref(ref);
-            if (!parsed.has_value()) {
-                fail("'" + ref + "' is not a Hugging Face ref (expected owner/repo[:file.gguf])");
-            }
-            hf = *parsed;
-
-            client =
-                std::make_unique<backends::HttpClient>(std::make_unique<backends::CurlTransport>());
-            const std::string token = models::hf_token({});
-
-            if (hf.file.empty()) {
-                // A diffusion pipeline is a directory, pulled whole, when
-                // its root carries model_index.json (49a); an MLX model is
-                // one when its model card says so and there is no GGUF to
-                // prefer (27b).
-                const models::HfListing listing =
-                    models::list_gguf_files(*client, hf, token, cancellation);
-                if (listing.ok && listing.pipeline()) {
-                    const InterruptScope interrupt;
-                    const auto pulled = pull_pipeline(ref, roots, *client, InterruptScope::token());
-                    note_stored(pulled.model, models::kPipelineFormat,
-                                pulled.dir.filename().string());
-                    return;
-                }
-                // A voice model is a directory too, pulled whole when its
-                // files are laid out as one (50a).
-                if (listing.ok && listing.gguf_files.empty() && listing.voice()) {
-                    const InterruptScope interrupt;
-                    const auto pulled = pull_voice(ref, roots, *client, InterruptScope::token());
-                    note_stored(pulled.model, models::kVoiceFormat, pulled.dir.filename().string());
-                    return;
-                }
-                if (listing.ok && listing.gguf_files.empty() && listing.mlx()) {
-                    const InterruptScope interrupt;
-                    const auto pulled = pull_mlx(ref, roots, *client, InterruptScope::token());
-                    note_stored(pulled.model, models::kMlxFormat, pulled.dir.filename().string());
-                    return;
-                }
-                std::string error;
-                if (!models::choose_file(listing, hf, error)) {
-                    fail(error);
-                }
-            }
-            source = models::http_source(*client, hf, token, cancellation, promise);
-        } else if (models::store_has_manifest(store, ref)) {
-            // Found in the store, but with no model layer: a CLOUD model, whose
-            // weights are on Ollama's servers. Telling this user to `ollama
-            // pull` would send them to re-fetch what they already have.
-            fail("'" + ref +
-                 "' is an Ollama cloud model -- its weights run on Ollama's servers, so there is "
-                 "nothing local to copy. Use it through a 'ollama-cli' backend instead, or pull a "
-                 "local variant such as '" +
-                 std::string{models::split_ref(ref).first} + "' without the -cloud tag");
-        } else {
-            fail("'" + ref +
-                 "' is not in your Ollama store and is not a Hugging Face ref. Pull it with "
-                 "'ollama pull " +
-                 ref + "' first, or name a Hugging Face repository as owner/repo");
-        }
-
-        // One directory per model, one per set of weights inside it.
-        const std::string model =
-            entry.has_value() ? models::safe_model_name(ref) : models::repo_directory_name(hf);
-        const std::string file_name = entry.has_value()
-                                          ? model + ".gguf"
-                                          : std::filesystem::path{hf.file}.filename().string();
-
-        // Ollama names its blob by digest, so weights already here are found
-        // before a byte moves. (Hugging Face promises no digest for a single
-        // file; those are found once they land, below.)
-        if (const std::string known = models::weight_id_from_digest(promise.digest);
-            !known.empty()) {
-            for (const models::StoredGguf& stored : models::list_store_ggufs(roots, model)) {
-                if (stored.id == known) {
-                    std::cout << "already here -- these exact weights are at\n  "
-                              << stored.file.string() << "\n";
-                    note_stored(model, models::kGgufFormat, stored.id);
-                    return;
-                }
-            }
-        }
-        std::cout << (entry.has_value()
-                          ? "copying from your Ollama store (" + human_size(entry->size) + ")"
-                          : "downloading " + promise.source_url)
-                  << "\n";
-
-        // The advisory warning, BEFORE the bytes move. It never refuses -- the
-        // open-model policy means the user's answer is final.
-        if (entry.has_value() && !*pull_yes) {
-            const models::GgufInfo peek = models::inspect_gguf(entry->blob);
-            if (peek.parsed && models::is_known_unrunnable(peek.architecture)) {
-                std::cout << "warning: architecture '" << peek.architecture
-                          << "' is not known to run in Apogee's llama.cpp.\n"
-                          << "         Pulling anyway is fine -- pass --yes to skip this notice.\n";
-            }
-        }
-
-        // Everything lands in a staging directory first and is renamed to its
-        // id once the bytes are verified and hashed.
-        const std::filesystem::path staging =
-            models::make_incoming_dir(roots, models::kGgufFormat, model);
-        DownloadProgress progress{std::cout, job_download_options()};
-        const models::AcquireResult result =
-            models::acquire(staging / file_name, promise, source,
-                            [&progress](std::int64_t written, std::int64_t total) {
-                                progress.bytes(written, total);
-                            });
-        progress.finish();
-        if (!result.ok) {
-            std::error_code code;
-            (void)models::remove_weights(staging);
-            fail(result.error);
-        }
-
-        // A vision model's projector is a SEPARATE layer in Ollama's manifest,
-        // and useless to leave behind: without it the model can only do text,
-        // and the user has no way to know a second file was sitting there. It
-        // lives beside its model, in the same directory.
-        bool projector_copied = false;
-        const std::string projector_name =
-            std::filesystem::path{file_name}.stem().string() + "-mmproj.gguf";
-        if (entry.has_value() && entry->has_projector()) {
-            std::cout << "this model has a vision projector; copying that too ("
-                      << human_size(entry->projector_size) << ")\n";
-            const models::AcquireResult vision =
-                models::acquire(staging / projector_name, models::projector_promise_for(*entry),
-                                models::projector_source(*entry));
-            if (!vision.ok) {
-                // The model is already in place and usable for text, so this is
-                // a warning rather than a failure of the whole pull.
-                std::cout << "warning: the projector could not be copied -- " << vision.error
-                          << "\n         this model will work for text but not for images\n";
-            } else {
-                projector_copied = true;
-            }
-        }
-
-        std::string id = models::weight_id_from_digest(result.sidecar.file_digest);
-        if (id.empty()) {
-            id = models::random_weight_id();
-        }
-        const models::Commit commit = models::commit_weights(
-            staging, models::weights_dir(roots, models::kGgufFormat, model, id));
-        if (!commit.error.empty()) {
-            fail(commit.error);
-        }
-        std::filesystem::path model_file = commit.dir / file_name;
-        std::filesystem::path projector = projector_copied ? commit.dir / projector_name : "";
-        if (commit.existed) {
-            // Identical weights were already stored, perhaps under another name.
-            for (const models::StoredGguf& stored : models::list_store_ggufs(roots, model)) {
-                if (stored.id == id) {
-                    model_file = stored.file;
-                    projector = stored.projector;
-                }
-            }
-            std::cout << "\nalready here -- these exact weights are at\n  " << model_file.string()
-                      << "\n";
-        } else {
-            std::cout << "\n" << model_file.string() << "\n";
-            std::cout << "verified: " << result.sidecar.verification.summary() << "\n";
-            if (!result.error.empty()) {
-                std::cout << "note: " << result.error << "\n";
-            }
-        }
-
-        print_backend_hint(model_file, projector);
-        note_stored(model, models::kGgufFormat, id);
-    };
-    pull->callback([pull_one, pull_format, &context]() {
-        if (*pull_format != JobFormat::StreamJson) {
-            pull_one();
-            return;
-        }
-        // The same pull, its progress as events (52b), and each set it stored
-        // said last as `models info` says it.
-        JobStream job{"models pull"};
-        try {
-            pull_one();
-        } catch (const CLI::RuntimeError&) {
-            job.failed("the pull failed; stderr says why");
-            throw;
-        } catch (const std::exception& e) {
-            job.failed(e.what());
-            throw;
-        }
-        const std::filesystem::path config_path = harness::resolve_config_path(context.config_path);
-        harness::Config config;
-        try {
-            config = harness::load_config(config_path);
-        } catch (const std::exception&) {
-            config = harness::Config{};
-        }
-        for (const std::string& handle : job.handles()) {
-            const nlohmann::json document = model_info_document(config, handle, config_path);
-            if (document.is_null()) {
-                job.events().on_notice("no document for " + handle);
-                continue;
-            }
-            job.events().emit_document(document);
-        }
+    pull->callback([pull_ref, pull_yes, pull_safetensors, pull_register, pull_register_with,
+                    pull_register_option, pull_base_name, pull_base_name_option, pull_format,
+                    models_dir, &context]() {
+        run_pull(PullRequest{
+            .roots = store_roots(models_dir, context.config_path),
+            .config_path = harness::resolve_config_path(context.config_path),
+            .ref = *pull_ref,
+            .yes = *pull_yes,
+            .safetensors = *pull_safetensors,
+            .registers = *pull_register || pull_register_option->count() > 0,
+            .register_with = *pull_register_with,
+            .base_name = *pull_base_name,
+            .base_name_given = pull_base_name_option->count() > 0,
+            .stream = *pull_format == JobFormat::StreamJson,
+        });
     });
 
     // ---- delete -------------------------------------------------------------

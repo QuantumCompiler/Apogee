@@ -10449,3 +10449,63 @@ The refusal was true but incomplete. The set is Wan's original layout, and its r
 **Not done:**
 - **Turn numbers can drift after a failed live turn.** Machine mode numbers every `user` line (28f), but a failed turn isn't counted (M27). After a mid-session failure, `chats show` numbers later turns lower than the live session did. Fixing it changes one of those rules: the user's call.
 - **Two places still write to stderr:** `task resume`'s resume warnings under stream-json, and the automatic compaction's lines in machine mode. Both still go there as before.
+
+### 2026-10-25 — `job-streams-and-compose-honesty` (backlog item 55c): cancellable pulls, honest compose reruns
+
+**Why.** 52b and 52c shipped long jobs as event streams and the composer's plan documents. The audit found four places where those promises broke:
+- **A plain `models pull` could not be cancelled.** Its token could never fire, so its stream never ended on an error.
+- **A resumed composition swallowed `--edit` and `--redo-scene`.**
+- **Rendering a kept plan overwrote an existing `<output>.srt`.**
+- **A second `--dry-run` announced `rendering the plan…`.**
+
+`machine-mode.md` also implied a failed media run's document is "the record beside the output", which only `video compose` writes. Each finding reproduced on the pre-change binary.
+- **Ctrl-C mid-copy of a plain pull,** with default signal handling: exit 130, the stream ending on a `bytes` event with no `error`, and `.incoming-*/…gguf.partial` left in the store. As a background job, SIGINT did nothing and the copy failed later.
+- **`--safetensors` and the register chain's download** passed a fresh `CancellationToken{}`, which can never fire.
+
+- [x] **Every `models pull` path is cancellable through one `InterruptScope`.**
+  - **One function, one scope:** the pull is one function, `run_pull`, over a `PullRequest`. The scopes nested in the pipeline, voice and MLX branches are gone, and the register chain's download stage has its own.
+  - **The Ollama-store copy** checks for Ctrl-C between chunks.
+  - **A Ctrl-C during a listing request** exits 130.
+  - **The result:** a Ctrl-C'd pull exits 130 with `apogee models: cancelled -- nothing was written`, its stream ends on that `error`, and the store holds nothing.
+- [x] **A stream's `error` is always its last event.** `job_stream` writes it when the stream closes, so the chain's "stopped at / resume with" notices no longer follow it. The set of events is unchanged.
+- [x] **A resumed composition applies or refuses `--edit` and `--redo-scene`,** never drops them.
+  - **A new instruction** runs as an edit over the kept project: `editing the project kept at …/edited.mp4.json with storm: "make it about storms instead"` and its diff. The real run renders the new plan, and `edits` holds both instructions.
+  - **Recorded against the original parent:** `business/video/compose`'s `through_kept` reads such an edit against the original parent. The diff and each scene's `from` and `changes` stay true to the original.
+  - **Refused by name:** a `--redo-scene` for a scene the project lacks, and a project from before 52c (which recorded no scene origins).
+- [x] **Rendering a kept plan never overwrites an `.srt`:** `…/paper.srt exists -- this ffmpeg cannot burn the captions…; name another -o`, the file untouched. An `.srt` the project's own record names as its captions is exempt, and dry runs skip the guard, as they skip readiness checks.
+- [x] **A dry run never says "rendering":** a second `--dry-run` reads `reading the plan a dry run kept at …`.
+- [x] **"not applied" only for flags that differ** from the kept project: `-m` resolved, so a model name and its store handle match, and the voice model, voice, planner, music, assets and `--no-captions` alike.
+- [x] **`machine-mode.md`** describes a failed media run's document as it is: in the stream, with `sidecar: null`.
+
+**Decisions made while building** (2026-10-25, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - a resumed project given a new `--edit` or `--redo-scene` runs it over the kept project, and refuses an irreconcilable mismatch by name;
+  - "not applied" only where the flag differs.
+- **The same command still resumes.** Flags equal to the kept project's last recorded edit are a resume, not a second edit, so "a failed edit run is resumed by the same command" holds.
+- **An edit over a kept project** copies files through a uniquely named side directory and saves the project twice, so a project file on disk never points at the wrong file.
+- **A Windows compile break, fixed:** a local variable named `near` in `models_pull.cpp`, from M21, is a `windows.h` macro under MinGW. It never reached a release. `ComposeOutcome::error` gained a default initializer.
+
+**Verified.**
+- **12 new cases:**
+  - `models_pull_cancel_test` (4, `[interrupt]`), each raising SIGINT inside a scripted Hugging Face, each stream required to end on the cancel `error`:
+    - a plain download cancelled mid-file;
+    - a cancel during the listing request;
+    - a `--safetensors` pull cancelled on its second shard;
+    - the chain's download cancelled.
+  - `video_compose_test` (7):
+    - a new `--edit` over a kept edit project, dry and real;
+    - `--redo-scene` applied, and refused for a missing scene;
+    - a project from before 52c refused;
+    - the same command resuming;
+    - "not applied" only for flags that differ;
+    - the `.srt` never written over (plan then render, a failed run resumed, the project's own `.srt`);
+    - the dry-run wording.
+  - `job_stream_test` (1): the error last even when the run prints after failing.
+- **`machine_mode_e2e.sh`:** sends a real SIGINT to `models pull` over a slow pipe. It fails on the old binary and passes on the new one.
+- **The neighbouring suites pass:** `[compose]`, `[job]`, `[chain]`, `[video]`, `[models]`, `[voice]`, `[resume]`, `[dry-run]` and `[edit]`.
+- **ctest:** these pass: `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`, `cli.machine_mode`, `cli.machine_schema_conformance`, `cli.video_lifecycle` (the compose end to end), `cli.mlx_models_lifecycle` and `cli.shell_completion`.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,921 tests and the macOS app's 449 cases passed, with no warning.
+
+**Not done:**
+- `models repair`'s snapshot download still uses a token that cannot be cancelled. It is not a `models pull` path.
+- The Ollama-store copy's cancel is tested only by the POSIX end-to-end test.

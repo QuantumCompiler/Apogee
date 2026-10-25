@@ -117,6 +117,26 @@ TEST_CASE("a stream's first failure is its error, said once", "[commands][machin
           nlohmann::json{{"type", "error"}, {"message", "cancelled -- nothing was written"}});
 }
 
+TEST_CASE("a stream's error is its last event, whatever the run says after it fails",
+          "[commands][machine][job]") {
+    // 55c: a chain says where it stopped and how to resume after its stage
+    // failed; the stream still ends on the error.
+    std::ostringstream captured;
+    std::streambuf* const before = std::cout.rdbuf(captured.rdbuf());
+    {
+        apogee::commands::JobStream job{"models pull"};
+        job.failed("cancelled -- nothing was written");
+        std::cout << "stopped at [1/3] pull\nresume with:\n  apogee models pull org/m";
+    }
+    std::cout.rdbuf(before);
+    const std::vector<nlohmann::json> events = events_of(captured.str());
+    REQUIRE(events.size() == 5);
+    CHECK(events[1].at("text") == "stopped at [1/3] pull");
+    CHECK(events[3].at("text") == "  apogee models pull org/m");
+    CHECK(events[4] ==
+          nlohmann::json{{"type", "error"}, {"message", "cancelled -- nothing was written"}});
+}
+
 TEST_CASE("models pull as a stream: the bytes, the same words, the stored set's document",
           "[commands][models][job]") {
     const OllamaStore store;

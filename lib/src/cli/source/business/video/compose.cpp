@@ -120,6 +120,56 @@ namespace {
     return {};
 }
 
+/// Which kept scenes left the parent's order: every one outside the longest
+/// run still in it, in place.
+void mark_moved(std::vector<SceneChange>& changes) {
+    const std::size_t count = changes.size();
+    std::vector<std::size_t> length(count, 0);
+    std::vector<std::size_t> before(count, count);
+    std::size_t best = count;
+    for (std::size_t index = 0; index < count; ++index) {
+        if (changes[index].from == 0) {
+            continue;
+        }
+        length[index] = 1;
+        for (std::size_t earlier = 0; earlier < index; ++earlier) {
+            if (changes[earlier].from != 0 && changes[earlier].from < changes[index].from &&
+                length[earlier] + 1 > length[index]) {
+                length[index] = length[earlier] + 1;
+                before[index] = earlier;
+            }
+        }
+        if (best == count || length[index] >= length[best]) {
+            best = index;
+        }
+    }
+    std::vector<bool> in_place(count, false);
+    for (std::size_t at = best; at < count; at = before[at]) {
+        in_place[at] = true;
+    }
+    for (std::size_t index = 0; index < count; ++index) {
+        changes[index].moved = changes[index].from != 0 && !in_place[index];
+    }
+}
+
+/// The parent's scenes no kept scene came from, from 1.
+[[nodiscard]] std::vector<std::size_t> removed_of(const std::vector<SceneChange>& changes,
+                                                  std::size_t parent_scenes) {
+    std::vector<bool> kept(parent_scenes, false);
+    for (const SceneChange& change : changes) {
+        if (change.from >= 1 && change.from <= parent_scenes) {
+            kept[change.from - 1] = true;
+        }
+    }
+    std::vector<std::size_t> out;
+    for (std::size_t index = 0; index < parent_scenes; ++index) {
+        if (!kept[index]) {
+            out.push_back(index + 1);
+        }
+    }
+    return out;
+}
+
 }  // namespace
 
 std::string plan_schema(const std::vector<std::string>& assets) {
@@ -547,7 +597,6 @@ EditedScenes edit_scenes(const harness::VideoProject& parent, std::string_view i
     }
     const nlohmann::json& json = *answer.json;
     out.title = json.value("title", parent.title);
-    std::vector<bool> kept(parent.scenes.size(), false);
     for (const nlohmann::json& item : json.at("scenes")) {
         harness::ProjectScene scene;
         scene.narration = item.at("narration").get<std::string>();
@@ -562,7 +611,6 @@ EditedScenes edit_scenes(const harness::VideoProject& parent, std::string_view i
             static_cast<std::size_t>(from.get<std::int64_t>()) <= parent.scenes.size()) {
             change.from = static_cast<std::size_t>(from.get<std::int64_t>());
             const harness::ProjectScene& was = parent.scenes[change.from - 1];
-            kept[change.from - 1] = true;
             scene.seed = was.seed;
             change.narration = scene.narration != was.narration;
             change.visual = scene.visual != was.visual;
@@ -574,41 +622,10 @@ EditedScenes edit_scenes(const harness::VideoProject& parent, std::string_view i
         out.scenes.push_back(std::move(scene));
         out.changes.push_back(change);
     }
-    for (std::size_t index = 0; index < kept.size(); ++index) {
-        if (!kept[index]) {
-            out.removed.push_back(index + 1);
-        }
-    }
+    out.removed = removed_of(out.changes, parent.scenes.size());
     // In place: the longest run of kept scenes still in the parent's order;
     // every other kept scene moved.
-    const std::size_t count = out.changes.size();
-    std::vector<std::size_t> length(count, 0);
-    std::vector<std::size_t> before(count, count);
-    std::size_t best = count;
-    for (std::size_t index = 0; index < count; ++index) {
-        if (out.changes[index].from == 0) {
-            continue;
-        }
-        length[index] = 1;
-        for (std::size_t earlier = 0; earlier < index; ++earlier) {
-            if (out.changes[earlier].from != 0 &&
-                out.changes[earlier].from < out.changes[index].from &&
-                length[earlier] + 1 > length[index]) {
-                length[index] = length[earlier] + 1;
-                before[index] = earlier;
-            }
-        }
-        if (best == count || length[index] >= length[best]) {
-            best = index;
-        }
-    }
-    std::vector<bool> in_place(count, false);
-    for (std::size_t at = best; at < count; at = before[at]) {
-        in_place[at] = true;
-    }
-    for (std::size_t index = 0; index < count; ++index) {
-        out.changes[index].moved = out.changes[index].from != 0 && !in_place[index];
-    }
+    mark_moved(out.changes);
     return out;
 }
 
@@ -701,6 +718,39 @@ std::vector<std::string> diff_lines(const EditedScenes& edited, std::size_t pare
     for (const std::size_t removed : edited.removed) {
         out.push_back("  scene " + std::to_string(removed) + " removed");
     }
+    return out;
+}
+
+EditedScenes through_kept(const harness::VideoProject& parent, const harness::VideoProject& kept,
+                          const EditedScenes& step) {
+    EditedScenes out;
+    out.title = step.title;
+    out.scenes = step.scenes;
+    out.attempts = step.attempts;
+    out.error = step.error;
+    for (std::size_t index = 0; index < step.scenes.size() && index < step.changes.size();
+         ++index) {
+        // The kept scene this one came from, and the parent's that one did.
+        const std::size_t from_kept = step.changes[index].from;
+        std::size_t from = 0;
+        if (from_kept >= 1 && from_kept <= kept.scenes.size()) {
+            from = kept.scenes[from_kept - 1].from.value_or(0);
+        }
+        SceneChange change;
+        if (from >= 1 && from <= parent.scenes.size()) {
+            const harness::ProjectScene& was = parent.scenes[from - 1];
+            const harness::ProjectScene& scene = step.scenes[index];
+            change.from = from;
+            change.narration = scene.narration != was.narration;
+            change.visual = scene.visual != was.visual;
+            change.seconds = std::abs(scene.seconds - was.seconds) > 1e-9;
+            change.asset = scene.asset != was.asset;
+            change.reseeded = scene.seed != was.seed;
+        }
+        out.changes.push_back(change);
+    }
+    out.removed = removed_of(out.changes, parent.scenes.size());
+    mark_moved(out.changes);
     return out;
 }
 

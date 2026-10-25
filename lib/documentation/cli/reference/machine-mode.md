@@ -317,14 +317,23 @@ before.
 | `assembling` | Those `frames` going into the clip. |
 | `segment` | Speech made: segment `index` of `of`, its `seconds` as the driver counted. |
 | `scene` | A composition's scene begun: `scene` of `scenes`, `state` `speaking` (its narration), `rendering` (its clip) or `asset` (its asset taken as it is). Every `ready`, `step`, `frames`, `assembling` and `segment` inside a composition carries the `scene` it belongs to; outside one they carry none. |
-| `document` | Last on success: the verb's own document, whole. For `video generate`, `video compose` and `voice say` it is exactly what `--output-format json` prints (the record beside the output). For `models pull`, which has no document of its own, one `document` per set of weights the run stored, in the order stored, each exactly what `apogee models info <model>/<format>/<id> --output-format json` prints for it. |
+| `document` | Last on success: the verb's own document, whole. For `video generate`, `video compose` and `voice say` it is exactly what `--output-format json` prints -- on success, the record written beside the output. For `models pull`, which has no document of its own, one `document` per set of weights the run stored, in the order stored, each exactly what `apogee models info <model>/<format>/<id> --output-format json` prints for it. |
 
 A failure ends the stream with an `error` event, its `message` the words stderr
-gets; a media run that wrote its document anyway (`status` `failed` or
-`cancelled`, as `--output-format json` prints it) sends that `document` first.
-Ctrl-C exits `130` with the stream ending cleanly on its `error`, every line
-whole. `models pull` takes `text` or `stream-json` only; the three media verbs
-take `text`, `json` or `stream-json`.
+gets -- the stream's last event, so a chain's `failed` stage and the `notice`s
+saying where it stopped and how to resume come before it. A media run that
+started and failed or was cancelled sends its document first, exactly as
+`--output-format json` prints it, `status` `failed` or `cancelled`: for `video
+generate` and `voice say` a record of the run written nowhere -- nothing lands
+beside the output, and its `sidecar` is `null` -- and for `video compose` the
+project as it saved it beside the video, its finished scenes kept for the same
+command to resume. A run refused before it starts sends no document. Ctrl-C
+exits `130` with the stream ending cleanly on its `error`, every line whole --
+`models pull` on every path too since 55c: a copy from the Ollama store, a
+GGUF, a SafeTensors snapshot, an MLX model, a pipeline, a voice model and the
+register chain's download, what it staged removed (`cancelled -- nothing was
+written`). `models pull` takes `text` or `stream-json` only; the three media
+verbs take `text`, `json` or `stream-json`.
 
 ## Validating and generating: the schema
 
@@ -953,7 +962,13 @@ the plan and its spend said on stderr, the project written beside the video
 with `status` `planned` and printed, nothing spoken, rendered or kept under
 `scenes_dir`. The same command without `--dry-run` renders that plan as
 kept, never planning again (`rendering the plan a dry run kept at …`); a dry
-run over a plan already kept makes no call at all. An edit is the same verb:
+run over a plan already kept makes no call at all, and says it reads the plan
+(`reading the plan a dry run kept at …`), never that it renders (55c).
+Captions this ffmpeg cannot burn are kept beside the video as `<video>.srt`,
+never over a file already there that is not the project's own (its
+`captions.file`): one refuses every run that would render -- a fresh run, a
+resumed one, the plan a dry run kept -- before anything runs.
+An edit is the same verb:
 
 ```bash
 apogee video compose --from video.mp4 --edit "<instruction>" -o edited.mp4 --output-format json
@@ -963,8 +978,18 @@ Its scene diff is said on stderr before anything renders; `--dry-run`
 prints the edited project with `status` `planned`, its scenes' `from` and
 `changes` the diff as data, and renders and writes nothing. Exit `1` on a failure and `130` on a cancel, every finished
 scene kept either way: the same command again resumes it, rendering only
-what the document does not hold. A refusal before the plan prints no
-document, one line on stderr naming the fix.
+what the document does not hold, with the project's own settings -- a flag
+asking for other than the project has is said `not applied`, one naming
+what it has is not (55c). An edit project resumed with
+an `--edit` or `--redo-scene` it does not hold last runs that edit over the
+kept project -- the kept plan is the one it rewrites (55c): the diff, its
+scenes' `from` and `changes` still read against the project's `parent`, the
+edit added to its `edits`, what the kept project made carried and the rest
+rendered -- or, with `--dry-run`, printed `planned` with nothing written. An
+edit that cannot run over the kept project is refused by name: a
+`--redo-scene` for a scene it does not have, a kept project whose scenes
+record no `from`. A refusal before the plan
+prints no document, one line on stderr naming the fix.
 
 Since 27l the graph navigation verbs are reads of the same kind:
 

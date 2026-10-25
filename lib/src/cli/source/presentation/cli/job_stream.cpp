@@ -78,6 +78,9 @@ JobStream::~JobStream() {
     std::cout.flush();
     std::cout.rdbuf(original_);
     relay_.reset();  // a last unterminated line, said
+    if (failed_) {
+        reporter_.emit_error(failure_);
+    }
     raw_.flush();
 }
 
@@ -94,7 +97,7 @@ void JobStream::failed(std::string_view message) {
         return;
     }
     failed_ = true;
-    reporter_.emit_error(message);
+    failure_ = std::string{message};
 }
 
 DownloadProgress::Options job_download_options() {

@@ -354,9 +354,8 @@ TEST_CASE("a failed compose keeps its scenes, and the same command resumes it",
                                    "join", "mix", "burn"});
     CHECK(run.said.front() ==
           "resuming " + run.sidecar().string() + ": 3 of 3 narrations and 1 clips already there");
-    CHECK(run.said.at(1) ==
-          "a resumed project keeps its own settings: --model, --voice not "
-          "applied");
+    // `-m` names the project's own pipeline: applied, so not said (55c).
+    CHECK(run.said.at(1) == "a resumed project keeps its own settings: --voice not applied");
     CHECK(result.document["status"] == "done");
     CHECK(result.document["settings"]["voice"] == "af_heart");
 }
@@ -699,4 +698,287 @@ TEST_CASE("an edit's dry run names each scene's source and what changed",
     CHECK(scenes[1]["moved"] == false);
     CHECK(scenes[0]["changes"].empty());
     CHECK(result.document["removed"].empty());
+}
+
+// ---- 55c: a resumed composition keeps its word ------------------------------
+
+namespace {
+
+/// A finished parent, then an edit of it that failed at scene 2's clip --
+/// the kept edit project at `edited.mp4.json`, scenes 1 and 3 carried.
+void kept_edit(Run& run) {
+    compose_parent(run);
+    run.options.edit = "make the second scene about the moon";
+    run.answer = edited_plan();
+    run.render_error = "the driver said no";
+    REQUIRE(run.go().exit_code == 1);
+    run.render_error.clear();
+    run.calls.clear();
+    run.said.clear();
+}
+
+/// The editor's answer over the kept edit: its three scenes, scene 3's
+/// visual changed.
+[[nodiscard]] nlohmann::json storm_plan() {
+    nlohmann::json out = edited_plan();
+    out["scenes"][2]["visual"] = "a storm at sea";
+    return out;
+}
+
+[[nodiscard]] std::filesystem::path edited_sidecar(const Run& run) {
+    return run.out_dir / "edited.mp4.json";
+}
+
+}  // namespace
+
+TEST_CASE("a kept edit given a new --edit runs it over the kept project, dry or not",
+          "[cli][video][compose][edit][resume]") {
+    Run run;
+    kept_edit(run);
+    const std::string kept = slurp(edited_sidecar(run));
+
+    // The audit's probe: a new instruction on paper over the kept edit. It
+    // is planned -- one edit call -- said, and nothing is written.
+    run.options.edit = "make the third scene a storm";
+    run.answer = storm_plan();
+    run.options.dry_run = true;
+    VideoComposeResult result = run.go();
+    INFO(result.error);
+    REQUIRE(result.exit_code == 0);
+    CHECK(run.calls == std::vector<std::string>{"plan on m"});
+    CHECK(run.said == std::vector<std::string>{
+                          "editing the project kept at " + edited_sidecar(run).string() +
+                              " with m: \"make the third scene a storm\"",
+                          "the edit: 3 scenes, were 3", "  1. scene 1, untouched",
+                          "  2. scene 2; its prompt changed", "  3. scene 3; its prompt changed"});
+    CHECK(result.lines == std::vector<std::string>{"a dry run: nothing was rendered or written"});
+    CHECK(result.document["status"] == "planned");
+    CHECK(result.document["scenes"][2]["visual"] == "a storm at sea");
+    CHECK(slurp(edited_sidecar(run)) == kept);
+
+    // Rendered: the kept plan is the edit's parent, so what it kept stays
+    // -- scene 1's clip carried in place -- scene 2 (never made) and the
+    // storm render, and the document still reads against the project's
+    // parent, both edits in its chain.
+    run.options.dry_run = false;
+    run.calls.clear();
+    run.said.clear();
+    result = run.go();
+    INFO(result.error);
+    REQUIRE(result.exit_code == 0);
+    const std::string clip = "org--clip/pipeline/aaaaaaaaaaaa";
+    CHECK(run.calls == std::vector<std::string>{"plan on m", "render s02.mp4 seed 8 on " + clip,
+                                                "render s03.mp4 seed 9 on " + clip, "join", "mix",
+                                                "burn"});
+    const nlohmann::json& document = result.document;
+    CHECK(document["status"] == "done");
+    CHECK(document["parent"] == run.sidecar().string());
+    REQUIRE(document["edits"].size() == 2);
+    CHECK(document["edits"][0]["instruction"] == "make the second scene about the moon");
+    CHECK(document["edits"][1] == nlohmann::json{{"instruction", "make the third scene a storm"},
+                                                 {"redo", nlohmann::json::array()},
+                                                 {"from", run.sidecar().string()}});
+    CHECK(document["scenes"][0]["changes"].empty());
+    CHECK(document["scenes"][1]["changes"] == nlohmann::json{"prompt"});
+    CHECK(document["scenes"][2]["changes"] == nlohmann::json{"prompt"});
+    const std::filesystem::path scenes = run.out_dir / "edited.scenes";
+    CHECK(slurp(scenes / "s01.mp4") == "MP4 seed 7");
+    CHECK(slurp(scenes / "s03.mp4") == "MP4 seed 9");
+    CHECK(document["scenes"][0]["clip"]["file"] == (scenes / "s01.mp4").string());
+    // Nothing is left of the directory the files went through.
+    std::size_t beside = 0;
+    for (const auto& entry : std::filesystem::directory_iterator{run.out_dir}) {
+        beside += entry.path().filename().string().starts_with("edited.scenes.") ? 1 : 0;
+    }
+    CHECK(beside == 0);
+    CHECK(nlohmann::json::parse(slurp(edited_sidecar(run))) == document);
+}
+
+TEST_CASE("a kept edit given --redo-scene re-rolls it over the kept project, or is refused",
+          "[cli][video][compose][edit][resume]") {
+    Run run;
+    kept_edit(run);
+    const std::string kept = slurp(edited_sidecar(run));
+
+    // A scene the kept project does not have: refused by name, nothing
+    // changed.
+    run.options.edit.clear();
+    run.options.redo = {7};
+    VideoComposeResult result = run.go();
+    CHECK(result.exit_code == 1);
+    CHECK(result.error == "--redo-scene 7: the project has 3 scenes");
+    CHECK(run.calls.empty());
+    CHECK(slurp(edited_sidecar(run)) == kept);
+
+    // Scene 1 re-rolled over the kept edit: no edit call, scene 1 rendered
+    // on its new seed, scene 2 as it never was made, scene 3 carried.
+    run.options.redo = {1};
+    run.next_seed = 10;
+    run.calls.clear();
+    run.said.clear();
+    result = run.go();
+    INFO(result.error);
+    REQUIRE(result.exit_code == 0);
+    const std::string clip = "org--clip/pipeline/aaaaaaaaaaaa";
+    CHECK(run.calls == std::vector<std::string>{"render s01.mp4 seed 10 on " + clip,
+                                                "render s02.mp4 seed 8 on " + clip, "join", "mix",
+                                                "burn"});
+    CHECK(run.said.front() == "editing the project kept at " + edited_sidecar(run).string());
+    CHECK(std::ranges::find(run.said, "  1. scene 1; a new seed") != run.said.end());
+    CHECK(std::ranges::find(run.said, "  2. scene 2; its prompt changed") != run.said.end());
+    REQUIRE(result.document["edits"].size() == 2);
+    CHECK(result.document["edits"][1]["instruction"].is_null());
+    CHECK(result.document["edits"][1]["redo"] == nlohmann::json::array({1}));
+    CHECK(result.document["scenes"][0]["changes"] == nlohmann::json{"seed"});
+    CHECK(slurp(run.out_dir / "edited.scenes" / "s03.mp4") == "MP4 seed 9");
+}
+
+TEST_CASE("a kept edit whose scenes record no source is refused an edit by name",
+          "[cli][video][compose][edit][resume]") {
+    // An edit project from before 52c: its scenes say nothing of where they
+    // came from, so a new edit could not be read against the parent.
+    Run run;
+    kept_edit(run);
+    nlohmann::json older = nlohmann::json::parse(slurp(edited_sidecar(run)));
+    for (nlohmann::json& scene : older["scenes"]) {
+        scene.erase("from");
+        scene.erase("changes");
+        scene.erase("moved");
+    }
+    older.erase("removed");
+    std::ofstream{edited_sidecar(run)} << older.dump(2) << "\n";
+    const std::string kept = slurp(edited_sidecar(run));
+    run.options.edit = "make the third scene a storm";
+    const VideoComposeResult result = run.go();
+    CHECK(result.exit_code == 1);
+    CHECK(result.error == edited_sidecar(run).string() +
+                              " was edited by a build that did not record where its scenes came "
+                              "from, so --edit and --redo-scene cannot run over it -- finish it "
+                              "with the command that made it, or name another -o");
+    CHECK(run.calls.empty());
+    CHECK(slurp(edited_sidecar(run)) == kept);
+}
+
+TEST_CASE("a kept edit given the edit it holds resumes it, its flags never said ignored",
+          "[cli][video][compose][edit][resume]") {
+    // The same command again is a resume, not a second edit: no edit call.
+    Run run;
+    kept_edit(run);
+    run.options.planner = "m";
+    const VideoComposeResult result = run.go();
+    INFO(result.error);
+    REQUIRE(result.exit_code == 0);
+    CHECK(run.calls ==
+          std::vector<std::string>{"render s02.mp4 seed 8 on org--clip/pipeline/aaaaaaaaaaaa",
+                                   "join", "mix", "burn"});
+    CHECK(run.said.front().starts_with("resuming " + edited_sidecar(run).string()));
+    CHECK(std::ranges::none_of(run.said, [](const std::string& line) {
+        return line.find("not applied") != std::string::npos;
+    }));
+}
+
+TEST_CASE("a resumed project says a flag not applied only where it differs from the project",
+          "[cli][video][compose][resume]") {
+    Run run;
+    apogee::testing::write_pipeline_model(run.roots.models / "org--other" / "pipeline" /
+                                          "dddddddddddd");
+    run.render_error = "the driver said no";
+    REQUIRE(run.go().exit_code == 1);
+    run.render_error.clear();
+    const auto said_unapplied = [&run](const std::function<void(VideoComposeOptions&)>& set) {
+        const VideoComposeOptions kept = run.options;
+        set(run.options);
+        std::filesystem::remove(run.out_dir / "tides.mp4");
+        run.said.clear();
+        const VideoComposeResult result = run.go();
+        run.options = kept;
+        INFO(result.error);
+        CHECK(result.exit_code == 0);
+        std::string line;
+        for (const std::string& said : run.said) {
+            line = said.find("not applied") != std::string::npos ? said : line;
+        }
+        return line;
+    };
+    // The project's own pipeline, by its name or its handle, its voice
+    // model and its voice: nothing to say.
+    CHECK(said_unapplied([](VideoComposeOptions& o) {
+              o.voice = "af_heart";
+              o.voice_model = "hexgrad--Kokoro-82M";
+          }).empty());
+    CHECK(said_unapplied([](VideoComposeOptions& o) {
+              o.model = "org--clip/pipeline/aaaaaaaaaaaa";
+          }).empty());
+    // Another pipeline: kept, and said.
+    CHECK(said_unapplied([](VideoComposeOptions& o) { o.model = "org--other"; }) ==
+          "a resumed project keeps its own settings: --model not applied");
+}
+
+TEST_CASE("rendering a kept plan never writes over an .srt beside the video",
+          "[cli][video][compose][dry-run]") {
+    // The plan on paper; then a file of the user's where unburnable
+    // captions would be kept; then the plan rendered -- refused before
+    // anything runs, the file untouched.
+    Run run;
+    run.can_burn = false;
+    run.options.dry_run = true;
+    REQUIRE(run.go().exit_code == 0);
+    std::ofstream{run.out_dir / "tides.srt"} << "mine";
+    run.options.dry_run = false;
+    run.calls.clear();
+    const VideoComposeResult refused = run.go();
+    CHECK(refused.exit_code == 1);
+    CHECK(refused.error == (run.out_dir / "tides.srt").string() +
+                               " exists -- this ffmpeg cannot burn the captions, so they would "
+                               "be kept there; name another -o");
+    CHECK(run.calls.empty());
+    CHECK(slurp(run.out_dir / "tides.srt") == "mine");
+    CHECK(nlohmann::json::parse(slurp(run.sidecar()))["status"] == "planned");
+
+    // A failed run resumed is held to it too.
+    Run failed;
+    failed.can_burn = false;
+    failed.render_error = "the driver said no";
+    REQUIRE(failed.go().exit_code == 1);
+    failed.render_error.clear();
+    std::ofstream{failed.out_dir / "tides.srt"} << "mine";
+    failed.calls.clear();
+    CHECK(failed.go().exit_code == 1);
+    CHECK(failed.calls.empty());
+    CHECK(slurp(failed.out_dir / "tides.srt") == "mine");
+
+    // The project's own captions -- its record names them -- are its to
+    // write again: a finished video gone, the same command remakes it.
+    Run done;
+    done.can_burn = false;
+    REQUIRE(done.go().exit_code == 0);
+    REQUIRE(nlohmann::json::parse(slurp(done.sidecar()))["captions"]["file"] ==
+            (done.out_dir / "tides.srt").string());
+    std::filesystem::remove(done.out_dir / "tides.mp4");
+    const VideoComposeResult again = done.go();
+    INFO(again.error);
+    CHECK(again.exit_code == 0);
+    CHECK(std::filesystem::exists(done.out_dir / "tides.mp4"));
+}
+
+TEST_CASE("a dry run over a kept plan says it reads the plan, never that it renders",
+          "[cli][video][compose][dry-run]") {
+    Run run;
+    run.options.dry_run = true;
+    REQUIRE(run.go().exit_code == 0);
+    run.said.clear();
+    const VideoComposeResult result = run.go();
+    REQUIRE(result.exit_code == 0);
+    CHECK(run.said ==
+          std::vector<std::string>{
+              "reading the plan a dry run kept at " + run.sidecar().string(),
+              "plan: \"Tides\" -- 3 scenes, about 11.0 s of video", "  1. (4.0 s) \"Line 1.\"",
+              "     shows: shot 1", "  2. (4.0 s) \"Line 2.\"", "     shows: shot 2",
+              "  3. (4.0 s) \"Line 3.\"", "     shows: shot 3",
+              "spend: 3 narration runs (faster than real time), then 3 clip runs at 1280x704, "
+              "50 steps -- each takes minutes on Apple silicon, less on a CUDA GPU",
+              "captions: burned into the frames"});
+    CHECK(std::ranges::none_of(run.said, [](const std::string& line) {
+        return line.find("rendering") != std::string::npos;
+    }));
 }

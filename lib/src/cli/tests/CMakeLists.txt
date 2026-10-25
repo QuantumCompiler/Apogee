@@ -298,6 +298,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/tui_workbench_test.cpp
     presentation/cli/root_test.cpp
     presentation/cli/models_pull_test.cpp
+    presentation/cli/models_pull_cancel_test.cpp
     presentation/cli/models_migrate_test.cpp
     presentation/cli/models_convert_test.cpp
     presentation/cli/models_mlx_test.cpp
