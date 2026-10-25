@@ -72,7 +72,8 @@ const std::string& JsonReporter::turn_text() const noexcept {
 }
 
 void JsonReporter::begin_session(std::string_view model, const MachineCapabilities& capabilities,
-                                 std::optional<std::int64_t> next_turn, bool private_chat) {
+                                 std::optional<std::int64_t> next_turn, bool private_chat,
+                                 std::string_view chat_id) {
     nlohmann::json object = event("session");
     object["protocol_version"] = kMachineProtocolVersion;
     object["model"] = std::string{model};
@@ -95,6 +96,10 @@ void JsonReporter::begin_session(std::string_view model, const MachineCapabiliti
     if (private_chat) {
         // `chat --private` (52d): nothing of this session is ever written.
         object["private"] = true;
+    } else if (!chat_id.empty()) {
+        // The chat this session writes (M28), so a driver never guesses it
+        // from what `chats list` shows next: a private one writes none.
+        object["chat_id"] = std::string{chat_id};
     }
     write(object);
 }

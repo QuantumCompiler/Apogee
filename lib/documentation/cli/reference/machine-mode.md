@@ -46,7 +46,7 @@ document last (see [A long job's run](#a-long-jobs-run)).
 One JSON object per line on stdout. Every object has a `type`.
 
 ```jsonl
-{"type":"session","protocol_version":1,"model":"claude-sonnet-5","next_turn":1,"capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"tools":true,"ask":true,"schema":"2026-10-24"}}
+{"type":"session","protocol_version":1,"model":"claude-sonnet-5","chat_id":"20261024-120000-a1b2","next_turn":1,"capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"tools":true,"ask":true,"schema":"2026-10-24"}}
 {"type":"thinking"}
 {"type":"thinking_delta","text":"…"}
 {"type":"memory","chats":1,"decisions":1,"sessions":[{"id":"20261019-142233-a1b2c3","name":"asyncio timeouts in the scraper","updated":"2026-10-19T14:40:02Z"}]}
@@ -63,7 +63,7 @@ One JSON object per line on stdout. Every object has a `type`.
 
 | Event | Meaning |
 |---|---|
-| `session` | Once, first, unprompted. Names the protocol version, the model and the session's `capabilities` (below); `"private": true` for a chat that writes nothing (52d, [below](#a-private-chat-chat---private)). |
+| `session` | Once, first, unprompted. Names the protocol version, the model and the session's `capabilities` (below); `chat_id`, the chat the session writes (M28, [below](#which-chat-chat_id)); `"private": true` for a chat that writes nothing (52d, [below](#a-private-chat-chat---private)). |
 | `thinking` | The model began reasoning. No text. Sent again with `"budget_reached": true` when the reasoning reached its thinking budget and was ended there (`--think-budget`, an `--effort` level's budget, or the backend's `thinking_budget`). Machine mode carries the reasoning as it streams whatever `ui.thinking_display` says: the terminal's and the shell's one-line summary (43) is theirs alone, and is never asked for here. |
 | `thinking_delta` | A chunk of reasoning. **Droppable** — see below. |
 | `memory` | `chat` only: what a turn was handed from earlier conversations -- `chats`, past chats' summaries, and `decisions`, recorded knowledge records -- injected for this turn and never into the transcript (26l). Sent before the turn, only when it recalled something. Since 52a `sessions` names each past chat recalled, in the order sent: its `id` (what `chats list` and `--resume` take), and the `name` and `updated` time the recall index recorded when it summarised the chat -- what the model was handed, so a later rename shows only once the chat is summarised again. Absent when `chats` is 0. |
@@ -94,6 +94,25 @@ it is talking to:
 It names what the binary can do and nothing about this machine — never a key,
 a path into the data directory or a config value. Like every field, more may
 be added.
+
+### Which chat: `chat_id`
+
+A driven `chat` or `execute`, and a `task run`, names on its `session` event
+the chat it writes (M28): `chat_id`, the id `chats list` lists it by, `chats
+show` reads and `--resume` takes. A resumed session (`--resume`, `-c`) names the
+chat it resumed -- its id, when it was resumed by name. A private chat (`chat
+--private`) writes none, so its `session` carries no `chat_id`; neither does a
+`complete` or an agent's run, which write no chat. Read it rather than guessing
+the session's chat from what appears in `chats list`: an older binary sends no
+`chat_id`, and a host falling back to a guess must allow for that.
+
+**A chat is written once a turn is answered.** A new session closed before any
+`user` line was answered -- sent none, or each it sent failed or was cancelled
+-- writes nothing: no file, no row in `chats list`, not its title or settings,
+not the index of what was attached. So the id it named is listed only after an
+answered turn. A resumed chat closed with no new turn, and nothing moved in it,
+keeps its file exactly as it was; a setting a `set` line moved is saved, as it
+always was. Chats an older binary saved with no turn stay listed until deleted.
 
 ### Turns: `turn` and `next_turn`
 
@@ -172,7 +191,7 @@ progress panel for a long-running goal spawns the task this way; its events
 arrive on the stdout of the `task run` it invoked, never from anywhere else.
 
 ```jsonl
-{"type":"session","protocol_version":1,"model":"local"}
+{"type":"session","protocol_version":1,"model":"local","chat_id":"20261004-120000-c4f2"}
 {"type":"task_started","task_id":"task-20261004-120000","resumed":false,"transition":{"at":"2026-10-04T12:00:00Z","event":"started","status":"planning"},"history":[{"at":"2026-10-04T12:00:00Z","detail":"Write the report","event":"created","status":"planning"}],"task":{…}}
 {"type":"task_plan","task_id":"task-20261004-120000","transition":{"at":"…","detail":"plan","event":"plan_started","status":"planning"},"round":{"round":0,"kind":"plan","outcome":"in_flight",…}}
 {"type":"answer_start"}
@@ -423,7 +442,8 @@ too, since there is no terminal to ask on. A `notice` also reports what could no
 be read, such as a video's sound with no model to hear it.
 
 Closing stdin ends the session: the child drains its queued output, persists the
-conversation, and exits cleanly.
+conversation, and exits cleanly -- a new chat with no answered turn writes
+nothing (M28, [above](#which-chat-chat_id)).
 
 ### The session's own doors: `detach`, `set`, `compact`
 

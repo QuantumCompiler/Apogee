@@ -115,6 +115,7 @@ python3 - "$HS_DIR/private.jsonl" <<'PY' || fail "the private stream: $(cat "$HS
 import json, sys
 events = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
 assert events[0]["type"] == "session" and events[0]["private"] is True, events[0]
+assert "chat_id" not in events[0], events[0]  # it writes no chat, so names none (M28)
 notices = [e["text"] for e in events if e["type"] == "notice"]
 assert "private: nothing of this chat is written -- no transcript, no recall" in notices, notices
 assert any(n.startswith("set: 'max_tokens' is not a setting") for n in notices), notices
@@ -134,6 +135,90 @@ grep -q '"accepts":\["hello"\]' "$HS_DIR/complete.jsonl" || fail "complete's cap
 "$APOGEE_BIN" complete -m echo --output-format stream-json "an argument" </dev/null \
     >"$HS_DIR/arg.jsonl" 2>&1 || fail "complete with an argument failed"
 grep -q '"accepts":\[\]' "$HS_DIR/arg.jsonl" || fail "complete with an argument claimed to read stdin"
+
+# --- the session names its chat; an empty one is never saved (M28) -------------
+# The user's run, as the probe that found it drove it (2026-10-22): two scripted
+# mocks, `claude` the default. A session closed before any turn -- with nothing,
+# or with every door but a turn -- adds no row to `chats list` and leaves no
+# index; one with a turn names the one row that appears, and its answers say
+# the model that gave them after a `set`; resumed, it names that chat, and
+# closed with no turn leaves its file as it was. Its own home, so the rows are
+# only these.
+ID_HOME="$WORK_DIR/chat-id"
+mkdir -p "$ID_HOME"
+printf '{"turns":[{"text":"claude says: {{last_user}}"}]}' >"$ID_HOME/claude.json"
+printf '{"turns":[{"text":"gemma says: {{last_user}}"}]}' >"$ID_HOME/gemma.json"
+printf 'The launch code is 7731.\n' >"$ID_HOME/notes.md"
+APOGEE_HOME="$ID_HOME" "$APOGEE_BIN" config init >/dev/null || fail "chat-id: config init"
+APOGEE_HOME="$ID_HOME" "$APOGEE_BIN" config add-backend claude --type mock \
+    --model-path "$ID_HOME/claude.json" >/dev/null || fail "chat-id: add claude"
+APOGEE_HOME="$ID_HOME" "$APOGEE_BIN" config add-backend Gemma4-26B-Instruct --type mock \
+    --model-path "$ID_HOME/gemma.json" >/dev/null || fail "chat-id: add gemma"
+APOGEE_HOME="$ID_HOME" "$APOGEE_BIN" config set-default claude >/dev/null || fail "chat-id: set-default"
+python3 - "$APOGEE_BIN" "$ID_HOME" <<'PY' || fail "the session's chat id, or an empty session's save"
+import hashlib, json, os, subprocess, sys
+
+binary, home = sys.argv[1], sys.argv[2]
+env = {**os.environ, "APOGEE_HOME": home}
+
+def chats():
+    got = subprocess.run([binary, "chats", "list", "--output-format", "json"], env=env,
+                         capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=60)
+    assert got.returncode == 0, got.stderr
+    return [(row["id"], row["backend"], row["turns"]) for row in json.loads(got.stdout)["data"]]
+
+def drive(name, lines, *flags):
+    text = "".join(json.dumps(line) + "\n" for line in lines)
+    got = subprocess.run([binary, "chat", "--no-recall", "--output-format", "stream-json",
+                          "--input-format", "stream-json", *flags], env=env, input=text,
+                         capture_output=True, text=True, timeout=60)
+    assert got.returncode == 0, got.stderr
+    with open(os.path.join(home, name + ".jsonl"), "w") as kept:  # validated below
+        kept.write(got.stdout)
+    events = [json.loads(line) for line in got.stdout.splitlines() if line.strip()]
+    assert events and events[0]["type"] == "session", events
+    return events
+
+def index_files():
+    folder = os.path.join(home, "attachments")
+    return sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+
+# Closed before any turn: named, and nothing written.
+assert chats() == [], chats()
+empty = drive("empty", [])
+assert isinstance(empty[0].get("chat_id"), str) and empty[0]["chat_id"], empty[0]
+assert chats() == [], f"a session closed before any turn added a row: {chats()}"
+doors = drive("doors", [{"type": "set", "model": "Gemma4-26B-Instruct"},
+                        {"type": "attach", "path": os.path.join(home, "notes.md")},
+                        {"type": "compact"}])
+assert "switched to Gemma4-26B-Instruct -- from the next turn" in \
+    [e["text"] for e in doors if e["type"] == "notice"], doors
+assert chats() == [], f"a session of doors and no turn added a row: {chats()}"
+assert index_files() == [], f"an unwritten chat left its index: {index_files()}"
+
+# A turn: the row that appears is exactly the chat the session named.
+talked = drive("talked", [{"type": "user", "text": "Hello, how are you today?"},
+                          {"type": "set", "model": "Gemma4-26B-Instruct"},
+                          {"type": "user", "text": "Can apogee create videos?"}])
+chat_id = talked[0]["chat_id"]
+assert talked[0]["model"] == "claude", talked[0]
+assert [(e["turn"], e["model"]) for e in talked if e["type"] == "result"] == \
+    [(1, "claude"), (2, "Gemma4-26B-Instruct")], talked
+assert chats() == [(chat_id, "Gemma4-26B-Instruct", 2)], (chat_id, chats())
+assert chat_id != empty[0]["chat_id"], "two sessions named one chat"
+
+# Resumed: the chat it resumed, and its file as it was when no turn ran.
+path = os.path.join(home, "sessions", chat_id + ".json")
+held = hashlib.sha256(open(path, "rb").read()).hexdigest(), os.stat(path).st_mtime_ns
+resumed = drive("resumed", [], "--resume", chat_id)
+assert resumed[0]["chat_id"] == chat_id and resumed[0]["next_turn"] == 3, resumed[0]
+assert (hashlib.sha256(open(path, "rb").read()).hexdigest(), os.stat(path).st_mtime_ns) == held, \
+    "a resumed chat closed with no turn was rewritten"
+again = drive("again", [{"type": "user", "text": "one more"}], "--resume", chat_id)
+assert again[0]["chat_id"] == chat_id, again[0]
+assert chats() == [(chat_id, "Gemma4-26B-Instruct", 3)], chats()
+print(f"chat-id: named {chat_id}, listed after a turn; empty sessions wrote nothing - OK")
+PY
 
 # --- turn ids and cancel (28f) ------------------------------------------------
 # A driver over real pipes: every turn-scoped event carries its turn; a cancel

@@ -37,8 +37,9 @@ std::string SessionStore::create(const std::string& backend,
         session.messages.push_back(harness::ChatMessage::system(params.system_prompt));
     }
     // Persisted at birth, so the id handed to the client already names a
-    // file. An empty transcript is a legitimate session -- `apogee chat`
-    // saves one too when the user quits before asking anything.
+    // file: a served session is a resource from its creation, its empty
+    // transcript a legitimate one -- unlike `apogee chat`'s, which is written
+    // once it has a turn (M28), its id already told to its driver.
     logger::save(session);
 
     const std::string id = session.chat_id;

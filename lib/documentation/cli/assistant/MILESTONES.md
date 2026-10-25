@@ -9381,6 +9381,63 @@ Decisions taken while building, for veto:
 - One run of the new cases straight after a rebuild reported 2 failed assertions that were not captured. They did not recur in about 100 sequential runs, 40 parallel, 12 under CPU load, or 15 ctest repeats.
 - `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,859 tests and the macOS app's 400 cases passed, with no warning; the earlier two-assertion failure did not recur.
 
+### 2026-10-24 — `session-names-its-chat` (maintenance item M28): a driven session names its chat, and an empty one is never saved
+
+**Why.** The user's app window on 2026-10-22 read `claude` and named chat `9a66` (0 turns) while their Gemma conversation, chat `d3e2`, ran in it. The CLI's half of the cause:
+- **No id in the event.** The `session` event never named its chat, so the app guessed "the one id that appeared since it opened".
+- **Empty chats were saved.** A session closed before any turn still wrote one (`chat_session.cpp`'s close), handing the guess an abandoned chat to take.
+
+The probe, run on two scripted mocks over a sandbox, showed both: `session` keys without a chat id, and `appeared: ('…', 'claude', 0)`. The app's half (the label, the stale snapshot) is the GUI's M10.
+
+- [x] **The `session` event names its chat,** as `chat_id`, added only to the event:
+  - **New:** `{"capabilities":…,"chat_id":"20261025-051944-312f","model":"claude","next_turn":1,…}`.
+  - **Resumed:** a resumed session names the id it resumed.
+  - **Private:** a `--private` session that writes nothing names none.
+  - **Task runs:** `task run`'s event names its chat too, since a task's chat is written from its start. `complete` and agent runs write no chat and name none.
+
+  `machine-mode.md` gains "Which chat: `chat_id`". The schema is generated from `protocol.cpp`, so it carries the field.
+- [x] **A new chat with no answered turn is never written.**
+  - **Where:** in the one writer, `logger::save`. It refuses a session the chat core marked new (`new_chat`, like 52d's `never_written`) until it holds an answered turn (`Session::unwritten()`).
+  - **What it means:** nothing of an empty session is kept: not its title, its settings, its `set` lines, a compaction, its attachments' index, or the backend's saved state. The probe's "closed before any turn" now leaves `appeared: []`. Its "`set`, `attach`, `compact`, no turn" case leaves `appeared: []` and `attachments/: []`.
+  - **The close is compared with the record as it opened,** so a resumed chat closed with no new turn keeps its file byte-identical, while a `set` on it is still saved.
+  - **An unwritten chat's attachment index** is removed at close (`UnwrittenIndex`), never left with no chat to name it.
+  - **At a terminal,** an empty chat ends `[apogee] nothing saved -- the chat had no turn`.
+
+**Decisions made while building** (2026-10-24, each recorded for veto):
+- **The open calls' defaults, taken:** the field is `chat_id`, and an empty session writes nothing at all.
+- **"A turn" means an answered turn.** A new chat whose only turns failed or were cancelled writes nothing, where before it left a 0-turn file holding an unanswered question. That keeps the rule in line with the record's own count and the cancel rollback.
+- **One small loss:** a launch flag on a resumed chat closed with no turn (`--resume X -m other`, then quit) is no longer saved.
+- **What stays as it was:**
+  - `serve` saves its sessions at creation, since the HTTP API treats a session as a resource from birth;
+  - existing 0-turn chats are untouched, and `chats title` still renames them.
+- **`ExcerptSource` (`contracts/types.h`)** gained default initializers, clearing 11 MinGW `-Wmissing-field-initializers` warnings in the touched `machine_mode_test.cpp`.
+- **A side effect:** `chat -c` no longer lands on an empty chat a prior session left behind.
+
+**Verified.**
+- 5 new cases (`[chat-id]`, `[unwritten]`, 66 assertions):
+  - the session naming its chat, a private one none;
+  - a new chat written once it has a turn, a loaded one with none still written;
+  - a driven chat naming the chat it writes, a resumed one the chat it resumed;
+  - a chat closed before its first turn writing nothing, whatever it set, and keeping no index;
+  - a resumed chat closed with no new turn keeping its file, one it changed saved.
+- **The probe, before and after:**
+  - closed before any turn: from one empty row to none;
+  - two turns with a `set` between: `chat_id` equals the row that appeared (`True`), with results `[(1,'claude'),(2,'Gemma4-26B-Instruct')]`;
+  - resumed and closed with no turn: the file unchanged (`True`, `False` before).
+- **Extended:**
+  - the declaration test covers a named session, and `execute`'s machine test asserts `chat_id`;
+  - `machine_mode_e2e.sh` has an M28 section, and its private block checks there is no `chat_id`;
+  - `execute_e2e.sh` matches `chat_id` to the saved conversation.
+- **Changed on purpose:**
+  - three execute tests and one chat permissions test assumed an empty saved session;
+  - `pty_lineedit_check.py`'s attach check now sends a turn;
+  - the two goldens gain `chat_id` on their session lines.
+- **The conformance test fails** when `chat_id` is cut from a copy of `machine-mode.md`.
+- **Suites:** the neighbouring ones pass (`[machine]`, `[private]`, `[session]`, `[execute]` and `[golden]`), and all 60 `cli.*` and `harness.*` ctest cases pass.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,893 tests and the macOS app's 449 cases passed, with no warning.
+
+**Not done:** 55b's no-op compaction ("history compacted" on an empty conversation) still says so, though nothing is now written.
+
 ---
 
 ## Milestone AP — Runtime adapters

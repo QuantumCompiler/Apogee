@@ -329,17 +329,17 @@ struct ModelInfo {
 struct ExcerptSource {
     /// The file as its index names it: an attachment's file name, a
     /// collection's source path, a recalled chat's id.
-    std::string file;
+    std::string file{};
     /// First and last, 1-based, when the chunks record them: a PDF's pages,
     /// a text's lines.
-    std::optional<std::array<std::int64_t, 2>> pages;
-    std::optional<std::array<std::int64_t, 2>> lines;
+    std::optional<std::array<std::int64_t, 2>> pages{};
+    std::optional<std::array<std::int64_t, 2>> lines{};
     /// A recording's span, in seconds.
-    std::optional<std::array<double, 2>> times;
+    std::optional<std::array<double, 2>> times{};
     double score = 0.0;
     /// `lexical`, `vector` or `hybrid`: the scale `score` is on. Always
     /// carried -- the scales are not comparable.
-    std::string retriever;
+    std::string retriever{};
 };
 
 /// Metadata about one RAG retrieval, carried alongside injected context.

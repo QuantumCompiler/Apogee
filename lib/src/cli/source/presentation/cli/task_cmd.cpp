@@ -908,9 +908,11 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     if (machine_mode) {
         // Once, first -- the protocol's rule -- then the task's lifecycle.
         // A task reads nothing from its driver, so it accepts no line and
-        // nobody is asked over the protocol (28d).
+        // nobody is asked over the protocol (28d). It names the chat it
+        // drives (M28), written from the task's start.
         machine_reporter->begin_session(
-            session.backend, MachineCapabilities{.accepts = {}, .tools = task.tools, .ask = false});
+            session.backend, MachineCapabilities{.accepts = {}, .tools = task.tools, .ask = false},
+            std::nullopt, false, session.chat_id);
     }
 
     // One task event per transition the ledger holds, and one per grant used:

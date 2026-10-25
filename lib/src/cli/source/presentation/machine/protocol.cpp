@@ -27,7 +27,7 @@ constexpr std::array<FieldSpec, 5> kCapabilities{{
     {"schema", "string", true, "The vocabulary's version, a date.", {}, {}},
 }};
 
-constexpr std::array<FieldSpec, 5> kSession{{
+constexpr std::array<FieldSpec, 6> kSession{{
     {"protocol_version",
      "integer",
      true,
@@ -46,6 +46,13 @@ constexpr std::array<FieldSpec, 5> kSession{{
      "boolean",
      false,
      "true for chat --private: nothing of the session is ever written.",
+     {},
+     {}},
+    {"chat_id",
+     "string",
+     false,
+     "The chat this session writes, as chats list, chats show and --resume name it; absent when "
+     "it writes none (chat --private).",
      {},
      {}},
 }};

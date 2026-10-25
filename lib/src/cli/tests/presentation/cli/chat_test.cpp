@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <random>
@@ -1536,9 +1537,10 @@ TEST_CASE("machine mode takes the permission mode at launch, asking nothing it c
 TEST_CASE("the slash verbs answer for the chat, and /permissions says from where",
           "[chat][cli][permissions][presets]") {
     HelperChat chat{texts({"fine"}), {"Title"}, "", "permissions:\n  delete_file: allow\n"};
+    // A turn last, so the chat is written to be resumed (M28).
     REQUIRE(chat.run({"chat", "--tools", "--deny", "example.org"},
                      "/allow write_file\n/deny run_command\n/permissions\n/revoke run_command\n"
-                     "/revoke delete_file\n/allow wrte_file\n/permissions\n") == 0);
+                     "/revoke delete_file\n/allow wrte_file\n/permissions\nhello\n") == 0);
     const std::string said = chat.out + chat.err;
     CHECK(said.find("write_file allowed for this chat") != std::string::npos);
     CHECK(said.find("run_command denied for this chat") != std::string::npos);
@@ -2253,6 +2255,133 @@ TEST_CASE("a private chat writes nothing: no transcript, no recall, no index lef
     // A saved chat is not made private after the fact.
     CHECK(chat.run({"chat", "--private", "--continue"}, "x\n") != 0);
     CHECK(chat.err.find("--private starts a chat that is never written") != std::string::npos);
+}
+
+namespace {
+
+/// What `chats list --output-format json` lists, by id.
+[[nodiscard]] std::vector<std::string> listed_ids(HelperChat& chat) {
+    REQUIRE(chat.run({"chats", "list", "--output-format", "json"}) == 0);
+    const nlohmann::json listed = nlohmann::json::parse(chat.out);
+    std::vector<std::string> ids;
+    for (const nlohmann::json& row : listed.at("data")) {
+        ids.push_back(row.at("id").get<std::string>());
+    }
+    return ids;
+}
+
+/// The bytes of a file, or nothing.
+[[nodiscard]] std::string bytes_of(const std::filesystem::path& path) {
+    std::ifstream in{path, std::ios::binary};
+    return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+}
+
+/// `chat` driven over the protocol, with `extra` flags after.
+[[nodiscard]] std::vector<std::string> driven_args(const std::vector<std::string>& extra = {}) {
+    std::vector<std::string> args{"chat", "--input-format", "stream-json", "--output-format",
+                                  "stream-json"};
+    args.insert(args.end(), extra.begin(), extra.end());
+    return args;
+}
+
+}  // namespace
+
+TEST_CASE("a driven chat names the chat it writes, a resumed one the chat it resumed",
+          "[chat][cli][machine][chat-id]") {
+    // M28: the id `chats list`, `chats show` and `--resume` use, so a driver
+    // never guesses its chat from what appeared in the list.
+    HelperChat chat{texts({"one", "two"}), {"Title"}};
+    INFO(chat.err);
+    REQUIRE(chat.run(driven_args(), std::string{R"({"type":"user","text":"hello"})"} + "\n") == 0);
+    const nlohmann::json opened = driven_events(chat.out).front();
+    REQUIRE(opened.at("type") == "session");
+    REQUIRE(opened.contains("chat_id"));
+    const std::string id = opened.at("chat_id").get<std::string>();
+    CHECK(listed_ids(chat) == std::vector<std::string>{id});
+
+    // Resumed by its name, it names the id -- and its next turn the same chat.
+    REQUIRE(chat.run({"chats", "title", id, "the first chat"}) == 0);
+    REQUIRE(chat.run(driven_args({"--resume", "the first chat"}),
+                     std::string{R"({"type":"user","text":"again"})"} + "\n") == 0);
+    const nlohmann::json resumed = driven_events(chat.out).front();
+    CHECK(resumed.at("chat_id") == id);
+    CHECK(resumed.at("next_turn") == 2);
+    CHECK(HelperChat::only_session().turns == 2);
+
+    // A private chat writes none and names none.
+    REQUIRE(chat.run(driven_args({"--private"}),
+                     std::string{R"({"type":"user","text":"secret"})"} + "\n") == 0);
+    const nlohmann::json hidden = driven_events(chat.out).front();
+    CHECK(hidden.at("private") == true);
+    CHECK_FALSE(hidden.contains("chat_id"));
+    CHECK(listed_ids(chat) == std::vector<std::string>{id});
+}
+
+TEST_CASE("a chat closed before its first turn writes nothing, whatever it set, and keeps no index",
+          "[chat][cli][unwritten]") {
+    // M28: no empty row in `chats list` -- the open call's default, nothing
+    // at all: not its title, not its settings, not its attachments' index.
+    HelperChat chat{texts({"an answer"}), {"Title", "a summary"}};
+    const std::filesystem::path notes = chat.home.path() / "notes.md";
+    std::ofstream{notes, std::ios::binary} << "The launch code is 7731.\n";
+    INFO(chat.err);
+
+    // Driven, its stdin closed at once -- the user's run.
+    REQUIRE(chat.run(driven_args()) == 0);
+    REQUIRE(driven_events(chat.out).front().contains("chat_id"));
+    CHECK(apogee::logger::list_sessions().empty());
+
+    // Driven, every door but a turn.
+    REQUIRE(chat.run(driven_args(),
+                     std::string{R"({"type":"set","model":"helper","temperature":0.3})"} + "\n" +
+                         R"({"type":"attach","path":")" + notes.generic_string() + "\"}\n" +
+                         R"({"type":"compact"})" + "\n") == 0);
+    CHECK(apogee::logger::list_sessions().empty());
+    CHECK(files_under(apogee::harness::sessions_dir()) == 0);
+    CHECK(files_under(apogee::harness::attachments_dir()) == 0);
+
+    // At a pipe, every command that saves when it is run.
+    REQUIRE(chat.run({"chat", "--attach", notes.string()},
+                     "/title renamed\n/retriever lexical\n/rerank off\n/temperature 0.3\n"
+                     "/private\n/compact\n/exit\n") == 0);
+    CHECK(apogee::logger::list_sessions().empty());
+    CHECK(files_under(apogee::harness::sessions_dir()) == 0);
+    CHECK(files_under(apogee::harness::attachments_dir()) == 0);
+
+    // The first turn writes it, with what was set before it.
+    REQUIRE(chat.run({"chat"}, "/title renamed\n/temperature 0.3\nhello\n") == 0);
+    const apogee::logger::Session saved = HelperChat::only_session();
+    CHECK(saved.custom_name == "renamed");
+    CHECK(saved.params.temperature == std::optional<double>{0.3});
+    CHECK(saved.turns == 1);
+}
+
+TEST_CASE("a resumed chat closed with no new turn keeps its file; one it changed is saved",
+          "[chat][cli][unwritten][resume]") {
+    HelperChat chat{texts({"one"}), {"Title"}};
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat"}, "hello\n") == 0);
+    const std::string id = HelperChat::only_session().chat_id;
+    const std::filesystem::path file = apogee::logger::session_path(id);
+    // A time no save writes, so a rewrite in the same second still shows.
+    nlohmann::json record = nlohmann::json::parse(bytes_of(file));
+    record["updated_at"] = "2001-01-01T00:00:00Z";
+    std::ofstream{file, std::ios::binary | std::ios::trunc} << record.dump(2);
+    const std::string held = bytes_of(file);
+
+    REQUIRE(chat.run(driven_args({"--resume", id})) == 0);
+    CHECK(driven_events(chat.out).front().at("chat_id") == id);
+    CHECK(bytes_of(file) == held);
+    REQUIRE(chat.run({"chat", "-c"}, "/model\n/attachments\n") == 0);
+    CHECK(bytes_of(file) == held);
+
+    // A setting moved on a chat that has turns is saved, as ever.
+    REQUIRE(chat.run(driven_args({"--resume", id}),
+                     std::string{R"({"type":"set","temperature":0.3})"} + "\n") == 0);
+    const apogee::logger::Session moved = HelperChat::only_session();
+    CHECK(moved.params.temperature == std::optional<double>{0.3});
+    CHECK(moved.updated_at != "2001-01-01T00:00:00Z");
+    CHECK(moved.turns == 1);
 }
 
 TEST_CASE("chats compact folds a saved chat's history, asked first or --yes",

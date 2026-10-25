@@ -308,6 +308,7 @@ def check_attach_flags(binary, env, home, failures):
             b"\t",               # Tab: the first value
             b"\r",               # sent: the folder attached, its method said
             b"/attachments\r",   # settled: the graph built
+            b"what is in it?\r", # a turn, so the chat is written (M28)
             b"/exit\r",
         ], cwd=work, width=width, snapshots=screens)
 

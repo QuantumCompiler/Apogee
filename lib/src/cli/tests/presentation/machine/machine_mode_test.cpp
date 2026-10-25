@@ -1040,6 +1040,46 @@ TEST_CASE("a private session says so on its session event", "[commands][machine]
     CHECK_FALSE(events(plain.str()).front().contains("private"));
 }
 
+TEST_CASE("a session names the chat it writes, and a private one names none",
+          "[commands][machine][chat-id]") {
+    // M28: the id `chats list` lists the chat by and `--resume` takes, added
+    // to the event and nothing else moved.
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.begin_session("m", {}, 1, false, "20261024-120000-a1b2");
+    nlohmann::json session = events(out.str()).front();
+    session.erase("capabilities");
+    CHECK(session.dump() ==
+          R"({"chat_id":"20261024-120000-a1b2","model":"m","next_turn":1,"protocol_version":1,)"
+          R"("type":"session"})");
+
+    // A private chat writes none, so it names none -- whatever it was minted.
+    std::ostringstream hidden;
+    JsonReporter private_reporter{hidden};
+    private_reporter.begin_session("m", {}, 1, true, "20261024-120000-a1b2");
+    const nlohmann::json private_session = events(hidden.str()).front();
+    CHECK(private_session.at("private") == true);
+    CHECK_FALSE(private_session.contains("chat_id"));
+
+    // A session given none -- complete, an agent's run -- says nothing new.
+    std::ostringstream none;
+    JsonReporter none_reporter{none};
+    none_reporter.begin_session("m", {}, 1);
+    CHECK_FALSE(events(none.str()).front().contains("chat_id"));
+
+    // Declared: an optional string, so an older driver ignores it.
+    const auto declared = apogee::commands::machine_events();
+    const auto line = std::ranges::find_if(
+        declared, [](const apogee::commands::LineSpec& spec) { return spec.type == "session"; });
+    REQUIRE(line != declared.end());
+    const auto field = std::ranges::find_if(
+        line->fields,
+        [](const apogee::commands::FieldSpec& spec) { return spec.name == "chat_id"; });
+    REQUIRE(field != line->fields.end());
+    CHECK(field->type == "string");
+    CHECK_FALSE(field->required);
+}
+
 // --- 28f: turn ids and cancel ---------------------------------------------------
 
 TEST_CASE("every event of an open turn carries its number; the session never does",
@@ -1258,6 +1298,8 @@ TEST_CASE("every event every emitter writes is the declaration's, field for fiel
     capabilities.tools = true;
     capabilities.ask = true;
     reporter.begin_session("m", capabilities, 1, true);
+    // And a session that names its chat (M28).
+    reporter.begin_session("m", capabilities, 1, false, "20261024-120000-a1b2");
     reporter.begin_turn(1);
     reporter.on_recall({{.id = "c1", .name = "one", .updated = "2026-10-19T10:00:00Z"}}, 1);
     reporter.on_sources({{.file = "a.md",

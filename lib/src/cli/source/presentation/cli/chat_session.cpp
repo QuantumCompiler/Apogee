@@ -230,6 +230,30 @@ private:
     std::filesystem::path path_;
 };
 
+/// A new chat closed before its first turn writes nothing (M28) -- and so
+/// keeps nothing: the index its attachments were read into as they were
+/// attached goes as the session ends, or it would lie under the data
+/// directory with no chat to list or delete it by. A private chat's index is
+/// its run's folder's, and goes with that.
+class UnwrittenIndex {
+public:
+    explicit UnwrittenIndex(const logger::Session& session) : session_{session} {}
+
+    UnwrittenIndex(const UnwrittenIndex&) = delete;
+    UnwrittenIndex& operator=(const UnwrittenIndex&) = delete;
+    UnwrittenIndex(UnwrittenIndex&&) = delete;
+    UnwrittenIndex& operator=(UnwrittenIndex&&) = delete;
+
+    ~UnwrittenIndex() {
+        if (session_.unwritten() && !session_.never_written) {
+            ChatAttachments::remove_index(session_.chat_id);
+        }
+    }
+
+private:
+    const logger::Session& session_;
+};
+
 /// What moving one of the session's run settings did (52d): whether it took,
 /// the line saying so, and a warning beside it when there is one. The one
 /// setter `/system`, `/temperature`, `/think`, `/effort` and `/model` and a
@@ -860,6 +884,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         }
     } else {
         session.chat_id = logger::new_chat_id();
+        // Written once it has a turn (M28): one closed before leaves nothing.
+        session.new_chat = true;
     }
     // A private chat (52d) is never written -- `save` does nothing for it --
     // and never summarised.
@@ -997,13 +1023,16 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // removed as it ends, so nothing of the conversation stays in the data
     // directory.
     const PrivateFolder private_folder{flags->private_chat};
+    // A new chat that ends with no turn was never written (M28), so its index
+    // goes too -- after everything reading it, declared below, has gone.
+    const UnwrittenIndex unwritten_index{session};
     const std::filesystem::path attachment_index =
         flags->private_chat ? private_folder.path() / "index.db"
                             : ChatAttachments::index_for(session.chat_id);
     // The backend's saved state of the conversation (26j) -- none for a
-    // private chat, whose words go nowhere.
+    // private chat, whose words go nowhere, nor for a chat not written.
     const auto save_state = [&harness, &session](const harness::StatusSink& on_status) {
-        if (!session.never_written) {
+        if (!session.unwritten()) {
             harness.save_conversation(session.backend, session.chat_id, on_status);
         }
     };
@@ -1362,6 +1391,17 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         out.print_line("");
     }
 
+    // The chat as the session opened it (M28). Its close writes it only when
+    // the session changed it: a resumed chat left with no new turn and
+    // nothing moved keeps its file as it was -- and a new chat with no turn
+    // is written by nothing at all, `save` refusing it.
+    const std::string opened = logger::serialize(session);
+    const auto save_if_changed = [&session, &opened]() {
+        if (logger::serialize(session) != opened) {
+            logger::save(session);
+        }
+    };
+
     // --- machine mode ----------------------------------------------------
     //
     // A driven child: one JSON object per line in, the same typed event
@@ -1406,7 +1446,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         // inbound line type, tools as wired, and `ask_user` and the
         // permission prompt reaching the driver exactly when tools do.
         // Each accepted `user` line is a numbered turn (28f), counted past
-        // the turns a resumed conversation already holds.
+        // the turns a resumed conversation already holds. The chat it writes
+        // is named (M28) -- none for a private one.
         std::int64_t next_turn = static_cast<std::int64_t>(session.turns) + 1;
         machine_reporter.begin_session(
             session.backend,
@@ -1414,7 +1455,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 .accepts = {machine_inbound_types().begin(), machine_inbound_types().end()},
                 .tools = tools_on(),
                 .ask = flags->tools},
-            next_turn, flags->private_chat);
+            next_turn, flags->private_chat, session.chat_id);
         // The todo's board (41d): this conversation's list, each change an
         // event; a resumed list is said as the session opens.
         const tools::TodoScope todo_scope{tools::TodoBoard{
@@ -1679,9 +1720,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         }
 
         // stdin closed: the driver is done. Everything is already persisted
-        // by the per-turn save, so exiting is clean by construction.
+        // by the per-turn save, so exiting is clean by construction -- and a
+        // session never sent a turn writes nothing (M28).
         title.settle(session);
-        logger::save(session);
+        save_if_changed();
         if (const std::string said = recall.finish({}); !said.empty()) {
             machine_notice(said);
         }
@@ -2571,7 +2613,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         title.cancel();
     }
     title.settle(session);
-    logger::save(session);
+    save_if_changed();
     // The model's state too, on a clean exit only (26j): an interrupt
     // asked for nothing more, and the transcript is saved either way.
     if (!reader->interrupted()) {
@@ -2591,9 +2633,13 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         capture_session({});
     }
     if (decorate) {
-        out.print_line(style.tag(ansi::Role::Apogee) +
-                       (session.never_written ? " private: nothing of this chat was written"
-                                              : " saved " + session.chat_id));
+        std::string left = " saved " + session.chat_id;
+        if (session.never_written) {
+            left = " private: nothing of this chat was written";
+        } else if (session.unwritten()) {
+            left = " nothing saved -- the chat had no turn";  // M28
+        }
+        out.print_line(style.tag(ansi::Role::Apogee) + left);
     }
     out.set_held({});
 }

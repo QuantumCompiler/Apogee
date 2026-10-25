@@ -111,10 +111,13 @@ public:
     /// once, before the first turn -- unprompted: the child speaks first, and
     /// a driver's `hello` refines what it reads, never gates it. A session of
     /// `user` lines also names `next_turn` (28f): the number its next turn
-    /// will carry, past those a resumed conversation already holds.
+    /// will carry, past those a resumed conversation already holds. A session
+    /// that writes a chat names it, `chat_id` (M28): the id `chats list` lists
+    /// it by and `--resume` takes -- a resumed one's, the chat it resumed. A
+    /// private one (52d) writes none, so names none.
     void begin_session(std::string_view model, const MachineCapabilities& capabilities,
                        std::optional<std::int64_t> next_turn = std::nullopt,
-                       bool private_chat = false);
+                       bool private_chat = false, std::string_view chat_id = {});
 
     /// A `user` line was accepted as turn `turn` (28f): every event until
     /// `end_turn` carries `"turn": turn`, so a driver can attribute any event

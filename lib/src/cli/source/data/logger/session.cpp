@@ -234,6 +234,10 @@ std::string Session::display_name() const {
     return chat_id;
 }
 
+bool Session::unwritten() const noexcept {
+    return never_written || (new_chat && turns == 0);
+}
+
 std::filesystem::path sessions_dir() {
     // Forwards to harness/layout.h -- the single declaration of the layout.
     return harness::sessions_dir();
@@ -546,8 +550,10 @@ LoadedSession deserialize(std::string_view text, const KnownDependencies& known)
 }
 
 void save(const Session& session) {
-    if (session.never_written) {
-        return;  // a private chat (52d): nothing written, ever
+    if (session.unwritten()) {
+        // A private chat (52d): nothing written, ever. A new chat with no
+        // turn (M28): nothing yet -- there is nothing in it to resume.
+        return;
     }
     Session stamped = session;
     stamped.schema_version = kCurrentSchemaVersion;

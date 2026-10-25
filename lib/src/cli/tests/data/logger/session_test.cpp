@@ -4,7 +4,9 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <filesystem>
 #include <functional>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -237,6 +239,55 @@ TEST_CASE("save then load round-trips through the filesystem", "[chat][session]"
     CHECK(loaded.session.messages.size() == 2);
     // save() stamps the write time.
     CHECK_FALSE(loaded.session.updated_at.empty());
+}
+
+TEST_CASE("a new chat is written once it has a turn, and a loaded one with none still is",
+          "[chat][session][unwritten]") {
+    // M28: a session closed before its first turn leaves no file -- whatever
+    // it set -- so no empty row joins `chats list`.
+    const TempDir dir{"session-unwritten-" + std::to_string(std::random_device{}())};
+    const EnvGuard home{"APOGEE_HOME", dir.path().string()};
+
+    Session fresh;
+    fresh.chat_id = apogee::logger::new_chat_id();
+    fresh.backend = "claude";
+    fresh.new_chat = true;
+    CHECK(fresh.unwritten());
+    apogee::logger::save(fresh);
+    fresh.custom_name = "named before asking";
+    fresh.params.temperature = 0.3;
+    apogee::logger::save(fresh);
+    CHECK_FALSE(std::filesystem::exists(apogee::logger::session_path(fresh.chat_id)));
+    CHECK(apogee::logger::list_sessions().empty());
+
+    // Its first turn writes it, with what was set before.
+    fresh.messages = {ChatMessage::user("hello"), ChatMessage::assistant("hi")};
+    fresh.turns = 1;
+    CHECK_FALSE(fresh.unwritten());
+    apogee::logger::save(fresh);
+    const auto loaded = apogee::logger::load(fresh.chat_id, {});
+    CHECK(loaded.session.custom_name == "named before asking");
+    CHECK(loaded.session.params.temperature == 0.3);
+    // The mark is this process's: a chat read back is not new.
+    CHECK_FALSE(loaded.session.new_chat);
+
+    // A chat already saved with no turn -- an older binary's -- is written as
+    // ever: `chats title` still renames it.
+    Session empty = sample();
+    empty.chat_id = "20260826-120000-0e0e";
+    empty.turns = 0;
+    empty.messages.clear();
+    CHECK_FALSE(empty.unwritten());
+    apogee::logger::save(empty);
+    CHECK(std::filesystem::exists(apogee::logger::session_path(empty.chat_id)));
+
+    // A private chat is never written, turns or not.
+    Session secret = sample();
+    secret.chat_id = "20260826-120000-5ec7";
+    secret.never_written = true;
+    CHECK(secret.unwritten());
+    apogee::logger::save(secret);
+    CHECK_FALSE(std::filesystem::exists(apogee::logger::session_path(secret.chat_id)));
 }
 
 TEST_CASE("a session is loadable by its custom name", "[chat][session]") {

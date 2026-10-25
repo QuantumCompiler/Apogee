@@ -320,6 +320,8 @@ TEST_CASE("machine mode carries a bare execute session in the events it already 
                                                        "answer_delta", "answer_end", "result"});
     const nlohmann::json session = nlohmann::json::parse(out.substr(0, out.find('\n')));
     CHECK(session.at("model") == "root");
+    // The chat it writes, named as chat's is (M28).
+    CHECK(session.at("chat_id") == home.sessions().front().chat_id);
 }
 
 TEST_CASE("execute with no suite named runs under the config's default", "[execute][suites]") {
@@ -465,11 +467,9 @@ TEST_CASE("a play that cannot run, or stops, is said and leaves the session as i
                         "describe-answer --image <file>' plays it with one"));
     // A member whose answer breaks its stage's schema stops the walk, named.
     CHECK_THAT(err, Catch::Matchers::ContainsSubstring("[error] stage 1/1 extract (extraction)"));
-    // Nothing was kept: no exchange, no turn.
-    const std::vector<apogee::logger::Session> sessions = home.sessions();
-    REQUIRE(sessions.size() == 1);
-    CHECK(sessions.front().messages.empty());
-    CHECK(sessions.front().turns == 0);
+    // Nothing was kept: no exchange, no turn -- and so no chat, which is
+    // written once it has a turn (M28).
+    CHECK(home.sessions().empty());
 }
 
 TEST_CASE("/symphonies lists what /play can play, as symphonies list does", "[execute][play]") {
@@ -528,7 +528,7 @@ TEST_CASE("a play is held to symphony_caps, the whole walk under one budget", "[
     REQUIRE(home.run({"execute", "--suite", "duo"}, &out, &err, "/play echo2 x\n") == 0);
     CHECK(out.empty());
     CHECK_THAT(err, Catch::Matchers::ContainsSubstring("the play's budget is spent"));
-    CHECK(home.sessions().front().messages.empty());
+    CHECK(home.sessions().empty());  // no turn, so no chat (M28)
 }
 
 TEST_CASE("a session that turned its suite off resumes in execute under the default",
@@ -613,7 +613,8 @@ TEST_CASE("a driver's play that cannot run ends in an error event, and nothing i
                      "{\"type\":\"user\",\"text\":\"/play nope x\"}\n") == 0);
     CHECK(event_types(out) == std::vector<std::string>{"session", "error"});
     CHECK_THAT(err, Catch::Matchers::ContainsSubstring("apogee: no symphony named 'nope'"));
-    CHECK(home.sessions().front().messages.empty());
+    // Not even the session: a chat with no turn is never written (M28).
+    CHECK(home.sessions().empty());
 }
 
 // --- the turn functions ---------------------------------------------------------------

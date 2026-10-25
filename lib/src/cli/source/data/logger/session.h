@@ -188,6 +188,12 @@ struct Session {
     /// that exists was, by definition, not this.
     bool never_written = false;
 
+    /// Opened new by this process, never resumed (M28): `save` writes it only
+    /// once it has a turn, so a session closed before its first leaves no
+    /// file and no row in `chats list` -- its title and settings, set before,
+    /// ride the first turn's save. Never serialised: a loaded chat was not.
+    bool new_chat = false;
+
     /// The session's `--retriever` SETTING (`lexical` / `vector` / `hybrid`;
     /// empty means auto) and its `--rerank` setting (a backend, `off`, or
     /// empty for the collections' pins). What the user chose, never what auto
@@ -217,6 +223,10 @@ struct Session {
     /// The name shown in listings: `custom_name` when set, else `title`, else
     /// the id.
     [[nodiscard]] std::string display_name() const;
+
+    /// Whether `save` writes nothing for this session as it stands: a private
+    /// chat's (52d), ever, and a new chat's while it has no turn (M28).
+    [[nodiscard]] bool unwritten() const noexcept;
 };
 
 /// What currently exists, so a resume can flag what does not.
@@ -257,8 +267,9 @@ struct LoadedSession {
 /// that reopens with a note.
 [[nodiscard]] LoadedSession deserialize(std::string_view text, const KnownDependencies& known);
 
-/// Writes `session` atomically. Called after every completed turn. A
-/// `never_written` session (52d) writes nothing.
+/// Writes `session` atomically. Called after every completed turn. An
+/// `unwritten()` one writes nothing: a private chat (52d), and a new chat with
+/// no turn yet (M28).
 void save(const Session& session);
 
 /// Loads by chat id or by custom name.

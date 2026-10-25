@@ -46,6 +46,7 @@ Two defects in the app, measured, not guessed (the source read; the installed `4
 - **Fixtures:** the probe's stream and `chats list`, recorded from the binary that ships the CLI's M28 and from one before it.
 
 **Decisions made** (dated):
+- 2026-10-24 — **What the CLI's M28 gives this item** (recorded when M28 shipped): the `session` event carries `chat_id` (a new chat's id, a resumed chat's own, none for a `--private` session that writes nothing; `task run` names its chat too), and a new chat with no answered turn is never written, so an unsent session leaves no empty chat behind for the guess to take. Older binaries still write empty chats, which the fallback's 0-turn skip covers.
 - 2026-10-22 — **Diagnosed from the user's run.** The local model was answering; the window was labelled with an abandoned empty chat, and its model label never followed the switch. The CLI's sibling M28 names the chat in the session event and stops saving empty chats.
 - 2026-10-22 — **The label follows `result.model`, the CLI's word for the model that answered,** not the settings sheet's choice. The sheet's choice takes effect only "from the next turn", and only the answer proves it ran.
 
@@ -63,4 +64,4 @@ Two defects in the app, measured, not guessed (the source read; the installed `4
 - [ ] A session opened from an unsent new one is labelled with its own chat, and Rename, Delete and a relaunch act on it.
 - [ ] Previews, `check-previews`, the layering check and `lib/scripts/cicd.sh --test` pass, with no Swift warning.
 
-**Scope note.** GUI Maintenance, claimable by name, no gate. It reads the CLI's [M28](../../../cli/backlog/maintenance/session-names-its-chat.md) `chat_id` where the binary has it, and is whole without it. Existing empty chats (`9a66`, `7e1e`) stay listed until the user deletes them.
+**Scope note.** GUI Maintenance, claimable by name, no gate. It reads the CLI's [M28](../../../cli/assistant/MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths) `chat_id` (shipped 2026-10-24) where the binary has it, and is whole without it. Existing empty chats (`9a66`, `7e1e`) stay listed until the user deletes them.

@@ -223,13 +223,15 @@ transcript "$SESSION" | grep -q '^user: /play echo2 one$' && fail "/compact: the
 printf '{"type":"user","text":"/play echo2 hello"}\n{"type":"user","text":"next"}\n{"type":"user","text":"/play nope x"}\n' |
     "$APOGEE_BIN" execute --output-format stream-json >"$WORK_DIR/events.jsonl" 2>"$WORK_DIR/err.txt" ||
     fail "machine mode: $(cat "$WORK_DIR/err.txt")"
-python3 - "$WORK_DIR/events.jsonl" <<'PY' || fail "machine mode: $(cat "$WORK_DIR/events.jsonl")"
+python3 - "$WORK_DIR/events.jsonl" "$(newest_session)" <<'PY' || fail "machine mode: $(cat "$WORK_DIR/events.jsonl")"
 import json, sys
 events = [json.loads(line) for line in open(sys.argv[1])]
 types = [e["type"] for e in events]
 known = {"session", "thinking", "thinking_delta", "memory", "tool_status", "notice",
          "answer_start", "answer_delta", "answer_end", "result", "question", "error"}
 assert set(types) <= known, f"a type the protocol does not have: {set(types) - known}"
+# The chat it writes, named as chat's is (M28): the conversation just saved.
+assert events[0]["chat_id"] == json.load(open(sys.argv[2]))["chat_id"], (events[0], sys.argv[2])
 assert types[:7] == ["session", "tool_status", "tool_status", "answer_start", "answer_delta",
                      "answer_end", "result"], types
 assert events[1]["text"].startswith("stage 1/2 first — asking utility (helper): One: hello"), events[1]
