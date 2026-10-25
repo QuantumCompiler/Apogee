@@ -1005,7 +1005,15 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   `vision_config` and an image processor beside it); else `chat` — so every
   directory made before the record reads as it did. Since 53i a directory with
   no record whose `config.json` declares a draft head (a drafter pulled whole)
-  reads `drafter` from its files, before the vision rule. A word this build does not
+  reads `drafter` from its files, before the vision rule. Since M22 a directory
+  with no record -- a set a pull brought ready-made -- reads `video` where a
+  `config.json` sits beside `t5_encoder.safetensors` and `vae.safetensors`
+  (mlx-video's layout), `voice` where a `config.json` naming Kokoro
+  (`model_type: kokoro`, or its `istftnet` and `plbert`) sits beside
+  `voices/*.safetensors`, and `embedding` where a `modules.json` names a
+  sentence-transformers Pooling module -- after the drafter rule and before the
+  vision rule, and only where exactly one of the three says so: files that say
+  none of them, or two, read as before. A word this build does not
   know is carried as written. Only `chat` and `vision` are what an `mlx`
   backend chats with: a row of any other kind has, in place of the backend's
   summary, a `note` saying what it is and what uses it (an `mlx` backend's row

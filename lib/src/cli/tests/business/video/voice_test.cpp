@@ -212,8 +212,12 @@ TEST_CASE("the speech engine is the voice model's directory's, and --engine only
     CHECK(apogee::video::voice_engine_of_directory(mlx) == VideoEngine::Mlx);
     CHECK_FALSE(apogee::video::voice_engine_of_directory(chat).has_value());
     CHECK_FALSE(apogee::video::voice_engine_of_directory(root.path() / "nothing").has_value());
-    // Unrecorded, an MLX build is no voice model: only its record says so.
+    // Unrecorded -- as a pull brings one -- its files say it is a voice model
+    // (M22): a config.json naming Kokoro beside its voices. Without its
+    // voices nothing says so.
     std::filesystem::remove(mlx / "apogee-snapshot.json");
+    CHECK(apogee::video::voice_engine_of_directory(mlx) == VideoEngine::Mlx);
+    std::filesystem::remove_all(mlx / "voices");
     CHECK_FALSE(apogee::video::voice_engine_of_directory(mlx).has_value());
 
     VideoEngine engine = VideoEngine::Torch;

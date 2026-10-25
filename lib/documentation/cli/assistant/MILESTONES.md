@@ -10111,3 +10111,57 @@ The refusal was true but incomplete. The set is Wan's original layout, and its r
 - `check` has no mlx-audio runtime row.
 - The streamed `ready` event does not carry the engine.
 - A pulled MLX-community Kokoro reads as `chat`, since 53e infers `voice` from a record only.
+
+### 2026-10-24 — `mlx-kinds-from-pulled-files` (maintenance item M22): a pulled MLX set says its kind from its own files
+
+**Why.** Every conversion records its kind (53e–53m), but a pull writes a record with none (`pull_mlx`). So a ready-made MLX set read as `chat`, and `config scan --register` would register it as a chat backend it cannot be. Affected sets: an MLX community embedding build, a Kokoro voice, or a Wan video build. 53m's record named the case (a pulled Kokoro).
+
+- [x] **The one reader infers three more kinds** (`read_mlx_kind`, `modelstore/mlx_info`). The order is the record, a draft head, the three new rules, vision, then `chat`.
+  - **Single answers only.** A new kind is inferred only when it is the one kind the files say. None, or two at once, reads as before.
+  - **The record wins.** A recorded word always does.
+  - **`describe` says the source:**
+
+    | Kind | Inferred from its files |
+    |---|---|
+    | `embedding` | its `modules.json` names a sentence-transformers Pooling module (M21's reader; mlx-embeddings' converter writes no marker of its own) |
+    | `voice` | a Kokoro `config.json` beside `voices/*.safetensors` (the MLX community builds carry no `model_type`, so Kokoro's own config shape, its `istftnet` and `plbert`, marks it, as mlx-audio's `model_type: kokoro` also does) |
+    | `video` | a `config.json` beside `t5_encoder.safetensors` and `vae.safetensors` (53k's layout); the transformer's weights are checked for completeness, so a set missing them reads "video, cannot load: no transformer weights" |
+- [x] **The shapes, read on Hugging Face (read-only, no weights fetched):**
+  - **voice:** `mlx-community/Kokoro-82M-bf16`, `-6bit` and `-8bit`;
+  - **video:** `Anes1032/Wan2.2-TI2V-5B-mlx-q8` and `…-I2V-A14B-mlx-q8`, `lBroth/…-MLX-bf16`, `rickylin…/Wan2.2-TI2V-5B-mlx` and `SceneWorks/wan2.2-ti2v-5b-mlx`;
+  - **embedding:** `embeddinggemma-300m-bf16`, `embeddinggemma-2-bf16`, `Qwen3-Embedding-0.6B-8bit`, `bge-m3-mlx-4bit` and `bge-small-en-v1.5-4bit`.
+- [x] **A pull lands such a set and says what uses it.** `read_mlx_info` now asks `read_mlx_kind`, so a Kokoro or Wan set is judged by its own layout rather than refused for lacking a tokenizer, which `pull_mlx` had done. The pull's ending:
+  - names each layout's own files as verified;
+  - for a kind other than chat, prints its kind line and the hint its conversion routes print (the embedding role, a drafter beside its base, `voice say`, none for video);
+  - keeps mlx-lm's "no marks" note to chat kinds.
+
+  A pulled drafter, 53i's leftover in the same switch, now says its kind and its drafter hint.
+- [x] **`machine-mode.md`'s `kind` paragraph** states the inference order.
+
+**Decisions made while building** (2026-10-24, each recorded for veto):
+- **The open call's default, taken:** only shapes whose files are unambiguous are inferred. These stay as they read today:
+  - **chat:** `Qwen3-Embedding-…-DWQ` (files identical to a Qwen3 chat model's), and `Octen-Embedding-4B-MLX-4bit` and `LFM2.5-Embedding-350M-*` (no `modules.json`). LFM's `config.json` carries an `"mlx": {"head": "embedding"}` key of unknown origin, a candidate later;
+  - **vision:** `Qwen3-VL-Embedding-2B-*`, laid out exactly as a Qwen3-VL chat model;
+  - `mlx-community/Kokoro-82M-4bit` ships a root `.pth`, so it routes to the PyTorch voice pull as before.
+- **Two directories now read as their kind rather than as before:**
+  - `embeddinggemma-2-*` read `vision` (a vision tower and processors) and now reads `embedding`: its Pooling module says what it returns, and nothing chats with an `EmbeddingGemma2Model`;
+  - SceneWorks' Wan, a complete `chat` model by its root `tokenizer.json`, now reads `video`.
+
+  The acceptance line "reads exactly as before" is read through the core constraint's "unless its files unambiguously say another kind".
+- **`pull_mlx`'s ending, outside the item's seam,** was changed so a newly landed set is never offered as a chat backend.
+- **Three earlier cases that pinned the old limitation** were updated, each keeping a counter-case: the `[mlx_video]` and `[mlx_audio]` cases in `mlx_info_test`, and `voice_test`'s engine case.
+
+**Verified.**
+- 4 new cases (`[pulled]`, 367 assertions):
+  - each published shape inferred, its source said;
+  - a recorded kind winning, and stray files reading as before: a lone `voices/`, a `modules.json` without Pooling, a lone `t5_encoder` or `vae`, `.pt`-only voices, two kinds at once, a draft head first;
+  - seven pulled shapes listed, informed and scanned, `--register` adding four;
+  - a pull landing each whole and saying what uses it.
+- The fixtures are new helpers in `mlx_model.h`, `voice_model.h` and `wan_original.h`.
+- The neighbouring suites pass: `[kind]`, `[mlx]`, `[voice]`, `[video]`, `[models]` and `[engine]`.
+- These ctest cases pass: `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`, `cli.mlx_models_lifecycle`, `cli.mlx_lifecycle`, `cli.config_lifecycle` and `cli.machine_schema_conformance`.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,863 tests and the macOS app's 449 cases passed, with no warning.
+
+**Not done:**
+- `video generate` on a pulled Wan set is still refused for want of a tokenizer: 53l's runtime finds it in the source set a conversion's record names, and a pull names none.
+- Whether mlx-embeddings loads `embedding_gemma2` is a load-time question.

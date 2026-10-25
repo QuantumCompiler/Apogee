@@ -148,4 +148,56 @@ inline void write_mlx_model(const std::filesystem::path& dir, const MlxModelSpec
     }
 }
 
+/// An MLX embedding model as the MLX community publishes one, and so as a
+/// pull lands it, with no record (M22) -- read off the repositories' file
+/// lists, 2026-10-24. By default `mlx-community/embeddinggemma-300m-bf16`:
+/// a `gemma3_text` `Gemma3TextModel` config, its tokenizer and weights, and
+/// sentence-transformers' `modules.json` (Transformer, Pooling, two Dense,
+/// Normalize) beside `config_sentence_transformers.json` and
+/// `sentence_bert_config.json` -- the modules' own directories not carried,
+/// as mlx-embeddings' converter copies the top level alone. With `towers`,
+/// `mlx-community/embeddinggemma-2-bf16`: an `EmbeddingGemma2Model` declaring
+/// vision and audio towers, both image processors beside it -- a vision
+/// model's files, by 27c's reading -- and modules Transformer, Pooling,
+/// Normalize, whose directories it does carry.
+inline void write_published_mlx_embedding(const std::filesystem::path& dir, bool towers = false) {
+    write_mlx_model(dir, MlxModelSpec{.bits = 0});
+    if (towers) {
+        write_fixture_file(
+            dir / "config.json",
+            R"({"architectures": ["EmbeddingGemma2Model"], "model_type": "embedding_gemma2",
+                "dtype": "bfloat16", "text_config": {"model_type": "embedding_gemma2_text"},
+                "vision_config": {"model_type": "gemma4_vision"},
+                "audio_config": {"model_type": "gemma4_audio"}})");
+        write_fixture_file(dir / "preprocessor_config.json", "{}\n");
+        write_fixture_file(dir / "processor_config.json", "{}\n");
+        write_fixture_file(dir / "1_Pooling" / "config.json", "{}\n");
+        write_fixture_file(dir / "2_Normalize" / "config.json", "{}\n");
+        write_fixture_file(dir / "modules.json", R"([
+            {"idx": 0, "name": "0", "path": "",
+             "type": "sentence_transformers.base.modules.transformer.Transformer"},
+            {"idx": 1, "name": "1", "path": "1_Pooling",
+             "type": "sentence_transformers.sentence_transformer.modules.pooling.Pooling"},
+            {"idx": 2, "name": "2", "path": "2_Normalize",
+             "type": "sentence_transformers.base.modules.normalize.Normalize"}])");
+    } else {
+        write_fixture_file(dir / "config.json",
+                           R"({"architectures": ["Gemma3TextModel"], "model_type": "gemma3_text",
+                               "dtype": "bfloat16", "hidden_size": 768,
+                               "max_position_embeddings": 2048,
+                               "use_bidirectional_attention": true})");
+        write_fixture_file(dir / "modules.json", R"([
+            {"idx": 0, "name": "0", "path": "", "type": "sentence_transformers.models.Transformer"},
+            {"idx": 1, "name": "1", "path": "1_Pooling",
+             "type": "sentence_transformers.models.Pooling"},
+            {"idx": 2, "name": "2", "path": "2_Dense", "type": "sentence_transformers.models.Dense"},
+            {"idx": 3, "name": "3", "path": "3_Dense", "type": "sentence_transformers.models.Dense"},
+            {"idx": 4, "name": "4", "path": "4_Normalize",
+             "type": "sentence_transformers.models.Normalize"}])");
+    }
+    // Present beside the pipeline; nothing here reads what they hold.
+    write_fixture_file(dir / "config_sentence_transformers.json", "{}\n");
+    write_fixture_file(dir / "sentence_bert_config.json", "{}\n");
+}
+
 }  // namespace apogee::testing

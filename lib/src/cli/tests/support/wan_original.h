@@ -187,4 +187,43 @@ inline std::filesystem::path write_converted_wan(const models::StoreRoots& roots
     return dir;
 }
 
+/// An MLX Wan as a community repository publishes mlx-video's build (M22),
+/// read off the file lists, 2026-10-24 -- what a pull brings, with no record.
+/// By default `Anes1032/Wan2.2-TI2V-5B-mlx-q8`: `config.json` (`ti2v`, its T5
+/// facts, 8-bit), the transformer's `model.safetensors`, the T5 encoder and
+/// the VAE, beside its licence and notice. With `pair`,
+/// `Anes1032/Wan2.2-I2V-A14B-mlx-q8`: `i2v`, `dual_model`, and its two
+/// experts' weights in the transformer's place. Each config cut to the keys
+/// read there.
+inline void write_published_mlx_wan(const std::filesystem::path& dir, bool pair = false) {
+    if (pair) {
+        write_fixture_file(dir / "config.json",
+                           "{\"model_type\": \"i2v\", \"model_version\": \"2.2\", \"dim\": 5120, "
+                           "\"in_dim\": 36, \"out_dim\": 16, \"num_layers\": 40, "
+                           "\"dual_model\": true, \"boundary\": 0.9, \"sample_steps\": 40, "
+                           "\"sample_fps\": 16, \"quantization\": {\"group_size\": 64, "
+                           "\"bits\": 8}}\n");
+        write_fixture_file(dir / "high_noise_model.safetensors",
+                           safetensors_bytes({{"blocks.0.self_attn.q.weight", 33}}));
+        write_fixture_file(dir / "low_noise_model.safetensors",
+                           safetensors_bytes({{"blocks.0.self_attn.q.weight", 34}}));
+    } else {
+        write_fixture_file(dir / "config.json",
+                           "{\"model_type\": \"ti2v\", \"model_version\": \"2.2\", \"text_len\": "
+                           "512, \"in_dim\": 48, \"dim\": 3072, \"text_dim\": 4096, \"out_dim\": "
+                           "48, \"num_heads\": 24, \"num_layers\": 30, \"dual_model\": false, "
+                           "\"sample_steps\": 40, \"sample_fps\": 24, \"t5_vocab_size\": 256384, "
+                           "\"t5_dim\": 4096, \"t5_num_layers\": 24, \"quantization\": "
+                           "{\"group_size\": 64, \"bits\": 8}}\n");
+        write_fixture_file(dir / "model.safetensors",
+                           safetensors_bytes({{"blocks.0.self_attn.q.weight", 33}}));
+    }
+    write_fixture_file(dir / "t5_encoder.safetensors",
+                       safetensors_bytes({{"encoder.block.0.weight", 32}}));
+    write_fixture_file(dir / "vae.safetensors",
+                       safetensors_bytes({{"decoder.conv_in.weight", 32}}));
+    write_fixture_file(dir / "LICENSE", "Apache License 2.0\n");
+    write_fixture_file(dir / "NOTICE", "a notice\n");
+}
+
 }  // namespace apogee::testing

@@ -35,6 +35,8 @@
 #include "support/env_guard.h"
 #include "support/mlx_model.h"
 #include "support/towered_configs.h"
+#include "support/voice_model.h"
+#include "support/wan_original.h"
 #include "training/mlx_convert.h"
 #include "transport/http_client.h"
 
@@ -144,10 +146,14 @@ public:
     std::vector<std::string> urls;
 
 private:
-    [[nodiscard]] std::vector<std::filesystem::path> files() const {
-        std::vector<std::filesystem::path> out;
-        for (const auto& entry : std::filesystem::directory_iterator(dir_)) {
-            out.push_back(entry.path());
+    /// Every file, by its path in the repository -- `voices/af_heart.safetensors`
+    /// beside the root's -- as the recursive tree lists them.
+    [[nodiscard]] std::vector<std::string> files() const {
+        std::vector<std::string> out;
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(dir_)) {
+            if (entry.is_regular_file()) {
+                out.push_back(entry.path().lexically_relative(dir_).generic_string());
+            }
         }
         std::ranges::sort(out);
         return out;
@@ -163,8 +169,8 @@ private:
 
     [[nodiscard]] std::string listing() const {
         nlohmann::json siblings = nlohmann::json::array();
-        for (const std::filesystem::path& file : files()) {
-            siblings.push_back({{"rfilename", file.filename().string()}});
+        for (const std::string& file : files()) {
+            siblings.push_back({{"rfilename", file}});
         }
         return nlohmann::json{{"id", repo_},
                               {"library_name", options_.library},
@@ -175,8 +181,7 @@ private:
 
     [[nodiscard]] std::string tree() const {
         nlohmann::json out = nlohmann::json::array();
-        for (const std::filesystem::path& file : files()) {
-            const std::string name = file.filename().string();
+        for (const std::string& name : files()) {
             const std::string bytes = served(name);
             nlohmann::json item{{"type", "file"}, {"path", name}, {"size", bytes.size()}};
             if (options_.digests && name.ends_with(".safetensors")) {
@@ -1531,6 +1536,259 @@ TEST_CASE("an MLX directory with no kind recorded lists, informs and registers a
           std::string::npos);
     REQUIRE(home.run({"models", "info", "plain-4bit", "-q"}, &out) == 0);
     CHECK(out.find("vision:       no -- it is not a vision model") != std::string::npos);
+}
+
+namespace {
+
+/// One set as a pull leaves it (M22): the published shape its writer lays
+/// down, the pull's record naming no kind, the kind its files say and where
+/// `describe` says that came from.
+struct PulledShape {
+    KindDir dir{};
+    void (*write)(const std::filesystem::path&) = nullptr;
+    std::string source{};
+};
+
+}  // namespace
+
+TEST_CASE("an MLX set pulled ready-made lists, informs and scans as the kind its files say",
+          "[commands][models][mlx][kind][pulled]") {
+    // M22: a pull records where a set came from and never a kind. An
+    // embedding, voice or video set the MLX community publishes says its
+    // kind by its own files, every surface follows the one reader, and
+    // `config scan --register` adds only what an mlx entry runs -- the chat
+    // and vision sets pulled beside them reading as they always did.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    const std::string embedding =
+        "inferred from its files: its modules.json names a sentence-transformers Pooling module";
+    const std::string video =
+        "inferred from its files: a config.json beside t5_encoder.safetensors and vae.safetensors";
+    const std::vector<PulledShape> shapes{
+        {.dir = {.model = "mlx-community--Talk-4bit", .kind = "chat", .name = "Talk-4bit"},
+         .write = [](const std::filesystem::path& at) { write_mlx_model(at); },
+         .source = "no kind recorded"},
+        {.dir = {.model = "mlx-community--See-4bit", .kind = "vision", .name = "See-4bit"},
+         .write = [](const std::filesystem::path& at) { write_mlx_model(at, {.vision = true}); },
+         .source = "inferred from its files: a vision_config and an image processor"},
+        {.dir = {.model = "mlx-community--embeddinggemma-300m-bf16",
+                 .kind = "embedding",
+                 .name = "embeddinggemma-300m-bf16"},
+         .write =
+             [](const std::filesystem::path& at) {
+                 apogee::testing::write_published_mlx_embedding(at);
+             },
+         .source = embedding},
+        {.dir = {.model = "mlx-community--embeddinggemma-2-bf16",
+                 .kind = "embedding",
+                 .name = "embeddinggemma-2-bf16"},
+         .write =
+             [](const std::filesystem::path& at) {
+                 apogee::testing::write_published_mlx_embedding(at, /*towers=*/true);
+             },
+         .source = embedding},
+        {.dir = {.model = "mlx-community--Kokoro-82M-bf16",
+                 .kind = "voice",
+                 .name = "Kokoro-82M-bf16"},
+         .write =
+             [](const std::filesystem::path& at) {
+                 apogee::testing::write_published_mlx_kokoro(at);
+             },
+         .source = "inferred from its files: a Kokoro config.json beside voices/*.safetensors"},
+        {.dir = {.model = "Anes1032--Wan2.2-TI2V-5B-mlx-q8",
+                 .kind = "video",
+                 .name = "Wan2.2-TI2V-5B-mlx-q8-8bit"},
+         .write =
+             [](const std::filesystem::path& at) { apogee::testing::write_published_mlx_wan(at); },
+         .source = video},
+        {.dir = {.model = "Anes1032--Wan2.2-I2V-A14B-mlx-q8",
+                 .kind = "video",
+                 .name = "Wan2.2-I2V-A14B-mlx-q8-8bit"},
+         .write =
+             [](const std::filesystem::path& at) {
+                 apogee::testing::write_published_mlx_wan(at, /*pair=*/true);
+             },
+         .source = video},
+    };
+    for (const PulledShape& shape : shapes) {
+        const std::filesystem::path at = home.models() / shape.dir.handle();
+        shape.write(at);
+        apogee::models::Snapshot record;
+        record.ref = shape.dir.model;
+        record.source = "huggingface";
+        REQUIRE(apogee::models::write_snapshot(at, record));
+    }
+
+    // Listed: each row's kind, its files read whole by its kind's layout,
+    // and one no mlx backend chats with saying what it is.
+    const std::map<std::string, nlohmann::json> rows = listed_by(home, "model");
+    for (const PulledShape& shape : shapes) {
+        INFO(shape.dir.model);
+        REQUIRE(rows.contains(shape.dir.handle()));
+        const nlohmann::json& row = rows.at(shape.dir.handle());
+        CHECK(row.at("kind") == shape.dir.kind);
+        CHECK(row.at("state") == "mlx");
+        CHECK(row.at("source") == "huggingface");
+        const std::string note = row.at("note").get<std::string>();
+        if (shape.dir.backend()) {
+            CHECK(note.starts_with("llama, 4-bit (affine, group 64), 32768-token window"));
+        } else {
+            CHECK(note == apogee::models::describe_mlx_kind(shape.dir.kind));
+        }
+    }
+
+    // Informed: the kind, where it came from and what runs it; the files
+    // whole; and the data's word.
+    std::string out;
+    std::string err;
+    for (const PulledShape& shape : shapes) {
+        INFO(shape.dir.model);
+        REQUIRE(home.run({"models", "info", shape.dir.handle(), "-q"}, &out) == 0);
+        CHECK(out.find("kind:         " + shape.dir.kind + " (" + shape.source + ") -- " +
+                       apogee::models::describe_mlx_kind(shape.dir.kind) + "\n") !=
+              std::string::npos);
+        CHECK(out.find("files:        whole -- ") != std::string::npos);
+        CHECK(out.find("repair:") == std::string::npos);
+        if (shape.dir.kind == "embedding") {
+            CHECK(out.find("backends:     none -- 'apogee config add-backend " + shape.dir.name +
+                           " --type mlx --model-path <the path below>', then 'apogee config "
+                           "set-default-embedding " +
+                           shape.dir.name + "'\n") != std::string::npos);
+        } else if (!shape.dir.backend()) {
+            CHECK(out.find("backends:     none -- no chat backend runs it; the kind line says "
+                           "what does\n") != std::string::npos);
+            CHECK(out.find("add-backend") == std::string::npos);
+        }
+        REQUIRE(home.run({"models", "info", shape.dir.handle(), "--output-format", "json"}, &out,
+                         &err) == 0);
+        CHECK(nlohmann::json::parse(out).at("data").at("kind") == shape.dir.kind);
+    }
+    REQUIRE(home.run({"models", "info", shapes.at(4).dir.handle(), "-q"}, &out) == 0);
+    CHECK(out.find("files:        whole -- config.json, the weights and its voices "
+                   "(voices/*.safetensors), 1 shard(s), each holding every byte its header "
+                   "lists\n") != std::string::npos);
+    CHECK(out.find("voices:       American English: af_heart, am_adam\n"
+                   "              British English: bf_emma\n") != std::string::npos);
+    REQUIRE(home.run({"models", "info", shapes.at(6).dir.handle(), "-q"}, &out) == 0);
+    CHECK(out.find(
+              "files:        whole -- config.json, the T5 text encoder (t5_encoder.safetensors), "
+              "the VAE (vae.safetensors) and the transformer's weights, 4 shard(s), each "
+              "holding every byte its header lists\n") != std::string::npos);
+
+    // Scanned: a row each, and only chat, vision and embedding registerable.
+    REQUIRE(home.run({"config", "scan"}, &out) == 0);
+    INFO(out);
+    for (const PulledShape& shape : shapes) {
+        INFO(shape.dir.model);
+        const std::string line = line_starting(out, shape.dir.name);
+        REQUIRE_FALSE(line.empty());
+        CHECK(line.ends_with(shape.dir.registers()
+                                 ? "  not registered"
+                                 : "  not registered -- " +
+                                       apogee::models::describe_mlx_kind(shape.dir.kind)));
+    }
+    REQUIRE(home.run({"config", "scan", "--register"}, &out) == 0);
+    CHECK(out.find("added backend 'embeddinggemma-300m-bf16' -- an embedding model, which answers "
+                   "no chat: 'apogee config set-default-embedding embeddinggemma-300m-bf16' points "
+                   "the embedding role at it\n") != std::string::npos);
+    CHECK(out.find("registered 4 backend(s)") != std::string::npos);
+    const apogee::harness::Config config = apogee::harness::load_config(home.config_path());
+    for (const PulledShape& shape : shapes) {
+        INFO(shape.dir.model);
+        CHECK(config.backends.contains(shape.dir.name) == shape.dir.registers());
+    }
+    const std::map<std::string, nlohmann::json> backends = listed_by(home, "backend");
+    CHECK(backends.at("Talk-4bit").at("kind") == "chat");
+    CHECK(backends.at("See-4bit").at("kind") == "vision");
+    CHECK(backends.at("embeddinggemma-300m-bf16").at("kind") == "embedding");
+    CHECK(backends.at("embeddinggemma-2-bf16").at("kind") == "embedding");
+}
+
+TEST_CASE("a pull of an MLX embedding, voice or video set lands it whole and says what uses it",
+          "[commands][models][mlx][pull][kind][pulled]") {
+    // M22: the pull's last rung reads a set by the layout its files say --
+    // a Kokoro or a Wan, which carry no tokenizer, land whole -- and it ends
+    // by saying the kind and what uses it, as a conversion of the kind does,
+    // never a chat backend's hint.
+    const Pull pull;
+    std::filesystem::remove_all(pull.repo);
+    std::string out;
+    const auto landed = [&pull]() {
+        const std::vector<apogee::models::StoredMlx> stored =
+            apogee::models::list_store_mlx(pull.roots);
+        REQUIRE(stored.size() == 1);
+        return stored.front();
+    };
+
+    SECTION("a Kokoro: its voices read whole, and voice say speaks with it") {
+        apogee::testing::write_published_mlx_kokoro(pull.repo);
+        REQUIRE(pull.run(&out) == 0);
+        INFO(out);
+        const apogee::models::StoredMlx stored = landed();
+        const apogee::models::MlxKind kind = apogee::models::read_mlx_kind(stored.dir);
+        CHECK(kind.word == "voice");
+        CHECK(kind.source == apogee::models::MlxKindSource::Files);
+        CHECK(apogee::models::read_mlx_info(stored.dir).complete);
+        // The SafeTensors packs landed; the original's .pt copies did not.
+        CHECK(std::filesystem::is_regular_file(stored.dir / "voices" / "bf_emma.safetensors"));
+        CHECK_FALSE(std::filesystem::exists(stored.dir / "voices" / "bf_emma.pt"));
+        CHECK(
+            out.find("; config.json, the weights and its voices (voices/*.safetensors) -- 1 shard "
+                     "header(s) and 3 voice(s) read whole\n") != std::string::npos);
+        CHECK(out.find("kind: voice (inferred from its files: a Kokoro config.json beside "
+                       "voices/*.safetensors) -- a voice model: 'apogee voice say' speaks with "
+                       "it, never a chat backend\n") != std::string::npos);
+        const std::string handle = "mlx-community--M-4bit/mlx/" + stored.id;
+        CHECK(out.find("\nSpeak with it on MLX:\n  apogee voice say \"<text>\" -o speech.wav "
+                       "--model " +
+                       handle + "\n") != std::string::npos);
+        CHECK(out.find("a tokenizer") == std::string::npos);
+        CHECK(out.find("add-backend") == std::string::npos);
+
+        // Pulled again: found before a byte moves, and said the same way.
+        pull.source->urls.clear();
+        REQUIRE(pull.run(&out) == 0);
+        CHECK(pull.source->downloads() == 0);
+        CHECK(out.find("kind: voice (inferred from its files: ") != std::string::npos);
+        CHECK(out.find("add-backend") == std::string::npos);
+    }
+    SECTION("a Wan: mlx-video's layout read whole, and no backend offered") {
+        apogee::testing::write_published_mlx_wan(pull.repo);
+        REQUIRE(pull.run(&out) == 0);
+        INFO(out);
+        const apogee::models::StoredMlx stored = landed();
+        CHECK(apogee::models::read_mlx_kind(stored.dir).word == "video");
+        CHECK(apogee::models::read_mlx_info(stored.dir).complete);
+        CHECK_FALSE(std::filesystem::exists(stored.dir / "LICENSE"));
+        CHECK(out.find("; config.json, the T5 text encoder (t5_encoder.safetensors), the VAE "
+                       "(vae.safetensors) and the transformer's weights -- 3 shard header(s) read "
+                       "whole\n") != std::string::npos);
+        CHECK(out.find("mlx model: ti2v, 8-bit (affine, group 64), ") != std::string::npos);
+        CHECK(out.find("kind: video (inferred from its files: a config.json beside "
+                       "t5_encoder.safetensors and vae.safetensors) -- a video model: 'apogee "
+                       "video generate' runs it, never a chat backend\n") != std::string::npos);
+        CHECK(out.find("a tokenizer") == std::string::npos);
+        CHECK(out.find("add-backend") == std::string::npos);
+    }
+    SECTION("an embedding model: the embedding role's backend offered") {
+        apogee::testing::write_published_mlx_embedding(pull.repo);
+        REQUIRE(pull.run(&out) == 0);
+        INFO(out);
+        const apogee::models::StoredMlx stored = landed();
+        CHECK(apogee::models::read_mlx_kind(stored.dir).word == "embedding");
+        CHECK(std::filesystem::is_regular_file(stored.dir / "modules.json"));
+        CHECK(out.find("; config.json, a tokenizer and 1 shard header(s) read whole\n") !=
+              std::string::npos);
+        CHECK(out.find("kind: embedding (inferred from its files: its modules.json names a "
+                       "sentence-transformers Pooling module) -- an embedding model: the "
+                       "embedding role uses it, never a chat backend\n") != std::string::npos);
+        const std::string name = apogee::models::stored_mlx_name(stored);
+        CHECK(out.find("\nUse it as the embedding role by adding a backend:\n  apogee config "
+                       "add-backend " +
+                       name + " --type mlx --model-path " + stored.dir.string() +
+                       "\n  apogee config set-default-embedding " + name + "\n") !=
+              std::string::npos);
+    }
 }
 
 TEST_CASE("convert --mlx records chat beside its transform, and a kind survives repair and rename",

@@ -114,9 +114,11 @@ struct MlxInfo {
 /// Reads `dir`. Never throws: an unreadable directory is an incomplete one,
 /// with the reason. `kind` is what the directory is (53e), when the caller
 /// knows it before a record says it -- a conversion's staging (53k); empty,
-/// its record's word. A `video` directory is read by its own layout's files
-/// (`MlxInfo::video`), and since 53m a `voice` directory by its own
-/// (`MlxInfo::voice`); every other kind as a language model's.
+/// the one reader's word (`read_mlx_kind`: its record's, else, since M22,
+/// what its files unambiguously say -- so a video or voice set a pull brought
+/// is read by its own layout). A `video` directory is read by its own
+/// layout's files (`MlxInfo::video`), and since 53m a `voice` directory by
+/// its own (`MlxInfo::voice`); every other kind as a language model's.
 [[nodiscard]] MlxInfo read_mlx_info(const std::filesystem::path& dir, std::string_view kind = {});
 
 /// The files an MLX video model's directory holds (53k), as mlx-video's Wan
@@ -175,7 +177,9 @@ enum class MlxKindSource {
     /// Its record names it: the conversion that made it wrote it.
     Recorded,
     /// No record names one, and its files make it a vision model -- or, since
-    /// 53i, a drafter: its `config.json` declares a draft head.
+    /// 53i, a drafter: its `config.json` declares a draft head -- or, since
+    /// M22, an embedding, voice or video model, as the MLX community
+    /// publishes each.
     Files,
     /// Nothing says otherwise: `chat`, as every MLX directory was before.
     Default,
@@ -207,9 +211,18 @@ struct MlxKind {
 /// The kind of the MLX directory `dir`: its record's `kind`, else `drafter`
 /// when its `config.json` declares a draft head (`snapshot_draft_head`, 53i --
 /// a drafter pulled whole, as the MLX community publishes one, is never taken
-/// for a chat model), else `vision` when its files say so
-/// (`mlx_vision_files`), else `chat`. Never throws: an unreadable record is no
-/// record.
+/// for a chat model), else -- since M22, what a pull brings ready-made -- the
+/// one kind its files say of these three:
+/// - `video`: a `config.json` beside mlx-video's T5 text encoder and VAE
+///   (`t5_encoder.safetensors`, `vae.safetensors`), 53k's layout;
+/// - `voice`: a `config.json` naming Kokoro (`model_type: kokoro`, or its
+///   `istftnet` and `plbert`) beside `voices/*.safetensors`, 53m's layout;
+/// - `embedding`: a `modules.json` naming a sentence-transformers `Pooling`
+///   module (`snapshot_embedding_model`, M21) -- over a vision tower too.
+///
+/// Files that say two of them say nothing certain. Then `vision` when its
+/// files say so (`mlx_vision_files`), else `chat`. Each inference's wording
+/// is `describe`'s. Never throws: an unreadable record is no record.
 [[nodiscard]] MlxKind read_mlx_kind(const std::filesystem::path& dir);
 
 /// Whether `dir`'s files make a vision model: `config.json` declares a

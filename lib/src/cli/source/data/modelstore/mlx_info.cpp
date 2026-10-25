@@ -9,6 +9,7 @@
 #include <set>
 #include <string_view>
 #include <system_error>
+#include <utility>
 
 #include "modelstore/kv_cache.h"
 #include "modelstore/snapshot.h"
@@ -395,12 +396,12 @@ namespace {
 MlxInfo read_mlx_info(const std::filesystem::path& dir, std::string_view kind) {
     MlxInfo info;
     // A video model's own layout (53k), and a voice model's (53m), by what
-    // the caller knows or the record says -- never by its files' names alone.
+    // the caller knows or the one reader says -- the record's word, else what
+    // the files unambiguously say (M22) -- never by its files' names alone.
     if (kind.empty()) {
-        if (const std::optional<Snapshot> record = load_snapshot(dir)) {
-            info.video = record->kind == kMlxVideo;
-            info.voice = record->kind == kMlxVoice;
-        }
+        const MlxKind read = read_mlx_kind(dir);
+        info.video = read.word == kMlxVideo;
+        info.voice = read.word == kMlxVoice;
     } else {
         info.video = kind == kMlxVideo;
         info.voice = kind == kMlxVoice;
@@ -532,6 +533,52 @@ bool mlx_vision_files(const std::filesystem::path& dir) {
            std::filesystem::is_regular_file(dir / "processor_config.json", code);
 }
 
+namespace {
+
+// What a pulled set's own files say it is (M22), each read off the layout the
+// MLX community publishes -- the presence of the kind's own files, never their
+// wholeness, which `read_mlx_info` then reads by the kind's layout.
+
+/// mlx-video's Wan layout (53k), as `Anes1032/Wan2.2-TI2V-5B-mlx-q8` publishes
+/// it: a `config.json` beside the T5 text encoder and the VAE, files no
+/// language model's directory holds.
+[[nodiscard]] bool mlx_video_files(const std::filesystem::path& dir) {
+    std::error_code code;
+    return read_json(dir / "config.json").is_object() &&
+           std::filesystem::is_regular_file(dir / "t5_encoder.safetensors", code) &&
+           std::filesystem::is_regular_file(dir / "vae.safetensors", code);
+}
+
+/// An MLX build of Kokoro (53m), as `mlx-community/Kokoro-82M-bf16` publishes
+/// it: a `config.json` naming Kokoro -- `model_type: kokoro`, as mlx-audio's
+/// converter writes it, or Kokoro's own shape, its `istftnet` decoder and its
+/// `plbert` text encoder, as the community's builds keep it -- beside a
+/// `voices/` directory holding a voice pack in SafeTensors.
+[[nodiscard]] bool mlx_voice_files(const std::filesystem::path& dir) {
+    const nlohmann::json config = read_json(dir / "config.json");
+    if (string_at(config, "model_type") != "kokoro" &&
+        (object_at(config, "istftnet") == nullptr || object_at(config, "plbert") == nullptr)) {
+        return false;
+    }
+    std::error_code code;
+    for (const auto& entry : std::filesystem::directory_iterator(dir / "voices", code)) {
+        std::error_code type;
+        if (entry.is_regular_file(type) && entry.path().extension() == ".safetensors") {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// A sentence-transformers embedding pipeline (M21's reader): a `modules.json`
+/// naming a `Pooling` module, as the `mlx-community` builds that carry one
+/// publish it (`embeddinggemma-300m-bf16`, `Qwen3-Embedding-0.6B-8bit`).
+[[nodiscard]] bool mlx_embedding_files(const std::filesystem::path& dir) {
+    return snapshot_embedding_model(dir).has_value();
+}
+
+}  // namespace
+
 MlxKind read_mlx_kind(const std::filesystem::path& dir) {
     MlxKind kind;
     if (const std::optional<Snapshot> record = load_snapshot(dir);
@@ -546,6 +593,29 @@ MlxKind read_mlx_kind(const std::filesystem::path& dir) {
     // brought whole is never taken for a chat model.
     if (snapshot_draft_head(dir).has_value()) {
         kind.word = std::string{kMlxDrafter};
+        kind.source = MlxKindSource::Files;
+        return kind;
+    }
+    // Since M22, what a pull brings ready-made: an embedding, voice or video
+    // model the MLX community publishes, each by its own files. Exactly one
+    // must say so -- files that say two kinds say nothing certain, and read
+    // as they did. An embedding pipeline with a vision tower is an embedding
+    // model: its Pooling says what the model gives back.
+    const std::array<std::pair<std::string_view, bool>, 3> said{{
+        {kMlxVideo, mlx_video_files(dir)},
+        {kMlxVoice, mlx_voice_files(dir)},
+        {kMlxEmbedding, mlx_embedding_files(dir)},
+    }};
+    std::string_view inferred;
+    int saying = 0;
+    for (const auto& [word, says] : said) {
+        if (says) {
+            inferred = word;
+            ++saying;
+        }
+    }
+    if (saying == 1) {
+        kind.word = std::string{inferred};
         kind.source = MlxKindSource::Files;
         return kind;
     }
@@ -570,9 +640,23 @@ std::string describe(const MlxKind& kind) {
             source = "recorded";
             break;
         case MlxKindSource::Files:
-            source = kind.word == kMlxDrafter
-                         ? "inferred from its files: its config.json declares a draft head"
-                         : "inferred from its files: a vision_config and an image processor";
+            // Each inference says the files it was read from.
+            if (kind.word == kMlxDrafter) {
+                source = "inferred from its files: its config.json declares a draft head";
+            } else if (kind.word == kMlxEmbedding) {
+                source =
+                    "inferred from its files: its modules.json names a sentence-transformers "
+                    "Pooling module";
+            } else if (kind.word == kMlxVoice) {
+                source =
+                    "inferred from its files: a Kokoro config.json beside voices/*.safetensors";
+            } else if (kind.word == kMlxVideo) {
+                source =
+                    "inferred from its files: a config.json beside t5_encoder.safetensors and "
+                    "vae.safetensors";
+            } else {
+                source = "inferred from its files: a vision_config and an image processor";
+            }
             break;
         case MlxKindSource::Default:
             source = "no kind recorded";

@@ -79,4 +79,34 @@ inline void write_mlx_voice_model(const std::filesystem::path& dir,
     }
 }
 
+/// An MLX Kokoro as the MLX community publishes it (M22), read off
+/// `mlx-community/Kokoro-82M-bf16`'s file list, 2026-10-24: `config.json` in
+/// Kokoro's own shape -- its `istftnet` decoder, `plbert` text encoder and
+/// `vocab`, and no `model_type` (with `bits`, the `quantization` the 6- and
+/// 8-bit builds add) -- the weights as `kokoro-v1_0.safetensors`, and each
+/// voice under `voices/` twice, its SafeTensors pack beside the original's
+/// `.pt`. No tokenizer, no record: what a pull brings. The config is cut to
+/// the keys read there.
+inline void write_published_mlx_kokoro(const std::filesystem::path& dir,
+                                       const MlxVoiceModelSpec& spec = {}) {
+    std::string config =
+        "{\"istftnet\": {\"upsample_rates\": [10, 6], \"gen_istft_n_fft\": 20, "
+        "\"upsample_initial_channel\": 512}, \"plbert\": {\"hidden_size\": 768, "
+        "\"num_attention_heads\": 12, \"num_hidden_layers\": 12}, "
+        "\"vocab\": {\";\": 1, \":\": 2, \",\": 3, \".\": 4, \"!\": 5}";
+    if (spec.bits > 0) {
+        config +=
+            ", \"quantization\": {\"group_size\": 64, \"bits\": " + std::to_string(spec.bits) + "}";
+    }
+    write_fixture_file(dir / "config.json", config + "}\n");
+    write_fixture_file(dir / "kokoro-v1_0.safetensors",
+                       safetensors_bytes({{"bert.embeddings.word_embeddings.weight", 64},
+                                          {"decoder.weight", 32}}));
+    for (const std::string& voice : spec.voices) {
+        write_fixture_file(dir / "voices" / (voice + ".safetensors"),
+                           safetensors_bytes({{"voice", 16}}));
+        write_fixture_file(dir / "voices" / (voice + ".pt"), zip_bytes());
+    }
+}
+
 }  // namespace apogee::testing

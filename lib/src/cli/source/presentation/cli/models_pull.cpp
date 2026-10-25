@@ -1476,6 +1476,43 @@ constexpr std::array<WanReadmeSize, 2> kWanReadmeSizes{{
     throw CLI::RuntimeError(kCancelled);
 }
 
+/// What a pulled MLX set's last rung read whole, by its layout (M22): a
+/// language model's configuration, tokenizer and shards, or a video or voice
+/// model's own files, as its conversion says them.
+[[nodiscard]] std::string mlx_read_whole(const models::MlxInfo& info,
+                                         const std::filesystem::path& dir) {
+    const std::string shards = std::to_string(info.shards.size()) + " shard header(s)";
+    if (info.video) {
+        return std::string{models::kMlxVideoFiles} + " -- " + shards + " read whole";
+    }
+    if (info.voice) {
+        return std::string{models::kMlxVoiceFiles} + " -- " + shards + " and " +
+               std::to_string(models::read_mlx_voice_info(dir).voices.size()) +
+               " voice(s) read whole";
+    }
+    return "config.json, a tokenizer and " + shards + " read whole";
+}
+
+/// How a pulled MLX set is put to use, by what its files say it is (M22): a
+/// model an mlx backend chats with gets a backend's hint, as every pull did;
+/// any other kind its kind line, then what uses it, as its conversion says.
+void print_pulled_mlx_hint(const models::StoredMlx& stored, const models::MlxKind& kind) {
+    if (kind.backend()) {
+        print_mlx_backend_hint(stored);
+        return;
+    }
+    std::cout << "kind: " << models::describe(kind) << "\n";
+    if (kind.embeds()) {
+        print_mlx_embedding_hint(stored);
+    } else if (kind.word == models::kMlxDrafter) {
+        print_mlx_drafter_hint(stored);
+    } else if (kind.word == models::kMlxVoice) {
+        std::cout << "\nSpeak with it on MLX:\n  apogee voice say \"<text>\" -o speech.wav --model "
+                  << models::weights_handle(stored.model, models::kMlxFormat, stored.id) << "\n";
+    }
+    // A video model has no backend to add (53k): its kind line says what runs it.
+}
+
 }  // namespace
 
 PulledMlx pull_mlx(const std::string& ref, const models::StoreRoots& roots,
@@ -1526,7 +1563,8 @@ PulledMlx pull_mlx(const std::string& ref, const models::StoreRoots& roots,
             pulled.dir = existing;
             pulled.existed = true;
             pulled.info = models::read_mlx_info(existing);
-            print_mlx_backend_hint(stored_at(roots, pulled.model, existing));
+            print_pulled_mlx_hint(stored_at(roots, pulled.model, existing),
+                                  models::read_mlx_kind(existing));
             return pulled;
         }
     }
@@ -1566,8 +1604,9 @@ PulledMlx pull_mlx(const std::string& ref, const models::StoreRoots& roots,
 
     // The last rung: the files make a model mlx-lm can load -- its
     // configuration, a tokenizer, every shard the index names and each
-    // shard's header within its file. A repository that is not one lands
-    // nothing.
+    // shard's header within its file -- or, where its files say it is a
+    // video or voice model (M22), that layout's files, each whole. A
+    // repository that is not one lands nothing.
     pulled.info = models::read_mlx_info(staging);
     if (!pulled.info.complete) {
         (void)models::remove_weights(staging);
@@ -1589,17 +1628,17 @@ PulledMlx pull_mlx(const std::string& ref, const models::StoreRoots& roots,
     } else {
         std::cout << "\n"
                   << stored.dir.string() << "\n"
-                  << pull_verification(result, "config.json, a tokenizer and " +
-                                                   std::to_string(pulled.info.shards.size()) +
-                                                   " shard header(s) read whole")
-                  << "\n";
+                  << pull_verification(result, mlx_read_whole(pulled.info, pulled.dir)) << "\n";
     }
     std::cout << "mlx model: " << mlx_summary(pulled.info) << "\n";
-    if (!pulled.info.mlx_format) {
+    // What its files say it is (M22) decides what is said of mlx-lm, and
+    // what puts it to use.
+    const models::MlxKind kind = models::read_mlx_kind(pulled.dir);
+    if (!pulled.info.mlx_format && kind.backend()) {
         std::cout << "note: its files carry no mlx-lm marks (no quantization, shards not saved by "
                      "mlx-lm) -- mlx-lm reads such weights all the same\n";
     }
-    print_mlx_backend_hint(stored_at(roots, pulled.model, pulled.dir));
+    print_pulled_mlx_hint(stored_at(roots, pulled.model, pulled.dir), kind);
     return pulled;
 }
 
