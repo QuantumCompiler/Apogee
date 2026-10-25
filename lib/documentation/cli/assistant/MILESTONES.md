@@ -10670,3 +10670,44 @@ The refusal was true but incomplete. The set is Wan's original layout, and its r
 - `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,966 tests and the macOS app's 449 cases passed, with no warning.
 
 **Not done:** the lock has not been run on Windows.
+
+### 2026-10-25 — `config-reads-and-validation` (backlog item 55g): config reads and validation catch up
+
+**Why.** The read and validation side of the config had fallen behind what the editor writes. Each finding reproduced first, in a sandbox:
+- **`config get` couldn't read eight backend fields** `set-backend` writes: `server_tools`, `adapters`, `draft` and `draft_block_size` among them. Each failed with `no such config key`.
+- **`config get`'s completion missed keys:** 143 candidates, without `memory.recall`, `knowledge.auto_capture`, `tools.search.*`, or the eight fields.
+- **A typo'd backend key** (`adaptors`, `drafter`, `sever_tools`, `temprature`) was silently dropped. `check` said "parses cleanly".
+- **The starter template** documented neither `draft` nor `draft_block_size`.
+- **`config upgrade`** reported a config "current" while it lacked the template's newer commented options. v0.1.9's own starter config lacked the two adapters blocks.
+
+- [x] **One declaration of what a backend entry holds** (`backend_entry_keys()`, 27 keys, in `contracts/config`):
+  - **Reads:** `config get` reads every one, from two tables (whole-config keys, and backend fields gated by the declaration). `adapters` prints one per line as `--adapters` takes it, pins left out.
+  - **Edits:** `backend_editable_fields()` is the declaration minus `api_key`, in the same order.
+  - **Completion:** built from the same tables, `settable_scalars()` and the declaration. 143 candidates became 188, and existing ones keep their order.
+- [x] **A typo'd key is a named `check` row.** The loader keeps an unknown key in `BackendConfig::unknown_keys` rather than dropping it, and `nearest_backend_key()` suggests the closest real one within two edits. The row reads `unknown key 'adaptors' -- no backend reads it, so it does nothing; did you mean 'adapters'?`, with the remedy `rename it 'adapters' in config.json`. The entry still loads.
+- [x] **The starter template documents every declared key** (`draft`, `draft_block_size`, `system_prompt`, and an Ollama CLI section with `host`), regenerated into `config_template.cpp`.
+- [x] **`config upgrade` learns a declared list of commented options per release** (`config_migrate`'s `CommentedOption` and `commented_options()`) and inserts each missing block with its comments. It places each beside the template line that follows it when that line appears once in both files, else last in its object. An object written on one line (`{}`) gets nothing.
+  - The template's real keys alone, upgraded, gain 8 options, and a second run says current.
+  - v0.1.9's starter config, upgraded, is byte-identical to this build's.
+
+**Decisions made while building** (2026-10-25, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - an unknown key is a `check` warning, and loading stays tolerant;
+  - upgrade learns a declared list per release.
+- **0.1.9's options were backfilled into the list** (`models.default_video`, `review`, `server_tools`, from git diffs of the template since v0.1.5), since upgrade could never deliver them before. 0.1.6's `thinking_display` was left out: a line inside the existing `ui` example, which upgrade would have to rewrite.
+- **Kept as before:** a later `set-backend` keeps a typo'd key in the file, since the editor never drops what it doesn't own. Decimals still print as `0.500000`.
+- **Behaviour noticed, not changed:** an entry's `system_prompt` is read only by `apogee complete`; `chat` ignores it. The template now says exactly that.
+
+**Verified.**
+- **14 new cases:**
+  - **`[unknown-keys]` (5):** unknown keys kept in file order; every declared key read and none unknown; the nearest-key matrix; the template documenting every key; the `check` typo matrix in both formats.
+  - **`[commented]` (6):** each block unique and listed by release; each removed block restored byte for byte; a release's whole set restored in template order; CRLF kept; real-keys-only configs; `{}` taking nothing.
+  - **`[get]` (2):** every backend key readable, and `set-backend` writes round-tripping.
+  - **`[completion]` (1):** the reverse test, with every settable scalar, role and backend field offered once.
+- **The derived lists fail the day a new field lands without its read, completion or template twin.**
+- **`config_e2e.cmake`'s 55g section** covers reads, completion, the typo rows, and an upgrade back to the template's bytes. It fails on the old binary.
+- **A fresh install's `check`** still has no warning.
+- **ctest:** these pass: `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`, `cli.config_lifecycle`, `cli.complete_lifecycle`, `cli.shell_completion`, `cli.http_api_conformance`, `cli.machine_schema_conformance`, and the asset and fresh-install cases.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,980 tests and the macOS app's 449 cases passed, with no warning.
+
+**Not done:** the `codex-cli` type has no template section; the declaration is fields, not types.

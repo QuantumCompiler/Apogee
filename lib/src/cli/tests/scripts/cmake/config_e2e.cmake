@@ -659,6 +659,104 @@ if(NOT AFTER_REFUSAL STREQUAL PRISTINE)
     message(FATAL_ERROR "a refused add-backend changed the config")
 endif()
 
+# --- reads and validation catch up with the writes (55g) --------------------
+# `config get` reads every field `set-backend` writes -- the audit found eight
+# it could not -- and its completion offers what it reads.
+file(WRITE "${CONFIG_FILE}" [=[{
+  "backends": {
+    "api": {"type": "anthropic", "model": "claude-sonnet-5", "server_tools": ["web_search"]},
+    "m": {"type": "mlx", "model_path": "/models/base", "adapters": [{"path": "/adapters/a"}],
+          "draft": "/models/drafter", "draft_block_size": 4},
+    "sub": {"type": "claude-cli", "binary": "/usr/local/bin/claude", "mode": "subscription"},
+    "oll": {"type": "ollama-cli", "model": "m", "host": "127.0.0.1:11434"},
+    "loc": {"type": "llamacpp", "model_path": "/models/x.gguf", "idle_unload_seconds": 900}
+  }
+}
+]=])
+foreach(read IN ITEMS "api.server_tools|web_search" "m.adapters|/adapters/a"
+                      "m.draft|/models/drafter" "m.draft_block_size|4"
+                      "sub.binary|/usr/local/bin/claude" "sub.mode|subscription"
+                      "oll.host|127.0.0.1:11434" "loc.idle_unload_seconds|900")
+    string(REPLACE "|" ";" read "${read}")
+    list(GET read 0 key)
+    list(GET read 1 value)
+    apogee_run(0 config get backends.${key})
+    expect_equal("${APOGEE_OUT}" "${value}" "config get backends.${key}")
+endforeach()
+# (Called directly: a function's ARGN drops the empty word being completed.)
+execute_process(COMMAND "${APOGEE_BIN}" __complete config get ""
+    RESULT_VARIABLE complete_code OUTPUT_VARIABLE offered ERROR_VARIABLE complete_err)
+if(NOT complete_code EQUAL 0)
+    message(FATAL_ERROR "__complete config get: exit ${complete_code}\n${complete_err}")
+endif()
+foreach(key IN ITEMS memory.recall knowledge.auto_capture tools.search.provider tools.search.url
+                     tools.search.results backends.m.draft backends.api.server_tools)
+    string(REPLACE "." "\\." pattern "${key}")
+    if(NOT "\n${offered}" MATCHES "\n${pattern}[\t\n]")
+        message(FATAL_ERROR "config get's completion does not offer ${key}:\n${offered}")
+    endif()
+endforeach()
+
+# A typo'd backend key is a named check row with the key it meant, and the
+# entry still loads; a later set-backend leaves it where it is.
+file(WRITE "${CONFIG_FILE}" [=[{
+  "backends": {
+    "m": {"type": "mock", "model": "m", "adaptors": [{"path": "/a"}], "drafter": "/d"},
+    "api": {"type": "mock", "sever_tools": ["web_search"], "temprature": 0.2}
+  }
+}
+]=])
+apogee_run(0 config get backends.m.model)
+expect_equal("${APOGEE_OUT}" "m" "an entry with an unknown key still loads")
+apogee_run(0 check --output-format json)
+foreach(pair IN ITEMS "adaptors|adapters" "drafter|draft" "sever_tools|server_tools"
+                      "temprature|temperature")
+    string(REPLACE "|" ";" pair "${pair}")
+    list(GET pair 0 typo)
+    list(GET pair 1 meant)
+    if(NOT APOGEE_OUT MATCHES "\"detail\": *\"unknown key '${typo}' -- no backend reads it, so it does nothing; did you mean '${meant}'\\?\"")
+        message(FATAL_ERROR "check does not name the unknown key ${typo}:\n${APOGEE_OUT}")
+    endif()
+endforeach()
+apogee_run(0 config set-backend api --model claude-opus-5)
+file(READ "${CONFIG_FILE}" AFTER_TYPO_EDIT)
+if(NOT AFTER_TYPO_EDIT MATCHES "\"temprature\": 0.2")
+    message(FATAL_ERROR "set-backend dropped a key it does not know:\n${AFTER_TYPO_EDIT}")
+endif()
+
+# `config upgrade` brings a release's commented options to a file seeded
+# before it: the shipped template without 53i's draft block is behind by one
+# option, says so, and upgrades back to the template's bytes.
+set(DRAFT_OPENS "    // draft runs a drafter beside the model")
+set(DRAFT_CLOSES "    //   \"draft_block_size\": 4\n")
+string(FIND "${PRISTINE}" "${DRAFT_OPENS}" draft_begin)
+string(FIND "${PRISTINE}" "${DRAFT_CLOSES}" draft_end)
+if(draft_begin EQUAL -1 OR draft_end EQUAL -1)
+    message(FATAL_ERROR "the shipped template has no draft block to take out")
+endif()
+string(LENGTH "${DRAFT_CLOSES}" closes_length)
+math(EXPR draft_stop "${draft_end} + ${closes_length}")
+string(SUBSTRING "${PRISTINE}" 0 ${draft_begin} BEFORE_DRAFT)
+string(SUBSTRING "${PRISTINE}" ${draft_stop} -1 AFTER_DRAFT)
+file(WRITE "${CONFIG_FILE}" "${BEFORE_DRAFT}${AFTER_DRAFT}")
+apogee_run(0 check --output-format json)
+if(NOT APOGEE_OUT MATCHES "parses cleanly -- 1 option from this release's starter config not in the file")
+    message(FATAL_ERROR "check does not count the missing commented option:\n${APOGEE_OUT}")
+endif()
+apogee_run(0 config upgrade)
+if(NOT APOGEE_OUT MATCHES "added 1 option to" OR
+   NOT APOGEE_OUT MATCHES "\n  backends\\.\\*\\.draft, draft_block_size \\(mlx\\)\n")
+    message(FATAL_ERROR "config upgrade did not add the draft option:\n${APOGEE_OUT}")
+endif()
+file(READ "${CONFIG_FILE}" AFTER_UPGRADE)
+if(NOT AFTER_UPGRADE STREQUAL PRISTINE)
+    message(FATAL_ERROR "the upgraded file is not the shipped template:\n${AFTER_UPGRADE}")
+endif()
+apogee_run(0 config upgrade)
+if(NOT APOGEE_OUT MATCHES "is current")
+    message(FATAL_ERROR "a second upgrade was not a no-op:\n${APOGEE_OUT}")
+endif()
+
 # --- delete restores the original bytes ------------------------------------
 # Rebuild from pristine so the role edits above do not muddy the comparison.
 file(WRITE "${CONFIG_FILE}" "${PRISTINE}")

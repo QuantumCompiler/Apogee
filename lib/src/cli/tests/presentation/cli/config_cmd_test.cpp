@@ -4,8 +4,10 @@
 
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "cli/complete_protocol.h"
@@ -680,4 +682,114 @@ TEST_CASE("config scan without a config: the rows still render, init is named, -
     REQUIRE(home.run_default({"config", "scan", "--register"}, &out, &err) != 0);
     INFO(err);
     CHECK(err.find("run 'apogee config init' first") != std::string::npos);
+}
+
+TEST_CASE("config get reads back every key a backend entry holds, unset as empty",
+          "[commands][config][get]") {
+    // 55g: `config get` failed `no such config key` on eight fields
+    // `set-backend` writes -- server_tools, adapters, draft and
+    // draft_block_size among them. Now it reads every key the one
+    // declaration names; a key declared with no sample here fails, and so
+    // does one `config get` cannot read.
+    const CliHome home{R"({
+  "backends": {
+    "m": {
+      "type": "mlx", "model": "mm", "model_path": "/models/base", "mmproj_path": "/p.gguf",
+      "embedding_model": "e", "system_prompt": "Be brief.", "context_size": 4096,
+      "cache_type": "f16", "max_tokens": 64, "temperature": 0.5, "top_p": 0.9, "top_k": 40,
+      "min_p": 0.05, "repeat_penalty": 1.1, "presence_penalty": 0.5, "seed": 7,
+      "thinking": "auto", "thinking_budget": 512, "binary": "/bin/b", "mode": "bare",
+      "host": "127.0.0.1:1", "idle_unload_seconds": 30, "draft": "/models/drafter",
+      "draft_block_size": 4
+    },
+    "api": {"type": "anthropic", "api_key": "k-123",
+            "server_tools": ["web_search", "code_execution"]},
+    "loc": {"type": "llamacpp", "model_path": "/m.gguf",
+            "adapters": [{"path": "/a.gguf", "scale": 0.8}, {"path": "/b.gguf"}]},
+    "bare": {"type": "mock"}
+  }
+}
+)",
+                       "config.json"};
+
+    struct Sample {
+        std::string_view entry{};
+        std::string_view printed{};
+    };
+
+    const std::map<std::string_view, Sample> samples{
+        {"type", {"m", "mlx"}},
+        {"api_key", {"api", "<redacted -- pass --reveal to print it>"}},
+        {"model", {"m", "mm"}},
+        {"model_path", {"m", "/models/base"}},
+        {"mmproj_path", {"m", "/p.gguf"}},
+        {"embedding_model", {"m", "e"}},
+        {"system_prompt", {"m", "Be brief."}},
+        {"context_size", {"m", "4096"}},
+        {"cache_type", {"m", "f16"}},
+        {"max_tokens", {"m", "64"}},
+        {"temperature", {"m", "0.500000"}},
+        {"top_p", {"m", "0.900000"}},
+        {"top_k", {"m", "40"}},
+        {"min_p", {"m", "0.050000"}},
+        {"repeat_penalty", {"m", "1.100000"}},
+        {"presence_penalty", {"m", "0.500000"}},
+        {"seed", {"m", "7"}},
+        {"thinking", {"m", "auto"}},
+        {"thinking_budget", {"m", "512"}},
+        {"binary", {"m", "/bin/b"}},
+        {"mode", {"m", "bare"}},
+        {"host", {"m", "127.0.0.1:1"}},
+        {"idle_unload_seconds", {"m", "30"}},
+        {"server_tools", {"api", "web_search\ncode_execution"}},
+        // One per line as --adapters takes each, the scale left out at 1.
+        {"adapters", {"loc", "/a.gguf:0.8\n/b.gguf"}},
+        {"draft", {"m", "/models/drafter"}},
+        {"draft_block_size", {"m", "4"}},
+    };
+    for (const std::string_view key : apogee::harness::backend_entry_keys()) {
+        INFO(key);
+        REQUIRE(samples.contains(key));
+        const Sample& sample = samples.at(key);
+        std::string out;
+        CHECK(home.run({"config", "get",
+                        "backends." + std::string{sample.entry} + "." + std::string{key}},
+                       &out) == 0);
+        CHECK(out == std::string{sample.printed} + "\n");
+        // Known but unset is an answer: empty, exit 0.
+        out.clear();
+        CHECK(home.run({"config", "get", "backends.bare." + std::string{key}}, &out) == 0);
+        CHECK(out == (key == "type" ? "mock\n" : "\n"));
+    }
+    CHECK(samples.size() == apogee::harness::backend_entry_keys().size());
+    std::string out;
+    CHECK(home.run({"config", "get", "backends.api.api_key", "--reveal"}, &out) == 0);
+    CHECK(out == "k-123\n");
+    // A key no entry holds is still no key at all.
+    out.clear();
+    CHECK(home.run({"config", "get", "backends.m.adaptors"}, &out) == 1);
+    CHECK(out.find("no such config key: 'backends.m.adaptors'") != std::string::npos);
+}
+
+TEST_CASE("what set-backend writes, config get reads back as written",
+          "[commands][config][get][set-backend]") {
+    // The twins end to end on the fields the audit found unreadable that
+    // need nothing on disk to write.
+    const CliHome home{kConfig};
+    std::string out;
+    REQUIRE(home.run({"config", "set-backend", "claude", "--server-tools",
+                      "web_search,code_execution", "--binary", "/bin/claude", "--mode", "bare",
+                      "--host", "127.0.0.1:11434", "--idle-unload-seconds", "900"},
+                     &out) == 0);
+    for (const auto& [field, printed] : std::vector<std::pair<std::string, std::string>>{
+             {"server_tools", "web_search\ncode_execution\n"},
+             {"binary", "/bin/claude\n"},
+             {"mode", "bare\n"},
+             {"host", "127.0.0.1:11434\n"},
+             {"idle_unload_seconds", "900\n"}}) {
+        INFO(field);
+        out.clear();
+        CHECK(home.run({"config", "get", "backends.claude." + field}, &out) == 0);
+        CHECK(out == printed);
+    }
 }

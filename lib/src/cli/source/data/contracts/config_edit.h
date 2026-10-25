@@ -179,6 +179,8 @@ public:
 /// A backend entry's fields `config set-backend` edits (46b): every field the
 /// entry's schema reads, but its key and its `api_key` -- a key is stored
 /// with `auth add` alone. One flag each, held to `add-backend`'s by a test.
+/// Since 55g it is `backend_entry_keys()` but `api_key`, the one declaration
+/// the loader, `config get` and its completion read too.
 [[nodiscard]] std::vector<std::string_view> backend_editable_fields();
 
 /// Sets `backends.<name>.<field>` to `value` in place (46b): the value token

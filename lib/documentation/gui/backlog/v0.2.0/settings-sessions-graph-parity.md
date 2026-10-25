@@ -14,7 +14,7 @@
 
 **Seam + files.** `presentation/sessions/` (compact with confirm, info, the recall list), `presentation/settings/` (per-provider register; a backend's `server_tools`; capability-truthful wording), `presentation/app/ViewModels/AppViewModel.swift` (a startup `__machine-schema` read setting capabilities), `presentation/graph/` (export with a save panel, dedupe, delete with confirm), `presentation/library/` (MCP remove), `presentation/knowledge/` (the raw view), `presentation/shell/ViewModels/Parity.swift` (rows updated). Tests: argv pins per verb; capabilities set from a recorded schema fixture before any session; the Settings wording against capable and incapable fixtures; destructive confirms.
 
-**Reference.** The gui SPEC's Full-parity principle, ADR 0003; the TUI's Chats and Providers keys; CLI 47a (`server_tools`), 52d/52e (compact, recall, `config set`); [`config-reads-and-validation.md`](../../../cli/backlog/v0.2.0/config-reads-and-validation.md) (CLI 55g), referenced and not gated; the CLI/GUI audit (2026-10-22).
+**Reference.** The gui SPEC's Full-parity principle, ADR 0003; the TUI's Chats and Providers keys; CLI 47a (`server_tools`), 52d/52e (compact, recall, `config set`); [CLI 55g](../../../cli/assistant/MILESTONES.md#milestone-ar--the-audits-cli-findings) (shipped 2026-10-25), referenced and not gated; the CLI/GUI audit (2026-10-22).
 
 **Decisions made** (dated):
 - 2026-10-22: Specced from the CLI/GUI audit (the user's call). The startup schema read supersedes per-session detection as the source of capability flags. Per-session detection (GUI MILESTONES:526, :565) stays as a refresh.

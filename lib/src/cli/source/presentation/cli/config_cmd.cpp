@@ -10,6 +10,8 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -120,101 +122,199 @@ std::string render_secret(const std::string& value, bool reveal) {
     return reveal ? value : "<redacted -- pass --reveal to print it>";
 }
 
+/// A boolean as `config get` prints it.
+std::string flag_word(bool value) {
+    return value ? "true" : "false";
+}
+
+/// A list as `config get` prints it: one item per line.
+std::string one_per_line(const std::vector<std::string>& items) {
+    std::string out;
+    for (const std::string& item : items) {
+        out += out.empty() ? "" : "\n";
+        out += item;
+    }
+    return out;
+}
+
+/// One key `config get` reads off the config as a whole, and how its value
+/// prints (55g): the one table `lookup` reads and `config_keys` offers, so
+/// neither can name a key the other does not. The entries under a section --
+/// a backend's fields, a server's, a collection's, a suite's -- are read
+/// after it.
+struct FixedRead {
+    std::string_view key{};
+    std::string (*read)(const Config&) = nullptr;
+};
+
+const std::vector<FixedRead>& fixed_reads() {
+    static const std::vector<FixedRead> reads{
+        {"status_mode",
+         [](const Config& c) { return std::string{harness::to_string(c.status_mode)}; }},
+        {"color", [](const Config& c) { return flag_word(c.color); }},
+        {"auto_rag", [](const Config& c) { return render(c.auto_rag); }},
+        {"models.default", [](const Config& c) { return render(c.models.default_backend); }},
+        {"models.default_embedding",
+         [](const Config& c) { return render(c.models.default_embedding); }},
+        {"models.default_extraction",
+         [](const Config& c) { return render(c.models.default_extraction); }},
+        {"models.default_vision", [](const Config& c) { return render(c.models.default_vision); }},
+        {"models.default_transcription",
+         [](const Config& c) { return render(c.models.default_transcription); }},
+        {"models.default_utility",
+         [](const Config& c) { return render(c.models.default_utility); }},
+        {"models.default_video", [](const Config& c) { return render(c.models.default_video); }},
+        {"paths.gguf_dir", [](const Config& c) { return render(c.paths.gguf_dir); }},
+        {"paths.hf_dir", [](const Config& c) { return render(c.paths.hf_dir); }},
+        {"paths.mcp_dir", [](const Config& c) { return render(c.paths.mcp_dir); }},
+        {"paths.embeddings_dir", [](const Config& c) { return render(c.paths.embeddings_dir); }},
+        {"tools.fs_root", [](const Config& c) { return render(c.tools.fs_root); }},
+        {"tools.disabled", [](const Config& c) { return one_per_line(c.tools.disabled); }},
+        // What `config set` moves (52e), each read back as it is written.
+        {"memory.recall", [](const Config& c) { return flag_word(c.memory.recall); }},
+        {"knowledge.auto_capture",
+         [](const Config& c) { return flag_word(c.knowledge.auto_capture); }},
+        {"ui.markdown", [](const Config& c) { return flag_word(c.ui.markdown); }},
+        {"ui.thinking_display",
+         [](const Config& c) { return std::string{harness::to_string(c.ui.thinking_display)}; }},
+        // Unset is each surface's built-in (27p), which no one word names.
+        {"attachments.graph",
+         [](const Config& c) {
+             return c.attachments.graph.has_value()
+                        ? std::string{harness::to_string(*c.attachments.graph)}
+                        : std::string{};
+         }},
+        {"tools.search.provider", [](const Config& c) { return render(c.tools.search.provider); }},
+        {"tools.search.url", [](const Config& c) { return render(c.tools.search.url); }},
+        {"tools.search.results",
+         [](const Config& c) { return std::to_string(c.tools.search.results); }},
+        {"training.python", [](const Config& c) { return render(c.training.python); }},
+        {"training.trainer",
+         [](const Config& c) {
+             return render(c.training.trainer.empty() ? std::string{"auto"} : c.training.trainer);
+         }},
+        {"training.judge_backend",
+         [](const Config& c) { return render(c.training.judge_backend); }},
+        {"training.eval_suite_path",
+         [](const Config& c) { return render(c.training.eval_suite_path); }},
+        {"training.retain_versions",
+         [](const Config& c) { return std::to_string(c.training.retain_versions); }},
+        {"training.gate_mode",
+         [](const Config& c) { return std::string{c.training.effective_gate_mode()}; }},
+        {"training.cycle.pipeline",
+         [](const Config& c) { return render(c.training.cycle.pipeline); }},
+        {"training.cycle.backend",
+         [](const Config& c) { return render(c.training.cycle.backend); }},
+        {"training.cycle.anchor_version",
+         [](const Config& c) { return std::to_string(c.training.cycle.anchor_version); }},
+        {"training.cycle.regression_threshold",
+         [](const Config& c) { return std::to_string(c.training.cycle.regression_threshold); }},
+        {"training.cycle.circuit_breaker_k",
+         [](const Config& c) { return std::to_string(c.training.cycle.circuit_breaker_k); }},
+        {"training.cycle.judge_backend",
+         [](const Config& c) { return render(c.training.cycle.judge_backend); }},
+        {"permissions",
+         [](const Config& c) {
+             std::vector<std::string> levels;
+             for (const auto& [tool, level] : c.permissions.levels) {
+                 levels.push_back(tool + ": " + std::string{harness::to_string(level)});
+             }
+             return one_per_line(levels);
+         }},
+        {"mcp_servers", [](const Config& c) { return one_per_line(c.mcp_server_names()); }},
+        {"embeddings", [](const Config& c) { return one_per_line(c.embedding_names()); }},
+        {"backends", [](const Config& c) { return one_per_line(c.backend_names()); }},
+    };
+    return reads;
+}
+
+/// One field of a backend entry, and how `config get
+/// backends.<name>.<field>` prints it (55g), unset as empty: a row for each
+/// of `backend_entry_keys()` but `api_key`, whose reading redacts. A field
+/// declared with no row here is `no such config key` -- which the derived
+/// test fails the day it happens.
+struct FieldRead {
+    std::string_view field{};
+    std::string (*read)(const BackendConfig&) = nullptr;
+};
+
+std::string real(const std::optional<double>& value) {
+    return value.has_value() ? std::to_string(*value) : std::string{};
+}
+
+std::string whole(const std::optional<std::int64_t>& value) {
+    return value.has_value() ? std::to_string(*value) : std::string{};
+}
+
+/// The adapters one per line as `config set-backend --adapters` takes each
+/// (53a): `<path>[:<scale>]`, the scale left out at 1. The pins are the
+/// editor's to record; `check`'s Adapters rows say whether each holds.
+std::string adapter_lines(const std::vector<harness::AdapterConfig>& adapters) {
+    std::vector<std::string> lines;
+    for (const harness::AdapterConfig& adapter : adapters) {
+        std::ostringstream scale;
+        scale << adapter.scale;
+        lines.push_back(adapter.path + (adapter.scale == 1.0 ? "" : ":" + scale.str()));
+    }
+    return one_per_line(lines);
+}
+
+const std::vector<FieldRead>& backend_field_reads() {
+    static const std::vector<FieldRead> reads{
+        {"type", [](const BackendConfig& b) { return std::string{harness::to_string(b.type)}; }},
+        {"model", [](const BackendConfig& b) { return render(b.model); }},
+        {"model_path", [](const BackendConfig& b) { return render(b.model_path); }},
+        {"mmproj_path", [](const BackendConfig& b) { return render(b.mmproj_path); }},
+        {"embedding_model", [](const BackendConfig& b) { return render(b.embedding_model); }},
+        {"system_prompt", [](const BackendConfig& b) { return render(b.system_prompt); }},
+        {"context_size", [](const BackendConfig& b) { return whole(b.context_size); }},
+        {"cache_type",
+         [](const BackendConfig& b) {
+             return b.cache_type.has_value() ? std::string{harness::to_string(*b.cache_type)}
+                                             : std::string{};
+         }},
+        {"max_tokens", [](const BackendConfig& b) { return whole(b.max_tokens); }},
+        {"temperature", [](const BackendConfig& b) { return real(b.temperature); }},
+        {"top_p", [](const BackendConfig& b) { return real(b.top_p); }},
+        {"top_k", [](const BackendConfig& b) { return whole(b.top_k); }},
+        {"min_p", [](const BackendConfig& b) { return real(b.min_p); }},
+        {"repeat_penalty", [](const BackendConfig& b) { return real(b.repeat_penalty); }},
+        {"presence_penalty", [](const BackendConfig& b) { return real(b.presence_penalty); }},
+        {"seed", [](const BackendConfig& b) { return whole(b.seed); }},
+        {"thinking",
+         [](const BackendConfig& b) {
+             return b.thinking.has_value() ? std::string{harness::to_string(*b.thinking)}
+                                           : std::string{};
+         }},
+        {"thinking_budget", [](const BackendConfig& b) { return whole(b.thinking_budget); }},
+        {"binary", [](const BackendConfig& b) { return render(b.binary); }},
+        {"mode", [](const BackendConfig& b) { return render(b.mode); }},
+        {"host", [](const BackendConfig& b) { return render(b.host); }},
+        {"idle_unload_seconds",
+         [](const BackendConfig& b) { return whole(b.idle_unload_seconds); }},
+        {"server_tools", [](const BackendConfig& b) { return one_per_line(b.server_tools); }},
+        {"adapters", [](const BackendConfig& b) { return adapter_lines(b.adapters); }},
+        {"draft", [](const BackendConfig& b) { return render(b.draft); }},
+        {"draft_block_size", [](const BackendConfig& b) { return whole(b.draft_block_size); }},
+    };
+    return reads;
+}
+
 /// Resolves a dotted key against a loaded config.
 /// Returns nullopt when the key does not name anything.
 std::optional<std::string> lookup(const Config& config, std::string_view key, bool reveal) {
     if (std::optional<std::string> suite = suite_lookup(config, key); suite.has_value()) {
         return suite;
     }
-    if (key == "status_mode") {
-        return std::string{harness::to_string(config.status_mode)};
-    }
-    if (key == "color") {
-        return config.color ? "true" : "false";
-    }
-    if (key == "models.default") {
-        return render(config.models.default_backend);
-    }
-    if (key == "models.default_embedding") {
-        return render(config.models.default_embedding);
-    }
-    if (key == "models.default_extraction") {
-        return render(config.models.default_extraction);
-    }
-    if (key == "models.default_vision") {
-        return render(config.models.default_vision);
-    }
-    if (key == "models.default_transcription") {
-        return render(config.models.default_transcription);
-    }
-    if (key == "models.default_utility") {
-        return render(config.models.default_utility);
-    }
-    if (key == "models.default_video") {
-        return render(config.models.default_video);
-    }
-    if (key == "paths.gguf_dir") {
-        return render(config.paths.gguf_dir);
-    }
-    if (key == "paths.hf_dir") {
-        return render(config.paths.hf_dir);
-    }
-    if (key == "paths.mcp_dir") {
-        return render(config.paths.mcp_dir);
-    }
-    if (key == "paths.embeddings_dir") {
-        return render(config.paths.embeddings_dir);
-    }
-    if (key == "auto_rag") {
-        return render(config.auto_rag);
-    }
-    // What `config set` moves (52e), each read back as it is written.
-    if (key == "memory.recall") {
-        return config.memory.recall ? "true" : "false";
-    }
-    if (key == "knowledge.auto_capture") {
-        return config.knowledge.auto_capture ? "true" : "false";
-    }
-    if (key == "ui.markdown") {
-        return config.ui.markdown ? "true" : "false";
-    }
-    if (key == "ui.thinking_display") {
-        return std::string{harness::to_string(config.ui.thinking_display)};
-    }
-    if (key == "attachments.graph") {
-        return config.attachments.graph.has_value()
-                   ? std::string{harness::to_string(*config.attachments.graph)}
-                   : render(std::string{});
-    }
-    if (key == "tools.search.provider") {
-        return render(config.tools.search.provider);
-    }
-    if (key == "tools.search.url") {
-        return render(config.tools.search.url);
-    }
-    if (key == "tools.search.results") {
-        return std::to_string(config.tools.search.results);
-    }
-    if (key == "permissions") {
-        std::string out;
-        for (const auto& [tool, level] : config.permissions.levels) {
-            out += out.empty() ? "" : "\n";
-            out += tool + ": " + std::string{harness::to_string(level)};
+    for (const FixedRead& fixed : fixed_reads()) {
+        if (fixed.key == key) {
+            return fixed.read(config);
         }
-        return out;
     }
     if (key.starts_with("permissions.")) {
         const std::string_view tool = key.substr(std::string_view{"permissions."}.size());
         // Unlisted is `ask`, which is an answer, not a missing key.
         return std::string{harness::to_string(config.permissions.level(tool))};
-    }
-    if (key == "mcp_servers") {
-        std::string out;
-        for (const std::string& name : config.mcp_server_names()) {
-            out += out.empty() ? "" : "\n";
-            out += name;
-        }
-        return out;
     }
     if (key.starts_with("mcp_servers.")) {
         const std::string_view rest = key.substr(std::string_view{"mcp_servers."}.size());
@@ -231,85 +331,12 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
             return render(server->command);
         }
         if (field == "enabled") {
-            return server->enabled ? "true" : "false";
+            return flag_word(server->enabled);
         }
         if (field == "args" || field == "env") {
-            std::string out;
-            for (const std::string& item : field == "args" ? server->args : server->env) {
-                out += out.empty() ? "" : "\n";
-                out += item;
-            }
-            return out;
+            return one_per_line(field == "args" ? server->args : server->env);
         }
         return std::nullopt;
-    }
-    if (key == "training.python") {
-        return render(config.training.python);
-    }
-    if (key == "training.trainer") {
-        return render(config.training.trainer.empty() ? std::string{"auto"}
-                                                      : config.training.trainer);
-    }
-    if (key == "training.judge_backend") {
-        return render(config.training.judge_backend);
-    }
-    if (key == "training.eval_suite_path") {
-        return render(config.training.eval_suite_path);
-    }
-    if (key == "training.retain_versions") {
-        return std::to_string(config.training.retain_versions);
-    }
-    if (key == "training.gate_mode") {
-        return std::string{config.training.effective_gate_mode()};
-    }
-    if (key == "training.cycle.pipeline") {
-        return render(config.training.cycle.pipeline);
-    }
-    if (key == "training.cycle.backend") {
-        return render(config.training.cycle.backend);
-    }
-    if (key == "training.cycle.anchor_version") {
-        return std::to_string(config.training.cycle.anchor_version);
-    }
-    if (key == "training.cycle.regression_threshold") {
-        return std::to_string(config.training.cycle.regression_threshold);
-    }
-    if (key == "training.cycle.circuit_breaker_k") {
-        return std::to_string(config.training.cycle.circuit_breaker_k);
-    }
-    if (key == "training.cycle.judge_backend") {
-        return render(config.training.cycle.judge_backend);
-    }
-    if (key == "tools.fs_root") {
-        return render(config.tools.fs_root);
-    }
-    if (key == "ui.markdown") {
-        return config.ui.markdown ? "true" : "false";
-    }
-    if (key == "ui.thinking_display") {
-        return std::string{harness::to_string(config.ui.thinking_display)};
-    }
-    if (key == "attachments.graph") {
-        // Unset is each surface's built-in (27p), which no one word names.
-        return config.attachments.graph.has_value()
-                   ? std::string{harness::to_string(*config.attachments.graph)}
-                   : std::string{};
-    }
-    if (key == "tools.disabled") {
-        std::string out;
-        for (const std::string& name : config.tools.disabled) {
-            out += out.empty() ? "" : "\n";
-            out += name;
-        }
-        return out;
-    }
-    if (key == "embeddings") {
-        std::string out;
-        for (const std::string& name : config.embedding_names()) {
-            out += out.empty() ? "" : "\n";
-            out += name;
-        }
-        return out;
     }
     if (key.starts_with("embeddings.")) {
         const std::string_view rest = key.substr(std::string_view{"embeddings."}.size());
@@ -369,14 +396,6 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
         }
         return std::nullopt;
     }
-    if (key == "backends") {
-        std::string out;
-        for (const std::string& name : config.backend_names()) {
-            out += out.empty() ? "" : "\n";
-            out += name;
-        }
-        return out;
-    }
 
     constexpr std::string_view kBackendsPrefix = "backends.";
     if (key.substr(0, kBackendsPrefix.size()) != kBackendsPrefix) {
@@ -400,74 +419,19 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
         return std::nullopt;
     }
 
-    if (field == "type") {
-        return std::string{harness::to_string(backend->type)};
+    // The one declaration of what an entry holds (55g): a key outside it is
+    // no field of a backend, and every key in it reads.
+    if (const std::span<const std::string_view> keys = harness::backend_entry_keys();
+        std::ranges::find(keys, field) == keys.end()) {
+        return std::nullopt;
     }
     if (field == "api_key") {
         return render_secret(backend->api_key, reveal);
     }
-    if (field == "model") {
-        return render(backend->model);
-    }
-    if (field == "model_path") {
-        return render(backend->model_path);
-    }
-    if (field == "mmproj_path") {
-        return render(backend->mmproj_path);
-    }
-    if (field == "embedding_model") {
-        return render(backend->embedding_model);
-    }
-    if (field == "system_prompt") {
-        return render(backend->system_prompt);
-    }
-    if (field == "context_size") {
-        return backend->context_size.has_value() ? std::to_string(*backend->context_size)
-                                                 : std::string{};
-    }
-    if (field == "cache_type") {
-        return backend->cache_type.has_value()
-                   ? std::string{harness::to_string(*backend->cache_type)}
-                   : std::string{};
-    }
-    if (field == "max_tokens") {
-        return backend->max_tokens.has_value() ? std::to_string(*backend->max_tokens)
-                                               : std::string{};
-    }
-    if (field == "temperature") {
-        return backend->temperature.has_value() ? std::to_string(*backend->temperature)
-                                                : std::string{};
-    }
-    const auto real = [](const std::optional<double>& value) {
-        return value.has_value() ? std::to_string(*value) : std::string{};
-    };
-    const auto whole = [](const std::optional<std::int64_t>& value) {
-        return value.has_value() ? std::to_string(*value) : std::string{};
-    };
-    if (field == "top_p") {
-        return real(backend->top_p);
-    }
-    if (field == "top_k") {
-        return whole(backend->top_k);
-    }
-    if (field == "min_p") {
-        return real(backend->min_p);
-    }
-    if (field == "repeat_penalty") {
-        return real(backend->repeat_penalty);
-    }
-    if (field == "presence_penalty") {
-        return real(backend->presence_penalty);
-    }
-    if (field == "seed") {
-        return whole(backend->seed);
-    }
-    if (field == "thinking") {
-        return backend->thinking.has_value() ? std::string{harness::to_string(*backend->thinking)}
-                                             : std::string{};
-    }
-    if (field == "thinking_budget") {
-        return whole(backend->thinking_budget);
+    for (const FieldRead& read : backend_field_reads()) {
+        if (read.field == field) {
+            return read.read(*backend);
+        }
     }
     return std::nullopt;
 }
@@ -1539,41 +1503,20 @@ std::string remove_backend(const std::filesystem::path& path, const std::string&
 }
 
 std::vector<std::string> config_keys(const harness::Config& config) {
-    std::vector<std::string> keys{"status_mode",
-                                  "color",
-                                  "auto_rag",
-                                  "models.default",
-                                  "models.default_embedding",
-                                  "models.default_extraction",
-                                  "models.default_vision",
-                                  "models.default_transcription",
-                                  "models.default_utility",
-                                  "models.default_video",
-                                  "paths.gguf_dir",
-                                  "paths.hf_dir",
-                                  "paths.mcp_dir",
-                                  "paths.embeddings_dir",
-                                  "tools.fs_root",
-                                  "tools.disabled",
-                                  "ui.markdown",
-                                  "ui.thinking_display",
-                                  "attachments.graph",
-                                  "training.python",
-                                  "training.trainer",
-                                  "training.judge_backend",
-                                  "training.eval_suite_path",
-                                  "training.retain_versions",
-                                  "training.gate_mode",
-                                  "training.cycle.pipeline",
-                                  "training.cycle.backend",
-                                  "training.cycle.anchor_version",
-                                  "training.cycle.regression_threshold",
-                                  "training.cycle.circuit_breaker_k",
-                                  "training.cycle.judge_backend",
-                                  "permissions",
-                                  "mcp_servers",
-                                  "embeddings",
-                                  "backends"};
+    // From the tables `config get` reads (55g), so completion offers every
+    // key it answers and no other.
+    std::vector<std::string> keys;
+    for (const FixedRead& fixed : fixed_reads()) {
+        keys.emplace_back(fixed.key);
+    }
+    // What `config set` moves is read back too (52e): offered from its own
+    // table, so a new scalar is offered -- and `config get` held to it by
+    // the test that asks for every key offered -- the day it is settable.
+    for (const harness::SettableScalar& scalar : harness::settable_scalars()) {
+        if (std::ranges::find(keys, scalar.key) == keys.end()) {
+            keys.emplace_back(scalar.key);
+        }
+    }
     for (const std::string_view tool : tools::destructive_tool_names()) {
         keys.push_back("permissions." + std::string{tool});
     }
@@ -1586,11 +1529,11 @@ std::vector<std::string> config_keys(const harness::Config& config) {
         }
     };
     for (const std::string& name : config.backend_names()) {
-        entry("backends", name,
-              {"type", "api_key", "model", "model_path", "mmproj_path", "embedding_model",
-               "system_prompt", "context_size", "cache_type", "max_tokens", "temperature", "top_p",
-               "top_k", "min_p", "repeat_penalty", "presence_penalty", "seed", "thinking",
-               "thinking_budget"});
+        // Every key an entry holds, `api_key` (redacted) among them.
+        keys.push_back("backends." + name);
+        for (const std::string_view field : harness::backend_entry_keys()) {
+            keys.push_back("backends." + name + "." + std::string{field});
+        }
     }
     for (const std::string& name : config.mcp_server_names()) {
         entry("mcp_servers", name, {"command", "enabled", "args", "env"});

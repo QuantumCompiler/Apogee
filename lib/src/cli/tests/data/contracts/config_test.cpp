@@ -4,6 +4,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -13,6 +14,8 @@
 #include <utility>
 #include <vector>
 
+#include "contracts/config_edit.h"
+#include "contracts/jsonc.h"
 #include "support/env_guard.h"
 
 using apogee::harness::BackendType;
@@ -1523,4 +1526,153 @@ TEST_CASE("a validation that cannot hold is refused at load, by name",
         }
     }
     CHECK_NOTHROW(load_text(with_suites(members + "    validate:\n")));
+}
+
+TEST_CASE("a backend entry's unknown keys load, kept in the file's order for check",
+          "[config][unknown-keys]") {
+    // 55g: the audit's typos, each a key no backend reads. Loading stays
+    // tolerant -- the entry loads with what it does hold -- and the keys are
+    // kept, never refused, for `check` to name.
+    const std::string yaml = R"(backends:
+  m:
+    type: mlx
+    model_path: /models/base
+    adaptors: [{path: /a}]
+    drafter: /models/drafter
+  api:
+    type: anthropic
+    sever_tools: [web_search]
+    model: claude-sonnet-5
+    temprature: 0.2
+  clean:
+    type: mock
+    model: m
+)";
+    const std::string jsonc = R"({
+  "backends": {
+    "m": {"type": "mlx", "model_path": "/models/base", "adaptors": [{"path": "/a"}],
+          "drafter": "/models/drafter"},
+    "api": {"type": "anthropic", "sever_tools": ["web_search"], "model": "claude-sonnet-5",
+            "temprature": 0.2}, // a comment
+    "clean": {"type": "mock", "model": "m"}
+  }
+}
+)";
+    for (const std::string& text : {yaml, jsonc}) {
+        INFO(text);
+        const Config config = load_text(text);
+        CHECK(config.find_backend("m")->unknown_keys ==
+              std::vector<std::string>{"adaptors", "drafter"});
+        CHECK(config.find_backend("m")->adapters.empty());
+        CHECK(config.find_backend("m")->draft.empty());
+        CHECK(config.find_backend("api")->unknown_keys ==
+              std::vector<std::string>{"sever_tools", "temprature"});
+        CHECK(config.find_backend("api")->model == "claude-sonnet-5");
+        CHECK_FALSE(config.find_backend("api")->temperature.has_value());
+        CHECK(config.find_backend("clean")->unknown_keys.empty());
+    }
+}
+
+TEST_CASE("every key the declaration names, the loader reads, and none is unknown",
+          "[config][unknown-keys]") {
+    // The one declaration (55g): what `set-backend` writes, but the key, is
+    // it; and an entry holding every declared key has no unknown one.
+    std::vector<std::string_view> declared{apogee::harness::backend_entry_keys().begin(),
+                                           apogee::harness::backend_entry_keys().end()};
+    std::vector<std::string_view> editable = apogee::harness::backend_editable_fields();
+    editable.insert(editable.begin() + 1, "api_key");
+    CHECK(declared == editable);
+
+    // An mlx entry holds all but server_tools, which only a vendor API runs.
+    const Config config = load_text(R"({
+  "backends": {
+    "m": {
+      "type": "mlx", "api_key": "k", "model": "m", "model_path": "/models/base",
+      "mmproj_path": "/p", "embedding_model": "e", "system_prompt": "Be brief.",
+      "context_size": 4096, "cache_type": "f16", "max_tokens": 64, "temperature": 0.5,
+      "top_p": 0.9, "top_k": 40, "min_p": 0.05, "repeat_penalty": 1.1,
+      "presence_penalty": 0.5, "seed": 7, "thinking": "auto", "thinking_budget": 512,
+      "binary": "/bin/b", "mode": "bare", "host": "127.0.0.1:1", "idle_unload_seconds": 30,
+      "adapters": [{"path": "/a"}], "draft": "/models/drafter", "draft_block_size": 4
+    },
+    "api": {"type": "anthropic", "server_tools": ["web_search"]}
+  }
+}
+)");
+    CHECK(config.find_backend("m")->unknown_keys.empty());
+    CHECK(config.find_backend("api")->unknown_keys.empty());
+    const apogee::harness::BackendConfig& m = *config.find_backend("m");
+    CHECK(m.system_prompt == "Be brief.");
+    CHECK(m.host == "127.0.0.1:1");
+    CHECK(m.idle_unload_seconds == 30);
+    CHECK(m.draft == "/models/drafter");
+    CHECK(m.draft_block_size == 4);
+    CHECK(m.adapters.size() == 1);
+    CHECK(config.find_backend("api")->server_tools == std::vector<std::string>{"web_search"});
+    // And each declared key alone, unset, on an entry of any type: known.
+    for (const std::string_view key : declared) {
+        INFO(key);
+        if (key == "type") {
+            continue;  // required, so every entry above holds it
+        }
+        const Config one = load_text("{\"backends\": {\"x\": {\"type\": \"mock\", \"" +
+                                     std::string{key} + "\": null}}}");
+        CHECK(one.find_backend("x")->unknown_keys.empty());
+    }
+}
+
+TEST_CASE("a typo's nearest key is the one it meant, and a stranger has none",
+          "[config][unknown-keys]") {
+    using apogee::harness::nearest_backend_key;
+    const std::vector<std::pair<std::string_view, std::string_view>> meant{
+        {"adaptors", "adapters"},
+        {"drafter", "draft"},
+        {"sever_tools", "server_tools"},
+        {"temprature", "temperature"},
+        {"Model", "model"},
+        {"modle", "model"},
+        {"apikey", "api_key"},
+        {"contextsize", "context_size"},
+        {"idle_unload_secs", "idle_unload_seconds"},
+        {"draft_blocksize", "draft_block_size"},
+        {"servertools", "server_tools"},
+        {"mod", "mode"},
+    };
+    for (const auto& [typo, key] : meant) {
+        INFO(typo);
+        CHECK(nearest_backend_key(typo) == key);
+    }
+    for (const std::string_view stranger : {"colour", "url", "endpoint", "x", "persona"}) {
+        INFO(stranger);
+        CHECK(nearest_backend_key(stranger).empty());
+    }
+}
+
+TEST_CASE("the starter config documents every key a backend entry holds",
+          "[config][template][unknown-keys]") {
+    // 55g's derived list: each declared key named in the template's
+    // `backends` section -- a key in an example or a word in its comments --
+    // so a field cannot ship that the file teaching every other one is silent
+    // about. 53i's draft and draft_block_size were the ones missing.
+    const std::string_view text = apogee::harness::config_template();
+    const apogee::harness::jsonc::Value root = apogee::harness::jsonc::parse(text);
+    const auto at = std::ranges::find(root.keys, "backends");
+    REQUIRE(at != root.keys.end());
+    const apogee::harness::jsonc::Value& backends =
+        root.children[static_cast<std::size_t>(at - root.keys.begin())];
+    const std::string_view section = text.substr(backends.begin, backends.end - backends.begin);
+    const auto word = [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_';
+    };
+    for (const std::string_view key : apogee::harness::backend_entry_keys()) {
+        INFO(key);
+        bool named = false;
+        for (std::size_t pos = section.find(key); pos != std::string_view::npos && !named;
+             pos = section.find(key, pos + 1)) {
+            const std::size_t end = pos + key.size();
+            named = (pos == 0 || !word(section[pos - 1])) &&
+                    (end == section.size() || !word(section[end]));
+        }
+        CHECK(named);
+    }
 }

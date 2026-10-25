@@ -17,7 +17,9 @@
 // JSONC since 28i: the comments are the teaching, and the editor keeps them.
 // The template is also the one source of truth `config upgrade` and `check`
 // compare a user's file against -- every key written here (not in a comment)
-// is an option an older file can be missing.
+// is an option an older file can be missing, and since 55g so is each block
+// of comments `commented_options()` (config_migrate.h) declares: a release
+// that teaches a new option only in a comment declares its block there.
 //
 // The drift test guards exactly this class of bug: a documented option that
 // `config init` has quietly stopped writing.
@@ -310,6 +312,10 @@ constexpr std::string_view kConfigTemplate = R"APOGEE(// Apogee configuration.
 
   "backends": {
 
+    // Any entry below may also carry a system_prompt: the system prompt
+    // `apogee complete` sends on it when -s/--system names none.
+    //   "system_prompt": "Answer in one short paragraph."
+
     // ── Anthropic (API billing plan) ────────────────────────────────────────────
     // Uses the Messages API directly with your own key. For the subscription
     // plan -- driving the `claude` CLI you are already logged into -- see the
@@ -396,6 +402,24 @@ constexpr std::string_view kConfigTemplate = R"APOGEE(// Apogee configuration.
     //   "type": "gemini-cli"
     //   // "binary": "/usr/local/bin/gemini",
     //   // "model": "gemini-3.5-flash"
+    // },
+
+    // ── Ollama through its CLI ──────────────────────────────────────────────────
+    // Apogee runs the `ollama` binary you installed, once per turn, against the
+    // Ollama server you already run. It never starts one: with no server
+    // reachable at host the turn is refused, since a server Apogee brought up
+    // would be a listening socket of its own. model is required -- there is no
+    // default to run -- and `apogee providers scan --register` writes this
+    // entry when Ollama has exactly one model.
+    //
+    // binary: resolved from PATH when unset.
+    // host:   where that server listens, as host:port; unset means
+    //         127.0.0.1:11434, Ollama's own default.
+    // "ollama": {
+    //   "type": "ollama-cli",
+    //   "model": "gpt-oss:20b-cloud"
+    //   // "binary": "/usr/local/bin/ollama",
+    //   // "host": "127.0.0.1:11434"
     // },
 
     // ── Local inference via llama.cpp ───────────────────────────────────────────
@@ -486,6 +510,17 @@ constexpr std::string_view kConfigTemplate = R"APOGEE(// Apogee configuration.
     // at the scale it was trained with -- pinned to the model directory's
     // weights as a llamacpp entry's are:
     //   apogee config set-backend mlx --adapters <adapter directory>
+    // draft runs a drafter beside the model -- an MLX directory mlx-vlm builds
+    // from a draft head, such as one of Gemma 4's assistants -- whose proposed
+    // tokens the model checks through mlx-vlm's speculative path, so only how
+    // fast an answer comes changes. A drafter pairs only with a base of its
+    // family and width, the one its record names. draft_block_size is the
+    // tokens one drafting round proposes, plus one: 2 to 16, unset meaning the
+    // drafter's own. `apogee models convert <a draft head> --mlx` makes one,
+    // and `apogee config set-backend mlx --draft <its directory or handle>`
+    // writes it, refused when it does not pair:
+    //   "draft": "${HOME}/models/gemma-4-assistant-mlx",
+    //   "draft_block_size": 4
     // "mlx": {
     //   "type": "mlx",
     //   "model_path": "${HOME}/models/Llama-3.2-3B-Instruct-4bit"

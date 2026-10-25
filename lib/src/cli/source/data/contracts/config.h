@@ -265,7 +265,28 @@ struct BackendConfig {
     /// as its `config.json` states it, else mlx-vlm's default. An mlx entry's
     /// alone; it means nothing without `draft`.
     std::optional<std::int64_t> draft_block_size;
+
+    /// The keys the entry holds that no backend reads (55g), in the file's
+    /// order -- a typo's `adaptors:` or `temprature:`. Loading stays tolerant
+    /// (a newer release's key read by an older binary is one of these), so
+    /// they are kept here for `check` to name, never refused.
+    std::vector<std::string> unknown_keys{};
 };
+
+/// Every key a backend entry may hold (55g), declared once: each field
+/// `config set-backend` writes, and `api_key` (`backend_editable_fields()`
+/// is this list but its key). The loader reads an entry against it -- any
+/// other key is an `unknown_keys` entry -- and `config get` reads and
+/// completes from it, so a new field cannot land without its read and its
+/// completion.
+[[nodiscard]] std::span<const std::string_view> backend_entry_keys() noexcept;
+
+/// The key of `backend_entry_keys()` nearest `key` (55g): the fewest edits
+/// away -- a character added, dropped, changed, or two swapped -- within two
+/// (or a quarter of the key's length, when longer), the earlier declared on
+/// a tie. Empty when none is that near: a suggestion that is a guess is
+/// worse than none.
+[[nodiscard]] std::string_view nearest_backend_key(std::string_view key);
 
 /// The tokens a drafting round may propose, plus one (53i): mlx-vlm drafts
 /// `draft_block_size - 1` a round, so 1 would propose none.

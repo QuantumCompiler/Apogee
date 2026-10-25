@@ -555,6 +555,252 @@ void find_gaps(std::string_view tmpl, const jsonc::Value& written, const jsonc::
     return jsonc::indent_at(text, object.begin) + "  ";
 }
 
+// ---------------------------------------------------------------------------
+// Commented options (55g): what the template teaches in a comment alone.
+// ---------------------------------------------------------------------------
+
+/// How many of `lines`, from `from` up to `to`, read `text` once trimmed.
+[[nodiscard]] std::size_t count_lines(const std::vector<std::string_view>& lines,
+                                      std::string_view text, std::size_t from, std::size_t to) {
+    std::size_t count = 0;
+    for (std::size_t i = from; i < to && i < lines.size(); ++i) {
+        if (trimmed(lines[i]) == text) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+/// The one line of `lines`, from `from` up to `to`, that reads `text` once
+/// trimmed; nullopt when none does, or more than one.
+[[nodiscard]] std::optional<std::size_t> only_line(const std::vector<std::string_view>& lines,
+                                                   std::string_view text, std::size_t from,
+                                                   std::size_t to) {
+    std::optional<std::size_t> found;
+    for (std::size_t i = from; i < to && i < lines.size(); ++i) {
+        if (trimmed(lines[i]) == text) {
+            if (found.has_value()) {
+                return std::nullopt;
+            }
+            found = i;
+        }
+    }
+    return found;
+}
+
+/// The line of `text` byte `pos` is on, counting from 0.
+[[nodiscard]] std::size_t line_at(std::string_view text, std::size_t pos) {
+    return static_cast<std::size_t>(
+        std::count(text.begin(), text.begin() + static_cast<std::ptrdiff_t>(pos), '\n'));
+}
+
+/// The leading whitespace of `line`.
+[[nodiscard]] std::string_view indent_of(std::string_view line) {
+    return line.substr(0, line.find_first_not_of(" \t"));
+}
+
+/// A commented option's block in the template, by line: the line `opens`
+/// reads -- a bare `//` line just above it with it -- through the first
+/// after it that `closes` reads, and how many blank lines stand above it.
+struct Block {
+    std::size_t first = 0;
+    std::size_t last = 0;
+    std::size_t lead = 0;
+};
+
+[[nodiscard]] std::optional<Block> find_block(const std::vector<std::string_view>& lines,
+                                              const CommentedOption& option) {
+    const std::optional<std::size_t> opens = only_line(lines, option.opens, 0, lines.size());
+    if (!opens.has_value()) {
+        return std::nullopt;
+    }
+    Block block{*opens, *opens, 0};
+    while (block.last < lines.size() && trimmed(lines[block.last]) != option.closes) {
+        ++block.last;
+    }
+    if (block.last == lines.size()) {
+        return std::nullopt;
+    }
+    while (block.first > 0 && trimmed(lines[block.first - 1]) == "//") {
+        --block.first;
+    }
+    while (block.first > block.lead && trimmed(lines[block.first - block.lead - 1]).empty()) {
+        ++block.lead;
+    }
+    return block;
+}
+
+/// The keys down to the innermost object of `root` whose braces hold byte
+/// `pos` -- empty for the top level.
+[[nodiscard]] std::vector<std::string> object_path_at(const jsonc::Value& root, std::size_t pos) {
+    std::vector<std::string> path;
+    const jsonc::Value* object = &root;
+    for (bool deeper = true; deeper;) {
+        deeper = false;
+        for (std::size_t i = 0; i < object->children.size(); ++i) {
+            const jsonc::Value& child = object->children[i];
+            if (child.kind == jsonc::Kind::Object && child.begin < pos && pos < child.end) {
+                path.push_back(object->keys[i]);
+                object = &child;
+                deeper = true;
+                break;
+            }
+        }
+    }
+    return path;
+}
+
+/// The object `path` names in `root`, or nullptr when the file has none there.
+[[nodiscard]] const jsonc::Value* object_at(const jsonc::Value& root,
+                                            const std::vector<std::string>& path) {
+    const jsonc::Value* object = &root;
+    for (const std::string& key : path) {
+        if (object->kind != jsonc::Kind::Object) {
+            return nullptr;
+        }
+        const auto found = std::ranges::find(object->keys, key);
+        if (found == object->keys.end()) {
+            return nullptr;
+        }
+        object = &object->children[static_cast<std::size_t>(found - object->keys.begin())];
+    }
+    return object->kind == jsonc::Kind::Object ? object : nullptr;
+}
+
+/// Where a commented option goes in a config, and its lines as they go in.
+struct Placement {
+    std::size_t before = 0;  ///< the line it goes in front of
+    std::vector<std::string> lines{};
+};
+
+/// Where `option`'s block goes in `text`, a config lacking it: in the object
+/// the template holds it in, beside the line the template has right after it
+/// -- else right before it -- when the file has that line once and the
+/// template once, so it lands where the template puts it; else last in that
+/// object. nullopt when this template carries no such block, the file holds
+/// it already (its first line, anywhere), or the file has no such object, or
+/// writes it on one line (a block cannot go inside it without rewriting a
+/// line of the file's).
+[[nodiscard]] std::optional<Placement> place(std::string_view text, std::string_view tmpl,
+                                             const jsonc::Value& written,
+                                             const CommentedOption& option) {
+    const std::vector<std::string_view> from = split_lines(tmpl);
+    const std::optional<Block> block = find_block(from, option);
+    if (!block.has_value()) {
+        return std::nullopt;
+    }
+    const std::vector<std::string_view> lines = split_lines(text);
+    if (count_lines(lines, option.opens, 0, lines.size()) > 0) {
+        return std::nullopt;
+    }
+    const std::optional<jsonc::Value> live = jsonc::parse_document(text);
+    if (!live.has_value()) {
+        return std::nullopt;
+    }
+    const std::size_t at = static_cast<std::size_t>(from[block->first].data() - tmpl.data());
+    const jsonc::Value* object = object_at(*live, object_path_at(written, at));
+    if (object == nullptr) {
+        return std::nullopt;
+    }
+    const std::size_t open = line_at(text, object->begin);
+    const std::size_t close = line_at(text, object->end - 1);
+    if (open == close || !trimmed(lines[close]).starts_with('}')) {
+        return std::nullopt;
+    }
+
+    // The template's lines, each moved from one indentation to another.
+    const auto carried = [&](std::string_view was, std::string_view now, bool lead) {
+        std::vector<std::string> out;
+        for (std::size_t i = block->first - (lead ? block->lead : 0); i <= block->last; ++i) {
+            const std::string_view line = from[i];
+            if (trimmed(line).empty()) {
+                out.emplace_back();
+            } else if (line.starts_with(was)) {
+                out.push_back(std::string{now} + std::string{line.substr(was.size())});
+            } else {
+                out.emplace_back(line);
+            }
+        }
+        return out;
+    };
+    // The line after it in the template, found once in both.
+    std::size_t next = block->last + 1;
+    while (next < from.size() && trimmed(from[next]).empty()) {
+        ++next;
+    }
+    if (next < from.size() && count_lines(from, trimmed(from[next]), 0, from.size()) == 1) {
+        if (const std::optional<std::size_t> anchor =
+                only_line(lines, trimmed(from[next]), open + 1, close);
+            anchor.has_value()) {
+            // Right after what precedes that line, so the file's own blank
+            // lines stay between the block and it.
+            std::size_t before = *anchor;
+            while (before > open + 1 && trimmed(lines[before - 1]).empty()) {
+                --before;
+            }
+            return Placement{before, carried(indent_of(from[next]), indent_of(lines[*anchor]),
+                                             /*lead=*/true)};
+        }
+    }
+    // Else the line before it, found once in both.
+    if (block->first > block->lead) {
+        const std::string_view above = trimmed(from[block->first - block->lead - 1]);
+        if (count_lines(from, above, 0, from.size()) == 1) {
+            if (const std::optional<std::size_t> anchor = only_line(lines, above, open + 1, close);
+                anchor.has_value()) {
+                return Placement{*anchor + 1,
+                                 carried(indent_of(from[block->first - block->lead - 1]),
+                                         indent_of(lines[*anchor]), /*lead=*/true)};
+            }
+        }
+    }
+    // Else last in its object, a paragraph of its own: a blank line above it
+    // unless it opens the object, and no bare `//` joining it to the text
+    // that stood above it in the template.
+    std::vector<std::string> out;
+    if (close > open + 1 && !trimmed(lines[close - 1]).empty()) {
+        out.emplace_back();
+    }
+    bool opening = true;
+    for (std::string& line : carried(indent_of(from[block->first]),
+                                     member_indent(text, *object, std::nullopt), false)) {
+        opening = opening && trimmed(line) == "//";
+        if (!opening) {
+            out.push_back(std::move(line));
+        }
+    }
+    return Placement{close, std::move(out)};
+}
+
+/// `text` with `placement`'s lines in front of its line, in its newlines.
+[[nodiscard]] std::string placed(std::string_view text, const Placement& placement) {
+    const std::vector<std::string_view> lines = split_lines(text);
+    const std::size_t at = static_cast<std::size_t>(lines[placement.before].data() - text.data());
+    const std::string newline = jsonc::newline_of(text);
+    std::string inserted;
+    for (const std::string& line : placement.lines) {
+        inserted += line + newline;
+    }
+    return std::string{text.substr(0, at)} + inserted + std::string{text.substr(at)};
+}
+
+/// The commented options `template_text` carries, in the order it does.
+[[nodiscard]] std::vector<CommentedOption> carried_options(std::string_view template_text) {
+    const std::vector<std::string_view> lines = split_lines(template_text);
+    std::vector<std::pair<std::size_t, CommentedOption>> found;
+    for (const CommentedOption& option : commented_options()) {
+        if (const std::optional<Block> block = find_block(lines, option); block.has_value()) {
+            found.emplace_back(block->first, option);
+        }
+    }
+    std::ranges::stable_sort(found, {}, &std::pair<std::size_t, CommentedOption>::first);
+    std::vector<CommentedOption> out;
+    for (const auto& entry : found) {
+        out.push_back(entry.second);
+    }
+    return out;
+}
+
 }  // namespace
 
 namespace {
@@ -655,6 +901,49 @@ MigrationReport migrate_config_file(const std::filesystem::path& path) {
     return report;
 }
 
+std::vector<CommentedOption> commented_options() {
+    // Since 0.1.5, the first release whose starter config was JSONC: each a
+    // block the release added, an option it teaches in a comment alone. A
+    // block that rewrites lines an older file already has -- 0.1.6's
+    // thinking_display, a line added inside the `ui` example -- is not one
+    // upgrade can carry, since it never rewrites a line of the file's.
+    return {
+        {.release = "0.1.9",
+         .option = "models.default_video",
+         .opens = "// The pipeline `apogee video generate` runs when --model names none: a",
+         .closes = R"(// "default_video": "Wan-AI--Wan2.2-TI2V-5B-Diffusers")"},
+        {.release = "0.1.9",
+         .option = "review",
+         .opens = "// Review sweep targets: what `apogee review sweep` watches -- a repository, or",
+         .closes = "// },"},
+        {.release = "0.1.9",
+         .option = "backends.*.server_tools",
+         .opens = "// A vendor's own server-side tools -- its web search, its code execution --",
+         .closes = "// `apogee config set-backend <name> --server-tools web_search` writes it."},
+        {.release = "0.2.0",
+         .option = "backends.*.system_prompt",
+         .opens = "// Any entry below may also carry a system_prompt: the system prompt",
+         .closes = R"(//   "system_prompt": "Answer in one short paragraph.")"},
+        {.release = "0.2.0",
+         .option = "backends.*.host (ollama-cli)",
+         .opens = "// ── Ollama through its CLI ──────────────────────────────────────────────────",
+         .closes = "// },"},
+        {.release = "0.2.0",
+         .option = "backends.*.adapters (llamacpp)",
+         .opens = "// adapters applies LoRA adapters over the model as it loads -- GGUF LoRA",
+         .closes = R"(//   "adapters": [{"path": "/adapters/style.gguf", "scale": 0.8, )"
+                   R"("base_sha256": "..."}])"},
+        {.release = "0.2.0",
+         .option = "backends.*.adapters (mlx)",
+         .opens = "// adapters applies one adapter directory over the model as it loads --",
+         .closes = "//   apogee config set-backend mlx --adapters <adapter directory>"},
+        {.release = "0.2.0",
+         .option = "backends.*.draft, draft_block_size (mlx)",
+         .opens = "// draft runs a drafter beside the model -- an MLX directory mlx-vlm builds",
+         .closes = R"(//   "draft_block_size": 4)"},
+    };
+}
+
 std::vector<std::string> missing_template_options(std::string_view content,
                                                   std::string_view template_text) {
     std::vector<std::string> out;
@@ -672,6 +961,13 @@ std::vector<std::string> missing_template_options(std::string_view content,
         for (const Gap& gap : gaps) {
             out.push_back(gap.path);
         }
+        // And what it teaches in a comment alone (55g), where upgrade can
+        // put it.
+        for (const CommentedOption& option : carried_options(template_text)) {
+            if (place(content, template_text, written, option).has_value()) {
+                out.emplace_back(option.option);
+            }
+        }
     } catch (const jsonc::JsoncError&) {
         // A config that does not parse is check's Config failure, not a gap.
     }
@@ -684,6 +980,28 @@ std::vector<std::string> missing_template_options(std::string_view content) {
 
 namespace {
 
+/// `upgrade` once every key is in (55g): each commented option the template
+/// carries and the file lacks, its block put where `place` says, in the
+/// template's order -- so one block placed is the next one's neighbour. Only
+/// comments go in: the file's values are held to what they were.
+void add_commented_options(Upgrade& out, std::string_view template_text,
+                           const jsonc::Value& written) {
+    const Json values = jsonc::parse_json(out.text);
+    for (const CommentedOption& option : carried_options(template_text)) {
+        if (const std::optional<Placement> placement =
+                place(out.text, template_text, written, option);
+            placement.has_value()) {
+            out.text = placed(out.text, *placement);
+            out.added.emplace_back(option.option);
+        }
+    }
+    if (jsonc::parse_json(out.text) != values) {
+        throw ConfigEditError(
+            "the upgrade did not carry the file's values exactly -- the file "
+            "was left as it was");
+    }
+}
+
 Upgrade upgrade(std::string_view content, std::string_view template_text) {
     Upgrade out{std::string{content}, {}};
     const jsonc::Value written = jsonc::parse(template_text);
@@ -695,6 +1013,7 @@ Upgrade upgrade(std::string_view content, std::string_view template_text) {
         std::vector<Gap> gaps;
         find_gaps(template_text, written, live, "", gaps, true);
         if (gaps.empty()) {
+            add_commented_options(out, template_text, written);
             return out;
         }
         const Gap& gap = gaps.front();

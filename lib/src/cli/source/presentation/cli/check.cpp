@@ -454,6 +454,20 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
         const std::string label = "backend: " + name;
         const std::string_view type = harness::to_string(backend.type);
 
+        // A key no backend reads does nothing, and said nothing until 55g: a
+        // warning naming it, with the key it most likely meant. The entry
+        // still loads -- a newer release's key read here is one of these.
+        for (const std::string& key : backend.unknown_keys) {
+            const std::string_view meant = harness::nearest_backend_key(key);
+            add(report, Status::Warn, "Config", label,
+                "unknown key '" + key + "' -- no backend reads it, so it does nothing" +
+                    (meant.empty() ? std::string{}
+                                   : "; did you mean '" + std::string{meant} + "'?"),
+                meant.empty() ? "remove it from " + file +
+                                    " ('apogee config set-backend --help' lists a backend's fields)"
+                              : "rename it '" + std::string{meant} + "' in " + file);
+        }
+
         if (backend.type == harness::BackendType::LlamaCpp) {
             if (backend.model_path.empty()) {
                 // The entry exists: a door the binary accepts on it (M14).

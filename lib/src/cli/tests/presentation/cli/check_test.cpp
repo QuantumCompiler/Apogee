@@ -3985,3 +3985,88 @@ TEST_CASE("the MLX rows read files and start no Python: neither the environment'
     CHECK(std::filesystem::exists(mark));
 }
 #endif
+
+TEST_CASE("a backend's unknown key is a named warning with the key it meant, and it still loads",
+          "[commands][check][unknown-keys]") {
+    // 55g's typo matrix: `check` said `parses cleanly` and nothing else over
+    // each of these, and the entry ran as if they were not there. Now each
+    // is a row of its own, the nearest known key suggested -- and only a
+    // warning, since an older binary reading a newer release's key must load.
+    const std::vector<std::pair<std::string, std::string>> formats{{"config.yaml", R"(backends:
+  m:
+    type: mock
+    model: m
+    adaptors: [{path: /a}]
+    drafter: /models/drafter
+    colour_scheme: dark
+  api:
+    type: mock
+    sever_tools: [web_search]
+    temprature: 0.2
+  clean:
+    type: mock
+    model: m
+)"},
+                                                                   {"config.json", R"({
+  "backends": {
+    "m": {"type": "mock", "model": "m", "adaptors": [{"path": "/a"}],
+          "drafter": "/models/drafter", "colour_scheme": "dark"},
+    "api": {"type": "mock", "sever_tools": ["web_search"], "temprature": 0.2},
+    "clean": {"type": "mock", "model": "m"}
+  }
+}
+)"}};
+    for (const auto& [file, text] : formats) {
+        INFO(file);
+        Install install;
+        install.seed();
+        CheckInputs inputs = inputs_for(install);
+        inputs.config_path = install.root / "config" / file;
+        install.write("config/" + file, text);
+        load_into(inputs);
+        REQUIRE(inputs.config_error.empty());
+
+        const CheckReport report = run_checks(inputs);
+        const auto unknown = [&report](std::string_view backend, std::string_view key) {
+            const std::string name = "backend: " + std::string{backend};
+            const std::string said = "unknown key '" + std::string{key} + "'";
+            const auto found = std::ranges::find_if(report.rows, [&](const auto& row) {
+                return row.name == name && row.detail.find(said) != std::string::npos;
+            });
+            return found == report.rows.end() ? nullptr : &*found;
+        };
+        for (const auto& [backend, key, meant] :
+             std::vector<std::tuple<std::string, std::string, std::string>>{
+                 {"m", "adaptors", "adapters"},
+                 {"m", "drafter", "draft"},
+                 {"api", "sever_tools", "server_tools"},
+                 {"api", "temprature", "temperature"}}) {
+            INFO(key);
+            const apogee::commands::CheckRow* row = unknown(backend, key);
+            REQUIRE(row != nullptr);
+            CHECK(row->status == Status::Warn);
+            CHECK(row->section == "Config");
+            CHECK(row->detail == "unknown key '" + key +
+                                     "' -- no backend reads it, so it does nothing; did you "
+                                     "mean '" +
+                                     meant + "'?");
+            CHECK(row->remedy == "rename it '" + meant + "' in " + file);
+        }
+        // A key near nothing known is named with no guess.
+        const apogee::commands::CheckRow* stranger = unknown("m", "colour_scheme");
+        REQUIRE(stranger != nullptr);
+        CHECK(stranger->status == Status::Warn);
+        CHECK(stranger->detail.find("did you mean") == std::string::npos);
+        CHECK(stranger->remedy == "remove it from " + file +
+                                      " ('apogee config set-backend --help' lists a backend's "
+                                      "fields)");
+        // An entry with none has no such row; nothing fails over them.
+        CHECK(std::ranges::none_of(report.rows, [](const auto& row) {
+            return row.name == "backend: clean" && row.detail.starts_with("unknown key");
+        }));
+        CHECK(report.count(Status::Fail) == 0);
+        CHECK(std::ranges::count_if(report.rows, [](const auto& row) {
+                  return row.detail.starts_with("unknown key");
+              }) == 5);
+    }
+}

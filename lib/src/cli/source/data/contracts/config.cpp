@@ -69,6 +69,63 @@ constexpr std::array<std::pair<std::string_view, AgentOutputFormat>, 3> kAgentOu
     {"markdown", AgentOutputFormat::Markdown},
 }};
 
+/// The one declaration of what a backend entry holds (55g): its type and its
+/// `api_key`, then the rest of the fields `config set-backend` writes, in the
+/// order `config get` completes them. A field added to the loader is a row
+/// here, or `check` names it as a key no backend reads.
+constexpr std::array<std::string_view, 27> kBackendEntryKeys{
+    "type",
+    "api_key",
+    "model",
+    "model_path",
+    "mmproj_path",
+    "embedding_model",
+    "system_prompt",
+    "context_size",
+    "cache_type",
+    "max_tokens",
+    "temperature",
+    "top_p",
+    "top_k",
+    "min_p",
+    "repeat_penalty",
+    "presence_penalty",
+    "seed",
+    "thinking",
+    "thinking_budget",
+    "binary",
+    "mode",
+    "host",
+    "idle_unload_seconds",
+    "server_tools",
+    "adapters",
+    "draft",
+    "draft_block_size",
+};
+
+/// The edits between `a` and `b` when a character may be added, dropped,
+/// changed, or swapped with its neighbour (the optimal string alignment
+/// distance), each costing one.
+[[nodiscard]] std::size_t edits_between(std::string_view a, std::string_view b) {
+    std::vector<std::vector<std::size_t>> d(a.size() + 1, std::vector<std::size_t>(b.size() + 1));
+    for (std::size_t i = 0; i <= a.size(); ++i) {
+        d[i][0] = i;
+    }
+    for (std::size_t j = 0; j <= b.size(); ++j) {
+        d[0][j] = j;
+    }
+    for (std::size_t i = 1; i <= a.size(); ++i) {
+        for (std::size_t j = 1; j <= b.size(); ++j) {
+            const std::size_t change = a[i - 1] == b[j - 1] ? 0 : 1;
+            d[i][j] = std::min({d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + change});
+            if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) {
+                d[i][j] = std::min(d[i][j], d[i - 2][j - 2] + 1);
+            }
+        }
+    }
+    return d[a.size()][b.size()];
+}
+
 constexpr std::array<std::pair<std::string_view, KvCacheType>, 3> kCacheTypeNames{{
     {"f16", KvCacheType::F16},
     {"q8_0", KvCacheType::Q8_0},
@@ -244,6 +301,14 @@ BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
     }
 
     BackendConfig backend;
+    // A key no backend reads is kept for `check` to name (55g), never
+    // refused: an older binary still loads a newer release's entry.
+    for (const auto& field : node) {
+        if (const std::string key = field.first.Scalar();
+            std::ranges::find(kBackendEntryKeys, key) == kBackendEntryKeys.end()) {
+            backend.unknown_keys.push_back(key);
+        }
+    }
 
     const std::string type_name = scalar(node["type"], origin, where + ".type");
     if (type_name.empty()) {
@@ -1251,6 +1316,22 @@ bool names_its_model(BackendType type) noexcept {
 
 bool takes_adapters(BackendType type) noexcept {
     return type == BackendType::LlamaCpp || type == BackendType::Mlx;
+}
+
+std::span<const std::string_view> backend_entry_keys() noexcept {
+    return kBackendEntryKeys;
+}
+
+std::string_view nearest_backend_key(std::string_view key) {
+    std::string_view nearest;
+    std::size_t fewest = std::max<std::size_t>(2, key.size() / 4) + 1;
+    for (const std::string_view known : kBackendEntryKeys) {
+        if (const std::size_t edits = edits_between(key, known); edits < fewest) {
+            fewest = edits;
+            nearest = known;
+        }
+    }
+    return nearest;
 }
 
 std::string_view to_string(AgentToolPolicy policy) noexcept {

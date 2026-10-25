@@ -10,6 +10,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "agentloop/retriever.h"
@@ -23,6 +24,7 @@
 #include "cli/task_cmd.h"
 #include "contracts/assets.h"
 #include "contracts/config.h"
+#include "contracts/config_edit.h"
 #include "contracts/layout.h"
 #include "embedstore/store.h"
 #include "knowledge/record.h"
@@ -333,6 +335,41 @@ embeddings:
         std::cerr.rdbuf(old_err);
         CHECK(code == 0);
     }
+}
+
+TEST_CASE("config get's completion offers every key it reads, each once",
+          "[commands][completion][sources]") {
+    // The reverse of the case above (55g): completion left out five scalars
+    // `config get` reads -- memory.recall among them -- and eight fields of
+    // every backend. Both now come from the tables the reads are declared
+    // in, so each is offered the day it is read.
+    const Home home;
+    const std::vector<std::string> keys = c::config_keys(home.config);
+    for (const apogee::harness::SettableScalar& scalar : apogee::harness::settable_scalars()) {
+        INFO(scalar.key);
+        CHECK(has(keys, scalar.key));
+    }
+    for (const std::string_view key :
+         {"memory.recall", "knowledge.auto_capture", "tools.search.provider", "tools.search.url",
+          "tools.search.results"}) {
+        INFO(key);
+        CHECK(has(keys, key));
+    }
+    for (const std::string_view role : apogee::harness::models_role_fields()) {
+        INFO(role);
+        CHECK(has(keys, "models." + std::string{role}));
+    }
+    CHECK(has(keys, "models.default_video"));
+    CHECK(has(keys, "models.default_suite"));
+    for (const std::string& name : home.config.backend_names()) {
+        for (const std::string_view field : apogee::harness::backend_entry_keys()) {
+            INFO(field);
+            CHECK(has(keys, "backends." + name + "." + std::string{field}));
+        }
+    }
+    std::vector<std::string> sorted = keys;
+    std::ranges::sort(sorted);
+    CHECK(std::ranges::adjacent_find(sorted) == sorted.end());
 }
 
 TEST_CASE("every fixed word list is the one its validator accepts",

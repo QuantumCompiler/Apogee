@@ -1843,32 +1843,15 @@ std::string set_backend_adapters(std::string_view content, std::string_view name
 }
 
 std::vector<std::string_view> backend_editable_fields() {
-    return {"type",
-            "model",
-            "model_path",
-            "mmproj_path",
-            "embedding_model",
-            "system_prompt",
-            "context_size",
-            "cache_type",
-            "max_tokens",
-            "temperature",
-            "top_p",
-            "top_k",
-            "min_p",
-            "repeat_penalty",
-            "presence_penalty",
-            "seed",
-            "thinking",
-            "thinking_budget",
-            "binary",
-            "mode",
-            "host",
-            "idle_unload_seconds",
-            "server_tools",
-            "adapters",
-            "draft",
-            "draft_block_size"};
+    // The entry's keys as the loader declares them (55g), but its key: a key
+    // is stored with `auth add` alone.
+    std::vector<std::string_view> fields;
+    for (const std::string_view key : backend_entry_keys()) {
+        if (key != "api_key") {
+            fields.push_back(key);
+        }
+    }
+    return fields;
 }
 
 /// `value`, a comma-separated list of names (`web_search,code_execution`),
