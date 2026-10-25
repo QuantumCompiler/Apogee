@@ -288,7 +288,11 @@ public:
 
 private:
     [[nodiscard]] std::string save() {
-        return write_pipeline_manifest(pipeline_dir_, manifest_);
+        std::string failure = write_pipeline_manifest(pipeline_dir_, manifest_);
+        if (failure.empty() && request_.on_manifest) {
+            request_.on_manifest(manifest_);
+        }
+        return failure;
     }
 
     void say(int index, const std::string& name, std::string_view phase, std::string message) {

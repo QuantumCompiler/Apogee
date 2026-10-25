@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cmath>
 #include <csignal>
+#include <exception>
 #include <fstream>
 #include <functional>
 #include <iomanip>
@@ -17,6 +18,7 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 
@@ -28,7 +30,9 @@
 #include "cli/datasets.h"
 #include "cli/helpers.h"
 #include "cli/interrupt.h"
+#include "cli/job_stream.h"
 #include "cli/models_pull.h"
+#include "cli/train_stream.h"
 #include "contracts/config_edit.h"
 #include "contracts/errors.h"
 #include "contracts/layout.h"
@@ -65,7 +69,35 @@ namespace {
 
 [[noreturn]] void fail_user(const std::string& message) {
     std::cerr << "apogee train: " << message << "\n";
+    // A run streaming (55h) says it as its error too.
+    if (JobStream* job = JobStream::current(); job != nullptr) {
+        job->failed(message);
+    }
     throw CLI::RuntimeError(kUserError);
+}
+
+/// What a training job's stream ends on, as its help says it (55h).
+constexpr std::string_view kPipelineStreamLast = "its 'train pipeline status' document last";
+constexpr std::string_view kCycleStreamLast = "its 'train cycle status' document last";
+
+/// A training job's body, under `stream-json` with its stream open before
+/// anything can be refused (55h): every refusal is then the stream's
+/// `error`, and a failure nothing has said yet is said for it.
+void run_as_job(JobFormat format, std::string_view verb, const std::function<void()>& body) {
+    if (format != JobFormat::StreamJson) {
+        body();
+        return;
+    }
+    JobStream job{verb};
+    try {
+        body();
+    } catch (const CLI::RuntimeError&) {
+        job.failed("the run failed; stderr says why");
+        throw;
+    } catch (const std::exception& e) {
+        job.failed(e.what());
+        throw;
+    }
 }
 
 [[nodiscard]] harness::Config load_config_or_default(const RootContext& context) {
@@ -2788,6 +2820,9 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         ->type_name(kBackendValue);
     pipe_run->add_option("--trainer", *pipe_trainer, "auto (default), mlx, peft, or mock")
         ->type_name(words_value(training::trainer_names()));
+    // The run's progress as events, its status's document last (55h).
+    auto pipe_format = std::make_shared<JobFormat>(JobFormat::Text);
+    add_job_format(pipe_run, pipe_format, false, kPipelineStreamLast);
 
     auto resume_id = std::make_shared<std::string>();
     auto resume_spec = std::make_shared<std::string>();
@@ -2809,12 +2844,16 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         ->type_name(kBackendValue);
     pipe_resume->add_option("--trainer", *resume_trainer, "auto (default), mlx, peft, or mock")
         ->type_name(words_value(training::trainer_names()));
+    auto resume_format = std::make_shared<JobFormat>(JobFormat::Text);
+    add_job_format(pipe_resume, resume_format, false, kPipelineStreamLast);
 
     auto pipe_status_id = std::make_shared<std::string>();
     CLI::App* pipe_status =
         pipeline->add_subcommand("status", "A pipeline run's stages, or every pipeline run");
     pipe_status->add_option("id", *pipe_status_id, "The pipeline run id (default: list them)")
         ->type_name(kPipelineRunValue);
+    auto pipe_status_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    add_read_format(pipe_status, pipe_status_format);
 
     // One body for run and resume: resolve, drive, report.
     auto drive_pipeline = [&context](const harness::Config& config,
@@ -2849,81 +2888,140 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                                       : training::new_run_id(harness::training_pipelines_dir(),
                                                              std::chrono::system_clock::now(),
                                                              training::kPipelineIdPrefix);
-        PipelineConsole console{spec.stages.size()};
-        request.on_progress = [&console](const training::PipelineProgress& progress) {
-            console(progress);
-        };
+        // A stream's progress is the relay's (55h); a person's, the console's.
+        JobStream* const job = JobStream::current();
+        std::optional<PipelineRelay> relay;
+        std::optional<PipelineConsole> console;
+        if (job != nullptr) {
+            relay.emplace(job->events());
+            request.on_progress = [&relay](const training::PipelineProgress& progress) {
+                relay->progress(progress);
+            };
+            request.on_manifest = [&relay](const training::PipelineRunManifest& manifest) {
+                relay->manifest(manifest);
+            };
+        } else {
+            console.emplace(spec.stages.size());
+            request.on_progress = [&console](const training::PipelineProgress& progress) {
+                (*console)(progress);
+            };
+        }
         const InterruptScope interrupt;
         request.cancellation = InterruptScope::token();
-        std::cerr << "[pipeline] " << (existing.has_value() ? "resuming " : "") << spec.name
-                  << " as " << request.pipeline_run_id << ": " << spec.stages.size()
-                  << " stage(s), " << trainer_name << " on "
-                  << request.base_model.filename().string()
-                  << (judge.key.empty() ? std::string{"; no judge: unmatched items skip"}
-                                        : ", judge " + judge.key)
-                  << "\n";
+        const std::string header =
+            "[pipeline] " + std::string{existing.has_value() ? "resuming " : ""} + spec.name +
+            " as " + request.pipeline_run_id + ": " + std::to_string(spec.stages.size()) +
+            " stage(s), " + trainer_name + " on " + request.base_model.filename().string() +
+            (judge.key.empty() ? std::string{"; no judge: unmatched items skip"}
+                               : ", judge " + judge.key);
+        if (job != nullptr) {
+            job->events().on_notice(header);
+        } else {
+            std::cerr << header << "\n";
+        }
         const training::PipelineOutcome outcome =
             existing.has_value() ? training::resume_pipeline(request, std::move(*existing))
                                  : training::run_pipeline(request);
-        console.finish();
-        print_pipeline_summary(outcome.manifest);
+        if (job != nullptr) {
+            // The run's own read, whatever became of it: what `train pipeline
+            // status <id> --output-format json` prints, once the run has
+            // written its manifest.
+            if (const std::optional<nlohmann::json> document =
+                    operations::training_pipeline_document(request.pipeline_run_id);
+                document.has_value()) {
+                job->events().emit_document(*document);
+            }
+        } else {
+            console->finish();
+            print_pipeline_summary(outcome.manifest);
+        }
         if (outcome.cancelled) {
-            std::cerr << "[pipeline] cancelled; recorded as " << outcome.manifest.status
-                      << " -- 'apogee train pipeline resume " << request.pipeline_run_id
-                      << "' continues it\n";
+            const std::string said = "cancelled; recorded as " + outcome.manifest.status +
+                                     " -- 'apogee train pipeline resume " +
+                                     request.pipeline_run_id + "' continues it";
+            std::cerr << "[pipeline] " << said << "\n";
+            if (job != nullptr) {
+                job->failed(said);
+            }
             throw CLI::RuntimeError(kCancelled);
         }
         if (!outcome.ok) {
             std::cerr << "apogee train: " << outcome.error << "\n";
+            if (job != nullptr) {
+                job->failed(outcome.error);
+            }
             throw CLI::RuntimeError(kBackendError);
         }
     };
 
-    pipe_run->callback(
-        [&context, drive_pipeline, pipe_spec, pipe_continue, pipe_judge, pipe_trainer]() {
+    pipe_run->callback([&context, drive_pipeline, pipe_spec, pipe_continue, pipe_judge,
+                        pipe_trainer, pipe_format]() {
+        run_as_job(*pipe_format, "train pipeline run", [&]() {
             std::filesystem::path config_path;
             const harness::Config config = load_config_strict(context, config_path);
             const harness::PipelineSpec spec = resolve_pipeline_spec(config, *pipe_spec);
             drive_pipeline(config, spec, std::nullopt, *pipe_continue, *pipe_judge, *pipe_trainer);
         });
-
-    pipe_resume->callback([&context, drive_pipeline, resume_id, resume_spec, resume_continue,
-                           resume_judge, resume_trainer]() {
-        std::filesystem::path config_path;
-        const harness::Config config = load_config_strict(context, config_path);
-        const training::TrainingStore store{harness::training_dir()};
-        if (!training::valid_run_id(*resume_id)) {
-            fail_user("'" + *resume_id + "' is not a pipeline run id");
-        }
-        std::optional<training::PipelineRunManifest> existing = store.get_pipeline(*resume_id);
-        if (!existing.has_value()) {
-            fail_user("no pipeline run '" + *resume_id +
-                      "' ('apogee train pipeline status' lists them)");
-        }
-        harness::PipelineSpec spec;
-        if (!resume_spec->empty()) {
-            spec = resolve_pipeline_spec(config, *resume_spec);
-        } else if (const auto named = config.training.pipelines.find(existing->spec_name);
-                   named != config.training.pipelines.end()) {
-            spec = named->second;
-        } else {
-            fail_user("pipeline '" + existing->spec_name +
-                      "' is not under training.pipelines any more -- pass --pipeline <spec> to "
-                      "resume " +
-                      *resume_id);
-        }
-        if (const std::string refusal = training::resume_check(*existing, spec); !refusal.empty()) {
-            fail_user(refusal);
-        }
-        std::error_code code;
-        if (!std::filesystem::is_directory(existing->base_model, code)) {
-            fail_user("the run's snapshot is gone: " + existing->base_model);
-        }
-        drive_pipeline(config, spec, std::move(existing), *resume_continue, *resume_judge,
-                       *resume_trainer);
     });
 
-    pipe_status->callback([pipe_status_id]() {
+    pipe_resume->callback([&context, drive_pipeline, resume_id, resume_spec, resume_continue,
+                           resume_judge, resume_trainer, resume_format]() {
+        run_as_job(*resume_format, "train pipeline resume", [&]() {
+            std::filesystem::path config_path;
+            const harness::Config config = load_config_strict(context, config_path);
+            const training::TrainingStore store{harness::training_dir()};
+            if (!training::valid_run_id(*resume_id)) {
+                fail_user("'" + *resume_id + "' is not a pipeline run id");
+            }
+            std::optional<training::PipelineRunManifest> existing = store.get_pipeline(*resume_id);
+            if (!existing.has_value()) {
+                fail_user("no pipeline run '" + *resume_id +
+                          "' ('apogee train pipeline status' lists them)");
+            }
+            harness::PipelineSpec spec;
+            if (!resume_spec->empty()) {
+                spec = resolve_pipeline_spec(config, *resume_spec);
+            } else if (const auto named = config.training.pipelines.find(existing->spec_name);
+                       named != config.training.pipelines.end()) {
+                spec = named->second;
+            } else {
+                fail_user("pipeline '" + existing->spec_name +
+                          "' is not under training.pipelines any more -- pass --pipeline <spec> to "
+                          "resume " +
+                          *resume_id);
+            }
+            if (const std::string refusal = training::resume_check(*existing, spec);
+                !refusal.empty()) {
+                fail_user(refusal);
+            }
+            std::error_code code;
+            if (!std::filesystem::is_directory(existing->base_model, code)) {
+                fail_user("the run's snapshot is gone: " + existing->base_model);
+            }
+            drive_pipeline(config, spec, std::move(existing), *resume_continue, *resume_judge,
+                           *resume_trainer);
+        });
+    });
+
+    pipe_status->callback([pipe_status_id, pipe_status_format]() {
+        if (*pipe_status_format == ReadFormat::Json) {
+            // The bodies `GET /v1/admin/training/runs?kind=pipeline` and
+            // `GET /v1/admin/training/runs/{id}` serve (55h).
+            if (pipe_status_id->empty()) {
+                write_document(std::cout, operations::training_runs_document("pipeline"));
+                return;
+            }
+            if (!training::valid_run_id(*pipe_status_id)) {
+                fail_user("'" + *pipe_status_id + "' is not a pipeline run id");
+            }
+            const std::optional<nlohmann::json> document =
+                operations::training_pipeline_document(*pipe_status_id);
+            if (!document.has_value()) {
+                fail_user("no pipeline run '" + *pipe_status_id + "'");
+            }
+            write_document(std::cout, *document);
+            return;
+        }
         const training::TrainingStore store{harness::training_dir()};
         if (pipe_status_id->empty()) {
             const std::vector<training::PipelineSummary> pipelines = store.list_pipelines();
@@ -3284,130 +3382,206 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         ->add_option("--source", *cycle_source,
                      "A queue directory for this run, replacing the first directory source")
         ->type_name(kPathValue);
-    cycle_run->callback([&context, cycle_source]() {
-        std::filesystem::path config_path;
-        const harness::Config config = load_config_strict(context, config_path);
-        const harness::CycleConfig& settings = config.training.cycle;
-        if (!settings.configured()) {
-            fail_user(
-                "training.cycle is not configured: it needs 'pipeline' (a training.pipelines "
-                "entry or a spec file), 'backend' (where a passing cycle promotes) and at least "
-                "one entry under 'sources' -- see the training block in the starter config (apogee "
-                "config init)");
-        }
-        const harness::PipelineSpec spec = resolve_pipeline_spec(config, settings.pipeline);
-        // The datasets are the merged sources; only the suites are resolved.
-        const PipelineInputs inputs = resolve_pipeline_inputs(config, context, spec, false);
-        const TeacherResolution judge = resolve_judge(config, settings.judge_backend);
-        const std::string trainer_name = choose_trainer(config, {}, {});
-        const std::unique_ptr<training::Trainer> trainer =
-            make_trainer(config, trainer_name, "train cycle run");
-        const training::Converter convert = make_converter(config, trainer_name);
-        {
-            PromoteRequest probe;
-            probe.backend = settings.backend;
-            if (probe.backend.find_first_of("/\\ \t") != std::string::npos) {
-                fail_user("training.cycle.backend must be a plain backend name");
+    // The pass's narration as events, the cycle's status document last (55h).
+    auto cycle_format = std::make_shared<JobFormat>(JobFormat::Text);
+    add_job_format(cycle_run, cycle_format, false, kCycleStreamLast);
+    cycle_run->callback([&context, cycle_source, cycle_format]() {
+        run_as_job(*cycle_format, "train cycle run", [&]() {
+            std::filesystem::path config_path;
+            const harness::Config config = load_config_strict(context, config_path);
+            const harness::CycleConfig& settings = config.training.cycle;
+            if (!settings.configured()) {
+                fail_user(
+                    "training.cycle is not configured: it needs 'pipeline' (a training.pipelines "
+                    "entry or a spec file), 'backend' (where a passing cycle promotes) and at "
+                    "least one entry under 'sources' -- see the training block in the starter "
+                    "config (apogee config init)");
             }
-            const std::string key = configured_backend_key(config, settings.backend);
-            const harness::BackendConfig* existing =
-                key.empty() ? nullptr : config.find_backend(key);
-            if (existing != nullptr && existing->type != harness::BackendType::LlamaCpp) {
-                fail_user("training.cycle.backend '" + key + "' is a " +
-                          std::string{harness::to_string(existing->type)} +
-                          " backend, not a llamacpp one");
+            const harness::PipelineSpec spec = resolve_pipeline_spec(config, settings.pipeline);
+            // The datasets are the merged sources; only the suites are resolved.
+            const PipelineInputs inputs = resolve_pipeline_inputs(config, context, spec, false);
+            const TeacherResolution judge = resolve_judge(config, settings.judge_backend);
+            const std::string trainer_name = choose_trainer(config, {}, {});
+            const std::unique_ptr<training::Trainer> trainer =
+                make_trainer(config, trainer_name, "train cycle run");
+            const training::Converter convert = make_converter(config, trainer_name);
+            {
+                PromoteRequest probe;
+                probe.backend = settings.backend;
+                if (probe.backend.find_first_of("/\\ \t") != std::string::npos) {
+                    fail_user("training.cycle.backend must be a plain backend name");
+                }
+                const std::string key = configured_backend_key(config, settings.backend);
+                const harness::BackendConfig* existing =
+                    key.empty() ? nullptr : config.find_backend(key);
+                if (existing != nullptr && existing->type != harness::BackendType::LlamaCpp) {
+                    fail_user("training.cycle.backend '" + key + "' is a " +
+                              std::string{harness::to_string(existing->type)} +
+                              " backend, not a llamacpp one");
+                }
             }
-        }
-        std::optional<Providers> providers;
-        if (!judge.key.empty()) {
-            providers.emplace(config, config_path);
-        }
-        std::optional<LoadedSessions> sessions;
-        for (const harness::CycleSourceConfig& source : settings.sources) {
-            if (source.type == "sessions" && !sessions.has_value()) {
-                sessions = load_session_views();
+            std::optional<Providers> providers;
+            if (!judge.key.empty()) {
+                providers.emplace(config, config_path);
             }
-        }
+            std::optional<LoadedSessions> sessions;
+            for (const harness::CycleSourceConfig& source : settings.sources) {
+                if (source.type == "sessions" && !sessions.has_value()) {
+                    sessions = load_session_views();
+                }
+            }
 
-        training::CycleRequest request;
-        request.config = settings;
-        request.cycle_dir = harness::training_cycle_dir();
-        request.training_dir = harness::training_dir();
-        request.spec = &spec;
-        request.stages = inputs.stages;
-        request.base_model = inputs.base_model;
-        request.source_override = *cycle_source;
-        if (sessions.has_value()) {
-            request.sessions = sessions->views;
-        }
-        request.trainer = trainer.get();
-        if (!judge.key.empty()) {
-            request.judge_backend = judge.key;
-            request.judge = make_judge(providers->harness, judge.key);
-        }
-        request.gate_mode = training::gate_mode_from_string(config.training.effective_gate_mode());
-        const training::TrainingStore store{harness::training_dir()};
-        const InterruptScope interrupt;
-        request.cancellation = InterruptScope::token();
-        request.promote = [&](std::string_view run_id) {
-            training::CyclePromotion promotion;
-            std::string error;
-            const std::optional<training::RunManifest> manifest =
-                training::read_manifest(store.run_dir(run_id), error);
-            if (!manifest.has_value()) {
-                promotion.error = error;
+            training::CycleRequest request;
+            request.config = settings;
+            request.cycle_dir = harness::training_cycle_dir();
+            request.training_dir = harness::training_dir();
+            request.spec = &spec;
+            request.stages = inputs.stages;
+            request.base_model = inputs.base_model;
+            request.source_override = *cycle_source;
+            if (sessions.has_value()) {
+                request.sessions = sessions->views;
+            }
+            request.trainer = trainer.get();
+            if (!judge.key.empty()) {
+                request.judge_backend = judge.key;
+                request.judge = make_judge(providers->harness, judge.key);
+            }
+            request.gate_mode =
+                training::gate_mode_from_string(config.training.effective_gate_mode());
+            const training::TrainingStore store{harness::training_dir()};
+            const InterruptScope interrupt;
+            request.cancellation = InterruptScope::token();
+            JobStream* const job = JobStream::current();
+            request.promote = [&](std::string_view run_id) {
+                training::CyclePromotion promotion;
+                std::string error;
+                const std::optional<training::RunManifest> manifest =
+                    training::read_manifest(store.run_dir(run_id), error);
+                if (!manifest.has_value()) {
+                    promotion.error = error;
+                    return promotion;
+                }
+                PromoteRequest promote_request;
+                promote_request.backend = settings.backend;
+                const PromoteOutcome result = promote_run(
+                    config, config_path, store, *manifest, *trainer, convert, promote_request,
+                    [job](std::string_view text) {
+                        if (job != nullptr) {
+                            job->events().on_notice("[promote] " + std::string{text});
+                            return;
+                        }
+                        std::cerr << "[promote] " << text << "\n";
+                    },
+                    InterruptScope::token());
+                promotion.ok = result.ok;
+                promotion.error = result.error;
+                promotion.version = result.version;
+                promotion.weights_path = result.weights_path;
                 return promotion;
+            };
+            // A stream's narration is `pass` events and the relay's (55h); a
+            // person's, the console's.
+            std::optional<PipelineRelay> relay;
+            std::optional<PipelineConsole> console;
+            if (job != nullptr) {
+                relay.emplace(job->events());
+                request.on_message = [job](std::string_view state, std::string_view text) {
+                    job->events().emit_pass(state, text);
+                };
+                request.on_progress = [&relay](const training::PipelineProgress& progress) {
+                    relay->progress(progress);
+                };
+                request.on_manifest = [&relay](const training::PipelineRunManifest& manifest) {
+                    relay->manifest(manifest);
+                };
+            } else {
+                console.emplace(spec.stages.size());
+                request.on_message = [&console](std::string_view /*state*/, std::string_view text) {
+                    (*console)(training::PipelineProgress{.stage_index = -1,
+                                                          .message = std::string{text}});
+                };
+                request.on_progress = [&console](const training::PipelineProgress& progress) {
+                    (*console)(progress);
+                };
             }
-            PromoteRequest promote_request;
-            promote_request.backend = settings.backend;
-            const PromoteOutcome result = promote_run(
-                config, config_path, store, *manifest, *trainer, convert, promote_request,
-                [](std::string_view text) { std::cerr << "[promote] " << text << "\n"; },
-                InterruptScope::token());
-            promotion.ok = result.ok;
-            promotion.error = result.error;
-            promotion.version = result.version;
-            promotion.weights_path = result.weights_path;
-            return promotion;
-        };
-        PipelineConsole console{spec.stages.size()};
-        request.on_message = [&console](std::string_view text) {
-            console(training::PipelineProgress{.stage_index = -1, .message = std::string{text}});
-        };
-        request.on_progress = [&console](const training::PipelineProgress& progress) {
-            console(progress);
-        };
-        const training::CycleOutcome outcome = training::run_cycle(request);
-        console.finish();
-        if (outcome.cancelled) {
-            std::cerr << "[cycle] cancelled before an outcome was recorded\n";
-            throw CLI::RuntimeError(kCancelled);
-        }
-        if (!outcome.ok) {
-            fail_user(outcome.error);
-        }
-        const training::CycleRunRecord& record = *outcome.record;
-        if (record.gate == training::kGateSkipped) {
-            std::cout << "cycle skipped -- " << record.gate_reason << "\n";
-            return;
-        }
-        if (record.gate == training::kGateFail) {
-            std::cout << "cycle FAILED -- " << record.gate_reason
-                      << "\n  the candidate was discarded; nothing reached inference\n";
-            if (outcome.halted_now) {
-                std::cout << "  " << outcome.history.halt_reason
-                          << "\n  the loop is halted: fix the data or the suite, then 'apogee "
-                             "train cycle resume'\n";
+            const training::CycleOutcome outcome = training::run_cycle(request);
+            if (console.has_value()) {
+                console->finish();
             }
-            throw CLI::RuntimeError(kBackendError);
-        }
-        std::cout << "cycle PASSED -- " << settings.backend << " promoted to v"
-                  << record.promoted_version << " (" << percent(record.cycle_score) << ")\n"
-                  << "  history: " << training::history_path(request.cycle_dir).string() << "\n";
+            if (job != nullptr && (outcome.ok || outcome.cancelled)) {
+                // The cycle's own read, once the pass got under way: what `train
+                // cycle status --output-format json` prints. A pass refused before
+                // it began sends none.
+                std::string unreadable;
+                if (const std::optional<nlohmann::json> document =
+                        operations::training_cycle_document(unreadable);
+                    document.has_value()) {
+                    job->events().emit_document(*document);
+                }
+            }
+            if (outcome.cancelled) {
+                std::cerr << "[cycle] cancelled before an outcome was recorded\n";
+                if (job != nullptr) {
+                    job->failed("cancelled before an outcome was recorded");
+                }
+                throw CLI::RuntimeError(kCancelled);
+            }
+            if (!outcome.ok) {
+                fail_user(outcome.error);
+            }
+            const training::CycleRunRecord& record = *outcome.record;
+            // A stream's outcome is its `pass` events and its document.
+            if (record.gate == training::kGateSkipped) {
+                if (job == nullptr) {
+                    std::cout << "cycle skipped -- " << record.gate_reason << "\n";
+                }
+                return;
+            }
+            if (record.gate == training::kGateFail) {
+                if (job != nullptr) {
+                    job->failed("cycle FAILED -- " + record.gate_reason);
+                    throw CLI::RuntimeError(kBackendError);
+                }
+                std::cout << "cycle FAILED -- " << record.gate_reason
+                          << "\n  the candidate was discarded; nothing reached inference\n";
+                if (outcome.halted_now) {
+                    std::cout << "  " << outcome.history.halt_reason
+                              << "\n  the loop is halted: fix the data or the suite, then 'apogee "
+                                 "train cycle resume'\n";
+                }
+                throw CLI::RuntimeError(kBackendError);
+            }
+            if (job != nullptr) {
+                return;
+            }
+            std::cout << "cycle PASSED -- " << settings.backend << " promoted to v"
+                      << record.promoted_version << " (" << percent(record.cycle_score) << ")\n"
+                      << "  history: " << training::history_path(request.cycle_dir).string()
+                      << "\n";
+        });
     });
 
     CLI::App* cycle_status = cycle->add_subcommand("status", "The cycle's history and anchor");
-    cycle_status->callback([&context]() {
+    auto cycle_status_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    add_read_format(cycle_status, cycle_status_format);
+    cycle_status->callback([&context, cycle_status_format]() {
+        if (*cycle_status_format == ReadFormat::Json) {
+            // The body `GET /v1/admin/training/cycle` serves (55h); none until
+            // the first pass writes the history, refused as the route answers
+            // 404.
+            std::string error;
+            const std::optional<nlohmann::json> document =
+                operations::training_cycle_document(error);
+            if (!error.empty()) {
+                fail_user("the cycle history is unreadable: " + error);
+            }
+            if (!document.has_value()) {
+                fail_user("no cycle history yet ('apogee train cycle run' writes it)");
+            }
+            write_document(std::cout, *document);
+            return;
+        }
         const harness::Config config = load_config_or_default(context);
         const std::filesystem::path cycle_dir = harness::training_cycle_dir();
         std::string error;

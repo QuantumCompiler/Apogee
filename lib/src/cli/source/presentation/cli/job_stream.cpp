@@ -112,7 +112,8 @@ DownloadProgress::Options job_download_options() {
     return options;
 }
 
-void add_job_format(CLI::App* command, const std::shared_ptr<JobFormat>& format, bool document) {
+void add_job_format(CLI::App* command, const std::shared_ptr<JobFormat>& format, bool document,
+                    std::string_view last) {
     command
         ->add_option_function<std::string>(
             "--output-format",
@@ -125,11 +126,12 @@ void add_job_format(CLI::App* command, const std::shared_ptr<JobFormat>& format,
                 }
                 *format = *parsed;
             },
-            document ? "Output format: text (default), json -- one JSON document of the same "
-                       "facts -- or stream-json: the progress as events, one JSON object a "
-                       "line, that document last"
+            document ? std::string{"Output format: text (default), json -- one JSON document of "
+                                   "the same facts -- or stream-json: the progress as events, one "
+                                   "JSON object a line, that document last"}
                      : "Output format: text (default) or stream-json -- the progress as events, "
-                       "one JSON object a line, each stored set's document last")
+                       "one JSON object a line, " +
+                           std::string{last})
         ->type_name(words_value(job_format_names(document)));
 }
 

@@ -202,17 +202,23 @@ public:
     //
     // `models pull`, `video generate`, `video compose` and `voice say` under
     // `--output-format stream-json`: the progress each already narrates,
-    // framed as events by its one producer. `scene` is 0 outside a composer's
-    // scene, and then omitted.
+    // framed as events by its one producer -- and since 55h `train pipeline
+    // run|resume` and `train cycle run`. `scene` is 0 outside a composer's
+    // scene, and `stage` outside a pipeline's, and then omitted.
 
     /// `job`, first: the verb, and the protocol's and the vocabulary's
     /// versions.
     void begin_job(std::string_view verb);
 
     /// `stage`: a chain's step -- `index` of `count`, its label -- `started`,
-    /// `done` or `failed`.
+    /// `done` or `failed`. A pipeline's stage (55h) is said as its manifest
+    /// records it: `state` the manifest's word, with the pipeline run it
+    /// belongs to, its own run once it has one, and its cumulative score once
+    /// the gate has scored it -- each left out when empty.
     void emit_stage(std::size_t index, std::size_t count, std::string_view label,
-                    std::string_view state);
+                    std::string_view state, std::string_view pipeline_run_id = {},
+                    std::string_view run_id = {},
+                    std::optional<double> cumulative_score = std::nullopt);
 
     /// `bytes`: `done` moved of `total` (left out when unknown -- never
     /// guessed); in a tree of files, the file and its place.
@@ -240,6 +246,16 @@ public:
     /// `scene`: a composer's scene, `scene` of `scenes`, at `state` --
     /// `speaking`, `rendering` or `asset` (its asset taken as it is).
     void emit_scene(std::size_t scene, std::size_t scenes, std::string_view state);
+
+    /// `iteration` (55h): a trainer's tick, `iteration` of `iterations` (left
+    /// out when the trainer did not say), its loss, learning rate and
+    /// throughput -- what the status line shows -- in pipeline stage `stage`.
+    void emit_iteration(int iteration, int iterations, double loss, double lr, double throughput,
+                        std::size_t stage);
+
+    /// `pass` (55h): a line of a cycle pass's narration, `text`, and where the
+    /// pass is, `state`.
+    void emit_pass(std::string_view state, std::string_view text);
 
     /// `document`, last: the verb's own document -- what `--output-format
     /// json` prints, whole.

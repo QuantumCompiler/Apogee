@@ -337,6 +337,43 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "every manifest the run writes is told once it is on disk, and a write that failed is not",
+    "[training][pipeline][manifest]") {
+    // 55h: a surface relays the run's transitions from these, so each one
+    // told must be exactly the file as it now stands.
+    Fixture fixture;
+    fixture.add_stage("a", kPlain, {{"say hello", "hello"}});
+    fixture.add_stage("b", kPlain, {{"say bye", "bye"}});
+    PipelineRequest request = fixture.request("pipe-10");
+    std::vector<std::string> first_stage;
+    std::size_t told = 0;
+    request.on_manifest = [&](const PipelineRunManifest& manifest) {
+        ++told;
+        CHECK(apogee::training::pipeline_manifest_to_json(manifest) ==
+              apogee::training::pipeline_manifest_to_json(fixture.on_disk("pipe-10")));
+        if (first_stage.empty() || first_stage.back() != manifest.stages[0].status) {
+            first_stage.push_back(manifest.stages[0].status);
+        }
+    };
+    const PipelineOutcome outcome = apogee::training::run_pipeline(request);
+    REQUIRE(outcome.ok);
+    CHECK(first_stage ==
+          std::vector<std::string>{"pending", "training", "evaluating", "fusing", "passed"});
+    CHECK(told > first_stage.size());
+    CHECK(fixture.on_disk("pipe-10").complete());
+
+    // A file where the run's directory goes: no write lands, none is told.
+    Fixture blocked;
+    blocked.add_stage("a", kPlain, {{"say hello", "hello"}});
+    write(blocked.training / "pipelines" / "pipe-11", "in the way");
+    PipelineRequest refused = blocked.request("pipe-11");
+    refused.on_manifest = [](const PipelineRunManifest&) { FAIL("a failed write was told"); };
+    const PipelineOutcome failed = apogee::training::run_pipeline(refused);
+    CHECK_FALSE(failed.ok);
+    CHECK_FALSE(failed.error.empty());
+}
+
+TEST_CASE(
     "judge items go through the closure pairwise against the untuned base, and a lost "
     "verdict fails the gate; the request's refusals",
     "[training][pipeline][judge]") {

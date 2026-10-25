@@ -251,7 +251,7 @@ The release's audit track *(track 55, opened 2026-10-22 from the user-requested 
 - [x] **Adapters and shared bases, closed** *(55e, shipped 2026-10-25 — [Milestone AR](MILESTONES.md#milestone-ar--the-audits-cli-findings))* — a joiner's window priced once, MLX embeddings honoring adapters, pins checked on base moves and rollbacks, embedding spaces carrying their adapters.
 - [x] **The config editor writes only what it means** *(55f, shipped 2026-10-25 — [Milestone AR](MILESTONES.md#milestone-ar--the-audits-cli-findings))* — block-aware lists, quote-aware `#`, names editable in both formats, a lock around every edit.
 - [x] **Config reads and validation** *(55g, shipped 2026-10-25 — [Milestone AR](MILESTONES.md#milestone-ar--the-audits-cli-findings))* — `config get` reading every field the editor writes, derived completion, typo'd keys said, the template and upgrade made true.
-- [ ] **`train pipeline` and `train cycle` speak JSON** *([55h](../backlog/v0.2.0/train-pipeline-cycle-json.md))* — the GUI's pipeline and cycle screens build on it.
+- [x] **`train pipeline` and `train cycle` speak JSON** *(55h, shipped 2026-10-25 — [Milestone AR](MILESTONES.md#milestone-ar--the-audits-cli-findings))* — the GUI's pipeline and cycle screens build on it.
 - [ ] **The docs at the release boundary** *([55i](../backlog/v0.2.0/docs-at-the-release-boundary.md))* — VERSION and the CLI version to 0.2.0 (without it the merge publishes nothing), ROADMAP, README, CLAUDE and DEVELOPER stating today's facts.
 
 ### v0.1.9 — Desktop-parity capabilities

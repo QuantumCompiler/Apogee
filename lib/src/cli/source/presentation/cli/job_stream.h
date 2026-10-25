@@ -81,8 +81,11 @@ private:
 [[nodiscard]] DownloadProgress::Options job_download_options();
 
 /// Adds `--output-format` to a job: `text`, `stream-json`, and `json` when
-/// the verb has a document.
-void add_job_format(CLI::App* command, const std::shared_ptr<JobFormat>& format, bool document);
+/// the verb has a document. A verb with no `json` of its own says in its
+/// help what its stream ends on, `last` -- a pull's documents, a training
+/// run's read (55h).
+void add_job_format(CLI::App* command, const std::shared_ptr<JobFormat>& format, bool document,
+                    std::string_view last = "each stored set's document last");
 
 /// A clip's driver event as the stream says it: `ready` (with the run's
 /// engine since M24), `step`, `frames`, `assembling`, a message as a

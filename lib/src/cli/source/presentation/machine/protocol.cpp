@@ -226,11 +226,35 @@ constexpr std::array<FieldSpec, 3> kJob{{
     {"schema", "string", true, "The vocabulary's version, a date.", {}, {}},
 }};
 
-constexpr std::array<FieldSpec, 4> kStage{{
-    {"index", "integer", true, "Which step of the chain, from 1.", {}, {}},
+constexpr std::array<FieldSpec, 7> kStage{{
+    {"index", "integer", true, "Which step of the chain -- a pipeline's stage -- from 1.", {}, {}},
     {"count", "integer", true, "How many steps the chain has.", {}, {}},
-    {"label", "string", true, "The step, in the chain's words.", {}, {}},
-    {"state", "string", true, "started, done or failed.", {}, {}},
+    {"label",
+     "string",
+     true,
+     "The step, in the chain's words: a pipeline's, the stage's name.",
+     {},
+     {}},
+    {"state",
+     "string",
+     true,
+     "started, done or failed; a pipeline's stage, its manifest's word -- pending, training, "
+     "evaluating, fusing, passed, failed.",
+     {},
+     {}},
+    {"pipeline_run_id", "string", false, "A pipeline's stage: the pipeline run.", {}, {}},
+    {"run_id",
+     "string",
+     false,
+     "A pipeline's stage: its own run, once it has one -- what train eval and train promote take.",
+     {},
+     {}},
+    {"cumulative_score",
+     "number",
+     false,
+     "A pipeline's stage: its cumulative gate's score, 0 to 1, once the gate has scored it.",
+     {},
+     {}},
 }};
 
 constexpr std::array<FieldSpec, 5> kBytes{{
@@ -286,6 +310,33 @@ constexpr std::array<FieldSpec, 3> kSceneEvent{{
      "speaking (its narration), rendering (its clip) or asset (its asset taken as it is).",
      {},
      {}},
+}};
+
+// A pipeline's and a cycle pass's (55h).
+
+constexpr std::array<FieldSpec, 6> kIteration{{
+    {"iteration", "integer", true, "Training iterations done.", {}, {}},
+    {"iterations",
+     "integer",
+     false,
+     "Iterations in all; absent when the trainer did not say.",
+     {},
+     {}},
+    {"loss", "number", true, "The training loss the trainer reported.", {}, {}},
+    {"lr", "number", true, "The learning rate it reported.", {}, {}},
+    {"throughput", "number", true, "Iterations a second, as it reported.", {}, {}},
+    {"stage", "integer", false, "In a pipeline: the stage this belongs to, from 1.", {}, {}},
+}};
+
+constexpr std::array<FieldSpec, 2> kPass{{
+    {"state",
+     "string",
+     true,
+     "Where the pass is: collecting, merging, training, gating, promoting -- or how it ended: "
+     "skipped, failed, halted (the circuit breaker tripped on it), passed.",
+     {},
+     {}},
+    {"text", "string", true, "The line, as the terminal says it.", {}, {}},
 }};
 
 constexpr std::array<FieldSpec, 1> kDocument{{
@@ -351,7 +402,7 @@ constexpr std::array<FieldSpec, 5> kSetLine{{
 
 // --- the lines -----------------------------------------------------------------
 
-constexpr std::array<LineSpec, 29> kOutbound{{
+constexpr std::array<LineSpec, 31> kOutbound{{
     LineSpec{"session",
              "Once, first, unprompted: the protocol version, the model, the session's "
              "capabilities.",
@@ -376,7 +427,8 @@ constexpr std::array<LineSpec, 29> kOutbound{{
     LineSpec{"task_grant", "A call a task's grant let through.", kTaskGrant},
     LineSpec{"task_finished", "A task ended.", kTaskFinished},
     LineSpec{"job", "A long job's first event: the verb and the versions.", kJob},
-    LineSpec{"stage", "A step of a job's chain, started, done or failed.", kStage},
+    LineSpec{"stage", "A step of a job's chain -- a pipeline's stage, as its manifest records it.",
+             kStage},
     LineSpec{"bytes", "Bytes a job has moved, and of how many when known.", kBytes},
     LineSpec{"ready", "A job's runtime loaded, and on what.", kReady},
     LineSpec{"step", "A denoising step done.", kStep},
@@ -385,6 +437,8 @@ constexpr std::array<LineSpec, 29> kOutbound{{
     LineSpec{"segment", "A segment of speech made.", kSegment},
     LineSpec{"scene", "A composition's scene begun: speaking, rendering or its asset.",
              kSceneEvent},
+    LineSpec{"iteration", "A training iteration done, as the trainer reported it.", kIteration},
+    LineSpec{"pass", "A line of a cycle pass's narration, with where the pass is.", kPass},
     LineSpec{"document", "A job's last event: the verb's own document.", kDocument},
 }};
 

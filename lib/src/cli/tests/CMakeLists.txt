@@ -390,6 +390,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/httpserver/admin_suites_test.cpp
     presentation/cli/datasets_test.cpp
     presentation/cli/train_test.cpp
+    presentation/cli/train_stream_test.cpp
     presentation/cli/task_test.cpp
     presentation/cli/symphonies_test.cpp
     presentation/httpserver/admin_datasets_test.cpp

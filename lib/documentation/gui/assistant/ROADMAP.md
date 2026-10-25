@@ -71,7 +71,7 @@ Opened 2026-10-22 (the user's call): a thorough bug and feature-disparity audit 
 - [ ] **Console and argv safety** *([4g](../backlog/v0.2.0/console-and-argv-safety.md))* — carve-outs refused after root options, the exec line's refusals, user text after `--`.
 - [ ] **Buttons that do what they say** *([4h](../backlog/v0.2.0/library-tasks-review-correctness.md))* — Tasks' resume in its folder and state, no stale saves, results on their own selection, empty states and failures said.
 - [ ] **Training and suites parity** *([4i](../backlog/v0.2.0/training-and-suites-parity.md))* — adapter promote and editing, datasets pull, the shared-base fit, a chat under any suite.
-- [ ] **Pipeline and cycle screens** *([4j](../backlog/v0.2.0/pipeline-and-cycle-screens.md))* — gated on the CLI's 55h JSON.
+- [ ] **Pipeline and cycle screens** *([4j](../backlog/v0.2.0/pipeline-and-cycle-screens.md))* — its gate, the CLI's 55h JSON, shipped 2026-10-25.
 - [ ] **The remaining verbs** *([4k](../backlog/v0.2.0/settings-sessions-graph-parity.md))* — saved-chat compact/info/recall, one provider registered, `server_tools` shown, graph export/dedupe/delete, MCP remove, raw records, capabilities from launch.
 - [ ] **Docs and the board catch up** *([4l](../backlog/v0.2.0/docs-and-board-catch-up.md))* — shipped gaps flipped by probe; ROADMAP, SPEC and CLAUDE stating what shipped.
 

@@ -38,7 +38,13 @@ constexpr std::array kSurfaces{
     ShellSurface{"symphonies", View, "Symphonies", ShellDoor{.view = "Symphonies"}},
     ShellSurface{"task", View, "Tasks (a run narrated through the progress seam)",
                  ShellDoor{.view = "Tasks"}},
-    ShellSurface{"train", View, "Train (a run narrated through the progress seam)",
+    // A pipeline run (p) and a cycle pass (c) are the view's keys, each the
+    // command run as the shell's child in its text face; their resume and
+    // their status -- the JSON faces among them (55h), which are a driver's
+    // -- run on the exec line.
+    ShellSurface{"train", View,
+                 "Train (a run narrated through the progress seam: p a pipeline, c a cycle pass; "
+                 "their resume and status on the exec line)",
                  ShellDoor{.view = "Train"}},
     ShellSurface{"datasets", View, "Datasets", ShellDoor{.view = "Datasets"}},
     ShellSurface{"agents", View, "Agents (edit stays the $EDITOR's, refused below)",

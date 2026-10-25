@@ -17,7 +17,8 @@
 # resumed. Between them (53b), `promote --adapter`: the fuse skipped, a
 # small GGUF LoRA registered on an entry's adapters over its untouched base,
 # repointed in place, retained, and an mlx run's adapter refused on a
-# llamacpp entry naming both formats.
+# llamacpp entry naming both formats. Last (55h), the pipeline and the cycle
+# as streams and their reads as documents.
 #
 # POSIX only, like the other shell checks.
 set -eu
@@ -443,5 +444,64 @@ grep -q "Cycle: idle; backend nightly-model" "$WORK_DIR/status2.out" || fail "st
 grep -q "Pipeline: none in progress" "$WORK_DIR/status2.out" || fail "status pipeline line: $(cat "$WORK_DIR/status2.out")"
 "$APOGEE_BIN" check >"$WORK_DIR/check4.out" 2>&1 || fail "final check: $(cat "$WORK_DIR/check4.out")"
 grep -q "ok   cycle history" "$WORK_DIR/check4.out" || fail "check cycle history row: $(grep 'cycle' "$WORK_DIR/check4.out")"
+
+# --- 55h: the pipeline and the cycle speak JSON ----------------------------------
+# On the real binary, after the text runs above: a pipeline run and a cycle
+# pass as streams -- every stdout line JSON and valid against the schema this
+# binary prints, stderr quiet, the stages as the manifest moved them, the
+# pass's narration with its states -- each stream's document its read's own.
+# (The reads' byte equality with the admin routes is the unit suite's.)
+"$APOGEE_BIN" __machine-schema </dev/null >"$WORK_DIR/machine-schema.json" || fail "__machine-schema"
+"$APOGEE_BIN" train pipeline status --output-format json </dev/null >"$WORK_DIR/pipelines.json" 2>"$WORK_DIR/pipelines.err" \
+    || fail "pipeline status --output-format json: $(cat "$WORK_DIR/pipelines.err")"
+"$APOGEE_BIN" train pipeline run --pipeline nightly --output-format stream-json </dev/null \
+    >"$WORK_DIR/pipe-stream.jsonl" 2>"$WORK_DIR/pipe-stream.err" \
+    || fail "pipeline run as a stream: $(cat "$WORK_DIR/pipe-stream.err")"
+[ ! -s "$WORK_DIR/pipe-stream.err" ] || fail "a streamed pipeline wrote to stderr: $(cat "$WORK_DIR/pipe-stream.err")"
+STREAMED=$(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1]).read().splitlines()[-1])["document"]["pipeline"]["pipeline_run_id"])' \
+    "$WORK_DIR/pipe-stream.jsonl") || fail "the pipeline stream ended without its document: $(tail -1 "$WORK_DIR/pipe-stream.jsonl")"
+"$APOGEE_BIN" train pipeline status "$STREAMED" --output-format json </dev/null >"$WORK_DIR/pipe-read.json" \
+    || fail "pipeline status $STREAMED --output-format json"
+cp "$TRAINING/datasets/starter.jsonl" "$WORK_DIR/queue/day3.jsonl"
+"$APOGEE_BIN" train cycle run --output-format stream-json </dev/null \
+    >"$WORK_DIR/cycle-stream.jsonl" 2>"$WORK_DIR/cycle-stream.err" \
+    || fail "cycle run as a stream: $(cat "$WORK_DIR/cycle-stream.err")"
+[ ! -s "$WORK_DIR/cycle-stream.err" ] || fail "a streamed pass wrote to stderr: $(cat "$WORK_DIR/cycle-stream.err")"
+"$APOGEE_BIN" train cycle status --output-format json </dev/null >"$WORK_DIR/cycle-read.json" \
+    || fail "cycle status --output-format json"
+python3 - "$WORK_DIR" <<'PY' || fail "the training streams or reads are wrong"
+import json, os, sys
+work = sys.argv[1]
+def read(name):
+    return json.load(open(os.path.join(work, name)))
+def stream(name):
+    return [json.loads(line) for line in open(os.path.join(work, name))]
+pipe, cycle = stream("pipe-stream.jsonl"), stream("cycle-stream.jsonl")
+assert pipe[0]["type"] == "job" and pipe[0]["verb"] == "train pipeline run", pipe[0]
+stages = [e["state"] for e in pipe if e["type"] == "stage"]
+assert stages == ["pending", "training", "evaluating", "passed"], stages
+assert [e["stage"] for e in pipe if e["type"] == "iteration"] == [1, 1], pipe
+assert pipe[-1]["type"] == "document" and pipe[-1]["document"] == read("pipe-read.json"), pipe[-1]
+assert pipe[-1]["document"]["pipeline"]["status"] == "complete", pipe[-1]
+listing = read("pipelines.json")
+assert listing["object"] == "list" and listing["data"], listing
+assert all(row["kind"] == "pipeline" for row in listing["data"]), listing
+assert cycle[0]["type"] == "job" and cycle[0]["verb"] == "train cycle run", cycle[0]
+passes = [e["state"] for e in cycle if e["type"] == "pass"]
+assert passes == ["collecting", "merging", "training", "gating", "promoting", "passed"], passes
+assert cycle[-1]["type"] == "document" and cycle[-1]["document"] == read("cycle-read.json"), cycle[-1]
+assert cycle[-1]["document"]["runs"][-1]["promoted_version"] == 2, cycle[-1]
+assert not [e for e in pipe + cycle if e["type"] == "error"], "a stream that ended well said an error"
+try:
+    from jsonschema import Draft202012Validator
+except ImportError:
+    print("train_e2e: no jsonschema module -- the training streams were NOT validated",
+          file=sys.stderr)
+    sys.exit(0)
+valid = Draft202012Validator(read("machine-schema.json"))
+for event in pipe + cycle:
+    errors = list(valid.iter_errors(event))
+    assert not errors, f"{json.dumps(event)[:200]} -- {errors[0].message}"
+PY
 
 echo "apogee train end-to-end: OK"

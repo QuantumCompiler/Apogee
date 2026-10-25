@@ -10711,3 +10711,49 @@ The refusal was true but incomplete. The set is Wan's original layout, and its r
 - `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,980 tests and the macOS app's 449 cases passed, with no warning.
 
 **Not done:** the `codex-cli` type has no template section; the declaration is fields, not types.
+
+### 2026-10-25 — `train-pipeline-cycle-json` (backlog item 55h): `train pipeline` and `train cycle` speak JSON
+
+**Why.** 52b gave long jobs machine-readable streams, but training's multi-stage verbs never got their JSON reads. `train pipeline run|resume|status` and `train cycle run|status|halt|resume` registered no `--output-format`. The GUI's pipeline and cycle screens (its 4j) gate on this: without JSON there is nothing honest to draw.
+
+- [x] **The status reads are the admin routes' bodies, byte for byte.** `train pipeline status [<id>]` and `train cycle status` take `--output-format json`, from shared bodies in `operations/training_reads`: the runs list, one run, one pipeline, and the cycle. `httpserver/admin_training` now calls them, its code moved over unchanged.
+  - **Pipeline status:** `{"data":[…],"object":"list"}`, or `{"kind":"pipeline","pipeline":{…}}` with the whole manifest.
+  - **Cycle status:** `{"active":…,"anchor_version":…,"runs":[…],…}`.
+- [x] **The run verbs stream.** `train pipeline run|resume` and `train cycle run` take `--output-format stream-json` (text or stream-json, no `json`). They relay what already happens, then the read's own document.
+  - **The pipeline's manifest writes become `stage` events,** through a new `PipelineRequest::on_manifest` hook called after each successful write. `state` is the manifest's own word (`pending`, `training`, `evaluating`, `fusing`, `passed`, `failed`), with optional `pipeline_run_id`, `run_id` and `cumulative_score`. The first write reports every stage, so a resume shows which already passed.
+  - **The cycle's narration becomes `pass` events** (`state` and `text`): `collecting`, `merging`, `training`, `gating`, `promoting`, then `skipped`, `failed`, `halted` or `passed`. `CycleRequest::on_message` now carries where the pass is, and the text console still prints only the text.
+  - **The trainer's ticks become `iteration` events** (`iteration`, `iterations`, `loss`, `lr`, `throughput`, `stage`), the training equivalent of 52b's `bytes` and `step`.
+  - **Narration and endings:** stderr narration becomes `notice`s, word for word. The document follows a failure or cancel too, just before the `error`, and a run refused before it starts sends `job` and `error` alone.
+- [x] **Default output is byte-identical.** A golden of the six verbs' text output was written from the unchanged code three times, all identical, and still matches.
+- [x] **Declared and documented:**
+  - The events are declared in the protocol. `machine-mode.md` gains "A training run: `train pipeline` and `train cycle`", and `http-api.md` names each route's CLI twin.
+  - The vocabulary date moved to `2026-10-25`, and the two goldens follow; the app's `>= "2026-10-20"` check still passes.
+  - `train pipeline status` and `train cycle status` move from read-only to served in the HTTP parity table. `tui_parity.cpp` names the `p` and `c` keys.
+
+**Decisions made while building** (2026-10-25, each recorded for veto):
+- **The open call's default, taken:** events in the 52b family. `stage` is reused for a pipeline's stages; `pass` and `iteration` are new. The item didn't name `iteration`, but without it a stage reads `training` for its whole length.
+- **`train cycle status --output-format json` with no history yet** exits 1 with the route's own 404 wording, while the text view says "no cycle runs yet" and exits 0. A GUI can read `train status`'s `cycle: null` first.
+- **`train pipeline status <id>` on a plain run's id** is refused, as the text view refuses it, though the runs route serves it as `kind: run`.
+
+**Verified.**
+- **12 new cases:**
+  - the byte-identity golden;
+  - the documents equal to the admin bodies (49 assertions);
+  - pipeline run and resume streams (138);
+  - refused streams (34);
+  - cycle streams (141);
+  - the new flags' completion;
+  - `train_stream_test` (3);
+  - a machine-mode declaration case;
+  - pipeline and cycle hook cases.
+- **The emitter declaration test** now covers the new events.
+- **`train_e2e.sh` streams a pipeline and a cycle pass on the real binary.** Every line validates against the binary's own schema (jsonschema), and each stream's document equals its read.
+- **ctest:** these pass:
+  - `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`;
+  - `cli.train_lifecycle`, `cli.machine_schema_conformance` (31 emitted and 8 accepted types, all documented), `cli.http_api_conformance`, `cli.machine_mode`;
+  - `cli.shell_completion`, `cli.complete_lifecycle`, `cli.tui_shell` and `cli.tui_doors`.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,992 tests and the macOS app's 449 cases passed, with no warning.
+
+**Not done:**
+- `train status` and `train versions` are still read-only in the HTTP parity table, though served. They are not this item's verbs.
+- A quirk kept for byte-identity: text-mode `train cycle run` prints an empty `-- stage 0/1: ` line before each `[cycle]` line. The golden records it.

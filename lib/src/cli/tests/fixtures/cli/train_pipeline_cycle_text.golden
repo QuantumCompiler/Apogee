@@ -1,0 +1,212 @@
+=== apogee train pipeline status
+--- exit 0
+--- stdout
+no pipeline runs yet ('apogee train pipeline run --pipeline <spec>')
+--- stderr
+=== apogee train pipeline run --pipeline <home>/pipe.yaml --trainer mock
+--- exit 2
+--- stdout
+pipeline aborted -- pipe-<id>
+  1.  a                     passed      100% (1/1)
+  2.  b                     failed      50% (1/2)
+--- stderr
+[pipeline] two as pipe-<id>: 2 stage(s), mock on aaaaaaaaaaaa; no judge: unmatched items skip
+-- stage 1/2: a
+[train] stage 1/2 'a': mock lora on aaaaaaaaaaaa, dataset starter.jsonl
+[train] mock trainer: 2 iteration(s), method lora
+[train] iter 1/2 · loss 0.5200 · lr 1.00e-04 · 10.0 it/s
+[train] iter 2/2 · loss 0.4200 · lr 1.00e-04 · 10.0 it/s
+[train] adapter saved to <home>/training/runs/pipe-<id>-s0/adapters
+[eval] cumulative suite: 1 suite(s), 1 item(s); no judge: unmatched items skip
+[gate] stage 'a' PASSED the cumulative eval -- 100% (1/1)
+[fuse] merging stage 1's adapter into its base for stage 2
+[fuse] mock fuse: <home>/training/runs/pipe-<id>-s0/adapters into <home>/models/tiny/safetensors/aaaaaaaaaaaa
+-- stage 2/2: b
+[train] stage 2/2 'b': mock lora on fused, dataset regress.jsonl
+[train] mock trainer: 2 iteration(s), method lora
+[train] iter 1/2 · loss 0.5200 · lr 1.00e-04 · 10.0 it/s
+[train] iter 2/2 · loss 0.4200 · lr 1.00e-04 · 10.0 it/s
+[train] adapter saved to <home>/training/runs/pipe-<id>-s1/adapters
+[eval] cumulative suite: 2 suite(s), 2 item(s); no judge: unmatched items skip
+[gate] stage 'b' FAILED the cumulative eval -- 50% (1/2)
+apogee train: pipeline aborted -- stage 'b' failed the cumulative eval gate (50% (1/2)). Fix the data or the suite and 'apogee train pipeline resume pipe-<id>', or pass --continue-on-fail to go on regardless
+=== apogee train pipeline status
+--- exit 0
+--- stdout
+  PIPELINE                      SPEC            STATUS    STAGES  STARTED
+  pipe-<id>          two             aborted   1/2     <time>
+--- stderr
+=== apogee train pipeline status pipe-<id>
+--- exit 0
+--- stdout
+pipeline pipe-<id>
+  status:  aborted
+  spec:    two
+  student: tiny
+  base:    <home>/models/tiny/safetensors/aaaaaaaaaaaa
+  started: <time>
+
+  #   STAGE                 STATUS      CUMULATIVE      RUN
+  1   a                     passed      100% (1/1)      pipe-<id>-s0
+  2   b                     failed      50% (1/2)       pipe-<id>-s1
+
+Promote the last passing stage:
+  apogee train promote pipe-<id>-s0 --as <backend>
+Resume from stage 2:
+  apogee train pipeline resume pipe-<id>
+--- stderr
+=== apogee train pipeline status nope
+--- exit 1
+--- stdout
+--- stderr
+apogee train: no pipeline run 'nope'
+=== apogee train pipeline status ../x
+--- exit 1
+--- stdout
+--- stderr
+apogee train: '../x' is not a pipeline run id
+=== apogee train pipeline resume pipe-<id> --pipeline <home>/pipe.yaml --trainer mock
+--- exit 0
+--- stdout
+pipeline complete -- pipe-<id>
+  1.  a                     passed      100% (1/1)
+  2.  b                     passed      100% (2/2)
+
+Promote the last passing stage:
+  apogee train promote pipe-<id>-s1 --as <backend>
+--- stderr
+[pipeline] resuming two as pipe-<id>: 2 stage(s), mock on aaaaaaaaaaaa; no judge: unmatched items skip
+-- stage 2/2: b
+[train] stage 2/2 'b': mock lora on fused, dataset regress.jsonl
+[train] mock trainer: 2 iteration(s), method lora
+[train] iter 1/2 · loss 0.5200 · lr 1.00e-04 · 10.0 it/s
+[train] iter 2/2 · loss 0.4200 · lr 1.00e-04 · 10.0 it/s
+[train] adapter saved to <home>/training/runs/pipe-<id>-s1/adapters
+[eval] cumulative suite: 2 suite(s), 2 item(s); no judge: unmatched items skip
+[gate] stage 'b' PASSED the cumulative eval -- 100% (2/2)
+=== apogee train pipeline status pipe-<id>
+--- exit 0
+--- stdout
+pipeline pipe-<id>
+  status:  complete
+  spec:    two
+  student: tiny
+  base:    <home>/models/tiny/safetensors/aaaaaaaaaaaa
+  started: <time>
+  completed: <time>
+
+  #   STAGE                 STATUS      CUMULATIVE      RUN
+  1   a                     passed      100% (1/1)      pipe-<id>-s0
+  2   b                     passed      100% (2/2)      pipe-<id>-s1
+
+Promote the last passing stage:
+  apogee train promote pipe-<id>-s1 --as <backend>
+--- stderr
+=== apogee train pipeline resume pipe-<id> --pipeline <home>/pipe.yaml
+--- exit 1
+--- stdout
+--- stderr
+apogee train: pipeline pipe-<id> is already complete
+=== apogee train pipeline run --pipeline nightly
+--- exit 0
+--- stdout
+pipeline complete -- pipe-<id>
+  1.  base                  passed      100% (1/1)
+
+Promote the last passing stage:
+  apogee train promote pipe-<id>-s0 --as <backend>
+--- stderr
+[pipeline] nightly as pipe-<id>: 1 stage(s), mock on aaaaaaaaaaaa; no judge: unmatched items skip
+-- stage 1/1: base
+[train] stage 1/1 'base': mock lora on aaaaaaaaaaaa, dataset starter.jsonl
+[train] mock trainer: 2 iteration(s), method lora
+[train] iter 1/2 · loss 0.5200 · lr 1.00e-04 · 10.0 it/s
+[train] iter 2/2 · loss 0.4200 · lr 1.00e-04 · 10.0 it/s
+[train] adapter saved to <home>/training/runs/pipe-<id>-s0/adapters
+[eval] cumulative suite: 1 suite(s), 1 item(s); no judge: unmatched items skip
+[gate] stage 'base' PASSED the cumulative eval -- 100% (1/1)
+=== apogee train cycle status
+--- exit 0
+--- stdout
+no cycle runs yet -- 'apogee train cycle run' performs one gated pass
+--- stderr
+=== apogee train cycle run
+--- exit 0
+--- stdout
+cycle skipped -- no new training data in any source
+--- stderr
+[cycle] directory: no new files in <home>/queue
+[cycle] no new data -- skipped
+=== apogee train cycle run
+--- exit 0
+--- stdout
+cycle PASSED -- nightly-model promoted to v1 (100%)
+  history: <home>/training/cycle/history.json
+--- stderr
+[cycle] directory: 1 file(s) in <home>/queue
+[cycle] 1 example(s) from directory
+[cycle] pipeline cycle-<id> (nightly): 1 stage(s)
+-- stage 1/1: base
+[train] stage 1/1 'base': mock lora on aaaaaaaaaaaa, dataset merged.jsonl
+[train] mock trainer: 2 iteration(s), method lora
+[train] iter 1/2 · loss 0.5200 · lr 1.00e-04 · 10.0 it/s
+[train] iter 2/2 · loss 0.4200 · lr 1.00e-04 · 10.0 it/s
+[train] adapter saved to <home>/training/runs/cycle-<id>-s0/adapters
+[eval] cumulative suite: 1 suite(s), 1 item(s); no judge: unmatched items skip
+[gate] stage 'base' PASSED the cumulative eval -- 100% (1/1)
+-- stage 0/1: 
+[cycle] gate -- current 100%, previous 0%, anchor 0%, threshold 0%
+[cycle] gate PASSED (100%) -- promoting cycle-<id>-s0 into nightly-model
+[promote] run cycle-<id>-s0 -> nightly-model v1
+[promote] fusing the adapter into the base model
+[promote]   base:    <home>/models/tiny/safetensors/aaaaaaaaaaaa
+[promote]   adapter: <home>/training/runs/cycle-<id>-s0/adapters
+[promote]   output:  <home>/training/runs/cycle-<id>-s0/fused
+[promote] mock fuse: <home>/training/runs/cycle-<id>-s0/adapters into <home>/models/tiny/safetensors/aaaaaaaaaaaa
+[promote] converting the fused model to GGUF (F16): <home>/models/tiny/gguf/.incoming-<id>/nightly-model-v1.gguf
+[promote] mock converter: writing a minimal GGUF
+[cycle] anchor set to v1 (100%)
+[cycle] complete -- nightly-model promoted to v1 (<home>/models/tiny/gguf/<id>/nightly-model-v1.gguf)
+=== apogee train cycle run
+--- exit 2
+--- stdout
+cycle FAILED -- pipeline aborted: pipeline aborted -- stage 'base' failed the cumulative eval gate (0% (0/1)). Fix the data or the suite and 'apogee train pipeline resume cycle-<id>', or pass --continue-on-fail to go on regardless
+  the candidate was discarded; nothing reached inference
+  circuit breaker: 1 consecutive failed cycle(s) reached circuit_breaker_k 1
+  the loop is halted: fix the data or the suite, then 'apogee train cycle resume'
+--- stderr
+[cycle] directory: 1 file(s) in <home>/queue
+[cycle] 1 example(s) from directory
+[cycle] pipeline cycle-<id> (nightly): 1 stage(s)
+-- stage 1/1: base
+[train] stage 1/1 'base': mock lora on aaaaaaaaaaaa, dataset merged.jsonl
+[train] mock trainer: 2 iteration(s), method lora
+[train] iter 1/2 · loss 0.5200 · lr 1.00e-04 · 10.0 it/s
+[train] iter 2/2 · loss 0.4200 · lr 1.00e-04 · 10.0 it/s
+[train] adapter saved to <home>/training/runs/cycle-<id>-s0/adapters
+[eval] cumulative suite: 1 suite(s), 1 item(s); no judge: unmatched items skip
+[gate] stage 'base' FAILED the cumulative eval -- 0% (0/1)
+-- stage 0/1: 
+[cycle] FAILED -- pipeline aborted: pipeline aborted -- stage 'base' failed the cumulative eval gate (0% (0/1)). Fix the data or the suite and 'apogee train pipeline resume cycle-<id>', or pass --continue-on-fail to go on regardless
+[cycle] circuit breaker: 1 consecutive failed cycle(s) reached circuit_breaker_k 1 -- the loop is halted; 'apogee train cycle resume' after fixing the data or the suite
+=== apogee train cycle run
+--- exit 1
+--- stdout
+--- stderr
+apogee train: the cycle is halted: circuit breaker: 1 consecutive failed cycle(s) reached circuit_breaker_k 1. Review the data and the suite, then 'apogee train cycle resume'
+=== apogee train cycle status
+--- exit 0
+--- stdout
+cycle for backend nightly-model
+  state:             HALTED -- circuit breaker: 1 consecutive failed cycle(s) reached circuit_breaker_k 1
+  runs:              3 (1 consecutive failure(s))
+  anchor:            v1 (100%)
+
+  RUN AT               SOURCE              GATE     SCORE  PREV   ANCHOR  PROMOTED
+  <time>  -                   skipped  -      -      -       -
+      no new training data in any source
+  <time>  directory           pass     100%   -      -       v1
+  <time>  directory           fail     -      -      -       -
+      pipeline aborted: pipeline aborted -- stage 'base' failed the cumulative eval gate (0% (0/1)). Fix the data or the suite and 'apogee train pipeline resume cycle-<id>', or pass --continue-on-fail to go on regardless
+      circuit breaker: 1 consecutive failed cycle(s) reached circuit_breaker_k 1
+--- stderr

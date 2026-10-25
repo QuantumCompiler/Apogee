@@ -246,6 +246,10 @@ const std::map<std::string, Classification>& table() {
         {"graph explain", served("/v1/admin/graph/{id}/explain")},
         {"graph neighbors", served("/v1/admin/graph/{id}/neighbors")},
         {"graph query", served("/v1/admin/graph/{id}/query")},
+        // `--output-format json` prints the route's body byte for byte (55h);
+        // without an id, `GET /v1/admin/training/runs?kind=pipeline`'s.
+        {"train pipeline status", served("/v1/admin/training/runs/{id}")},
+        {"train cycle status", served("/v1/admin/training/cycle")},
         // --- read-only / interactive ------------------------------------------
         {"chat", read_only()},
         // chat's session opened with a suite (27s); a session surface, as chat
@@ -301,8 +305,6 @@ const std::map<std::string, Classification>& table() {
         {"datasets info", read_only()},
         {"train versions", read_only()},
         {"train status", read_only()},
-        {"train pipeline status", read_only()},
-        {"train cycle status", read_only()},
         // The shipped and the user's regime specs (42a): reads of the host's
         // own files, beside `datasets kits`.
         {"train regime list", read_only()},

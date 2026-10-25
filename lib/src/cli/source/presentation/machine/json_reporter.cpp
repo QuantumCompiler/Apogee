@@ -304,12 +304,22 @@ void JsonReporter::begin_job(std::string_view verb) {
 }
 
 void JsonReporter::emit_stage(std::size_t index, std::size_t count, std::string_view label,
-                              std::string_view state) {
+                              std::string_view state, std::string_view pipeline_run_id,
+                              std::string_view run_id, std::optional<double> cumulative_score) {
     nlohmann::json object = event("stage");
     object["index"] = index;
     object["count"] = count;
     object["label"] = std::string{label};
     object["state"] = std::string{state};
+    if (!pipeline_run_id.empty()) {
+        object["pipeline_run_id"] = std::string{pipeline_run_id};
+    }
+    if (!run_id.empty()) {
+        object["run_id"] = std::string{run_id};
+    }
+    if (cumulative_score.has_value()) {
+        object["cumulative_score"] = *cumulative_score;
+    }
     write(object);
 }
 
@@ -393,6 +403,29 @@ void JsonReporter::emit_scene(std::size_t scene, std::size_t scenes, std::string
     object["scene"] = scene;
     object["scenes"] = scenes;
     object["state"] = std::string{state};
+    write(object);
+}
+
+void JsonReporter::emit_iteration(int iteration, int iterations, double loss, double lr,
+                                  double throughput, std::size_t stage) {
+    nlohmann::json object = event("iteration");
+    object["iteration"] = iteration;
+    if (iterations > 0) {
+        object["iterations"] = iterations;
+    }
+    object["loss"] = loss;
+    object["lr"] = lr;
+    object["throughput"] = throughput;
+    if (stage > 0) {
+        object["stage"] = stage;
+    }
+    write(object);
+}
+
+void JsonReporter::emit_pass(std::string_view state, std::string_view text) {
+    nlohmann::json object = event("pass");
+    object["state"] = std::string{state};
+    object["text"] = std::string{text};
     write(object);
 }
 

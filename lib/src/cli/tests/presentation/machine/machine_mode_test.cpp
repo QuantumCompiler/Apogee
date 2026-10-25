@@ -238,6 +238,38 @@ TEST_CASE("a job's events: its versions first, unknowns left out, scenes only in
     CHECK(lines == expected);
 }
 
+TEST_CASE("a training run's events: a pipeline's stage in its manifest's words, a tick, a pass",
+          "[commands][machine][job][train]") {
+    // 55h: the pipeline's fields ride `stage` only where they say something;
+    // a tick's total only when the trainer said it; a pass is its line and
+    // its state.
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.emit_stage(1, 2, "a", "pending", "pipe-20261025-120000");
+    reporter.emit_stage(1, 2, "a", "evaluating", "pipe-20261025-120000", "pipe-20261025-120000-s0");
+    reporter.emit_stage(1, 2, "a", "passed", "pipe-20261025-120000", "pipe-20261025-120000-s0",
+                        0.5);
+    reporter.emit_stage(1, 2, "a", "passed", "pipe-20261025-120000", "pipe-20261025-120000-s0",
+                        0.0);
+    reporter.emit_iteration(10, 600, 1.5, 0.0001, 2.5, 1);
+    reporter.emit_iteration(3, 0, 1.5, 0.0001, 2.5, 0);
+    reporter.emit_pass("collecting", "[cycle] directory: 1 file(s) in /q");
+    const std::vector<std::string> expected{
+        R"({"count":2,"index":1,"label":"a","pipeline_run_id":"pipe-20261025-120000","state":"pending","type":"stage"})",
+        R"({"count":2,"index":1,"label":"a","pipeline_run_id":"pipe-20261025-120000","run_id":"pipe-20261025-120000-s0","state":"evaluating","type":"stage"})",
+        R"({"count":2,"cumulative_score":0.5,"index":1,"label":"a","pipeline_run_id":"pipe-20261025-120000","run_id":"pipe-20261025-120000-s0","state":"passed","type":"stage"})",
+        R"({"count":2,"cumulative_score":0.0,"index":1,"label":"a","pipeline_run_id":"pipe-20261025-120000","run_id":"pipe-20261025-120000-s0","state":"passed","type":"stage"})",
+        R"({"iteration":10,"iterations":600,"loss":1.5,"lr":0.0001,"stage":1,"throughput":2.5,"type":"iteration"})",
+        R"({"iteration":3,"loss":1.5,"lr":0.0001,"throughput":2.5,"type":"iteration"})",
+        R"({"state":"collecting","text":"[cycle] directory: 1 file(s) in /q","type":"pass"})"};
+    std::vector<std::string> lines;
+    std::istringstream in{out.str()};
+    for (std::string line; std::getline(in, line);) {
+        lines.push_back(line);
+    }
+    CHECK(lines == expected);
+}
+
 TEST_CASE("a job's format words: json only for a verb with a document",
           "[commands][machine][job]") {
     using apogee::commands::JobFormat;
@@ -1348,6 +1380,12 @@ TEST_CASE("every event every emitter writes is the declaration's, field for fiel
     reporter.emit_assembling(49, 1);
     reporter.emit_segment(1, 2, 1.5, 0);
     reporter.emit_scene(1, 2, "speaking");
+    // A pipeline's and a cycle pass's (55h), as the training relay writes them.
+    reporter.emit_stage(1, 2, "a", "fusing", "pipe-20261025-120000", "pipe-20261025-120000-s0",
+                        1.0);
+    reporter.emit_iteration(10, 600, 1.73, 1e-4, 2.4, 1);
+    reporter.emit_iteration(3, 0, 1.9, 1e-4, 0.0, 0);
+    reporter.emit_pass("gating", "[cycle] gate -- current 96%");
     reporter.emit_document(nlohmann::json{{"object", "video.generation"}});
 
     std::set<std::string> seen_types;

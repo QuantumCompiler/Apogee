@@ -411,7 +411,9 @@ TEST_CASE(
     Fixture fixture;
     std::vector<std::string> said;
     apogee::training::CycleRequest request = fixture.request(2);
-    request.on_message = [&said](std::string_view text) { said.emplace_back(text); };
+    request.on_message = [&said](std::string_view /*state*/, std::string_view text) {
+        said.emplace_back(text);
+    };
 
     // Nothing queued: skipped, the history started.
     apogee::training::CycleOutcome outcome = apogee::training::run_cycle(request);
@@ -510,6 +512,53 @@ TEST_CASE(
     outcome = apogee::training::run_cycle(request);
     CHECK_FALSE(outcome.ok);
     CHECK(outcome.error.find("another cycle is already running") != std::string::npos);
+}
+
+TEST_CASE(
+    "each line a pass says carries where the pass is, and its pipeline's manifest writes are told",
+    "[training][cycle][run][narration]") {
+    // 55h: a stream keys on the state; a person reads the line, as before.
+    Fixture fixture;
+    std::vector<std::string> states;
+    std::vector<std::string> lines;
+    std::vector<std::string> manifests;
+    apogee::training::CycleRequest request = fixture.request(1);
+    request.on_message = [&](std::string_view state, std::string_view text) {
+        states.emplace_back(state);
+        lines.emplace_back(text);
+    };
+    request.on_manifest = [&](const apogee::training::PipelineRunManifest& manifest) {
+        manifests.push_back(manifest.pipeline_run_id + " " + manifest.status);
+    };
+
+    REQUIRE(apogee::training::run_cycle(request).ok);
+    CHECK(states == std::vector<std::string>{"collecting", "skipped"});
+    CHECK(lines.back() == "[cycle] no new data -- skipped");
+    CHECK(manifests.empty());
+
+    states.clear();
+    lines.clear();
+    write(fixture.queue / "day1.jsonl", kPlain);
+    apogee::training::CycleOutcome outcome = apogee::training::run_cycle(request);
+    REQUIRE(outcome.ok);
+    CHECK(states == std::vector<std::string>{"collecting", "merging", "training", "gating",
+                                             "promoting", "passed", "passed"});
+    for (const std::string& line : lines) {
+        CHECK(line.starts_with("[cycle] "));
+    }
+    CHECK(lines[3].starts_with("[cycle] gate -- current 100%"));
+    CHECK(lines.back().starts_with("[cycle] complete -- nightly-model promoted to v1"));
+    REQUIRE_FALSE(manifests.empty());
+    CHECK(manifests.front() == outcome.record->pipeline_id + " running");
+    CHECK(manifests.back() == outcome.record->pipeline_id + " complete");
+
+    states.clear();
+    write(fixture.queue / "day2.jsonl", "{\"mock\": {\"answer\": \"nope\"}}\n");
+    outcome = apogee::training::run_cycle(request);
+    REQUIRE(outcome.ok);
+    CHECK(outcome.halted_now);
+    CHECK(states ==
+          std::vector<std::string>{"collecting", "merging", "training", "failed", "halted"});
 }
 
 TEST_CASE(

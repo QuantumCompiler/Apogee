@@ -51,6 +51,19 @@ inline constexpr std::string_view kGatePass = "pass";
 inline constexpr std::string_view kGateFail = "fail";
 inline constexpr std::string_view kGateSkipped = "skipped";
 
+/// Where a pass is, as each line of its narration says it (55h): the
+/// sources read, merged, the pipeline run, the dual gate, the promotion --
+/// then how the pass ended, and the breaker tripping on it.
+inline constexpr std::string_view kPassCollecting = "collecting";
+inline constexpr std::string_view kPassMerging = "merging";
+inline constexpr std::string_view kPassTraining = "training";
+inline constexpr std::string_view kPassGating = "gating";
+inline constexpr std::string_view kPassPromoting = "promoting";
+inline constexpr std::string_view kPassSkipped = "skipped";
+inline constexpr std::string_view kPassFailed = "failed";
+inline constexpr std::string_view kPassHalted = "halted";
+inline constexpr std::string_view kPassPassed = "passed";
+
 /// One `cycle run`.
 struct CycleRunRecord {
     std::string run_at{};
@@ -226,8 +239,12 @@ struct CycleRequest {
     JudgeFn judge;
     GateMode gate_mode = GateMode::Hard;
     PromoteFn promote;
-    std::function<void(std::string_view)> on_message;
+    /// The pass's narration, a line at a time, each with where the pass is
+    /// (`kPass*`): the words a person reads, and the state a surface keys on.
+    std::function<void(std::string_view state, std::string_view text)> on_message;
     std::function<void(const PipelineProgress&)> on_progress;
+    /// The pass's pipeline's manifest writes, as `PipelineRequest` tells them.
+    std::function<void(const PipelineRunManifest&)> on_manifest;
     harness::CancellationToken cancellation;
 };
 

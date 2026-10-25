@@ -151,6 +151,10 @@ struct PipelineRequest {
     /// Go on past a failed gate under a hard gate.
     bool continue_on_fail = false;
     std::function<void(const PipelineProgress&)> on_progress;
+    /// Told every manifest the run writes, once it is on disk (55h): the
+    /// run's transitions, for a surface that relays them. Nothing else is
+    /// told it -- a write that failed is not a transition.
+    std::function<void(const PipelineRunManifest&)> on_manifest;
     harness::CancellationToken cancellation;
 };
 

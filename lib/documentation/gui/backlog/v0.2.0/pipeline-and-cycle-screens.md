@@ -11,9 +11,16 @@ The parity table classes `train` as this screen's (`Parity.swift:58`), and 2d's 
 
 **Seam + files.** `presentation/training/ViewModels/TrainingViewModel.swift` + views (Pipelines and Cycle sections), `business/reads/Training.swift` (the pipeline and cycle documents decoded), the jobs core (run/resume streams), `presentation/shell/ViewModels/Parity.swift` (the `train` row naming pipelines and the cycle). Tests: pipeline list, status and stage rendering over 55h-shaped fixtures; run and resume argv and stream handling; the cycle's run-once confirm, halt and resume argv.
 
-**Reference.** [`train-pipeline-cycle-json.md`](../../../cli/backlog/v0.2.0/train-pipeline-cycle-json.md) (CLI 55h, the gate); the TUI's training keys; CLI Milestone Z (pipelines and the cycle); the CLI/GUI audit (2026-10-22).
+**Reference.** [CLI 55h](../../../cli/assistant/MILESTONES.md#milestone-ar--the-audits-cli-findings) (the gate, shipped 2026-10-25); the TUI's training keys; CLI Milestone Z (pipelines and the cycle); the CLI/GUI audit (2026-10-22).
 
 **Decisions made** (dated):
+- 2026-10-25 — **What the CLI's 55h gives this item** (recorded when 55h shipped).
+  - `train pipeline status [<id>] --output-format json` and `train cycle status --output-format json` print the admin routes' bodies: `{"data":[…],"object":"list"}`, `{"kind":"pipeline","pipeline":{…}}` and the cycle's `{"active","anchor_version","runs",…}`. The cycle with no history exits 1 with the 404 wording, so read `train status`'s `cycle: null` first.
+  - `train pipeline run|resume` and `train cycle run` stream under `--output-format stream-json`, then the read's document:
+    - `stage` events (`state` `pending`/`training`/`evaluating`/`fusing`/`passed`/`failed`, with `pipeline_run_id`, `run_id`, `cumulative_score`);
+    - `pass` events (`collecting` … `passed`);
+    - `iteration` events (`iteration`, `iterations`, `loss`, `lr`, `throughput`, `stage`).
+  - The schema date is `2026-10-25`.
 - 2026-10-22: Specced from the CLI/GUI audit (the user's call). Gated on CLI 55h, the one cross-queue gate the audit needed: without JSON there is nothing honest to draw.
 
 **Open calls:**
@@ -26,4 +33,4 @@ The parity table classes `train` as this screen's (`Parity.swift:58`), and 2d's 
 - [ ] The cycle's state shows, and a pass can be run, halted and resumed with a confirm.
 - [ ] The parity row names both; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0 (track 4); gated on CLI 55h ([`train-pipeline-cycle-json.md`](../../../cli/backlog/v0.2.0/train-pipeline-cycle-json.md)).
+**Scope note.** Earmarked for v0.2.0 (track 4). Its gate, the CLI's [55h](../../../cli/assistant/MILESTONES.md#milestone-ar--the-audits-cli-findings), shipped 2026-10-25.

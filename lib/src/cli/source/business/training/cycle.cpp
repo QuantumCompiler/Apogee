@@ -387,9 +387,9 @@ CycleOutcome run_cycle(const CycleRequest& request) {
                         " suites were resolved";
         return outcome;
     }
-    auto say = [&request](const std::string& text) {
+    auto say = [&request](std::string_view state, const std::string& text) {
         if (request.on_message) {
-            request.on_message(text);
+            request.on_message(state, text);
         }
     };
 
@@ -414,10 +414,11 @@ CycleOutcome run_cycle(const CycleRequest& request) {
     }
     const std::string run_at = rfc3339_now();
     const std::filesystem::path work = request.cycle_dir / kWorkDirName;
-    auto save = [&](const std::string& what) {
+    auto save = [&](std::string_view state, const std::string& what) {
         if (const std::string failure = save_history(request.cycle_dir, history);
             !failure.empty()) {
-            say("[cycle] warning: could not save the history after " + what + ": " + failure);
+            say(state,
+                "[cycle] warning: could not save the history after " + what + ": " + failure);
         }
     };
 
@@ -442,10 +443,10 @@ CycleOutcome run_cycle(const CycleRequest& request) {
                 return outcome;
             }
             if (found.files.empty()) {
-                say("[cycle] directory: no new files in " + dir.string());
+                say(kPassCollecting, "[cycle] directory: no new files in " + dir.string());
             } else {
-                say("[cycle] directory: " + std::to_string(found.files.size()) + " file(s) in " +
-                    dir.string());
+                say(kPassCollecting, "[cycle] directory: " + std::to_string(found.files.size()) +
+                                         " file(s) in " + dir.string());
                 collected.insert(collected.end(), found.files.begin(), found.files.end());
                 queues.emplace_back(dir, found.files);
                 types.emplace_back("directory");
@@ -461,7 +462,8 @@ CycleOutcome run_cycle(const CycleRequest& request) {
                 newest_session = mined.newest_started_at;
             }
             if (mined.lines.empty()) {
-                say("[cycle] sessions: no new sessions since " + (history.sessions_until.empty()
+                say(kPassCollecting,
+                    "[cycle] sessions: no new sessions since " + (history.sessions_until.empty()
                                                                       ? std::string{"the beginning"}
                                                                       : history.sessions_until));
             } else {
@@ -480,8 +482,9 @@ CycleOutcome run_cycle(const CycleRequest& request) {
                     outcome.error = std::string{"sessions source: "} + e.what();
                     return outcome;
                 }
-                say("[cycle] sessions: " + std::to_string(mined.lines.size()) +
-                    " exchange(s) from " + std::to_string(mined.sessions) + " session(s)");
+                say(kPassCollecting, "[cycle] sessions: " + std::to_string(mined.lines.size()) +
+                                         " exchange(s) from " + std::to_string(mined.sessions) +
+                                         " session(s)");
                 collected.push_back(out);
                 types.emplace_back("sessions");
             }
@@ -507,8 +510,8 @@ CycleOutcome run_cycle(const CycleRequest& request) {
         if (!newest_session.empty()) {
             history.sessions_until = newest_session;
         }
-        save("the skip");
-        say("[cycle] no new data -- skipped");
+        save(kPassSkipped, "the skip");
+        say(kPassSkipped, "[cycle] no new data -- skipped");
         outcome.ok = true;
         outcome.record = record;
         outcome.history = history;
@@ -524,7 +527,7 @@ CycleOutcome run_cycle(const CycleRequest& request) {
         return outcome;
     }
     record.dataset_rows = rows;
-    say("[cycle] " + std::to_string(rows) + " example(s) from " + source_label);
+    say(kPassMerging, "[cycle] " + std::to_string(rows) + " example(s) from " + source_label);
 
     // --- the pipeline, every stage on the merged dataset -----------------------
     harness::PipelineSpec spec = *request.spec;
@@ -546,10 +549,11 @@ CycleOutcome run_cycle(const CycleRequest& request) {
     pipeline.gate_mode = request.gate_mode;
     pipeline.continue_on_fail = false;
     pipeline.on_progress = request.on_progress;
+    pipeline.on_manifest = request.on_manifest;
     pipeline.cancellation = request.cancellation;
     record.pipeline_id = pipeline.pipeline_run_id;
-    say("[cycle] pipeline " + pipeline.pipeline_run_id + " (" + spec.name +
-        "): " + std::to_string(spec.stages.size()) + " stage(s)");
+    say(kPassTraining, "[cycle] pipeline " + pipeline.pipeline_run_id + " (" + spec.name +
+                           "): " + std::to_string(spec.stages.size()) + " stage(s)");
     const PipelineOutcome ran = run_pipeline(pipeline);
     if (ran.cancelled) {
         outcome.cancelled = true;
@@ -566,12 +570,12 @@ CycleOutcome run_cycle(const CycleRequest& request) {
         if (outcome.halted_now) {
             history.runs.back().note = history.halt_reason;
         }
-        save("the failure");
-        say("[cycle] FAILED -- " + history.runs.back().gate_reason);
+        save(kPassFailed, "the failure");
+        say(kPassFailed, "[cycle] FAILED -- " + history.runs.back().gate_reason);
         if (outcome.halted_now) {
-            say("[cycle] " + history.halt_reason +
-                " -- the loop is halted; 'apogee train cycle "
-                "resume' after fixing the data or the suite");
+            say(kPassHalted, "[cycle] " + history.halt_reason +
+                                 " -- the loop is halted; 'apogee train cycle "
+                                 "resume' after fixing the data or the suite");
         }
         outcome.ok = true;
         outcome.record = history.runs.back();
@@ -598,10 +602,10 @@ CycleOutcome run_cycle(const CycleRequest& request) {
     const Anchor anchor = effective_anchor(history, request.config);
     record.anchor_score = anchor.score;
     const double threshold = request.config.regression_threshold;
-    say("[cycle] gate -- current " + percent_of(record.cycle_score) + ", previous " +
-        percent_of(record.prev_score) + ", anchor " + percent_of(anchor.score) +
-        (anchor.version > 0 ? " (v" + std::to_string(anchor.version) + ")" : "") + ", threshold " +
-        percent_of(threshold));
+    say(kPassGating, "[cycle] gate -- current " + percent_of(record.cycle_score) + ", previous " +
+                         percent_of(record.prev_score) + ", anchor " + percent_of(anchor.score) +
+                         (anchor.version > 0 ? " (v" + std::to_string(anchor.version) + ")" : "") +
+                         ", threshold " + percent_of(threshold));
     const AnchorGate gate =
         anchor_gate_pass(record.cycle_score, record.prev_score, anchor.score, threshold);
     if (!gate.pass()) {
@@ -621,15 +625,16 @@ CycleOutcome run_cycle(const CycleRequest& request) {
     }
 
     // --- promote, consume, record --------------------------------------------
-    say("[cycle] gate PASSED (" + percent_of(record.cycle_score) + ") -- promoting " +
-        final_stage.run_id + " into " + request.config.backend);
+    say(kPassPromoting, "[cycle] gate PASSED (" + percent_of(record.cycle_score) +
+                            ") -- promoting " + final_stage.run_id + " into " +
+                            request.config.backend);
     const CyclePromotion promoted = request.promote(final_stage.run_id);
     if (!promoted.ok) {
         return fail("promote: " + promoted.error);
     }
     for (const auto& [queue, files] : queues) {
         if (const std::string failure = consume_directory_files(files, queue); !failure.empty()) {
-            say("[cycle] warning: could not move the consumed files: " + failure);
+            say(kPassPromoting, "[cycle] warning: could not move the consumed files: " + failure);
         }
     }
     if (!newest_session.empty()) {
@@ -638,8 +643,8 @@ CycleOutcome run_cycle(const CycleRequest& request) {
     if (history.anchor_version == 0 && request.config.anchor_version <= 0) {
         history.anchor_version = promoted.version;
         history.anchor_score = record.cycle_score;
-        say("[cycle] anchor set to v" + std::to_string(promoted.version) + " (" +
-            percent_of(record.cycle_score) + ")");
+        say(kPassPassed, "[cycle] anchor set to v" + std::to_string(promoted.version) + " (" +
+                             percent_of(record.cycle_score) + ")");
     } else if (request.config.anchor_version > 0) {
         history.anchor_version = anchor.version;
         history.anchor_score = anchor.score;
@@ -647,9 +652,9 @@ CycleOutcome run_cycle(const CycleRequest& request) {
     record.gate = std::string{kGatePass};
     record.promoted_version = promoted.version;
     record_cycle_run(history, record);
-    save("the pass");
-    say("[cycle] complete -- " + request.config.backend + " promoted to v" +
-        std::to_string(promoted.version) + " (" + promoted.weights_path + ")");
+    save(kPassPassed, "the pass");
+    say(kPassPassed, "[cycle] complete -- " + request.config.backend + " promoted to v" +
+                         std::to_string(promoted.version) + " (" + promoted.weights_path + ")");
     outcome.ok = true;
     outcome.record = record;
     outcome.history = history;

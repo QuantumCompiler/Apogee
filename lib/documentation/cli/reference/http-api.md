@@ -1231,7 +1231,8 @@ eval_passed, eval_score]} | {kind: "pipeline", id, spec_name, status,
 stages, passed, started_at[, completed_at]}]}` -- `data` is `[]` and never
 null. A run's `status` is `running`, `complete`, `failed` or `cancelled`; a
 pipeline's `running`, `complete`, `aborted` or `failed`. `?kind=run|pipeline`
-keeps one kind; any other value is `400`.
+keeps one kind; any other value is `400`. Since 55h `apogee train pipeline
+status --output-format json` prints the `?kind=pipeline` body byte for byte.
 
 ### `GET /v1/admin/training/runs/{id}`
 
@@ -1244,7 +1245,9 @@ pipeline run's: `200 {"kind": "pipeline", "pipeline": {pipeline_run_id,
 spec_name, student, base_model, status, started_at[, completed_at], stages:
 [{index, name, run_id, base_model, dataset, adapter_dir, fused_dir, status,
 cumulative_score, cumulative_passed[, eval_results]}]}}`; `404` when
-neither, `400` for an id that is not a plain name.
+neither, `400` for an id that is not a plain name. Since 55h `apogee train
+pipeline status <id> --output-format json` prints a pipeline run's body byte for
+byte, from the same builder.
 
 ### `GET /v1/admin/training/versions`
 
@@ -1270,8 +1273,9 @@ anchor_score, consecutive_fails, total_runs, halted, halt_reason,
 sessions_until, runs: [{run_at, source, dataset_rows, pipeline_id, gate:
 "pass" | "fail" | "skipped", gate_reason, cycle_score, prev_score,
 anchor_score, promoted_version[, note]}], active: bool}`; `404` until the
-first `train cycle run` has written it. `cycle run`, `halt` and `resume`
-have no route.
+first `train cycle run` has written it. Since 55h `apogee train cycle status
+--output-format json` prints this body byte for byte, and refuses where this
+answers `404`. `cycle run`, `halt` and `resume` have no route.
 
 ### `GET /v1/admin/tasks`
 

@@ -39,14 +39,16 @@ as chat does (see
 [A task's run](#a-tasks-run)).
 Since 52b `models pull`, `video generate`, `video compose` and `voice say`
 take `--output-format stream-json` too: their progress as events, their
-document last (see [A long job's run](#a-long-jobs-run)).
+document last (see [A long job's run](#a-long-jobs-run)) -- and since 55h
+`train pipeline run`, `train pipeline resume` and `train cycle run` (see
+[A training run](#a-training-run-train-pipeline-and-train-cycle)).
 
 ## Reading the stream
 
 One JSON object per line on stdout. Every object has a `type`.
 
 ```jsonl
-{"type":"session","protocol_version":1,"model":"claude-sonnet-5","chat_id":"20261024-120000-a1b2","next_turn":1,"capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"tools":true,"ask":true,"schema":"2026-10-24"}}
+{"type":"session","protocol_version":1,"model":"claude-sonnet-5","chat_id":"20261024-120000-a1b2","next_turn":1,"capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"tools":true,"ask":true,"schema":"2026-10-25"}}
 {"type":"thinking"}
 {"type":"thinking_delta","text":"…"}
 {"type":"memory","chats":1,"decisions":1,"sessions":[{"id":"20261019-142233-a1b2c3","name":"asyncio timeouts in the scraper","updated":"2026-10-19T14:40:02Z"}]}
@@ -279,7 +281,7 @@ diagnostics, as ever. Without the flag every verb prints exactly what it did
 before.
 
 ```jsonl
-{"type":"job","verb":"models pull","protocol_version":1,"schema":"2026-10-24"}
+{"type":"job","verb":"models pull","protocol_version":1,"schema":"2026-10-25"}
 {"type":"notice","text":"pulling org/model, then converting it to F16 and registering it"}
 {"type":"stage","index":1,"count":3,"label":"pull org/model's full weights","state":"started"}
 {"type":"bytes","done":67108864,"total":4971201024,"file":"model-00001-of-00002.safetensors","index":1,"count":4}
@@ -290,7 +292,7 @@ before.
 ```
 
 ```jsonl
-{"type":"job","verb":"video compose","protocol_version":1,"schema":"2026-10-24"}
+{"type":"job","verb":"video compose","protocol_version":1,"schema":"2026-10-25"}
 {"type":"notice","text":"plan: \"Tides\" -- 2 scenes, about 5.5 s of video"}
 {"type":"scene","scene":1,"scenes":2,"state":"speaking"}
 {"type":"ready","device":"mps","engine":"torch","scene":1}
@@ -309,7 +311,7 @@ before.
 | Event | Meaning |
 |---|---|
 | `job` | First: the `verb`, `protocol_version` and `schema` — the same versions a session's announce. |
-| `stage` | A step of `models pull`'s chain (`--safetensors --register[-with]`): `index` of `count`, its `label` in the chain's words, `state` `started`, `done` or `failed`. A failed stage is followed by the chain's own `notice`s saying where it stopped and the one command that resumes it -- or, since 55d, where it stopped alone, when the stage found nothing after it could run (a pulled draft head, whose refusal names its one conversion). |
+| `stage` | A step of `models pull`'s chain (`--safetensors --register[-with]`): `index` of `count`, its `label` in the chain's words, `state` `started`, `done` or `failed`. Since 55h a pipeline's stage too, as its manifest records it ([below](#a-training-run-train-pipeline-and-train-cycle)). A failed stage is followed by the chain's own `notice`s saying where it stopped and the one command that resumes it -- or, since 55d, where it stopped alone, when the stage found nothing after it could run (a pulled draft head, whose refusal names its one conversion). |
 | `bytes` | Bytes a pull has moved — a download, a copy from the Ollama store, a hash: `done`, and `total` **only when known** (never guessed). In a tree of files (a snapshot, an MLX model, a pipeline, a voice model), the `file` moving and its `index` of `count`. Sent at each file's start, at each whole percent of a known total (each 16 MiB of an unknown one), and at its end. |
 | `ready` | A runtime loaded: `device`, and `dtype` and `mode` (`t2v`, `i2v`) when the driver says them. Since M24 `video generate`'s, `voice say`'s and a composition's also carry `engine`, the engine the run takes — `torch` or `mlx` — the same word the final document's `engine` says, so a run is known as MLX's while it runs. A `ready` without it (an older build) is PyTorch's. |
 | `step` | A denoising step done: `step` of `steps`. |
@@ -334,6 +336,80 @@ GGUF, a SafeTensors snapshot, an MLX model, a pipeline, a voice model and the
 register chain's download, what it staged removed (`cancelled -- nothing was
 written`). `models pull` takes `text` or `stream-json` only; the three media
 verbs take `text`, `json` or `stream-json`.
+
+### A training run: `train pipeline` and `train cycle`
+
+Since 55h `train pipeline run`, `train pipeline resume` and `train cycle run`
+take `--output-format stream-json` -- `text` or `stream-json`, no `json` of
+their own: the document is the read's, `train pipeline status` and `train cycle
+status` ([below](#everything-else-is-a-cli-command)). The same relay: nothing
+is narrated a second time. A pipeline's stages are **its manifest's** -- the
+manifest under `training/pipelines/<id>/` is rewritten on every transition, and
+each write is relayed once it is on disk, as a `stage` for every stage whose
+status that write moved (on the first write every stage, so a host joining at a
+resume knows which already passed). The trainer's ticks, which the terminal's
+status line shows, are `iteration`s; every other line the terminal would print
+-- the `[pipeline]` header, `[train]`, `[eval]`, `[gate]`, `[fuse]` and
+`[warn]` lines, and in a cycle the promotion's `[promote]` lines -- is a
+`notice` in the same words; a cycle pass's own narration is its `pass` events.
+In the text view all of it goes to stderr; under `stream-json` it is on the
+stream and stderr keeps the diagnostics -- a refusal or a failure is said there
+as well as in the stream's `error`. Without the flag every verb prints exactly
+what it did before.
+
+```jsonl
+{"type":"job","verb":"train pipeline run","protocol_version":1,"schema":"2026-10-25"}
+{"type":"notice","text":"[pipeline] skills as pipe-20261025-120000: 2 stage(s), mlx on aaaaaaaaaaaa; no judge: unmatched items skip"}
+{"type":"stage","index":1,"count":2,"label":"a","state":"pending","pipeline_run_id":"pipe-20261025-120000"}
+{"type":"stage","index":2,"count":2,"label":"b","state":"pending","pipeline_run_id":"pipe-20261025-120000"}
+{"type":"stage","index":1,"count":2,"label":"a","state":"training","pipeline_run_id":"pipe-20261025-120000","run_id":"pipe-20261025-120000-s0"}
+{"type":"notice","text":"[train] stage 1/2 'a': mlx lora on aaaaaaaaaaaa, dataset starter.jsonl"}
+{"type":"iteration","iteration":10,"iterations":600,"loss":1.7342,"lr":0.0001,"throughput":2.4,"stage":1}
+…
+{"type":"stage","index":1,"count":2,"label":"a","state":"evaluating","pipeline_run_id":"pipe-20261025-120000","run_id":"pipe-20261025-120000-s0"}
+{"type":"notice","text":"[gate] stage 'a' PASSED the cumulative eval -- 100% (24/24)"}
+{"type":"stage","index":1,"count":2,"label":"a","state":"fusing","pipeline_run_id":"pipe-20261025-120000","run_id":"pipe-20261025-120000-s0","cumulative_score":1.0}
+{"type":"stage","index":1,"count":2,"label":"a","state":"passed","pipeline_run_id":"pipe-20261025-120000","run_id":"pipe-20261025-120000-s0","cumulative_score":1.0}
+…
+{"type":"document","document":{"kind":"pipeline","pipeline":{"pipeline_run_id":"pipe-20261025-120000","spec_name":"skills","status":"complete","stages":[…],…}}}
+```
+
+```jsonl
+{"type":"job","verb":"train cycle run","protocol_version":1,"schema":"2026-10-25"}
+{"type":"pass","state":"collecting","text":"[cycle] directory: 1 file(s) in /Users/you/queue"}
+{"type":"pass","state":"merging","text":"[cycle] 12 example(s) from directory"}
+{"type":"pass","state":"training","text":"[cycle] pipeline cycle-20261025-030000 (nightly): 1 stage(s)"}
+{"type":"stage","index":1,"count":1,"label":"base","state":"pending","pipeline_run_id":"cycle-20261025-030000"}
+…
+{"type":"pass","state":"gating","text":"[cycle] gate -- current 96%, previous 94%, anchor 95% (v3), threshold 2%"}
+{"type":"pass","state":"promoting","text":"[cycle] gate PASSED (96%) -- promoting cycle-20261025-030000-s0 into nightly-model"}
+{"type":"notice","text":"[promote] run cycle-20261025-030000-s0 -> nightly-model v4"}
+…
+{"type":"pass","state":"passed","text":"[cycle] complete -- nightly-model promoted to v4 (/Users/you/.apogee/models/…/nightly-model-v4.gguf)"}
+{"type":"document","document":{"backend":"nightly-model","anchor_version":3,"halted":false,"runs":[…],"active":false,…}}
+```
+
+| Event | Meaning |
+|---|---|
+| `stage` | A pipeline's stage as its manifest records it: `index` of `count` (from 1), its `label` the stage's name, `state` the manifest's own word -- `pending`, `training`, `evaluating`, `fusing` (an intermediate stage merged into the next one's base), `passed` or `failed` -- with `pipeline_run_id`, the stage's own `run_id` once it has one (what `train eval` and `train promote` take), and `cumulative_score`, 0 to 1, once its cumulative gate has scored it. A run Ctrl-C stopped leaves its stage where the manifest left it; the pipeline's own status is the document's. |
+| `iteration` | A training iteration, as the trainer reported it: `iteration` of `iterations` (absent when the trainer did not say), `loss`, `lr` and `throughput` (iterations a second) -- the status line's facts -- and the pipeline `stage` it belongs to, from 1. As often as the trainer reports, never more. |
+| `pass` | A line of a cycle pass's narration, `text` as the terminal says it, and `state`, where the pass is: `collecting` (its sources read), `merging`, `training` (its pipeline -- whose `stage`s, `iteration`s and `notice`s follow), `gating` (the dual gate against the last passing pass and the anchor), `promoting` -- or how it ended: `skipped` (no new data), `failed`, `halted` (the circuit breaker tripped on this pass) or `passed`. More states may be added. |
+
+**The document is the read's**, last, whatever became of the run: for a
+pipeline, what `apogee train pipeline status <id> --output-format json` prints
+-- its `status` `complete`, `aborted` (a hard gate failed, or a Ctrl-C) or
+`failed` -- and for a cycle pass, what `apogee train cycle status
+--output-format json` prints, the history with the pass recorded. A run that
+failed, or was cancelled, sends it and then the `error` that ends the stream: a
+pipeline's gate failure in the words stderr gets, a cycle's `cycle FAILED --
+<reason>`, a Ctrl-C's `cancelled; recorded as aborted -- 'apogee train pipeline
+resume <id>' continues it` or `cancelled before an outcome was recorded`. A run
+refused before it starts -- a spec, a student or a dataset that does not
+resolve, the cycle's lock held, the loop halted, a source that cannot be read
+-- sends `job` and its `error` and no document. The exit codes are the text
+view's: a pipeline `0` complete, `2` aborted or failed, `130` cancelled, `1`
+refused; a pass `0` passed or skipped, `2` failed, `130` cancelled, `1`
+refused.
 
 ## Validating and generating: the schema
 
@@ -1073,6 +1149,8 @@ apogee graph stats <name> --output-format json       # {"object":"graph.stats","
 apogee graph show <name> <entity> --output-format json   # {"object":"graph.show","match",…,"data":[entities]}
 apogee train status --output-format json    # byte for byte GET /v1/admin/training/status
 apogee train versions [backend] --output-format json   # byte for byte GET /v1/admin/training/versions
+apogee train pipeline status [<id>] --output-format json   # byte for byte GET /v1/admin/training/runs?kind=pipeline, or …/runs/{id}
+apogee train cycle status --output-format json   # byte for byte GET /v1/admin/training/cycle
 apogee datasets list --output-format json   # byte for byte GET /v1/admin/datasets
 apogee datasets info <name> --output-format json       # byte for byte GET /v1/admin/datasets/{name}
 apogee datasets kits --output-format json   # byte for byte GET /v1/admin/datasets/kits
@@ -1307,6 +1385,26 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   scored on the quantized base the entry serves, `eval_scored_on` (`<base>
   (<precision>)`). A backend with no history is refused as the text refuses
   it.
+- **`train pipeline status`** and **`train cycle status`** (since 55h): the
+  bodies the control plane serves, from the same builders. Without an id, every
+  pipeline run -- a cycle pass's among them -- newest first, `{"object":
+  "list", "data": [{kind: "pipeline", id, spec_name, status, stages, passed,
+  started_at[, completed_at]}]}`, `data` `[]` and never null; with one, that
+  run's manifest whole, `{"kind": "pipeline", "pipeline": {pipeline_run_id,
+  spec_name, student, base_model, status, started_at[, completed_at], stages:
+  [{index, name, run_id, base_model, dataset, adapter_dir, fused_dir, status,
+  cumulative_score, cumulative_passed[, eval_results]}]}}` -- each stage's
+  `status` the word a run's `stage` events carry. An id no pipeline run
+  answers is refused as the text refuses it, and so is one that is not a plain
+  name. The cycle's is its history, `{backend, anchor_version, anchor_score,
+  consecutive_fails, total_runs, halted, halt_reason, sessions_until, runs:
+  [{run_at, source, dataset_rows, pipeline_id, gate, gate_reason, cycle_score,
+  prev_score, anchor_score, promoted_version[, note]}], active}`, `active`
+  whether a pass holds the lock now. **Until the first pass has written the
+  history there is no document**: the read is refused (`no cycle history yet`,
+  exit `1`), as the route answers `404`, where the text view says `no cycle
+  runs yet` -- `train status`'s `cycle` is `null` until then. Whether a cycle
+  is configured at all is the config's to say.
 - **`datasets list`**, **`datasets info`** and **`datasets kits`** (since
   37f): the control plane's bodies -- each dataset's `name`, `path`, `lines`,
   `bytes` and `shape`; each kit's `name`, `path`, `description`,
