@@ -10766,7 +10766,7 @@ The refusal was true but incomplete. The set is Wan's original layout, and its r
   - `version-check.sh` is green: "merging publishes v0.2.0, with the CLI 0.2.0 this run builds".
   - One number holds in four places: VERSION, CMake, ROADMAP's In progress header and the earliest backlog table.
 - [x] **ROADMAP's state swap.**
-  - v0.1.9 moved to Shipped releases, headed `(released 2026-10-20 · [release notes](…/releases/tag/v0.1.9))`, all 17 boxes already checked. The lightweight tag `v0.1.9` sits on merge `81b0da7d`, and the release was published 2026-10-20T15:26Z.
+  - v0.1.9 moved to Shipped releases, its header carrying the release date (2026-10-20) and its release-notes link, all 17 boxes already checked. The lightweight tag `v0.1.9` sits on merge `81b0da7d`, and the release was published 2026-10-20T15:26Z.
   - In progress holds v0.2.0 alone. The live branch is named v0.2.0.
   - The queue line under v0.2.1 reads "Nothing is queued past v0.2.1 yet".
   - The GUI idea points at `lib/documentation/gui/`, its docs home since 2026-10-20.
