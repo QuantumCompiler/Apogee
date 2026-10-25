@@ -97,10 +97,10 @@ std::vector<harness::ChatMessage> splice_transient(
     return out;
 }
 
-std::vector<harness::ChatMessage> compact_history(const harness::Harness& harness,
-                                                  const std::vector<harness::ChatMessage>& history,
-                                                  const std::string& model,
-                                                  const harness::CancellationToken& cancellation) {
+Compaction compact_history(const harness::Harness& harness,
+                           const std::vector<harness::ChatMessage>& history,
+                           const std::string& model,
+                           const harness::CancellationToken& cancellation) {
     std::vector<harness::ChatMessage> system_messages;
     std::vector<harness::ChatMessage> conversation;
     for (const harness::ChatMessage& message : history) {
@@ -111,9 +111,19 @@ std::vector<harness::ChatMessage> compact_history(const harness::Harness& harnes
         }
     }
 
-    if (conversation.empty()) {
-        return history;
+    // Nothing to fold without an exchange (55b): an empty conversation, or
+    // only the answer the last compaction kept -- summarising that again would
+    // stack a second summary and fold nothing.
+    if (std::ranges::none_of(conversation, [](const harness::ChatMessage& message) {
+            return message.role == harness::Role::User;
+        })) {
+        return Compaction{
+            .outcome = Compaction::Outcome::Nothing, .history = history, .failure = {}};
     }
+    const auto failed = [&history](std::string why) {
+        return Compaction{
+            .outcome = Compaction::Outcome::Failed, .history = history, .failure = std::move(why)};
+    };
 
     harness::ChatRequest request;
     request.model = model;
@@ -131,13 +141,13 @@ std::vector<harness::ChatMessage> compact_history(const harness::Harness& harnes
     std::string summary;
     try {
         summary = harness.chat(request, cancellation).message.content.plain_text();
-    } catch (const harness::HarnessError&) {
+    } catch (const harness::HarnessError& e) {
         // A failed compaction degrades to a longer prompt, never to a lost
-        // conversation. The caller may be told, but the history is intact.
-        return history;
+        // conversation: the history is intact, and the caller says why.
+        return failed(e.what());
     }
-    if (summary.empty()) {
-        return history;
+    if (summary.find_first_not_of(" \t\r\n") == std::string::npos) {
+        return failed("the summary came back empty");
     }
 
     // Opened by the preamble a read of the saved history knows a compaction
@@ -154,7 +164,8 @@ std::vector<harness::ChatMessage> compact_history(const harness::Harness& harnes
             break;
         }
     }
-    return compacted;
+    return Compaction{
+        .outcome = Compaction::Outcome::Compacted, .history = std::move(compacted), .failure = {}};
 }
 
 }  // namespace apogee::agentloop

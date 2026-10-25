@@ -262,6 +262,138 @@ assert chats() == [(chat_id, "Gemma4-26B-Instruct", 3)], chats()
 print(f"chat-id: named {chat_id}, listed after a turn; empty sessions wrote nothing - OK")
 PY
 
+# --- the session record tells the truth (55b) ----------------------------------
+# The audit's probes, on the real binary in a home of their own: a `compact`
+# with nothing to fold, and one whose utility fails, each said as it is and
+# counted nowhere; a legacy chat resumed over the protocol saying what it could
+# not carry over as `notice`s, not on stderr; a file with answers and no count
+# resuming on the next number; and a live chat that keeps the name `chats
+# title` gave it while it ran, and stays deleted after `chats delete`, saying
+# so.
+RT_HOME="$WORK_DIR/record-truth"
+mkdir -p "$RT_HOME/bin"
+printf '{"turns":[{"text":"Answer {{last_user}}"}]}' >"$RT_HOME/chat.json"
+printf '#!/bin/sh\necho "the utility fell over" >&2\nexit 1\n' >"$RT_HOME/bin/claude"
+chmod +x "$RT_HOME/bin/claude"
+rt() { APOGEE_HOME="$RT_HOME" "$APOGEE_BIN" "$@" </dev/null >/dev/null; }
+rt config init || fail "record-truth: config init"
+rt config add-backend mock --type mock --model-path "$RT_HOME/chat.json" || fail "record-truth: add mock"
+rt config set-default mock || fail "record-truth: set-default"
+rt config add-backend broken --type claude-cli || fail "record-truth: add broken"
+rt config set-backend broken --binary "$RT_HOME/bin/claude" || fail "record-truth: point broken"
+python3 - "$APOGEE_BIN" "$RT_HOME" <<'PY' || fail "the session record does not tell the truth"
+import json, os, subprocess, sys
+
+binary, home = sys.argv[1], sys.argv[2]
+env = {**os.environ, "APOGEE_HOME": home}
+
+def run(*args):
+    got = subprocess.run([binary, *args], env=env, capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, timeout=60)
+    return got
+
+def drive(name, lines, *flags):
+    text = "".join(json.dumps(line) + "\n" for line in lines)
+    got = subprocess.run([binary, "chat", "--no-recall", "--output-format", "stream-json",
+                          "--input-format", "stream-json", *flags], env=env, input=text,
+                         capture_output=True, text=True, timeout=60)
+    assert got.returncode == 0, got.stderr
+    with open(os.path.join(home, name + ".jsonl"), "w") as kept:  # validated below
+        kept.write(got.stdout)
+    return [json.loads(line) for line in got.stdout.splitlines() if line.strip()], got.stderr
+
+def notices(events):
+    return [e["text"] for e in events if e["type"] == "notice"]
+
+def chats():
+    got = run("chats", "list", "--output-format", "json")
+    assert got.returncode == 0, got.stderr
+    return [(row["id"], row["name"], row["turns"]) for row in json.loads(got.stdout)["data"]]
+
+def write(chat_id, record):
+    os.makedirs(os.path.join(home, "sessions"), exist_ok=True)
+    with open(os.path.join(home, "sessions", chat_id + ".json"), "w") as f:
+        json.dump(record, f)
+
+# Finding 1: nothing to fold, said and not counted -- the probe's empty compact.
+events, _ = drive("rt-empty", [{"type": "compact"}])
+assert notices(events) == ["nothing to compact -- no exchange to fold yet"], events
+
+# Finding 3: a legacy chat's degradations reach the driver as notices.
+messages = [{"role": "user", "content": "q1"}, {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "q2"}, {"role": "assistant", "content": "a2"}]
+write("legacy-chat", {"chat_id": "legacy-chat", "backend": "gone", "messages": messages})
+events, err = drive("rt-legacy", [], "--resume", "legacy-chat")
+assert [e["type"] for e in events] == ["session", "notice", "notice"], events
+assert notices(events) == [
+    "resume: this chat predates session metadata; resuming best-effort with current defaults",
+    "resume: backend 'gone' is no longer configured; using the default instead"], events
+assert "[resume]" not in err, err
+
+# Finding 4: two answers and no count -- the resumed session numbers on from 2.
+write("nocount", {"schema_version": 2, "chat_id": "nocount", "backend": "mock",
+                  "messages": messages})
+shown = json.loads(run("chats", "show", "nocount", "--output-format", "json").stdout)
+assert [t["turn"] for t in shown["turns"]] == [1, 2], shown["turns"]
+assert shown["warnings"] == [], shown
+events, _ = drive("rt-nocount", [{"type": "user", "text": "q3"}], "--resume", "nocount")
+assert events[0]["next_turn"] == 3, events[0]
+assert [e["turn"] for e in events if e["type"] == "result"] == [3], events
+shown = json.loads(run("chats", "show", "nocount", "--output-format", "json").stdout)
+assert [t["turn"] for t in shown["turns"]] == [1, 2, 3], shown["turns"]
+
+# Finding 5: a live chat keeps an outside rename, and an outside delete.
+child = subprocess.Popen([binary, "chat", "--no-recall", "--output-format", "stream-json",
+                          "--input-format", "stream-json"], env=env, stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+seen = []
+
+def turn(text):
+    child.stdin.write(json.dumps({"type": "user", "text": text}) + "\n")
+    child.stdin.flush()
+    while True:
+        line = child.stdout.readline()
+        assert line, "the live chat ended early"
+        seen.append(line)
+        event = json.loads(line)
+        if event["type"] in ("result", "error"):
+            return event
+
+opened = json.loads(child.stdout.readline())
+seen.append(json.dumps(opened) + "\n")
+chat_id = opened["chat_id"]
+assert turn("one")["type"] == "result"
+renamed = run("chats", "title", chat_id, "Renamed By GUI")
+assert renamed.returncode == 0, renamed.stderr
+assert turn("two")["type"] == "result"
+live = [row for row in chats() if row[0] == chat_id]
+assert live == [(chat_id, "Renamed By GUI", 2)], live
+deleted = run("chats", "delete", chat_id)
+assert deleted.stdout.strip() == "deleted " + chat_id, deleted
+assert turn("three")["type"] == "result"
+child.stdin.close()
+seen.extend(child.stdout.readlines())
+assert child.wait(timeout=60) == 0, child.stderr.read()
+said = [json.loads(l)["text"] for l in seen if json.loads(l)["type"] == "notice"]
+assert said == ["chat " + chat_id + " was deleted while this session ran -- it stays deleted, "
+                "and nothing more of it is saved"], said
+assert all(row[0] != chat_id for row in chats()), chats()
+with open(os.path.join(home, "rt-live.jsonl"), "w") as kept:
+    kept.writelines(seen)
+
+# Finding 1 again: a utility that fails is said by name, and counted nowhere.
+assert run("config", "set-default-utility", "broken").returncode == 0
+events, _ = drive("rt-failed", [{"type": "compact"}], "--resume", "nocount")
+said = notices(events)
+assert len(said) == 1 and said[0].startswith("compaction by broken failed: ") and \
+    said[0].endswith(" -- the history is unchanged"), said
+info = run("chats", "info", "nocount").stdout
+assert "compacted:" not in info, info
+refused = run("chats", "compact", "nocount", "--yes")
+assert refused.returncode == 1 and "compaction by broken failed: " in refused.stderr, refused
+print("record-truth: compaction, numbering, resume notices and outside edits told truly - OK")
+PY
+
 # --- turn ids and cancel (28f) ------------------------------------------------
 # A driver over real pipes: every turn-scoped event carries its turn; a cancel
 # with nothing in flight changes nothing; a cancel mid-stream ends the turn in

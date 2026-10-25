@@ -85,6 +85,30 @@ struct ContextUsage {
     const std::vector<harness::ChatMessage>& messages,
     const std::vector<harness::ChatMessage>& prefix, std::size_t at);
 
+/// What a compaction did (55b): the history to keep, and whether anything was
+/// folded. Every door says and counts it as it is -- a compaction that
+/// changed nothing is never reported, or counted, as one that did.
+struct Compaction {
+    enum class Outcome : std::uint8_t {
+        /// The earlier exchanges folded into a summary.
+        Compacted,
+        /// No exchange to fold: system messages alone, or with them only the
+        /// answer an earlier compaction kept.
+        Nothing,
+        /// The summariser failed or answered nothing.
+        Failed,
+    };
+    Outcome outcome = Outcome::Nothing;
+    /// The compacted history -- or, when nothing was folded, the one given.
+    std::vector<harness::ChatMessage> history{};
+    /// Why it failed, in a line: the call's error, or an empty summary.
+    std::string failure{};
+
+    [[nodiscard]] bool compacted() const noexcept {
+        return outcome == Outcome::Compacted;
+    }
+};
+
 /// Summarises `history` into a single system message to free context space.
 ///
 /// Preserves any leading system messages, replaces the conversation with a
@@ -95,8 +119,10 @@ struct ContextUsage {
 /// authoritative record, so the model can answer "what have we discussed?"
 /// correctly rather than treating its own summary as something it once said.
 ///
-/// **On any failure the original history is returned unchanged.** A failed
-/// compaction must degrade to a longer prompt, never to a lost conversation.
+/// **On any failure the original history is kept unchanged**, and the result
+/// says it failed and why. A failed compaction must degrade to a longer
+/// prompt, never to a lost conversation -- nor to a claim that it compacted.
+/// A history with no exchange to fold asks no model and says so.
 ///
 /// Tool results are shown to the summariser as their stubs (26c): tool
 /// output is condensed before conversation.
@@ -104,8 +130,9 @@ struct ContextUsage {
 /// `model` writes the summary: the utility model when one is set, else the
 /// conversation's own backend (26b). It is asked as a side request, so a
 /// local chat model's cache is not disturbed by it.
-[[nodiscard]] std::vector<harness::ChatMessage> compact_history(
-    const harness::Harness& harness, const std::vector<harness::ChatMessage>& history,
-    const std::string& model, const harness::CancellationToken& cancellation = {});
+[[nodiscard]] Compaction compact_history(const harness::Harness& harness,
+                                         const std::vector<harness::ChatMessage>& history,
+                                         const std::string& model,
+                                         const harness::CancellationToken& cancellation = {});
 
 }  // namespace apogee::agentloop

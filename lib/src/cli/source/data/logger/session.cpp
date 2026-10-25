@@ -10,6 +10,7 @@
 #include <random>
 #include <sstream>
 #include <stdexcept>
+#include <system_error>
 
 #include "contracts/config_edit.h"
 #include "contracts/layout.h"
@@ -235,7 +236,7 @@ std::string Session::display_name() const {
 }
 
 bool Session::unwritten() const noexcept {
-    return never_written || (new_chat && turns == 0);
+    return never_written || deleted || (new_chat && turns == 0);
 }
 
 std::filesystem::path sessions_dir() {
@@ -530,6 +531,12 @@ LoadedSession deserialize(std::string_view text, const KnownDependencies& known)
         }
     }
 
+    // One count (55b): a file whose count is short of the answers it holds
+    // -- older than the count, or a served client's several exchanges at
+    // once -- carries the answers', so `chats list`, `chats show` and a
+    // resumed session's `next_turn` agree.
+    session.turns = counted_turns(session);
+
     if (session.schema_version == 0) {
         loaded.warnings.push_back(ResumeWarning{
             WarningKind::SchemaLegacy,
@@ -549,11 +556,44 @@ LoadedSession deserialize(std::string_view text, const KnownDependencies& known)
     return loaded;
 }
 
-void save(const Session& session) {
+Saved save(Session& session) {
     if (session.unwritten()) {
         // A private chat (52d): nothing written, ever. A new chat with no
-        // turn (M28): nothing yet -- there is nothing in it to resume.
-        return;
+        // turn (M28): nothing yet -- there is nothing in it to resume. One
+        // deleted while it ran (55b): nothing more.
+        return Saved::Unwritten;
+    }
+    const std::filesystem::path path = session_path(session.chat_id);
+    if (session.filed_name.has_value()) {
+        // The one store is edited from outside too (55b): what the file
+        // holds now is read before it is replaced. Gone, it was deleted --
+        // and stays so. A name other than the one this process left there
+        // was given outside, and wins over this session's copy.
+        std::error_code missing;
+        if (!std::filesystem::exists(path, missing)) {
+            session.deleted = true;
+            return Saved::Deleted;
+        }
+        std::string text;
+        {
+            // Closed before the rewrite below: Windows refuses to replace a
+            // file this process still holds open.
+            std::ifstream in(path, std::ios::binary);
+            std::ostringstream buffer;
+            buffer << in.rdbuf();
+            text = buffer.str();
+        }
+        // A file that does not parse is no edit to keep: this session's
+        // record replaces it.
+        const nlohmann::json filed = nlohmann::json::parse(text, nullptr, false);
+        if (filed.is_object()) {
+            const auto name = filed.find("custom_name");
+            const std::string now =
+                name != filed.end() && name->is_string() ? name->get<std::string>() : std::string{};
+            if (now != *session.filed_name) {
+                session.custom_name = now;
+            }
+        }
     }
     Session stamped = session;
     stamped.schema_version = kCurrentSchemaVersion;
@@ -564,7 +604,16 @@ void save(const Session& session) {
 
     // The same atomic path the config engine uses: an interrupted write leaves
     // the previous session intact rather than a truncated file.
-    harness::write_file_atomically(session_path(stamped.chat_id), serialize(stamped));
+    harness::write_file_atomically(path, serialize(stamped));
+    session.filed_name = session.custom_name;
+    return Saved::Written;
+}
+
+int counted_turns(const Session& session) {
+    const std::vector<Grouped> grouped = group_turns(session.messages);
+    const auto answered = static_cast<int>(std::ranges::count_if(
+        grouped, [](const Grouped& entry) { return entry.opened_by_user && entry.turn.answered; }));
+    return std::max(session.turns, answered);
 }
 
 LoadedSession load(const std::string& name, const KnownDependencies& known) {
@@ -594,7 +643,10 @@ LoadedSession load(const std::string& name, const KnownDependencies& known) {
     }
     std::ostringstream buffer;
     buffer << in.rdbuf();
-    return deserialize(buffer.str(), known);
+    LoadedSession loaded = deserialize(buffer.str(), known);
+    // The file as this process found it (55b): what its next save compares.
+    loaded.session.filed_name = loaded.session.custom_name;
+    return loaded;
 }
 
 SessionSweep rename_session_backend(std::string_view old_name, std::string_view new_name) {
@@ -752,17 +804,17 @@ std::vector<SavedTurn> saved_turns(const Session& session) {
         }
     }
 
-    // Numbered by the count the session keeps, backward from it: the last
-    // answered turn is `session.turns`, so a resumed session's `next_turn`
-    // follows the last entry. Turns a compaction folded are in that count
-    // and not in the history; a count short of the history's own answers --
-    // a file older than the count, a served client's several messages at
-    // once -- numbers from 1.
+    // Numbered by the one count (55b), backward from it: the last answered
+    // turn is `counted_turns`, so a resumed session's `next_turn` follows the
+    // last entry. Turns a compaction folded are in that count and not in the
+    // history; a count short of the history's own answers -- a file older
+    // than the count, a served client's several messages at once -- is the
+    // answers', and numbers from 1.
     const auto counted = [](const Grouped& entry) {
         return entry.opened_by_user && entry.turn.answered;
     };
     const auto answered = static_cast<std::int64_t>(std::ranges::count_if(grouped, counted));
-    std::int64_t count = std::max<std::int64_t>(0, std::int64_t{session.turns} - answered);
+    std::int64_t count = std::int64_t{counted_turns(session)} - answered;
     std::vector<SavedTurn> out;
     out.reserve(grouped.size());
     for (Grouped& entry : grouped) {

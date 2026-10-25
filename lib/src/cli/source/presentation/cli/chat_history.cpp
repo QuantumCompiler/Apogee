@@ -144,7 +144,8 @@ std::string format_session_info(const logger::Session& session) {
     return out.str();
 }
 
-nlohmann::json saved_chat_view(const logger::Session& session) {
+nlohmann::json saved_chat_view(const logger::Session& session,
+                               const std::vector<logger::ResumeWarning>& warnings) {
     nlohmann::json turns = nlohmann::json::array();
     for (const logger::SavedTurn& turn : logger::saved_turns(session)) {
         nlohmann::json tools = nlohmann::json::array();
@@ -170,6 +171,16 @@ nlohmann::json saved_chat_view(const logger::Session& session) {
     // The chat's facts as `chats list`'s row says them (52a), then every
     // attachment the chat holds -- a retrieved one rides no turn -- and the
     // turns.
+    // And what the loader could not read (55b): a gap in the turns is said in
+    // the document itself, never only on stderr, where a host reading the
+    // document never looks.
+    nlohmann::json dropped = nlohmann::json::array();
+    for (const logger::ResumeWarning& warning : warnings) {
+        if (warning.kind == logger::WarningKind::FieldDropped) {
+            dropped.push_back(nlohmann::json{{"kind", logger::to_string(warning.kind)},
+                                             {"message", warning.message}});
+        }
+    }
     return nlohmann::json{{"object", "chat"},
                           {"id", session.chat_id},
                           {"name", session.display_name()},
@@ -177,7 +188,8 @@ nlohmann::json saved_chat_view(const logger::Session& session) {
                           {"backend", session.backend},
                           {"model", session.model},
                           {"attachments", attachments_view(logger::saved_attachments(session))},
-                          {"turns", std::move(turns)}};
+                          {"turns", std::move(turns)},
+                          {"warnings", std::move(dropped)}};
 }
 
 std::string format_saved_chat(const logger::Session& session) {
@@ -365,15 +377,16 @@ void ChatsCommand::bind(CLI::App& root, const RootContext& context) {
         } catch (const std::exception& e) {
             fail(e.what());
         }
-        // A message the loader could not read is a gap in what follows: said.
+        // A message the loader could not read is a gap in what follows:
+        // said -- in the document's `warnings` (55b), else on stderr.
+        if (*show_format == ReadFormat::Json) {
+            write_document(std::cout, saved_chat_view(loaded.session, loaded.warnings));
+            return;
+        }
         for (const logger::ResumeWarning& warning : loaded.warnings) {
             if (warning.kind == logger::WarningKind::FieldDropped) {
                 std::cerr << "apogee chats: " << warning.message << "\n";
             }
-        }
-        if (*show_format == ReadFormat::Json) {
-            write_document(std::cout, saved_chat_view(loaded.session));
-            return;
         }
         std::cout << format_saved_chat(loaded.session);
     });
@@ -497,12 +510,36 @@ void ChatsCommand::bind(CLI::App& root, const RootContext& context) {
     remove->callback([delete_name]() { std::cout << delete_chat(*delete_name) << "\n"; });
 }
 
-std::string compact_conversation(const harness::Harness& harness, logger::Session& session) {
-    const std::string compactor =
-        helper_backend(harness.config(), harness::ModelRole::Utility, session.backend);
-    session.messages = agentloop::compact_history(harness, session.messages, compactor);
-    ++session.compactions;
-    return compactor;
+CompactionDone compact_conversation(const harness::Harness& harness, logger::Session& session) {
+    CompactionDone done{
+        .compactor = helper_backend(harness.config(), harness::ModelRole::Utility, session.backend),
+        .outcome = agentloop::Compaction::Outcome::Nothing,
+        .failure = {}};
+    agentloop::Compaction compaction =
+        agentloop::compact_history(harness, session.messages, done.compactor);
+    done.outcome = compaction.outcome;
+    done.failure = std::move(compaction.failure);
+    // Counted only when it folded something (55b): `chats info`'s
+    // `compacted: N time(s)` says what happened.
+    if (done.compacted()) {
+        session.messages = std::move(compaction.history);
+        ++session.compactions;
+    }
+    return done;
+}
+
+std::string compaction_line(const CompactionDone& done, std::string_view conversation) {
+    switch (done.outcome) {
+        case agentloop::Compaction::Outcome::Compacted:
+            return "history compacted" +
+                   (done.compactor == conversation ? std::string{} : " by " + done.compactor);
+        case agentloop::Compaction::Outcome::Nothing:
+            return "nothing to compact -- no exchange to fold yet";
+        case agentloop::Compaction::Outcome::Failed:
+            break;
+    }
+    return "compaction by " + done.compactor + " failed: " + done.failure +
+           " -- the history is unchanged";
 }
 
 std::string compact_saved_chat(const std::string& name, const std::filesystem::path& config_path) {
@@ -535,7 +572,16 @@ std::string compact_saved_chat(const std::string& name, const std::filesystem::p
             }
         }
         const std::size_t before = session.messages.size();
-        (void)compact_conversation(harness, session);
+        const CompactionDone done = compact_conversation(harness, session);
+        // Nothing folded is nothing done (55b): the chat is left as it was,
+        // unsaved, and a failure is refused naming it.
+        if (done.outcome == agentloop::Compaction::Outcome::Nothing) {
+            return "nothing to compact in " + session.chat_id + " -- no exchange to fold yet";
+        }
+        if (!done.compacted()) {
+            fail("compaction by " + done.compactor + " failed: " + done.failure + " -- " +
+                 session.chat_id + " is unchanged");
+        }
         // Its attachments told, as a live chat's are: what rode the folded
         // messages is retrieved from now on.
         std::vector<std::string> said;
@@ -550,7 +596,10 @@ std::string compact_saved_chat(const std::string& name, const std::filesystem::p
                     .built_in_graph = harness::AttachmentGraphMethod::Code}};
             attached.after_compaction();
         }
-        logger::save(session);
+        // Deleted while the summary was written (55b): it stays deleted.
+        if (logger::save(session) == logger::Saved::Deleted) {
+            fail(session.chat_id + " was deleted while it was compacted -- it stays deleted");
+        }
         std::string out = "compacted " + session.chat_id + ": " + std::to_string(before) +
                           " messages into " + std::to_string(session.messages.size()) +
                           (compactor == session.backend ? "" : ", by " + compactor);

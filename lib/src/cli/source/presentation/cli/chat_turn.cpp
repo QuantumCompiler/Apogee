@@ -11,6 +11,7 @@
 #include "agentloop/rag.h"
 #include "agentloop/side_call.h"
 #include "cli/chat_attachments.h"
+#include "cli/chat_history.h"
 #include "cli/chat_recall.h"
 #include "cli/helpers.h"
 #include "contracts/config.h"
@@ -65,14 +66,29 @@ ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& s
         // Compacts the PRIOR history only: folding the message the user just
         // typed into a summary of the conversation so far would summarise away
         // the question being asked.
+        CompactionDone done{.compactor = compactor,
+                            .outcome = agentloop::Compaction::Outcome::Nothing,
+                            .failure = {}};
         {
             const agentloop::SideCallScope said{side, "utility",
                                                 "compacting the conversation with " + compactor};
-            session.messages = agentloop::compact_history(harness, session.messages, compactor);
+            agentloop::Compaction compaction =
+                agentloop::compact_history(harness, session.messages, compactor);
+            done.outcome = compaction.outcome;
+            done.failure = std::move(compaction.failure);
+            if (done.compacted()) {
+                session.messages = std::move(compaction.history);
+            }
         }
-        ++session.compactions;
-        if (attached != nullptr) {
-            attached->after_compaction();
+        // Counted and told only when it folded something (55b); otherwise
+        // said as it was, the turn going on over the history as it stands.
+        if (done.compacted()) {
+            ++session.compactions;
+            if (attached != nullptr) {
+                attached->after_compaction();
+            }
+        } else {
+            notice(compaction_line(done, session.backend));
         }
     } else if (usage.should_warn()) {
         notice("context " + std::to_string(static_cast<int>(usage.fraction() * 100)) + "% full" +

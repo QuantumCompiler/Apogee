@@ -51,7 +51,9 @@ namespace fs = std::filesystem;
 }  // namespace
 
 bool recall_due(const logger::Session& session) {
-    return !session.private_chat && session.turns >= agentloop::kRecallMinTurns;
+    // Never one deleted while it ran (55b): a deleted chat is recalled no
+    // more, and its summary is not written back.
+    return !session.private_chat && !session.deleted && session.turns >= agentloop::kRecallMinTurns;
 }
 
 fs::path recall_marker(std::string_view chat_id) {
@@ -140,8 +142,10 @@ std::string summarise_for_recall(const harness::Harness& harness, const harness:
             updated.clear();
         }
     }
+    // Named as `chats list` names it (55b): a chat renamed with `chats title`
+    // or `/title` is recalled by that name, not the title it was given.
     const agentloop::RecallEntry entry{.chat_id = session.chat_id,
-                                       .title = session.title,
+                                       .title = session.display_name(),
                                        .updated_at = std::move(updated),
                                        .summary = *summary};
     if (!index.put(entry, cancellation, note)) {

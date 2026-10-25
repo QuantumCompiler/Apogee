@@ -198,6 +198,15 @@ namespace {
 constexpr std::string_view kPrivateLine =
     "private: nothing of this chat is written -- no transcript, no recall";
 
+/// What a session says, once, when its chat was deleted outside it while it
+/// ran (55b): the save that found the file gone wrote nothing, and no later
+/// one will.
+[[nodiscard]] std::string deleted_line(std::string_view chat_id) {
+    return "chat " + std::string{chat_id} +
+           " was deleted while this session ran -- it stays deleted, and nothing more of it is "
+           "saved";
+}
+
 /// A private chat's own folder (52d), in the system's temporary directory
 /// and removed with the run: where its attachments are indexed, so nothing
 /// of the conversation lands in the data directory. Inert for any other.
@@ -383,15 +392,19 @@ struct SettingSaid {
 
 /// Compacts the conversation now, as `/compact` and a driver's `compact`
 /// line both do (52d): a model call, so what is reading an attachment
-/// settles first (26e); the attachments told; the session saved. Returns
-/// the line to say.
-[[nodiscard]] std::string compact_attached(const harness::Harness& harness,
+/// settles first (26e); the attachments told; the session saved -- each only
+/// when something was folded (55b). Returns the line to say, `ok` false for
+/// a compaction that failed.
+[[nodiscard]] SettingSaid compact_attached(const harness::Harness& harness,
                                            logger::Session& session, ChatAttachments& attached) {
     attached.settle();
-    const std::string compactor = compact_conversation(harness, session);
-    attached.after_compaction();
-    logger::save(session);
-    return "history compacted" + (compactor == session.backend ? "" : " by " + compactor);
+    const CompactionDone done = compact_conversation(harness, session);
+    if (done.compacted()) {
+        attached.after_compaction();
+        logger::save(session);
+    }
+    return {.ok = done.outcome != agentloop::Compaction::Outcome::Failed,
+            .line = compaction_line(done, session.backend)};
 }
 
 /// The models each owning entry runs from its type's roster (M13, 35), by
@@ -853,6 +866,18 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
 
     // --- resume ---------------------------------------------------------
     logger::Session session;
+    // What a resume could not carry over (55b): the terminal's `[resume]`
+    // warning lines, and a driver's `notice`s once its `session` event is out
+    // -- never stderr alone, which a driver does not draw.
+    const bool machine_stream = flags->output_format == OutputFormat::StreamJson;
+    std::vector<std::string> resume_notes;
+    const auto resume_note = [&](const std::string& message) {
+        if (machine_stream) {
+            resume_notes.push_back("resume: " + message);
+        } else {
+            out.print_line(style.tag(ansi::Role::Warning) + " [resume] " + message);
+        }
+    };
     logger::KnownDependencies known;
     known.backends = config.backend_names();
     known.suites = config.suite_names();
@@ -877,7 +902,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             session = std::move(loaded.session);
             // Resume degrades, never fails: every problem is a note.
             for (const logger::ResumeWarning& warning : loaded.warnings) {
-                out.print_line(style.tag(ansi::Role::Warning) + " [resume] " + warning.message);
+                resume_note(warning.message);
                 if (warning.kind == logger::WarningKind::BackendMissing) {
                     session.backend.clear();  // fall back to the default
                 }
@@ -1008,9 +1033,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             refused.empty()) {
             std::cerr << "model '" << resumed.pinned << "' -- " << roster_pin_note(resumed) << "\n";
         } else {
-            out.print_line(style.tag(ansi::Role::Warning) + " [resume] " + resumed.pinned +
-                           " could not be pinned again (" + refused + ") -- the chat runs on " +
-                           resumed.backend + "'s own model");
+            resume_note(resumed.pinned + " could not be pinned again (" + refused +
+                        ") -- the chat runs on " + resumed.backend + "'s own model");
         }
     }
     // A resumed chat starts from its saved state when its backend kept
@@ -1451,9 +1475,11 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         // inbound line type, tools as wired, and `ask_user` and the
         // permission prompt reaching the driver exactly when tools do.
         // Each accepted `user` line is a numbered turn (28f), counted past
-        // the turns a resumed conversation already holds. The chat it writes
-        // is named (M28) -- none for a private one.
-        std::int64_t next_turn = static_cast<std::int64_t>(session.turns) + 1;
+        // the turns a resumed conversation already holds -- the one count
+        // `chats show` numbers them by (55b), which the load reconciled with
+        // the answers the file holds. The chat it writes is named (M28) --
+        // none for a private one.
+        std::int64_t next_turn = static_cast<std::int64_t>(logger::counted_turns(session)) + 1;
         machine_reporter.begin_session(
             session.backend,
             MachineCapabilities{
@@ -1461,6 +1487,15 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 .tools = tools_on(),
                 .ask = flags->tools},
             next_turn, flags->private_chat, session.chat_id);
+        // A chat deleted outside while this session runs stays deleted
+        // (55b): the save that finds it gone writes nothing more, and the
+        // driver is told once.
+        bool deleted_said = false;
+        const auto say_deleted = [&session, &machine_reporter, &deleted_said]() {
+            if (session.deleted && !std::exchange(deleted_said, true)) {
+                machine_reporter.on_notice(deleted_line(session.chat_id));
+            }
+        };
         // The todo's board (41d): this conversation's list, each change an
         // event; a resumed list is said as the session opens.
         const tools::TodoScope todo_scope{tools::TodoBoard{
@@ -1469,6 +1504,11 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             }}};
         if (!session.todo.empty()) {
             machine_reporter.on_todo(session.todo);
+        }
+        // What the resume could not carry over, said where the driver draws
+        // it (55b): one `notice` each, before anything the session reads.
+        for (const std::string& note : resume_notes) {
+            machine_reporter.on_notice(note);
         }
         // The driver's lines, read while a turn runs, so a `cancel` reaches
         // it (28f); the loop, a question and the permission prompt all take
@@ -1565,19 +1605,22 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 title.settle(session);
                 (void)attached.attach(message.text, working_directory,
                                       attached.graph_method(graph));
+                say_deleted();
                 continue;
             }
             // The session's own doors (52d), each its slash command's core:
             // said as notices, effective from the next turn.
             if (message.kind == DriverMessage::Kind::Detach) {
                 machine_reporter.on_notice(detach_named(attached, message.text).line);
+                say_deleted();
                 continue;
             }
             if (message.kind == DriverMessage::Kind::Compact) {
                 // A model call: the title in flight settles first, as the
                 // REPL's slash dispatch does (55a) -- one call at a time.
                 title.settle(session);
-                machine_reporter.on_notice(compact_attached(harness, session, attached));
+                machine_reporter.on_notice(compact_attached(harness, session, attached).line);
+                say_deleted();
                 continue;
             }
             if (message.kind == DriverMessage::Kind::Set) {
@@ -1645,6 +1688,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             const auto cancelled_result = [&]() {
                 session = before;
                 logger::save(session);
+                say_deleted();
                 harness::ChatResponse response;
                 response.message = harness::ChatMessage::assistant(machine_reporter.turn_text());
                 response.model = session.backend;
@@ -1668,6 +1712,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                                   prepare_play(harness.config(), config_path,
                                                parse_play_argument(command->argument)),
                                   *member_calls, machine_reporter, &recall, got->turn);
+                say_deleted();
                 if (played.cancelled) {
                     machine_notice(played.failure);
                     cancelled_result();
@@ -1707,6 +1752,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                          approvals},
                 machine_reporter, machine_notice, rag_settings, review_note, &attached, &recall,
                 got->turn, /*summarize_reasoning=*/false, standing);
+            say_deleted();
             if (outcome.cancelled) {
                 cancelled_result();
                 close_turn();
@@ -1736,9 +1782,11 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
 
         // stdin closed: the driver is done. Everything is already persisted
         // by the per-turn save, so exiting is clean by construction -- and a
-        // session never sent a turn writes nothing (M28).
+        // session never sent a turn writes nothing (M28), nor one deleted
+        // while it ran (55b).
         title.settle(session);
         save_if_changed();
+        say_deleted();
         if (const std::string said = recall.finish({}); !said.empty()) {
             machine_notice(said);
         }
@@ -1939,8 +1987,17 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // --- the REPL --------------------------------------------------------
     BackgroundTitle title{harness,
                           [&out](std::string_view line) { out.reporter().on_progress(line); }};
+    // A chat deleted outside while this session runs stays deleted (55b):
+    // said once, before the prompt after the save that found it gone.
+    bool deleted_said = false;
+    const auto say_deleted = [&]() {
+        if (session.deleted && !std::exchange(deleted_said, true)) {
+            out.print_line(style.tag(ansi::Role::Warning) + " " + deleted_line(session.chat_id));
+        }
+    };
     bool running = true;
     while (running) {
+        say_deleted();
         report_held();
         // The editor draws its own prompt; the plain reader ignores it and
         // the prompt goes to stderr so a piped run's stdout stays clean.
@@ -2566,10 +2623,12 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     }
                     break;
                 }
-                case ChatVerb::Compact:
-                    out.print_line(style.tag(ansi::Role::Apogee) + " " +
-                                   compact_attached(harness, session, attached));
+                case ChatVerb::Compact: {
+                    const SettingSaid said = compact_attached(harness, session, attached);
+                    out.print_line(style.tag(said.ok ? ansi::Role::Apogee : ansi::Role::Warning) +
+                                   " " + said.line);
                     break;
+                }
             }
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
@@ -2634,6 +2693,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     }
     title.settle(session);
     save_if_changed();
+    say_deleted();
     // The model's state too, on a clean exit only (26j): an interrupt
     // asked for nothing more, and the transcript is saved either way.
     if (!reader->interrupted()) {
@@ -2648,14 +2708,18 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // interrupt: a user who hit Ctrl-C did not ask for a model call, and
     // the transcript is already saved either way. Best-effort: a failure
     // is a line, never a non-zero exit.
-    // Never for a private chat (52d): its words go nowhere.
-    if (config.knowledge.auto_capture && !reader->interrupted() && !session.never_written) {
+    // Never for a private chat (52d): its words go nowhere -- nor for one
+    // deleted while it ran (55b), whose words were deleted with it.
+    if (config.knowledge.auto_capture && !reader->interrupted() && !session.never_written &&
+        !session.deleted) {
         capture_session({});
     }
     if (decorate) {
         std::string left = " saved " + session.chat_id;
         if (session.never_written) {
             left = " private: nothing of this chat was written";
+        } else if (session.deleted) {
+            left = " not saved -- " + session.chat_id + " was deleted while this session ran";
         } else if (session.unwritten()) {
             left = " nothing saved -- the chat had no turn";  // M28
         }

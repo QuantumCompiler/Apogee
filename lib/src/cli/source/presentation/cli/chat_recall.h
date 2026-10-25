@@ -24,7 +24,8 @@
 /// agents and `serve` never reach it.
 namespace apogee::commands {
 
-/// Whether `session` is due a summary: at least two turns, not private.
+/// Whether `session` is due a summary: at least two turns, not private, and
+/// not deleted while it ran (55b).
 [[nodiscard]] bool recall_due(const logger::Session& session);
 
 /// The marker naming the process that has `chat_id` open, and so is due to

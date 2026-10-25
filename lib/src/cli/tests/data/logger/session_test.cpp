@@ -231,7 +231,7 @@ TEST_CASE("save then load round-trips through the filesystem", "[chat][session]"
     const TempDir dir{"session"};
     const EnvGuard home{"APOGEE_HOME", dir.path().string()};
 
-    const Session original = sample();
+    Session original = sample();
     apogee::logger::save(original);
 
     const auto loaded = apogee::logger::load(original.chat_id, {});
@@ -908,4 +908,103 @@ TEST_CASE("a tool call's summary is its arguments in one clipped line",
     // Clipped on a character boundary.
     const std::string long_path = std::string(119, 'p') + "é" + std::string(100, 'p');
     CHECK(tool_call_summary(ToolCall{"c", "t", long_path}) == std::string(119, 'p') + "...");
+}
+
+// ---------------------------------------------------------------------------
+// The session record tells the truth (55b): one turn count, and a save that
+// keeps an outside rename or deletion
+// ---------------------------------------------------------------------------
+
+TEST_CASE("the turn count is the count kept, or the answers the history holds when more",
+          "[logger][session][turns][record-truth]") {
+    Session session = sample();
+    session.messages.push_back(ChatMessage::user("again"));
+    session.messages.push_back(ChatMessage::assistant("hi again"));  // two answered turns
+    session.turns = 0;                                               // a file older than the count
+    CHECK(apogee::logger::counted_turns(session) == 2);
+    session.turns = 5;  // turns a compaction folded are in the count
+    CHECK(apogee::logger::counted_turns(session) == 5);
+    session.messages.push_back(ChatMessage::user("unanswered"));
+    session.turns = 1;
+    CHECK(apogee::logger::counted_turns(session) == 2);
+    CHECK(apogee::logger::counted_turns(Session{}) == 0);
+
+    // A read carries it: `chats list`, `chats show` and a resume agree.
+    session.messages.pop_back();  // the unanswered question
+    nlohmann::json record = nlohmann::json::parse(apogee::logger::serialize(session));
+    record.erase("turns");
+    const auto loaded = deserialize(record.dump(), {});
+    CHECK(loaded.session.turns == 2);
+    CHECK(numbers(apogee::logger::saved_turns(loaded.session)) == std::vector<std::int64_t>{1, 2});
+}
+
+TEST_CASE("a save keeps a name given outside the session, and its own rename too",
+          "[logger][session][record-truth]") {
+    // `chats title` on a chat a session runs: the session's next save takes
+    // the file's name rather than writing its own copy over it.
+    const TempDir dir{"session-outside-name-" + std::to_string(std::random_device{}())};
+    const EnvGuard home{"APOGEE_HOME", dir.path().string()};
+    Session running = sample();
+    CHECK(apogee::logger::save(running) == apogee::logger::Saved::Written);
+
+    Session outside = apogee::logger::load(running.chat_id, {}).session;
+    outside.custom_name = "Renamed By GUI";
+    CHECK(apogee::logger::save(outside) == apogee::logger::Saved::Written);
+
+    running.messages.push_back(ChatMessage::user("next"));
+    running.messages.push_back(ChatMessage::assistant("answer"));
+    running.turns = 3;
+    CHECK(apogee::logger::save(running) == apogee::logger::Saved::Written);
+    CHECK(running.custom_name == "Renamed By GUI");
+    const Session saved = apogee::logger::load(running.chat_id, {}).session;
+    CHECK(saved.custom_name == "Renamed By GUI");
+    CHECK(saved.turns == 3);
+
+    // The session's own rename, with none outside since, is written.
+    running.custom_name = "renamed in the session";
+    REQUIRE(apogee::logger::save(running) == apogee::logger::Saved::Written);
+    CHECK(apogee::logger::load(running.chat_id, {}).session.custom_name ==
+          "renamed in the session");
+    // And a name cleared outside wins too.
+    Session cleared = apogee::logger::load(running.chat_id, {}).session;
+    cleared.custom_name.clear();
+    REQUIRE(apogee::logger::save(cleared) == apogee::logger::Saved::Written);
+    REQUIRE(apogee::logger::save(running) == apogee::logger::Saved::Written);
+    CHECK(running.custom_name.empty());
+}
+
+TEST_CASE("a chat deleted outside a running session stays deleted",
+          "[logger][session][unwritten][record-truth]") {
+    // `chats delete` on a chat a session runs: its next save finds the file
+    // gone, writes nothing, and writes nothing again.
+    const TempDir dir{"session-outside-delete-" + std::to_string(std::random_device{}())};
+    const EnvGuard home{"APOGEE_HOME", dir.path().string()};
+    Session running = sample();
+    running.chat_id = apogee::logger::new_chat_id();
+    running.new_chat = true;
+    REQUIRE(apogee::logger::save(running) == apogee::logger::Saved::Written);
+    const std::filesystem::path file = apogee::logger::session_path(running.chat_id);
+    REQUIRE(std::filesystem::remove(file));
+
+    running.turns = 3;
+    CHECK(apogee::logger::save(running) == apogee::logger::Saved::Deleted);
+    CHECK(running.deleted);
+    CHECK(running.unwritten());
+    CHECK_FALSE(std::filesystem::exists(file));
+    CHECK(apogee::logger::save(running) == apogee::logger::Saved::Unwritten);
+    CHECK_FALSE(std::filesystem::exists(file));
+
+    // A loaded chat is the same: the file it was read from, gone, stays gone.
+    Session kept = sample();
+    REQUIRE(apogee::logger::save(kept) == apogee::logger::Saved::Written);
+    Session resumed = apogee::logger::load(kept.chat_id, {}).session;
+    REQUIRE(std::filesystem::remove(apogee::logger::session_path(kept.chat_id)));
+    CHECK(apogee::logger::save(resumed) == apogee::logger::Saved::Deleted);
+    CHECK(apogee::logger::list_sessions().empty());
+
+    // A session that has read no file and written none writes its first.
+    Session fresh = sample();
+    fresh.chat_id = "20260826-120000-f1f1";
+    CHECK(apogee::logger::save(fresh) == apogee::logger::Saved::Written);
+    CHECK(std::filesystem::exists(apogee::logger::session_path(fresh.chat_id)));
 }

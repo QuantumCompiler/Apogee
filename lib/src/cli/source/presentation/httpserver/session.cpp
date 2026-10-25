@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include "logger/operational.h"
+
 namespace apogee::httpserver {
 
 std::string format_utc(std::chrono::system_clock::time_point when) {
@@ -65,11 +67,19 @@ std::optional<logger::Session> SessionStore::get(std::string_view id) const {
 void SessionStore::commit(const logger::Session& session) {
     // Persist after EVERY turn, before touching the live set: a crash between
     // the two leaves the transcript complete on disk, which is the property
-    // that matters. The same rule `apogee chat` follows, for the same reason.
-    logger::save(session);
+    // that matters. The same rule `apogee chat` follows, for the same reason
+    // -- and the same store: a rename made outside meanwhile is kept, and a
+    // chat deleted outside stays deleted (55b), as the copy kept here says.
+    logger::Session saved = session;
+    if (logger::save(saved) == logger::Saved::Deleted) {
+        logger::log(logger::Level::Warn, "serve",
+                    "session " + saved.chat_id +
+                        " was deleted while it was served -- nothing more of it is saved");
+    }
 
+    const std::string id = saved.chat_id;
     const std::lock_guard<std::mutex> lock{mutex_};
-    live_[session.chat_id] = Live{session, clock_()};
+    live_[id] = Live{std::move(saved), clock_()};
 }
 
 bool SessionStore::erase(std::string_view id) {

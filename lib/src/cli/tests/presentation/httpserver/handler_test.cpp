@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -992,6 +993,30 @@ TEST_CASE("a session is minted on request, continued by id, and resumable from d
     REQUIRE(loaded.session.messages.size() == 4);
     CHECK(loaded.session.messages[3].content.plain_text() == "mock response");
     CHECK(loaded.session.backend == "mock");
+}
+
+TEST_CASE("a session sent several exchanges at once counts the turns its history answers",
+          "[httpserver][session][turns][record-truth]") {
+    // 55b: one request is one `++turns`, so a client that sent a whole
+    // conversation left a count short of its answers, and `chats show`
+    // numbered from 1 while `chat --resume` announced the short count.
+    const Fixture fixture;
+    nlohmann::json body{{"session_id", "new"},
+                        {"messages", nlohmann::json::array(
+                                         {nlohmann::json{{"role", "user"}, {"content", "q1"}},
+                                          nlohmann::json{{"role", "assistant"}, {"content", "a1"}},
+                                          nlohmann::json{{"role", "user"}, {"content", "q2"}}})}};
+    const HttpResponse turn = fixture.send(post("/v1/chat/completions", body));
+    REQUIRE(turn.status == 200);
+    const std::string id = turn.headers.at("X-Apogee-Session-Id");
+    CHECK(parsed(fixture.send(get("/v1/sessions/" + id)))["turn_count"] == 2);
+    const apogee::logger::LoadedSession loaded = apogee::logger::load(id, {});
+    CHECK(loaded.session.turns == 2);
+    std::vector<std::int64_t> numbered;
+    for (const apogee::logger::SavedTurn& entry : apogee::logger::saved_turns(loaded.session)) {
+        numbered.push_back(entry.turn);
+    }
+    CHECK(numbered == std::vector<std::int64_t>{1, 2});
 }
 
 TEST_CASE("an unknown session id is a typed 404", "[httpserver][session]") {

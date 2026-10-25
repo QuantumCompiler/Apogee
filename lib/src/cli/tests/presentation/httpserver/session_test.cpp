@@ -68,6 +68,35 @@ TEST_CASE("a committed turn is persisted before the live set changes", "[httpser
     CHECK(fixture.store.list()[0].turns == 1);
 }
 
+TEST_CASE("a served session renamed or deleted outside keeps the edit",
+          "[httpserver][session][record-truth]") {
+    // 55b: the store the CLI's chats live in is one store -- `chats title` and
+    // `chats delete` act on a served session too, and its next commit keeps
+    // what they did rather than writing its own copy over it.
+    Fixture fixture;
+    const std::string id = fixture.store.create("mock", {});
+    apogee::logger::Session renamed = apogee::logger::load(id, {}).session;
+    renamed.custom_name = "Renamed outside";
+    REQUIRE(apogee::logger::save(renamed) == apogee::logger::Saved::Written);
+
+    apogee::logger::Session session = *fixture.store.get(id);
+    session.messages.push_back(ChatMessage::user("one"));
+    session.messages.push_back(ChatMessage::assistant("two"));
+    session.turns = 1;
+    fixture.store.commit(session);
+    CHECK(apogee::logger::load(id, {}).session.custom_name == "Renamed outside");
+    CHECK(fixture.store.get(id)->custom_name == "Renamed outside");
+
+    REQUIRE(std::filesystem::remove(apogee::logger::session_path(id)));
+    session = *fixture.store.get(id);
+    session.messages.push_back(ChatMessage::user("three"));
+    session.messages.push_back(ChatMessage::assistant("four"));
+    session.turns = 2;
+    fixture.store.commit(session);
+    CHECK_FALSE(std::filesystem::exists(apogee::logger::session_path(id)));
+    CHECK(fixture.store.get(id)->deleted);
+}
+
 TEST_CASE("idle sessions leave memory on their TTL and stay on disk", "[httpserver][session]") {
     Fixture fixture;
     const std::string old = fixture.store.create("mock", {});

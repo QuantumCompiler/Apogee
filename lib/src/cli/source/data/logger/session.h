@@ -194,6 +194,18 @@ struct Session {
     /// ride the first turn's save. Never serialised: a loaded chat was not.
     bool new_chat = false;
 
+    /// The chat's file as this process last read or wrote it (55b): its
+    /// `custom_name` then, or unset while this process has read no file and
+    /// written none. What `save` compares the file with before it writes, so
+    /// a running session never undoes an outside edit. Never serialised.
+    std::optional<std::string> filed_name{};
+
+    /// Deleted outside this session while it ran (55b): the file `save` last
+    /// wrote, or `load` read, was gone at the next save. It stays deleted --
+    /// `save` writes nothing more for it, and the session says so. Never
+    /// serialised.
+    bool deleted = false;
+
     /// The session's `--retriever` SETTING (`lexical` / `vector` / `hybrid`;
     /// empty means auto) and its `--rerank` setting (a backend, `off`, or
     /// empty for the collections' pins). What the user chose, never what auto
@@ -225,7 +237,8 @@ struct Session {
     [[nodiscard]] std::string display_name() const;
 
     /// Whether `save` writes nothing for this session as it stands: a private
-    /// chat's (52d), ever, and a new chat's while it has no turn (M28).
+    /// chat's (52d), ever, a new chat's while it has no turn (M28), and one
+    /// deleted while it ran (55b), from then on.
     [[nodiscard]] bool unwritten() const noexcept;
 };
 
@@ -267,14 +280,44 @@ struct LoadedSession {
 /// that reopens with a note.
 [[nodiscard]] LoadedSession deserialize(std::string_view text, const KnownDependencies& known);
 
+/// What `save` did (55b).
+enum class Saved : std::uint8_t {
+    /// The file holds the session.
+    Written,
+    /// Nothing written: `unwritten()` -- a private chat, a new one with no
+    /// turn yet, or one deleted while it ran.
+    Unwritten,
+    /// Nothing written, now or later: the file this session had was found
+    /// gone -- deleted outside it -- and the session is marked `deleted`.
+    Deleted,
+};
+
 /// Writes `session` atomically. Called after every completed turn. An
 /// `unwritten()` one writes nothing: a private chat (52d), and a new chat with
 /// no turn yet (M28).
-void save(const Session& session);
+///
+/// **One session store, edited from outside too** (55b): `chats title` and
+/// `chats delete` may act on a chat while a session runs it. So once this
+/// process has read or written the chat's file, `save` reads it again first:
+/// a name it no longer holds as this process left it was changed outside,
+/// and is taken into `session` -- an outside rename wins -- and a file gone
+/// was deleted outside, so nothing is written, `session.deleted` is set, and
+/// the chat stays deleted. Otherwise the session is written whole, its own
+/// rename included.
+Saved save(Session& session);
+
+/// The conversation's turn count (55b): the count the session keeps, or the
+/// answered turns its history holds when that is more -- a file older than
+/// the count, or a served client's several exchanges sent at once. The one
+/// count: `chats show` numbers by it, a loaded session carries it, and a
+/// resumed one's `next_turn` follows it.
+[[nodiscard]] int counted_turns(const Session& session);
 
 /// Loads by chat id or by custom name.
 /// Throws std::runtime_error only when the session cannot be found or read at
-/// all -- every recoverable problem is a warning.
+/// all -- every recoverable problem is a warning. The session's `turns` is
+/// `counted_turns`, and its `filed_name` the file's name, so a later `save`
+/// keeps an outside edit (55b).
 [[nodiscard]] LoadedSession load(const std::string& name, const KnownDependencies& known);
 
 /// What renaming a backend did to the saved chats (46a).

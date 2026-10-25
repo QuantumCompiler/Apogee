@@ -215,7 +215,8 @@ TEST_CASE("chats show --output-format json carries the same turns typed",
                                       {"name": "report.pdf", "files": 1, "bytes": 9000}]},
              "answer": {"text": "The report covers Q3.", "tools": []},
              "answered": true}
-        ]
+        ],
+        "warnings": []
     })"));
     // The chat's facts as `chats list`'s row says them.
     const nlohmann::json row =
@@ -314,6 +315,93 @@ TEST_CASE("a chat driven through turns, a compaction and an attach reads back as
     }
     // And the resumed session numbers on from the last turn listed.
     CHECK(resumed_session(home, id).at("next_turn") == 4);
+}
+
+namespace {
+
+/// A session file written as an older Apogee, or another writer, left it:
+/// `record`'s keys as given, nothing stamped.
+void write_raw(const std::string& id, const nlohmann::json& record) {
+    std::filesystem::create_directories(apogee::logger::sessions_dir());
+    std::ofstream{apogee::logger::session_path(id), std::ios::binary} << record.dump(2);
+}
+
+/// Each `turn` of a `chats show` document, in order.
+[[nodiscard]] std::vector<int> turn_numbers(const nlohmann::json& shown) {
+    std::vector<int> out;
+    for (const nlohmann::json& entry : shown.at("turns")) {
+        out.push_back(entry.at("turn").get<int>());
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("chats show's document says what the loader could not read, in its warnings",
+          "[chats][show][history][reads][json][record-truth]") {
+    // 55b: the gap was said on stderr alone, even under --output-format json,
+    // and a host keeping only the document drew a degraded chat as whole.
+    const CliHome home{kConfig};
+    write_raw("20261022-140000-bad0", nlohmann::json::parse(R"({
+        "schema_version": 2, "chat_id": "20261022-140000-bad0", "backend": "local", "turns": 1,
+        "messages": [{"role": "user", "content": "q1"}, {"role": "assistant", "content": "a1"},
+                     {"role": "nonsense", "content": 42}]})"));
+    const Run json =
+        run(home, {"chats", "show", "20261022-140000-bad0", "--output-format", "json"});
+    const nlohmann::json shown = document(json);
+    CHECK(shown.at("warnings") == nlohmann::json::parse(R"([{"kind": "field_dropped",
+                                     "message": "a message could not be read and was skipped"}])"));
+    CHECK(json.err.empty());
+    CHECK(turn_numbers(shown) == std::vector<int>{1});
+    // The text view says it on stderr, as it did.
+    const Run text = run(home, {"chats", "show", "20261022-140000-bad0"});
+    REQUIRE(text.code == 0);
+    CHECK(text.err == "apogee chats: a message could not be read and was skipped\n");
+    // A file read whole has none.
+    save_fixture();
+    CHECK(
+        document(run(home, {"chats", "show", kChatId, "--output-format", "json"})).at("warnings") ==
+        nlohmann::json::array());
+}
+
+TEST_CASE("a chat whose count is short of its answers numbers on from them when resumed",
+          "[chats][show][history][machine][turns][record-truth]") {
+    // 55b, the probe's fixture: two answered turns and no count. `chats show`
+    // numbered them 1 and 2 while the resumed session announced next_turn 1,
+    // and its live turn reused a number already drawn.
+    const CliHome home{kConfig};
+    write_raw("nocount", nlohmann::json::parse(R"({
+        "schema_version": 2, "chat_id": "nocount", "backend": "local",
+        "started_at": "2026-10-22T00:00:00Z", "updated_at": "2026-10-22T00:00:00Z",
+        "messages": [{"role": "user", "content": "q1"}, {"role": "assistant", "content": "a1"},
+                     {"role": "user", "content": "q2"}, {"role": "assistant", "content": "a2"}]})"));
+    CHECK(turn_numbers(document(run(home, {"chats", "show", "nocount", "--output-format",
+                                           "json"}))) == std::vector<int>{1, 2});
+    CHECK(document(run(home, {"chats", "list", "--output-format", "json"}))
+              .at("data")
+              .at(0)
+              .at("turns") == 2);
+    CHECK(resumed_session(home, "nocount").at("next_turn") == 3);
+
+    // A live turn takes the next number, and the read numbers it the same.
+    const Run live = run(home,
+                         {"chat", "--resume", "nocount", "--no-recall", "--input-format",
+                          "stream-json", "--output-format", "stream-json"},
+                         std::string{R"({"type":"user","text":"q3"})"} + "\n");
+    INFO(live.err);
+    REQUIRE(live.code == 0);
+    std::vector<int> results;
+    std::istringstream lines{live.out};
+    for (std::string line; std::getline(lines, line);) {
+        const nlohmann::json event = nlohmann::json::parse(line);
+        if (event.at("type") == "result") {
+            results.push_back(event.at("turn").get<int>());
+        }
+    }
+    CHECK(results == std::vector<int>{3});
+    CHECK(turn_numbers(document(run(home, {"chats", "show", "nocount", "--output-format",
+                                           "json"}))) == std::vector<int>{1, 2, 3});
+    CHECK(apogee::logger::load("nocount", {}).session.turns == 3);
 }
 
 TEST_CASE("chats show refuses a name no chat answers as chats info refuses it",

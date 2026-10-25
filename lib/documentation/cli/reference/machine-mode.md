@@ -66,10 +66,10 @@ One JSON object per line on stdout. Every object has a `type`.
 | `session` | Once, first, unprompted. Names the protocol version, the model and the session's `capabilities` (below); `chat_id`, the chat the session writes (M28, [below](#which-chat-chat_id)); `"private": true` for a chat that writes nothing (52d, [below](#a-private-chat-chat---private)). |
 | `thinking` | The model began reasoning. No text. Sent again with `"budget_reached": true` when the reasoning reached its thinking budget and was ended there (`--think-budget`, an `--effort` level's budget, or the backend's `thinking_budget`). Machine mode carries the reasoning as it streams whatever `ui.thinking_display` says: the terminal's and the shell's one-line summary (43) is theirs alone, and is never asked for here. |
 | `thinking_delta` | A chunk of reasoning. **Droppable** — see below. |
-| `memory` | `chat` only: what a turn was handed from earlier conversations -- `chats`, past chats' summaries, and `decisions`, recorded knowledge records -- injected for this turn and never into the transcript (26l). Sent before the turn, only when it recalled something. Since 52a `sessions` names each past chat recalled, in the order sent: its `id` (what `chats list` and `--resume` take), and the `name` and `updated` time the recall index recorded when it summarised the chat -- what the model was handed, so a later rename shows only once the chat is summarised again. Absent when `chats` is 0. |
+| `memory` | `chat` only: what a turn was handed from earlier conversations -- `chats`, past chats' summaries, and `decisions`, recorded knowledge records -- injected for this turn and never into the transcript (26l). Sent before the turn, only when it recalled something. Since 52a `sessions` names each past chat recalled, in the order sent: its `id` (what `chats list` and `--resume` take), and the `name` and `updated` time the recall index recorded when it summarised the chat -- what the model was handed, so a later rename shows only once the chat is summarised again (its next run with a turn). Since 55b that `name` is the chat's name as `chats list` gives it -- the one `chats title` or `/title` gave it, else its generated title, else its id -- never a generated title it was renamed from. Absent when `chats` is 0. |
 | `sources` | The excerpts retrieval sent the model this turn (52a), before the answer: `sources`, each `{file, pages?, lines?, times?, score, retriever}` in the order sent -- the chat's attachments' excerpts first, then a collection's. `file` is the file as its index names it (an attachment's file name, a collection's source path); `pages`, `lines` and `times` (seconds, for a recording) are `[first, last]` when the excerpt's chunks record them. **What was sent, never what was found**: an excerpt the context budget trimmed is not here, and with nothing sent there is no event. `score` is on its `retriever`'s scale -- `lexical`, `vector` or `hybrid` scores do not compare. Number them in order to draw citations. Past chats' recall is `memory`'s, not this. |
 | `tool_status` | A tool is running, described in `text` for display -- or another model call the turn makes besides the chat model's own (the embedder, the utility model, the rerank judge, the knowledge clerk, a suite member the model consults), as `<role> — <what it is doing>` (26n). A `consult` (27f) is an ordinary tool call: `[tool] consult`, then `consult — asking utility (<backend>): <the question's first words>` while the member answers, and the answer reaches the model as the tool's result. A suite's verifier checking a tool call or an answer (27g) is said the same way: `validate — asking utility (<backend>): Check …`. A symphony the root model plays on its own (27t, an orchestrating `execute` session) is an ordinary tool call too: `[tool] play_<symphony>`, then `play — the model chose <symphony>: <n> member calls, <roles>`, then a line per stage. A tool the **vendor** ran on its own servers (47a: an entry's `server_tools:`, or the run's `--search`) is said here too, never dispatched: `<tool>, run by <vendor>: <what>` -- `web_search, run by Anthropic: "apogee harness"`, then `web_search, run by Anthropic: 5 results` -- and since it can fall between two parts of an answer, the answer's events end before it and start again after. |
-| `notice` | A line for the user in `text` that is neither progress nor an error — a local model answering without the tools it was given because its chat template cannot take them, or a reply kept as text because it did not match the template's format, or a request trimmed to fit the model's window (`context budget: 2 earlier exchanges not sent`), or what a suite's verifier said (27g): an objection to a tool call returned to the model, a dispute the call runs over, the two positions on an answer under `answers: always` (`validate: …`), a check that could not be made. Show it and keep it; it never ends the turn. |
+| `notice` | A line for the user in `text` that is neither progress nor an error — a local model answering without the tools it was given because its chat template cannot take them, or a reply kept as text because it did not match the template's format, or a request trimmed to fit the model's window (`context budget: 2 earlier exchanges not sent`), or what a suite's verifier said (27g): an objection to a tool call returned to the model, a dispute the call runs over, the two positions on an answer under `answers: always` (`validate: …`), a check that could not be made; what a resumed chat could not carry over (55b, `resume: …`, [below](#which-chat-chat_id)); a compaction that folded nothing or failed ([below](#the-sessions-own-doors-detach-set-compact)); a chat deleted while its session ran. Show it and keep it; it never ends the turn. |
 | `todo` | The session's todo, whole (41d): `items`, an array of `{text, state}` -- `state` `pending`, `active` (being done now) or `done` -- in the model's order, empty when it cleared it. Sent each time the model rewrites it with `todo_write` (a session with tools), and once as a resumed session opens, right after `session`, when it was left holding one. Draw it in place of the last: it is the plan, not a log. |
 | `answer_start` / `answer_end` | Bracket one answer's deltas. |
 | `answer_delta` | A chunk of answer text. Concatenate in order. |
@@ -114,6 +114,24 @@ answered turn. A resumed chat closed with no new turn, and nothing moved in it,
 keeps its file exactly as it was; a setting a `set` line moved is saved, as it
 always was. Chats an older binary saved with no turn stay listed until deleted.
 
+**A resume says what it could not carry over** (55b). Resuming degrades rather
+than fails -- a file older than the session metadata, a backend or suite no
+longer configured (the chat then runs on the default), a message that could not
+be read -- and each is a `notice` `resume: <what>`, after the `session` event
+(and a resumed `todo`) and before anything the session reads, carrying no
+`turn`: `resume: backend 'gone' is no longer configured; using the default
+instead`. Before 55b they went to stderr alone; the terminal still prints them
+as `[resume]` warnings.
+
+**The one store is edited from outside too** (55b). `chats title` and `chats
+delete` may act on a chat while a session runs it -- a host's Rename and Delete.
+Each save the session makes reads the chat's file first: a name given outside
+since is kept, and the session goes on under it; a chat deleted outside stays
+deleted -- the session writes nothing more of it (no transcript, no recall
+summary, no saved model state), answers its turns as before, and says so once in
+a `notice`: `chat <id> was deleted while this session ran -- it stays deleted,
+and nothing more of it is saved`.
+
 ### Turns: `turn` and `next_turn`
 
 In a driven `chat` or `execute`, each accepted `user` line is a **turn**,
@@ -130,7 +148,10 @@ sent are N turns closed. A `task run`'s events carry no `turn`: its turns have
 no `user` line. The turns a resumed conversation already holds are a read,
 not events: `apogee chats show <id> --output-format json` (since M27,
 [below](#everything-else-is-a-cli-command)), whose last turn is `next_turn`
-minus one.
+minus one. Both read one count (55b): the turns the file counts, or the
+answered turns its history holds when that is more -- a file older than the
+count, or a served session sent several exchanges at once -- so a resumed
+session never numbers a live turn with a number the read already drew.
 
 ### Three rules a driver must follow
 
@@ -450,7 +471,15 @@ nothing (M28, [above](#which-chat-chat_id)).
 Since 52d a driven `chat` or `execute` takes three lines that reach exactly
 what the session's slash commands reach — never a second implementation —
 each answered by `notice`s and effective from the next turn. Sent while a
-turn runs, a line waits for it to end, as an `attach` does.
+turn runs, a line waits for it to end, as an `attach` does -- **unless the turn
+asks**. While a `question` or a permission prompt is outstanding, the child
+reads lines only for its `answer`, and every other line it reads in that time
+-- a `user`, `attach`, `detach`, `set`, `compact` or `hello`, one sent before
+the question appeared and still waiting included -- is **dropped, with no
+`notice`** (52d's recorded rule; a `cancel` still fails the turn). So a host
+sends `detach`, `set` and `compact` **between turns**: after the turn's
+`result` or `error`, or before its first `user` line -- never while a question
+waits, and not mid-turn when the turn may ask one.
 
 - **`{"type":"detach","path":…}`** detaches what was attached under that
   name (the `path` the `attach` line gave), as `/detach` does: `notice`
@@ -472,9 +501,17 @@ turn runs, a line waits for it to end, as an `attach` does.
   chosen at launch.
 - **`{"type":"compact"}`** compacts the conversation now, as `/compact`
   does — the utility model, else the chat's own backend, folds the earlier
-  exchanges into a summary — said as `history compacted by <backend>`. A
-  saved chat is compacted with the verb `apogee chats compact <id>` (asked
-  first at a terminal, `--yes` for a script).
+  exchanges into a summary — said as `history compacted by <backend>`
+  (`history compacted` when the chat's own backend did it). Only what happened
+  is said and counted (55b): with no exchange to fold — before the first turn,
+  or straight after a compaction — no model is asked and the `notice` is
+  `nothing to compact -- no exchange to fold yet`; a summariser that fails or
+  answers nothing leaves the history as it was, saying `compaction by
+  <backend> failed: <why> -- the history is unchanged`. Neither counts as a
+  compaction (`chats info`'s `compacted: N time(s)`), nor is saved. A saved
+  chat is compacted with the verb `apogee chats compact <id>` (asked first at
+  a terminal, `--yes` for a script), which says `nothing to compact in <id>`
+  the same way and refuses a failure by name (exit `1`), the chat untouched.
 
 A chat is titled in the background after its first answer. A `compact`, a
 `set` naming a `model`, or an `attach` sent while that title is still being
@@ -576,8 +613,11 @@ until answered**:
 
 Reply with one `{"type":"answer","text":"…"}` line per question, in order. The
 offered options are a convenience, not a constraint — free text is always
-accepted. Closing stdin with a question outstanding fails the turn, and the
-half-turn is rolled out of history rather than persisted half-finished. A
+accepted. Any other line read while the question waits is dropped with no
+`notice` -- a `cancel` aside -- so send it after the turn ends
+([the between-turns rule](#the-sessions-own-doors-detach-set-compact)).
+Closing stdin with a question outstanding fails the turn, and the half-turn
+is rolled out of history rather than persisted half-finished. A
 `cancel` while it waits fails the turn the same way, and the session goes on
 ([Stopping a turn](#stopping-a-turn-cancel)).
 
@@ -602,8 +642,10 @@ Reply with one `{"type":"answer","text":"…"}` line: `yes` allows this once,
 `session` allows the tool for the rest of the run, `always` allows it and
 writes `permissions.<tool>: allow` to the config through the same editor the
 CLI uses, and anything else denies. A denial is a **tool result** the model
-reads, not an error; the turn continues. A driver that closes stdin with a
-prompt outstanding fails the turn, exactly as with an unanswered question.
+reads, not an error; the turn continues. As with a question, a line other than
+the `answer` read while the prompt waits is dropped with no `notice`. A driver
+that closes stdin with a prompt outstanding fails the turn, exactly as with an
+unanswered question.
 
 Where there is no driver — `complete --output-format stream-json` is one-shot
 and cannot be asked — `ask` resolves to deny, and only `allow` in the config
@@ -1274,7 +1316,7 @@ Since M27 a saved chat's turns read the same way -- what a host draws of a
 conversation it resumes, or shows without resuming it:
 
 ```bash
-apogee chats show <id|name> --output-format json   # {"object":"chat","id",…,"attachments":[…],"turns":[…]}
+apogee chats show <id|name> --output-format json   # {"object":"chat","id",…,"attachments":[…],"turns":[…],"warnings":[]}
 ```
 
 The document is `id`, `name`, `backend` and `model` as `chats list`'s row
@@ -1309,6 +1351,12 @@ entry is a **turn** -- a user message and everything after it up to the next
 - `compacted`: on a compaction alone, `{summary}`, the summary that stands in
   for the turns before it; its `answer` is the last answer the compaction
   kept.
+
+And `warnings` (since 55b): what of the file the loader could not read and left
+out -- a message it skipped -- each `{kind, message}` (`kind`
+`field_dropped`), `[]` when it read everything. A turn missing from `turns` is
+said here, not only on stderr: under `--output-format json` stderr carries
+none of it; the text view says it on stderr as before.
 
 Nothing the transcript never held is here: no thinking, and no injected
 context -- retrieved excerpts, an inlined attachment's text, recall. The

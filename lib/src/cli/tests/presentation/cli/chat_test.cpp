@@ -2637,3 +2637,186 @@ TEST_CASE("a driven compact, model change or attach waits for the title in fligh
     }
 }
 #endif
+
+// ---------------------------------------------------------------------------
+// The session record tells the truth (55b): compaction, names, degradations
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A protocol line, newline-ended.
+[[nodiscard]] std::string line_of(const nlohmann::json& line) {
+    return line.dump() + "\n";
+}
+
+}  // namespace
+
+TEST_CASE("a compaction with nothing to fold says so and counts nothing, at every door",
+          "[chat][cli][compaction][record-truth]") {
+    // The probe: a `compact` line on an empty conversation answered `history
+    // compacted`. Nothing to fold asks no model, is said as nothing, and adds
+    // nothing to the count.
+    HelperChat chat{texts({"one", "two"}), {"Title", "what was said, in short"}};
+    INFO(chat.err);
+    const std::string nothing = "nothing to compact -- no exchange to fold yet";
+
+    // Driven, before any turn: said, and nothing written (M28).
+    REQUIRE(chat.run(driven_args({"--no-recall"}), line_of({{"type", "compact"}})) == 0);
+    CHECK(notices_of(driven_events(chat.out)) == std::vector<std::string>{nothing});
+    CHECK(apogee::logger::list_sessions().empty());
+    // At a pipe, before any turn.
+    REQUIRE(chat.run({"chat", "--no-recall"}, "/compact\n") == 0);
+    CHECK((chat.out + chat.err).find(nothing) != std::string::npos);
+    CHECK((chat.out + chat.err).find("history compacted") == std::string::npos);
+
+    // Two turns compacted, then a compaction straight after: only the answer
+    // the first kept is left, and nothing is folded again.
+    REQUIRE(chat.run(driven_args({"--no-recall"}),
+                     line_of({{"type", "user"}, {"text", "first"}}) +
+                         line_of({{"type", "user"}, {"text", "second"}}) +
+                         line_of({{"type", "compact"}}) + line_of({{"type", "compact"}})) == 0);
+    CHECK(notices_of(driven_events(chat.out)) ==
+          std::vector<std::string>{"history compacted by helper", nothing});
+    const apogee::logger::Session once = HelperChat::only_session();
+    CHECK(once.compactions == 1);
+
+    // `chats compact` on it: nothing to fold, the file as it was.
+    const std::filesystem::path file = apogee::logger::session_path(once.chat_id);
+    const std::string held = bytes_of(file);
+    REQUIRE(chat.run({"chats", "compact", once.chat_id, "--yes"}) == 0);
+    CHECK(chat.out == "nothing to compact in " + once.chat_id + " -- no exchange to fold yet\n");
+    CHECK(bytes_of(file) == held);
+    REQUIRE(chat.run({"chats", "info", once.chat_id}) == 0);
+    CHECK(chat.out.find("compacted: 1 time(s)") != std::string::npos);
+}
+
+TEST_CASE("a compaction that fails names the failure and counts nothing, at every door",
+          "[chat][cli][compaction][record-truth]") {
+    // The utility titles, then answers every summary with nothing: no
+    // compaction happened, and none is said or counted.
+    HelperChat chat{texts({"one", "two", "three"}), {"Title", ""}};
+    INFO(chat.err);
+    const std::string failed =
+        "compaction by helper failed: the summary came back empty -- the history is unchanged";
+
+    REQUIRE(
+        chat.run(driven_args({"--no-recall"}), line_of({{"type", "user"}, {"text", "first"}}) +
+                                                   line_of({{"type", "user"}, {"text", "second"}}) +
+                                                   line_of({{"type", "compact"}})) == 0);
+    CHECK(notices_of(driven_events(chat.out)) == std::vector<std::string>{failed});
+    const apogee::logger::Session session = HelperChat::only_session();
+    CHECK(session.compactions == 0);
+    CHECK(replies(session) == std::vector<std::string>{"one", "two"});
+
+    // `/compact` says it as a warning, and leaves the file as it was -- each
+    // run's utility answering its first call, the summary, with nothing.
+    (void)chat.script("helper", texts({""}));
+    const std::filesystem::path file = apogee::logger::session_path(session.chat_id);
+    const std::string held = bytes_of(file);
+    REQUIRE(chat.run({"chat", "--no-recall", "--resume", session.chat_id}, "/compact\n") == 0);
+    CHECK((chat.out + chat.err).find(failed) != std::string::npos);
+    CHECK(bytes_of(file) == held);
+
+    // `chats compact` is refused, naming the failure.
+    CHECK(chat.run({"chats", "compact", session.chat_id, "--yes"}) == 1);
+    CHECK(chat.out.empty());
+    CHECK(chat.err == "apogee chats: compaction by helper failed: the summary came back empty -- " +
+                          session.chat_id + " is unchanged\n");
+    CHECK(bytes_of(file) == held);
+    REQUIRE(chat.run({"chats", "info", session.chat_id}) == 0);
+    CHECK(chat.out.find("compacted:") == std::string::npos);
+}
+
+TEST_CASE("a full context's compaction that fails is said, and the turn goes on uncounted",
+          "[chat][cli][compaction][record-truth]") {
+    // The door no one asks at: the second question finds the 300-token window
+    // over 90% full, and the utility's summary comes back empty.
+    const std::string long_answer(1200, 'a');
+    HelperChat chat{
+        texts({long_answer, "second answer"}), {"Title", ""}, "    context_size: 300\n"};
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat", "--no-recall"}, "first\nsecond\n") == 0);
+    CHECK(chat.err.find("compacting with helper") != std::string::npos);
+    CHECK(chat.err.find("compaction by helper failed: the summary came back empty -- the history "
+                        "is unchanged") != std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    CHECK(session.compactions == 0);
+    CHECK(replies(session) == std::vector<std::string>{long_answer, "second answer"});
+}
+
+TEST_CASE("a renamed chat is recalled by the name it was given",
+          "[chat][cli][recall][helpers][record-truth]") {
+    // The probe: renamed with `chats title` (the app's Rename), a chat
+    // summarised again kept its old title in the recall index, and the
+    // `memory` event named it so forever.
+    HelperChat chat{texts({"Noted.", "Fine."}), {"Title", "The project uses Postgres 16."}};
+    const std::string first = first_chat(chat);
+    INFO(chat.err);
+    REQUIRE(chat.run({"chats", "title", first, "Postgres notes"}) == 0);
+    // One more turn: summarised again at its exit, under its name.
+    (void)chat.script("helper", texts({"The project uses Postgres 16."}));
+    REQUIRE(chat.run({"chat", "--verbose", "--resume", first}, "One more thing.\n") == 0);
+    CHECK(chat.err.find("[memory] summarised for recall by helper") != std::string::npos);
+
+    (void)chat.script("helper", texts({"Later Title"}));
+    REQUIRE(chat.run(driven_args(), line_of({{"type", "user"},
+                                             {"text",
+                                              "Which Postgres version does the project "
+                                              "use?"}})) == 0);
+    std::optional<nlohmann::json> memory;
+    for (const nlohmann::json& event : driven_events(chat.out)) {
+        if (event.at("type") == "memory") {
+            memory = event;
+        }
+    }
+    REQUIRE(memory.has_value());
+    REQUIRE(memory->at("sessions").size() == 1);
+    CHECK(memory->at("sessions")[0].at("id") == first);
+    CHECK(memory->at("sessions")[0].at("name") == "Postgres notes");
+}
+
+TEST_CASE("a resumed chat says what it could not carry over, as notices to a driver",
+          "[chat][cli][machine][resume][record-truth]") {
+    // The probe: a legacy chat resumed over stream-json carried only events
+    // on stdout, its `[resume]` warnings on stderr, which a driver never
+    // draws -- and its missing backend silently replaced.
+    HelperChat chat{texts({"three"}), {"Title"}};
+    INFO(chat.err);
+    const auto write_legacy = []() {
+        std::filesystem::create_directories(apogee::logger::sessions_dir());
+        std::ofstream{apogee::logger::session_path("legacy-chat"),
+                      std::ios::binary | std::ios::trunc}
+            << R"({"chat_id": "legacy-chat", "backend": "gone-backend", "messages": [
+                {"role": "user", "content": "first question"},
+                {"role": "assistant", "content": "first answer"},
+                {"role": "user", "content": "second question"},
+                {"role": "assistant", "content": "second answer"},
+                {"role": "nonsense", "content": 42}]})";
+    };
+    write_legacy();
+    REQUIRE(chat.run(driven_args({"--no-recall", "--resume", "legacy-chat"})) == 0);
+    const std::vector<nlohmann::json> events = driven_events(chat.out);
+    REQUIRE(events.size() == 4);
+    CHECK(events[0].at("type") == "session");
+    CHECK(events[0].at("model") == "chatty");
+    CHECK(events[0].at("next_turn") == 3);
+    CHECK(notices_of(events) ==
+          std::vector<std::string>{
+              "resume: a message could not be read and was skipped",
+              "resume: this chat predates session metadata; resuming best-effort with current "
+              "defaults",
+              "resume: backend 'gone-backend' is no longer configured; using the default instead"});
+    // Said between turns: no notice carries a turn.
+    for (const nlohmann::json& event : events) {
+        CHECK_FALSE(event.contains("turn"));
+    }
+    CHECK(chat.err.find("[resume]") == std::string::npos);
+
+    // At a terminal or a pipe, the warning lines, as ever.
+    write_legacy();
+    REQUIRE(chat.run({"chat", "--no-recall", "--resume", "legacy-chat"}, "/exit\n") == 0);
+    CHECK((chat.out + chat.err).find("[resume] this chat predates session metadata") !=
+          std::string::npos);
+    CHECK((chat.out + chat.err).find("[resume] backend 'gone-backend' is no longer configured") !=
+          std::string::npos);
+}

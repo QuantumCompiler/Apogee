@@ -10,6 +10,7 @@
 #include "contracts/config.h"
 
 using apogee::agentloop::compact_history;
+using apogee::agentloop::Compaction;
 using apogee::agentloop::ContextUsage;
 using apogee::agentloop::count_turns;
 using apogee::agentloop::estimate_prompt_tokens;
@@ -87,7 +88,10 @@ TEST_CASE("compaction summarises into an authoritative system message",
         ChatMessage::assistant("still fine"),
     };
 
-    const auto compacted = compact_history(harness, history, "mock");
+    const Compaction done = compact_history(harness, history, "mock");
+    CHECK(done.outcome == Compaction::Outcome::Compacted);
+    CHECK(done.failure.empty());
+    const std::vector<ChatMessage>& compacted = done.history;
 
     CHECK(compacted.size() < history.size());
     // Not a turn of the conversation: whichever model writes it, a local
@@ -105,25 +109,72 @@ TEST_CASE("compaction summarises into an authoritative system message",
     CHECK(compacted.back().content.plain_text() == "still fine");
 }
 
-TEST_CASE("a failed compaction returns the history unchanged", "[agentloop][content][compaction]") {
+TEST_CASE("a failed compaction returns the history unchanged, and says why",
+          "[agentloop][content][compaction]") {
     // Degrading to a longer prompt is acceptable; losing the conversation is
-    // not.
+    // not -- nor is calling it a compaction (55b).
     Harness harness{Config{}};
     harness.use_default_router();  // nothing registered -- the summarise call fails
 
     const std::vector<ChatMessage> history{ChatMessage::user("one"), ChatMessage::assistant("two")};
-    const auto compacted = compact_history(harness, history, "ghost");
+    const Compaction done = compact_history(harness, history, "ghost");
 
-    REQUIRE(compacted.size() == history.size());
-    CHECK(compacted[0].content.plain_text() == "one");
-    CHECK(compacted[1].content.plain_text() == "two");
+    CHECK(done.outcome == Compaction::Outcome::Failed);
+    CHECK_FALSE(done.compacted());
+    CHECK_FALSE(done.failure.empty());
+    REQUIRE(done.history.size() == history.size());
+    CHECK(done.history[0].content.plain_text() == "one");
+    CHECK(done.history[1].content.plain_text() == "two");
 }
 
-TEST_CASE("compacting a system-only history is a no-op", "[agentloop][content][compaction]") {
+TEST_CASE("compaction with nothing to fold asks no model and says so",
+          "[agentloop][content][compaction]") {
+    // 55b: an empty conversation, and one holding only the answer an earlier
+    // compaction kept -- each is nothing to compact, never a compaction.
+    MockProvider::Options options;
+    options.backend_name = "mock";
+    options.turns = {MockTurn{.text = "a summary"}};
+    const auto mock = std::make_shared<MockProvider>(std::move(options));
     Harness harness{Config{}};
+    harness.register_provider("mock", mock);
     harness.use_default_router();
-    const std::vector<ChatMessage> history{ChatMessage::system("only a prompt")};
-    CHECK(compact_history(harness, history, "m").size() == 1);
+
+    const std::vector<std::vector<ChatMessage>> nothing{
+        {},
+        {ChatMessage::system("only a prompt")},
+        {ChatMessage::system("be brief"), ChatMessage::system("an earlier summary"),
+         ChatMessage::assistant("the answer it kept")},
+    };
+    for (const std::vector<ChatMessage>& history : nothing) {
+        const Compaction done = compact_history(harness, history, "mock");
+        CHECK(done.outcome == Compaction::Outcome::Nothing);
+        CHECK(done.failure.empty());
+        CHECK(done.history.size() == history.size());
+    }
+    CHECK(mock->requests().empty());
+}
+
+TEST_CASE("an empty summary is a failed compaction, the history kept",
+          "[agentloop][content][compaction]") {
+    // 55b: a summariser that answers nothing has compacted nothing -- the
+    // history stays, and the failure names why.
+    for (const std::string& blank : {std::string{}, std::string{" \n\t "}}) {
+        MockProvider::Options options;
+        options.backend_name = "mock";
+        options.turns = {MockTurn{.text = blank}};
+        const auto mock = std::make_shared<MockProvider>(std::move(options));
+        Harness harness{Config{}};
+        harness.register_provider("mock", mock);
+        harness.use_default_router();
+
+        const std::vector<ChatMessage> history{ChatMessage::user("one"),
+                                               ChatMessage::assistant("two")};
+        const Compaction done = compact_history(harness, history, "mock");
+        CHECK(done.outcome == Compaction::Outcome::Failed);
+        CHECK(done.failure == "the summary came back empty");
+        CHECK(done.history.size() == history.size());
+        CHECK(mock->requests().size() == 1);
+    }
 }
 
 // ---------------------------------------------------------------------------

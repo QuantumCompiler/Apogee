@@ -10389,3 +10389,63 @@ The refusal was true but incomplete. The set is Wan's original layout, and its r
 - MinGW, clang 22 and AppleClang find nothing in the touched code.
 - These ctest cases pass: `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`, `cli.machine_mode`, `cli.tui_shell`, `cli.chat_typeahead_and_crash_safety`, `cli.chat_line_editing` and `cli.machine_schema_conformance`.
 - `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,896 tests and the macOS app's 449 cases passed, with no warning.
+
+### 2026-10-25 — `session-record-truth` (backlog item 55b): the session record tells the truth
+
+**Why.** The audit found five places where what a session says about itself drifted from what happened, each misleading a driver such as the macOS app. Every probe reproduced on the unmodified binary first:
+- **A compaction that did nothing said it succeeded.** A `compact` line on an empty chat answered `history compacted`, and an empty summary answered `history compacted by empty`. `chats info` counted three.
+- **Recall named a renamed chat by its old auto-title** (`Zebra migration facts`).
+- **Resume degradations reached stderr only.** A legacy chat resumed over stream-json showed three `[warn] [resume]` lines there, and `chats show` wrote its dropped-field warning there too.
+- **`next_turn` contradicted `chats show`.** A legacy file with two answered turns and no count showed [1,2], while the resumed session announced `next_turn` 1 and reused it.
+- **A running chat undid outside edits.** It put back an auto-title over an outside `chats title`, and resurrected a chat after `chats delete`. This finding came from the completeness pass and was reproduced first.
+
+`machine-mode.md` also never said that a line sent while a question or permission prompt is open is dropped (52d's rule).
+
+- [x] **A compaction reports and counts only what happened** (`agentloop::compact_history` says no-op or failure).
+  - **Nothing to fold:** `nothing to compact -- no exchange to fold yet`. That covers a history whose only exchange is the answer an earlier compaction kept, so summaries no longer stack.
+  - **A failure, by name:** `compaction by empty failed: the summary came back empty -- the history is unchanged`. A whitespace-only summary counts as a failure.
+  - **Neither counts, saves or tells the attachments.** `chats compact` exits 0 on a no-op and 1 on a failure, and refuses a chat deleted meanwhile. The automatic compaction at 90% and `serve` count only on success.
+- [x] **Recall names a chat by its display name** (`display_name()`). After `chats title` and a re-summary, the `memory` event says `Renamed Zebra Chat`. An untitled chat is recalled under its id, as `chats list` names it, and a chat deleted meanwhile is skipped.
+- [x] **Resume degradations reach drivers.** In machine mode each is a `notice` (`resume: …`) after `session` and any resumed `todo`, the roster-pin failure among them, and stderr stays empty. The terminal is unchanged. `chats show`'s JSON always carries `warnings` (`[{kind:"field_dropped",…}]`), no longer written to stderr.
+- [x] **One reconciled turn count.** The count is reconciled when a chat is loaded and after each served request. So `chats list`, the TUI's picker, tasks and resume read one number. The probe's file now resumes at `next_turn` 3, and `chats show` lists [1,2,3] after a live turn.
+- [x] **A running session never overwrites an outside rename or delete.**
+  - Each save re-reads the file's existence and name first (`logger::save` returns `Saved` and keeps two in-memory fields, `filed_name` and `deleted`).
+  - An outside rename wins, even over one the session made meanwhile.
+  - A deleted chat stays deleted. Nothing more is saved (transcript, recall summary, model state, auto-capture), and the session says so once: `chat <id> was deleted while this session ran -- it stays deleted, and nothing more of it is saved`.
+  - The terminal REPL and `serve` behave alike.
+- [x] **`machine-mode.md`** states the between-turns rule and the drop.
+
+**Decisions made while building** (2026-10-25, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - A no-op says "nothing to compact", and a failure names the backend and reason; neither counts.
+  - A save re-reads the name and existence first. An outside rename wins, and a deleted chat stays deleted, said.
+- **"Nothing to compact" covers more than an empty conversation:** a history whose only exchange is the kept answer of an earlier compaction, which otherwise grew longer on each compaction.
+- **Only the name and existence are re-read.** A `config rename-backend` made while a session runs is still overwritten by its next save.
+- **The served session store saves a copy,** since `save` now writes back into the session it is given.
+
+**Verified.**
+- 12 new cases (`[record-truth]`, 143 assertions):
+  - the one count;
+  - a save keeping an outside rename and the session's own;
+  - a deleted chat staying deleted;
+  - `chats show`'s warnings, and the numbering over the probe's fixture;
+  - the nothing-to-fold and failure matrices, and a full-context failure;
+  - recall after a rename;
+  - a legacy resume as notices;
+  - several exchanges in one served request;
+  - a served rename and delete.
+- 2 new compaction cases in `content_test`: nothing to fold asks no model, and an empty summary is a failure.
+- `machine_mode_e2e.sh` gained a 55b section running findings 1, 3, 4 and 5 on the real binary. It fails on the old one.
+- Reverting the fixes made the new chat, logger and served-turn cases fail.
+- `chats show`'s golden gains `"warnings": []`.
+- These ctest cases pass:
+  - `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`;
+  - `cli.machine_mode`, `cli.machine_schema_conformance`, `cli.reference_driver`;
+  - `cli.serve_lifecycle`, `cli.knowledge_lifecycle`, `cli.execute_lifecycle`, `cli.task_lifecycle`, `cli.suites_lifecycle`, `cli.symphonies_lifecycle`, `cli.code_graph_lifecycle`, `cli.config_lifecycle`;
+  - `cli.chat_typeahead_and_crash_safety`, `cli.chat_line_editing`, `cli.tui_shell`, `cli.tui_doors`;
+  - `cli.complete_lifecycle`, `cli.http_api_conformance`.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,909 tests and the macOS app's 449 cases passed, with no warning.
+
+**Not done:**
+- **Turn numbers can drift after a failed live turn.** Machine mode numbers every `user` line (28f), but a failed turn isn't counted (M27). After a mid-session failure, `chats show` numbers later turns lower than the live session did. Fixing it changes one of those rules: the user's call.
+- **Two places still write to stderr:** `task resume`'s resume warnings under stream-json, and the automatic compaction's lines in machine mode. Both still go there as before.
