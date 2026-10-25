@@ -454,9 +454,10 @@ void attach_mentions(ChatAttachments& attached, std::string_view message,
 ///
 /// **One model call at a time is the rule this keeps.** A local provider is
 /// not safe to drive from two threads, so everything that may reach the model
-/// -- the next turn, a slash command, the exit -- calls `settle()` first. That
-/// waits for a title still in flight (seconds at most: a few dozen tokens with
-/// the reasoning skipped) and records it.
+/// -- the next turn, a slash command, a driver's `attach`, `compact` or model
+/// `set` line (55a), the exit -- calls `settle()` first. That waits for a
+/// title still in flight (seconds at most: a few dozen tokens with the
+/// reasoning skipped) and records it.
 /// A turn's span on the session's front-end (32c): the token that stops it,
 /// and its end said however the turn leaves -- answered, cancelled, thrown.
 struct TurnScope {
@@ -495,8 +496,12 @@ public:
 
     /// Asks for a title when `session` has no name yet -- once per process, so
     /// a model that cannot produce one is not asked again after every turn.
+    /// Never for a private chat (55a): nothing would keep its title, and
+    /// asking for one sends its questions to a second model, perhaps a cloud
+    /// one.
     void start_if_due(const logger::Session& session) {
-        if (asked_ || session.turns < 1 || !session.title.empty() || !session.custom_name.empty()) {
+        if (asked_ || session.never_written || session.turns < 1 || !session.title.empty() ||
+            !session.custom_name.empty()) {
             return;
         }
         asked_ = true;
@@ -1554,6 +1559,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         continue;
                     }
                 }
+                // Reading it may reach a model -- the embedder, the vision
+                // helper -- so a title in flight settles first, as before
+                // the REPL's `/attach` (55a).
+                title.settle(session);
                 (void)attached.attach(message.text, working_directory,
                                       attached.graph_method(graph));
                 continue;
@@ -1565,6 +1574,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 continue;
             }
             if (message.kind == DriverMessage::Kind::Compact) {
+                // A model call: the title in flight settles first, as the
+                // REPL's slash dispatch does (55a) -- one call at a time.
+                title.settle(session);
                 machine_reporter.on_notice(compact_attached(harness, session, attached));
                 continue;
             }
@@ -1587,6 +1599,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 for (const auto& [key, value] : message.settings) {
                     SettingSaid said;
                     if (key == "model") {
+                        // A rebuild is a model call's business: the title in
+                        // flight settles first, as before `/model` (55a).
+                        title.settle(session);
                         said = switch_model(harness, session, config, value, build_options,
                                             flags->tools, [&attached]() { attached.settle(); });
                         if (said.ok) {
@@ -1791,7 +1806,12 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // it, and `@` completes paths -- all from the one command table. A
     // pipe gets none of it: the plain reader never asks.
     EditingLineReader::Options reader_options;
-    reader_options.history_path = default_history_path();
+    // A private chat (55a) keeps its lines for its own up-arrow and writes
+    // them nowhere: no history path, so the shared file is neither read nor
+    // written, and no later session recalls what was typed here.
+    if (!session.never_written) {
+        reader_options.history_path = default_history_path();
+    }
     // A folder deleted under the process lists as nothing, never a throw.
     ChatCompletionSources completion = chat_completion_sources(config, working_directory);
     completion.attachment_names = [&attached] { return attached.names(); };
@@ -1942,7 +1962,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             continue;
         }
         // Only non-empty lines enter the history, so recall is not padded
-        // with blanks.
+        // with blanks -- a private chat's in memory alone (55a).
         reader->remember(input);
 
         // Before anything below can reach the model.

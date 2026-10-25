@@ -136,6 +136,48 @@ grep -q '"accepts":\["hello"\]' "$HS_DIR/complete.jsonl" || fail "complete's cap
     >"$HS_DIR/arg.jsonl" 2>&1 || fail "complete with an argument failed"
 grep -q '"accepts":\[\]' "$HS_DIR/arg.jsonl" || fail "complete with an argument claimed to read stdin"
 
+# --- private stays private (55a): no title asked, at either door ---------------
+# The CLI/GUI audit's probe (2026-10-22), pinned: the utility model -- which
+# titles a chat -- is a claude-cli entry whose binary logs every prompt it is
+# handed. A private chat, driven or on a pipe, hands it nothing; the same chat
+# written hands it its question, which is what the absence is measured
+# against. Its own home, so no other section's config moves.
+PV_HOME="$WORK_DIR/private-title"
+PV_LOG="$PV_HOME/utility.log"
+mkdir -p "$PV_HOME/bin"
+cat >"$PV_HOME/bin/claude" <<EOF
+#!/bin/sh
+for last in "\$@"; do :; done
+printf '%s\n' "\$last" >>"$PV_LOG"
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"Acme Merger Talk"}'
+EOF
+chmod +x "$PV_HOME/bin/claude"
+pv() { APOGEE_HOME="$PV_HOME" "$APOGEE_BIN" "$@"; }
+pv config init >/dev/null || fail "private-title: config init"
+pv config add-backend mock --type mock --model mock-1 >/dev/null || fail "private-title: add mock"
+pv config set-default mock >/dev/null || fail "private-title: set-default"
+pv config add-backend util --type claude-cli >/dev/null || fail "private-title: add util"
+pv config set-backend util --binary "$PV_HOME/bin/claude" >/dev/null || fail "private-title: point util"
+pv config set-default-utility util >/dev/null || fail "private-title: set-default-utility"
+printf '%s\n' '{"type":"user","text":"our confidential merger with Acme closes Friday"}' \
+    | pv chat --private --output-format stream-json --input-format stream-json \
+        >"$PV_HOME/driven.jsonl" 2>"$PV_HOME/driven.err" \
+    || fail "private-title: the driven chat failed: $(cat "$PV_HOME/driven.err")"
+grep -q '"type":"result"' "$PV_HOME/driven.jsonl" || fail "private-title: the driven chat answered nothing"
+[ ! -e "$PV_LOG" ] || fail "a private driven chat asked the utility model for a title: $(cat "$PV_LOG")"
+printf 'our confidential merger with Acme closes Friday\n' | pv chat --private \
+    >"$PV_HOME/repl.out" 2>"$PV_HOME/repl.err" \
+    || fail "private-title: the chat on a pipe failed: $(cat "$PV_HOME/repl.err")"
+[ ! -e "$PV_LOG" ] || fail "a private chat on a pipe asked the utility model for a title: $(cat "$PV_LOG")"
+[ -z "$(ls "$PV_HOME/sessions" 2>/dev/null)" ] || fail "private-title: a private chat wrote a session"
+printf '%s\n' '{"type":"user","text":"an ordinary question about lunch"}' \
+    | pv chat --no-recall --output-format stream-json --input-format stream-json \
+        >"$PV_HOME/written.jsonl" 2>"$PV_HOME/written.err" \
+    || fail "private-title: the written chat failed: $(cat "$PV_HOME/written.err")"
+grep -q "an ordinary question about lunch" "$PV_LOG" 2>/dev/null \
+    || fail "private-title: the logging utility heard no title for a written chat -- the absence above proves nothing"
+grep -q "Acme" "$PV_LOG" && fail "private-title: a private chat's words reached the utility model"
+
 # --- the session names its chat; an empty one is never saved (M28) -------------
 # The user's run, as the probe that found it drove it (2026-10-22): two scripted
 # mocks, `claude` the default. A session closed before any turn -- with nothing,

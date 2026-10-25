@@ -21,6 +21,8 @@ this locks:
   * the permission mode (39b): Shift+Tab cycles it, the prompt redrawn with
     its words and the line typed so far kept; `/permission-mode bypass`
     asks once and a yes chooses it.
+  * a private chat (55a): Up recalls its own lines, and the history file is
+    byte for byte what it was -- no later session recalls them.
 
 POSIX only -- `pty` has no Windows equivalent.
 """
@@ -146,17 +148,20 @@ class Screen:
         return out
 
 
-def run_chat(binary, env, script, settle=0.7, cwd=None, width=None, snapshots=None):
+def run_chat(binary, env, script, settle=0.7, cwd=None, width=None, snapshots=None,
+             args=(), until_exit=False):
     """Drives chat under a PTY, writing each element of `script` in turn.
 
     With `snapshots`, the screen as it stands after each element is appended
-    to it (a `Screen` of `width` columns).
+    to it (a `Screen` of `width` columns). `args` follow `chat`; with
+    `until_exit`, the PTY is read until the chat has exited, so whatever it
+    writes as it closes is written before the caller looks.
     """
     primary, secondary = pty.openpty()
     if width is not None:
         fcntl.ioctl(secondary, termios.TIOCSWINSZ, struct.pack("HHHH", 40, width, 0, 0))
     process = subprocess.Popen(
-        [binary, "chat"], stdin=secondary, stdout=secondary, stderr=secondary,
+        [binary, "chat", *args], stdin=secondary, stdout=secondary, stderr=secondary,
         env=env, close_fds=True, cwd=cwd,
     )
     os.close(secondary)
@@ -187,6 +192,11 @@ def run_chat(binary, env, script, settle=0.7, cwd=None, width=None, snapshots=No
             screen = Screen(width)
             screen.feed(b"".join(chunks))
             snapshots.append(screen)
+    if until_exit:
+        deadline = time.time() + 15
+        while process.poll() is None and time.time() < deadline:
+            drain(0.2)
+        drain(0.2)
 
     selector.close()
     os.close(primary)
@@ -392,6 +402,44 @@ def check_permission_mode(binary, env, home, failures):
             failures.append(f"unmodelled sequences {screen.unhandled!r}: extend the model")
 
 
+def check_private_history(binary, env, home, failures):
+    """55a: a private chat's lines serve its own Up and are written nowhere."""
+    history = os.path.join(home, "chat_history")
+    with open(history, "rb") as handle:
+        before = handle.read()
+    width = 80
+    screens = []
+    output = run_chat(binary, env, [
+        b"zebra confidential gamma\r",
+        b"\x1b[A",   # Up: the line just typed, from memory
+        b"\r",       # sent again
+        b"/exit\r",
+    ], args=["--private"], width=width, snapshots=screens, until_exit=True)
+    recalled = below_prompt(screens[1])
+    if not (recalled and recalled[0] == "You: zebra confidential gamma"):
+        failures.append(f"Up in a private chat did not recall its own line: {recalled!r}")
+    if b"private: nothing of this chat was written" not in output:
+        failures.append(f"the private chat did not say it wrote nothing: {output[-400:]!r}")
+    with open(history, "rb") as handle:
+        after = handle.read()
+    if after != before:
+        failures.append(f"a private chat changed the history file: {after[len(before):]!r}")
+    if b"zebra" in after:
+        failures.append("the history file holds a private chat's line")
+
+    # A later session: Up, twice, reaches the lines before the private chat's
+    # -- `/exit` (its suggestion drawn beside it), then the one before -- and
+    # never one typed in it.
+    screens = []
+    run_chat(binary, env, [b"\x1b[A", b"\x1b[A", b"\x03"], width=width, snapshots=screens,
+             until_exit=True)
+    rows = [(below_prompt(screen) or [""])[0] for screen in screens[:2]]
+    if any("zebra" in row for row in rows):
+        failures.append(f"a later session recalled a private chat's line: {rows!r}")
+    if not (rows[0].startswith("You: /exit") and rows[1] == "You: remember this line"):
+        failures.append(f"a later session's Up did not recall the lines before: {rows!r}")
+
+
 def check_pipe(binary, env, failures):
     """A pipe is a first-class way to drive chat: it must get bytes and nothing else."""
     work = tempfile.mkdtemp(prefix="apogee-lineedit-pipe-")
@@ -455,6 +503,7 @@ def main():
                 if "remember this line" not in handle.read():
                     failures.append("the history file does not contain the typed line")
 
+        check_private_history(binary, env, home, failures)
         check_suggestions(binary, env, home, failures)
         check_attach_flags(binary, env, home, failures)
         check_permission_mode(binary, env, home, failures)
@@ -465,7 +514,7 @@ def main():
                 print(f"FAIL: {failure}", file=sys.stderr)
             return 1
 
-        print("arrow-key recall, history, suggestions and the pipe contract - OK")
+        print("arrow-key recall, history, a private chat's, suggestions and the pipe contract - OK")
         return 0
     except Exception as error:  # noqa: BLE001 -- report, do not mask
         print(f"FAIL: {error!r}", file=sys.stderr)

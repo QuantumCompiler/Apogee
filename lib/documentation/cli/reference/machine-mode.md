@@ -476,18 +476,26 @@ turn runs, a line waits for it to end, as an `attach` does.
   saved chat is compacted with the verb `apogee chats compact <id>` (asked
   first at a terminal, `--yes` for a script).
 
+A chat is titled in the background after its first answer. A `compact`, a
+`set` naming a `model`, or an `attach` sent while that title is still being
+asked for waits for it first (55a) -- one model call at a time, as before the
+slash commands -- so its `notice` can take a few seconds longer.
+
 ### A private chat: `chat --private`
 
 `chat --private` (and `execute --private`, the session's one opening)
 writes **nothing** of the conversation: no transcript under `sessions/` —
 not written and later deleted, never written — no recall summary and no
-recall of earlier chats, no saved model state, no auto-capture, and its
-attachments indexed in a folder of the run's own in the system's temporary
-directory, removed as the run ends. The `session` event carries `"private":
-true`, and a `notice` says it: `private: nothing of this chat is written --
-no transcript, no recall`; the terminal and the shell say the same line at
-the start. A saved chat cannot be resumed privately: `--private` with
-`--resume` or `--continue` is refused.
+recall of earlier chats, no saved model state, no auto-capture, no title
+asked of any model (55a: one would be kept nowhere, and asking for it sent the
+chat's questions to the utility model), and its attachments indexed in a
+folder of the run's own in the system's temporary directory, removed as the
+run ends. At a terminal its typed lines are its own up-arrow's alone: the line
+editor's history file (`chat_history`) is neither read nor written. The
+`session` event carries `"private": true`, and a `notice` says it: `private:
+nothing of this chat is written -- no transcript, no recall`; the terminal and
+the shell say the same line at the start. A saved chat cannot be resumed
+privately: `--private` with `--resume` or `--continue` is refused.
 
 ### Playing a symphony (`execute`)
 

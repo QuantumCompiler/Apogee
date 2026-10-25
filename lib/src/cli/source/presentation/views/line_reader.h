@@ -146,6 +146,8 @@ public:
         /// Where the input history is kept. **Per-user, not per-session** — a
         /// session file records the conversation, not the keystrokes that
         /// produced it, and recall across sessions is the whole point.
+        /// Empty keeps it in memory for this reader alone: nothing is read or
+        /// written (a private chat's, 55a).
         std::filesystem::path history_path;
         /// Entries retained. Bounded so a long-lived history cannot grow
         /// without limit.

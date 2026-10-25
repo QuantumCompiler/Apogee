@@ -2,11 +2,16 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <optional>
+#include <random>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "ansi/text_width.h"
 #include "support/env_guard.h"
@@ -111,6 +116,32 @@ TEST_CASE("the history path sits under APOGEE_HOME", "[chat][reader]") {
     const auto path = apogee::commands::default_history_path();
     CHECK(path.parent_path() == dir.path());
     CHECK(path.filename() == "chat_history");
+}
+
+TEST_CASE("an editor with no history path keeps its lines in memory and writes nothing",
+          "[chat][reader][private]") {
+    // A private chat's reader (55a): what it remembers serves its own
+    // up-arrow and lands nowhere. An editor given a path writes there as it
+    // closes -- the measure the absence is taken against.
+    const TempDir dir{"history-none-" + std::to_string(std::random_device{}())};
+    const EnvGuard home{"APOGEE_HOME", dir.path().string()};
+    {
+        apogee::commands::EditingLineReader reader{{}};
+        reader.remember("zebra confidential gamma");
+    }
+    CHECK(std::filesystem::is_empty(dir.path()));
+
+    const std::filesystem::path kept = dir.path() / "kept" / "chat_history";
+    {
+        apogee::commands::EditingLineReader::Options options;
+        options.history_path = kept;
+        apogee::commands::EditingLineReader reader{std::move(options)};
+        reader.remember("an ordinary line");
+    }
+    std::ifstream in{kept, std::ios::binary};
+    const std::string written{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    CHECK(written.find("an ordinary line") != std::string::npos);
+    CHECK(written.find("zebra") == std::string::npos);
 }
 
 // --- suggestions ---------------------------------------------------------------

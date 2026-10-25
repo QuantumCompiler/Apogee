@@ -10352,3 +10352,40 @@ The refusal was true but incomplete. The set is Wan's original layout, and its r
 **Not done:**
 - 55d's items: its single list of references, MLX level spellings in the family rename, and the unguarded `config->models.default_video` in `rename_stored_model`, which sits beside this change.
 - The footprint has no JSON or HTTP view.
+
+
+## Milestone AR — The audit's CLI findings
+
+**Goal.** The CLI/GUI audit of 2026-10-22 (the user's call: "do a very thorough bug search / feature disparity / audit on the CLI and GUI so far") was a 14-dimension sweep over the branch. It probed the branch binary in sandboxed homes, and a three-lens adversarial panel judged each finding. 43 findings were the CLI's, grouped by seam into track 55 (55a–55i). Each item closes its findings with the probes pinned as tests, so what the CLI promises and what it does agree again.
+
+### 2026-10-25 — `private-stays-private` (backlog item 55a): nothing typed, titled or raced
+
+**Why.** 52d's `chat --private` promises *nothing of this chat is written*. The audit found it false twice, and one adjacent race. All three reproduced on the unmodified binary first:
+- **Line history.** A private terminal session's typed lines landed in the shared `chat_history`. Typing `zebra confidential gamma` and `/exit` wrote both, and a later session's Up arrow recalled the zebra line.
+- **A discarded title.** A private chat's questions went to the utility backend for a title that was then thrown away. A logging `claude-cli` utility received `The conversation's questions: - our confidential merger with Acme closes Friday`, at both doors.
+- **A race.** The title call raced machine mode's `compact` and model `set` lines, against the session's own rule of one model call at a time. With a 2-second title, the compact log read `begin title, begin other, end other, end title`, and a `set` answered after 0.0 s with no title saved.
+
+- [x] **A private terminal session keeps no line history.** Its history path is empty, so its lines are kept in memory for its own Up arrow and written nowhere. The shared file is neither read nor written. `line_reader` already skipped an empty path.
+- [x] **A private chat never asks for a title** (`start_if_due` returns early on `never_written`), at either door. A chat merely marked with `/private` (26l) is still saved, and still titled.
+- [x] **A driver's `compact`, model `set` and `attach` lines settle the title in flight first,** as the REPL's slash dispatch does. `attach` is covered too, since reading an attachment can call the embedder or the vision helper. `detach` calls no model and waits for nothing. After the fix:
+  - the compact log reads `begin title, end title, begin other, end other`;
+  - the `set` answers after 2.1 s, with the title saved.
+- [x] **`machine-mode.md`** says a private chat asks for no title and writes no line history, and that those three lines may wait on a title.
+
+**Decisions made while building** (2026-10-25, each recorded for veto):
+- **The open call's default, taken:** a private terminal session's up-arrow history lives in memory, written nowhere. Since it loads nothing either, Up shows only that session's own lines.
+- **The private guard is the title alone.** The item's core constraint reads, literally, "no provider call beyond the conversation's own model". Taken that far, it would cut the utility, vision, transcription and embedding helpers from a private chat: search rewrites, summaries, the thinking choice, compaction, attachment reading. Their results are used in the conversation, unlike the title's, which is thrown away. The seam and acceptance name the title. Cutting the others is the user's call.
+- **Two older `-Wsign-conversion` warnings** in `chat_test.cpp` (`files_under`), found by the MinGW scan of the touched file, were fixed (`1U : 0U`).
+
+**Verified.**
+- 3 new cases:
+  - an editor with no history path keeping its lines in memory and writing nothing;
+  - a private chat asking no model for a title, at either door;
+  - a driven `compact`, model change or `attach` waiting for the title in flight. This one is POSIX only, over a slow logging `claude-cli` utility with a stdout marker.
+- 2 script checks:
+  - `cli.machine_mode` runs the audit's title probe on the real binary at both doors, with a written chat as its control;
+  - `cli.chat_line_editing` checks Up recalls a private chat's own line, `chat_history` stays byte-identical, and a later session never recalls it.
+- Reverting each fix made its test fail: the title guard, each of the three settles, and the empty path.
+- MinGW, clang 22 and AppleClang find nothing in the touched code.
+- These ctest cases pass: `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`, `cli.machine_mode`, `cli.tui_shell`, `cli.chat_typeahead_and_crash_safety`, `cli.chat_line_editing` and `cli.machine_schema_conformance`.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,896 tests and the macOS app's 449 cases passed, with no warning.

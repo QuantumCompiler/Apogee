@@ -26,4 +26,4 @@
 - [ ] Quitting the app ends every session child and completes the deleted-on-close fallback.
 - [ ] Stop or switch during a session's launch leaves no live child behind; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0 (track 4, the CLI/GUI audit's GUI findings); ungated. The CLI's matching private fixes are [`private-stays-private.md`](../../../cli/backlog/v0.2.0/private-stays-private.md) (CLI 55a); neither gates the other.
+**Scope note.** Earmarked for v0.2.0 (track 4, the CLI/GUI audit's GUI findings); ungated. The CLI's matching private fixes, [55a](../../../cli/assistant/MILESTONES.md#milestone-ar--the-audits-cli-findings), shipped 2026-10-25; neither gated the other.

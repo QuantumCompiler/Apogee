@@ -13,6 +13,7 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "agentloop/recall.h"
@@ -27,6 +28,7 @@
 #include "embedstore/store.h"
 #include "logger/operational.h"
 #include "logger/session.h"
+#include "platform/child_process.h"
 #include "support/env_guard.h"
 
 using apogee::commands::ChatAttachments;
@@ -2137,7 +2139,7 @@ namespace {
     std::size_t count = 0;
     for (std::filesystem::recursive_directory_iterator it{dir, code}, end; !code && it != end;
          it.increment(code)) {
-        count += it->is_regular_file(code) ? 1 : 0;
+        count += it->is_regular_file(code) ? 1U : 0U;
     }
     return count;
 }
@@ -2437,3 +2439,201 @@ TEST_CASE("chats recall shows what recall holds, and forgets it with consent, tr
     REQUIRE(chat.run({"chats", "recall", "--forget", "--yes"}) == 0);
     CHECK(chat.out == "recall holds nothing -- nothing to forget\n");
 }
+
+// ---------------------------------------------------------------------------
+// Private stays private, and a title waits its turn (55a)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// The `text` of each `result` a driven chat wrote, in order.
+[[nodiscard]] std::vector<std::string> results_of(const std::vector<nlohmann::json>& events) {
+    std::vector<std::string> out;
+    for (const nlohmann::json& event : events) {
+        if (event.at("type") == "result") {
+            out.push_back(event.at("text").get<std::string>());
+        }
+    }
+    return out;
+}
+
+/// The lines a driven turn, a compaction and a turn after it send.
+[[nodiscard]] std::string turn_compact_turn() {
+    return std::string{R"({"type":"user","text":"our merger with Acme closes Friday"})"} + "\n" +
+           R"({"type":"compact"})" + "\n" + R"({"type":"user","text":"and after that?"})" + "\n";
+}
+
+}  // namespace
+
+TEST_CASE("a private chat asks no model for a title, at either door",
+          "[chat][cli][private][title]") {
+    // A private chat's title would be written nowhere, and asking for it sent
+    // the chat's questions to the utility model -- perhaps a cloud one (the
+    // CLI/GUI audit, 2026-10-22). The helper answers in script order, so the
+    // compaction's summary, read back by the next turn, says which call was
+    // its first: with no title asked, the compaction's own.
+    HelperChat chat{texts({"first answer", "[{{system}}]"}),
+                    {"Helper First Call", "Helper Second Call"}};
+    INFO(chat.err);
+    REQUIRE(chat.run(driven_args({"--private", "--no-recall"}), turn_compact_turn()) == 0);
+    const std::vector<std::string> driven = results_of(driven_events(chat.out));
+    REQUIRE(driven.size() == 2);
+    CHECK(driven.back().find("Helper First Call") != std::string::npos);
+    CHECK(driven.back().find("Helper Second Call") == std::string::npos);
+
+    // The REPL, on a pipe: the same.
+    REQUIRE(chat.run({"chat", "--private", "--no-recall"},
+                     "our merger with Acme closes Friday\n/compact\nand after that?\n") == 0);
+    CHECK(chat.out.find("Helper First Call") != std::string::npos);
+    CHECK(chat.out.find("Helper Second Call") == std::string::npos);
+    CHECK(apogee::logger::list_sessions().empty());
+
+    // The measure: a chat that is written is titled by the helper's first
+    // call, settled before the compaction takes its second.
+    REQUIRE(chat.run(driven_args({"--no-recall"}), turn_compact_turn()) == 0);
+    const std::vector<std::string> written = results_of(driven_events(chat.out));
+    REQUIRE(written.size() == 2);
+    CHECK(written.back().find("Helper Second Call") != std::string::npos);
+    CHECK(HelperChat::only_session().title == "Helper First Call");
+}
+
+#if !defined(_WIN32)
+namespace {
+
+/// std::cout for a run, and a mark in `log` -- where the slow utility logs
+/// its calls -- as each line holding `marker` is written: what the session
+/// said, ordered against what the model was doing. Machine mode flushes
+/// every event, which is when a line is read here.
+class MarkedOut final : public std::stringbuf {
+public:
+    MarkedOut(std::filesystem::path log, std::string marker)
+        : log_{std::move(log)}, marker_{std::move(marker)} {}
+
+protected:
+    int sync() override {
+        const std::string text = str();
+        for (std::size_t end = text.find('\n', seen_); end != std::string::npos;
+             end = text.find('\n', seen_)) {
+            if (text.substr(seen_, end - seen_).find(marker_) != std::string::npos) {
+                std::ofstream{log_, std::ios::app} << "said " << marker_ << "\n";
+            }
+            seen_ = end + 1;
+        }
+        return 0;
+    }
+
+private:
+    std::filesystem::path log_{};
+    std::string marker_{};
+    std::size_t seen_ = 0;
+};
+
+/// The lines of `path`, or none.
+[[nodiscard]] std::vector<std::string> lines_of(const std::filesystem::path& path) {
+    std::vector<std::string> out;
+    std::ifstream in{path};
+    for (std::string line; std::getline(in, line);) {
+        out.push_back(line);
+    }
+    return out;
+}
+
+/// `chat`'s config driven with `lines`, the line saying `marker` marked in
+/// `log`; its stdout and stderr kept on `chat`.
+int run_marked(HelperChat& chat, const std::filesystem::path& log, const std::string& marker,
+               const std::string& lines) {
+    MarkedOut marked{log, marker};
+    std::ostringstream err;
+    std::istringstream fed{lines};
+    std::streambuf* const old_out = std::cout.rdbuf(&marked);
+    std::streambuf* const old_err = std::cerr.rdbuf(err.rdbuf());
+    std::streambuf* const old_in = std::cin.rdbuf(fed.rdbuf());
+    int code = -1;
+    {
+        apogee::commands::RootCommand root{apogee::commands::default_registry()};
+        const std::string config = chat.config_path.string();
+        std::vector<const char*> argv{"apogee",      "--config",        config.c_str(),
+                                      "chat",        "--no-recall",     "--input-format",
+                                      "stream-json", "--output-format", "stream-json"};
+        code = root.run(static_cast<int>(argv.size()), argv.data());
+    }
+    std::cout.rdbuf(old_out);
+    std::cerr.rdbuf(old_err);
+    std::cin.rdbuf(old_in);
+    std::cin.clear();
+    chat.out = marked.str();
+    chat.err = err.str();
+    return code;
+}
+
+}  // namespace
+
+TEST_CASE("a driven compact, model change or attach waits for the title in flight",
+          "[chat][cli][machine][doors][title]") {
+    // One model call at a time (55a): a title still being asked for when a
+    // driver's `compact`, `set` or `attach` line arrives settles first, as
+    // before the REPL's slash commands -- a local model is not safe from two
+    // threads.
+    // The utility -- which titles and compacts -- is a claude-cli entry whose
+    // binary is a script taking a second over each call and logging its
+    // start and end, so a line that did not wait is caught mid-title.
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("this platform spawns no child processes");
+    }
+    HelperChat chat{texts({"first answer"}), {"Title"}};
+    INFO(chat.err);
+    const std::filesystem::path log = chat.home.path() / "utility.log";
+    const std::filesystem::path script = chat.home.path() / "bin" / "claude";
+    std::filesystem::create_directories(script.parent_path());
+    std::ofstream{script, std::ios::binary}
+        << "#!/bin/sh\n"
+           "for last in \"$@\"; do :; done\n"
+           "case \"$last\" in *\"The conversation's questions\"*) what=title ;; *) what=other ;; "
+           "esac\n"
+           "echo \"begin $what\" >> '"
+        << log.string()
+        << "'\nsleep 1\n"
+           "echo \"end $what\" >> '"
+        << log.string()
+        << "'\nprintf '%s\\n' "
+           "'{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"Slow "
+           "Title\"}'\n";
+    std::filesystem::permissions(script, std::filesystem::perms::owner_all);
+    REQUIRE(chat.run({"config", "add-backend", "util", "--type", "claude-cli"}) == 0);
+    REQUIRE(chat.run({"config", "set-backend", "util", "--binary", script.string()}) == 0);
+    REQUIRE(chat.run({"config", "set-default-utility", "util"}) == 0);
+
+    // `compact` straight after the first answer: the title's call ends
+    // before the compaction's begins.
+    REQUIRE(chat.run(driven_args({"--no-recall"}),
+                     std::string{R"({"type":"user","text":"first question"})"} + "\n" +
+                         R"({"type":"compact"})" + "\n") == 0);
+    CHECK(said(notices_of(driven_events(chat.out)), "history compacted by util"));
+    CHECK(lines_of(log) ==
+          std::vector<std::string>{"begin title", "end title", "begin other", "end other"});
+    CHECK(HelperChat::only_session().title == "Slow Title");
+    std::filesystem::remove(log);
+    std::filesystem::remove(apogee::logger::session_path(HelperChat::only_session().chat_id));
+
+    // `set` with a model, and `attach` -- whose reading may reach the
+    // embedder or the vision helper -- straight after the first answer: the
+    // title is settled before the line is answered.
+    const std::filesystem::path notes = chat.home.path() / "notes.md";
+    std::ofstream{notes, std::ios::binary} << "The launch code is 7731.\n";
+    const std::string first = std::string{R"({"type":"user","text":"first question"})"} + "\n";
+    const std::vector<std::pair<std::string, std::string>> doors{
+        {R"({"type":"set","model":"helper"})", "switched to helper"},
+        {R"({"type":"attach","path":")" + notes.generic_string() + "\"}",
+         "attaching " + notes.generic_string()}};
+    for (const auto& [line, marker] : doors) {
+        const int code = run_marked(chat, log, marker, first + line + "\n");
+        INFO(line + "\n" + chat.err);
+        REQUIRE(code == 0);
+        CHECK(lines_of(log) ==
+              std::vector<std::string>{"begin title", "end title", "said " + marker});
+        CHECK(HelperChat::only_session().title == "Slow Title");
+        std::filesystem::remove(log);
+        std::filesystem::remove(apogee::logger::session_path(HelperChat::only_session().chat_id));
+    }
+}
+#endif

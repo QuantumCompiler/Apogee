@@ -244,7 +244,7 @@ The release's MLX-for-every-kind track *(53e–53m, opened 2026-10-21 from that 
 
 The release's audit track *(track 55, opened 2026-10-22 from the user-requested CLI/GUI audit: 14 dimensions, probes against the branch binary, a three-lens adversarial panel per finding; 111 of 112 findings survived, the CLI's 43 with 6 high)*. In build order:
 
-- [ ] **Private stays private** *([55a](../backlog/v0.2.0/private-stays-private.md))* — a private terminal session writes no `chat_history`, never sends its questions to the utility backend for a title, and `compact`/`set model` settle the title call first.
+- [x] **Private stays private** *(55a, shipped 2026-10-25 — [Milestone AR](MILESTONES.md#milestone-ar--the-audits-cli-findings))* — a private terminal session writes no `chat_history`, never sends its questions to the utility backend for a title, and `compact`/`set model` settle the title call first.
 - [ ] **The session record tells the truth** *([55b](../backlog/v0.2.0/session-record-truth.md))* — failed compactions said and uncounted, recall naming renamed chats, resume degradations reaching drivers as notices, reconciled turn numbers, outside renames and deletes surviving a live session.
 - [ ] **Job streams and the composer keep their word** *([55c](../backlog/v0.2.0/job-streams-and-compose-honesty.md))* — every `models pull` cancellable, resumed compositions applying or refusing `--edit`, no `.srt` overwritten, dry runs never saying "rendering".
 - [ ] **Model-store hygiene** *([55d](../backlog/v0.2.0/model-store-hygiene.md))* — delete and rename see `draft:`, adapters and default pointers; MLX families rename; every hint runnable; voice and video sets never chat backends.
