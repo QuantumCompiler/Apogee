@@ -309,7 +309,7 @@ before.
 | Event | Meaning |
 |---|---|
 | `job` | First: the `verb`, `protocol_version` and `schema` — the same versions a session's announce. |
-| `stage` | A step of `models pull`'s chain (`--safetensors --register[-with]`): `index` of `count`, its `label` in the chain's words, `state` `started`, `done` or `failed`. A failed stage is followed by the chain's own `notice`s saying where it stopped and the one command that resumes it. |
+| `stage` | A step of `models pull`'s chain (`--safetensors --register[-with]`): `index` of `count`, its `label` in the chain's words, `state` `started`, `done` or `failed`. A failed stage is followed by the chain's own `notice`s saying where it stopped and the one command that resumes it -- or, since 55d, where it stopped alone, when the stage found nothing after it could run (a pulled draft head, whose refusal names its one conversion). |
 | `bytes` | Bytes a pull has moved — a download, a copy from the Ollama store, a hash: `done`, and `total` **only when known** (never guessed). In a tree of files (a snapshot, an MLX model, a pipeline, a voice model), the `file` moving and its `index` of `count`. Sent at each file's start, at each whole percent of a known total (each 16 MiB of an unknown one), and at its end. |
 | `ready` | A runtime loaded: `device`, and `dtype` and `mode` (`t2v`, `i2v`) when the driver says them. Since M24 `video generate`'s, `voice say`'s and a composition's also carry `engine`, the engine the run takes — `torch` or `mlx` — the same word the final document's `engine` says, so a run is known as MLX's while it runs. A `ready` without it (an older build) is PyTorch's. |
 | `step` | A denoising step done: `step` of `steps`. |
@@ -1117,8 +1117,12 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   the one exception: an `mlx` backend embeds with it, so `config scan
   --register` registers it as an `mlx` entry for the `embedding` role, and
   such a backend's row is not marked for attention -- its `note` says what it
-  is and how wide its vectors are. A backend whose directory is missing, and
-  every other row, has no `kind`.
+  is and how wide its vectors are. Since 55d the kind decides the role at every
+  door: `config add-backend`, `config set-backend` and the `config set-default*`
+  verbs refuse an `mlx` entry over any other kind, and the backend's own ladder
+  turns away one written by hand -- its row's `state` `wrong kind` (a drafter's
+  `a drafter`, as since 53i), its `note` the kind and what uses it. A backend
+  whose directory is missing, and every other row, has no `kind`.
 - **`models info`** and **`models status`**: their `label: value` record as
   `fields`, in order, each label as printed and a value's indented continuation
   joined to it with a newline. The values are the same words the human view

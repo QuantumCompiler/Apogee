@@ -156,7 +156,41 @@ namespace {
     }
 }
 
+/// Why the entry `edits` leave backend `name` with may not run what it names
+/// (55d): the edits tried on the file's text, kept nowhere, and the entry
+/// they leave asked `kind_refusal`. Empty when it may, or when the edit would
+/// not load -- the edit's own re-parse says why then.
+[[nodiscard]] std::string edited_kind_refusal(const std::filesystem::path& path,
+                                              std::string_view name,
+                                              const std::vector<BackendFieldEdit>& edits) {
+    try {
+        const std::ifstream in{path, std::ios::binary};
+        std::ostringstream content;
+        content << in.rdbuf();
+        std::string trial = content.str();
+        for (const BackendFieldEdit& edit : edits) {
+            if (edit.field == "type" || edit.field == "model_path") {
+                trial = harness::set_backend_field(trial, name, edit.field, edit.value);
+            }
+        }
+        const harness::Config edited = harness::parse_config(trial, "<edited config>");
+        const harness::BackendConfig* entry = edited.find_backend(name);
+        return entry == nullptr ? std::string{} : kind_refusal(name, *entry);
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
 }  // namespace
+
+std::string kind_refusal(std::string_view name, const harness::BackendConfig& backend) {
+    if (backend.type != harness::BackendType::Mlx || backend.model_path.empty()) {
+        return {};
+    }
+    const backends::MlxReadiness readiness = backends::probe_mlx_kind(
+        name, std::filesystem::path{harness::expand_env_and_home(backend.model_path)});
+    return readiness.message();
+}
 
 BackendFieldsOutcome set_backend_fields(const std::filesystem::path& path, std::string_view name,
                                         const std::vector<BackendFieldEdit>& requested) {
@@ -188,6 +222,16 @@ BackendFieldsOutcome set_backend_fields(const std::filesystem::path& path, std::
                 accepted += (accepted.empty() ? "" : ", ") + std::string{type};
             }
             out.refusal = "type: unknown value '" + edit.value + "' (accepted: " + accepted + ")";
+            return out;
+        }
+    }
+    // The kind decides the role (55d): an edit that would leave an mlx entry
+    // over a set no mlx entry runs is refused by that set's kind.
+    if (std::ranges::any_of(edits, [](const BackendFieldEdit& edit) {
+            return edit.field == "type" || edit.field == "model_path";
+        })) {
+        if (std::string refused = edited_kind_refusal(path, name, edits); !refused.empty()) {
+            out.refusal = std::move(refused);
             return out;
         }
     }

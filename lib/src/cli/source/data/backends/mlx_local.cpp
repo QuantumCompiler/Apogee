@@ -406,6 +406,8 @@ std::string_view to_string(MlxRefusal refusal) noexcept {
             return "no mlx-embeddings";
         case MlxRefusal::Drafter:
             return "a drafter";
+        case MlxRefusal::Kind:
+            return "wrong kind";
         case MlxRefusal::Draft:
             return "draft";
         case MlxRefusal::NoDriver:
@@ -453,6 +455,35 @@ MlxReadiness probe_mlx_runtime(const MlxHost& host) {
     return readiness;
 }
 
+MlxReadiness probe_mlx_kind(std::string_view name, const std::filesystem::path& dir) {
+    MlxReadiness readiness;
+    readiness.model_dir = dir;
+    std::error_code code;
+    if (!std::filesystem::is_regular_file(dir / "config.json", code)) {
+        return readiness;
+    }
+    const models::MlxKind kind = models::read_mlx_kind(dir);
+    // A drafter runs beside its base, never alone (53i): an entry names it as
+    // its base's `draft:`, never as its model.
+    if (kind.word == models::kMlxDrafter) {
+        readiness.refusal = MlxRefusal::Drafter;
+        readiness.reason = dir.string() +
+                           " is a drafter: it runs beside its base model, never alone -- an mlx "
+                           "entry over its base names it as its draft";
+        readiness.remedy =
+            "apogee config set-backend <its base's mlx backend> --draft " + dir.string();
+        return readiness;
+    }
+    if (!kind.registers()) {
+        readiness.refusal = MlxRefusal::Kind;
+        readiness.reason =
+            dir.string() + " is kind " + models::describe(kind) + ", so no mlx entry runs it";
+        readiness.remedy = "apogee config add-backend " + std::string{name} +
+                           " --type mlx --model-path <model directory> --force";
+    }
+    return readiness;
+}
+
 MlxReadiness probe_mlx_backend(std::string_view name, const harness::BackendConfig& config,
                                const MlxHost& host) {
     MlxReadiness readiness = probe_environment(host);
@@ -493,15 +524,12 @@ MlxReadiness probe_mlx_backend(std::string_view name, const harness::BackendConf
         return readiness;
     }
     const models::MlxKind kind = models::read_mlx_kind(readiness.model_dir);
-    // A drafter runs beside its base, never alone (53i): an entry names it as
-    // its base's `draft:`, never as its model.
-    if (kind.word == models::kMlxDrafter) {
-        readiness.refusal = MlxRefusal::Drafter;
-        readiness.reason = readiness.model_dir.string() +
-                           " is a drafter: it runs beside its base model, never alone -- an mlx "
-                           "entry over its base names it as its draft";
-        readiness.remedy = "apogee config set-backend <its base's mlx backend> --draft " +
-                           readiness.model_dir.string();
+    // The kind decides the role (53i, 55d): a drafter, a video or voice
+    // model, or a word this build does not know is no entry's model.
+    if (const MlxReadiness by_kind = probe_mlx_kind(name, readiness.model_dir); !by_kind.ready()) {
+        readiness.refusal = by_kind.refusal;
+        readiness.reason = by_kind.reason;
+        readiness.remedy = by_kind.remedy;
         return readiness;
     }
     // An embedding model mlx-embeddings built is embedded with through it

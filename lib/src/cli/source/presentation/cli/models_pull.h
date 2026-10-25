@@ -87,14 +87,17 @@ struct DeletePlan {
 [[nodiscard]] DeletePlan plan_delete(const models::StoreRoots& roots, const harness::Config& config,
                                      std::string_view name);
 
-/// Whether `models delete` removes the backend entries that point into what
-/// it removes, too (M14): `--and-backends` says yes without asking; else the
-/// `count` entries are asked about through `ask` -- the question in, the
-/// answer out, nullopt for nobody to ask -- and only a yes removes them.
-/// Never silently: no flag and nobody to ask keeps them.
+/// Whether `models delete` settles what it strands, too (M14): it removes the
+/// backend entries that point into what it removes and -- since 55d -- clears
+/// the other references into it, `cleared` naming each (a `draft:`, an
+/// adapter, `models.default_video`). `--and-backends` says yes without asking;
+/// else they are asked about through `ask`, in one question -- the question
+/// in, the answer out, nullopt for nobody to ask -- and only a yes settles
+/// them. Never silently: no flag and nobody to ask keeps them all.
 [[nodiscard]] bool remove_backends_too(
     bool and_backends, const std::vector<std::string>& backends,
-    const std::function<std::optional<std::string>(const std::string& question)>& ask);
+    const std::function<std::optional<std::string>(const std::string& question)>& ask,
+    const std::vector<std::string>& cleared = {});
 
 /// The two doors for a backend whose model is gone -- each a command the
 /// binary accepts on that state: repoint it, or remove it.

@@ -325,6 +325,11 @@ HttpResponse admin_create_backend(const AdminConfigContext& context, const HttpR
                               kForbidden);
     }
 
+    // The kind decides the role (55d): the CLI's own refusal, by the one
+    // predicate, before anything is written.
+    if (const std::string refused = commands::kind_refusal(name, backend); !refused.empty()) {
+        return error_response(400, refused);
+    }
     try {
         harness::edit_config_file(context.config_path, [&](std::string_view content) {
             return harness::append_backend(content, name, backend, force);
@@ -832,6 +837,12 @@ HttpResponse admin_set_role(const AdminConfigContext& context, std::string_view 
                               "no backend named '" + name + "' in this config" +
                                   (known.empty() ? " (it has no backends yet)"
                                                  : " (known backends: " + join_names(known) + ")"));
+    }
+    // And one that runs what it names (55d), as the CLI refuses it.
+    if (const std::string refused =
+            commands::kind_refusal(name, *loaded.config->find_backend(name));
+        !refused.empty()) {
+        return error_response(400, "backend '" + name + "' cannot take a role: " + refused);
     }
     try {
         harness::edit_config_file(context.config_path, [&](std::string_view content) {

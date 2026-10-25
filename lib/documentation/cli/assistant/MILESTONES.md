@@ -10509,3 +10509,69 @@ The refusal was true but incomplete. The set is Wan's original layout, and its r
 **Not done:**
 - `models repair`'s snapshot download still uses a token that cannot be cancelled. It is not a `models pull` path.
 - The Ollama-store copy's cancel is tested only by the POSIX end-to-end test.
+
+### 2026-10-25 — `model-store-hygiene` (backlog item 55d): delete, rename and register see every reference
+
+**Why.** The model-store verbs grew through M14–M16 and the MLX wave faster than their edges were held. The audit found seven defects:
+- **`models delete` was blind to two references.** It missed `draft:` pairings and the default video pipeline, so deleting a drafter left its base's `draft:` dangling.
+- **`models rename` by family name refused MLX families** (`TestM-4bit`), and its hint named only GGUF levels.
+- **`rename_stored_model` read an empty optional,** undefined behaviour on a configless install.
+- **A pulled draft head's hint named commands that refuse.**
+- **Register chains told the person to chat with an embedding backend.**
+- **Chain notes printed `note: note:`.** Its test locked the doubled prefix in.
+- **A set recorded `voice` (or `video`) was accepted as a chat backend.** `add-backend` and `set-default` succeeded, `check` said `ok default_backend vox`, and `models info` offered `roles: chat, embedding, extraction` (the completeness pass's finding, reproduced first).
+
+- [x] **One reference walk** (`presentation/operations/store_references`, its `kStoreFields` table plus one pointer row) lists what can point into a stored set. M25's `kStorePaths` was absorbed whole, and `stored_model_at` moved there too.
+  - **What it lists:** `model_path` and `mmproj_path` (the entry's weights), `draft`, each of `adapters`, and `models.default_video`. The other `models.default_*` pointers name backends, not folders.
+  - **Who reads it:** delete's warning and offer (`stranded_by`), all three rename paths, and register (`check_registrations`, and `config scan`'s "already registered").
+- [x] **Delete names and offers every reference.** For a drafter: `backend 'e4b' drafts with this (its draft) and is refused until it is cleared`, and `--and-backends` clears it.
+  - **The default pipeline:** deleting it warns, and clears `models.default_video`.
+  - **Stranded adapters:** dropped from the list, the rest keeping their pins.
+  - **One consent:** a single question covers removals and clearings. A reference of an entry being removed isn't listed twice.
+- [x] **An MLX family renames by its shared name:** `models rename TestM NewName` moves `TestM-4bit` to `NewName-4bit`. The hint names `-F16, -Q4KM, -4bit`.
+- [x] **A configless rename is safe:** the read is inside `config.has_value()`, pinned by a test.
+- [x] **Every hint is runnable (M14's bar).**
+  - **A draft head:** a stored head now says `its one conversion is an MLX drafter, which runs beside that base: apogee models convert … --mlx` (`draft_head_refusal`).
+  - **Its pull:** the closing hint, run by its test.
+  - **The register chain** stops at the pull for a set no GGUF is made from (a draft head, or a diffusion model), with no "resume with" line.
+- [x] **Embedding chains end on the embedding door:** `point the embedding role at it:  apogee config set-default-embedding embed-F16`. A GGUF embedding conversion is no longer called a base model.
+- [x] **One note prefix:** a note already starting `note:` or `warning:` prints as written. The `model_chain_test` golden is corrected to `"note: a base model"`, not deleted.
+- [x] **The kind decides the role** (`registers()`).
+  - **Where it gates:** `add-backend`, `config set-backend` and every `set-default*` role, with their admin twins (400 with the CLI's words). A drafter, voice, video or unknown-kind MLX set is refused: `… is kind voice (recorded) -- a voice model: 'apogee voice say' speaks with it, never a chat backend, so no mlx entry runs it`.
+  - **The ladder's new rung:** `MlxRefusal::Kind`, `wrong kind` in `models list`, after the environment rungs.
+
+**Decisions made while building** (2026-10-25, each recorded for veto):
+- **The open call's default, taken:**
+  - Deleting the default video pipeline warns, and under `--and-backends` (or a yes at a terminal) clears `models.default_video` through the one editor. The result is byte-identical to `config set-default-video off`.
+  - A stranded `draft:` is offered the same way, byte-identical to `--draft ""`.
+- **The kind gate is wider than the item listed:** it covers `set-backend`, every `set-default*` and drafters too, since `registers()` is false for them.
+- **Moving renames also repoint `models.default_video`.** That is the family rename and `config rename-backend`'s folder move, where only the folder rename did before.
+
+**Verified.**
+- **19 new cases:**
+  - the walk's matrix (4);
+  - delete (2);
+  - rename (5);
+  - the chain (2) and the GGUF embedding chain (1);
+  - `models_mlx_test` (3);
+  - the ladder (1);
+  - the admin twin (1).
+- **Three earlier cases changed:**
+  - `model_chain_test`'s doubled-prefix golden, corrected;
+  - two `models_mlx_test` cases that pinned `add-backend` accepting a video set and a drafter, which now check the refusal and write the entry by hand so the ladder is still exercised.
+- **Each probe ran against the old binary and the new one.**
+- **MinGW finds nothing** in the 18 changed files. A planted warning was caught, so the zero is real.
+- **ctest:** these pass:
+  - `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`;
+  - `cli.mlx_models_lifecycle`, `cli.config_lifecycle`, `cli.machine_schema_conformance`, `cli.http_api_conformance`, `cli.machine_mode`;
+  - `cli.providers_lifecycle`, `cli.shell_completion`, `cli.video_lifecycle`, `cli.provider_offer`, `cli.mlx_lifecycle`;
+  - the completion cases.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,940 tests and the macOS app's 449 cases passed, with no warning.
+
+**For the macOS app:**
+- `store-command-verdicts.txt:91` records the old rename refusal. The app's test checks only its prefix and still passes; a refresh records the new hint.
+- `add-backend` and `set-default*` over a non-chat kind now refuse.
+- `models list` gains the state word `wrong kind`.
+- MLX families now complete under `models rename`.
+
+**Not done:** `models delete` and `models rename` still have no HTTP twins.

@@ -19,6 +19,7 @@
 #include "support/env_guard.h"
 #include "support/file_time.h"
 #include "support/gguf_builder.h"
+#include "support/mlx_model.h"
 
 /// The mutating verbs over the model store, and the boundary they must never
 /// cross.
@@ -665,4 +666,198 @@ TEST_CASE("the doctor's door for a dangling backend is one the binary accepts",
     REQUIRE(stranded.home.run({"config", "delete-backend", "second"}, &out) == 0);
     (void)stranded.home.run({"check", "--no-color"}, &out);
     CHECK(out.find("model_path does not exist") == std::string::npos);
+}
+
+// --- every reference into what goes (55d) -----------------------------------------------
+
+namespace {
+
+/// 55d's delete matrix: a store holding one set of each kind a reference can
+/// point into, and a config pointing into every one the walk's way -- `e4b`
+/// an mlx entry over a base, drafting with a stored drafter; `local` a
+/// llamacpp entry over a stored GGUF, applying a stored LoRA and one outside
+/// the store; and `models.default_video` naming a stored pipeline by its
+/// model's name.
+struct Pointed {
+    apogee::testing::CliHome home{""};
+    std::filesystem::path gguf =
+        home.models() / "org--m" / "gguf" / "aaaaaaaaaaaa" / "m-Q4_K_M.gguf";
+    std::filesystem::path lora =
+        home.models() / "org--lora" / "gguf" / "bbbbbbbbbbbb" / "style.gguf";
+    std::filesystem::path outside = home.home() / "mine.gguf";
+    std::filesystem::path base = home.models() / "Gemma4-E4B-Instruct" / "mlx" / "cccccccccccc";
+    std::filesystem::path drafter = home.models() / "Gemma4-E4B-Assistant" / "mlx" / "dddddddddddd";
+    std::filesystem::path pipeline =
+        home.models() / "Wan-AI--Wan2.2-TI2V-5B-Diffusers" / "pipeline" / "eeeeeeeeeeee";
+
+    Pointed() {
+        for (const std::filesystem::path& file : {gguf, lora, outside}) {
+            std::filesystem::create_directories(file.parent_path());
+            std::ofstream{file, std::ios::binary} << apogee::testing::minimal_gguf("llama");
+        }
+        apogee::testing::write_mlx_model(base, {.kind = "vision"});
+        apogee::testing::write_mlx_model(drafter, {.kind = "drafter"});
+        std::filesystem::create_directories(pipeline);
+        std::ofstream{pipeline / "model_index.json", std::ios::binary}
+            << R"({"_class_name": "WanPipeline", "_diffusers_version": "0.35.0"})";
+        std::ofstream{home.config_path(), std::ios::binary | std::ios::trunc}
+            << "# my backends\nbackends:\n"
+               "  e4b:\n    type: mlx\n    model_path: "
+            << base.string() << "\n    draft: " << drafter.string()
+            << "\n  local:\n    type: llamacpp\n    model_path: " << gguf.string()
+            << "\n    adapters: [{path: " << lora.string()
+            << ", base_sha256: " << std::string(64, 'a') << "}, {path: " << outside.string()
+            << ", base_sha256: " << std::string(64, 'b') << "}]\n"
+            << "models:\n  default: local\n  default_video: Wan-AI--Wan2.2-TI2V-5B-Diffusers\n";
+    }
+
+    [[nodiscard]] std::string config() const {
+        std::ifstream in{home.config_path(), std::ios::binary};
+        return {std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    }
+
+    [[nodiscard]] apogee::harness::Config loaded() const {
+        return apogee::harness::load_config(home.config_path());
+    }
+};
+
+}  // namespace
+
+TEST_CASE("models delete names and offers every reference into what goes, by the one walk",
+          "[commands][models][delete][backends][store_references]") {
+    Pointed pointed;
+    const std::string before = pointed.config();
+    std::string out;
+
+    SECTION("a drafter: its base's draft, said, kept with its door, the door runnable") {
+        // Before 55d: nothing said, and the draft left dangling -- the ladder
+        // then refuses the whole base.
+        REQUIRE(pointed.home.run({"models", "delete", "Gemma4-E4B-Assistant"}, &out) == 0);
+        CHECK(out.find("\nbackend 'e4b' drafts with this (its draft) and is refused until it is "
+                       "cleared.\n") != std::string::npos);
+        CHECK(out.find("the draft of backend 'e4b' stays unless you say -- --and-backends clears "
+                       "it with the weights.\n") != std::string::npos);
+        CHECK(out.find("points into this") == std::string::npos);  // no entry goes
+        REQUIRE(pointed.home.run({"models", "delete", "Gemma4-E4B-Assistant", "--and-backends"},
+                                 &out) == 0);
+        CHECK(out.find("--and-backends: the draft of backend 'e4b' is cleared too, through the "
+                       "config editor.\n") != std::string::npos);
+        CHECK(pointed.config() == before);
+        // -y alone: the weights go, the draft is kept and its door said.
+        REQUIRE(pointed.home.run({"models", "delete", "Gemma4-E4B-Assistant", "--yes"}, &out) == 0);
+        CHECK_FALSE(std::filesystem::exists(pointed.drafter));
+        CHECK(pointed.config() == before);
+        const std::string door = "apogee config set-backend e4b --draft \"\"";
+        CHECK(out.find("kept the draft of backend 'e4b', which names nothing now -- clear it: " +
+                       door + "\n") != std::string::npos);
+        // The door, as printed, on that state.
+        REQUIRE(pointed.home.run({"config", "set-backend", "e4b", "--draft", ""}, &out) == 0);
+        CHECK(pointed.loaded().find_backend("e4b")->draft.empty());
+    }
+    SECTION("a drafter with --and-backends: the draft cleared, as its door clears it") {
+        Pointed by_hand;
+        REQUIRE(pointed.home.run(
+                    {"models", "delete", "Gemma4-E4B-Assistant", "--yes", "--and-backends"},
+                    &out) == 0);
+        CHECK(out.find("cleared the draft of backend 'e4b' in " +
+                       pointed.home.config_path().string()) != std::string::npos);
+        REQUIRE(by_hand.home.run({"config", "set-backend", "e4b", "--draft", ""}, &out) == 0);
+        const auto strip = [](std::string text, const std::string& root) {
+            for (std::size_t at = text.find(root); at != std::string::npos; at = text.find(root)) {
+                text.replace(at, root.size(), "<home>");
+            }
+            return text;
+        };
+        CHECK(strip(pointed.config(), pointed.home.home().string()) ==
+              strip(by_hand.config(), by_hand.home.home().string()));
+        CHECK(pointed.config().find("# my backends") != std::string::npos);
+        CHECK(pointed.loaded().find_backend("e4b")->model_path == pointed.base.string());
+    }
+    SECTION("a stored adapter: dropped from its entry's list, the rest kept with its pin") {
+        REQUIRE(pointed.home.run({"models", "delete", "org--lora", "--yes", "--and-backends"},
+                                 &out) == 0);
+        CHECK(out.find("\nbackend 'local' applies an adapter from this (" + pointed.lora.string() +
+                       ") and is refused until it is dropped.\n") != std::string::npos);
+        CHECK(out.find("cleared the adapter " + pointed.lora.string() + " on backend 'local'") !=
+              std::string::npos);
+        const apogee::harness::Config config = pointed.loaded();
+        REQUIRE(config.find_backend("local")->adapters.size() == 1);
+        CHECK(config.find_backend("local")->adapters[0].path == pointed.outside.string());
+        CHECK(config.find_backend("local")->adapters[0].base_sha256 == std::string(64, 'b'));
+        CHECK(config.find_backend("local")->model_path == pointed.gguf.string());
+    }
+    SECTION("the default video pipeline: the pointer cleared, as 'set-default-video off' does") {
+        Pointed by_hand;
+        REQUIRE(pointed.home.run({"models", "delete", "Wan-AI--Wan2.2-TI2V-5B-Diffusers"}, &out) ==
+                0);
+        CHECK(out.find("\nmodels.default_video names this, and 'apogee video generate' without "
+                       "--model finds nothing until it names another.\n") != std::string::npos);
+        CHECK(out.find("models.default_video stays unless you say -- --and-backends clears it "
+                       "with the weights.\n") != std::string::npos);
+        REQUIRE(pointed.home.run({"models", "delete", "Wan-AI--Wan2.2-TI2V-5B-Diffusers", "--yes",
+                                  "--and-backends"},
+                                 &out) == 0);
+        CHECK(out.find("cleared models.default_video in ") != std::string::npos);
+        CHECK(pointed.loaded().models.default_video.empty());
+        REQUIRE(by_hand.home.run({"config", "set-default-video", "off"}, &out) == 0);
+        CHECK(pointed.config().substr(pointed.config().find("models:")) ==
+              by_hand.config().substr(by_hand.config().find("models:")));
+    }
+    SECTION("the default video pipeline kept: its door said, and runnable") {
+        REQUIRE(pointed.home.run({"models", "delete", "Wan-AI--Wan2.2-TI2V-5B-Diffusers", "--yes"},
+                                 &out) == 0);
+        CHECK(out.find("kept models.default_video, which names nothing now -- clear it: apogee "
+                       "config set-default-video off\n") != std::string::npos);
+        CHECK(pointed.config() == before);
+        REQUIRE(pointed.home.run({"config", "set-default-video", "off"}, &out) == 0);
+        CHECK(pointed.loaded().models.default_video.empty());
+    }
+    SECTION("a base: its entry goes whole, its draft with it, never cleared apart") {
+        REQUIRE(pointed.home.run(
+                    {"models", "delete", "Gemma4-E4B-Instruct", "--yes", "--and-backends"}, &out) ==
+                0);
+        CHECK(out.find("backend 'e4b' points into this and will stop working") !=
+              std::string::npos);
+        CHECK(out.find("drafts with this") == std::string::npos);
+        CHECK(out.find("removed backend 'e4b' from ") != std::string::npos);
+        CHECK(out.find("cleared") == std::string::npos);
+        CHECK(pointed.loaded().find_backend("e4b") == nullptr);
+        CHECK(pointed.loaded().find_backend("local") != nullptr);
+    }
+    SECTION("a set nothing points into: nothing said, the config untouched") {
+        const std::filesystem::path idle =
+            pointed.home.models() / "org--idle" / "gguf" / "ffffffffffff" / "idle.gguf";
+        std::filesystem::create_directories(idle.parent_path());
+        std::ofstream{idle, std::ios::binary} << apogee::testing::minimal_gguf("llama");
+        REQUIRE(pointed.home.run({"models", "delete", "org--idle", "--yes", "--and-backends"},
+                                 &out) == 0);
+        CHECK(out.find("--and-backends:") == std::string::npos);
+        CHECK(out.find("cleared") == std::string::npos);
+        CHECK(pointed.config() == before);
+    }
+}
+
+TEST_CASE("the ask names what a delete clears beside the entries it removes",
+          "[commands][models][delete][store_references]") {
+    using apogee::commands::remove_backends_too;
+    std::string asked;
+    const auto answer = [&asked](std::optional<std::string> said) {
+        return [&asked, said](const std::string& question) {
+            asked = question;
+            return said;
+        };
+    };
+    CHECK(remove_backends_too(false, {}, answer("y"), {"the draft of backend 'e4b'"}));
+    CHECK(asked == "Clear the draft of backend 'e4b' too? [y/N] ");
+    CHECK(remove_backends_too(false, {"first"}, answer("yes"),
+                              {"the draft of backend 'e4b'", "models.default_video"}));
+    CHECK(asked ==
+          "Remove the backend entry first, and clear the draft of backend 'e4b' and "
+          "models.default_video too? [y/N] ");
+    CHECK_FALSE(remove_backends_too(false, {}, answer("n"), {"models.default_video"}));
+    CHECK_FALSE(remove_backends_too(false, {}, {}, {"models.default_video"}));  // nobody there
+    asked.clear();
+    CHECK(remove_backends_too(true, {}, answer("n"), {"models.default_video"}));  // the flag
+    CHECK(asked.empty());
+    CHECK_FALSE(remove_backends_too(true, {}, answer("y"), {}));  // nothing to settle
 }

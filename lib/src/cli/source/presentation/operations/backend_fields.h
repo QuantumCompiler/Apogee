@@ -5,6 +5,8 @@
 #include <string_view>
 #include <vector>
 
+#include "contracts/config.h"
+
 /// Editing a backend in place (46b): the one core `config set-backend` and
 /// its admin twin call, so an entry edited over HTTP is byte for byte the
 /// entry edited on the command line.
@@ -44,8 +46,24 @@ struct BackendFieldsOutcome {
 /// (`backends::probe_mlx_draft`): refused for a drafter that cannot run
 /// beside it. An edit moving the model, or its type, under a drafter the
 /// entry keeps is asked the same.
+///
+/// An edit that leaves an `mlx` entry over an MLX directory whose kind no mlx
+/// entry runs is refused by that kind (`kind_refusal`, 55d).
 [[nodiscard]] BackendFieldsOutcome set_backend_fields(const std::filesystem::path& path,
                                                       std::string_view name,
                                                       const std::vector<BackendFieldEdit>& edits);
+
+/// **The kind decides the role** (55d): why entry `name` may not run what it
+/// names, or empty when it may. An `mlx` entry over an MLX directory is held
+/// to the directory's kind through the one predicate the backend ladder asks
+/// (`backends::probe_mlx_kind`, over `models::MlxKind::registers()`): a
+/// drafter, a video or voice model, or a word this build does not know is no
+/// entry's model, refused with the kind and what uses it. Every other entry,
+/// and a directory with no `config.json`, may. The doors that make an entry
+/// or point a role at one ask it -- `config add-backend`, `config
+/// set-backend`, `config set-default*` and their admin twins -- so a set
+/// whose record says `voice` never becomes a chat backend by any of them.
+[[nodiscard]] std::string kind_refusal(std::string_view name,
+                                       const harness::BackendConfig& backend);
 
 }  // namespace apogee::commands

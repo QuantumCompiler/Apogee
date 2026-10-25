@@ -130,9 +130,13 @@ struct ConfigWidth {
                                               const std::vector<std::string>& bases);
 
 /// The refusal a conversion of one says, `subject` its name or path: what it
-/// is, that nothing converted from it could answer a chat, and the way out.
+/// is, that nothing converted from it could answer a chat, and the way out --
+/// `mlx_door`, the command that makes its MLX drafter, where the caller found
+/// that conversion offered (`snapshot_conversions` answering `mlx`, 53i;
+/// named since 55d), else its base model's conversion.
 [[nodiscard]] std::string draft_head_refusal(std::string_view subject, const DraftHead& head,
-                                             const std::vector<std::string>& bases);
+                                             const std::vector<std::string>& bases,
+                                             std::string_view mlx_door = {});
 
 /// The short form a listing's note says: "draft head -- runs beside <base>,
 /// never alone".

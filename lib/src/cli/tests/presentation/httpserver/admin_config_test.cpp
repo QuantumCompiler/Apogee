@@ -25,6 +25,7 @@
 #include "httpserver/mux.h"
 #include "modelstore/sidecar.h"
 #include "support/env_guard.h"
+#include "support/mlx_model.h"
 #include "training/python_env.h"
 
 /// The config slice of the control plane, and THE parity proof: an HTTP edit
@@ -767,4 +768,77 @@ TEST_CASE("config set's twin moves the same scalars the CLI moves, byte for byte
     put.body = R"({})";
     CHECK(admin_put_config_value(fixture.context(), "memory.recall", put).status == 400);
     CHECK(Fixture::bytes(fixture.http_config) == before);
+}
+
+TEST_CASE("a set whose kind no mlx entry runs is refused over HTTP in the CLI's own words",
+          "[httpserver][admin][kind]") {
+    // 55d: the kind decides the role at every door, the admin twins too --
+    // the one predicate, one wording, the file untouched either way.
+    const Fixture fixture;
+    const std::filesystem::path voice = fixture.home.path() / "kokoro" / "mlx" / "ffffffffffff";
+    apogee::testing::write_mlx_model(voice, {.kind = "voice"});
+    const auto cli = [&fixture](const std::vector<std::string>& args, std::string* err) {
+        apogee::commands::RootCommand root{apogee::commands::default_registry()};
+        std::vector<std::string> full{"--config", fixture.cli_config.string()};
+        full.insert(full.end(), args.begin(), args.end());
+        std::vector<const char*> argv{"apogee"};
+        for (const std::string& arg : full) {
+            argv.push_back(arg.c_str());
+        }
+        std::ostringstream captured;
+        std::ostringstream said;
+        std::streambuf* old_err = std::cerr.rdbuf(captured.rdbuf());
+        std::streambuf* old_out = std::cout.rdbuf(said.rdbuf());
+        const int code = root.run(static_cast<int>(argv.size()), argv.data());
+        std::cerr.rdbuf(old_err);
+        std::cout.rdbuf(old_out);
+        *err = captured.str();
+        return code;
+    };
+    const std::string cli_before = Fixture::bytes(fixture.cli_config);
+    const std::string http_before = Fixture::bytes(fixture.http_config);
+
+    const HttpResponse added = admin_create_backend(
+        fixture.context(),
+        post(nlohmann::json{{"name", "vox"}, {"type", "mlx"}, {"model_path", voice.string()}}));
+    CHECK(added.status == 400);
+    const std::string message = parsed(added)["error"]["message"].get<std::string>();
+    CHECK(message.find(voice.string() + " is kind voice (recorded) -- a voice model: 'apogee "
+                                        "voice say' speaks with it, never a chat backend") !=
+          std::string::npos);
+    std::string err;
+    CHECK(cli({"config", "add-backend", "vox", "--type", "mlx", "--model-path", voice.string()},
+              &err) == 1);
+    CHECK(err == "apogee config: " + message + "\n");
+    CHECK(Fixture::bytes(fixture.cli_config) == cli_before);
+    CHECK(Fixture::bytes(fixture.http_config) == http_before);
+
+    // An entry over it written past the doors -- by hand, as the one editor
+    // writes one -- takes no role on either surface.
+    for (const std::filesystem::path& path : {fixture.cli_config, fixture.http_config}) {
+        apogee::harness::BackendConfig backend;
+        backend.type = apogee::harness::BackendType::Mlx;
+        backend.model_path = voice.string();
+        apogee::harness::edit_config_file(path, [&backend](std::string_view content) {
+            return apogee::harness::append_backend(content, "vox", backend, false);
+        });
+    }
+    const std::string cli_entry = Fixture::bytes(fixture.cli_config);
+    for (const std::string field : {"default", "default_embedding"}) {
+        INFO(field);
+        const HttpResponse pointed =
+            admin_set_role(fixture.context(), field, post(nlohmann::json{{"name", "vox"}}));
+        CHECK(pointed.status == 400);
+        const std::string refused = parsed(pointed)["error"]["message"].get<std::string>();
+        CHECK(refused.starts_with("backend 'vox' cannot take a role: " + voice.string() +
+                                  " is kind voice (recorded)"));
+        CHECK(cli({"config", field == "default" ? "set-default" : "set-default-embedding", "vox"},
+                  &err) == 1);
+        CHECK(err == "apogee config: " + refused + "\n");
+    }
+    CHECK(Fixture::bytes(fixture.cli_config) == cli_entry);
+    CHECK(apogee::harness::load_config(fixture.http_config).models.default_backend != "vox");
+    // And no edit moves an entry over it: set-backend's core, both surfaces' one.
+    CHECK(cli({"config", "set-backend", "vox", "--model-path", voice.string()}, &err) == 1);
+    CHECK(err.find(" is kind voice (recorded)") != std::string::npos);
 }

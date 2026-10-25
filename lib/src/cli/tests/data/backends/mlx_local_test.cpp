@@ -23,6 +23,7 @@
 #include "backends/factory.h"
 #include "contracts/errors.h"
 #include "contracts/layout.h"
+#include "modelstore/mlx_info.h"
 #include "support/draft_head_configs.h"
 #include "support/env_guard.h"
 #include "support/fake_mlx_driver.h"
@@ -1912,4 +1913,66 @@ TEST_CASE(
     std::ofstream{draft / "config.json"} << R"({"model_type": "gemma4_assistant",
         "backbone_hidden_size": 2560, "block_size": 3})";
     CHECK(apogee::backends::drafter_block_size(draft) == 3);
+}
+
+TEST_CASE("the ladder turns away a set whose kind no mlx entry runs, by the one predicate",
+          "[backends][mlx][ladder][kind]") {
+    // The completeness pass (55d): a stored voice set's record said `voice`,
+    // and the ladder ran it as a chat backend all the same.
+    const auto record = [](const std::filesystem::path& dir, const std::string& kind) {
+        std::ofstream{dir / "apogee-snapshot.json"} << json{
+            {"source", "convert"},
+            {"transform", "x"},
+            {"files", json::array()},
+            {"kind", kind}}.dump();
+    };
+    for (const std::string word : {"voice", "video", "hologram"}) {
+        INFO(word);
+        const Runtime runtime;
+        const std::filesystem::path dir = runtime.dir.path() / "model";
+        record(dir, word);
+        const MlxReadiness readiness = runtime.probe();
+        CHECK(readiness.refusal == MlxRefusal::Kind);
+        CHECK(readiness.reason == dir.string() + " is kind " +
+                                      apogee::models::describe(apogee::models::read_mlx_kind(dir)) +
+                                      ", so no mlx entry runs it");
+        CHECK(readiness.remedy ==
+              "apogee config add-backend local --type mlx --model-path <model directory> --force");
+        // The one rung, asked alone by the doors that make an entry.
+        CHECK(apogee::backends::probe_mlx_kind("local", dir).message() == readiness.message());
+    }
+    CHECK(apogee::backends::to_string(MlxRefusal::Kind) == "wrong kind");
+    // Said by its files, as a pull lands one (M22): the same rung.
+    {
+        const Runtime runtime;
+        const std::filesystem::path dir = runtime.dir.path() / "model";
+        std::ofstream{dir / "config.json"} << R"({"model_type": "kokoro"})";
+        Runtime::touch(dir / "voices" / "af_heart.safetensors");
+        const MlxReadiness readiness = runtime.probe();
+        CHECK(readiness.refusal == MlxRefusal::Kind);
+        CHECK(readiness.reason.find(" is kind voice (inferred from its files: a Kokoro "
+                                    "config.json beside voices/*.safetensors)") !=
+              std::string::npos);
+    }
+    // A kind an entry runs passes the rung, on to its own.
+    {
+        const Runtime runtime;
+        record(runtime.dir.path() / "model", "chat");
+        CHECK(runtime.probe().ready());
+    }
+    {
+        const Runtime runtime;
+        record(runtime.dir.path() / "model", "embedding");
+        CHECK(runtime.probe().refusal == MlxRefusal::NoMlxEmbeddings);
+    }
+    // A drafter keeps its own rung and its door (53i).
+    {
+        const Runtime runtime;
+        record(runtime.dir.path() / "model", "drafter");
+        CHECK(runtime.probe().refusal == MlxRefusal::Drafter);
+        CHECK(apogee::backends::probe_mlx_kind("local", runtime.dir.path() / "model").refusal ==
+              MlxRefusal::Drafter);
+    }
+    // A directory with no config.json is the model rungs' to name, never the kind's.
+    CHECK(apogee::backends::probe_mlx_kind("local", "/nowhere/at/all").ready());
 }

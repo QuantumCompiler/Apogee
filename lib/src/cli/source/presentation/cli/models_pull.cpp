@@ -45,6 +45,7 @@
 #include "modelstore/store.h"
 #include "modelstore/voice_info.h"
 #include "operations/renames.h"
+#include "operations/store_references.h"
 #include "platform/platform.h"
 #include "training/convert.h"
 #include "training/mlx_convert.h"
@@ -61,6 +62,12 @@ constexpr std::string_view kMlxVideoRemedy = "apogee train setup --with mlx-vide
 
 /// What installs mlx-audio's converter and its Kokoro (53m): opt-in too.
 constexpr std::string_view kMlxAudioRemedy = "apogee train setup --with mlx-audio";
+
+/// Whether `conversions` -- what `models::snapshot_conversions` answers for a
+/// set -- holds `format`.
+[[nodiscard]] bool offers(const std::vector<std::string>& conversions, std::string_view format) {
+    return std::ranges::find(conversions, format) != conversions.end();
+}
 
 /// A failure said on the job's stream too, when one is open (52b): its
 /// `error` event carries the words stderr gets.
@@ -248,58 +255,140 @@ std::string projector_failure(const std::string& error) {
            "'-Instruct'); a base model is what fine-tuning starts from.";
 }
 
-/// The one command that puts a stored model to use, its projector included.
+/// The one command that puts a stored model to use, its projector included
+/// -- and for an embedding model (M21), the embedding role pointed at the
+/// entry, since it answers no chat (55d).
 void print_backend_hint(const std::filesystem::path& model_file,
-                        const std::filesystem::path& projector) {
-    std::cout << "\nUse it by adding a backend:\n"
+                        const std::filesystem::path& projector, bool embedding = false) {
+    std::cout << (embedding ? "\nUse it as the embedding role by adding a backend:\n"
+                            : "\nUse it by adding a backend:\n")
               << "  apogee config add-backend <name> --type llamacpp --model-path "
               << model_file.string();
     if (!projector.empty()) {
         std::cout << " --mmproj-path " << projector.string();
     }
     std::cout << "\n";
+    if (embedding) {
+        std::cout << "  apogee config set-default-embedding <name>\n";
+    }
 }
 
-/// The configured backends whose model or projector lies inside one of `dirs`.
-/// Best effort: a config that does not load names none.
-[[nodiscard]] std::vector<std::string> backends_inside(
-    const std::string& config_flag, const std::vector<std::filesystem::path>& dirs) {
-    std::vector<std::string> names;
+/// What a delete strands (M14, 55d): every reference the one walk lists
+/// (`store_references`) that points inside one of the weights directories it
+/// removes. A backend whose weights go is stranded whole -- its entry is what
+/// is removed -- and any other reference into what goes is one to clear: a
+/// `draft:`, an adapter, `models.default_video`. Best effort: a config that
+/// does not load strands nothing.
+struct Stranded {
+    std::filesystem::path path{};
+    harness::Config config{};
+    /// The entries whose weights go.
+    std::vector<std::string> backends{};
+    /// The references to clear, none on an entry that goes whole.
+    std::vector<StoreReference> cleared{};
+};
+
+[[nodiscard]] Stranded stranded_by(const models::StoreRoots& roots, const std::string& config_flag,
+                                   const std::vector<std::filesystem::path>& dirs) {
+    Stranded out;
     try {
-        const std::filesystem::path path = harness::resolve_config_path(config_flag);
+        out.path = harness::resolve_config_path(config_flag);
         std::error_code code;
-        if (!std::filesystem::exists(path, code)) {
-            return names;
+        if (!std::filesystem::exists(out.path, code)) {
+            return out;
         }
-        const harness::Config config = harness::load_config(path);
-        for (const auto& [name, backend] : config.backends) {
-            for (const std::string& field : {backend.model_path, backend.mmproj_path}) {
-                if (field.empty()) {
-                    continue;
-                }
-                const std::filesystem::path file{harness::expand_env_and_home(field)};
-                const bool inside = std::ranges::any_of(dirs, [&file](const auto& dir) {
-                    const std::filesystem::path relative = file.lexically_relative(dir);
-                    return !relative.empty() && *relative.begin() != "..";
-                });
-                if (inside) {
-                    names.push_back(name);
-                    break;
-                }
-            }
-        }
+        out.config = harness::load_config(out.path);
     } catch (const harness::ConfigError&) {
         // `check` reports a broken config; this only warns.
+        return out;
     }
-    return names;
+    std::vector<StoreReference> others;
+    for (StoreReference& reference : store_references(out.config)) {
+        const bool inside = std::ranges::any_of(dirs, [&](const std::filesystem::path& dir) {
+            return points_inside(roots, reference, dir);
+        });
+        if (!inside) {
+            continue;
+        }
+        if (!reference.weights) {
+            others.push_back(std::move(reference));
+        } else if (std::ranges::find(out.backends, reference.backend) == out.backends.end()) {
+            out.backends.push_back(reference.backend);
+        }
+    }
+    for (StoreReference& reference : others) {
+        if (std::ranges::find(out.backends, reference.backend) == out.backends.end()) {
+            out.cleared.push_back(std::move(reference));
+        }
+    }
+    return out;
+}
+
+/// A reference a delete clears, as its lines name it.
+[[nodiscard]] std::string stranded_name(const StoreReference& reference) {
+    if (reference.backend.empty()) {
+        return reference.where();
+    }
+    if (reference.field == "adapters") {
+        return "the adapter " + reference.value + " on backend '" + reference.backend + "'";
+    }
+    return "the " + reference.field + " of backend '" + reference.backend + "'";
+}
+
+/// What stops working when `reference` names nothing, said before (55d).
+[[nodiscard]] std::string stranded_warning(const StoreReference& reference) {
+    if (reference.backend.empty()) {
+        return reference.where() +
+               " names this, and 'apogee video generate' without --model finds nothing until it "
+               "names another.";
+    }
+    if (reference.field == "adapters") {
+        return "backend '" + reference.backend + "' applies an adapter from this (" +
+               reference.value + ") and is refused until it is dropped.";
+    }
+    return "backend '" + reference.backend + "' drafts with this (its " + reference.field +
+           ") and is refused until it is cleared.";
+}
+
+/// `names` as "a", "a and b", "a, b and c".
+[[nodiscard]] std::string spoken_list(const std::vector<std::string>& names) {
+    std::string out;
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        out += (index == 0 ? "" : index + 1 == names.size() ? " and " : ", ") + names[index];
+    }
+    return out;
+}
+
+/// What the delete does about the references it clears once the weights are
+/// gone (55d): with `clear`, every one let go in one edit through the one
+/// config editor (`clear_references`) and its own line said; else each kept,
+/// the one command that clears it said.
+[[nodiscard]] std::vector<std::string> settle_references(const Stranded& stranded, bool clear) {
+    std::vector<std::string> out;
+    if (stranded.cleared.empty()) {
+        return out;
+    }
+    if (clear) {
+        harness::edit_config_file(stranded.path, [&stranded](std::string_view content) {
+            return clear_references(std::string{content}, stranded.config, stranded.cleared);
+        });
+    }
+    for (const StoreReference& reference : stranded.cleared) {
+        out.push_back(
+            clear ? "cleared " + stranded_name(reference) + " in " + stranded.path.string()
+                  : "kept " + stranded_name(reference) + ", which names nothing now -- clear it: " +
+                        clear_door(stranded.config, stranded.cleared, reference));
+    }
+    return out;
 }
 
 }  // namespace
 
 bool remove_backends_too(
     bool and_backends, const std::vector<std::string>& backends,
-    const std::function<std::optional<std::string>(const std::string& question)>& ask) {
-    if (backends.empty()) {
+    const std::function<std::optional<std::string>(const std::string& question)>& ask,
+    const std::vector<std::string>& cleared) {
+    if (backends.empty() && cleared.empty()) {
         return false;
     }
     if (and_backends) {
@@ -312,9 +401,15 @@ bool remove_backends_too(
     for (const std::string& backend : backends) {
         named += (named.empty() ? "" : ", ") + backend;
     }
-    const std::optional<std::string> answer =
-        ask(std::string{"Remove the backend "} + (backends.size() == 1 ? "entry " : "entries ") +
-            named + " too? [y/N] ");
+    std::string question;
+    if (!backends.empty()) {
+        question = std::string{"Remove the backend "} +
+                   (backends.size() == 1 ? "entry " : "entries ") + named;
+    }
+    if (!cleared.empty()) {
+        question += (question.empty() ? "Clear " : ", and clear ") + spoken_list(cleared);
+    }
+    const std::optional<std::string> answer = ask(question + " too? [y/N] ");
     return answer.has_value() && (*answer == "y" || *answer == "Y" || *answer == "yes");
 }
 
@@ -380,12 +475,38 @@ namespace {
 /// How a pull of a SafeTensors set ends, standalone: what to do next with
 /// what it is. A diffusion model's weights say what they are and what runs
 /// them (M20, 53j) -- its MLX conversion said made where one stands in the
-/// store under `roots` (M24).
+/// store under `roots` (M24). Every other set is told the conversions the one
+/// decision offers it (`snapshot_conversions`, 55d), so each command it names
+/// is one the binary accepts on that set: a draft head's MLX drafter where the
+/// installed mlx-vlm drafts its type, and why not where it does not -- never
+/// a GGUF, nor a registration, which a draft head is refused.
 void print_snapshot_next(const models::StoreRoots& roots, const std::filesystem::path& dir,
                          const std::string& repo_id) {
     if (const std::optional<models::DiffusionModel> diffusion =
             models::stored_diffusion_model(roots, dir, installed_mlx_video_converts())) {
         std::cout << "\nThe set is " << models::describe_diffusion_model(*diffusion) << "\n";
+        return;
+    }
+    const std::vector<std::string> conversions = models::snapshot_conversions(
+        dir, installed_mlx_embedding_builds(), installed_mlx_drafter_builds());
+    if (const std::optional<models::DraftHead> head = models::snapshot_draft_head(dir)) {
+        std::cout << "\nThe set is "
+                  << models::describe_draft_head(*head, models::draft_head_bases(roots, *head))
+                  << "\n";
+        if (offers(conversions, models::kMlxFormat)) {
+            std::cout << "Make the drafter of it -- an MLX build an mlx backend over its base runs "
+                         "beside it, named as that backend's draft -- with\n  apogee models "
+                         "convert "
+                      << repo_id << " --mlx\n";
+        } else {
+            const MlxOffer offer = installed_mlx_offer(dir);
+            std::cout << "Its one conversion, an MLX drafter, is not offered here: " << offer.gap
+                      << (offer.remedy.empty() ? std::string{} : " -- " + offer.remedy) << "\n";
+        }
+        return;
+    }
+    if (!offers(conversions, models::kGgufFormat)) {
+        std::cout << "\nNo conversion takes these weights.\n";
         return;
     }
     std::cout << "\nA full-weight snapshot: trainable with 'apogee train', not runnable -- make "
@@ -917,8 +1038,14 @@ SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view
     }
     if (const std::optional<models::DraftHead> head = models::snapshot_draft_head(choice.path);
         head.has_value() && !drafters) {
-        choice.error = models::draft_head_refusal("'" + std::string{given} + "'", *head,
-                                                  models::draft_head_bases(roots, *head));
+        // Its one conversion named where it is offered -- the installed
+        // mlx-vlm drafting its type, by the one decision (53i, 55d).
+        const bool drafter =
+            offers(models::snapshot_conversions(choice.path, {}, installed_mlx_drafter_builds()),
+                   models::kMlxFormat);
+        choice.error = models::draft_head_refusal(
+            "'" + std::string{given} + "'", *head, models::draft_head_bases(roots, *head),
+            drafter ? "apogee models convert " + std::string{given} + " --mlx" : std::string{});
         choice.path.clear();
     } else if (const std::optional<models::DiffusionModel> diffusion =
                    models::stored_diffusion_model(roots, choice.path,
@@ -1365,6 +1492,15 @@ void print_mlx_drafter_hint(const models::StoredMlx& stored) {
     return "note: an embedding model -- the backend embeds and answers no chat; point the "
            "embedding role at it: apogee config set-default-embedding " +
            name;
+}
+
+/// The one thing to type once a chain has registered `name` (M3, M16): chat
+/// with it -- or, for an embedding model's entry, which answers no chat,
+/// point the embedding role at it (55d), on either route.
+[[nodiscard]] std::string next_step(const std::string& name, bool embedding) {
+    return embedding
+               ? "point the embedding role at it:  apogee config set-default-embedding " + name
+               : "chat with one:  apogee chat -m " + name;
 }
 
 /// The two commands that put an MLX embedding model to use (53h): an `mlx`
@@ -2280,6 +2416,9 @@ struct ConvertedModel {
     std::filesystem::path projector;
     /// No chat template: a base model, registered all the same.
     bool base_model = false;
+    /// An embedding model (M21): its GGUF embeds and answers no chat -- the
+    /// embedding role's, never a base model to chat with once tuned (55d).
+    bool embedding = false;
     /// Each as the standalone verb prints it, prefix and all.
     std::vector<std::string> warnings;
 };
@@ -2317,7 +2456,8 @@ ConvertedModel convert_model(const models::StoreRoots& roots, std::string_view g
 
     ConvertedModel out;
     out.model = source.model;
-    out.base_model = !models::snapshot_has_chat_template(source.path);
+    out.embedding = models::snapshot_embedding_model(source.path).has_value();
+    out.base_model = !out.embedding && !models::snapshot_has_chat_template(source.path);
     const auto finish = [&out, chained]() {
         if (!chained) {
             for (const std::string& warning : out.warnings) {
@@ -2359,7 +2499,7 @@ ConvertedModel convert_model(const models::StoreRoots& roots, std::string_view g
         out.id = done->id;
         finish();
         if (!chained) {
-            print_backend_hint(done->file, done->projector);
+            print_backend_hint(done->file, done->projector, out.embedding);
         }
         return out;
     }
@@ -2511,7 +2651,7 @@ ConvertedModel convert_model(const models::StoreRoots& roots, std::string_view g
             std::cout << "\nMake it smaller:\n  apogee models quantize " << source.model
                       << " --type Q4_K_M\n";
         }
-        print_backend_hint(model_file, projector);
+        print_backend_hint(model_file, projector, out.embedding);
     }
     return out;
 }
@@ -2657,7 +2797,8 @@ QuantizedModel quantize_model(const models::StoreRoots& roots, std::string_view 
 /// Refuses, before the first stage, a chain whose registrations would refuse
 /// at its last: no config to register into, or a name already taken by a
 /// backend that is not this model's. One a previous run of this chain made
-/// -- pointing inside this model's directory -- is not in the way.
+/// -- its weights, by the one walk (`store_references`, 55d), inside this
+/// model's directory -- is not in the way.
 void check_registrations(const models::StoreRoots& roots, const std::filesystem::path& config_path,
                          const std::string& model, const std::vector<std::string>& names,
                          std::string_view format = models::kGgufFormat) {
@@ -2703,9 +2844,14 @@ void check_registrations(const models::StoreRoots& roots, const std::filesystem:
             }
             continue;
         }
-        const std::filesystem::path path = configured_path(found->second.model_path);
-        const std::filesystem::path relative = path.lexically_relative(home);
-        if (path.empty() || relative.empty() || *relative.begin() == "..") {
+        // This model's own, when its weights -- by the one walk (55d) -- lie
+        // in this model's directory.
+        const std::vector<StoreReference> held = backend_references(name, found->second);
+        const bool ours = std::ranges::any_of(held, [&roots, &home](const StoreReference& each) {
+            return each.weights && points_inside(roots, each, home);
+        });
+        if (!ours) {
+            const std::filesystem::path path = configured_path(found->second.model_path);
             fail("backend '" + name + "' already exists" +
                  (path.empty() ? std::string{} : " and points at " + path.string()) +
                  " -- remove it with 'apogee config delete-backend " + name +
@@ -2727,7 +2873,8 @@ struct Registration {
 /// naming the same files is left as it is: a resumed chain registers what is
 /// missing and nothing twice.
 void register_backends(const std::filesystem::path& config_path,
-                       const std::vector<Registration>& wanted, bool base_model, ChainLog& log) {
+                       const std::vector<Registration>& wanted, bool base_model, bool embedding,
+                       ChainLog& log) {
     for (const Registration& entry : wanted) {
         harness::Config config;
         try {
@@ -2767,9 +2914,14 @@ void register_backends(const std::filesystem::path& config_path,
                                           "answering -- to chat, convert its instruction-tuned "
                                           "release)"
                                         : std::string{}));
+        if (embedding) {
+            // What the entry is for (M21, 55d): the embedding role, as the
+            // MLX route says it.
+            log.note(embedding_role_note(entry.name));
+        }
     }
     if (!wanted.empty()) {
-        log.next = "chat with one:  apogee chat -m " + wanted.back().name;
+        log.next = next_step(wanted.back().name, embedding);
     }
 }
 
@@ -2906,6 +3058,16 @@ void run_register_chain(const RegisterChainRequest& request, const ChainTools& t
                               }
                               note_stored(pulled.model, models::kSafetensorsFormat, pulled.id);
                               snapshot = pulled.model + "/safetensors/" + pulled.id;
+                              // A set no GGUF is made of -- a draft head, a
+                              // diffusion model -- stops here, its refusal
+                              // naming its one door: no stage after this one
+                              // could run, so there is nothing to resume (55d).
+                              if (const SnapshotChoice landed =
+                                      choose_snapshot(roots, snapshot, {});
+                                  !landed.error.empty()) {
+                                  chain.resume.clear();
+                                  fail(landed.error);
+                              }
                               // Everything after the pull runs offline: resuming
                               // need not reach Hugging Face again.
                               chain.resume = convert_resume(snapshot);
@@ -2931,19 +3093,19 @@ void run_register_chain(const RegisterChainRequest& request, const ChainTools& t
                               quants.push_back(std::move(made));
                           }});
     }
-    stages.push_back({names.size() == 1 ? "register " + names.front()
-                                        : "register " + std::to_string(names.size()) + " backends",
-                      [&](ChainLog& chain) {
-                          std::vector<Registration> wanted{{.name = names.front(),
-                                                            .file = f16.file,
-                                                            .projector = f16.projector}};
-                          for (std::size_t index = 0; index < quants.size(); ++index) {
-                              wanted.push_back({.name = names[index + 1],
-                                                .file = quants[index].file,
-                                                .projector = quants[index].projector});
-                          }
-                          register_backends(request.config_path, wanted, f16.base_model, chain);
-                      }});
+    stages.push_back(
+        {names.size() == 1 ? "register " + names.front()
+                           : "register " + std::to_string(names.size()) + " backends",
+         [&](ChainLog& chain) {
+             std::vector<Registration> wanted{
+                 {.name = names.front(), .file = f16.file, .projector = f16.projector}};
+             for (std::size_t index = 0; index < quants.size(); ++index) {
+                 wanted.push_back({.name = names[index + 1],
+                                   .file = quants[index].file,
+                                   .projector = quants[index].projector});
+             }
+             register_backends(request.config_path, wanted, f16.base_model, f16.embedding, chain);
+         }});
 
     std::cout << (pulls ? "pulling " + request.pull_ref + ", then " : std::string{})
               << "converting it to F16"
@@ -2960,7 +3122,7 @@ namespace {
 /// byte for byte (M16). An entry already naming the same directory is left
 /// as it is: a resumed chain registers what is missing and nothing twice.
 void register_mlx_backend(const std::filesystem::path& config_path, const std::string& name,
-                          const std::filesystem::path& dir, ChainLog& log) {
+                          const std::filesystem::path& dir, bool embedding, ChainLog& log) {
     harness::Config config;
     try {
         config = harness::load_config(config_path);
@@ -2990,7 +3152,7 @@ void register_mlx_backend(const std::filesystem::path& config_path, const std::s
         std::cout << "registered " << name << "\n";
     }
     log.ready.push_back(name);
-    log.next = "chat with one:  apogee chat -m " + name;
+    log.next = next_step(name, embedding);
 }
 
 }  // namespace
@@ -3070,7 +3232,7 @@ void run_mlx_register_chain(const MlxRegisterRequest& request,
              }});
         stages.push_back({"register " + names[index], [&, index](ChainLog& chain) {
                               register_mlx_backend(request.config_path, names[index],
-                                                   made[index].dir, chain);
+                                                   made[index].dir, embedding, chain);
                           }});
     }
     std::cout << "converting it to MLX at " << joined << " and registering "
@@ -3832,13 +3994,19 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         for (const std::filesystem::path& dir : plan.removes) {
             std::cout << "  " << dir.string() << "\n";
         }
-        // A backend pointing into what goes stops working: say which, and
-        // what will be done about it, before (M14).
-        const std::vector<std::string> affected =
-            backends_inside(context.config_path, plan.removes);
+        // A backend pointing into what goes stops working, and so does every
+        // other reference into it: say which, and what will be done about
+        // them, before (M14, 55d) -- every one the one walk lists.
+        const Stranded stranded = stranded_by(roots, context.config_path, plan.removes);
+        const std::vector<std::string>& affected = stranded.backends;
+        std::vector<std::string> cleared;
         for (const std::string& backend : affected) {
             std::cout << "\nbackend '" << backend
                       << "' points into this and will stop working until it is repointed.\n";
+        }
+        for (const StoreReference& reference : stranded.cleared) {
+            std::cout << "\n" << stranded_warning(reference) << "\n";
+            cleared.push_back(stranded_name(reference));
         }
         if (!affected.empty()) {
             const bool one = affected.size() == 1;
@@ -3851,6 +4019,15 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                                                  (one ? "entry stays" : "entries stay") +
                                                  " unless you say -- --and-backends removes " +
                                                  (one ? "it" : "them") + " with the weights.\n");
+        }
+        if (!cleared.empty()) {
+            const bool one = cleared.size() == 1;
+            std::cout << (*delete_backends
+                              ? "--and-backends: " + spoken_list(cleared) + (one ? " is" : " are") +
+                                    " cleared too, through the config editor.\n"
+                              : spoken_list(cleared) + (one ? " stays" : " stay") +
+                                    " unless you say -- --and-backends clears " +
+                                    (one ? "it" : "them") + " with the weights.\n");
         }
         if (plan.ollama_sourced) {
             // Apogee's copy only. Ollama's blobs are shared between models, so
@@ -3880,19 +4057,23 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                     return std::string{};
                 }
                 return answer;
-            });
+            },
+            cleared);
         for (const std::filesystem::path& dir : plan.removes) {
             if (const std::string error = models::remove_weights(dir); !error.empty()) {
                 fail(error);
             }
         }
         std::cout << "\nremoved.\n";
-        if (affected.empty()) {
+        if (affected.empty() && cleared.empty()) {
             return;
         }
         try {
-            for (const std::string& line : settle_backends(
-                     harness::resolve_config_path(context.config_path), affected, remove_entries)) {
+            for (const std::string& line :
+                 settle_backends(stranded.path, affected, remove_entries)) {
+                std::cout << line << "\n";
+            }
+            for (const std::string& line : settle_references(stranded, remove_entries)) {
                 std::cout << line << "\n";
             }
         } catch (const std::exception& e) {

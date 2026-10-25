@@ -291,7 +291,9 @@ sampling beyond it -- `top_p`, `top_k`, `min_p`, `repeat_penalty`,
 its model reasons first, `thinking` (`on`, `off` or `auto`) and `thinking_budget`
 (tokens) -- and `force` (the `--force` twin: replace an existing entry). `201` with the view; `409`
 (`type: conflict`) on a name collision without `force`; `400` on a bad type,
-cache type or body.
+cache type or body, or -- since 55d, in the CLI's own words -- an `mlx` entry
+over a set whose kind no `mlx` entry runs (a drafter, a video or voice model,
+by its record or its files).
 
 A **literal** `api_key` is accepted from loopback peers only (`403` otherwise),
 judged from the connection's own peer address and never from a forwarded
@@ -330,7 +332,8 @@ config it leaves is byte for byte the CLI's. `200 {edited, said,
 restart_required}`; `404` when unknown; `400` naming why for a field no
 backend has, a value its field cannot hold, an adapter that is not there or
 a base that cannot be read, a drafter that cannot run beside the entry's
-model, or a key.
+model, an edit leaving an `mlx` entry over a set whose kind no `mlx` entry runs
+(55d), or a key.
 
 ### `POST /v1/admin/backends/{id}/rename`
 
@@ -340,8 +343,8 @@ suites' members, the collections, graphs, agents and training settings that
 name it -- comments kept, then rewrites the saved chats that name it, and
 moves its store directory with it when it alone runs that stored model and
 both names are the model's own (`<model>-<level>`). A moved directory takes
-every path the entry holds into it with it, an mlx entry's `draft` among
-them, and each stored drafter whose record names it as its base is
+every path the entry holds into it with it, an mlx entry's `draft` and,
+since 55d, its adapters among them, and each stored drafter whose record names it as its base is
 rewritten to name it as it is now called, so a pairing that held still holds
 (M25). The config it leaves is byte for byte the CLI's. `200 {renamed, to, said, restart_required}`, `said`
 the lines the CLI prints; `404` when unknown; `400` naming why for a name
@@ -351,7 +354,8 @@ that is taken or cannot name a backend.
 
 The twin of `apogee config set-default`: `{"name": "<backend>"}` sets
 `models.default`. `400` when the backend is not configured, naming the ones that
-are.
+are, or -- since 55d, as the CLI refuses it -- when it is an `mlx` entry over a
+set whose kind no `mlx` entry runs.
 
 ### `POST /v1/admin/backends/default-embedding`
 

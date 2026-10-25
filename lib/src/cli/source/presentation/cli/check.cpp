@@ -2104,6 +2104,7 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
         case backends::MlxRefusal::NoMlxVlm:
         case backends::MlxRefusal::NoMlxEmbeddings:
         case backends::MlxRefusal::Drafter:
+        case backends::MlxRefusal::Kind:
         case backends::MlxRefusal::Draft:
             break;  // the runtime's rungs never answer these
     }

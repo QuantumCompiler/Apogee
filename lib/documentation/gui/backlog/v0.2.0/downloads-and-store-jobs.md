@@ -11,7 +11,7 @@
 
 **Seam + files.** `presentation/models/ViewModels/DownloadsViewModel.swift` (registration from the job's own result; re-runs keep kind/steps/registerAfter; a failed snapshot fails the step), `business/jobs/JobProgress.swift` (resume only for non-done), `presentation/models/Views/DownloadsView.swift`, `presentation/models/ViewModels/StoreViewModel.swift` + `Views/StoreView.swift` (delete narration kept; the affected backends named before confirming, read from a dry run of the same command). Tests: two concurrent jobs, each registering its own set; a failed first read; a done chain with no resume button; again on a failed quantize re-registering; a delete's warnings and doors drawn.
 
-**Reference.** GUI MILESTONES 2h/2i: the store screens and jobs; CLI M14 (the delete's warnings and doors) and 52b (stream events naming the stored entry); [`model-store-hygiene.md`](../../../cli/backlog/v0.2.0/model-store-hygiene.md) (CLI 55d, delete seeing every reference), referenced and not gated; the CLI/GUI audit (2026-10-22).
+**Reference.** GUI MILESTONES 2h/2i: the store screens and jobs; CLI M14 (the delete's warnings and doors) and 52b (stream events naming the stored entry); [CLI 55d](../../../cli/assistant/MILESTONES.md#milestone-ar--the-audits-cli-findings) (shipped 2026-10-25: delete seeing every reference, `wrong kind`, MLX families renaming by name), referenced and not gated; the CLI/GUI audit (2026-10-22).
 
 **Decisions made** (dated):
 - 2026-10-22: Specced from the CLI/GUI audit (the user's call).

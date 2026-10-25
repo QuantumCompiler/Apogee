@@ -32,7 +32,9 @@ struct ChainLog {
     std::string next;
     /// What a stage would warn about on its own -- a base model, a projector
     /// that could not be made -- said once, in the summary, however many
-    /// stages noticed it.
+    /// stages noticed it. Each as its standalone verb says it, its `note: `
+    /// or `warning: ` included; one given without either is said with
+    /// `note: ` -- one prefix, never two (55d).
     std::vector<std::string> notes;
 
     /// Adds `note` unless it is already there.
@@ -47,7 +49,9 @@ struct ChainStage {
 
 /// Runs `stages` in order, narrating on `out`, starting from `log`. Returns
 /// the log once every stage has run, its summary printed. When a stage
-/// throws, says where the chain stopped and how to resume, and rethrows.
+/// throws, says where the chain stopped and how to resume -- unless the stage
+/// emptied `resume`, having found nothing after it could run (55d) -- and
+/// rethrows.
 ChainLog run_chain(const std::vector<ChainStage>& stages, ChainLog log, std::ostream& out);
 
 }  // namespace apogee::commands

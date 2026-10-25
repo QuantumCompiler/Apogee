@@ -31,6 +31,7 @@
 #include "operations/backend_fields.h"
 #include "operations/graph_sources.h"
 #include "operations/renames.h"
+#include "operations/store_references.h"
 #include "tools/toolsets.h"
 
 namespace apogee::commands {
@@ -72,7 +73,8 @@ void apply_edit(const std::filesystem::path& path, Transform&& transform) {
     }
 }
 
-/// Confirms a role pointer names a real backend before writing it.
+/// Confirms a role pointer names a real backend before writing it -- and,
+/// since 55d, one that runs what it names (`kind_refusal`).
 ///
 /// Without this, `set-default typo` writes a config that loads fine and then
 /// fails on the next request with a far less obvious message.
@@ -89,6 +91,12 @@ void require_backend_exists(const std::filesystem::path& path, const std::string
                  (known.empty() ? " (it has no backends yet -- add one with 'apogee config "
                                   "add-backend')"
                                 : " (known backends: " + known + ")"));
+        }
+        // A role names an entry that runs what it names (55d): the kind of
+        // the set an mlx entry is over decides, by the one predicate.
+        if (const std::string refused = kind_refusal(name, *config.find_backend(name));
+            !refused.empty()) {
+            fail("backend '" + name + "' cannot take a role: " + refused);
         }
     } catch (const ConfigError& e) {
         fail(e.what());
@@ -651,9 +659,16 @@ struct StoreScanRow {
     }
     for (StoreScanRow& row : rows) {
         if (config != nullptr) {
-            for (const auto& [name, backend] : config->backends) {
-                if (scan_configured_path(backend.model_path) == row.path) {
-                    row.registered_as += (row.registered_as.empty() ? "" : ", ") + name;
+            // An entry already runs it when its weights -- by the one walk
+            // (`store_references`, 55d) -- are this row's.
+            std::string last;
+            for (const StoreReference& reference : store_references(*config)) {
+                // A backend's references come together: it is named once.
+                if (reference.weights && reference.backend != last &&
+                    scan_configured_path(reference.value) == row.path) {
+                    row.registered_as +=
+                        (row.registered_as.empty() ? "" : ", ") + reference.backend;
+                    last = reference.backend;
                 }
             }
             if (!row.registered_as.empty() || !row.skip.empty()) {
@@ -1032,6 +1047,12 @@ void bind_add_backend(CLI::App& parent, const RootContext& context) {
             backend.thinking_budget = flags->thinking_budget;
         }
 
+        // The kind decides the role (55d): a set no mlx entry runs -- its
+        // record or its files say a drafter, a video or a voice model -- is
+        // refused by that kind, before anything is written.
+        if (const std::string refused = kind_refusal(flags->name, backend); !refused.empty()) {
+            fail(refused);
+        }
         apply_edit(path, [flags, &backend](std::string_view content) {
             return harness::append_backend(content, flags->name, backend, flags->force);
         });

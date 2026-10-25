@@ -7,6 +7,20 @@
 
 namespace apogee::commands {
 
+namespace {
+
+/// A note as the summary says it, with one prefix (55d): a note the stage
+/// worded as its standalone verb does -- `note: `, `warning: ` -- as it is,
+/// any other given `note: `. Never two, never none.
+[[nodiscard]] std::string said_as_note(const std::string& note) {
+    if (note.starts_with("note: ") || note.starts_with("warning: ")) {
+        return note;
+    }
+    return "note: " + note;
+}
+
+}  // namespace
+
 void ChainLog::note(const std::string& note) {
     if (std::ranges::find(notes, note) == notes.end()) {
         notes.push_back(note);
@@ -38,8 +52,10 @@ ChainLog run_chain(const std::vector<ChainStage>& stages, ChainLog log, std::ost
             // The stage has said why. This says what is left, and the one
             // command that picks it up -- then the failure goes on, carrying
             // the stage's own exit code.
-            out << "\nstopped at " << where << " -- what the stages before it made is kept.\n"
-                << "resume with:\n  " << log.resume << "\n";
+            out << "\nstopped at " << where << " -- what the stages before it made is kept.\n";
+            if (!log.resume.empty()) {
+                out << "resume with:\n  " << log.resume << "\n";
+            }
             out.flush();
             throw;
         }
@@ -60,7 +76,7 @@ ChainLog run_chain(const std::vector<ChainStage>& stages, ChainLog log, std::ost
         }
     }
     for (const std::string& note : log.notes) {
-        out << "note: " << note << "\n";
+        out << said_as_note(note) << "\n";
     }
     if (!log.next.empty()) {
         out << "\n" << log.next << "\n";

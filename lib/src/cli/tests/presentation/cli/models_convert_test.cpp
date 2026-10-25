@@ -640,6 +640,46 @@ TEST_CASE("a base model is registered, its note said once and beside its name",
     CHECK(config.backends.contains("text-Q4KM"));
 }
 
+TEST_CASE("an embedding model's chain ends on the embedding door, never on a chat",
+          "[commands][models][convert][register][embedding]") {
+    // The audit's finding (55d): the GGUF route's last line told the person to
+    // chat with an entry that embeds, under a base model's note that does not
+    // apply, and never named the embedding role.
+    const Home home;
+    const std::filesystem::path dir =
+        home.roots.safetensors / "org--embed" / "safetensors" / "aaaaaaaaaaaa";
+    write_file(dir / "config.json", R"({"architectures": ["Qwen3Model"], "model_type": "qwen3"})");
+    write_file(dir / "model.safetensors", "weights");
+    write_file(dir / "modules.json", R"([
+        {"idx": 0, "path": "", "type": "sentence_transformers.models.Transformer"},
+        {"idx": 1, "path": "1_Pooling", "type": "sentence_transformers.models.Pooling"},
+        {"idx": 2, "path": "2_Normalize", "type": "sentence_transformers.models.Normalize"}])");
+    FakeQuantizer quantizer;
+    std::string out;
+    REQUIRE(chain(home, "org--embed", {"Q4_K_M"}, quantizer, &out));
+    INFO(out);
+    const std::string door =
+        "point the embedding role at it:  apogee config set-default-embedding embed-Q4KM";
+    CHECK(out.ends_with("\n" + door + "\n"));
+    CHECK(out.find("chat with one") == std::string::npos);
+    CHECK(out.find("base model") == std::string::npos);
+    CHECK(out.find("note: note:") == std::string::npos);
+    CHECK(out.find("note: an embedding model -- the backend embeds and answers no chat; point "
+                   "the embedding role at it: apogee config set-default-embedding embed-F16\n") !=
+          std::string::npos);
+    CHECK(out.find("  embed-F16\n  embed-Q4KM\n") != std::string::npos);  // no base model's aside
+    // The door, as printed, on that state.
+    REQUIRE(home.run({"config", "set-default-embedding", "embed-Q4KM"}, &out) == 0);
+    CHECK(apogee::harness::load_config(home.config_path).models.default_embedding == "embed-Q4KM");
+
+    // Converted alone, its hint is the embedding role's two commands.
+    REQUIRE(home.run({"models", "convert", "org--embed"}, &out) == 0);
+    CHECK(out.find("\nUse it as the embedding role by adding a backend:\n  apogee config "
+                   "add-backend <name> --type llamacpp --model-path ") != std::string::npos);
+    CHECK(out.find("\n  apogee config set-default-embedding <name>\n") != std::string::npos);
+    CHECK(out.find("base model") == std::string::npos);
+}
+
 TEST_CASE("the chain's flags are checked before anything is fetched or made",
           "[commands][models][register]") {
     const Home home;

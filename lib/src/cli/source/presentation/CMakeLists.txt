@@ -85,6 +85,8 @@ apogee_add_module(operations
     operations/retrieval.cpp
     operations/run_settings.h
     operations/run_settings.cpp
+    operations/store_references.h
+    operations/store_references.cpp
     operations/suites.h
     operations/suites.cpp
     operations/system_view.h

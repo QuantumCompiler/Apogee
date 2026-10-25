@@ -282,9 +282,13 @@ std::string describe_draft_head(const DraftHead& head, const std::vector<std::st
 }
 
 std::string draft_head_refusal(std::string_view subject, const DraftHead& head,
-                               const std::vector<std::string>& bases) {
+                               const std::vector<std::string>& bases, std::string_view mlx_door) {
     return std::string{subject} + " is " + describe_draft_head(head, bases) +
-           " -- nothing converted from it could answer a chat; convert its base model instead";
+           " -- nothing converted from it could answer a chat; " +
+           (mlx_door.empty() ? std::string{"convert its base model instead"}
+                             : "its one conversion is an MLX drafter, which runs beside that "
+                               "base: " +
+                                   std::string{mlx_door});
 }
 
 std::string draft_head_note(const DraftHead& head, const std::vector<std::string>& bases) {

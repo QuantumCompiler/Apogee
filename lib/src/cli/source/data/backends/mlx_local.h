@@ -106,6 +106,10 @@ enum class MlxRefusal : std::uint8_t {
     /// The directory is a drafter (53i): it runs beside its base model, never
     /// alone -- an entry's `draft:`, never its `model_path`.
     Drafter,
+    /// The directory's kind is one no mlx entry runs (55d): a video or voice
+    /// model, or a word this build does not know -- `models::MlxKind::
+    /// registers()` false, by its record or its files.
+    Kind,
     /// The entry's `draft:` cannot run beside its model (53i): no drafter
     /// there, a base of another family or width, one its record does not
     /// name, mlx-lm's build of the base, or an mlx-vlm that drafts no model
@@ -144,9 +148,23 @@ struct MlxReadiness {
 /// The runtime's rungs: platform, environment, `mlx-lm`, the driver.
 [[nodiscard]] MlxReadiness probe_mlx_runtime(const MlxHost& host);
 
+/// **The kind decides the role** (55d): whether an mlx entry `name` may run
+/// the MLX directory `dir` at all, by the kind its record states or its files
+/// say, through the one predicate -- `models::MlxKind::registers()`, a model
+/// it chats or embeds with. A drafter is refused with its door (53i: it runs
+/// as a base's `draft:`); any other kind no entry runs -- a video or voice
+/// model, a word this build does not know -- with the kind and what uses it.
+/// Ready for a kind that registers, and for a directory with no `config.json`
+/// (the ladder's model rungs say what is wrong with that). The ladder asks it,
+/// and so does every door that makes or points at an entry (`config
+/// add-backend`, `set-backend`, `set-default*` and their admin twins), so an
+/// entry is turned away by the same words wherever it is.
+[[nodiscard]] MlxReadiness probe_mlx_kind(std::string_view name, const std::filesystem::path& dir);
+
 /// The whole ladder for one entry `name`: the platform, the environment and
 /// `mlx-lm`, then its `model_path` -- a drafter there refused, since it runs
-/// beside a base and never alone (53i) -- then mlx-vlm for a directory that
+/// beside a base and never alone (53i), and since 55d any other kind no mlx
+/// entry runs (`probe_mlx_kind`) -- then mlx-vlm for a directory that
 /// loads through it alone (53f), then its `draft:` beside it, when it names
 /// one (53i, `probe_mlx_draft`), then the driver. An embedding directory
 /// (53h) asks for mlx-embeddings in mlx-vlm's place and for the embedding

@@ -86,6 +86,41 @@ TEST_CASE("a chain runs every stage in order, then says what is ready",
     CHECK(said.find("stopped at") == std::string::npos);
 }
 
+TEST_CASE("a note is said with one prefix, never two and never none", "[commands][models][chain]") {
+    // 55d: notes arrive worded as their standalone verb says them, prefix
+    // and all, and the summary once added its own -- `note: note:`.
+    std::ostringstream out;
+    const std::vector<ChainStage> stages{{"convert to F16", [](ChainLog& log) {
+                                              log.note("note: a base model");
+                                              log.note("warning: no projector");
+                                              log.note("an embedding model");
+                                          }}};
+    (void)run_chain(stages, start(), out);
+    const std::string said = out.str();
+    CHECK(said.find("\nnote: a base model\nwarning: no projector\nnote: an embedding model\n") !=
+          std::string::npos);
+    CHECK(said.find("note: note:") == std::string::npos);
+    CHECK(said.find("note: warning:") == std::string::npos);
+}
+
+TEST_CASE("a stage that finds nothing after it can run stops the chain with nothing to resume",
+          "[commands][models][chain]") {
+    // 55d: a pulled set no GGUF is made of -- a draft head -- stops at the
+    // pull; resuming the chain would only be refused again.
+    std::ostringstream out;
+    const std::vector<ChainStage> stages{{"pull org/head's full weights",
+                                          [](ChainLog& log) {
+                                              log.resume.clear();
+                                              throw CLI::RuntimeError(1);
+                                          }},
+                                         {"convert to F16", [](ChainLog&) {}}};
+    CHECK_THROWS_AS(run_chain(stages, start(), out), CLI::RuntimeError);
+    CHECK(
+        out.str().ends_with("\nstopped at [1/2] pull org/head's full weights -- what the stages "
+                            "before it made is kept.\n"));
+    CHECK(out.str().find("resume with") == std::string::npos);
+}
+
 TEST_CASE("once the pull is done the cheaper resume is said, before anything can stop",
           "[commands][models][chain]") {
     Table table;
@@ -215,7 +250,7 @@ TEST_CASE("on a job's stream each stage is an event, and the rest of what it say
                              "from here on, if this stops, resume with:",
                              "  apogee models convert org--model/safetensors/a --register-with "
                              "Q4_K_M",
-                             "ready:", "  model-F16", "  model-Q4_K_M", "note: note: a base model",
+                             "ready:", "  model-F16", "  model-Q4_K_M", "note: a base model",
                              "chat with one:  apogee chat -m model-Q4_K_M"});
     }
     SECTION("a stage that fails: failed, then where and how to resume") {

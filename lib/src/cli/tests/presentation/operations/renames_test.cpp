@@ -23,6 +23,8 @@
 #include "support/cli_home.h"
 #include "support/draft_head_configs.h"
 #include "support/file_time.h"
+#include "support/gguf_builder.h"
+#include "support/mlx_model.h"
 
 /// Renames that propagate (46a), through the real commands in process: a
 /// backend's key and every reference in one edit, the saved chats swept and
@@ -691,5 +693,144 @@ TEST_CASE("a rename that touches no drafter writes the config and every record a
         INFO(dir.string());
         CHECK(DraftedHome::record(dir) == bytes);
         CHECK(written_before(dir, std::chrono::hours{24}));
+    }
+}
+
+// --- every reference, every family (55d) -----------------------------------------------
+
+TEST_CASE("an MLX precision is a level the way the MLX chain names its backends",
+          "[renames][family][mlx]") {
+    using apogee::commands::quant_level;
+    // `<base>-<precision>` (M16), read from the one table the chain names from.
+    for (const char* level : {"4bit", "8bit", "3bit", "6bit", "mxfp4", "bf16", "f16"}) {
+        INFO(level);
+        CHECK(quant_level(std::string{"TestM-"} + level) == std::optional<std::string>{level});
+    }
+    CHECK_FALSE(quant_level("TestM-4bits").has_value());
+    CHECK_FALSE(quant_level("TestM-mlx").has_value());
+    CHECK_FALSE(quant_level("x-q4km").has_value());  // GGUF's spelling stays M3's
+}
+
+TEST_CASE(
+    "models rename by an MLX family's shared name renames every precision, the folder "
+    "following",
+    "[renames][models][family][mlx]") {
+    // The audit's probe (55d): `models rename TestM NewName` over `TestM-4bit`
+    // exited 1, advising a GGUF-only spelling.
+    const apogee::testing::CliHome home{std::string{}};
+    const fs::path folder = home.models() / "org--testm-base" / "mlx";
+    apogee::testing::write_mlx_model(folder / "111111111111", {.kind = "chat"});
+    apogee::testing::write_mlx_model(folder / "222222222222", {.bits = 8, .kind = "chat"});
+    std::ofstream{home.config_path(), std::ios::binary | std::ios::trunc}
+        << "backends:\n  TestM-4bit:\n    type: mlx\n    model_path: "
+        << (folder / "111111111111").string()
+        << "\n  TestM-8bit:\n    type: mlx\n    model_path: " << (folder / "222222222222").string()
+        << "\nmodels:\n  default: TestM-4bit\n";
+    std::string out;
+    std::string err;
+    // Completed by the name the backends share, as a GGUF family is.
+    REQUIRE(home.run({"__complete", "models", "rename", ""}, &out, &err) == 0);
+    CHECK(out == "TestM\n");
+    REQUIRE(run(home, {"models", "rename", "TestM", "NewName"}, &out, &err) == 0);
+    CHECK_THAT(out, ContainsSubstring("renamed backend 'TestM-4bit' to 'NewName-4bit'"));
+    CHECK_THAT(out, ContainsSubstring("renamed backend 'TestM-8bit' to 'NewName-8bit'"));
+    CHECK_THAT(out, ContainsSubstring("moved store 'org--testm-base' to 'NewName'"));
+    const apogee::harness::Config config = apogee::harness::load_config(home.config_path());
+    REQUIRE(config.find_backend("NewName-4bit") != nullptr);
+    REQUIRE(config.find_backend("NewName-8bit") != nullptr);
+    CHECK(config.find_backend("NewName-8bit")->model_path ==
+          (home.models() / "NewName" / "mlx" / "222222222222").string());
+    CHECK(fs::exists(config.find_backend("NewName-4bit")->model_path));
+    CHECK(config.models.default_backend == "NewName-4bit");
+    // A name no backend shares is refused in words that say every engine's
+    // levels.
+    CHECK(run(home, {"models", "rename", "Nope", "Other"}, &out, &err) == 1);
+    CHECK_THAT(err, ContainsSubstring("(the backend without its level: -F16, -Q4KM, -4bit)"));
+}
+
+TEST_CASE("models rename on an install with no config moves the folder and reads no config",
+          "[renames][models]") {
+    // The audit's finding (55d): the folder rename read
+    // `models.default_video` through an optional only a config file fills.
+    const apogee::testing::CliHome home{std::string{}};
+    fs::remove(home.config_path());
+    REQUIRE_FALSE(fs::exists(home.config_path()));
+    const fs::path file = home.models() / "org--plain" / "gguf" / "333333333333" / "p.gguf";
+    write_file(file, apogee::testing::minimal_gguf("llama"));
+    std::string out;
+    std::string err;
+    // As an install with no config runs it: no --config, none found.
+    REQUIRE(home.run_default({"models", "rename", "org--plain", "Plain"}, &out, &err) == 0);
+    CHECK(out == "renamed stored model 'org--plain' to 'Plain', its records inside it\n");
+    CHECK(fs::exists(home.models() / "Plain" / "gguf" / "333333333333" / "p.gguf"));
+    CHECK_FALSE(fs::exists(home.models() / "org--plain"));
+    // Nothing was written for a config that is not there.
+    CHECK_FALSE(fs::exists(home.config_path()));
+}
+
+TEST_CASE("models rename of a folder takes every reference into it along, adapters too",
+          "[renames][models][store_references]") {
+    // The one walk (55d): an adapter applied from the folder follows it, its
+    // pin kept; one outside the store and the entry's own weights stay.
+    const apogee::testing::CliHome home{std::string{}};
+    const fs::path gguf = home.models() / "org--m" / "gguf" / "444444444444" / "m.gguf";
+    const fs::path lora = home.models() / "org--lora" / "gguf" / "555555555555" / "style.gguf";
+    const fs::path outside = home.home() / "mine.gguf";
+    for (const fs::path& path : {gguf, lora, outside}) {
+        write_file(path, apogee::testing::minimal_gguf("llama"));
+    }
+    std::ofstream{home.config_path(), std::ios::binary | std::ios::trunc}
+        << "backends:\n  local:\n    type: llamacpp\n    model_path: " << gguf.string()
+        << "\n    adapters: [{path: " << lora.string()
+        << ", scale: 0.5, base_sha256: " << std::string(64, 'a') << "}, {path: " << outside.string()
+        << ", base_sha256: " << std::string(64, 'b') << "}]\nmodels:\n  default: local\n";
+    std::string out;
+    std::string err;
+    REQUIRE(run(home, {"models", "rename", "org--lora", "Style"}, &out, &err) == 0);
+    CHECK_THAT(out, ContainsSubstring("repointed 1 backend: local"));
+    const apogee::harness::Config config = apogee::harness::load_config(home.config_path());
+    const apogee::harness::BackendConfig& local = *config.find_backend("local");
+    REQUIRE(local.adapters.size() == 2);
+    CHECK(local.adapters[0].path ==
+          (home.models() / "Style" / "gguf" / "555555555555" / "style.gguf").string());
+    CHECK(local.adapters[0].scale == 0.5);
+    CHECK(local.adapters[0].base_sha256 == std::string(64, 'a'));
+    CHECK(local.adapters[1].path == outside.string());
+    CHECK(local.model_path == gguf.string());
+}
+
+TEST_CASE("a folder moved by a family or a backend's rename takes the video pointer along",
+          "[renames][models][store_references]") {
+    // The one walk (55d): every rename that moves a folder repoints every
+    // reference into it -- `models.default_video` too, which only the
+    // folder rename followed before.
+    const apogee::testing::CliHome home{std::string{}};
+    const fs::path folder = home.models() / "org--wan";
+    apogee::testing::write_mlx_model(folder / "mlx" / "666666666666", {.kind = "chat"});
+    write_file(folder / "pipeline" / "777777777777" / "model_index.json",
+               R"({"_class_name": "WanPipeline", "_diffusers_version": "0.35.0"})");
+    std::ofstream{home.config_path(), std::ios::binary | std::ios::trunc}
+        << "backends:\n  wan-4bit:\n    type: mlx\n    model_path: "
+        << (folder / "mlx" / "666666666666").string()
+        << "\nmodels:\n  default: wan-4bit\n  default_video: org--wan\n";
+    std::string out;
+    std::string err;
+
+    SECTION("by the family's name") {
+        REQUIRE(run(home, {"models", "rename", "wan", "Wan"}, &out, &err) == 0);
+        CHECK_THAT(out, ContainsSubstring("moved store 'org--wan' to 'Wan'"));
+        CHECK_THAT(out, ContainsSubstring("repointed models.default_video: org--wan -> Wan"));
+        const apogee::harness::Config config = apogee::harness::load_config(home.config_path());
+        CHECK(config.models.default_video == "Wan");
+        CHECK(fs::exists(home.models() / "Wan" / "pipeline" / "777777777777"));
+    }
+    SECTION("by the backend's own rename, its store following") {
+        REQUIRE(run(home, {"config", "rename-backend", "wan-4bit", "big-4bit"}, &out, &err) == 0);
+        CHECK_THAT(out, ContainsSubstring("moved store 'org--wan' to 'org--big'"));
+        CHECK_THAT(out, ContainsSubstring("repointed models.default_video: org--wan -> org--big"));
+        const apogee::harness::Config config = apogee::harness::load_config(home.config_path());
+        CHECK(config.models.default_video == "org--big");
+        CHECK(config.find_backend("big-4bit")->model_path ==
+              (home.models() / "org--big" / "mlx" / "666666666666").string());
     }
 }
